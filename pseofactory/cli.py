@@ -169,6 +169,34 @@ def cmd_drift(args: argparse.Namespace) -> int:
     return 0 if drift_res["status"] == "ALIGNED" else 1
 
 
+def cmd_replay_dlq(args: argparse.Namespace) -> int:
+    """
+    Lists or replays quarantined entries from Dead Letter Queue (DLQ).
+    Zero em-dashes. Zero en-dashes.
+    """
+    engine = RefactorCascadeEngine(dlq_path=args.dlq_path)
+    if args.list:
+        entries = engine.list_dlq(property_id=args.property)
+        if args.slug:
+            entries = [e for e in entries if e.get("slug") == args.slug]
+        if args.json:
+            print(json.dumps(entries, indent=2))
+        else:
+            print(f"Quarantined DLQ Entries ({len(entries)}):")
+            for e in entries:
+                print(f"  - [{e.get('property_id')}] {e.get('slug')} ({e.get('asset_path')}) [Reason: {e.get('reasons')}] Last error: {e.get('last_error')}")
+        return 0
+    else:
+        replayed = engine.replay_dlq(property_id=args.property, slug=args.slug)
+        if args.json:
+            print(json.dumps({"replayed_count": len(replayed), "replayed": replayed}, indent=2))
+        else:
+            print(f"Replayed {len(replayed)} quarantined DLQ entries.")
+            for e in replayed:
+                print(f"  - [{e.get('property_id')}] {e.get('slug')} ({e.get('asset_path')})")
+        return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -207,6 +235,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_drift.add_argument("--record", action="store_true", help="Persist current engine hash into state file")
     p_drift.add_argument("--json", action="store_true", help="Output result as JSON")
 
+    # replay-dlq
+    p_dlq = subparsers.add_parser("replay-dlq", help="Inspect and replay quarantined Dead Letter Queue (DLQ) entries")
+    p_dlq.add_argument("--list", action="store_true", help="List currently quarantined DLQ entries without replaying")
+    p_dlq.add_argument("--property", type=str, default=None, help="Optional property ID filter")
+    p_dlq.add_argument("--slug", type=str, default=None, help="Optional slug filter")
+    p_dlq.add_argument("--dlq-path", type=str, default=None, help="Custom DLQ JSON path")
+    p_dlq.add_argument("--json", action="store_true", help="Output result as JSON")
+
     return parser
 
 
@@ -229,6 +265,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_fleet_maintain(args)
     elif args.command == "drift":
         return cmd_drift(args)
+    elif args.command == "replay-dlq":
+        return cmd_replay_dlq(args)
     else:
         parser.print_help()
         return 1

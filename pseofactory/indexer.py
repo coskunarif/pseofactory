@@ -833,9 +833,6 @@ class PushIndexer:
             urls = urls[:GOOGLE_INDEXING_DAILY_QUOTA]
             if live:
                 self.save_gsc_rollover_queue(rollover_spillover)
-        else:
-            if live and rollover_loaded:
-                self.save_gsc_rollover_queue([])
 
         fast_res = self.submit_fast_index(urls=urls, dry_run=not live)
         gsc_results = [
@@ -865,32 +862,48 @@ class PushIndexer:
             if len(to_push) > GOOGLE_INDEXING_DAILY_QUOTA:
                 overflow = to_push[GOOGLE_INDEXING_DAILY_QUOTA:]
                 to_push = to_push[:GOOGLE_INDEXING_DAILY_QUOTA]
-                self.save_gsc_rollover_queue(overflow)
                 rollover_spillover.extend(overflow)
             api_results = []
+            accepted_urls = []
+            failed_urls = []
             for u in to_push:
                 try:
                     cmd = [gsccli_bin, "index", "publish", u, "--type", "URL_UPDATED"]
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+                    status = "ACCEPTED" if proc.returncode == 0 else "FAIL"
                     api_results.append({
                         "url": u,
-                        "status": "ACCEPTED" if proc.returncode == 0 else "FAIL",
+                        "status": status,
                         "output": proc.stdout.strip() or proc.stderr.strip(),
                     })
+                    if status == "ACCEPTED":
+                        accepted_urls.append(u)
+                    else:
+                        failed_urls.append(u)
                 except Exception as e:
                     api_results.append({"url": u, "status": "ERROR", "note": str(e)})
+                    failed_urls.append(u)
 
-            if to_push:
-                self.record_pushed_urls(to_push, engine="google")
+            if accepted_urls:
+                self.record_pushed_urls(accepted_urls, engine="google")
+
+            # Preserve quota spillover and re-save FAIL/ERROR URLs to rollover queue
+            remaining_rollover = []
+            seen_rem = set()
+            for u in rollover_spillover + failed_urls:
+                if u and u not in seen_rem:
+                    seen_rem.add(u)
+                    remaining_rollover.append(u)
+            self.save_gsc_rollover_queue(remaining_rollover)
 
             gsc_results.append({
                 "engine": "google_indexing_api",
                 "status": "DISPATCHED" if to_push else "IDEMPOTENT_NO_OP",
                 "notifications": api_results,
-                "urls_pushed": len(to_push),
+                "urls_pushed": len(accepted_urls),
                 "urls_skipped": len(skipped),
                 "rollover_queue_drained": len(rollover_loaded),
-                "rollover_queue_spillover": len(rollover_spillover),
+                "rollover_queue_spillover": len(remaining_rollover),
             })
             try:
                 sitemap_url = f"{self.canonical_base}/sitemap.xml"

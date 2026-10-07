@@ -1238,6 +1238,7 @@ class RefactorCascadeEngine:
     ) -> None:
         """
         Routes persistent refactor failures to Dead Letter Queue (DLQ).
+        Deduplicates by asset id so repeat drift runs do not append duplicates.
         Zero em-dashes. Zero en-dashes.
         """
         self.dlq_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1250,6 +1251,7 @@ class RefactorCascadeEngine:
             except Exception:
                 entries = []
 
+        now_iso = datetime.now(timezone.utc).isoformat()
         entry = {
             "property_id": property_id,
             "asset_path": record.asset_path,
@@ -1258,15 +1260,140 @@ class RefactorCascadeEngine:
             "details": record.details,
             "attempts": self.max_retries,
             "last_error": error_msg,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_iso,
         }
-        entries.append(entry)
+
+        # Deduplicate by asset id (matching slug or asset_path within property)
+        existing_index = None
+        for idx, item in enumerate(entries):
+            same_prop = not property_id or item.get("property_id") == property_id
+            same_slug = bool(record.slug and item.get("slug") == record.slug)
+            same_path = bool(
+                record.asset_path
+                and (
+                    item.get("asset_path") == record.asset_path
+                    or Path(item.get("asset_path", "")).resolve() == Path(record.asset_path).resolve()
+                )
+            )
+            if same_prop and (same_slug or same_path):
+                existing_index = idx
+                break
+
+        if existing_index is not None:
+            entries[existing_index].update(entry)
+        else:
+            entries.append(entry)
+
         self.dlq_path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+
+    def get_quarantine_entry(
+        self,
+        record: Union[AssetDriftRecord, str, Path],
+        property_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Returns the DLQ entry if the asset is quarantined, else None.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not self.dlq_path.is_file():
+            return None
+        try:
+            data = json.loads(self.dlq_path.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                return None
+
+            slug = None
+            asset_path = None
+            if isinstance(record, AssetDriftRecord):
+                slug = record.slug
+                asset_path = record.asset_path
+            elif isinstance(record, (str, Path)):
+                asset_path = str(record)
+                slug = Path(record).stem
+
+            for entry in data:
+                same_prop = not property_id or entry.get("property_id") == property_id
+                same_slug = bool(slug and entry.get("slug") == slug)
+                same_path = bool(
+                    asset_path
+                    and (
+                        entry.get("asset_path") == asset_path
+                        or Path(entry.get("asset_path", "")).resolve() == Path(asset_path).resolve()
+                    )
+                )
+                if same_prop and (same_slug or same_path):
+                    return entry
+        except Exception:
+            return None
+        return None
+
+    def is_quarantined(
+        self,
+        record: Union[AssetDriftRecord, str, Path],
+        property_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Checks whether an asset is currently quarantined in the DLQ.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return self.get_quarantine_entry(record, property_id) is not None
+
+    def list_dlq(self, property_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Lists entries currently quarantined in the DLQ.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not self.dlq_path.is_file():
+            return []
+        try:
+            data = json.loads(self.dlq_path.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                return []
+            if property_id:
+                return [e for e in data if e.get("property_id") == property_id]
+            return data
+        except Exception:
+            return []
+
+    def replay_dlq(
+        self,
+        property_id: Optional[str] = None,
+        slug: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Replays quarantined entries by removing them from DLQ.
+        Returns the list of replayed entries.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not self.dlq_path.is_file():
+            return []
+        try:
+            data = json.loads(self.dlq_path.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                return []
+        except Exception:
+            return []
+
+        replayed = []
+        remaining = []
+        for entry in data:
+            match_prop = not property_id or entry.get("property_id") == property_id
+            match_slug = not slug or entry.get("slug") == slug
+            if match_prop and match_slug:
+                replayed.append(entry)
+            else:
+                remaining.append(entry)
+
+        if replayed:
+            self.dlq_path.write_text(json.dumps(remaining, indent=2), encoding="utf-8")
+
+        return replayed
 
     def refactor_asset(
         self,
         record: AssetDriftRecord,
         adapter: PropertyAdapter,
+        force: bool = False,
     ) -> bool:
         """
         Refactors an individual drifted asset with atomic staged swap and rollback.
@@ -1277,6 +1404,17 @@ class RefactorCascadeEngine:
         slug = record.slug or target_path.stem
         backoff = self.initial_backoff
         last_error = "Unknown error"
+
+        # Quarantine awareness: Skip assets already quarantined in DLQ unless force=True
+        if not force:
+            q_entry = self.get_quarantine_entry(record, property_id=adapter.property_id)
+            if q_entry:
+                q_ts = q_entry.get("timestamp", "unknown")
+                q_reasons = q_entry.get("reasons", [])
+                print(
+                    f"Asset '{slug}' is quarantined in DLQ (timestamp: {q_ts}, reasons: {q_reasons}); skipping retries."
+                )
+                return False
 
         for attempt in range(1, self.max_retries + 1):
             backup_path: Optional[Path] = None
@@ -1336,6 +1474,7 @@ class RefactorCascadeEngine:
         self,
         records: List[AssetDriftRecord],
         adapter: PropertyAdapter,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """
         Refactors all provided drifted records serially with dependency cascade.
@@ -1345,17 +1484,23 @@ class RefactorCascadeEngine:
         failed_count = 0
         all_dependencies: Set[str] = set()
 
+        # Quarantine awareness: filter out records already quarantined in DLQ unless force=True
+        actionable_records = [
+            r for r in records
+            if force or not self.is_quarantined(r, adapter.property_id)
+        ]
+
         total_assets = len(adapter.list_assets())
-        should_bulk_rebuild = bool(records) and (
-            any(DriftReason.ENGINE_HASH_DRIFT in rec.reasons for rec in records)
-            or (total_assets > 0 and len(records) >= total_assets * 0.5)
+        should_bulk_rebuild = bool(actionable_records) and (
+            any(DriftReason.ENGINE_HASH_DRIFT in rec.reasons for rec in actionable_records)
+            or (total_assets > 0 and len(actionable_records) >= total_assets * 0.5)
         )
 
         if should_bulk_rebuild:
             with adapter.scoped_environment():
                 build_ok = adapter.build_all()
 
-            for rec in records:
+            for rec in actionable_records:
                 target_path = Path(rec.asset_path).resolve()
                 audit_record = self.evaluator.audit_asset(target_path, adapter)
                 verify_dict = (
@@ -1385,8 +1530,8 @@ class RefactorCascadeEngine:
                     self.route_to_dlq(adapter.property_id, rec, err_msg)
                     failed_count += 1
         else:
-            for rec in records:
-                success = self.refactor_asset(rec, adapter)
+            for rec in actionable_records:
+                success = self.refactor_asset(rec, adapter, force=force)
                 if success:
                     refactored_count += 1
                     deps = self.map_dependencies(rec.asset_path, adapter)
@@ -1460,13 +1605,30 @@ class MaintenanceLifecycle:
             )
 
             # Phase 2: Universal Idempotency Gate (HWL-1231)
-            if not force and report.drifted_assets_count == 0:
+            # Filter out assets already quarantined in DLQ (with recorded reason + timestamp)
+            actionable_drifted = []
+            quarantined_drifted = []
+            for rec in report.drifted_assets:
+                q_entry = self.cascade_engine.get_quarantine_entry(rec, adapter.property_id)
+                if q_entry and not force:
+                    quarantined_drifted.append((rec, q_entry))
+                else:
+                    actionable_drifted.append(rec)
+
+            if quarantined_drifted:
+                for rec, q_entry in quarantined_drifted:
+                    print(
+                        f"Skipping quarantined asset '{rec.slug or rec.asset_path}' "
+                        f"(quarantined at {q_entry.get('timestamp')} for reasons {q_entry.get('reasons')})"
+                    )
+
+            if not force and len(actionable_drifted) == 0:
                 duration = time.time() - start_time
                 return MaintenanceResult(
                     property_id=adapter.property_id,
                     status="SKIPPED_NO_CHANGES",
                     assets_audited=report.total_assets_checked,
-                    assets_drifted=0,
+                    assets_drifted=report.drifted_assets_count,
                     assets_refactored=0,
                     assets_failed=0,
                     engine_hash=compute_engine_hash(),
@@ -1474,7 +1636,7 @@ class MaintenanceLifecycle:
                 )
 
             # Phase 3: Refactor Cascade
-            cascade_res = self.cascade_engine.refactor_all(report.drifted_assets, adapter)
+            cascade_res = self.cascade_engine.refactor_all(actionable_drifted, adapter, force=force)
 
             # Phase 4: Fail-Closed Post-Refactor Verification Gate
             post_report = self.evaluator.audit_all(
@@ -1483,12 +1645,18 @@ class MaintenanceLifecycle:
                 check_ledger=False,
             )
 
-            # Anti-Softening Invariant: Any lingering drifted assets cause gate failure
-            if post_report.drifted_assets_count > 0:
+            # Check post-refactor drift excluding assets that are quarantined in DLQ
+            post_actionable_drifted = [
+                rec for rec in post_report.drifted_assets
+                if not self.cascade_engine.is_quarantined(rec, adapter.property_id)
+            ]
+
+            # Anti-Softening Invariant: Any lingering non-quarantined drifted assets cause gate failure
+            if len(post_actionable_drifted) > 0:
                 duration = time.time() - start_time
                 status = (
                     "PARTIAL_SUCCESS"
-                    if post_report.drifted_assets_count < report.drifted_assets_count
+                    if len(post_actionable_drifted) < len(actionable_drifted)
                     else "FAILED"
                 )
                 return MaintenanceResult(
@@ -1654,6 +1822,31 @@ def audit_property_assets(
     return evaluator.audit_all(target_adapter)
 
 
+def replay_dlq(
+    property_id: Optional[str] = None,
+    slug: Optional[str] = None,
+    dlq_path: Optional[Union[str, Path]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Convenience function to re-queue / replay quarantined DLQ entries.
+    Zero em-dashes. Zero en-dashes.
+    """
+    engine = RefactorCascadeEngine(dlq_path=dlq_path)
+    return engine.replay_dlq(property_id=property_id, slug=slug)
+
+
+def list_dlq(
+    property_id: Optional[str] = None,
+    dlq_path: Optional[Union[str, Path]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Convenience function to list quarantined DLQ entries.
+    Zero em-dashes. Zero en-dashes.
+    """
+    engine = RefactorCascadeEngine(dlq_path=dlq_path)
+    return engine.list_dlq(property_id=property_id)
+
+
 __all__ = [
     "DriftReason",
     "AssetDriftRecord",
@@ -1673,6 +1866,8 @@ __all__ = [
     "run_maintenance_lifecycle",
     "run_fleet_maintenance",
     "audit_property_assets",
+    "replay_dlq",
+    "list_dlq",
     "trigger_drift_cascade",
     "cascade_drift_lifecycle",
 ]
