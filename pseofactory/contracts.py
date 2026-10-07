@@ -19,7 +19,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Set, Optional, Tuple, Callable, Union
+from typing import List, Dict, Any, Set, Optional, Tuple, Callable, Union, Iterable
 
 FORBIDDEN_JARGON: List[str] = [
     "delve",
@@ -1976,6 +1976,308 @@ assert_primary_statutory_citations = assert_statutory_citation_syntax
 # =============================================================================
 # Factor 5: Organic Fan-Out Coverage Rankings (+1.91) Contracts & Verification
 # =============================================================================
+
+DEFAULT_FAN_OUT_SUBTOPIC_FACETS: Dict[str, Dict[str, Any]] = {
+    "prerequisites_eligibility": {
+        "name": "Prerequisites & Eligibility",
+        "description": "criteria, qualifying conditions, who qualifies, eligibility rules, baseline requirements",
+        "keywords": (
+            "criteria",
+            "qualifying conditions",
+            "qualifying condition",
+            "who qualifies",
+            "eligibility rules",
+            "eligibility rule",
+            "baseline requirements",
+            "baseline requirement",
+            "prerequisites",
+            "prerequisite",
+            "eligibility",
+            "qualify",
+            "qualifies",
+            "qualification",
+        ),
+    },
+    "timing_deadlines": {
+        "name": "Timing & Deadlines",
+        "description": "effective dates, deadlines, sunset dates, phaseout schedules, recertification timing",
+        "keywords": (
+            "effective dates",
+            "effective date",
+            "deadlines",
+            "deadline",
+            "sunset dates",
+            "sunset date",
+            "phaseout schedules",
+            "phaseout schedule",
+            "recertification timing",
+            "recertification",
+            "sunset",
+            "due date",
+            "due dates",
+            "timing",
+        ),
+    },
+    "procedural_steps": {
+        "name": "Procedural Steps",
+        "description": "how to apply, step-by-step application instructions, required forms, submission workflow",
+        "keywords": (
+            "how to apply",
+            "step-by-step",
+            "step by step",
+            "application instructions",
+            "required forms",
+            "required form",
+            "submission workflow",
+            "application steps",
+            "application process",
+            "how to file",
+            "procedural steps",
+            "filing workflow",
+        ),
+    },
+    "alternatives_comparison": {
+        "name": "Alternatives & Comparison",
+        "description": "comparison vs alternative options, scenario trade-offs, standard vs specialized regimes",
+        "keywords": (
+            "comparison vs alternative options",
+            "alternative options",
+            "scenario trade-offs",
+            "scenario tradeoffs",
+            "standard vs specialized regimes",
+            "standard vs specialized",
+            "comparison",
+            "alternative",
+            "alternatives",
+            "trade-off",
+            "trade-offs",
+            "tradeoff",
+            "tradeoffs",
+            "versus",
+            "vs",
+            "compare",
+        ),
+    },
+    "exceptions_limits": {
+        "name": "Exceptions & Limits",
+        "description": "limitations, disqualifications, phaseout ceilings, penalties, edge cases, gotchas",
+        "keywords": (
+            "limitations",
+            "limitation",
+            "disqualifications",
+            "disqualification",
+            "phaseout ceilings",
+            "phaseout ceiling",
+            "penalties",
+            "penalty",
+            "edge cases",
+            "edge case",
+            "gotchas",
+            "gotcha",
+            "exceptions",
+            "exception",
+            "limits",
+        ),
+    },
+    "consequences_impact": {
+        "name": "Consequences & Impact",
+        "description": "tax consequences, financial liabilities, net payoff impact, reporting forms",
+        "keywords": (
+            "tax consequences",
+            "tax consequence",
+            "financial liabilities",
+            "financial liability",
+            "net payoff impact",
+            "net payoff",
+            "reporting forms",
+            "reporting form",
+            "consequences",
+            "consequence",
+            "liabilities",
+            "liability",
+            "tax impact",
+            "financial impact",
+        ),
+    },
+}
+
+
+def classify_subtopic_facets(
+    html_or_text: str,
+    facets: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Set[str]:
+    """
+    Classifies which ordinary SEO subtopic dimensions are addressed in HTML or text content.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(html_or_text, str) or not html_or_text.strip():
+        return set()
+
+    active_facets = facets if facets is not None else DEFAULT_FAN_OUT_SUBTOPIC_FACETS
+    clean_text = html.unescape(re.sub(r'<[^>]+>', ' ', html_or_text))
+    normalized_text = " " + re.sub(r'\s+', ' ', clean_text).lower() + " "
+    raw_normalized = " " + re.sub(r'\s+', ' ', html_or_text).lower() + " "
+
+    covered: Set[str] = set()
+
+    for facet_key, facet_meta in active_facets.items():
+        candidates: Set[str] = set()
+
+        if "keywords" in facet_meta and facet_meta["keywords"]:
+            for kw in facet_meta["keywords"]:
+                candidates.add(kw.strip().lower())
+
+        desc = facet_meta.get("description", "")
+        if desc:
+            for term in desc.split(","):
+                cleaned_term = term.strip().lower()
+                if cleaned_term:
+                    candidates.add(cleaned_term)
+
+        candidates.add(facet_key.replace("_", " ").lower())
+
+        matched = False
+        for cand in candidates:
+            if not cand:
+                continue
+            pattern = rf"\b{re.escape(cand)}\b"
+            if re.search(pattern, normalized_text) or re.search(pattern, raw_normalized):
+                matched = True
+                break
+
+        if matched:
+            covered.add(facet_key)
+
+    return covered
+
+
+def evaluate_page_set_fan_out_coverage(
+    pages: Dict[str, str],
+    required_subtopics: Optional[Iterable[str]] = None,
+    min_coverage_ratio: float = 0.6,
+    facets: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Evaluates ordinary SEO query fan-out subtopic coverage across a set of pages.
+    Detects covered and missing subtopics across the page set. If any required or expected subtopics
+    have 0 covering pages, records issue:
+    Page set fan-out coverage deficit: missing related subtopic search '{facet_key}' ({facet_meta['description']} not addressed across page set)
+    Zero em-dashes. Zero en-dashes.
+    """
+    active_facets = facets if facets is not None else DEFAULT_FAN_OUT_SUBTOPIC_FACETS
+    issues: List[str] = []
+
+    if not isinstance(pages, dict):
+        return {
+            "status": "FAIL",
+            "total_pages": 0,
+            "covered_subtopics": [],
+            "missing_subtopics": sorted(list(active_facets.keys())),
+            "page_set_coverage_ratio": 0.0,
+            "page_coverage": {},
+            "subtopic_page_counts": {k: 0 for k in active_facets},
+            "violations_count": 1,
+            "issues": ["Pages collection must be a dictionary mapping routes to HTML content"],
+        }
+
+    for route, content in pages.items():
+        if isinstance(content, str):
+            if "\u2014" in content:
+                issues.append(f"Page {route}: Document contains forbidden em-dash")
+            if "\u2013" in content:
+                issues.append(f"Page {route}: Document contains forbidden en-dash")
+
+    page_coverage: Dict[str, List[str]] = {}
+    subtopic_page_counts: Dict[str, int] = {k: 0 for k in active_facets}
+    covered_subtopics_set: Set[str] = set()
+
+    for route, content in pages.items():
+        cov = classify_subtopic_facets(content, facets=active_facets)
+        page_coverage[route] = sorted(list(cov))
+        for facet_key in cov:
+            covered_subtopics_set.add(facet_key)
+            if facet_key in subtopic_page_counts:
+                subtopic_page_counts[facet_key] += 1
+
+    total_facets_count = len(active_facets)
+    covered_count = len(covered_subtopics_set)
+    page_set_coverage_ratio = (covered_count / total_facets_count) if total_facets_count > 0 else 1.0
+
+    missing_subtopics: List[str] = []
+
+    if required_subtopics is not None:
+        req_list = list(required_subtopics)
+        for req_key in req_list:
+            if subtopic_page_counts.get(req_key, 0) == 0:
+                missing_subtopics.append(req_key)
+                facet_meta = active_facets.get(req_key, {"description": req_key})
+                issues.append(
+                    f"Page set fan-out coverage deficit: missing related subtopic search '{req_key}' "
+                    f"({facet_meta.get('description', req_key)} not addressed across page set)"
+                )
+        if page_set_coverage_ratio < min_coverage_ratio:
+            ratio_deficit_issue = (
+                f"Page set fan-out coverage ratio deficit: coverage ratio {page_set_coverage_ratio:.2f} "
+                f"strictly requires >= {min_coverage_ratio:.2f}"
+            )
+            if ratio_deficit_issue not in issues:
+                issues.append(ratio_deficit_issue)
+    else:
+        if page_set_coverage_ratio < min_coverage_ratio:
+            for facet_key, facet_meta in active_facets.items():
+                if subtopic_page_counts.get(facet_key, 0) == 0:
+                    missing_subtopics.append(facet_key)
+                    issues.append(
+                        f"Page set fan-out coverage deficit: missing related subtopic search '{facet_key}' "
+                        f"({facet_meta.get('description', facet_key)} not addressed across page set)"
+                    )
+        elif len(pages) == 0:
+            missing_subtopics = sorted(list(active_facets.keys()))
+            issues.append("Page set fan-out coverage deficit: page set is empty")
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "total_pages": len(pages),
+        "covered_subtopics": sorted(list(covered_subtopics_set)),
+        "missing_subtopics": sorted(list(set(missing_subtopics))),
+        "page_set_coverage_ratio": round(page_set_coverage_ratio, 4),
+        "page_coverage": page_coverage,
+        "subtopic_page_counts": subtopic_page_counts,
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
+def assert_page_set_fan_out_coverage(
+    pages: Dict[str, str],
+    required_subtopics: Optional[Iterable[str]] = None,
+    min_coverage_ratio: float = 0.6,
+    context: str = "",
+) -> bool:
+    """
+    Mechanical contract validating page set query fan-out subtopic coverage.
+    Raises ValueError if status is FAIL with the list of missing subtopics.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" in {context}" if context else ""
+    res = evaluate_page_set_fan_out_coverage(
+        pages=pages,
+        required_subtopics=required_subtopics,
+        min_coverage_ratio=min_coverage_ratio,
+    )
+    if res["status"] == "FAIL":
+        missing = res.get("missing_subtopics", [])
+        if missing:
+            missing_names = ", ".join(f"'{m}'" for m in missing)
+            raise ValueError(
+                f"Page set fan-out coverage deficit{ctx}: missing required or expected subtopics: {missing_names}"
+            )
+        elif res.get("issues"):
+            raise ValueError(f"Page set fan-out coverage deficit{ctx}: {'; '.join(res['issues'])}")
+        else:
+            raise ValueError(f"Page set fan-out coverage deficit{ctx}")
+    return True
+
 
 SUBQUERY_QUESTION_STARTERS: Tuple[str, ...] = (
     "what",
@@ -7468,6 +7770,10 @@ __all__ = [
     "assert_organic_fan_out_coverage",
     "assert_fan_out_coverage",
     "assert_organic_fan_out",
+    "DEFAULT_FAN_OUT_SUBTOPIC_FACETS",
+    "classify_subtopic_facets",
+    "evaluate_page_set_fan_out_coverage",
+    "assert_page_set_fan_out_coverage",
     "assert_no_forbidden_dashes",
     "assert_no_prompt_leakage",
     "assert_linkedin",

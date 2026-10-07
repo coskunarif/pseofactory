@@ -83,6 +83,10 @@ from pseofactory.contracts import (
     assert_free_web_application_schema,
     detect_rate_limit_and_bot_shield_issues,
     assert_rate_limit_and_bot_shield,
+    DEFAULT_FAN_OUT_SUBTOPIC_FACETS,
+    classify_subtopic_facets,
+    evaluate_page_set_fan_out_coverage,
+    assert_page_set_fan_out_coverage,
 )
 
 
@@ -2526,11 +2530,14 @@ class MasterSEOVerifier:
         require_reciprocal: bool = True,
         min_words_per_answer: int = 15,
         min_total_words: int = 150,
+        required_subtopics: Optional[List[str]] = None,
+        min_subtopic_coverage: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Mechanical verification gate for Factor 5: Organic Fan-Out Coverage Rankings (+1.91).
         Enforces clustered subqueries, related sub-questions, secondary intent coverage,
         calculation variant containers, and reciprocal cross-links without thin page cannibalization.
+        Evaluates page set fan-out subtopic coverage across ordinary SEO dimensions.
         Zero em-dashes. Zero en-dashes.
         """
         target = Path(dist_dir) if dist_dir else self.dist_dir
@@ -2540,6 +2547,7 @@ class MasterSEOVerifier:
         total_variants = 0
         total_cross_links = 0
         total_orphaned = 0
+        page_set: Dict[str, str] = {}
         if target.exists():
             for p in sorted(target.glob("**/*.html")):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
@@ -2549,6 +2557,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 content = p.read_text(encoding="utf-8", errors="ignore")
+                page_set[rel] = content
                 res = verify_html_organic_fan_out_coverage(
                     content,
                     rel_path=rel,
@@ -2565,6 +2574,23 @@ class MasterSEOVerifier:
                 total_cross_links += res.get("cross_links_count", 0)
                 total_orphaned += res.get("orphaned_nodes_count", 0)
 
+        covered_subtopics: List[str] = []
+        missing_subtopics: List[str] = []
+        page_set_coverage_ratio: float = 1.0
+
+        if len(page_set) > 1 or (len(page_set) > 0 and required_subtopics is not None):
+            cov_ratio = min_subtopic_coverage if min_subtopic_coverage is not None else 0.6
+            ps_res = evaluate_page_set_fan_out_coverage(
+                pages=page_set,
+                required_subtopics=required_subtopics,
+                min_coverage_ratio=cov_ratio,
+            )
+            covered_subtopics = ps_res.get("covered_subtopics", [])
+            missing_subtopics = ps_res.get("missing_subtopics", [])
+            page_set_coverage_ratio = ps_res.get("page_set_coverage_ratio", 1.0)
+            if missing_subtopics:
+                issues.extend(ps_res.get("issues", []))
+
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_organic_fan_out_coverage_gate",
@@ -2573,6 +2599,9 @@ class MasterSEOVerifier:
             "calculation_variants_found": total_variants,
             "cross_links_found": total_cross_links,
             "orphaned_nodes_found": total_orphaned,
+            "covered_subtopics": covered_subtopics,
+            "missing_subtopics": missing_subtopics,
+            "page_set_coverage_ratio": page_set_coverage_ratio,
             "violations_count": len(issues),
             "issues": issues,
         }
@@ -2588,6 +2617,8 @@ class MasterSEOVerifier:
         require_reciprocal: bool = True,
         min_words_per_answer: int = 15,
         min_total_words: int = 150,
+        required_subtopics: Optional[List[str]] = None,
+        min_subtopic_coverage: Optional[float] = None,
     ) -> Dict[str, Any]:
         return self.check_organic_fan_out_coverage_gate(
             dist_dir=dist_dir,
@@ -2596,6 +2627,30 @@ class MasterSEOVerifier:
             require_reciprocal=require_reciprocal,
             min_words_per_answer=min_words_per_answer,
             min_total_words=min_total_words,
+            required_subtopics=required_subtopics,
+            min_subtopic_coverage=min_subtopic_coverage,
+        )
+
+    def verify_page_set_fan_out_coverage(
+        self,
+        dist_dir: Optional[Path] = None,
+        min_subqueries: int = 2,
+        min_variants: int = 2,
+        require_reciprocal: bool = True,
+        min_words_per_answer: int = 15,
+        min_total_words: int = 150,
+        required_subtopics: Optional[List[str]] = None,
+        min_subtopic_coverage: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        return self.check_organic_fan_out_coverage_gate(
+            dist_dir=dist_dir,
+            min_subqueries=min_subqueries,
+            min_variants=min_variants,
+            require_reciprocal=require_reciprocal,
+            min_words_per_answer=min_words_per_answer,
+            min_total_words=min_total_words,
+            required_subtopics=required_subtopics,
+            min_subtopic_coverage=min_subtopic_coverage,
         )
 
     # 24. Factor 6: Organic Search Ranking Gate (+1.89)
@@ -3958,6 +4013,7 @@ check_organic_fan_out_coverage_gate = _default_verifier.check_organic_fan_out_co
 check_fan_out_coverage_gate = _default_verifier.check_fan_out_coverage_gate
 check_organic_fan_out_gate = _default_verifier.check_organic_fan_out_gate
 verify_organic_fan_out_coverage = _default_verifier.verify_organic_fan_out_coverage
+verify_page_set_fan_out_coverage = _default_verifier.verify_page_set_fan_out_coverage
 check_organic_search_ranking_gate = _default_verifier.check_organic_search_ranking_gate
 check_traditional_organic_search_gate = _default_verifier.check_traditional_organic_search_gate
 check_core_seo_hygiene_gate = _default_verifier.check_core_seo_hygiene_gate

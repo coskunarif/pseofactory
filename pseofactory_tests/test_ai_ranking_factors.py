@@ -48,6 +48,7 @@ from pseofactory.verifier import (
     check_fan_out_coverage_gate,
     check_organic_fan_out_gate,
     verify_organic_fan_out_coverage,
+    verify_page_set_fan_out_coverage,
     verify_html_organic_fan_out_coverage,
     check_organic_search_ranking_gate,
     check_traditional_organic_search_gate,
@@ -193,6 +194,10 @@ from pseofactory.contracts import (
     assert_organic_fan_out_coverage,
     assert_fan_out_coverage,
     assert_organic_fan_out,
+    DEFAULT_FAN_OUT_SUBTOPIC_FACETS,
+    classify_subtopic_facets,
+    evaluate_page_set_fan_out_coverage,
+    assert_page_set_fan_out_coverage,
     assert_no_forbidden_dashes,
     ORGANIC_SEARCH_TITLE_MIN_CHARS,
     ORGANIC_SEARCH_TITLE_MAX_CHARS,
@@ -3069,6 +3074,273 @@ def test_gate_aliases_and_checklist_integration_factor5(tmp_path):
     audit_res = verifier.audit_seo_checklist(dist, enforce_relevance=False)
     assert "check_organic_fan_out_coverage_gate" in audit_res["gates"]
     assert audit_res["gates"]["check_organic_fan_out_coverage_gate"]["status"] == "PASS"
+
+
+def test_classify_subtopic_facets():
+    """Verifies classify_subtopic_facets identifies standard ordinary SEO subtopic dimensions."""
+    assert classify_subtopic_facets("") == set()
+    assert classify_subtopic_facets(None) == set()
+    assert classify_subtopic_facets("random unformatted general text") == set()
+
+    # Prerequisites & eligibility
+    eligibility_html = "<p>Review qualifying conditions and who qualifies under current eligibility rules.</p>"
+    facets = classify_subtopic_facets(eligibility_html)
+    assert "prerequisites_eligibility" in facets
+
+    # Timing & deadlines
+    timing_html = "<h2>Effective Dates and Phaseout Schedules</h2><p>Check sunset dates and recertification timing.</p>"
+    facets = classify_subtopic_facets(timing_html)
+    assert "timing_deadlines" in facets
+
+    # Procedural steps
+    steps_html = "<section><h3>How to Apply</h3><p>Follow step-by-step application instructions and submit required forms.</p></section>"
+    facets = classify_subtopic_facets(steps_html)
+    assert "procedural_steps" in facets
+
+    # Alternatives & comparison
+    comp_html = "<div><h4>Bonus Depreciation vs Section 179 Comparison</h4><p>Review scenario trade-offs and alternative options.</p></div>"
+    facets = classify_subtopic_facets(comp_html)
+    assert "alternatives_comparison" in facets
+
+    # Exceptions & limits
+    exc_html = "<article><h2>Limitations and Phaseout Ceilings</h2><p>Review disqualifications, penalties, and edge cases.</p></article>"
+    facets = classify_subtopic_facets(exc_html)
+    assert "exceptions_limits" in facets
+
+    # Consequences & impact
+    impact_html = "<p>Understand tax consequences, financial liabilities, net payoff impact, and reporting forms.</p>"
+    facets = classify_subtopic_facets(impact_html)
+    assert "consequences_impact" in facets
+
+    # Multi-facet document
+    multi_html = (
+        "<h1>Complete Equipment Expensing Guide</h1>"
+        "<h2>Who qualifies for the deduction?</h2>"
+        "<p>Eligibility rules and baseline requirements apply to all active businesses.</p>"
+        "<h2>How to apply for Section 179</h2>"
+        "<p>Step-by-step application instructions and required forms for filing.</p>"
+        "<h2>Tax Consequences and Financial Liabilities</h2>"
+        "<p>Net payoff impact and reporting forms must be reviewed with an advisor.</p>"
+    )
+    multi_facets = classify_subtopic_facets(multi_html)
+    assert "prerequisites_eligibility" in multi_facets
+    assert "procedural_steps" in multi_facets
+    assert "consequences_impact" in multi_facets
+
+    # Custom facets dictionary
+    custom_facets = {
+        "custom_pricing": {
+            "name": "Pricing",
+            "description": "pricing plans, subscription costs, billing tiers",
+            "keywords": ("pricing", "subscription", "billing tiers"),
+        }
+    }
+    custom_res = classify_subtopic_facets("Explore our subscription pricing and billing tiers", facets=custom_facets)
+    assert "custom_pricing" in custom_res
+
+
+def test_evaluate_page_set_fan_out_coverage():
+    """Verifies evaluate_page_set_fan_out_coverage calculates coverage ratio and identifies deficits."""
+    invalid_eval = evaluate_page_set_fan_out_coverage(None)
+    assert invalid_eval["status"] == "FAIL"
+
+    empty_eval = evaluate_page_set_fan_out_coverage({})
+    assert empty_eval["status"] == "FAIL"
+
+    pages_complete = {
+        "page1.html": (
+            "<h1>Equipment Financing</h1>"
+            "<h2>Who qualifies and eligibility rules</h2>"
+            "<p>Baseline requirements and qualifying conditions for business property.</p>"
+            "<h2>Effective dates and phaseout schedules</h2>"
+            "<p>Review statutory deadlines and sunset dates.</p>"
+        ),
+        "page2.html": (
+            "<h1>Application and Comparisons</h1>"
+            "<h2>How to apply and required forms</h2>"
+            "<p>Follow step-by-step application instructions and filing workflow.</p>"
+            "<h2>Section 179 vs Bonus Depreciation Comparison</h2>"
+            "<p>Evaluate alternative options and scenario trade-offs.</p>"
+        ),
+        "page3.html": (
+            "<h1>Limits and Impacts</h1>"
+            "<h2>Limitations and phaseout ceilings</h2>"
+            "<p>Check penalties, disqualifications, and edge cases.</p>"
+            "<h2>Tax consequences and net payoff impact</h2>"
+            "<p>Review financial liabilities and reporting forms.</p>"
+        ),
+    }
+
+    res_complete = evaluate_page_set_fan_out_coverage(pages_complete)
+    assert res_complete["status"] == "PASS"
+    assert res_complete["page_set_coverage_ratio"] == 1.0
+    assert len(res_complete["covered_subtopics"]) == 6
+    assert len(res_complete["missing_subtopics"]) == 0
+    assert res_complete["violations_count"] == 0
+
+    # Deficit page set: only 1 subtopic covered out of 6 (ratio = 0.1667 < 0.6)
+    pages_deficit = {
+        "page1.html": "<h1>Overview</h1><p>General narrative with who qualifies and eligibility rules.</p>",
+        "page2.html": "<h1>General</h1><p>More narrative touching qualifying conditions and criteria.</p>",
+    }
+    res_deficit = evaluate_page_set_fan_out_coverage(pages_deficit)
+    assert res_deficit["status"] == "FAIL"
+    assert res_deficit["page_set_coverage_ratio"] < 0.6
+    assert "prerequisites_eligibility" in res_deficit["covered_subtopics"]
+    assert "timing_deadlines" in res_deficit["missing_subtopics"]
+    assert "procedural_steps" in res_deficit["missing_subtopics"]
+    assert any("Page set fan-out coverage deficit: missing related subtopic search 'timing_deadlines'" in iss for iss in res_deficit["issues"])
+
+    # Required subtopic explicitly specified and missing
+    pages_partial = {
+        "page1.html": "<p>Review who qualifies and baseline requirements.</p>",
+        "page2.html": "<p>Check effective dates and phaseout schedules.</p>",
+        "page3.html": "<p>Follow step-by-step application instructions and required forms.</p>",
+        "page4.html": "<p>Review comparison vs alternative options and scenario trade-offs.</p>",
+    }
+    # 4 of 6 covered, ratio = 4/6 = 0.6667 >= 0.6, but 'consequences_impact' is required
+    res_req_missing = evaluate_page_set_fan_out_coverage(
+        pages_partial,
+        required_subtopics=["consequences_impact"],
+    )
+    assert res_req_missing["status"] == "FAIL"
+    assert "consequences_impact" in res_req_missing["missing_subtopics"]
+    expected_issue = (
+        "Page set fan-out coverage deficit: missing related subtopic search 'consequences_impact' "
+        f"({DEFAULT_FAN_OUT_SUBTOPIC_FACETS['consequences_impact']['description']} not addressed across page set)"
+    )
+    assert expected_issue in res_req_missing["issues"]
+
+
+def test_assert_page_set_fan_out_coverage_success_and_failure():
+    """Verifies assert_page_set_fan_out_coverage contract assertions and ValueError handling."""
+    pages_pass = {
+        "page1.html": (
+            "<p>Who qualifies, eligibility rules, criteria, and baseline requirements.</p>"
+            "<p>Effective dates, statutory deadlines, sunset dates, and phaseout schedules.</p>"
+            "<p>How to apply with step-by-step application instructions and required forms.</p>"
+            "<p>Comparison vs alternative options and scenario trade-offs.</p>"
+        ),
+    }
+    assert assert_page_set_fan_out_coverage(pages_pass, min_coverage_ratio=0.6) is True
+
+    # Failing page set
+    pages_fail = {
+        "page1.html": "<p>Only eligibility rules and who qualifies are covered here.</p>",
+    }
+    with pytest.raises(ValueError) as exc_info:
+        assert_page_set_fan_out_coverage(pages_fail, min_coverage_ratio=0.6, context="test_suite")
+    assert "Page set fan-out coverage deficit in test_suite" in str(exc_info.value)
+    assert "timing_deadlines" in str(exc_info.value)
+
+    # Required subtopic missing
+    with pytest.raises(ValueError) as exc_req:
+        assert_page_set_fan_out_coverage(pages_pass, required_subtopics=["exceptions_limits"])
+    assert "exceptions_limits" in str(exc_req.value)
+
+
+def test_check_organic_fan_out_coverage_gate_page_set_flags_missing_subtopic(tmp_path):
+    """Verifies check_organic_fan_out_coverage_gate evaluates page set fan-out coverage and flags missing subtopics."""
+    dist = tmp_path / "dist_fan_out_multi"
+    dist.mkdir()
+
+    # Page 1: covers prerequisites & eligibility and timing & deadlines
+    page1 = (
+        "<!DOCTYPE html><html><head><title>Section 179 Eligibility and Deadlines</title></head><body>"
+        "<h1>Section 179 Eligibility and Deadlines</h1>"
+        "<p>This comprehensive technical guide evaluates the full spectrum of equipment expense elections, "
+        "addressing primary and secondary intent queries to eliminate thin page fragmentation across multi-intent search queries. "
+        "Taxpayers must account for equipment acquisition dates, bonus depreciation phaseouts, and aggregate expenditure thresholds "
+        "to optimize their total federal tax deductions under 26 U.S.C. Section 179.</p>"
+        "<h2>Who qualifies for immediate expensing and what are the eligibility rules?</h2>"
+        "<p>Eligible property includes machinery, computers, software, and office furniture deployed by qualifying taxpayers "
+        "who meet baseline requirements and qualifying conditions under current statutory regulations.</p>"
+        "<h2>What are the effective dates, statutory deadlines, and phaseout schedules?</h2>"
+        "<p>Taxpayers must note effective dates, filing deadlines, sunset dates, and recertification timing to ensure deductions "
+        "remain compliant before the year-end statutory deadline.</p>"
+        '<div class="calculation-variant" data-variant-id="v-1" id="v-1">'
+        "  <h3>Variant 1</h3>"
+        "  <p>Calculation: $100 * 10 = $1,000 deduction.</p>"
+        '  <a href="#v-2">Go to Variant 2</a>'
+        "</div>"
+        '<div class="calculation-variant" data-variant-id="v-2" id="v-2">'
+        "  <h3>Variant 2</h3>"
+        "  <p>Calculation: $200 * 10 = $2,000 deduction.</p>"
+        '  <a href="#v-1">Go to Variant 1</a>'
+        "</div>"
+        "</body></html>"
+    )
+
+    # Page 2: covers procedural steps and alternatives comparison
+    page2 = (
+        "<!DOCTYPE html><html><head><title>Section 179 Application and Alternatives</title></head><body>"
+        "<h1>Section 179 Application and Alternatives</h1>"
+        "<p>This comprehensive technical guide evaluates the full spectrum of equipment expense elections, "
+        "addressing primary and secondary intent queries to eliminate thin page fragmentation across multi-intent search queries. "
+        "Taxpayers must account for equipment acquisition dates, bonus depreciation phaseouts, and aggregate expenditure thresholds "
+        "to optimize their total federal tax deductions under 26 U.S.C. Section 179.</p>"
+        "<h2>How to apply with step-by-step application instructions and required forms?</h2>"
+        "<p>Taxpayers should follow step-by-step application instructions, preparing Form 4562 and adhering to the required forms "
+        "submission workflow during annual tax filing procedures.</p>"
+        "<h2>How does Section 179 compare vs alternative options with scenario trade-offs?</h2>"
+        "<p>Reviewing comparison vs alternative options and scenario trade-offs between standard vs specialized regimes enables "
+        "businesses to optimize immediate write-offs against long-term depreciation benefits.</p>"
+        '<div class="calculation-variant" data-variant-id="v-3" id="v-3">'
+        "  <h3>Variant 3</h3>"
+        "  <p>Calculation: $300 * 10 = $3,000 deduction.</p>"
+        '  <a href="#v-4">Go to Variant 4</a>'
+        "</div>"
+        '<div class="calculation-variant" data-variant-id="v-4" id="v-4">'
+        "  <h3>Variant 4</h3>"
+        "  <p>Calculation: $400 * 10 = $4,000 deduction.</p>"
+        '  <a href="#v-3">Go to Variant 3</a>'
+        "</div>"
+        "</body></html>"
+    )
+
+    (dist / "eligibility.html").write_text(page1, encoding="utf-8")
+    (dist / "application.html").write_text(page2, encoding="utf-8")
+
+    verifier = MasterSEOVerifier(dist_dir=dist)
+
+    # The 2 pages cover 4 of 6 facets: prerequisites_eligibility, timing_deadlines, procedural_steps, alternatives_comparison.
+    # Coverage ratio = 4/6 = 0.6667 >= 0.6.
+    res_pass = verifier.check_organic_fan_out_coverage_gate(dist)
+    assert res_pass["status"] == "PASS"
+    assert res_pass["pages_checked"] == 2
+    assert "prerequisites_eligibility" in res_pass["covered_subtopics"]
+    assert "timing_deadlines" in res_pass["covered_subtopics"]
+    assert "procedural_steps" in res_pass["covered_subtopics"]
+    assert "alternatives_comparison" in res_pass["covered_subtopics"]
+    assert res_pass["page_set_coverage_ratio"] >= 0.6
+    assert len(res_pass["missing_subtopics"]) == 0
+
+    # When exceptions_limits is explicitly required across the page set, it must flag a missing subtopic
+    res_missing = verifier.check_organic_fan_out_coverage_gate(
+        dist,
+        required_subtopics=["exceptions_limits"],
+    )
+    assert res_missing["status"] == "FAIL"
+    assert "exceptions_limits" in res_missing["missing_subtopics"]
+    assert any(
+        "Page set fan-out coverage deficit: missing related subtopic search 'exceptions_limits'" in iss
+        for iss in res_missing["issues"]
+    )
+
+    # Method verify_page_set_fan_out_coverage works identically
+    res_method = verifier.verify_page_set_fan_out_coverage(
+        dist,
+        required_subtopics=["exceptions_limits"],
+    )
+    assert res_method["status"] == "FAIL"
+    assert "exceptions_limits" in res_method["missing_subtopics"]
+
+    # Module alias verify_page_set_fan_out_coverage works identically
+    res_mod = verify_page_set_fan_out_coverage(
+        dist,
+        required_subtopics=["exceptions_limits"],
+    )
+    assert res_mod["status"] == "FAIL"
 
 
 # =============================================================================

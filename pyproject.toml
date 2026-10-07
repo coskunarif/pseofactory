@@ -23,7 +23,5 @@ pseofactory = "pseofactory.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pseofactory*"]
-
 [tool.pytest.ini_options]
 pythonpath = ["."]
-
