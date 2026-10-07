@@ -1,0 +1,150 @@
+"""
+pseofactory: Unified Programmatic SEO Substrate for Prexvo and ProfitHelm
+Provides shared SEO verification, indexing velocity governors, content hash diffing,
+parasite syndication growth hacks, and engine hash drift gate.
+Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
+"""
+
+from pseofactory.contracts import (
+    assert_no_forbidden_dashes,
+    assert_no_prompt_leakage,
+    assert_linkedin,
+    assert_x_post,
+    assert_ai_mode_calculation_manifest,
+    assert_meta_tag_contract,
+    sanitize_url_slug,
+    FORBIDDEN_JARGON,
+    assert_url_safe_slug,
+    assert_technical_seo_spec,
+    assert_touch_targets,
+    assert_valid_jsonld,
+    assert_sitemap_parses,
+    StageResult,
+    assert_comparison_layout_contracts,
+    assert_multi_scale_semantic_compression,
+)
+
+from pseofactory.qualification import (
+    qualify_search_intent,
+    check_search_intent_cannibalization,
+    assert_search_intent_qualified,
+)
+
+
+from pseofactory.verifier import (
+    MasterSEOVerifier,
+    SEOVerificationError,
+    audit_seo_checklist,
+    run_seo_checklist_audit,
+)
+
+from pseofactory.indexer import (
+    PushIndexer,
+    CrawlerTelemetryListener,
+    calculate_indexing_velocity,
+    audit_indexing_velocity,
+    record_indexing_velocity,
+    get_url_content_hash,
+    filter_unchanged_push_urls,
+    partition_indexing_urls,
+    ensure_indexnow_key_file,
+    submit_indexnow_batch,
+    submit_gsc_indexing,
+    submit_fast_index,
+    inspect_platform_assets,
+    audit_asset_submission_status,
+    dispatch_automated_indexing,
+    get_latest_indexing_audit_log,
+    run_full_indexing_sweep,
+)
+
+from pseofactory.distributor import (
+    generate_linkedin_company_post,
+    generate_x_post,
+    generate_facebook_post,
+    generate_parasite_google_sites_html,
+    generate_parasite_linkedin_pulse,
+    generate_parasite_substack_teardown,
+    generate_reddit_community_teardown,
+    generate_quora_thread_answer,
+    generate_backlink_outreach_pitch,
+    generate_newsletter_growth_hook,
+    generate_regulatory_lead_magnet_copy,
+    get_dual_dataset_citations,
+    generate_youtube_syndication,
+    generate_social_syndication_pack,
+    generate_ai_benchmark_nodes,
+    generate_all_distribution_assets,
+    export_all_syndication_files,
+)
+
+from pseofactory.drift import (
+    compute_engine_hash,
+    detect_engine_drift,
+    record_engine_hash,
+)
+
+__version__ = "0.1.0"
+
+__all__ = [
+    "MasterSEOVerifier",
+    "SEOVerificationError",
+    "audit_seo_checklist",
+    "run_seo_checklist_audit",
+    "PushIndexer",
+    "CrawlerTelemetryListener",
+    "calculate_indexing_velocity",
+    "audit_indexing_velocity",
+    "record_indexing_velocity",
+    "get_url_content_hash",
+    "filter_unchanged_push_urls",
+    "partition_indexing_urls",
+    "ensure_indexnow_key_file",
+    "submit_indexnow_batch",
+    "submit_gsc_indexing",
+    "submit_fast_index",
+    "inspect_platform_assets",
+    "audit_asset_submission_status",
+    "dispatch_automated_indexing",
+    "get_latest_indexing_audit_log",
+    "run_full_indexing_sweep",
+    "generate_linkedin_company_post",
+    "generate_x_post",
+    "generate_facebook_post",
+    "generate_parasite_google_sites_html",
+    "generate_parasite_linkedin_pulse",
+    "generate_parasite_substack_teardown",
+    "generate_reddit_community_teardown",
+    "generate_quora_thread_answer",
+    "generate_backlink_outreach_pitch",
+    "generate_newsletter_growth_hook",
+    "generate_regulatory_lead_magnet_copy",
+    "get_dual_dataset_citations",
+    "generate_youtube_syndication",
+    "generate_social_syndication_pack",
+    "generate_ai_benchmark_nodes",
+    "generate_all_distribution_assets",
+    "export_all_syndication_files",
+    "compute_engine_hash",
+    "detect_engine_drift",
+    "record_engine_hash",
+    "assert_no_forbidden_dashes",
+    "assert_no_prompt_leakage",
+    "assert_linkedin",
+    "assert_x_post",
+    "assert_ai_mode_calculation_manifest",
+    "assert_meta_tag_contract",
+    "sanitize_url_slug",
+    "FORBIDDEN_JARGON",
+    "qualify_search_intent",
+    "check_search_intent_cannibalization",
+    "assert_search_intent_qualified",
+    "assert_url_safe_slug",
+    "assert_technical_seo_spec",
+    "assert_touch_targets",
+    "assert_valid_jsonld",
+    "assert_sitemap_parses",
+    "StageResult",
+    "assert_comparison_layout_contracts",
+    "assert_multi_scale_semantic_compression",
+]
