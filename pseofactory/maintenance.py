@@ -879,6 +879,7 @@ class AssetIntegrityEvaluator:
         ledger_path: Optional[Union[str, Path]] = None,
         state_file: Optional[Union[str, Path]] = None,
         check_engine_drift: bool = True,
+        check_ledger: Optional[bool] = None,
     ) -> AssetIntegrityReport:
         """
         Executes comprehensive asset integrity audit across all assets in adapter.dist_dir.
@@ -888,13 +889,15 @@ class AssetIntegrityEvaluator:
         drifted: List[AssetDriftRecord] = []
 
         # Determine ledger & engine drift
+        should_check_ledger = check_ledger if check_ledger is not None else check_engine_drift
         ledger: Dict[str, Any] = {}
-        if ledger_path:
-            ledger = load_asset_ledger(ledger_path)
-        else:
-            default_ledger = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
-            if default_ledger.exists():
-                ledger = load_asset_ledger(default_ledger)
+        if should_check_ledger:
+            if ledger_path:
+                ledger = load_asset_ledger(ledger_path)
+            else:
+                default_ledger = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
+                if default_ledger.exists():
+                    ledger = load_asset_ledger(default_ledger)
 
         engine_drifted = False
         if check_engine_drift:
@@ -1249,7 +1252,11 @@ class MaintenanceLifecycle:
             cascade_res = self.cascade_engine.refactor_all(report.drifted_assets, adapter)
 
             # Phase 4: Fail-Closed Post-Refactor Verification Gate
-            post_report = self.evaluator.audit_all(adapter=adapter, check_engine_drift=False)
+            post_report = self.evaluator.audit_all(
+                adapter=adapter,
+                check_engine_drift=False,
+                check_ledger=False,
+            )
 
             # Anti-Softening Invariant: Any lingering drifted assets cause gate failure
             if post_report.drifted_assets_count > 0:
