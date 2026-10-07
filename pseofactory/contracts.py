@@ -19,7 +19,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Set, Optional, Tuple, Callable
+from typing import List, Dict, Any, Set, Optional, Tuple, Callable, Union
 
 FORBIDDEN_JARGON: List[str] = [
     "delve",
@@ -6928,11 +6928,502 @@ assert_llms_txt_file = assert_llms_txt
 assert_curated_llms_txt = assert_llms_txt
 
 
+# =============================================================================
+# Free Interactive Tools Contracts & Operational Shields
+# =============================================================================
+
+class ToolUtilityHTMLParser(HTMLParser):
+    """
+    HTML parser evaluating ToolUtilityContract requirements:
+    1. Interactive form or container presence (<form> or role='form' or container with inputs and submit CTA).
+    2. Input accessibility: all non-hidden inputs paired with <label for=id>, aria-label, or nested in <label>.
+    3. Dedicated submit CTA (<button type='submit'> or equivalent).
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.has_form: bool = False
+        self.containers: List[str] = []
+        self.label_for_ids: Set[str] = set()
+        self.label_depth: int = 0
+        self.inputs: List[Dict[str, Any]] = []
+        self.buttons: List[Dict[str, Any]] = []
+        self._current_button: Optional[Dict[str, Any]] = None
+        self._current_button_text: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "form":
+            self.has_form = True
+
+        role = attr_dict.get("role", "").lower()
+        if role == "form" or "calc" in role or "tool" in role:
+            self.containers.append(tag)
+
+        cls_id = (attr_dict.get("class", "") + " " + attr_dict.get("id", "")).lower()
+        if any(k in cls_id for k in ("calc", "tool", "widget", "converter", "generator")):
+            self.containers.append(tag)
+
+        if tag == "label":
+            self.label_depth += 1
+            for_id = attr_dict.get("for")
+            if for_id:
+                self.label_for_ids.add(for_id.strip())
+
+        elif tag == "input":
+            inp_type = attr_dict.get("type", "text").lower().strip()
+            if inp_type == "submit":
+                self.buttons.append({
+                    "tag": "input",
+                    "type": "submit",
+                    "text": attr_dict.get("value", "Submit"),
+                    "is_submit": True,
+                })
+            elif inp_type not in ("hidden", "button", "reset"):
+                has_aria = bool(
+                    attr_dict.get("aria-label", "").strip()
+                    or attr_dict.get("aria-labelledby", "").strip()
+                )
+                self.inputs.append({
+                    "tag": "input",
+                    "type": inp_type,
+                    "id": attr_dict.get("id", "").strip(),
+                    "name": attr_dict.get("name", "").strip(),
+                    "has_aria_label": has_aria,
+                    "inside_label": (self.label_depth > 0),
+                })
+
+        elif tag in ("select", "textarea"):
+            has_aria = bool(
+                attr_dict.get("aria-label", "").strip()
+                or attr_dict.get("aria-labelledby", "").strip()
+            )
+            self.inputs.append({
+                "tag": tag,
+                "type": tag,
+                "id": attr_dict.get("id", "").strip(),
+                "name": attr_dict.get("name", "").strip(),
+                "has_aria_label": has_aria,
+                "inside_label": (self.label_depth > 0),
+            })
+
+        elif tag == "button":
+            btn_type = attr_dict.get("type", "").lower().strip()
+            self._current_button = {
+                "tag": "button",
+                "type": btn_type,
+                "is_submit": (btn_type == "submit" or (self.has_form and btn_type not in ("button", "reset"))),
+                "role": role,
+                "class": attr_dict.get("class", ""),
+            }
+            self._current_button_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_button is not None:
+            self._current_button_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "label":
+            if self.label_depth > 0:
+                self.label_depth -= 1
+        elif tag == "button" and self._current_button is not None:
+            btn_text = "".join(self._current_button_text).strip()
+            self._current_button["text"] = btn_text
+            cta_words = (
+                "submit", "calc", "run", "convert", "generate",
+                "analyze", "estimate", "compute", "apply", "go",
+                "find", "search", "evaluate"
+            )
+            if any(w in btn_text.lower() for w in cta_words):
+                self._current_button["is_submit"] = True
+            self.buttons.append(self._current_button)
+            self._current_button = None
+            self._current_button_text = []
+
+
+def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> List[str]:
+    """
+    Detects contract violations for interactive micro-tools against ToolUtilityContract:
+    1. Zero em-dashes and zero en-dashes.
+    2. Presence of interactive form or container (<form> or elements with input/action).
+    3. Input elements paired with <label> or aria-label.
+    4. Dedicated submit CTA button.
+    5. Touch targets meeting 44x44px standard.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues: List[str] = []
+    if not isinstance(html_text, str):
+        return [f"Page {rel_path}: HTML content must be a string"]
+    if not html_text.strip():
+        return [f"Page {rel_path}: HTML content is empty"]
+
+    if "\u2014" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
+    if "\u2013" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
+
+    try:
+        assert_touch_targets(html_text, context=rel_path)
+    except ValueError as ex:
+        issues.append(f"Page {rel_path}: {ex}")
+
+    parser = ToolUtilityHTMLParser()
+    try:
+        parser.feed(html_text)
+    except Exception as ex:
+        issues.append(f"Page {rel_path}: Failed to parse HTML for tool utility contract: {ex}")
+        return issues
+
+    # 1. Check interactive form or container
+    has_container = parser.has_form or bool(parser.containers) or (
+        bool(parser.inputs) and any(b.get("is_submit") for b in parser.buttons)
+    )
+    if not has_container:
+        issues.append(
+            f"Page {rel_path}: Missing interactive form or container element (<form> or container with role='form')"
+        )
+
+    # 2. Check input elements
+    if not parser.inputs:
+        issues.append(f"Page {rel_path}: Missing interactive input elements in tool")
+    else:
+        for inp in parser.inputs:
+            is_paired = (
+                inp["has_aria_label"]
+                or inp["inside_label"]
+                or (inp["id"] and inp["id"] in parser.label_for_ids)
+            )
+            if not is_paired:
+                identifier = inp["id"] or inp["name"] or f"input[type='{inp['type']}']"
+                issues.append(
+                    f"Page {rel_path}: Input element '{identifier}' lacks associated <label> or aria-label"
+                )
+
+    # 3. Check submit CTA button
+    has_submit_cta = any(b.get("is_submit") for b in parser.buttons)
+    if not has_submit_cta:
+        issues.append(
+            f"Page {rel_path}: Missing submit CTA button (<button type='submit'> or equivalent)"
+        )
+
+    return issues
+
+
+def assert_tool_utility_contract(html_text: str, context: str = "") -> bool:
+    """
+    Contract assertion validating ToolUtilityContract for interactive free tools.
+    Verifies presence of interactive form or container, accessible input pairings,
+    submit CTA button, and 44x44px touch targets.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" ({context})" if context else ""
+    issues = detect_tool_utility_issues(html_text, rel_path=context or "index.html")
+    if issues:
+        raise ValueError(f"Tool utility contract violation{ctx}: {issues[0]}")
+    return True
+
+
+def detect_free_web_application_schema_issues(html_text: str, rel_path: str = "index.html") -> List[str]:
+    """
+    Detects Schema.org markup issues for free tools requiring WebApplication or SoftwareApplication
+    with applicationCategory and offers defined with price 0 and ISO 4217 currency.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues: List[str] = []
+    if not isinstance(html_text, str):
+        return [f"Page {rel_path}: HTML content must be a string"]
+    if not html_text.strip():
+        return [f"Page {rel_path}: HTML content is empty"]
+
+    if "\u2014" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
+    if "\u2013" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
+
+    script_pattern = re.compile(
+        r'<script\s+type=["\']application/ld\+json["\']\s*>(.*?)</script>',
+        re.DOTALL | re.IGNORECASE,
+    )
+    blocks = script_pattern.findall(html_text)
+    if not blocks:
+        return [f"Page {rel_path}: Missing application/ld+json structured data block"]
+
+    parsed_blocks: List[Any] = []
+    for raw in blocks:
+        try:
+            parsed_blocks.append(json.loads(raw.strip()))
+        except Exception as ex:
+            issues.append(f"Page {rel_path}: Invalid JSON-LD syntax: {ex}")
+
+    if issues:
+        return issues
+
+    # Collect entities and graph id map
+    entities: List[Dict[str, Any]] = []
+    graph_by_id: Dict[str, Dict[str, Any]] = {}
+
+    for block in parsed_blocks:
+        if isinstance(block, dict):
+            if "@graph" in block and isinstance(block["@graph"], list):
+                for item in block["@graph"]:
+                    if isinstance(item, dict):
+                        entities.append(item)
+                        if "@id" in item:
+                            graph_by_id[item["@id"]] = item
+            else:
+                entities.append(block)
+                if "@id" in block:
+                    graph_by_id[block["@id"]] = block
+        elif isinstance(block, list):
+            for item in block:
+                if isinstance(item, dict):
+                    entities.append(item)
+                    if "@id" in item:
+                        graph_by_id[item["@id"]] = item
+
+    target_types = {"WebApplication", "SoftwareApplication"}
+    matching_entities: List[Dict[str, Any]] = []
+
+    for ent in entities:
+        etype = ent.get("@type")
+        types: List[str] = []
+        if isinstance(etype, str):
+            types = [etype]
+        elif isinstance(etype, list):
+            types = [str(t) for t in etype]
+
+        if any(t in target_types for t in types):
+            matching_entities.append(ent)
+
+    if not matching_entities:
+        return [
+            f"Page {rel_path}: Missing WebApplication or SoftwareApplication schema in JSON-LD"
+        ]
+
+    for app_ent in matching_entities:
+        ent_type = app_ent.get("@type")
+        ent_name = str(app_ent.get("name", "Application")).strip()
+
+        # Check applicationCategory
+        app_cat = app_ent.get("applicationCategory")
+        if not app_cat or not str(app_cat).strip():
+            issues.append(
+                f"Page {rel_path}: Missing or empty 'applicationCategory' in {ent_name} ({ent_type}) schema"
+            )
+
+        # Check offers
+        raw_offers = app_ent.get("offers")
+        if not raw_offers:
+            issues.append(
+                f"Page {rel_path}: Missing 'offers' specification in {ent_name} ({ent_type}) schema"
+            )
+            continue
+
+        offer_candidates: List[Dict[str, Any]] = []
+        if isinstance(raw_offers, dict):
+            if "@id" in raw_offers and raw_offers["@id"] in graph_by_id and len(raw_offers) == 1:
+                offer_candidates.append(graph_by_id[raw_offers["@id"]])
+            else:
+                offer_candidates.append(raw_offers)
+        elif isinstance(raw_offers, list):
+            for o in raw_offers:
+                if isinstance(o, dict):
+                    if "@id" in o and o["@id"] in graph_by_id and len(o) == 1:
+                        offer_candidates.append(graph_by_id[o["@id"]])
+                    else:
+                        offer_candidates.append(o)
+
+        if not offer_candidates:
+            issues.append(
+                f"Page {rel_path}: 'offers' in {ent_name} ({ent_type}) schema must be an object or list of objects"
+            )
+            continue
+
+        has_free_price = False
+        has_iso_currency = False
+
+        for off in offer_candidates:
+            price_val = off.get("price")
+            if price_val is not None:
+                str_price = str(price_val).strip()
+                if str_price in ("0", "0.00", "0.0") or price_val == 0:
+                    has_free_price = True
+
+            curr = off.get("priceCurrency")
+            if curr and isinstance(curr, str) and re.match(r'^[A-Z]{3}$', curr.strip()):
+                has_iso_currency = True
+
+        if not has_free_price:
+            issues.append(
+                f"Page {rel_path}: Free tool schema in {ent_name} requires offers with 'price': '0'"
+            )
+        if not has_iso_currency:
+            issues.append(
+                f"Page {rel_path}: Free tool schema in {ent_name} requires valid ISO 4217 currency (e.g. 'priceCurrency': 'USD')"
+            )
+
+    return issues
+
+
+def assert_free_web_application_schema(html_text: str, context: str = "") -> bool:
+    """
+    Contract assertion validating Schema.org WebApplication or SoftwareApplication
+    markup for free tools: defines applicationCategory and offers with price '0'
+    and ISO 4217 currency.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" ({context})" if context else ""
+    issues = detect_free_web_application_schema_issues(html_text, rel_path=context or "index.html")
+    if issues:
+        raise ValueError(f"Free WebApplication schema violation{ctx}: {issues[0]}")
+    return True
+
+
+def detect_rate_limit_and_bot_shield_issues(
+    headers_or_html: Union[str, Dict[str, Any]],
+    context: str = "",
+) -> List[str]:
+    """
+    Detects operational rate-limit and bot shield protection gaps.
+    Verifies presence of rate-limit headers (X-RateLimit-Limit), bot shield tokens
+    (Cloudflare Turnstile, reCAPTCHA, cf-mitigated), or client-side caching hooks.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" in {context}" if context else ""
+    if headers_or_html is None:
+        return [f"Operational shield check failed{ctx}: headers or HTML cannot be None"]
+
+    if isinstance(headers_or_html, str):
+        if "\u2014" in headers_or_html:
+            return [f"Document contains forbidden em-dash{ctx}"]
+        if "\u2013" in headers_or_html:
+            return [f"Document contains forbidden en-dash{ctx}"]
+
+        text_lower = headers_or_html.lower()
+
+        has_rate_limit = any(
+            token in text_lower
+            for token in (
+                "x-ratelimit-limit",
+                "x-ratelimit-remaining",
+                "x-ratelimit-reset",
+                "ratelimit-limit",
+                "ratelimit-remaining",
+                "ratelimit-reset",
+                "x-rate-limit-limit",
+                "x-rate-limit",
+                "retry-after",
+                'name="rate-limit"',
+                "name='rate-limit'",
+                "data-rate-limit",
+                "rate-limit-token",
+            )
+        )
+
+        has_bot_shield = any(
+            token in text_lower
+            for token in (
+                "cf-mitigated",
+                "cf-ray",
+                "cf-turnstile",
+                "turnstile",
+                "challenges.cloudflare.com",
+                "recaptcha",
+                "hcaptcha",
+                "x-bot-shield",
+                'name="bot-shield"',
+                "name='bot-shield'",
+                "data-bot-shield",
+                "bot-protection",
+                "anti-bot",
+                "cloudflare-challenge",
+            )
+        )
+
+        has_cache_hook = any(
+            token in text_lower
+            for token in (
+                "cache-control",
+                "stale-while-revalidate",
+                'http-equiv="cache-control"',
+                "http-equiv='cache-control'",
+                "data-client-cache",
+                "client-cache",
+            )
+        )
+
+        if not (has_rate_limit or has_bot_shield or has_cache_hook):
+            return [
+                f"Missing operational rate-limit headers (X-RateLimit-Limit), bot challenge protection (Turnstile/reCAPTCHA), or client-side caching hooks{ctx}"
+            ]
+        return []
+
+    elif isinstance(headers_or_html, dict):
+        lower_headers = {str(k).lower(): str(v) for k, v in headers_or_html.items()}
+
+        has_rate_limit = any(
+            k in lower_headers
+            for k in (
+                "x-ratelimit-limit",
+                "x-ratelimit-remaining",
+                "x-ratelimit-reset",
+                "ratelimit-limit",
+                "ratelimit-remaining",
+                "ratelimit-reset",
+                "x-rate-limit-limit",
+                "x-rate-limit",
+                "retry-after",
+            )
+        )
+
+        has_bot_shield = any(
+            k in lower_headers
+            for k in (
+                "cf-mitigated",
+                "cf-ray",
+                "x-bot-shield",
+                "cf-turnstile",
+            )
+        ) or any(
+            "turnstile" in v.lower() or "challenge" in v.lower() or "bot" in v.lower()
+            for v in lower_headers.values()
+        )
+
+        has_cache_hook = any(
+            k in lower_headers
+            for k in ("cache-control", "etag", "stale-while-revalidate")
+        )
+
+        if not (has_rate_limit or has_bot_shield or has_cache_hook):
+            return [
+                f"Missing operational rate-limit headers (X-RateLimit-Limit), bot challenge protection (Turnstile/reCAPTCHA), or client-side caching hooks{ctx}"
+            ]
+        return []
+
+    return [f"Operational shield input must be str or dict, got {type(headers_or_html).__name__}{ctx}"]
+
+
+def assert_rate_limit_and_bot_shield(
+    headers_or_html: Union[str, Dict[str, Any]],
+    context: str = "",
+) -> bool:
+    """
+    Contract assertion validating operational rate-limiting and bot shield defenses.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_rate_limit_and_bot_shield_issues(headers_or_html, context=context)
+    if issues:
+        raise ValueError(f"Operational rate-limit and bot shield violation: {issues[0]}")
+    return True
+
+
 from pseofactory.qualification import (
     qualify_search_intent,
     check_search_intent_cannibalization,
     assert_search_intent_qualified,
 )
+
 
 
 __all__ = [
@@ -7138,7 +7629,15 @@ __all__ = [
     "assert_llms_manifest_pair",
     "assert_llms_txt_file",
     "assert_curated_llms_txt",
+    "ToolUtilityHTMLParser",
+    "detect_tool_utility_issues",
+    "assert_tool_utility_contract",
+    "detect_free_web_application_schema_issues",
+    "assert_free_web_application_schema",
+    "detect_rate_limit_and_bot_shield_issues",
+    "assert_rate_limit_and_bot_shield",
 ]
+
 
 
 
