@@ -5978,6 +5978,11 @@ SUPPORTED_AUXILIARY_SCHEMAS: Set[str] = {
     "SearchAction",
     "MonetaryAmount",
     "QuantitativeValue",
+    "Country",
+    "State",
+    "AdministrativeArea",
+    "City",
+    "Place",
 }
 
 ALL_REGISTERED_SCHEMAS: Set[str] = TARGET_ENTITY_SCHEMAS | SUPPORTED_AUXILIARY_SCHEMAS

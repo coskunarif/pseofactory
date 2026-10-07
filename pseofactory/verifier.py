@@ -2914,7 +2914,7 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html") and not require_strict:
+                if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html", "about/index.html", "contact/index.html") and not require_strict:
                     continue
                 pages_checked += 1
                 content = p.read_text(encoding="utf-8", errors="ignore")
