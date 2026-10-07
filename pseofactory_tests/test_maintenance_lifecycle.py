@@ -10,35 +10,27 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 import os
 import json
 import pytest
-from pathlib import Path
-from typing import Dict, Any
 
 from pseofactory.maintenance import (
     DriftReason,
     AssetDriftRecord,
-    AssetIntegrityReport,
-    MaintenanceResult,
     PropertyContaminationError,
     CrossPropertyContaminationScanner,
-    PropertyAdapter,
-    PrexvoPropertyAdapter,
-    ProfitHelmPropertyAdapter,
+    SubprocessPropertyAdapter,
+    WorkspacePropertyScanner,
     ConfigurablePropertyAdapter,
     TenantRegistry,
     AssetIntegrityEvaluator,
     RefactorCascadeEngine,
     MaintenanceLifecycle,
     FleetMaintenanceCoordinator,
-    run_maintenance_lifecycle,
-    run_fleet_maintenance,
-    audit_property_assets,
 )
 from pseofactory.drift import (
     compute_asset_fingerprint,
     record_asset_ledger,
     load_asset_ledger,
     record_engine_hash,
-    compute_engine_hash,
+    trigger_drift_cascade,
 )
 from pseofactory.cli import main as cli_main
 
@@ -470,3 +462,149 @@ def test_cli_subcommands(tmp_path):
 
     exit_code = cli_main(["drift", "--state-file", str(state_file)])
     assert exit_code == 0
+
+
+def test_workspace_property_scanner_conventions(tmp_path):
+    """Verifies WorkspacePropertyScanner discovers properties via conventions."""
+    # 1. .pseofactory.json
+    p1 = tmp_path / "prop1"
+    p1.mkdir()
+    (p1 / ".pseofactory.json").write_text(
+        json.dumps({
+            "property_id": "prop1",
+            "brand_name": "PropOne",
+            "domain": "prop1.com",
+            "canonical_base": "https://prop1.com",
+            "dist_dir": "dist",
+        }),
+        encoding="utf-8",
+    )
+    (p1 / "dist").mkdir()
+    (p1 / "dist" / "page.html").write_text(CLEAN_HTML, encoding="utf-8")
+
+    # 2. factory.json
+    p2 = tmp_path / "prop2"
+    p2.mkdir()
+    (p2 / "factory.json").write_text(
+        json.dumps({
+            "property_id": "prop2",
+            "brand_name": "PropTwo",
+            "domain": "prop2.com",
+            "canonical_base": "https://prop2.com",
+            "dist_dir": "dist",
+        }),
+        encoding="utf-8",
+    )
+    (p2 / "dist").mkdir()
+    (p2 / "dist" / "page.html").write_text(CLEAN_HTML, encoding="utf-8")
+
+    # 3. dist/sitemap.xml
+    p3 = tmp_path / "prop3"
+    p3.mkdir()
+    (p3 / "dist").mkdir()
+    (p3 / "dist" / "sitemap.xml").write_text(
+        CLEAN_SITEMAP.replace("profithelm.com", "prop3.com"), encoding="utf-8"
+    )
+
+    # 4. pyproject.toml
+    p4 = tmp_path / "prop4"
+    p4.mkdir()
+    (p4 / "pyproject.toml").write_text(
+        '[project]\nname = "prop4"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (p4 / "dist").mkdir()
+
+    scanner = WorkspacePropertyScanner(workspace_root=tmp_path)
+    discovered = scanner.discover_properties()
+    prop_ids = {a.property_id for a in discovered}
+
+    assert "prop1" in prop_ids
+    assert "prop2" in prop_ids
+    assert "prop3" in prop_ids
+    assert "prop4" in prop_ids
+
+
+def test_subprocess_property_adapter_memory_isolation(tmp_path):
+    """Verifies SubprocessPropertyAdapter executes worker builds in child process without memory pollution."""
+    import sys
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+
+    # Adapter with subprocess build command
+    adapter = SubprocessPropertyAdapter(
+        property_id="custom_tenant",
+        brand_name="CustomTenant",
+        domain="customtenant.com",
+        canonical_base="https://customtenant.com",
+        dist_dir=dist_dir,
+        repo_path=tmp_path,
+        build_command=[sys.executable, "-c", "import sys; print('built successfully')"],
+    )
+
+    assert adapter.property_id == "custom_tenant"
+    assert adapter.build_all() is True
+    # Verify memory firewall: tenant packages are never imported in host process
+    assert "profithelm" not in sys.modules
+    assert "prexvo" not in sys.modules
+    assert "custom_tenant" not in sys.modules
+
+
+def test_trigger_drift_cascade_lifecycle_and_hwl_1349_latching(tmp_path):
+    """Verifies full drift cascade lifecycle and HWL-1349 post-verification commit latch."""
+    prop_dir = tmp_path / "test_app"
+    prop_dir.mkdir()
+    (prop_dir / ".pseofactory.json").write_text(
+        json.dumps({
+            "property_id": "test_app",
+            "brand_name": "TestApp",
+            "domain": "testapp.com",
+            "canonical_base": "https://testapp.com",
+            "dist_dir": "dist",
+        }),
+        encoding="utf-8",
+    )
+    (prop_dir / "dist").mkdir()
+    dirty_html = "<html><body>Dirty content with \u2014 em dash</body></html>"
+    (prop_dir / "dist" / "index.html").write_text(dirty_html, encoding="utf-8")
+
+    state_file = tmp_path / ".agy" / "engine_hash.json"
+    ledger_file = tmp_path / ".agy" / "asset_ledger.json"
+    initial_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps({"engine_hash": initial_hash}), encoding="utf-8")
+
+    # 1. Dirty run must fail verification and MUST NOT latch engine hash
+    res_fail = trigger_drift_cascade(
+        workspace_root=tmp_path,
+        state_file=state_file,
+        ledger_file=ledger_file,
+    )
+    assert res_fail["status"] == "FAIL"
+    current_state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert current_state["engine_hash"] == initial_hash
+
+    # 2. Clean run must pass verification and MUST latch engine hash
+    (prop_dir / "dist" / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    res_pass = trigger_drift_cascade(
+        workspace_root=tmp_path,
+        state_file=state_file,
+        ledger_file=ledger_file,
+        force=True,
+    )
+    assert res_pass["status"] == "PASS"
+    updated_state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert updated_state["engine_hash"] != initial_hash
+    assert ledger_file.exists()
+
+
+def test_tenant_registry_dynamic_discovery(tmp_path):
+    """Verifies TenantRegistry discovers properties dynamically via WorkspacePropertyScanner."""
+    TenantRegistry.reset_default()
+    reg = TenantRegistry.default(workspace_root=tmp_path)
+    assert isinstance(reg, TenantRegistry)
+    # Ensure no hardcoded prexvo or profithelm if not in tmp_path
+    adapters = reg.list_adapters()
+    assert "prexvo" not in adapters
+    assert "profithelm" not in adapters
+    TenantRegistry.reset_default()
+

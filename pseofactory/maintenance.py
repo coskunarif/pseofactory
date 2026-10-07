@@ -8,12 +8,14 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import os
+import sys
 import re
 import json
 import time
 import uuid
 import shutil
 import tempfile
+import subprocess
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -24,7 +26,6 @@ from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
-    assert_no_prompt_leakage,
     assert_touch_targets,
     assert_valid_jsonld,
     assert_sitemap_parses,
@@ -39,6 +40,8 @@ from pseofactory.drift import (
     compute_asset_fingerprint,
     record_asset_ledger,
     load_asset_ledger,
+    trigger_drift_cascade,
+    cascade_drift_lifecycle,
 )
 
 
@@ -483,43 +486,56 @@ class ConfigurablePropertyAdapter(PropertyAdapter):
         return super().verify_asset(path)
 
 
-class PrexvoPropertyAdapter(PropertyAdapter):
+class SubprocessPropertyAdapter(PropertyAdapter):
     """
-    Property adapter for Prexvo federal student loan statutory modeling factory.
+    Subprocess-isolated PropertyAdapter for executing property builds and operations
+    in separate child processes.
+    Guarantees zero memory contamination: tenant packages are never imported
+    into the host process's sys.modules.
     Zero em-dashes. Zero en-dashes.
     """
 
     def __init__(
         self,
-        dist_dir: Optional[Union[str, Path]] = None,
+        property_id: str,
+        brand_name: str,
+        domain: str,
+        canonical_base: str,
+        dist_dir: Union[str, Path],
         repo_path: Optional[Union[str, Path]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        foreign_tokens: Optional[Set[str]] = None,
+        statutory_tokens: Optional[Set[str]] = None,
+        build_command: Optional[Union[str, List[str]]] = None,
+        build_asset_command: Optional[Union[str, List[str]]] = None,
     ):
-        self._repo_path = (
-            Path(repo_path).resolve()
-            if repo_path
-            else Path("/home/ubuntuadmin/projects/prexvo").resolve()
-        )
-        self._dist_dir = (
-            Path(dist_dir).resolve()
-            if dist_dir
-            else self._repo_path / "dist"
-        )
+        self._property_id = property_id.lower()
+        self._brand_name = brand_name
+        self._domain = domain
+        self._canonical_base = canonical_base.rstrip("/")
+        self._dist_dir = Path(dist_dir).resolve()
+        self._repo_path = Path(repo_path).resolve() if repo_path else self._dist_dir.parent
+        self._tools = list(tools) if tools else []
+        self._foreign_tokens = set(foreign_tokens) if foreign_tokens else set()
+        self._statutory_tokens = set(statutory_tokens) if statutory_tokens else set()
+        self._build_command = build_command
+        self._build_asset_command = build_asset_command
 
     @property
     def property_id(self) -> str:
-        return "prexvo"
+        return self._property_id
 
     @property
     def brand_name(self) -> str:
-        return "Prexvo"
+        return self._brand_name
 
     @property
     def domain(self) -> str:
-        return "prexvo.com"
+        return self._domain
 
     @property
     def canonical_base(self) -> str:
-        return "https://prexvo.com"
+        return self._canonical_base
 
     @property
     def dist_dir(self) -> Path:
@@ -529,145 +545,348 @@ class PrexvoPropertyAdapter(PropertyAdapter):
     def repo_path(self) -> Optional[Path]:
         return self._repo_path
 
+    @property
+    def tools(self) -> List[Dict[str, Any]]:
+        return self._tools
+
     def get_statutory_tokens(self) -> Set[str]:
-        return {
-            "title iv",
-            "34 cfr",
-            "repayment assistance plan",
-            "pslf",
-            "student loan",
-            "hea",
-            "ibr",
-            "paye",
-            "save plan",
-        }
+        return self._statutory_tokens
 
     def get_foreign_tokens(self) -> Set[str]:
-        return {
-            "section 1031",
-            "section 179",
-            "tcja",
-            "profithelm.com",
-            "exchange1031",
-            "profithelm",
-        }
+        if self._foreign_tokens:
+            return self._foreign_tokens
+        return super().get_foreign_tokens()
 
     def build_asset(self, slug: str, target_file: Optional[Path] = None) -> bool:
+        """
+        Rebuilds single asset in isolated subprocess.
+        Guarantees tenant modules are never imported into host process sys.modules.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if self._build_asset_command:
+            try:
+                env = os.environ.copy()
+                env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+                env["FACTORY_DOMAIN"] = self.domain
+                env["FACTORY_BRAND_NAME"] = self.brand_name
+                env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+                env["FACTORY_ASSET_SLUG"] = slug
+                if target_file:
+                    env["FACTORY_TARGET_FILE"] = str(target_file)
+
+                cmd = self._build_asset_command
+                if isinstance(cmd, str):
+                    formatted_cmd = cmd.format(
+                        slug=slug,
+                        target_file=str(target_file) if target_file else "",
+                        dist_dir=str(self.dist_dir),
+                    )
+                    res = subprocess.run(formatted_cmd, shell=True, env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
+                else:
+                    formatted_args = [
+                        arg.format(
+                            slug=slug,
+                            target_file=str(target_file) if target_file else "",
+                            dist_dir=str(self.dist_dir),
+                        )
+                        for arg in cmd
+                    ]
+                    res = subprocess.run(formatted_args, env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
+                return res.returncode == 0
+            except Exception:
+                return False
+
+        factory_script = self._repo_path / "run_factory.sh"
+        if not factory_script.is_file():
+            factory_script = self._repo_path / "scripts" / "run_factory.sh"
+
+        if factory_script.is_file():
+            try:
+                env = os.environ.copy()
+                env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+                env["FACTORY_DOMAIN"] = self.domain
+                env["FACTORY_BRAND_NAME"] = self.brand_name
+                env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+                env["FACTORY_ASSET_SLUG"] = slug
+                res = subprocess.run(["bash", str(factory_script)], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                return res.returncode == 0
+            except Exception:
+                return False
+
+        # Isolated python execution in child process
+        script = (
+            f"import sys\n"
+            f"if {repr(str(self._repo_path))} not in sys.path:\n"
+            f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
+            f"try:\n"
+            f"    import importlib\n"
+            f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"    if hasattr(mod, 'build_asset'):\n"
+            f"        mod.build_asset({repr(slug)}, target_file={repr(str(target_file) if target_file else None)})\n"
+            f"        sys.exit(0)\n"
+            f"    elif hasattr(mod, 'build_all'):\n"
+            f"        mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
+            f"        sys.exit(0)\n"
+            f"except Exception as ex:\n"
+            f"    sys.exit(1)\n"
+            f"sys.exit(1)\n"
+        )
         try:
-            import sys
-            if str(self._repo_path) not in sys.path:
-                sys.path.insert(0, str(self._repo_path))
-            import prexvo.builder as pb  # type: ignore
-            if hasattr(pb, "build_all"):
-                pb.build_all(dist_dir=self._dist_dir)
-                return True
-        except Exception as ex:
-            print(f"Warning: Prexvo build_asset({slug}) fallback: {ex}")
-        return False
+            env = os.environ.copy()
+            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
+            return res.returncode == 0
+        except Exception:
+            return False
 
     def build_all(self) -> bool:
+        """
+        Rebuilds all assets in isolated subprocess.
+        Guarantees tenant modules are never imported into host process sys.modules.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if self._build_command:
+            try:
+                env = os.environ.copy()
+                env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+                env["FACTORY_DOMAIN"] = self.domain
+                env["FACTORY_BRAND_NAME"] = self.brand_name
+                env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+
+                cmd = self._build_command
+                if isinstance(cmd, str):
+                    res = subprocess.run(cmd, shell=True, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                else:
+                    res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                return res.returncode == 0
+            except Exception:
+                return False
+
+        factory_script = self._repo_path / "run_factory.sh"
+        if not factory_script.is_file():
+            factory_script = self._repo_path / "scripts" / "run_factory.sh"
+
+        if factory_script.is_file():
+            try:
+                env = os.environ.copy()
+                env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+                env["FACTORY_DOMAIN"] = self.domain
+                env["FACTORY_BRAND_NAME"] = self.brand_name
+                env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+                res = subprocess.run(["bash", str(factory_script)], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                return res.returncode == 0
+            except Exception:
+                return False
+
+        # Isolated python execution in child process
+        script = (
+            f"import sys\n"
+            f"if {repr(str(self._repo_path))} not in sys.path:\n"
+            f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
+            f"try:\n"
+            f"    import importlib\n"
+            f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"    if hasattr(mod, 'build_all'):\n"
+            f"        mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
+            f"        sys.exit(0)\n"
+            f"except Exception as ex:\n"
+            f"    sys.exit(1)\n"
+            f"sys.exit(1)\n"
+        )
         try:
-            import sys
-            if str(self._repo_path) not in sys.path:
-                sys.path.insert(0, str(self._repo_path))
-            import prexvo.builder as pb  # type: ignore
-            pb.build_all(dist_dir=self._dist_dir)
-            return True
-        except Exception as ex:
-            print(f"Warning: Prexvo build_all failed: {ex}")
+            env = os.environ.copy()
+            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+            return res.returncode == 0
+        except Exception:
             return False
 
 
-class ProfitHelmPropertyAdapter(PropertyAdapter):
+class WorkspacePropertyScanner:
     """
-    Property adapter for ProfitHelm quantitative financial and tax intelligence factory.
+    Discovers property adapters dynamically by convention without hardcoding tenant packages:
+    - .pseofactory.json configuration marker
+    - factory.json configuration marker
+    - dist/sitemap.xml static site distribution
+    - pyproject.toml package metadata with dist/ directory
     Zero em-dashes. Zero en-dashes.
     """
 
-    def __init__(
-        self,
-        dist_dir: Optional[Union[str, Path]] = None,
-        repo_path: Optional[Union[str, Path]] = None,
-    ):
-        self._repo_path = (
-            Path(repo_path).resolve()
-            if repo_path
-            else Path("/home/ubuntuadmin/projects/profithelm-platform").resolve()
-        )
-        self._dist_dir = (
-            Path(dist_dir).resolve()
-            if dist_dir
-            else self._repo_path / "dist"
-        )
+    EXCLUDED_DIR_NAMES: Set[str] = {
+        "pseofactory",
+        "arif-skills",
+        "knowledge",
+        "automations",
+        "node_modules",
+        "_archive",
+        ".agy",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "public",
+        "dist",
+        "docs",
+        "data",
+        "satellites",
+        "artifacts",
+        "generations",
+        "parasite-output",
+    }
 
-    @property
-    def property_id(self) -> str:
-        return "profithelm"
+    def __init__(self, workspace_root: Optional[Union[str, Path]] = None):
+        self.workspace_root = Path(
+            workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+        ).resolve()
 
-    @property
-    def brand_name(self) -> str:
-        return "ProfitHelm"
-
-    @property
-    def domain(self) -> str:
-        return "profithelm.com"
-
-    @property
-    def canonical_base(self) -> str:
-        return "https://profithelm.com"
-
-    @property
-    def dist_dir(self) -> Path:
-        return self._dist_dir
-
-    @property
-    def repo_path(self) -> Optional[Path]:
-        return self._repo_path
-
-    def get_statutory_tokens(self) -> Set[str]:
-        return {
-            "section 1031",
-            "section 179",
-            "tcja",
-            "irc",
-            "capital gains",
-            "depreciation",
-        }
-
-    def get_foreign_tokens(self) -> Set[str]:
-        return {
-            "title iv",
-            "34 cfr",
-            "repayment assistance plan",
-            "pslf",
-            "prexvo.com",
-            "prexvo",
-        }
-
-    def build_asset(self, slug: str, target_file: Optional[Path] = None) -> bool:
+    def _parse_pseofactory_json(self, config_file: Path) -> Optional[PropertyAdapter]:
         try:
-            import sys
-            if str(self._repo_path) not in sys.path:
-                sys.path.insert(0, str(self._repo_path))
-            import profithelm.builder as pb  # type: ignore
-            if hasattr(pb, "build_all"):
-                pb.build_all()
-                return True
-        except Exception as ex:
-            print(f"Warning: ProfitHelm build_asset({slug}) fallback: {ex}")
-        return False
+            data = json.loads(config_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return None
+            repo_path = config_file.parent
+            property_id = str(data.get("property_id") or repo_path.name).lower()
+            brand_name = str(data.get("brand_name") or property_id.capitalize())
+            domain = str(data.get("domain") or f"{property_id}.com")
+            canonical_base = str(data.get("canonical_base") or f"https://{domain}").rstrip("/")
+            raw_dist = data.get("dist_dir") or "dist"
+            dist_dir = (
+                (repo_path / raw_dist).resolve()
+                if not Path(raw_dist).is_absolute()
+                else Path(raw_dist).resolve()
+            )
+            tools = data.get("tools", [])
+            build_cmd = data.get("build_command")
+            build_asset_cmd = data.get("build_asset_command")
+            foreign_tokens = set(data.get("foreign_tokens", []))
+            statutory_tokens = set(data.get("statutory_tokens", []))
 
-    def build_all(self) -> bool:
+            return SubprocessPropertyAdapter(
+                property_id=property_id,
+                brand_name=brand_name,
+                domain=domain,
+                canonical_base=canonical_base,
+                dist_dir=dist_dir,
+                repo_path=repo_path,
+                tools=tools,
+                foreign_tokens=foreign_tokens,
+                statutory_tokens=statutory_tokens,
+                build_command=build_cmd,
+                build_asset_command=build_asset_cmd,
+            )
+        except Exception:
+            return None
+
+    def _parse_sitemap_xml(self, sitemap_file: Path, repo_path: Path) -> Optional[PropertyAdapter]:
         try:
-            import sys
-            if str(self._repo_path) not in sys.path:
-                sys.path.insert(0, str(self._repo_path))
-            import profithelm.builder as pb  # type: ignore
-            pb.build_all()
-            return True
-        except Exception as ex:
-            print(f"Warning: ProfitHelm build_all failed: {ex}")
-            return False
+            content = sitemap_file.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"<loc>(https?://([^/]+))", content)
+            if not m:
+                return None
+            canonical_base = m.group(1).rstrip("/")
+            domain = m.group(2)
+            prop_id = domain.split(".")[0].lower() if "." in domain else repo_path.name.lower()
+            brand_name = prop_id.capitalize()
+            dist_dir = sitemap_file.parent
+
+            return SubprocessPropertyAdapter(
+                property_id=prop_id,
+                brand_name=brand_name,
+                domain=domain,
+                canonical_base=canonical_base,
+                dist_dir=dist_dir,
+                repo_path=repo_path,
+            )
+        except Exception:
+            return None
+
+    def _parse_pyproject_toml(self, pyproject_file: Path, repo_path: Path) -> Optional[PropertyAdapter]:
+        try:
+            content = pyproject_file.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
+            if not m:
+                return None
+            name = m.group(1)
+            dist_dir = repo_path / "dist"
+            if not dist_dir.is_dir():
+                return None
+
+            domain = f"{name}.com"
+            canonical_base = f"https://{domain}"
+            sitemap_path = dist_dir / "sitemap.xml"
+            if sitemap_path.is_file():
+                sm_adapter = self._parse_sitemap_xml(sitemap_path, repo_path)
+                if sm_adapter:
+                    canonical_base = sm_adapter.canonical_base
+                    domain = sm_adapter.domain
+
+            return SubprocessPropertyAdapter(
+                property_id=name.lower(),
+                brand_name=name.capitalize(),
+                domain=domain,
+                canonical_base=canonical_base,
+                dist_dir=dist_dir,
+                repo_path=repo_path,
+            )
+        except Exception:
+            return None
+
+    def discover_properties(self, workspace_root: Optional[Union[str, Path]] = None) -> List[PropertyAdapter]:
+        root = Path(workspace_root or self.workspace_root).resolve()
+        if not root.is_dir():
+            return []
+
+        adapters: List[PropertyAdapter] = []
+        seen_ids: Set[str] = set()
+
+        # Check if root itself has marker
+        for cfg_name in (".pseofactory.json", "factory.json"):
+            cfg = root / cfg_name
+            if cfg.is_file():
+                root_adapter = self._parse_pseofactory_json(cfg)
+                if root_adapter and root_adapter.property_id not in seen_ids:
+                    seen_ids.add(root_adapter.property_id)
+                    adapters.append(root_adapter)
+
+        # Check child directories
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            if entry.name in self.EXCLUDED_DIR_NAMES:
+                continue
+
+            adapter: Optional[PropertyAdapter] = None
+
+            # 1. .pseofactory.json
+            p_json = entry / ".pseofactory.json"
+            if p_json.is_file():
+                adapter = self._parse_pseofactory_json(p_json)
+
+            # 2. factory.json
+            if adapter is None:
+                f_json = entry / "factory.json"
+                if f_json.is_file():
+                    adapter = self._parse_pseofactory_json(f_json)
+
+            # 3. dist/sitemap.xml
+            if adapter is None:
+                sm = entry / "dist" / "sitemap.xml"
+                if sm.is_file():
+                    adapter = self._parse_sitemap_xml(sm, entry)
+
+            # 4. pyproject.toml with dist/
+            if adapter is None:
+                pyproj = entry / "pyproject.toml"
+                if pyproj.is_file():
+                    adapter = self._parse_pyproject_toml(pyproj, entry)
+
+            if adapter and adapter.property_id not in seen_ids:
+                seen_ids.add(adapter.property_id)
+                adapters.append(adapter)
+
+        return adapters
+
+    scan_workspace = discover_properties
+    scan = discover_properties
+    discover = discover_properties
 
 
 class TenantRegistry:
@@ -701,14 +920,20 @@ class TenantRegistry:
         self._adapters.clear()
 
     @classmethod
-    def default(cls) -> TenantRegistry:
-        """Returns or creates singleton registry preloaded with Prexvo and ProfitHelm."""
+    def default(cls, workspace_root: Optional[Union[str, Path]] = None) -> TenantRegistry:
+        """Returns or creates singleton registry preloaded dynamically via WorkspacePropertyScanner."""
         if cls._global_registry is None:
             reg = cls()
-            reg.register_adapter(PrexvoPropertyAdapter())
-            reg.register_adapter(ProfitHelmPropertyAdapter())
+            scanner = WorkspacePropertyScanner(workspace_root=workspace_root)
+            for adapter in scanner.discover_properties():
+                reg.register_adapter(adapter)
             cls._global_registry = reg
         return cls._global_registry
+
+    @classmethod
+    def reset_default(cls) -> None:
+        """Resets singleton default registry."""
+        cls._global_registry = None
 
 
 class AssetIntegrityEvaluator:
@@ -1372,7 +1597,7 @@ class FleetMaintenanceCoordinator:
 
 
 def run_maintenance_lifecycle(
-    property_id: str = "prexvo",
+    property_id: Optional[str] = None,
     force: bool = False,
     adapter: Optional[PropertyAdapter] = None,
 ) -> MaintenanceResult:
@@ -1381,7 +1606,16 @@ def run_maintenance_lifecycle(
     Zero em-dashes. Zero en-dashes.
     """
     lifecycle = MaintenanceLifecycle()
-    target = adapter or property_id
+    if adapter is not None:
+        target: Union[str, PropertyAdapter] = adapter
+    elif property_id is not None:
+        target = property_id
+    else:
+        reg = TenantRegistry.default()
+        adapters = reg.list_adapters()
+        if not adapters:
+            raise ValueError("No registered property adapters found in TenantRegistry")
+        target = next(iter(adapters.values()))
     return lifecycle.run(target, force=force)
 
 
@@ -1399,7 +1633,7 @@ def run_fleet_maintenance(
 
 
 def audit_property_assets(
-    property_id: str = "prexvo",
+    property_id: Optional[str] = None,
     adapter: Optional[PropertyAdapter] = None,
 ) -> AssetIntegrityReport:
     """
@@ -1407,6 +1641,39 @@ def audit_property_assets(
     Zero em-dashes. Zero en-dashes.
     """
     reg = TenantRegistry.default()
-    target_adapter = adapter or reg.get_adapter(property_id)
+    if adapter is not None:
+        target_adapter = adapter
+    elif property_id is not None:
+        target_adapter = reg.get_adapter(property_id)
+    else:
+        adapters = reg.list_adapters()
+        if not adapters:
+            raise ValueError("No registered property adapters found in TenantRegistry")
+        target_adapter = next(iter(adapters.values()))
     evaluator = AssetIntegrityEvaluator()
     return evaluator.audit_all(target_adapter)
+
+
+__all__ = [
+    "DriftReason",
+    "AssetDriftRecord",
+    "AssetIntegrityReport",
+    "MaintenanceResult",
+    "PropertyContaminationError",
+    "CrossPropertyContaminationScanner",
+    "PropertyAdapter",
+    "SubprocessPropertyAdapter",
+    "WorkspacePropertyScanner",
+    "ConfigurablePropertyAdapter",
+    "TenantRegistry",
+    "AssetIntegrityEvaluator",
+    "RefactorCascadeEngine",
+    "MaintenanceLifecycle",
+    "FleetMaintenanceCoordinator",
+    "run_maintenance_lifecycle",
+    "run_fleet_maintenance",
+    "audit_property_assets",
+    "trigger_drift_cascade",
+    "cascade_drift_lifecycle",
+]
+
