@@ -231,8 +231,8 @@ ZYPPY_2026_FACTORS_SPEC = [
 ]
 
 # Canonical 3-Tier AI Crawler Taxonomy
-AI_SEARCH_BOTS = ["googlebot", "bingbot", "perplexitybot", "oai-searchbot"]
-AI_USER_TRIGGERED_BOTS = ["chatgpt-user", "claude-web"]
+AI_SEARCH_BOTS = ["googlebot", "bingbot", "perplexitybot", "claudebot", "oai-searchbot"]
+AI_USER_TRIGGERED_BOTS = ["chatgpt-user"]
 AI_TRAINING_BOTS = [
     "gptbot",
     "google-extended",
@@ -707,6 +707,10 @@ class MasterSEOVerifier:
 
                 for bot in AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS:
                     if bot not in sections:
+                        if bot == "claudebot" and "claude-web" in sections:
+                            continue
+                        if bot == "claude-web" and "claudebot" in sections:
+                            continue
                         issues.append(f"robots.txt missing User-agent directive for AI crawler {bot}")
 
         return {
