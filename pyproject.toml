@@ -17,6 +17,9 @@ test = [
     "pytest>=7.0.0",
 ]
 
+[project.scripts]
+pseofactory = "pseofactory.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pseofactory*"]
