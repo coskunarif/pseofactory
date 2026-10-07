@@ -71,10 +71,23 @@ class SinglePassSEODocumentParser(HTMLParser):
         self.current_tag: Optional[str] = None
         self.current_data: List[str] = []
         self.tag_stack: List[Tuple[str, Dict[str, str]]] = []
+        # Snippet and crawl verification state
+        self.has_nosnippet: bool = False
+        self.max_snippet: Optional[int] = None
+        self.has_noindex: bool = False
+        self.max_image_preview: Optional[str] = None
+        self.max_video_preview: Optional[int] = None
+        self.data_nosnippet_tags: List[str] = []
+        self.quick_answer_has_data_nosnippet: bool = False
 
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
         attrs_dict = {k.lower(): (v or "") for k, v in attrs}
         self.tag_stack.append((tag, attrs_dict))
+
+        if "data-nosnippet" in attrs_dict:
+            self.data_nosnippet_tags.append(tag)
+            if self.in_quick_answer:
+                self.quick_answer_has_data_nosnippet = True
 
         if tag == "html":
             if "lang" in attrs_dict:
@@ -97,6 +110,25 @@ class SinglePassSEODocumentParser(HTMLParser):
                 self.geo_region = content
             elif prop == "og:url":
                 self.og_url = content
+
+            if name in ("robots", "googlebot", "google-extended", "bingbot"):
+                c_lower = content.lower()
+                if "nosnippet" in c_lower:
+                    self.has_nosnippet = True
+                if "noindex" in c_lower:
+                    self.has_noindex = True
+                if "max-snippet" in c_lower:
+                    m_ms = re.search(r'max-snippet\s*:\s*(-?\d+)', content, re.IGNORECASE)
+                    if m_ms:
+                        self.max_snippet = int(m_ms.group(1))
+                if "max-image-preview" in c_lower:
+                    m_mip = re.search(r'max-image-preview\s*:\s*([a-zA-Z0-9_-]+)', content, re.IGNORECASE)
+                    if m_mip:
+                        self.max_image_preview = m_mip.group(1).lower()
+                if "max-video-preview" in c_lower:
+                    m_mvp = re.search(r'max-video-preview\s*:\s*(-?\d+)', content, re.IGNORECASE)
+                    if m_mvp:
+                        self.max_video_preview = int(m_mvp.group(1))
 
         elif tag == "link":
             rel = attrs_dict.get("rel", "").lower()
@@ -125,6 +157,12 @@ class SinglePassSEODocumentParser(HTMLParser):
         if "quick-answer" in tag_cls or "quick-answer" in tag_id:
             self.in_quick_answer = True
             self.quick_answer_depth = len(self.tag_stack)
+            if "data-nosnippet" in attrs_dict:
+                self.quick_answer_has_data_nosnippet = True
+            for anc_tag, anc_attrs in self.tag_stack:
+                if "data-nosnippet" in anc_attrs:
+                    self.quick_answer_has_data_nosnippet = True
+                    break
 
         if tag == "table":
             self.table_count += 1
@@ -192,6 +230,22 @@ ZYPPY_2026_FACTORS_SPEC = [
     {"factor": "Meta Description", "weight": 0.22, "code": "meta_description"},
 ]
 
+# Canonical 3-Tier AI Crawler Taxonomy
+AI_SEARCH_BOTS = ["googlebot", "bingbot", "perplexitybot", "oai-searchbot"]
+AI_USER_TRIGGERED_BOTS = ["chatgpt-user", "claude-web"]
+AI_TRAINING_BOTS = [
+    "gptbot",
+    "google-extended",
+    "applebot",
+    "applebot-extended",
+    "meta-externalagent",
+    "ccbot",
+    "anthropic-ai",
+    "cohere-ai",
+    "bytespider",
+]
+
+
 
 # =============================================================================
 # Master SEO Verifier Class
@@ -228,6 +282,7 @@ class MasterSEOVerifier:
             if domain is not None
             else os.environ.get("FACTORY_DOMAIN", "profithelm.com")
         )
+        self.brand_domain = self.domain
         self.brand_name = (
             brand_name
             if brand_name is not None
@@ -583,20 +638,75 @@ class MasterSEOVerifier:
             if "disallow: /signal/" not in content_lower:
                 issues.append("robots.txt missing 'Disallow: /signal/'")
 
+            # Parse robots.txt sections by user-agent
+            sections: Dict[str, Dict[str, List[str]]] = {}
+            current_agents: List[str] = []
+            for raw_line in content.splitlines():
+                line = raw_line.split("#")[0].strip()
+                if not line:
+                    current_agents = []
+                    continue
+                if ":" not in line:
+                    continue
+                key, val = [x.strip() for x in line.split(":", 1)]
+                key_lower = key.lower()
+                if key_lower == "user-agent":
+                    agent = val.lower()
+                    current_agents.append(agent)
+                    if agent not in sections:
+                        sections[agent] = {"allow": [], "disallow": []}
+                elif key_lower == "allow" and current_agents:
+                    for agent in current_agents:
+                        sections[agent]["allow"].append(val)
+                elif key_lower == "disallow" and current_agents:
+                    for agent in current_agents:
+                        sections[agent]["disallow"].append(val)
+
+            def _is_path_disallowed(path: str, allows: List[str], disallows: List[str]) -> bool:
+                norm_path = path if path.startswith("/") else f"/{path}"
+                longest_allow = -1
+                for a in allows:
+                    a_clean = a.strip()
+                    if not a_clean:
+                        continue
+                    if norm_path.startswith(a_clean):
+                        if len(a_clean) > longest_allow:
+                            longest_allow = len(a_clean)
+                longest_disallow = -1
+                for d in disallows:
+                    d_clean = d.strip()
+                    if not d_clean:
+                        continue
+                    if norm_path.startswith(d_clean):
+                        if len(d_clean) > longest_disallow:
+                            longest_disallow = len(d_clean)
+                if longest_disallow > longest_allow:
+                    return True
+                return False
+
+            def _is_bot_blocked(bot_name: str, path: str) -> bool:
+                if bot_name in sections:
+                    return _is_path_disallowed(path, sections[bot_name]["allow"], sections[bot_name]["disallow"])
+                if "*" in sections:
+                    return _is_path_disallowed(path, sections["*"]["allow"], sections["*"]["disallow"])
+                return False
+
+            # AI Search and User-Triggered bots must NOT be disallowed on root / or /tools/
+            for bot in AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS:
+                if _is_bot_blocked(bot, "/"):
+                    issues.append(f"robots.txt disallows AI search/user bot '{bot}' on root '/'")
+                if _is_bot_blocked(bot, "/tools/"):
+                    issues.append(f"robots.txt disallows AI search/user bot '{bot}' on '/tools/'")
+
             if self.strict_robots:
-                if "allow: /tools/" not in content_lower:
+                if (self.tools or (target / "tools").is_dir()) and "allow: /tools/" not in content_lower:
                     issues.append("robots.txt missing 'Allow: /tools/' directive")
-                for dis in ("/signal/", "/syndication/", "/staging/", "/test/", "/tests/"):
-                    if f"disallow: {dis}" not in content_lower:
+                for dis in ("/syndication/", "/staging/", "/test/", "/tests/"):
+                    if (target / dis.strip("/")).is_dir() and f"disallow: {dis}" not in content_lower:
                         issues.append(f"robots.txt missing 'Disallow: {dis}'")
 
-                ai_bots = [
-                    "googlebot", "bingbot", "perplexitybot", "claudebot", "gptbot",
-                    "chatgpt-user", "oai-searchbot", "ccbot", "anthropic-ai", "cohere-ai",
-                    "applebot", "applebot-extended", "meta-externalagent",
-                ]
-                for bot in ai_bots:
-                    if f"user-agent: {bot}" not in content_lower:
+                for bot in AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS:
+                    if bot not in sections:
                         issues.append(f"robots.txt missing User-agent directive for AI crawler {bot}")
 
         return {
@@ -858,11 +968,36 @@ class MasterSEOVerifier:
                 clean = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', content, flags=re.IGNORECASE)
                 clean = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', clean, flags=re.IGNORECASE)
                 text = re.sub(r'<[^>]+>', ' ', clean)
-                words = [w for w in text.split() if w.strip()]
+
+                # Check for skeleton/placeholder containers and phrases
+                placeholder_patterns = [
+                    r'\bloading\.{0,3}\b',
+                    r'\benable\s+javascript\b',
+                    r'\bjavascript\s+is\s+required\b',
+                    r'\bjavascript\s+required\b',
+                    r'\bloading\s+application\b',
+                    r'\bskeleton\b',
+                ]
+                substantive_text = text
+                for pat in placeholder_patterns:
+                    substantive_text = re.sub(pat, ' ', substantive_text, flags=re.IGNORECASE)
+
+                words = [w for w in substantive_text.split() if w.strip()]
                 if len(words) < 50:
-                    issues.append(f"Insufficient static content without JavaScript ({len(words)} words) in {rel}")
+                    issues.append(f"Insufficient static content without JavaScript ({len(words)} substantive words) in {rel}")
                 if "<h1" not in content.lower():
                     issues.append(f"Missing <h1> tag in static HTML in {rel}")
+
+                # If quick-answer container is present, verify non-empty text directly in static HTML
+                m_qa = re.search(r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>(.*?)</aside>', content, re.IGNORECASE | re.DOTALL)
+                if m_qa:
+                    qa_raw = m_qa.group(1)
+                    qa_text = re.sub(r'<[^>]+>', ' ', qa_raw).strip()
+                    qa_substantive = qa_text
+                    for pat in placeholder_patterns:
+                        qa_substantive = re.sub(pat, ' ', qa_substantive, flags=re.IGNORECASE).strip()
+                    if not qa_substantive:
+                        issues.append(f"Quick-answer container is empty or contains only placeholders awaiting JavaScript hydration in {rel}")
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -905,6 +1040,8 @@ class MasterSEOVerifier:
         boxes_checked = 0
         if target.exists():
             for p in target.glob("**/*.html"):
+                if p.name == "404.html" or "signal" in p.parts:
+                    continue
                 content = p.read_text(encoding="utf-8", errors="ignore")
                 rel = p.relative_to(target).as_posix()
                 m_snippet = re.search(r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>(.*?)</aside>', content, re.IGNORECASE | re.DOTALL)
@@ -915,10 +1052,79 @@ class MasterSEOVerifier:
                     if not (40 <= len(words) <= 60):
                         issues.append(f"Quick-answer snippet has {len(words)} words (expected 40-60) in {rel}")
 
+                    parser = SinglePassSEODocumentParser(self.brand_domain)
+                    parser.feed(content)
+                    if parser.has_nosnippet:
+                        issues.append(f"Page {rel} contains 'nosnippet' directive, revoking search and AI snippet eligibility")
+                    if parser.max_snippet is not None:
+                        if parser.max_snippet == 0:
+                            issues.append(f"Page {rel} contains 'max-snippet:0' directive, revoking search snippet eligibility")
+                        elif parser.max_snippet > 0 and parser.quick_answer_text:
+                            if len(parser.quick_answer_text) > parser.max_snippet:
+                                issues.append(f"Page {rel} quick-answer ({len(parser.quick_answer_text)} chars) exceeds max-snippet:{parser.max_snippet} limit")
+                    if parser.quick_answer_has_data_nosnippet:
+                        issues.append(f"Page {rel} quick-answer container or ancestor contains 'data-nosnippet', excluding answer from search snippets and AI Overviews")
+
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "Snippet Gate",
             "boxes_checked": boxes_checked,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    # Snippet Eligibility Gate
+    def check_snippet_eligibility_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        issues = []
+        pages_checked = 0
+        if target.exists():
+            for p in target.glob("**/*.html"):
+                if p.name == "404.html" or "signal" in p.parts:
+                    continue
+                pages_checked += 1
+                rel = p.relative_to(target).as_posix()
+                content = p.read_text(encoding="utf-8", errors="ignore")
+                parser = SinglePassSEODocumentParser(self.brand_domain)
+                parser.feed(content)
+
+                if parser.has_nosnippet:
+                    issues.append(f"Page {rel} contains 'nosnippet' directive, revoking search and AI snippet eligibility")
+                if parser.max_snippet is not None:
+                    if parser.max_snippet == 0:
+                        issues.append(f"Page {rel} contains 'max-snippet:0' directive, revoking search snippet eligibility")
+                    elif parser.max_snippet > 0 and parser.quick_answer_text:
+                        if len(parser.quick_answer_text) > parser.max_snippet:
+                            issues.append(f"Page {rel} quick-answer ({len(parser.quick_answer_text)} chars) exceeds max-snippet:{parser.max_snippet} limit")
+                if parser.quick_answer_has_data_nosnippet:
+                    issues.append(f"Page {rel} quick-answer container or ancestor contains 'data-nosnippet', excluding answer from search snippets and AI Overviews")
+
+            headers_file = target / "_headers"
+            if headers_file.is_file():
+                current_route = ""
+                for raw_line in headers_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    line = raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if not raw_line.startswith(" ") and not raw_line.startswith("\t"):
+                        current_route = line
+                    else:
+                        if ":" in line:
+                            h_name, h_val = line.split(":", 1)
+                            if h_name.strip().lower() == "x-robots-tag":
+                                val_lower = h_val.lower()
+                                if not current_route.startswith("/signal"):
+                                    if "nosnippet" in val_lower:
+                                        issues.append(f"_headers applies 'nosnippet' to public route '{current_route}' via X-Robots-Tag")
+                                    if re.search(r'max-snippet\s*:\s*0\b', val_lower):
+                                        issues.append(f"_headers applies 'max-snippet:0' to public route '{current_route}' via X-Robots-Tag")
+                                    if "noindex" in val_lower:
+                                        issues.append(f"_headers applies 'noindex' to public route '{current_route}' via X-Robots-Tag")
+
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_snippet_eligibility_gate",
+            "pages_checked": pages_checked,
             "violations_count": len(issues),
             "issues": issues,
         }
@@ -1459,6 +1665,7 @@ class MasterSEOVerifier:
             "check_hide_test_pages_gate": self.check_hide_test_pages_gate(target),
             "check_no_js_rendering_gate": self.check_no_js_rendering_gate(target),
             "check_http_link_canonical_gate": self.check_http_link_canonical_gate(target),
+            "check_snippet_eligibility_gate": self.check_snippet_eligibility_gate(target),
             "check_content_relevance_gate": content_relevance_gate,
             # Auxiliary and legacy aliases
             "check_ai_mode_manifest_gate": self.check_ai_mode_manifest_gate(target),
@@ -1493,6 +1700,7 @@ class MasterSEOVerifier:
             "check_hide_test_pages_gate",
             "check_no_js_rendering_gate",
             "check_http_link_canonical_gate",
+            "check_snippet_eligibility_gate",
         ]
 
         for g_key in primary_keys:
@@ -1556,6 +1764,7 @@ check_url_redirects_gate = _default_verifier.check_url_redirects_gate
 check_search_console_tag_gate = _default_verifier.check_search_console_tag_gate
 check_hide_test_pages_gate = _default_verifier.check_hide_test_pages_gate
 check_no_js_rendering_gate = _default_verifier.check_no_js_rendering_gate
+check_snippet_eligibility_gate = _default_verifier.check_snippet_eligibility_gate
 check_existence_gate = _default_verifier.check_existence_gate
 check_title_gate = _default_verifier.check_title_gate
 check_snippet_gate = _default_verifier.check_snippet_gate

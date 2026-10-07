@@ -8,6 +8,7 @@ from pseofactory.verifier import (
     ZyppyHTMLParser,
     audit_seo_checklist,
     run_seo_checklist_audit,
+    check_snippet_eligibility_gate,
     FORBIDDEN_JARGON,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "ZyppyHTMLParser",
     "audit_seo_checklist",
     "run_seo_checklist_audit",
+    "check_snippet_eligibility_gate",
     "FORBIDDEN_JARGON",
 ]

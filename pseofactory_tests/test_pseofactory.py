@@ -28,7 +28,15 @@ from pseofactory.contracts import (
     assert_multi_scale_semantic_compression,
     assert_technical_seo_spec,
 )
-from pseofactory.verifier import MasterSEOVerifier, SEOVerificationError
+from pseofactory.verifier import (
+    MasterSEOVerifier,
+    SEOVerificationError,
+    SinglePassSEODocumentParser,
+    check_snippet_eligibility_gate,
+    AI_SEARCH_BOTS,
+    AI_USER_TRIGGERED_BOTS,
+    AI_TRAINING_BOTS,
+)
 from pseofactory.indexer import (
     PushIndexer,
     CrawlerTelemetryListener,
@@ -447,5 +455,236 @@ def test_substrate_domain_neutrality_isolation(monkeypatch, tmp_path):
     assert resolved["category"] == "Education Finance"
     assert resolved["affiliates"] == ["sofi", "earnest"]
     assert resolved["slug"] == "custom-loan-repayment"
+
+
+def test_single_pass_parser_snippet_directives():
+    """Verifies SinglePassSEODocumentParser detects nosnippet, max-snippet, noindex, and data-nosnippet."""
+    html = (
+        '<!DOCTYPE html><html><head>'
+        '<title>Test Page</title>'
+        '<meta name="robots" content="nosnippet, noindex, max-snippet:50, max-image-preview:large, max-video-preview:15">'
+        '</head><body>'
+        '<h1>Heading</h1>'
+        '<div data-nosnippet="true">'
+        '  <aside class="quick-answer">This is a quick answer wrapped in an ancestor with data-nosnippet.</aside>'
+        '</div>'
+        '</body></html>'
+    )
+    parser = SinglePassSEODocumentParser()
+    parser.feed(html)
+    assert parser.has_nosnippet is True
+    assert parser.has_noindex is True
+    assert parser.max_snippet == 50
+    assert parser.max_image_preview == "large"
+    assert parser.max_video_preview == 15
+    assert parser.quick_answer_has_data_nosnippet is True
+    assert "div" in parser.data_nosnippet_tags
+
+    # Direct data-nosnippet on aside
+    html_direct = (
+        '<!DOCTYPE html><html><head><title>Test</title></head><body>'
+        '<aside class="quick-answer" data-nosnippet>Direct data-nosnippet on answer.</aside>'
+        '</body></html>'
+    )
+    p2 = SinglePassSEODocumentParser()
+    p2.feed(html_direct)
+    assert p2.quick_answer_has_data_nosnippet is True
+    assert "aside" in p2.data_nosnippet_tags
+
+
+def test_snippet_eligibility_and_snippet_gate_failures(tmp_path):
+    """Verifies check_snippet_eligibility_gate and check_snippet_gate fail on restrictive directives."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+
+    # 1. nosnippet failure
+    page_nosnippet = dist / "nosnippet.html"
+    page_nosnippet.write_text(
+        '<!DOCTYPE html><html><head><title>Test</title>'
+        '<meta name="robots" content="nosnippet">'
+        '</head><body>'
+        '<aside class="quick-answer">'
+        'Word one two three four five six seven eight nine ten '
+        'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty '
+        'twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty '
+        'thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty '
+        'fortyone fortytwo fortythree fortyfour fortyfive.'
+        '</aside>'
+        '</body></html>',
+        encoding="utf-8"
+    )
+
+    verifier = MasterSEOVerifier(dist_dir=dist)
+    res_elig = verifier.check_snippet_eligibility_gate(dist)
+    assert res_elig["status"] == "FAIL"
+    assert any("nosnippet" in issue for issue in res_elig["issues"])
+
+    res_snip = verifier.check_snippet_gate(dist)
+    assert res_snip["status"] == "FAIL"
+    assert any("nosnippet" in issue for issue in res_snip["issues"])
+
+    # 2. max-snippet too small
+    page_nosnippet.unlink()
+    page_max_snippet = dist / "max_snippet.html"
+    page_max_snippet.write_text(
+        '<!DOCTYPE html><html><head><title>Test</title>'
+        '<meta name="robots" content="max-snippet:20">'
+        '</head><body>'
+        '<aside class="quick-answer">'
+        'Word one two three four five six seven eight nine ten '
+        'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty '
+        'twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty '
+        'thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty '
+        'fortyone fortytwo fortythree fortyfour fortyfive.'
+        '</aside>'
+        '</body></html>',
+        encoding="utf-8"
+    )
+
+    res_elig2 = verifier.check_snippet_eligibility_gate(dist)
+    assert res_elig2["status"] == "FAIL"
+    assert any("exceeds max-snippet:20" in issue for issue in res_elig2["issues"])
+
+    # 3. data-nosnippet on quick-answer
+    page_max_snippet.unlink()
+    page_data_nosnippet = dist / "data_nosnippet.html"
+    page_data_nosnippet.write_text(
+        '<!DOCTYPE html><html><head><title>Test</title></head><body>'
+        '<aside class="quick-answer" data-nosnippet>'
+        'Word one two three four five six seven eight nine ten '
+        'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty '
+        'twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty '
+        'thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty '
+        'fortyone fortytwo fortythree fortyfour fortyfive.'
+        '</aside>'
+        '</body></html>',
+        encoding="utf-8"
+    )
+
+    res_elig3 = verifier.check_snippet_eligibility_gate(dist)
+    assert res_elig3["status"] == "FAIL"
+    assert any("data-nosnippet" in issue for issue in res_elig3["issues"])
+
+
+def test_snippet_gates_pass_on_clean_page(tmp_path):
+    """Verifies check_snippet_eligibility_gate and check_snippet_gate pass when quick answer is clean."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    clean_page = dist / "clean.html"
+    clean_page.write_text(
+        '<!DOCTYPE html><html><head><title>Clean Page</title>'
+        '<meta name="robots" content="index, follow, max-snippet:500">'
+        '</head><body>'
+        '<h1>Clean Page Header</h1>'
+        '<aside class="quick-answer">'
+        'Word one two three four five six seven eight nine ten '
+        'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty '
+        'twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty '
+        'thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty '
+        'fortyone fortytwo fortythree fortyfour fortyfive.'
+        '</aside>'
+        '</body></html>',
+        encoding="utf-8"
+    )
+
+    verifier = MasterSEOVerifier(dist_dir=dist)
+    res_elig = verifier.check_snippet_eligibility_gate(dist)
+    assert res_elig["status"] == "PASS"
+    assert res_elig["violations_count"] == 0
+
+    res_snip = verifier.check_snippet_gate(dist)
+    assert res_snip["status"] == "PASS"
+    assert res_snip["violations_count"] == 0
+
+
+def test_robots_txt_ai_crawler_taxonomy(tmp_path):
+    """Verifies 3-tier crawler taxonomy allows disallowing training bot while requiring search bots to be allowed."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+
+    # Valid robots.txt: training bot (GPTBot) disallowed, search bots allowed
+    robots_valid = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /tools/\n"
+        "Disallow: /signal/\n"
+        "Disallow: /syndication/\n"
+        "Disallow: /staging/\n"
+        "Disallow: /test/\n"
+        "Disallow: /tests/\n\n"
+        "User-agent: Googlebot\n"
+        "Allow: /\n\n"
+        "User-agent: Bingbot\n"
+        "Allow: /\n\n"
+        "User-agent: PerplexityBot\n"
+        "Allow: /\n\n"
+        "User-agent: OAI-SearchBot\n"
+        "Allow: /\n\n"
+        "User-agent: ChatGPT-User\n"
+        "Allow: /\n\n"
+        "User-agent: Claude-Web\n"
+        "Allow: /\n\n"
+        "User-agent: GPTBot\n"
+        "Disallow: /\n\n"
+        "Sitemap: https://example.com/sitemap.xml\n"
+        "Sitemap: https://example.com/sitemap-hubs.xml\n"
+        "Sitemap: https://example.com/sitemap-leaves.xml\n"
+    )
+    (dist / "robots.txt").write_text(robots_valid, encoding="utf-8")
+
+    verifier = MasterSEOVerifier(dist_dir=dist, strict_robots=True)
+    res = verifier.check_robots_txt_gate(dist)
+    assert res["status"] == "PASS", f"Expected PASS but got: {res['issues']}"
+
+    # Invalid robots.txt: search bot (OAI-SearchBot) is disallowed
+    robots_invalid = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /tools/\n"
+        "Disallow: /signal/\n"
+        "Disallow: /syndication/\n"
+        "Disallow: /staging/\n"
+        "Disallow: /test/\n"
+        "Disallow: /tests/\n\n"
+        "User-agent: Googlebot\n"
+        "Allow: /\n\n"
+        "User-agent: Bingbot\n"
+        "Allow: /\n\n"
+        "User-agent: PerplexityBot\n"
+        "Allow: /\n\n"
+        "User-agent: OAI-SearchBot\n"
+        "Disallow: /\n\n"
+        "User-agent: ChatGPT-User\n"
+        "Allow: /\n\n"
+        "User-agent: Claude-Web\n"
+        "Allow: /\n\n"
+        "User-agent: GPTBot\n"
+        "Disallow: /\n\n"
+        "Sitemap: https://example.com/sitemap.xml\n"
+        "Sitemap: https://example.com/sitemap-hubs.xml\n"
+        "Sitemap: https://example.com/sitemap-leaves.xml\n"
+    )
+    (dist / "robots.txt").write_text(robots_invalid, encoding="utf-8")
+    res_inv = verifier.check_robots_txt_gate(dist)
+    assert res_inv["status"] == "FAIL"
+    assert any("oai-searchbot" in issue.lower() for issue in res_inv["issues"])
+
+
+def test_headers_x_robots_tag_nosnippet_detection(tmp_path):
+    """Verifies check_snippet_eligibility_gate catches X-Robots-Tag nosnippet on public routes in _headers."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    headers_content = (
+        "/tools/*\n"
+        "  X-Robots-Tag: nosnippet\n"
+        "/signal/*\n"
+        "  X-Robots-Tag: noindex, nosnippet\n"
+    )
+    (dist / "_headers").write_text(headers_content, encoding="utf-8")
+
+    verifier = MasterSEOVerifier(dist_dir=dist)
+    res = verifier.check_snippet_eligibility_gate(dist)
+    assert res["status"] == "FAIL"
+    assert any("_headers applies 'nosnippet' to public route '/tools/*'" in issue for issue in res["issues"])
 
 
