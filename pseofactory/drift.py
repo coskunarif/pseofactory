@@ -137,3 +137,55 @@ def record_engine_hash(
         print(f"Warning: Failed to persist engine hash: {ex}")
 
     return final_hash
+
+
+def compute_asset_fingerprint(asset_path: Union[str, Path]) -> str:
+    """
+    Computes a deterministic SHA-256 fingerprint for a compiled static asset.
+    Fails closed if the file does not exist.
+    Zero em-dashes. Zero en-dashes.
+    """
+    path = Path(asset_path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Asset file not found: {path}")
+    content = path.read_bytes()
+    return hashlib.sha256(content).hexdigest()
+
+
+def record_asset_ledger(
+    ledger_file: Union[str, Path],
+    asset_hashes: Dict[str, str],
+    engine_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Persists asset fingerprint ledger alongside the engine hash into ledger_file.
+    Enforces HWL-1349 post-pipeline commit latch.
+    Zero em-dashes. Zero en-dashes.
+    """
+    l_path = Path(ledger_file).resolve()
+    l_path.parent.mkdir(parents=True, exist_ok=True)
+    payload: Dict[str, Any] = {
+        "engine_hash": engine_hash or compute_engine_hash(),
+        "total_assets": len(asset_hashes),
+        "assets": dict(sorted(asset_hashes.items())),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    l_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
+
+
+def load_asset_ledger(ledger_file: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Loads asset ledger from disk. Returns empty dictionary if file does not exist.
+    Zero em-dashes. Zero en-dashes.
+    """
+    l_path = Path(ledger_file).resolve()
+    if not l_path.is_file():
+        return {}
+    try:
+        data = json.loads(l_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
