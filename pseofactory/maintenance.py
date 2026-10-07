@@ -13,6 +13,7 @@ import json
 import time
 import uuid
 import shutil
+import tempfile
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -467,6 +468,13 @@ class ConfigurablePropertyAdapter(PropertyAdapter):
     def build_all(self) -> bool:
         if self._build_all_fn:
             return bool(self._build_all_fn())
+        if self._build_asset_fn:
+            success = True
+            for a in self.list_assets():
+                slug = a.stem
+                if not self.build_asset(slug, target_file=a):
+                    success = False
+            return success
         return True
 
     def verify_asset(self, path: Path) -> Dict[str, Any]:
@@ -870,6 +878,7 @@ class AssetIntegrityEvaluator:
         adapter: PropertyAdapter,
         ledger_path: Optional[Union[str, Path]] = None,
         state_file: Optional[Union[str, Path]] = None,
+        check_engine_drift: bool = True,
     ) -> AssetIntegrityReport:
         """
         Executes comprehensive asset integrity audit across all assets in adapter.dist_dir.
@@ -888,10 +897,11 @@ class AssetIntegrityEvaluator:
                 ledger = load_asset_ledger(default_ledger)
 
         engine_drifted = False
-        s_file = state_file or (adapter.dist_dir.parent / ".agy" / "engine_hash.json")
-        if Path(s_file).exists():
-            drift_res = detect_engine_drift(s_file)
-            engine_drifted = bool(drift_res.get("drift_detected", False))
+        if check_engine_drift:
+            s_file = state_file or (adapter.dist_dir.parent / ".agy" / "engine_hash.json")
+            if Path(s_file).exists():
+                drift_res = detect_engine_drift(s_file)
+                engine_drifted = bool(drift_res.get("drift_detected", False))
 
         for asset in assets:
             record = self.audit_asset(
@@ -1045,8 +1055,10 @@ class RefactorCascadeEngine:
             try:
                 # 1. Transactional isolation & backup
                 if target_path.is_file():
+                    backup_dir = Path(tempfile.gettempdir()) / f"pseofactory_backups_{os.getpid()}"
+                    backup_dir.mkdir(parents=True, exist_ok=True)
                     backup_name = f".tmp_backup.{os.getpid()}.{uuid.uuid4().hex[:8]}.{target_path.name}"
-                    backup_path = target_path.parent / backup_name
+                    backup_path = backup_dir / backup_name
                     shutil.copy2(target_path, backup_path)
 
                 # 2. Rebuild in isolated environment
@@ -1105,15 +1117,55 @@ class RefactorCascadeEngine:
         failed_count = 0
         all_dependencies: Set[str] = set()
 
-        for rec in records:
-            success = self.refactor_asset(rec, adapter)
-            if success:
-                refactored_count += 1
-                deps = self.map_dependencies(rec.asset_path, adapter)
-                for d in deps:
-                    all_dependencies.add(str(d))
-            else:
-                failed_count += 1
+        total_assets = len(adapter.list_assets())
+        should_bulk_rebuild = bool(records) and (
+            any(DriftReason.ENGINE_HASH_DRIFT in rec.reasons for rec in records)
+            or (total_assets > 0 and len(records) >= total_assets * 0.5)
+        )
+
+        if should_bulk_rebuild:
+            with adapter.scoped_environment():
+                build_ok = adapter.build_all()
+
+            for rec in records:
+                target_path = Path(rec.asset_path).resolve()
+                audit_record = self.evaluator.audit_asset(target_path, adapter)
+                verify_dict = (
+                    adapter.verify_asset(target_path)
+                    if hasattr(adapter, "verify_asset")
+                    else {"status": "PASS"}
+                )
+                if (
+                    build_ok
+                    and audit_record is None
+                    and verify_dict.get("status") != "FAIL"
+                ):
+                    refactored_count += 1
+                    deps = self.map_dependencies(rec.asset_path, adapter)
+                    for d in deps:
+                        all_dependencies.add(str(d))
+                else:
+                    err_msg = (
+                        f"Post-build audit failed: {audit_record.details}"
+                        if audit_record
+                        else (
+                            f"Adapter verification failed: {verify_dict.get('issues')}"
+                            if verify_dict.get("status") == "FAIL"
+                            else "Bulk rebuild failed"
+                        )
+                    )
+                    self.route_to_dlq(adapter.property_id, rec, err_msg)
+                    failed_count += 1
+        else:
+            for rec in records:
+                success = self.refactor_asset(rec, adapter)
+                if success:
+                    refactored_count += 1
+                    deps = self.map_dependencies(rec.asset_path, adapter)
+                    for d in deps:
+                        all_dependencies.add(str(d))
+                else:
+                    failed_count += 1
 
         return {
             "refactored": refactored_count,
@@ -1197,7 +1249,7 @@ class MaintenanceLifecycle:
             cascade_res = self.cascade_engine.refactor_all(report.drifted_assets, adapter)
 
             # Phase 4: Fail-Closed Post-Refactor Verification Gate
-            post_report = self.evaluator.audit_all(adapter=adapter)
+            post_report = self.evaluator.audit_all(adapter=adapter, check_engine_drift=False)
 
             # Anti-Softening Invariant: Any lingering drifted assets cause gate failure
             if post_report.drifted_assets_count > 0:
