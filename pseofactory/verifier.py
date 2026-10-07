@@ -16,7 +16,8 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Set, Callable
+from typing import Dict, Any, List, Optional, Tuple, Set, Callable, Union
+
 
 from pseofactory.contracts import (
     FORBIDDEN_JARGON,
@@ -75,7 +76,15 @@ from pseofactory.contracts import (
     assert_no_internal_route_leaks,
     assert_top_category_hubs_summaries,
     assert_llms_manifest_pair,
+    ToolUtilityHTMLParser,
+    detect_tool_utility_issues,
+    assert_tool_utility_contract,
+    detect_free_web_application_schema_issues,
+    assert_free_web_application_schema,
+    detect_rate_limit_and_bot_shield_issues,
+    assert_rate_limit_and_bot_shield,
 )
+
 
 
 class SEOVerificationError(Exception):
@@ -2968,6 +2977,7 @@ class MasterSEOVerifier:
         self,
         dist_dir: Optional[Path] = None,
         require_strict: bool = False,
+        require_free_app_schema: bool = False,
     ) -> Dict[str, Any]:
         """
         Mechanical verification gate for Factor 12: Structured Data (+0.80).
@@ -2995,6 +3005,7 @@ class MasterSEOVerifier:
                     content,
                     rel_path=rel,
                     require_strict=require_strict,
+                    require_free_app_schema=require_free_app_schema,
                 )
                 if res["issues"]:
                     issues.extend(res["issues"])
@@ -3021,11 +3032,14 @@ class MasterSEOVerifier:
         self,
         dist_dir: Optional[Path] = None,
         require_strict: bool = False,
+        require_free_app_schema: bool = False,
     ) -> Dict[str, Any]:
         return self.check_structured_data_gate(
             dist_dir=dist_dir,
             require_strict=require_strict,
+            require_free_app_schema=require_free_app_schema,
         )
+
 
     verify_schema_org_structured_data = verify_structured_data
     verify_jsonld_structured_data = verify_structured_data
@@ -3118,6 +3132,118 @@ class MasterSEOVerifier:
     verify_llms_full_txt = verify_llms_txt
     verify_llmstxt = verify_llms_txt
     verify_curated_llms_txt = verify_llms_txt
+
+    # Free Interactive Tool Utility Gate
+    def check_tool_utility_gate(
+        self,
+        dist_dir_or_html: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Mechanical verification gate for ToolUtilityContract.
+        Verifies presence of interactive form or container (<form> or elements with input/action),
+        <input> elements paired with <label> or aria-label, and a submit CTA (<button type="submit"> or equivalent).
+        Zero em-dashes. Zero en-dashes.
+        """
+        if isinstance(dist_dir_or_html, str) and ("<" in dist_dir_or_html or "\n" in dist_dir_or_html):
+            return verify_html_tool_utility_contract(dist_dir_or_html, rel_path="inline.html")
+
+        target = Path(dist_dir_or_html) if dist_dir_or_html else self.dist_dir
+        issues: List[str] = []
+        tools_checked = 0
+
+        if target.exists():
+            for p in sorted(target.glob("**/*.html")):
+                if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
+                    continue
+                rel = p.relative_to(target).as_posix()
+                content = p.read_text(encoding="utf-8", errors="ignore")
+                is_tool = rel.startswith("tools/") and rel != "tools/index.html"
+                has_form_tag = "<form" in content.lower() or 'role="form"' in content.lower()
+                if is_tool or has_form_tag:
+                    tools_checked += 1
+                    res = verify_html_tool_utility_contract(content, rel_path=rel)
+                    if res["issues"]:
+                        issues.extend(res["issues"])
+
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_tool_utility_gate",
+            "tools_checked": tools_checked,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    verify_tool_utility_contract = check_tool_utility_gate
+
+    # Free WebApplication / SoftwareApplication Schema Gate
+    def check_free_web_application_schema_gate(
+        self,
+        dist_dir_or_html: Optional[Union[str, Path]] = None,
+        require_strict: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Mechanical verification gate for Free WebApplication / SoftwareApplication Schema.
+        Validates Schema.org WebApplication or SoftwareApplication JSON-LD defining
+        applicationCategory and offers with price '0' and ISO 4217 currency.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if isinstance(dist_dir_or_html, str) and ("<" in dist_dir_or_html or "\n" in dist_dir_or_html):
+            return verify_html_free_web_application_schema(dist_dir_or_html, rel_path="inline.html")
+
+        target = Path(dist_dir_or_html) if dist_dir_or_html else self.dist_dir
+        issues: List[str] = []
+        pages_checked = 0
+
+        if target.exists():
+            for p in sorted(target.glob("**/*.html")):
+                if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
+                    continue
+                rel = p.relative_to(target).as_posix()
+                content = p.read_text(encoding="utf-8", errors="ignore")
+                is_tool = rel.startswith("tools/") and rel != "tools/index.html"
+                has_app_schema = '"webapplication"' in content.lower() or '"softwareapplication"' in content.lower()
+                if is_tool or has_app_schema or require_strict:
+                    pages_checked += 1
+                    res = verify_html_free_web_application_schema(content, rel_path=rel)
+                    if res["issues"]:
+                        issues.extend(res["issues"])
+
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_free_web_application_schema_gate",
+            "pages_checked": pages_checked,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    verify_free_web_application_schema = check_free_web_application_schema_gate
+
+    # Operational Rate-Limit & Bot Shield Gate
+    def check_operational_shield_gate(
+        self,
+        dist_dir_or_headers: Optional[Union[str, Path, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Mechanical verification gate for Operational Rate-Limit and Bot Shield defense.
+        Verifies presence of rate-limit headers (X-RateLimit-Limit), bot challenge protection,
+        or client-side caching hooks.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if isinstance(dist_dir_or_headers, dict):
+            return verify_rate_limit_and_bot_shield(dist_dir_or_headers)
+        if isinstance(dist_dir_or_headers, str) and ("\n" in dist_dir_or_headers or ":" in dist_dir_or_headers):
+            return verify_rate_limit_and_bot_shield(dist_dir_or_headers)
+
+        target = Path(dist_dir_or_headers) if dist_dir_or_headers else self.dist_dir
+        headers_file = target / "_headers" if target.exists() else None
+        if headers_file and headers_file.is_file():
+            content = headers_file.read_text(encoding="utf-8", errors="ignore")
+            return verify_rate_limit_and_bot_shield(content, context="_headers")
+
+        return verify_rate_limit_and_bot_shield({}, context="missing _headers")
+
+    verify_operational_shield = check_operational_shield_gate
+
 
     # 25. Schema Validation Gate (Auxiliary)
     def check_schema_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -3710,7 +3836,11 @@ class MasterSEOVerifier:
             "check_llmstxt_gate": self.check_llms_txt_gate(target),
             "check_llms_manifest_gate": self.check_llms_txt_gate(target),
             "check_curated_llms_txt_gate": self.check_llms_txt_gate(target),
+            "check_tool_utility_gate": self.check_tool_utility_gate(target),
+            "check_free_web_application_schema_gate": self.check_free_web_application_schema_gate(target),
+            "check_operational_shield_gate": self.check_operational_shield_gate(target),
             "check_content_relevance_gate": content_relevance_gate,
+
             # Auxiliary and legacy aliases
             "check_ai_mode_manifest_gate": self.check_ai_mode_manifest_gate(target),
             "check_manifest_gate": self.check_ai_mode_manifest_gate(target),
@@ -5023,6 +5153,7 @@ def verify_html_structured_data(
     html_content: str,
     rel_path: str = "index.html",
     require_strict: bool = False,
+    require_free_app_schema: bool = False,
 ) -> Dict[str, Any]:
     """
     Mechanical single-page verification function for Factor 12: Structured Data (+0.80).
@@ -5067,6 +5198,11 @@ def verify_html_structured_data(
     )
     issues.extend(detected)
 
+    if require_free_app_schema:
+        from pseofactory.contracts import detect_free_web_application_schema_issues
+        free_issues = detect_free_web_application_schema_issues(html_content, rel_path=rel_path)
+        issues.extend(free_issues)
+
     try:
         assert_structured_data(
             html_content,
@@ -5077,6 +5213,7 @@ def verify_html_structured_data(
         err_msg = str(ex)
         if err_msg not in issues:
             issues.append(err_msg)
+
 
     meta = extract_structured_data_metadata(html_content)
 
@@ -5198,6 +5335,122 @@ def verify_llms_txt_manifest_pair(
 verify_llms_full_txt_content = verify_llms_txt_content
 
 
+def verify_html_tool_utility_contract(
+    html_content: str,
+    rel_path: str = "index.html",
+) -> Dict[str, Any]:
+    """
+    In-memory validation helper for an HTML document string against ToolUtilityContract.
+    Verifies:
+    1. Zero em-dashes and zero en-dashes.
+    2. Interactive form or container presence.
+    3. Input elements paired with label or aria-label.
+    4. Dedicated submit CTA button.
+    5. Touch targets meeting 44x44px standard.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import detect_tool_utility_issues, assert_tool_utility_contract
+
+    issues: List[str] = []
+    if not isinstance(html_content, str):
+        return {
+            "status": "FAIL",
+            "gate": "check_tool_utility_gate",
+            "violations_count": 1,
+            "issues": [f"Page {rel_path}: HTML content must be a string"],
+            "tool_valid": False,
+        }
+
+    detected = detect_tool_utility_issues(html_content, rel_path=rel_path)
+    issues.extend(detected)
+
+    try:
+        assert_tool_utility_contract(html_content, context=f"Page {rel_path}")
+    except Exception as ex:
+        err_msg = str(ex)
+        if err_msg not in issues:
+            issues.append(err_msg)
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "gate": "check_tool_utility_gate",
+        "violations_count": len(issues),
+        "issues": issues,
+        "tool_valid": len(issues) == 0,
+    }
+
+
+def verify_html_free_web_application_schema(
+    html_content: str,
+    rel_path: str = "index.html",
+) -> Dict[str, Any]:
+    """
+    In-memory validation helper for Free WebApplication / SoftwareApplication Schema.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import (
+        detect_free_web_application_schema_issues,
+        assert_free_web_application_schema,
+    )
+
+    issues: List[str] = []
+    if not isinstance(html_content, str):
+        return {
+            "status": "FAIL",
+            "gate": "check_free_web_application_schema_gate",
+            "violations_count": 1,
+            "issues": [f"Page {rel_path}: HTML content must be a string"],
+            "schema_valid": False,
+        }
+
+    detected = detect_free_web_application_schema_issues(html_content, rel_path=rel_path)
+    issues.extend(detected)
+
+    try:
+        assert_free_web_application_schema(html_content, context=f"Page {rel_path}")
+    except Exception as ex:
+        err_msg = str(ex)
+        if err_msg not in issues:
+            issues.append(err_msg)
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "gate": "check_free_web_application_schema_gate",
+        "violations_count": len(issues),
+        "issues": issues,
+        "schema_valid": len(issues) == 0,
+    }
+
+
+def verify_rate_limit_and_bot_shield(
+    headers_or_html: Union[str, Dict[str, Any]],
+    context: str = "",
+) -> Dict[str, Any]:
+    """
+    In-memory validation helper for operational rate-limiting and bot shield defenses.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import (
+        detect_rate_limit_and_bot_shield_issues,
+        assert_rate_limit_and_bot_shield,
+    )
+    issues: List[str] = []
+    detected = detect_rate_limit_and_bot_shield_issues(headers_or_html, context=context)
+    issues.extend(detected)
+
+    try:
+        assert_rate_limit_and_bot_shield(headers_or_html, context=context)
+    except Exception as ex:
+        err_msg = str(ex)
+        if err_msg not in issues:
+            issues.append(err_msg)
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "gate": "check_operational_shield_gate",
+        "violations_count": len(issues),
+        "issues": issues,
+    }
 
 
 check_existence_gate = _default_verifier.check_existence_gate
@@ -5210,4 +5463,12 @@ check_indexing_gate = _default_verifier.check_indexing_gate
 check_content_relevance_gate = _default_verifier.check_content_relevance_gate
 audit_seo_checklist = _default_verifier.audit_seo_checklist
 run_seo_checklist_audit = audit_seo_checklist
+
+check_tool_utility_gate = _default_verifier.check_tool_utility_gate
+verify_tool_utility_contract = _default_verifier.verify_tool_utility_contract
+check_free_web_application_schema_gate = _default_verifier.check_free_web_application_schema_gate
+verify_free_web_application_schema = _default_verifier.verify_free_web_application_schema
+check_operational_shield_gate = _default_verifier.check_operational_shield_gate
+verify_operational_shield = _default_verifier.verify_operational_shield
+
 

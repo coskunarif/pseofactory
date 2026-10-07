@@ -55,6 +55,8 @@ class DriftReason(str, Enum):
     CONTENT_RELEVANCE_GAP = "CONTENT_RELEVANCE_GAP"
     PROPERTY_CONTAMINATION = "PROPERTY_CONTAMINATION"
     STATUTORY_DRIFT = "STATUTORY_DRIFT"
+    OPERATIONAL_SHIELD_GAP = "OPERATIONAL_SHIELD_GAP"
+
 
 
 @dataclass
@@ -953,9 +955,12 @@ class AssetIntegrityEvaluator:
         self,
         scanner: Optional[CrossPropertyContaminationScanner] = None,
         enforce_master_seo: bool = False,
+        enforce_operational_shield: bool = False,
     ):
         self.scanner = scanner or CrossPropertyContaminationScanner()
         self.enforce_master_seo = enforce_master_seo
+        self.enforce_operational_shield = enforce_operational_shield
+
 
     def extract_slug(self, asset_path: Path, dist_dir: Path) -> Optional[str]:
         """Extracts tool slug from asset path."""
@@ -1085,6 +1090,16 @@ class AssetIntegrityEvaluator:
                 except ValueError as ex:
                     reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
                     details.append(f"Layout container violation: {ex}")
+
+        # 10. Operational Rate-Limit and Bot Shield (HTML / headers)
+        if self.enforce_operational_shield and p.suffix == ".html":
+            from pseofactory.contracts import assert_rate_limit_and_bot_shield
+            try:
+                assert_rate_limit_and_bot_shield(content, context=rel_key)
+            except ValueError as ex:
+                reasons.append(DriftReason.OPERATIONAL_SHIELD_GAP)
+                details.append(f"Operational shield gap: {ex}")
+
 
         if reasons:
             return AssetDriftRecord(
