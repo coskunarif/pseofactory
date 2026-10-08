@@ -1,0 +1,116 @@
+{
+  "hub_metadata": {
+    "version": "1.0.0",
+    "updated_at": "2026-10-08T15:50:00Z",
+    "description": "Unified programmatic monetization vault and master affiliate keys"
+  },
+  "master_networks": {
+    "sovrn_commerce": {
+      "name": "Sovrn Commerce",
+      "domain_key": "0a5ac1bfe04034bff021b394f5e71d90",
+      "api_key": "039f430e9e7cad0bd9ff3e6c8d1c54769d5847c3",
+      "site_domain": "profithelm.com",
+      "site_url": "https://profithelm.com",
+      "redirect_base": "https://redirect.viglink.com",
+      "enabled": true
+    },
+    "partnerstack": {
+      "name": "PartnerStack",
+      "api_key": "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP",
+      "account_name": "ProfitHelm LLC",
+      "enabled": true
+    },
+    "stripe": {
+      "name": "Stripe",
+      "account_id": "acct_1T6fSTIq0ckFsf5j",
+      "enabled": true
+    }
+  },
+  "sub_affiliate_master": {
+    "provider": "sovrn_commerce",
+    "domain_key": "0a5ac1bfe04034bff021b394f5e71d90",
+    "enabled": true
+  },
+  "properties": {
+    "profithelm": {
+      "name": "ProfitHelm",
+      "property_id": "profithelm",
+      "fallback_enabled": true,
+      "fallback_provider": "sovrn_commerce",
+      "default_fallback_url": "https://profithelm.com",
+      "categories": {
+        "STARTUP_BANKING": {
+          "primary_partner": "mercury",
+          "fallback_partner": "rho",
+          "direct_url": "https://mercury.com/",
+          "status": "pending",
+          "bounty": "$250"
+        },
+        "PAYROLL_HR": {
+          "primary_partner": "rippling",
+          "fallback_partner": "gusto",
+          "direct_url": "https://rippling.com/",
+          "status": "pending",
+          "bounty": "$600-$1600"
+        },
+        "CORPORATE_SPEND": {
+          "primary_partner": "ramp",
+          "fallback_partner": "mercury",
+          "direct_url": "https://ramp.com/",
+          "status": "pending",
+          "bounty": "$500"
+        },
+        "DIGITAL_ASSETS": {
+          "primary_partner": "coinledger",
+          "fallback_partner": "koinly",
+          "direct_url": "https://coinledger.io/?fpr=arif-554004",
+          "status": "live",
+          "bounty": "$35-$90"
+        },
+        "TAX_INTELLIGENCE": {
+          "primary_partner": "turbotax",
+          "fallback_partner": "taxslayer",
+          "direct_url": "https://turbotax.intuit.com/",
+          "status": "pending",
+          "bounty": "$45-$120"
+        },
+        "COMMERCIAL_REAL_ESTATE": {
+          "primary_partner": "crest_capital",
+          "fallback_partner": "ipx1031",
+          "direct_url": "https://www.crestcapital.com/",
+          "status": "pending",
+          "bounty": "$300-$800"
+        },
+        "MARKET_ARBITRAGE": {
+          "primary_partner": "kalshi",
+          "fallback_partner": "interactive_brokers",
+          "direct_url": "https://kalshi.com/",
+          "status": "pending",
+          "bounty": "$80-$150"
+        }
+      }
+    },
+    "prexvo": {
+      "name": "Prexvo",
+      "property_id": "prexvo",
+      "fallback_enabled": false,
+      "standing_restriction": "Strict prohibition on B2B monetization on Prexvo student loan pages. Prexvo visitors seek defensive relief from federal student debt (RAP, IBR, SAVE, PSLF) and possess zero corporate spending authority. Student loan refinance hypothesis remains conditional pending Gate 1 (written payout >= $45) and requires mandatory YMYL warning that refinancing federal loans permanently forfeits federal protections.",
+      "categories": {
+        "STUDENT_LOAN_REFINANCE": {
+          "primary_partner": "splash_financial",
+          "fallback_partner": "sofi",
+          "direct_url": "https://www.splashfinancial.com/",
+          "status": "pending_p2",
+          "bounty": "$200-$240"
+        },
+        "STUDENT_LOAN_COMPARISON": {
+          "primary_partner": "credible",
+          "fallback_partner": "earnest",
+          "direct_url": "https://www.credible.com/",
+          "status": "pending_p2",
+          "bounty": "$100-$150"
+        }
+      }
+    }
+  }
+}

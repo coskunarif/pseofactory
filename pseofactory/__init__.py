@@ -450,6 +450,7 @@ from pseofactory.affiliates import (
     get_affiliates_for_property,
     get_affiliate_route,
 )
+from pseofactory.affiliates_hub import MonetizationHub
 from pseofactory.trends import (
     FeedSpike,
     TrendCandidate,
@@ -894,6 +895,7 @@ __all__ = [
     "resolve_partner_url",
     "get_affiliates_for_property",
     "get_affiliate_route",
+    "MonetizationHub",
     "FeedSpike",
     "TrendCandidate",
     "TregDurabilityResult",
