@@ -236,7 +236,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_IPX1031_URL",
-        default_url="https://www.ipx1031.com/",
+        default_url="https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
         badge="Fidelity Backed / $100M Insured",
         commission_est="$250-$750/qualified exchange",
         bounty_est="$250-$750",

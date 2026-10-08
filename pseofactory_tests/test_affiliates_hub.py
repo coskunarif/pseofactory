@@ -257,3 +257,19 @@ def test_environment_variable_overrides_master_keys(monkeypatch):
     # Override Stripe account ID
     monkeypatch.setenv("STRIPE_ACCOUNT_ID", "acct_override_stripe_123")
     assert hub.stripe_account_id == "acct_override_stripe_123"
+
+
+def test_ipx1031_section_1031_calculator_route():
+    """Verifies that section-1031-calculator returns ipx1031 with start-an-exchange URL and required link attributes."""
+    hub = MonetizationHub()
+    route = hub.get_route("profithelm", "section-1031-calculator")
+
+    expected_url = (
+        "https://www.ipx1031.com/start-an-exchange/"
+        "?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator"
+    )
+    assert route["partner"] == "ipx1031"
+    assert route["url"] == expected_url
+    assert route["rel"] == "noopener sponsored nofollow"
+    assert route["target"] == "_blank"
+

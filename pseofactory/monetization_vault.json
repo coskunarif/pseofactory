@@ -81,6 +81,13 @@
           "status": "pending",
           "bounty": "$300-$800"
         },
+        "SECTION_1031_EXCHANGE": {
+          "primary_partner": "ipx1031",
+          "fallback_partner": "exeter1031",
+          "direct_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
+          "status": "active_direct",
+          "bounty": "$250-$750"
+        },
         "MARKET_ARBITRAGE": {
           "primary_partner": "kalshi",
           "fallback_partner": "interactive_brokers",
