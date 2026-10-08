@@ -262,6 +262,110 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         return 0 if all_success else 1
 
 
+def cmd_trend_intake(args: argparse.Namespace) -> int:
+    """
+    Executes automated trend intake and qualification pipeline.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.trends import run_trend_pipeline, FeedSpike, MultiSourceCollector, TregChecker, JevEngine
+
+    spikes = []
+    if args.fixture:
+        fix_path = Path(args.fixture).resolve()
+        if not fix_path.exists():
+            print(f"Error: Fixture file not found: {args.fixture}", file=sys.stderr)
+            return 1
+        with open(fix_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            raw_list = data
+        elif isinstance(data, dict) and "records" in data:
+            raw_list = data["records"]
+        else:
+            raw_list = [data]
+
+        mock_registry = {}
+        for item in raw_list:
+            sp = FeedSpike(
+                id=str(item.get("id", "")),
+                query=str(item.get("query", "")),
+                source=str(item.get("source", "fixture")),
+                detected_at=str(item.get("detected_at", "")),
+                sample_count=int(item.get("sample_count", 1)),
+                velocity=float(item.get("velocity", 0.0)),
+                acceleration=float(item.get("acceleration", 0.0)),
+                z_score=float(item.get("z_score", 0.0)),
+                baseline_mean=float(item.get("baseline_mean", 0.0)),
+                baseline_std=float(item.get("baseline_std", 0.0)),
+                raw_payload=item,
+            )
+            spikes.append(sp)
+            if "treg_mock" in item:
+                mock_registry[sp.query.lower().strip()] = item["treg_mock"]
+
+        treg_checker = TregChecker(mock_data=mock_registry)
+    else:
+        seeds = [s.strip() for s in (args.seeds or "calculator,tax deduction,compliance").split(",") if s.strip()]
+        collector = MultiSourceCollector()
+        spikes = collector.harvest(seeds)
+        treg_checker = TregChecker()
+
+    if args.source:
+        spikes = [s for s in spikes if s.source == args.source]
+
+    jev_engine = JevEngine(min_build_yield=float(args.min_yield))
+    result = run_trend_pipeline(
+        spikes=spikes,
+        sink_path=args.sink,
+        treg_checker=treg_checker,
+        jev_engine=jev_engine,
+    )
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(
+            f"[TREND INTAKE] Processed: {result['total_spikes']} | "
+            f"Filtered Noise: {result['filtered_noise_count']} | "
+            f"Approved Build: {len(result['approved_build'])} | "
+            f"Refactor Pages: {len(result['refactor_pages'])} | "
+            f"Monitored: {len(result['monitored'])} | "
+            f"Rejected: {len(result['rejected'])}"
+        )
+        for r in result["approved_build"]:
+            print(f" -> [BUILD_PAGE] {r['query']} ({r['slug']}) - Yield: {r['composite_profit_yield']:.1f}")
+        for r in result["refactor_pages"]:
+            print(f" -> [REFACTOR_PAGE] {r['query']} -> {r.get('matching_tool')} (Striking Distance)")
+
+    return 0
+
+
+def cmd_trend_monitor(args: argparse.Namespace) -> int:
+    """
+    Executes trend monitoring across streaming sources.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.trends import MultiSourceCollector, TrendPipeline
+
+    seeds = [s.strip() for s in (args.seeds or "calculator,estimator,tax").split(",") if s.strip()]
+    collector = MultiSourceCollector()
+    spikes = collector.harvest(seeds)
+    if args.source:
+        spikes = [s for s in spikes if s.source == args.source]
+
+    pipe = TrendPipeline()
+    result = pipe.process_spikes(spikes)
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"[TREND MONITOR] Monitored {len(spikes)} topics across {len(seeds)} seeds.")
+        for r in result["rankings"][:5]:
+            print(f" - {r['query']} [{r['action']}]: yield={r['composite_profit_yield']:.1f}")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -316,6 +420,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_dlq.add_argument("--dlq-path", type=str, default=None, help="Custom DLQ JSON path")
     p_dlq.add_argument("--json", action="store_true", help="Output result as JSON")
 
+    # trend-intake
+    p_intake = subparsers.add_parser("trend-intake", help="Execute automated breakout trend intake and Jev decision pipeline")
+    p_intake.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing raw spikes")
+    p_intake.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries for live streaming intake")
+    p_intake.add_argument("--source", type=str, default=None, help="Optional feed source filter (e.g. google_suggest)")
+    p_intake.add_argument("--sink", type=str, default="void_candidates.jsonl", help="Output path for JSONL candidates sink (default: void_candidates.jsonl)")
+    p_intake.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold (default: 60.0)")
+    p_intake.add_argument("--json", action="store_true", help="Output result as JSON")
+
+    # trend-monitor
+    p_monitor = subparsers.add_parser("trend-monitor", help="Monitor live streaming suggest queries and report momentum rankings")
+    p_monitor.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries to monitor")
+    p_monitor.add_argument("--source", type=str, default=None, help="Optional feed source filter")
+    p_monitor.add_argument("--once", action="store_true", default=True, help="Execute single monitor cycle")
+    p_monitor.add_argument("--json", action="store_true", help="Output result as JSON")
+
     return parser
 
 
@@ -342,6 +462,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_drift(args)
     elif args.command == "replay-dlq":
         return cmd_replay_dlq(args)
+    elif args.command == "trend-intake":
+        return cmd_trend_intake(args)
+    elif args.command == "trend-monitor":
+        return cmd_trend_monitor(args)
     else:
         parser.print_help()
         return 1
@@ -349,3 +473,4 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
