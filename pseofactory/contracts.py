@@ -80,6 +80,7 @@ AI_MODE_ENTITY_TAXONOMY: Set[str] = {
     "CorporateTaxBracket",
     "PersonalTaxBracket",
     "MunicipalBondProduct",
+    "AutonomousShipperReleaseProtocol",
     # Rule and Specification Extensions
     "StatutoryCalculationRule",
     "StatutoryLimitSpecification",
