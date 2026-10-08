@@ -410,6 +410,39 @@ def cmd_trend_cron(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_trend_backfill(args: argparse.Namespace) -> int:
+    """
+    Executes historical session crawl and idempotent bulk insert into trend history DB.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.trends.backfill import run_trend_backfill
+
+    try:
+        result = run_trend_backfill(
+            db_path=args.db_path,
+            staging_dir=args.staging_dir,
+            dlq_path=args.dlq_path,
+            fixture_path=getattr(args, "fixture", None),
+            dry_run=getattr(args, "dry_run", False),
+            limit_cycles=getattr(args, "limit_cycles", None),
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            print(
+                f"[TREND BACKFILL] Evaluated: {result['total_cycles_evaluated']} cycles | "
+                f"Completed: {result['cycles_completed']} | "
+                f"Skipped: {result['cycles_skipped']} | "
+                f"Observations: {result['total_observations_inserted']} | "
+                f"Keywords: {result['total_keywords_upserted']} | "
+                f"Proposals: {result['total_proposals_created']}"
+            )
+        return 0
+    except Exception as ex:
+        print(f"Error executing trend-backfill: {ex}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -491,6 +524,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cron.add_argument("--json", action="store_true", help="Output machine-readable JSON cycle summary")
     p_cron.add_argument("--dry-run", action="store_true", help="Evaluate cycle without committing mutations to SQLite history")
 
+    # trend-backfill
+    p_backfill = subparsers.add_parser("trend-backfill", help="Execute historical session crawl and idempotent bulk insert into trend history DB")
+    p_backfill.add_argument("--db-path", type=str, default="pseofactory/trends/data/trend_history.db", help="Path to persistent SQLite trend history database file")
+    p_backfill.add_argument("--staging-dir", type=str, default=".agy/scratch/backfill_staged", help="Path to intermediate staged buffer directory")
+    p_backfill.add_argument("--dlq-path", type=str, default=".agy/runs/5017e890/staging_dlq.jsonl", help="Path to quarantine dead letter queue file")
+    p_backfill.add_argument("--fixture", type=str, default=None, help="Optional JSON fixture file to include in backfill")
+    p_backfill.add_argument("--limit-cycles", type=int, default=None, help="Optional ceiling on number of cycles to process")
+    p_backfill.add_argument("--dry-run", action="store_true", help="Parse and validate without committing mutations to SQLite")
+    p_backfill.add_argument("--json", action="store_true", help="Output machine-readable JSON backfill summary")
+
     return parser
 
 
@@ -523,6 +566,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_trend_monitor(args)
     elif args.command == "trend-cron":
         return cmd_trend_cron(args)
+    elif args.command == "trend-backfill":
+        return cmd_trend_backfill(args)
     else:
         parser.print_help()
         return 1

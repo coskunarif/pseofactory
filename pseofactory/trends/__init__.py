@@ -48,6 +48,12 @@ from pseofactory.trends.db import (
 from pseofactory.trends.cron import (
     TrendCronRunner,
 )
+from pseofactory.trends.backfill import (
+    FlexibleSchemaAdapter,
+    HistoricalSessionCrawler,
+    IdempotentBulkInserter,
+    run_trend_backfill,
+)
 
 __all__ = [
     "FeedSpike",
@@ -79,4 +85,9 @@ __all__ = [
     "run_trend_pipeline",
     "TrendHistoryDB",
     "TrendCronRunner",
+    "FlexibleSchemaAdapter",
+    "HistoricalSessionCrawler",
+    "IdempotentBulkInserter",
+    "run_trend_backfill",
 ]
+
