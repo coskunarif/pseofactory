@@ -3816,96 +3816,140 @@ class MasterSEOVerifier:
 
         content_relevance_gate = self.check_content_relevance_gate(target)
 
+        g_alt_text = self.check_alt_text_gate(target)
+        g_sitemap = self.check_sitemap_gate(target)
+        g_page_titles = self.check_page_titles_gate(target)
+        g_single_h1 = self.check_single_h1_gate(target)
+        g_image_compression = self.check_image_compression_gate(target)
+        g_page_language = self.check_page_language_gate(target)
+        g_canonical_tags = self.check_canonical_tags_gate(target)
+        g_robots_txt = self.check_robots_txt_gate(target)
+        g_readable_urls = self.check_readable_urls_gate(target)
+        g_schema_markup = self.check_schema_markup_gate(target)
+        g_noindex_tags = self.check_noindex_tags_gate(target)
+        g_internal_linking = self.check_internal_linking_gate(target)
+        g_load_performance = self.check_load_performance_gate(target)
+        g_meta_descriptions = self.check_meta_descriptions_gate(target)
+        g_url_redirects = self.check_url_redirects_gate(target)
+        g_search_console_tag = self.check_search_console_tag_gate(target)
+        g_hide_test_pages = self.check_hide_test_pages_gate(target)
+        g_no_js_rendering = self.check_no_js_rendering_gate(target)
+        g_http_link_canonical = self.check_http_link_canonical_gate(target)
+        g_snippet_eligibility = self.check_snippet_eligibility_gate(target)
+        g_query_answer_match = self.check_query_answer_match_gate(target)
+        g_brand_entity = self.check_brand_entity_in_llm_memory_gate(target)
+        g_citable_facts = self.check_citable_specific_facts_gate(target)
+        g_organic_fan_out = self.check_organic_fan_out_coverage_gate(target)
+        g_organic_search = self.check_organic_search_ranking_gate(target)
+        g_unique_first_party = self.check_unique_first_party_information_gate(target)
+        g_cross_web_consensus = self.check_cross_web_consensus_and_corroboration_gate(target)
+        g_source_publisher = self.check_source_publisher_reputation_gate(target)
+        g_extractable_structure = self.check_extractable_content_structure_gate(target)
+        g_answer_prominence = self.check_answer_prominence_gate(target)
+        g_structured_data = self.check_structured_data_gate(target)
+        g_llms_txt = self.check_llms_txt_gate(target)
+        g_tool_utility = self.check_tool_utility_gate(target)
+        g_free_web_app_schema = self.check_free_web_application_schema_gate(target)
+        g_operational_shield = self.check_operational_shield_gate(target)
+        g_ai_mode_manifest = self.check_ai_mode_manifest_gate(target)
+        g_existence = self.check_existence_gate(target)
+        g_title_length = self.check_title_gate(target)
+        g_snippet = self.check_snippet_gate(target)
+        g_schema = self.check_schema_gate(target)
+        g_citability = self.check_citability_gate(target)
+        g_cleanliness = self.check_cleanliness_gate(target)
+        g_indexing = self.check_indexing_gate(target)
+
         gates = {
-            "check_alt_text_gate": self.check_alt_text_gate(target),
-            "check_sitemap_gate": self.check_sitemap_gate(target),
-            "check_page_titles_gate": self.check_page_titles_gate(target),
-            "check_single_h1_gate": self.check_single_h1_gate(target),
-            "check_image_compression_gate": self.check_image_compression_gate(target),
-            "check_page_language_gate": self.check_page_language_gate(target),
-            "check_canonical_tags_gate": self.check_canonical_tags_gate(target),
-            "check_robots_txt_gate": self.check_robots_txt_gate(target),
-            "check_readable_urls_gate": self.check_readable_urls_gate(target),
-            "check_schema_markup_gate": self.check_schema_markup_gate(target),
-            "check_noindex_tags_gate": self.check_noindex_tags_gate(target),
-            "check_internal_linking_gate": self.check_internal_linking_gate(target),
-            "check_load_performance_gate": self.check_load_performance_gate(target),
-            "check_meta_descriptions_gate": self.check_meta_descriptions_gate(target),
-            "check_url_redirects_gate": self.check_url_redirects_gate(target),
-            "check_search_console_tag_gate": self.check_search_console_tag_gate(target),
-            "check_hide_test_pages_gate": self.check_hide_test_pages_gate(target),
-            "check_no_js_rendering_gate": self.check_no_js_rendering_gate(target),
-            "check_http_link_canonical_gate": self.check_http_link_canonical_gate(target),
-            "check_snippet_eligibility_gate": self.check_snippet_eligibility_gate(target),
-            "check_ai_crawl_access_and_snippet_eligibility_gate": self.check_snippet_eligibility_gate(target),
-            "check_ai_crawl_access_gate": self.check_snippet_eligibility_gate(target),
-            "check_query_answer_match_gate": self.check_query_answer_match_gate(target),
-            "check_query_answer_gate": self.check_query_answer_match_gate(target),
-            "check_brand_entity_in_llm_memory_gate": self.check_brand_entity_in_llm_memory_gate(target),
-            "check_brand_entity_gate": self.check_brand_entity_in_llm_memory_gate(target),
-            "check_entity_memory_gate": self.check_brand_entity_in_llm_memory_gate(target),
-            "check_citable_specific_facts_gate": self.check_citable_specific_facts_gate(target),
-            "check_citable_facts_gate": self.check_citable_specific_facts_gate(target),
-            "check_specific_facts_gate": self.check_citable_specific_facts_gate(target),
-            "check_organic_fan_out_coverage_gate": self.check_organic_fan_out_coverage_gate(target),
-            "check_fan_out_coverage_gate": self.check_organic_fan_out_coverage_gate(target),
-            "check_organic_fan_out_gate": self.check_organic_fan_out_coverage_gate(target),
-            "check_organic_search_ranking_gate": self.check_organic_search_ranking_gate(target),
-            "check_traditional_organic_search_gate": self.check_organic_search_ranking_gate(target),
-            "check_core_seo_hygiene_gate": self.check_organic_search_ranking_gate(target),
-            "check_unique_first_party_information_gate": self.check_unique_first_party_information_gate(target),
-            "check_first_party_information_gate": self.check_unique_first_party_information_gate(target),
-            "check_first_party_assets_gate": self.check_unique_first_party_information_gate(target),
-            "check_firsthand_calculations_gate": self.check_unique_first_party_information_gate(target),
-            "check_proprietary_models_gate": self.check_unique_first_party_information_gate(target),
-            "check_cross_web_consensus_and_corroboration_gate": self.check_cross_web_consensus_and_corroboration_gate(target),
-            "check_cross_web_corroboration_gate": self.check_cross_web_consensus_and_corroboration_gate(target),
-            "check_statutory_consensus_gate": self.check_cross_web_consensus_and_corroboration_gate(target),
-            "check_baseline_fact_agreement_gate": self.check_cross_web_consensus_and_corroboration_gate(target),
-            "check_statutory_constants_corroboration_gate": self.check_cross_web_consensus_and_corroboration_gate(target),
-            "check_source_publisher_reputation_gate": self.check_source_publisher_reputation_gate(target),
-            "check_publisher_reputation_gate": self.check_source_publisher_reputation_gate(target),
-            "check_publisher_authority_gate": self.check_source_publisher_reputation_gate(target),
-            "check_author_credentials_gate": self.check_source_publisher_reputation_gate(target),
-            "check_editorial_policy_gate": self.check_source_publisher_reputation_gate(target),
-            "check_extractable_content_structure_gate": self.check_extractable_content_structure_gate(target),
-            "check_extractable_structure_gate": self.check_extractable_content_structure_gate(target),
-            "check_semantic_heading_hierarchy_gate": self.check_extractable_content_structure_gate(target),
-            "check_scoped_table_headers_gate": self.check_extractable_content_structure_gate(target),
-            "check_procedural_ordered_steps_gate": self.check_extractable_content_structure_gate(target),
-            "check_answer_prominence_gate": self.check_answer_prominence_gate(target),
-            "check_answer_above_fold_gate": self.check_answer_prominence_gate(target),
-            "check_core_answer_prominence_gate": self.check_answer_prominence_gate(target),
-            "check_direct_answer_prominence_gate": self.check_answer_prominence_gate(target),
-            "check_calculation_widget_prominence_gate": self.check_answer_prominence_gate(target),
-            "check_early_answer_block_gate": self.check_answer_prominence_gate(target),
-            "check_structured_data_gate": self.check_structured_data_gate(target),
-            "check_schema_org_structured_data_gate": self.check_structured_data_gate(target),
-            "check_jsonld_structured_data_gate": self.check_structured_data_gate(target),
-            "check_schema_graphs_gate": self.check_structured_data_gate(target),
-            "check_target_entity_schemas_gate": self.check_structured_data_gate(target),
-            "check_machine_readable_schemas_gate": self.check_structured_data_gate(target),
-            "check_llms_txt_gate": self.check_llms_txt_gate(target),
-            "check_llms_txt_file_gate": self.check_llms_txt_gate(target),
-            "check_llms_full_txt_gate": self.check_llms_txt_gate(target),
-            "check_llmstxt_gate": self.check_llms_txt_gate(target),
-            "check_llms_manifest_gate": self.check_llms_txt_gate(target),
-            "check_curated_llms_txt_gate": self.check_llms_txt_gate(target),
-            "check_tool_utility_gate": self.check_tool_utility_gate(target),
-            "check_free_web_application_schema_gate": self.check_free_web_application_schema_gate(target),
-            "check_operational_shield_gate": self.check_operational_shield_gate(target),
+            "check_alt_text_gate": g_alt_text,
+            "check_sitemap_gate": g_sitemap,
+            "check_page_titles_gate": g_page_titles,
+            "check_single_h1_gate": g_single_h1,
+            "check_image_compression_gate": g_image_compression,
+            "check_page_language_gate": g_page_language,
+            "check_canonical_tags_gate": g_canonical_tags,
+            "check_robots_txt_gate": g_robots_txt,
+            "check_readable_urls_gate": g_readable_urls,
+            "check_schema_markup_gate": g_schema_markup,
+            "check_noindex_tags_gate": g_noindex_tags,
+            "check_internal_linking_gate": g_internal_linking,
+            "check_load_performance_gate": g_load_performance,
+            "check_meta_descriptions_gate": g_meta_descriptions,
+            "check_url_redirects_gate": g_url_redirects,
+            "check_search_console_tag_gate": g_search_console_tag,
+            "check_hide_test_pages_gate": g_hide_test_pages,
+            "check_no_js_rendering_gate": g_no_js_rendering,
+            "check_http_link_canonical_gate": g_http_link_canonical,
+            "check_snippet_eligibility_gate": g_snippet_eligibility,
+            "check_ai_crawl_access_and_snippet_eligibility_gate": g_snippet_eligibility,
+            "check_ai_crawl_access_gate": g_snippet_eligibility,
+            "check_query_answer_match_gate": g_query_answer_match,
+            "check_query_answer_gate": g_query_answer_match,
+            "check_brand_entity_in_llm_memory_gate": g_brand_entity,
+            "check_brand_entity_gate": g_brand_entity,
+            "check_entity_memory_gate": g_brand_entity,
+            "check_citable_specific_facts_gate": g_citable_facts,
+            "check_citable_facts_gate": g_citable_facts,
+            "check_specific_facts_gate": g_citable_facts,
+            "check_organic_fan_out_coverage_gate": g_organic_fan_out,
+            "check_fan_out_coverage_gate": g_organic_fan_out,
+            "check_organic_fan_out_gate": g_organic_fan_out,
+            "check_organic_search_ranking_gate": g_organic_search,
+            "check_traditional_organic_search_gate": g_organic_search,
+            "check_core_seo_hygiene_gate": g_organic_search,
+            "check_unique_first_party_information_gate": g_unique_first_party,
+            "check_first_party_information_gate": g_unique_first_party,
+            "check_first_party_assets_gate": g_unique_first_party,
+            "check_firsthand_calculations_gate": g_unique_first_party,
+            "check_proprietary_models_gate": g_unique_first_party,
+            "check_cross_web_consensus_and_corroboration_gate": g_cross_web_consensus,
+            "check_cross_web_corroboration_gate": g_cross_web_consensus,
+            "check_statutory_consensus_gate": g_cross_web_consensus,
+            "check_baseline_fact_agreement_gate": g_cross_web_consensus,
+            "check_statutory_constants_corroboration_gate": g_cross_web_consensus,
+            "check_source_publisher_reputation_gate": g_source_publisher,
+            "check_publisher_reputation_gate": g_source_publisher,
+            "check_publisher_authority_gate": g_source_publisher,
+            "check_author_credentials_gate": g_source_publisher,
+            "check_editorial_policy_gate": g_source_publisher,
+            "check_extractable_content_structure_gate": g_extractable_structure,
+            "check_extractable_structure_gate": g_extractable_structure,
+            "check_semantic_heading_hierarchy_gate": g_extractable_structure,
+            "check_scoped_table_headers_gate": g_extractable_structure,
+            "check_procedural_ordered_steps_gate": g_extractable_structure,
+            "check_answer_prominence_gate": g_answer_prominence,
+            "check_answer_above_fold_gate": g_answer_prominence,
+            "check_core_answer_prominence_gate": g_answer_prominence,
+            "check_direct_answer_prominence_gate": g_answer_prominence,
+            "check_calculation_widget_prominence_gate": g_answer_prominence,
+            "check_early_answer_block_gate": g_answer_prominence,
+            "check_structured_data_gate": g_structured_data,
+            "check_schema_org_structured_data_gate": g_structured_data,
+            "check_jsonld_structured_data_gate": g_structured_data,
+            "check_schema_graphs_gate": g_structured_data,
+            "check_target_entity_schemas_gate": g_structured_data,
+            "check_machine_readable_schemas_gate": g_structured_data,
+            "check_llms_txt_gate": g_llms_txt,
+            "check_llms_txt_file_gate": g_llms_txt,
+            "check_llms_full_txt_gate": g_llms_txt,
+            "check_llmstxt_gate": g_llms_txt,
+            "check_llms_manifest_gate": g_llms_txt,
+            "check_curated_llms_txt_gate": g_llms_txt,
+            "check_tool_utility_gate": g_tool_utility,
+            "check_free_web_application_schema_gate": g_free_web_app_schema,
+            "check_operational_shield_gate": g_operational_shield,
             "check_content_relevance_gate": content_relevance_gate,
 
             # Auxiliary and legacy aliases
-            "check_ai_mode_manifest_gate": self.check_ai_mode_manifest_gate(target),
-            "check_manifest_gate": self.check_ai_mode_manifest_gate(target),
-            "existence_gate": self.check_existence_gate(target),
-            "title_length_gate": self.check_title_gate(target),
-            "snippet_gate": self.check_snippet_gate(target),
-            "schema_gate": self.check_schema_gate(target),
-            "citability_gate": self.check_citability_gate(target),
-            "cleanliness_gate": self.check_cleanliness_gate(target),
-            "indexing_gate": self.check_indexing_gate(target),
+            "check_ai_mode_manifest_gate": g_ai_mode_manifest,
+            "check_manifest_gate": g_ai_mode_manifest,
+            "existence_gate": g_existence,
+            "title_length_gate": g_title_length,
+            "snippet_gate": g_snippet,
+            "schema_gate": g_schema,
+            "citability_gate": g_citability,
+            "cleanliness_gate": g_cleanliness,
+            "indexing_gate": g_indexing,
         }
 
         all_issues = []

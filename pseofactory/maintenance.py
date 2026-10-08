@@ -706,6 +706,32 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             except Exception:
                 return False
 
+        # Prioritize isolated python execution in child process
+        script = (
+            f"import sys\n"
+            f"if {repr(str(self._repo_path))} not in sys.path:\n"
+            f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
+            f"try:\n"
+            f"    import importlib\n"
+            f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"    if hasattr(mod, 'build_all'):\n"
+            f"        try:\n"
+            f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
+            f"        except TypeError:\n"
+            f"            mod.build_all()\n"
+            f"        sys.exit(0)\n"
+            f"except Exception as ex:\n"
+            f"    sys.exit(1)\n"
+            f"sys.exit(1)\n"
+        )
+        try:
+            env = os.environ.copy()
+            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
+
         factory_script = self._repo_path / "run_factory.sh"
         if not factory_script.is_file():
             factory_script = self._repo_path / "scripts" / "run_factory.sh"
@@ -729,30 +755,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             except Exception:
                 pass
 
-        # Isolated python execution in child process
-        script = (
-            f"import sys\n"
-            f"if {repr(str(self._repo_path))} not in sys.path:\n"
-            f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
-            f"try:\n"
-            f"    import importlib\n"
-            f"    mod = importlib.import_module('{self._property_id}.builder')\n"
-            f"    if hasattr(mod, 'build_all'):\n"
-            f"        try:\n"
-            f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
-            f"        except TypeError:\n"
-            f"            mod.build_all()\n"
-            f"        sys.exit(0)\n"
-            f"except Exception as ex:\n"
-            f"    sys.exit(1)\n"
-            f"sys.exit(1)\n"
-        )
-        try:
-            env = os.environ.copy()
-            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
-            return res.returncode == 0
-        except Exception:
-            return False
+        return False
 
 
 class WorkspacePropertyScanner:
