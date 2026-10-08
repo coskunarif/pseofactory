@@ -717,17 +717,17 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_DOMAIN"] = self.domain
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
-                res = subprocess.run(["bash", str(factory_script)], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
-                if res.returncode == 75:
-                    raise LockContentionError(
-                        f"Factory runner '{factory_script.name}' exited with 75 (EX_TEMPFAIL) on lock contention for '{self._property_id}'",
-                        property_id=self._property_id,
-                    )
-                return res.returncode == 0
-            except LockContentionError:
-                raise
+                env["FACTORY_DRY_RUN"] = "1"
+                env["PREXVO_AUTO_LIVE"] = "0"
+                env["PREXVO_CHECK_QUEUE"] = "0"
+                env["PROFITHELM_AUTO_LIVE"] = "0"
+                env["PROFITHELM_CHECK_QUEUE"] = "0"
+                cmd = ["bash", str(factory_script), "--dry-run", "--force"]
+                res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                if res.returncode == 0:
+                    return True
             except Exception:
-                return False
+                pass
 
         # Isolated python execution in child process
         script = (
@@ -738,7 +738,10 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"    import importlib\n"
             f"    mod = importlib.import_module('{self._property_id}.builder')\n"
             f"    if hasattr(mod, 'build_all'):\n"
-            f"        mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
+            f"        try:\n"
+            f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
+            f"        except TypeError:\n"
+            f"            mod.build_all()\n"
             f"        sys.exit(0)\n"
             f"except Exception as ex:\n"
             f"    sys.exit(1)\n"
