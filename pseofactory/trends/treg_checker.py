@@ -92,11 +92,12 @@ class TregChecker:
                     treg_bin,
                     "call",
                     ENDPOINT_IDEAS,
-                    "--json",
+                    "--method",
+                    "POST",
+                    "--data",
+                    json.dumps({"keyword": clean_q}),
                     "--header",
                     f"X-Treg-Route-Max-Cost: {self.max_cost}",
-                    "--body",
-                    json.dumps({"keyword": clean_q}),
                 ]
                 proc = subprocess.run(
                     cmd,

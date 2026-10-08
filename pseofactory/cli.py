@@ -366,6 +366,50 @@ def cmd_trend_monitor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_trend_cron(args: argparse.Namespace) -> int:
+    """
+    Executes autonomous daily cron loop trend monitoring and longitudinal analysis.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.trends.cron import TrendCronRunner
+
+    try:
+        runner = TrendCronRunner(
+            db_path=args.db_path,
+            min_yield=float(args.min_yield),
+        )
+        result = runner.run_cycle(
+            cycle_id=args.cycle_id,
+            fixture_path=args.fixture,
+            seeds=args.seeds,
+            property_filter=args.property,
+            dry_run=args.dry_run,
+        )
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(
+                f"[TREND CRON] Cycle: {result['cycle_id']} | "
+                f"Observations: {result['total_raw_observations']} | "
+                f"Unique: {result['unique_queries_count']} | "
+                f"Filtered: {result['filtered_noise_count']} | "
+                f"Build: {len(result['approved_build'])} | "
+                f"Refactor: {len(result['refactor_pages'])} | "
+                f"Monitored: {len(result['monitored'])} | "
+                f"Proposals: {len(result.get('proposals', []))}"
+            )
+            for b in result["approved_build"]:
+                print(f" -> [BUILD_PAGE] {b['query']} ({b['property_id']}) - Yield: {b['composite_profit_yield']:.1f}")
+            for r in result["refactor_pages"]:
+                print(f" -> [REFACTOR_PAGE] {r['query']} ({r['property_id']}) -> {r.get('matching_tool')} (Striking Distance)")
+            for p in result.get("proposals", []):
+                print(f" -> [PROPOSE_NEW_APP] {p['cluster_slug']} - Yield: {p['mean_composite_yield']:.1f} - Sustained: {p['consecutive_cycles_sustained']} cycles")
+        return 0
+    except Exception as ex:
+        print(f"Error executing trend-cron: {ex}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -436,6 +480,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_monitor.add_argument("--once", action="store_true", default=True, help="Execute single monitor cycle")
     p_monitor.add_argument("--json", action="store_true", help="Output result as JSON")
 
+    # trend-cron
+    p_cron = subparsers.add_parser("trend-cron", help="Execute autonomous daily cron loop trend monitoring and longitudinal analysis")
+    p_cron.add_argument("--db-path", type=str, default="trends_history.db", help="Path to persistent SQLite trend history database file")
+    p_cron.add_argument("--fixture", type=str, default=None, help="Path to JSON multi-source crawl fixture file for deterministic testing")
+    p_cron.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries for live streaming collectors")
+    p_cron.add_argument("--cycle-id", type=str, default=None, help="Explicit cycle identifier (default: auto-generated UTC timestamp/hash)")
+    p_cron.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold for asset build/refactor")
+    p_cron.add_argument("--property", type=str, default=None, help="Optional tenant filter (prexvo, profithelm, unassigned)")
+    p_cron.add_argument("--json", action="store_true", help="Output machine-readable JSON cycle summary")
+    p_cron.add_argument("--dry-run", action="store_true", help="Evaluate cycle without committing mutations to SQLite history")
+
     return parser
 
 
@@ -466,6 +521,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_trend_intake(args)
     elif args.command == "trend-monitor":
         return cmd_trend_monitor(args)
+    elif args.command == "trend-cron":
+        return cmd_trend_cron(args)
     else:
         parser.print_help()
         return 1

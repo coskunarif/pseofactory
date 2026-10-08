@@ -174,3 +174,324 @@ class JevDecisionResult:
             overlay_spec=data.get("overlay_spec"),
             candidate_spec=data.get("candidate_spec"),
         )
+
+
+@dataclass
+class CrawlCycleRecord:
+    """Ledger record capturing crawl provenance and operational metrics for a daily cron run."""
+    cycle_id: str
+    executed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    seeds_used: List[str] = field(default_factory=list)
+    sources_crawled: List[str] = field(default_factory=list)
+    total_raw_observations: int = 0
+    unique_queries_count: int = 0
+    status: str = "RUNNING"
+    metadata: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.cycle_id, "CrawlCycleRecord.cycle_id")
+        assert_no_forbidden_dashes(self.status, "CrawlCycleRecord.status")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CrawlCycleRecord":
+        return cls(
+            cycle_id=str(data.get("cycle_id", "")),
+            executed_at=str(data.get("executed_at", datetime.now(timezone.utc).isoformat())),
+            seeds_used=list(data.get("seeds_used", [])),
+            sources_crawled=list(data.get("sources_crawled", [])),
+            total_raw_observations=int(data.get("total_raw_observations", 0)),
+            unique_queries_count=int(data.get("unique_queries_count", 0)),
+            status=str(data.get("status", "RUNNING")),
+            metadata=data.get("metadata"),
+        )
+
+
+@dataclass
+class RawObservationRecord:
+    """Append-only observation hit from suggestion endpoints."""
+    observation_id: str
+    cycle_id: str
+    source: str
+    query: str
+    normalized_query: str
+    rank_position: int = 0
+    observed_velocity: float = 0.0
+    observed_acceleration: float = 0.0
+    observed_z_score: float = 0.0
+    observed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    raw_payload: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.observation_id, "RawObservationRecord.observation_id")
+        assert_no_forbidden_dashes(self.cycle_id, "RawObservationRecord.cycle_id")
+        assert_no_forbidden_dashes(self.source, "RawObservationRecord.source")
+        assert_no_forbidden_dashes(self.query, "RawObservationRecord.query")
+        assert_no_forbidden_dashes(self.normalized_query, "RawObservationRecord.normalized_query")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RawObservationRecord":
+        return cls(
+            observation_id=str(data.get("observation_id", "")),
+            cycle_id=str(data.get("cycle_id", "")),
+            source=str(data.get("source", "")),
+            query=str(data.get("query", "")),
+            normalized_query=str(data.get("normalized_query", "")),
+            rank_position=int(data.get("rank_position", 0)),
+            observed_velocity=float(data.get("observed_velocity", 0.0)),
+            observed_acceleration=float(data.get("observed_acceleration", 0.0)),
+            observed_z_score=float(data.get("observed_z_score", 0.0)),
+            observed_at=str(data.get("observed_at", datetime.now(timezone.utc).isoformat())),
+            raw_payload=data.get("raw_payload"),
+        )
+
+
+@dataclass
+class LongitudinalKeywordRecord:
+    """Longitudinal keyword entity tracking demand velocity, streaks, and acceleration."""
+    query_slug: str
+    query: str
+    intent_cluster: str = "informational"
+    first_seen_cycle_id: Optional[str] = None
+    first_seen_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    last_seen_cycle_id: Optional[str] = None
+    last_seen_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    consecutive_cycles_count: int = 1
+    total_cycles_count: int = 1
+    lifetime_observations_count: int = 1
+    current_property_id: str = "unassigned"
+    status: str = "candidate"
+    latest_velocity: float = 0.0
+    velocity_delta: float = 0.0
+    acceleration_2nd_deriv: float = 0.0
+    velocity_variance: float = 0.0
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.query, "LongitudinalKeywordRecord.query")
+        assert_no_forbidden_dashes(self.query_slug, "LongitudinalKeywordRecord.query_slug")
+        if self.query_slug:
+            assert_url_safe_slug(self.query_slug)
+        assert_no_forbidden_dashes(self.current_property_id, "LongitudinalKeywordRecord.current_property_id")
+        assert_no_forbidden_dashes(self.status, "LongitudinalKeywordRecord.status")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "LongitudinalKeywordRecord":
+        return cls(
+            query_slug=str(data.get("query_slug", "")),
+            query=str(data.get("query", "")),
+            intent_cluster=str(data.get("intent_cluster", "informational")),
+            first_seen_cycle_id=data.get("first_seen_cycle_id"),
+            first_seen_at=str(data.get("first_seen_at", datetime.now(timezone.utc).isoformat())),
+            last_seen_cycle_id=data.get("last_seen_cycle_id"),
+            last_seen_at=str(data.get("last_seen_at", datetime.now(timezone.utc).isoformat())),
+            consecutive_cycles_count=int(data.get("consecutive_cycles_count", 1)),
+            total_cycles_count=int(data.get("total_cycles_count", 1)),
+            lifetime_observations_count=int(data.get("lifetime_observations_count", 1)),
+            current_property_id=str(data.get("current_property_id", "unassigned")),
+            status=str(data.get("status", "candidate")),
+            latest_velocity=float(data.get("latest_velocity", 0.0)),
+            velocity_delta=float(data.get("velocity_delta", 0.0)),
+            acceleration_2nd_deriv=float(data.get("acceleration_2nd_deriv", 0.0)),
+            velocity_variance=float(data.get("velocity_variance", 0.0)),
+        )
+
+
+@dataclass
+class PropertyAssignmentRecord:
+    """Property tenant assignment enforcing boundaries between Prexvo, ProfitHelm, and unassigned."""
+    assignment_id: str
+    query_slug: str
+    cycle_id: str
+    property_id: str = "unassigned"
+    assignment_basis: str = "unassigned_cluster"
+    matched_existing_slug: Optional[str] = None
+    cannibalization_score: float = 0.0
+    current_position: float = 100.0
+    contamination_scan_passed: int = 1
+    assigned_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.assignment_id, "PropertyAssignmentRecord.assignment_id")
+        assert_no_forbidden_dashes(self.query_slug, "PropertyAssignmentRecord.query_slug")
+        if self.query_slug:
+            assert_url_safe_slug(self.query_slug)
+        if self.matched_existing_slug:
+            assert_url_safe_slug(self.matched_existing_slug)
+        assert_no_forbidden_dashes(self.property_id, "PropertyAssignmentRecord.property_id")
+        assert_no_forbidden_dashes(self.assignment_basis, "PropertyAssignmentRecord.assignment_basis")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PropertyAssignmentRecord":
+        return cls(
+            assignment_id=str(data.get("assignment_id", "")),
+            query_slug=str(data.get("query_slug", "")),
+            cycle_id=str(data.get("cycle_id", "")),
+            property_id=str(data.get("property_id", "unassigned")),
+            assignment_basis=str(data.get("assignment_basis", "unassigned_cluster")),
+            matched_existing_slug=data.get("matched_existing_slug"),
+            cannibalization_score=float(data.get("cannibalization_score", 0.0)),
+            current_position=float(data.get("current_position", 100.0)),
+            contamination_scan_passed=int(data.get("contamination_scan_passed", 1)),
+            assigned_at=str(data.get("assigned_at", datetime.now(timezone.utc).isoformat())),
+        )
+
+
+@dataclass
+class TregSnapshotRecord:
+    """Search demand and difficulty metrics captured per keyword cycle observation."""
+    snapshot_id: str
+    query_slug: str
+    cycle_id: str
+    search_volume: int = 0
+    cpc_usd: float = 0.0
+    competition_index: float = 0.0
+    keyword_difficulty: float = 0.0
+    position_zero_vacant: int = 0
+    historical_stability: float = 0.85
+    volume_delta_pct: float = 0.0
+    cpc_delta_pct: float = 0.0
+    volatility_score: float = 0.0
+    checked_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.snapshot_id, "TregSnapshotRecord.snapshot_id")
+        assert_no_forbidden_dashes(self.query_slug, "TregSnapshotRecord.query_slug")
+        if self.query_slug:
+            assert_url_safe_slug(self.query_slug)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TregSnapshotRecord":
+        return cls(
+            snapshot_id=str(data.get("snapshot_id", "")),
+            query_slug=str(data.get("query_slug", "")),
+            cycle_id=str(data.get("cycle_id", "")),
+            search_volume=int(data.get("search_volume", 0)),
+            cpc_usd=float(data.get("cpc_usd", 0.0)),
+            competition_index=float(data.get("competition_index", 0.0)),
+            keyword_difficulty=float(data.get("keyword_difficulty", 0.0)),
+            position_zero_vacant=int(data.get("position_zero_vacant", 0)),
+            historical_stability=float(data.get("historical_stability", 0.85)),
+            volume_delta_pct=float(data.get("volume_delta_pct", 0.0)),
+            cpc_delta_pct=float(data.get("cpc_delta_pct", 0.0)),
+            volatility_score=float(data.get("volatility_score", 0.0)),
+            checked_at=str(data.get("checked_at", datetime.now(timezone.utc).isoformat())),
+        )
+
+
+@dataclass
+class JevEvaluationRecord:
+    """Strategic decision record produced by JevEngine for a keyword in a cycle."""
+    evaluation_id: str
+    query_slug: str
+    cycle_id: str
+    property_id: str = "unassigned"
+    jev_score: float = 0.0
+    durable_prob: float = 0.0
+    composite_profit_yield: float = 0.0
+    cannibalization_risk: float = 0.0
+    action: str = "MONITOR"
+    target_asset_type: str = "none"
+    passed_thresholds: int = 0
+    decision_reason: str = ""
+    spec_payload: Optional[Dict[str, Any]] = None
+    evaluated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.evaluation_id, "JevEvaluationRecord.evaluation_id")
+        assert_no_forbidden_dashes(self.query_slug, "JevEvaluationRecord.query_slug")
+        if self.query_slug:
+            assert_url_safe_slug(self.query_slug)
+        assert_no_forbidden_dashes(self.property_id, "JevEvaluationRecord.property_id")
+        assert_no_forbidden_dashes(self.action, "JevEvaluationRecord.action")
+        assert_no_forbidden_dashes(self.target_asset_type, "JevEvaluationRecord.target_asset_type")
+        assert_no_forbidden_dashes(self.decision_reason, "JevEvaluationRecord.decision_reason")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "JevEvaluationRecord":
+        return cls(
+            evaluation_id=str(data.get("evaluation_id", "")),
+            query_slug=str(data.get("query_slug", "")),
+            cycle_id=str(data.get("cycle_id", "")),
+            property_id=str(data.get("property_id", "unassigned")),
+            jev_score=float(data.get("jev_score", 0.0)),
+            durable_prob=float(data.get("durable_prob", 0.0)),
+            composite_profit_yield=float(data.get("composite_profit_yield", 0.0)),
+            cannibalization_risk=float(data.get("cannibalization_risk", 0.0)),
+            action=str(data.get("action", "MONITOR")),
+            target_asset_type=str(data.get("target_asset_type", "none")),
+            passed_thresholds=int(data.get("passed_thresholds", 0)),
+            decision_reason=str(data.get("decision_reason", "")),
+            spec_payload=data.get("spec_payload"),
+            evaluated_at=str(data.get("evaluated_at", datetime.now(timezone.utc).isoformat())),
+        )
+
+
+@dataclass
+class NicheClusterProposal:
+    """Candidate proposal for launching a new standalone programmatic application."""
+    proposal_id: str
+    cluster_slug: str
+    cluster_title: str
+    first_observed_cycle_id: Optional[str] = None
+    confirmed_cycle_id: Optional[str] = None
+    consecutive_cycles_sustained: int = 3
+    mean_composite_yield: float = 0.0
+    aggregate_search_volume: int = 0
+    mean_cpc_usd: float = 0.0
+    treg_stability_index: float = 0.85
+    primary_queries: List[str] = field(default_factory=list)
+    recommended_domain_archetype: str = "standalone_factory"
+    status: str = "PROPOSED"
+    proposal_spec: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.proposal_id, "NicheClusterProposal.proposal_id")
+        assert_no_forbidden_dashes(self.cluster_slug, "NicheClusterProposal.cluster_slug")
+        if self.cluster_slug:
+            assert_url_safe_slug(self.cluster_slug)
+        assert_no_forbidden_dashes(self.cluster_title, "NicheClusterProposal.cluster_title")
+        assert_no_forbidden_dashes(self.recommended_domain_archetype, "NicheClusterProposal.recommended_domain_archetype")
+        assert_no_forbidden_dashes(self.status, "NicheClusterProposal.status")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "NicheClusterProposal":
+        return cls(
+            proposal_id=str(data.get("proposal_id", "")),
+            cluster_slug=str(data.get("cluster_slug", "")),
+            cluster_title=str(data.get("cluster_title", "")),
+            first_observed_cycle_id=data.get("first_observed_cycle_id"),
+            confirmed_cycle_id=data.get("confirmed_cycle_id"),
+            consecutive_cycles_sustained=int(data.get("consecutive_cycles_sustained", 3)),
+            mean_composite_yield=float(data.get("mean_composite_yield", 0.0)),
+            aggregate_search_volume=int(data.get("aggregate_search_volume", 0)),
+            mean_cpc_usd=float(data.get("mean_cpc_usd", 0.0)),
+            treg_stability_index=float(data.get("treg_stability_index", 0.85)),
+            primary_queries=list(data.get("primary_queries", [])),
+            recommended_domain_archetype=str(data.get("recommended_domain_archetype", "standalone_factory")),
+            status=str(data.get("status", "PROPOSED")),
+            proposal_spec=dict(data.get("proposal_spec", {})),
+            created_at=str(data.get("created_at", datetime.now(timezone.utc).isoformat())),
+            updated_at=str(data.get("updated_at", datetime.now(timezone.utc).isoformat())),
+        )

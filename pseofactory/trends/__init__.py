@@ -8,6 +8,13 @@ from pseofactory.trends.models import (
     TrendCandidate,
     TregDurabilityResult,
     JevDecisionResult,
+    CrawlCycleRecord,
+    RawObservationRecord,
+    LongitudinalKeywordRecord,
+    PropertyAssignmentRecord,
+    TregSnapshotRecord,
+    JevEvaluationRecord,
+    NicheClusterProposal,
 )
 from pseofactory.trends.collectors import (
     BaseSuggestCollector,
@@ -35,12 +42,25 @@ from pseofactory.trends.pipeline import (
     TrendPipeline,
     run_trend_pipeline,
 )
+from pseofactory.trends.db import (
+    TrendHistoryDB,
+)
+from pseofactory.trends.cron import (
+    TrendCronRunner,
+)
 
 __all__ = [
     "FeedSpike",
     "TrendCandidate",
     "TregDurabilityResult",
     "JevDecisionResult",
+    "CrawlCycleRecord",
+    "RawObservationRecord",
+    "LongitudinalKeywordRecord",
+    "PropertyAssignmentRecord",
+    "TregSnapshotRecord",
+    "JevEvaluationRecord",
+    "NicheClusterProposal",
     "BaseSuggestCollector",
     "GoogleSuggestCollector",
     "YouTubeSuggestCollector",
@@ -57,4 +77,6 @@ __all__ = [
     "JevEngine",
     "TrendPipeline",
     "run_trend_pipeline",
+    "TrendHistoryDB",
+    "TrendCronRunner",
 ]
