@@ -435,6 +435,21 @@ from pseofactory.gitops import (
     LiveEdgeVerifier,
     GitOpsResult,
 )
+from pseofactory.affiliates import (
+    AffiliatePartner,
+    AFFILIATE_REGISTRY,
+    PROFITHELM_AFFILIATES,
+    PREXVO_AFFILIATES,
+    PROFITHELM_DISCLOSURES,
+    PREXVO_DISCLOSURES,
+    PREXVO_STANDING_RESTRICTION,
+    B2B_PARTNER_KEYS,
+    STUDENT_LOAN_PARTNER_KEYS,
+    validate_affiliate_url,
+    resolve_partner_url,
+    get_affiliates_for_property,
+    get_affiliate_route,
+)
 
 __version__ = "0.1.0"
 
@@ -844,4 +859,17 @@ __all__ = [
     "CICDWatcher",
     "LiveEdgeVerifier",
     "GitOpsResult",
+    "AffiliatePartner",
+    "AFFILIATE_REGISTRY",
+    "PROFITHELM_AFFILIATES",
+    "PREXVO_AFFILIATES",
+    "PROFITHELM_DISCLOSURES",
+    "PREXVO_DISCLOSURES",
+    "PREXVO_STANDING_RESTRICTION",
+    "B2B_PARTNER_KEYS",
+    "STUDENT_LOAN_PARTNER_KEYS",
+    "validate_affiliate_url",
+    "resolve_partner_url",
+    "get_affiliates_for_property",
+    "get_affiliate_route",
 ]
