@@ -64,6 +64,9 @@ PREXVO_STATUTORY_TOKENS: List[str] = [
 PROFITHELM_STATUTORY_TOKENS: List[str] = [
     "section 1031",
     "1031 exchange",
+    "exchange 1031",
+    "like-kind exchange",
+    "like kind exchange",
     "section 179",
     "bonus depreciation",
     "tcja",
@@ -109,7 +112,7 @@ class TrendCronRunner:
         q_lower = query.lower().strip()
 
         is_prexvo = any(tok in q_lower for tok in PREXVO_STATUTORY_TOKENS)
-        is_profithelm = any(tok in q_lower for tok in PROFITHELM_STATUTORY_TOKENS)
+        is_profithelm = any(tok in q_lower for tok in PROFITHELM_STATUTORY_TOKENS) or ("1031" in q_lower and "exchange" in q_lower)
 
         if is_prexvo and not is_profithelm:
             foreign = self.scanner.scan_text(query, "prexvo")

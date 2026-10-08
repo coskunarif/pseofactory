@@ -192,6 +192,7 @@ class CrossPropertyContaminationScanner:
             "tcja",
             "profithelm.com",
             "exchange1031",
+            "exchange 1031",
             "profithelm",
         },
         "profithelm": {
