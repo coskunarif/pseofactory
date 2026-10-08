@@ -197,6 +197,71 @@ def cmd_replay_dlq(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_cycle(args: argparse.Namespace) -> int:
+    """
+    Executes complete autonomous cycle across specified property or whole fleet:
+    1. Preflight Audit: AssetIntegrityEvaluator
+    2. Atomic Refactor: RefactorCascadeEngine
+    3. Statutory Isolation Scan: CrossPropertyContaminationScanner
+    4. GitOps Commit Latch: GitOpsCoordinator
+    5. CI/CD Quality Gate Watch: CICDWatcher
+    6. Live Edge Verification: LiveEdgeVerifier
+    Zero em-dashes. Zero en-dashes.
+    """
+    property_id = getattr(args, "property", None)
+    dry_run = getattr(args, "dry_run", False)
+    timeout = getattr(args, "timeout", 300)
+    skip_ci = getattr(args, "skip_ci", False)
+    as_json = getattr(args, "json", False)
+
+    reg = TenantRegistry.default()
+    if property_id:
+        try:
+            adapter = reg.get_adapter(property_id)
+        except KeyError:
+            print(f"Error: Property '{property_id}' not found in registry", file=sys.stderr)
+            return 1
+        lifecycle = MaintenanceLifecycle(registry=reg)
+        res = lifecycle.run(
+            adapter,
+            force=False,
+            enable_gitops=True,
+            dry_run=dry_run,
+            skip_ci=skip_ci,
+        )
+        if as_json:
+            print(json.dumps(res.to_dict(), indent=2))
+        else:
+            print(
+                f"[{res.status}] Property: {res.property_id} | "
+                f"Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | "
+                f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}"
+            )
+        return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN") else 1
+    else:
+        coordinator = FleetMaintenanceCoordinator(registry=reg)
+        results = coordinator.run_fleet(
+            force=False,
+            dry_run=dry_run,
+            enable_gitops=True,
+            skip_ci=skip_ci,
+        )
+        if as_json:
+            print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
+        else:
+            for pid, res in results.items():
+                print(
+                    f"[{res.status}] Property: {pid} | "
+                    f"Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | "
+                    f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}"
+                )
+        all_success = all(
+            r.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN")
+            for r in results.values()
+        )
+        return 0 if all_success else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -204,6 +269,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Unified Programmatic SEO Substrate for Prexvo and ProfitHelm Software Factories",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
+    # cycle
+    p_cycle = subparsers.add_parser("cycle", help="Execute complete autonomous release cycle across property or fleet")
+    p_cycle.add_argument("--property", type=str, default=None, help="Optional property ID (default: all fleet properties)")
+    p_cycle.add_argument("--dry-run", action="store_true", help="Dry-run audit mode without committing or pushing")
+    p_cycle.add_argument("--timeout", type=int, default=300, help="Timeout in seconds for CI watcher")
+    p_cycle.add_argument("--skip-ci", action="store_true", help="Skip remote CI/CD quality gate watching")
+    p_cycle.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # audit
     p_audit = subparsers.add_parser("audit", help="Audit static assets against engine baselines")
@@ -255,7 +328,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 0
 
-    if args.command == "audit":
+    if args.command == "cycle":
+        return cmd_cycle(args)
+    elif args.command == "audit":
         return cmd_audit(args)
     elif args.command == "maintain":
         return cmd_maintain(args)

@@ -161,6 +161,23 @@ class PropertyContaminationError(ValueError):
         self.foreign_tokens = foreign_tokens or []
 
 
+class LockContentionError(Exception):
+    """
+    Raised when tenant factory runner encounters transient flock lock contention
+    (exit code 75 EX_TEMPFAIL).
+    Zero em-dashes. Zero en-dashes.
+    """
+    def __init__(
+        self,
+        message: str,
+        property_id: str = "",
+        exit_code: int = 75,
+    ):
+        super().__init__(message)
+        self.property_id = property_id
+        self.exit_code = exit_code
+
+
 class CrossPropertyContaminationScanner:
     """
     Scans rendered markup, schemas, and syndication files for foreign property tokens.
@@ -573,6 +590,8 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
                 env["FACTORY_ASSET_SLUG"] = slug
+                env["PROFITHELM_TARGET"] = slug
+                env["PREXVO_TARGET"] = slug
                 if target_file:
                     env["FACTORY_TARGET_FILE"] = str(target_file)
 
@@ -594,7 +613,14 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                         for arg in cmd
                     ]
                     res = subprocess.run(formatted_args, env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
+                if res.returncode == 75:
+                    raise LockContentionError(
+                        f"Build asset command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
+                        property_id=self._property_id,
+                    )
                 return res.returncode == 0
+            except LockContentionError:
+                raise
             except Exception:
                 return False
 
@@ -610,8 +636,18 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
                 env["FACTORY_ASSET_SLUG"] = slug
-                res = subprocess.run(["bash", str(factory_script)], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                env["PROFITHELM_TARGET"] = slug
+                env["PREXVO_TARGET"] = slug
+                cmd = ["bash", str(factory_script), "--target", slug]
+                res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                if res.returncode == 75:
+                    raise LockContentionError(
+                        f"Factory runner '{factory_script.name}' exited with 75 (EX_TEMPFAIL) on lock contention for '{self._property_id}'",
+                        property_id=self._property_id,
+                    )
                 return res.returncode == 0
+            except LockContentionError:
+                raise
             except Exception:
                 return False
 
@@ -659,7 +695,14 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                     res = subprocess.run(cmd, shell=True, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
                 else:
                     res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                if res.returncode == 75:
+                    raise LockContentionError(
+                        f"Build all command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
+                        property_id=self._property_id,
+                    )
                 return res.returncode == 0
+            except LockContentionError:
+                raise
             except Exception:
                 return False
 
@@ -675,7 +718,14 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
                 res = subprocess.run(["bash", str(factory_script)], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                if res.returncode == 75:
+                    raise LockContentionError(
+                        f"Factory runner '{factory_script.name}' exited with 75 (EX_TEMPFAIL) on lock contention for '{self._property_id}'",
+                        property_id=self._property_id,
+                    )
                 return res.returncode == 0
+            except LockContentionError:
+                raise
             except Exception:
                 return False
 
@@ -1299,7 +1349,10 @@ class RefactorCascadeEngine:
         else:
             entries.append(entry)
 
-        self.dlq_path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        # Atomic DLQ write via .tmp and os.replace
+        tmp_dlq = self.dlq_path.with_name(f"{self.dlq_path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:6]}")
+        tmp_dlq.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        os.replace(tmp_dlq, self.dlq_path)
 
     def get_quarantine_entry(
         self,
@@ -1400,7 +1453,9 @@ class RefactorCascadeEngine:
                 remaining.append(entry)
 
         if replayed:
-            self.dlq_path.write_text(json.dumps(remaining, indent=2), encoding="utf-8")
+            tmp_dlq = self.dlq_path.with_name(f"{self.dlq_path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:6]}")
+            tmp_dlq.write_text(json.dumps(remaining, indent=2), encoding="utf-8")
+            os.replace(tmp_dlq, self.dlq_path)
 
         return replayed
 
@@ -1434,9 +1489,13 @@ class RefactorCascadeEngine:
         for attempt in range(1, self.max_retries + 1):
             backup_path: Optional[Path] = None
             try:
-                # 1. Transactional isolation & backup
+                # 1. Transactional isolation & backup in scratch outside dist (HWL-1370)
                 if target_path.is_file():
-                    backup_dir = Path(tempfile.gettempdir()) / f"pseofactory_backups_{os.getpid()}"
+                    scratch_base = Path("/home/ubuntuadmin/projects/.agy/scratch")
+                    if scratch_base.is_dir():
+                        backup_dir = scratch_base / f"backups_{os.getpid()}"
+                    else:
+                        backup_dir = Path(tempfile.gettempdir()) / f"pseofactory_backups_{os.getpid()}"
                     backup_dir.mkdir(parents=True, exist_ok=True)
                     backup_name = f".tmp_backup.{os.getpid()}.{uuid.uuid4().hex[:8]}.{target_path.name}"
                     backup_path = backup_dir / backup_name
@@ -1466,6 +1525,16 @@ class RefactorCascadeEngine:
                 if backup_path and backup_path.exists():
                     backup_path.unlink(missing_ok=True)
                 return True
+
+            except LockContentionError as lce:
+                # Catch LockContentionError and defer/abort without routing to DLQ
+                if backup_path and backup_path.exists():
+                    try:
+                        shutil.copy2(backup_path, target_path)
+                        backup_path.unlink(missing_ok=True)
+                    except Exception as rb_ex:
+                        print(f"Warning: Rollback error: {rb_ex}")
+                raise lce
 
             except Exception as ex:
                 last_error = str(ex)
@@ -1512,8 +1581,18 @@ class RefactorCascadeEngine:
         )
 
         if should_bulk_rebuild:
-            with adapter.scoped_environment():
-                build_ok = adapter.build_all()
+            try:
+                with adapter.scoped_environment():
+                    build_ok = adapter.build_all()
+            except LockContentionError as lce:
+                print(f"Lock contention on property '{adapter.property_id}': deferring bulk rebuild without DLQ routing.")
+                return {
+                    "refactored": 0,
+                    "failed": 0,
+                    "deferred": len(actionable_records),
+                    "dependencies": [],
+                    "lock_contention": True,
+                }
 
             for rec in actionable_records:
                 target_path = Path(rec.asset_path).resolve()
@@ -1546,14 +1625,24 @@ class RefactorCascadeEngine:
                     failed_count += 1
         else:
             for rec in actionable_records:
-                success = self.refactor_asset(rec, adapter, force=force)
-                if success:
-                    refactored_count += 1
-                    deps = self.map_dependencies(rec.asset_path, adapter)
-                    for d in deps:
-                        all_dependencies.add(str(d))
-                else:
-                    failed_count += 1
+                try:
+                    success = self.refactor_asset(rec, adapter, force=force)
+                    if success:
+                        refactored_count += 1
+                        deps = self.map_dependencies(rec.asset_path, adapter)
+                        for d in deps:
+                            all_dependencies.add(str(d))
+                    else:
+                        failed_count += 1
+                except LockContentionError as lce:
+                    print(f"Lock contention on property '{adapter.property_id}': deferring asset cascade without DLQ routing.")
+                    return {
+                        "refactored": refactored_count,
+                        "failed": failed_count,
+                        "deferred": len(actionable_records) - (refactored_count + failed_count),
+                        "dependencies": sorted(list(all_dependencies)),
+                        "lock_contention": True,
+                    }
 
         return {
             "refactored": refactored_count,
@@ -1589,6 +1678,12 @@ class MaintenanceLifecycle:
         force: bool = False,
         state_file: Optional[Union[str, Path]] = None,
         ledger_file: Optional[Union[str, Path]] = None,
+        enable_gitops: bool = False,
+        run_id: Optional[str] = None,
+        dry_run: bool = False,
+        skip_ci: bool = False,
+        workflow: Optional[str] = None,
+        edge_url: Optional[str] = None,
     ) -> MaintenanceResult:
         """
         Executes single-tenant closed-loop maintenance lifecycle.
@@ -1687,7 +1782,27 @@ class MaintenanceLifecycle:
                 )
 
             # Phase 5: HWL-1349 Post-Pipeline Commit Latch
-            # Persist engine hash and asset ledgers ONLY after 100% verification pass
+            # 1. Statutory token bleed boundary scan (fail-closed before any commit, HWL-1371)
+            scanner = CrossPropertyContaminationScanner()
+            contamination = scanner.scan_directory(adapter.dist_dir, adapter.property_id)
+            if contamination:
+                duration = time.time() - start_time
+                return MaintenanceResult(
+                    property_id=adapter.property_id,
+                    status="FAILED",
+                    assets_audited=post_report.total_assets_checked,
+                    assets_drifted=len(contamination),
+                    assets_refactored=cascade_res["refactored"],
+                    assets_failed=len(contamination),
+                    failed_records=[
+                        {"asset_path": k, "reasons": ["PROPERTY_CONTAMINATION"], "details": v}
+                        for k, v in contamination.items()
+                    ],
+                    engine_hash=None,
+                    duration_seconds=duration,
+                )
+
+            # 2. Persist engine hash and asset ledgers ONLY after 100% verification pass
             all_assets = adapter.list_assets()
             asset_hashes: Dict[str, str] = {}
             for a in all_assets:
@@ -1696,6 +1811,38 @@ class MaintenanceLifecycle:
 
             current_engine_hash = record_engine_hash(s_file)
             record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+
+            # 3. GitOps Commit Latch: stage, commit, merge, push, watch CI/CD, and verify edge
+            if enable_gitops:
+                from pseofactory.gitops import GitOpsCoordinator
+                repo_path = adapter.repo_path or adapter.dist_dir.parent
+                coordinator = GitOpsCoordinator(
+                    repo_path=repo_path,
+                    branch="main",
+                    run_id=run_id,
+                    dry_run=dry_run,
+                    workflow=workflow,
+                )
+                target_edge = edge_url or f"https://{adapter.domain}"
+                gitops_res = coordinator.coordinate_release(
+                    property_id=adapter.property_id,
+                    commit_message=f"fix({adapter.property_id}): automated maintenance cycle",
+                    skip_ci=skip_ci,
+                    edge_url=target_edge,
+                )
+                if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN"):
+                    duration = time.time() - start_time
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="FAILED",
+                        assets_audited=post_report.total_assets_checked,
+                        assets_drifted=0,
+                        assets_refactored=cascade_res["refactored"],
+                        assets_failed=1,
+                        failed_records=[{"error": gitops_res.error or gitops_res.status, "gitops": gitops_res.to_dict()}],
+                        engine_hash=current_engine_hash,
+                        duration_seconds=duration,
+                    )
 
             duration = time.time() - start_time
             return MaintenanceResult(
@@ -1730,6 +1877,9 @@ class FleetMaintenanceCoordinator:
         property_ids: Optional[List[str]] = None,
         force: bool = False,
         dry_run: bool = False,
+        enable_gitops: bool = False,
+        run_id: Optional[str] = None,
+        skip_ci: bool = False,
     ) -> Dict[str, MaintenanceResult]:
         """
         Executes sequential maintenance across specified or all registered tenants.
@@ -1773,7 +1923,14 @@ class FleetMaintenanceCoordinator:
                 continue
 
             # Execute full closed-loop lifecycle
-            res = self.lifecycle.run(adapter, force=force)
+            res = self.lifecycle.run(
+                adapter,
+                force=force,
+                enable_gitops=enable_gitops,
+                run_id=run_id,
+                dry_run=dry_run,
+                skip_ci=skip_ci,
+            )
             results[p_id] = res
 
         return results
@@ -1868,6 +2025,7 @@ __all__ = [
     "AssetIntegrityReport",
     "MaintenanceResult",
     "PropertyContaminationError",
+    "LockContentionError",
     "CrossPropertyContaminationScanner",
     "PropertyAdapter",
     "SubprocessPropertyAdapter",

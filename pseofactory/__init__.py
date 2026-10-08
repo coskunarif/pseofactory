@@ -414,6 +414,7 @@ from pseofactory.maintenance import (
     AssetIntegrityReport,
     MaintenanceResult,
     PropertyContaminationError,
+    LockContentionError,
     CrossPropertyContaminationScanner,
     PropertyAdapter,
     SubprocessPropertyAdapter,
@@ -427,6 +428,12 @@ from pseofactory.maintenance import (
     run_maintenance_lifecycle,
     run_fleet_maintenance,
     audit_property_assets,
+)
+from pseofactory.gitops import (
+    GitOpsCoordinator,
+    CICDWatcher,
+    LiveEdgeVerifier,
+    GitOpsResult,
 )
 
 __version__ = "0.1.0"
@@ -819,6 +826,7 @@ __all__ = [
     "AssetIntegrityReport",
     "MaintenanceResult",
     "PropertyContaminationError",
+    "LockContentionError",
     "CrossPropertyContaminationScanner",
     "PropertyAdapter",
     "SubprocessPropertyAdapter",
@@ -832,4 +840,8 @@ __all__ = [
     "run_maintenance_lifecycle",
     "run_fleet_maintenance",
     "audit_property_assets",
+    "GitOpsCoordinator",
+    "CICDWatcher",
+    "LiveEdgeVerifier",
+    "GitOpsResult",
 ]
