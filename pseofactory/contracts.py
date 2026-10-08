@@ -45,6 +45,7 @@ PROMPT_LEAKAGE_TERMS: List[str] = [
     "as an ai language model",
     "here is the response",
     "delve into the intricacies",
+    "internal reasoning instructions",
 ]
 
 AI_MODE_ENTITY_TAXONOMY: Set[str] = {
