@@ -31,6 +31,7 @@ FORBIDDEN_JARGON: List[str] = [
     "TODO",
     "TBD",
     "[placeholder]",
+    "paradigm shift",
 ]
 
 PROMPT_LEAKAGE_TERMS: List[str] = [
