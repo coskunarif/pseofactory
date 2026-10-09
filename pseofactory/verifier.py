@@ -3361,9 +3361,66 @@ class MasterSEOVerifier:
 
     # 27. Instant Indexing Gate (Auxiliary)
     def check_indexing_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
-        res = self.check_sitemap_gate(dist_dir)
-        res["gate"] = "Instant Indexing Gate"
-        return res
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        issues: List[str] = []
+        if not target.exists():
+            issues.append(f"Dist directory does not exist: {target}")
+            return {
+                "gate": "Instant Indexing Gate",
+                "passed": False,
+                "status": "FAIL",
+                "total": 0,
+                "clean_urls": 0,
+                "blocked": 0,
+                "breakdown": {},
+                "push_eligible_urls": [],
+                "blocked_urls": [],
+                "issues": issues,
+            }
+
+        from pseofactory.indexing.preflight import IndexingPreflightEngine
+        engine = IndexingPreflightEngine(
+            domain=self.domain,
+            property_id=getattr(self, "property_id", "profithelm"),
+            dist_dir=target,
+        )
+        report = engine.inspect_dist(target)
+        if report.total_inspected == 0:
+            issues.append(f"No pages found for indexing inspection in {target}")
+            return {
+                "gate": "Instant Indexing Gate",
+                "passed": False,
+                "status": "FAIL",
+                "total": 0,
+                "clean_urls": 0,
+                "blocked": 0,
+                "breakdown": {},
+                "push_eligible_urls": [],
+                "blocked_urls": [],
+                "issues": issues,
+            }
+
+        if not report.is_gate_passed:
+            issues.append(
+                f"Indexing preflight blocked {report.blocked_count} URLs out of {report.total_inspected}: {report.breakdown}"
+            )
+            for u in report.blocked_urls[:10]:
+                issues.append(f"Blocked URL from indexing: {u}")
+            if len(report.blocked_urls) > 10:
+                issues.append(f"(...and {len(report.blocked_urls) - 10} more blocked URLs)")
+
+        return {
+            "gate": "Instant Indexing Gate",
+            "passed": report.is_gate_passed,
+            "status": "PASS" if report.is_gate_passed else "FAIL",
+            "total": report.total_inspected,
+            "clean_urls": len(report.push_eligible_urls),
+            "blocked": report.blocked_count,
+            "breakdown": report.breakdown,
+            "push_eligible_urls": report.push_eligible_urls,
+            "blocked_urls": report.blocked_urls,
+            "issues": issues,
+        }
 
     # 28. Zyppy 2026 Content Relevance Gate (12 Factors)
     def check_content_relevance_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -3950,6 +4007,7 @@ class MasterSEOVerifier:
             "citability_gate": g_citability,
             "cleanliness_gate": g_cleanliness,
             "indexing_gate": g_indexing,
+            "check_indexing_gate": g_indexing,
         }
 
         all_issues = []
@@ -4019,6 +4077,7 @@ _default_verifier = MasterSEOVerifier()
 
 check_alt_text_gate = _default_verifier.check_alt_text_gate
 check_sitemap_gate = _default_verifier.check_sitemap_gate
+check_indexing_gate = _default_verifier.check_indexing_gate
 check_page_titles_gate = _default_verifier.check_page_titles_gate
 check_single_h1_gate = _default_verifier.check_single_h1_gate
 check_image_compression_gate = _default_verifier.check_image_compression_gate

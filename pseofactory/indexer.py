@@ -1296,14 +1296,43 @@ class PushIndexer:
         all_urls = [a["url"] for a in inspection["assets"]]
 
         if force:
-            urls_to_submit = all_urls
+            candidate_urls = all_urls
             dispatch_type = "FORCED_FULL_SUBMISSION"
         elif new_assets:
-            urls_to_submit = [a["url"] for a in new_assets]
+            candidate_urls = [a["url"] for a in new_assets]
             dispatch_type = "NEW_ASSETS_SUBMITTED"
         else:
-            urls_to_submit = []
+            candidate_urls = []
             dispatch_type = "IDEMPOTENT_NO_OP"
+
+        preflight_report = None
+        blocked_urls: List[str] = []
+        if candidate_urls:
+            from pseofactory.indexing.preflight import run_indexing_preflight
+            dist_to_check = self.dist_dir if (self.dist_dir.exists() and any(self.dist_dir.glob("**/*.html"))) else None
+            preflight_report = run_indexing_preflight(
+                urls=candidate_urls,
+                dist_dir=dist_to_check,
+                domain=self.domain,
+            )
+            urls_to_submit = preflight_report.push_eligible_urls
+            blocked_urls = preflight_report.blocked_urls
+            if blocked_urls:
+                blocked_log_path = self.base_dir / ".agy" / "indexing_preflight_blocked.json"
+                try:
+                    blocked_log_path.parent.mkdir(parents=True, exist_ok=True)
+                    blocked_data = {
+                        "timestamp": datetime.now().isoformat(),
+                        "domain": self.domain,
+                        "blocked_count": len(blocked_urls),
+                        "blocked_urls": blocked_urls,
+                        "breakdown": preflight_report.breakdown,
+                    }
+                    blocked_log_path.write_text(json.dumps(blocked_data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+        else:
+            urls_to_submit = []
 
         if urls_to_submit:
             indexnow_res = self.submit_indexnow_batch(urls=urls_to_submit, dry_run=not live, force=force, hubs_only=hubs_only)
@@ -1371,6 +1400,8 @@ class PushIndexer:
             "gsc_inspection_oracle": gsc_res.get("inspection_oracle"),
             "indexmysite": indexmysite_res,
             "audit": audit,
+            "preflight": preflight_report.to_dict() if preflight_report else None,
+            "blocked_urls": blocked_urls,
             "audit_log_path": str(self.audit_log_path),
         }
 
