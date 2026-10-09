@@ -966,7 +966,29 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def _check_api_auth(self) -> bool:
+        """Validates PSEODASHBOARD_API_TOKEN if set."""
+        auth_token = os.environ.get("PSEODASHBOARD_API_TOKEN")
+        if not auth_token:
+            return True
+        header_val = self.headers.get("Authorization", "")
+        req_token = ""
+        if header_val.startswith("Bearer "):
+            req_token = header_val[7:].strip()
+        elif "X-API-Key" in self.headers:
+            req_token = self.headers.get("X-API-Key", "").strip()
+        return req_token == auth_token
+
     def do_POST(self) -> None:
+        if not self._check_api_auth():
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            err_body = json.dumps({"ok": False, "error": "Unauthorized"}).encode("utf-8")
+            self.send_header("Content-Length", str(len(err_body)))
+            self.end_headers()
+            self.wfile.write(err_body)
+            return
+
         parsed = urllib.parse.urlsplit(self.path)
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length) if content_length > 0 else b"{}"

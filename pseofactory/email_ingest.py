@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
+import urllib.parse
 
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -623,6 +624,42 @@ class EmailIngestionEngine:
                         date=msg.date,
                     )
                 )
+
+            # 9. Generic Partner Matching across AFFILIATE_REGISTRY
+            else:
+                from pseofactory.affiliates import AFFILIATE_REGISTRY
+                matched_partner = None
+                for p_key, p_obj in AFFILIATE_REGISTRY.items():
+                    p_name_lower = p_obj.name.lower()
+                    p_key_lower = p_key.lower().replace("_", " ")
+                    p_domain = urllib.parse.urlsplit(p_obj.default_url).netloc.lower().replace("www.", "")
+                    if (p_key in combined_text or p_key_lower in combined_text or
+                        p_name_lower in combined_text or (p_domain and p_domain in combined_text)):
+                        matched_partner = p_obj
+                        break
+
+                if matched_partner:
+                    req_decision = ("action required" in combined_text or "urgent" in combined_text or
+                                    "warning" in combined_text or "update" in combined_text)
+                    classifications.append(
+                        PartnerEmailClassification(
+                            email_id=msg.id,
+                            account=msg.account,
+                            property_id=matched_partner.property_id,
+                            partner_key=matched_partner.key,
+                            partner_name=matched_partner.name,
+                            category=matched_partner.category,
+                            classification_type="GENERAL_INQUIRY" if not req_decision else "GOVERNANCE_WARNING",
+                            requires_operator_decision=req_decision,
+                            summary=f"Inbound correspondence matched for {matched_partner.name} on {matched_partner.property_id}.",
+                            urgency="HIGH" if req_decision else "LOW",
+                            deadline=None,
+                            missing_requirements=[],
+                            raw_subject=msg.subject,
+                            sender_email=msg.sender_email,
+                            date=msg.date,
+                        )
+                    )
 
         # Sort classifications by date descending so latest emails have priority
         classifications.sort(key=lambda x: x.date, reverse=True)

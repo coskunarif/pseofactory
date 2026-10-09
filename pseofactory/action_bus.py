@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import fcntl
+import tempfile
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
@@ -103,12 +105,20 @@ class HumanActionBus:
         for it in self.items.values():
             self._assert_item_invariants(it)
 
-        tmp_path = f"{self.bus_path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, self.bus_path)
+        target_dir = os.path.dirname(os.path.abspath(self.bus_path))
+        os.makedirs(target_dir, exist_ok=True)
+        lock_path = f"{self.bus_path}.lock"
+        with open(lock_path, "w", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                with tempfile.NamedTemporaryFile("w", dir=target_dir, delete=False, encoding="utf-8") as tf:
+                    json.dump(data, tf, indent=2)
+                    tf.flush()
+                    os.fsync(tf.fileno())
+                    tmp_name = tf.name
+                os.replace(tmp_name, self.bus_path)
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _assert_item_invariants(self, item: ActionItem) -> None:
         """Enforces property boundary rules and typography anti-slop contracts."""

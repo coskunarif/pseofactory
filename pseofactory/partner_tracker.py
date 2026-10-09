@@ -257,12 +257,12 @@ class PartnerTrackingEngine:
             missing_reqs = []
             dest_url = p_obj.default_url
 
-            if p_obj.status == "live":
-                op_status = "LIVE_ACTIVE"
-                live_count += 1
-                is_live = True
-            elif p_key == "ipx1031":
-                # Active direct in 1031 exchange
+            if act_item and act_item.status == "PENDING_OPERATOR" and getattr(act_item, "severity", "") in ("CRITICAL", "HIGH"):
+                op_status = "REQUIRES_FOLLOWUP"
+                followup_count += 1
+                is_live = False
+                missing_reqs.extend(act_item.missing_requirements)
+            elif p_obj.status == "live":
                 op_status = "LIVE_ACTIVE"
                 live_count += 1
                 is_live = True

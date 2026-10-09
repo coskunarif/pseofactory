@@ -234,7 +234,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         name="IPX1031 Qualified Intermediary",
         category="Commercial Real Estate",
         property_id="profithelm",
-        status="pending",
+        status="live",
         env_var="AFFILIATE_IPX1031_URL",
         default_url="https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
         badge="Fidelity Backed / $100M Insured",
@@ -478,6 +478,8 @@ AFFILIATE_REGISTRY: Dict[str, AffiliatePartner] = {
 
 # Boundary Sets
 B2B_PARTNER_KEYS: Set[str] = {
+    "coinledger",
+    "koinly",
     "mercury",
     "stripe",
     "ramp",
@@ -572,7 +574,7 @@ def validate_affiliate_url(url: str) -> bool:
     if "javascript:" in url_lower or "data:" in url_lower:
         return False
 
-    # SSRF protection: reject localhost, loopback, link-local metadata, and private IP addresses
+    # SSRF protection: reject localhost, loopback, link-local metadata, cloud metadata DNS, and private IP addresses
     hostname = (parsed.hostname or "").lower()
     if not hostname:
         return False
@@ -582,12 +584,44 @@ def validate_affiliate_url(url: str) -> bool:
         return False
     if hostname.startswith("127.") or hostname.startswith("169.254."):
         return False
+    if hostname in ("metadata.google.internal", "instance-data", "metadata") or hostname.endswith(".metadata.google.internal"):
+        return False
+
     try:
         import ipaddress
-        ip = ipaddress.ip_address(hostname)
-        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved:
+        ip = None
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            # Parse integer, hex, or octal IP encodings
+            ip_int = None
+            if hostname.isdigit():
+                ip_int = int(hostname)
+            elif hostname.startswith("0x") or hostname.startswith("0X"):
+                try:
+                    ip_int = int(hostname, 16)
+                except ValueError:
+                    pass
+            elif hostname.startswith("0") and hostname[1:].isdigit():
+                try:
+                    ip_int = int(hostname, 8)
+                except ValueError:
+                    pass
+            else:
+                parts = hostname.split(".")
+                if len(parts) == 4:
+                    try:
+                        octets = [int(p, 0) for p in parts]
+                        if all(0 <= o <= 255 for o in octets):
+                            ip_int = (octets[0] << 24) + (octets[1] << 16) + (octets[2] << 8) + octets[3]
+                    except (ValueError, TypeError):
+                        pass
+            if ip_int is not None and 0 <= ip_int <= 0xFFFFFFFF:
+                ip = ipaddress.ip_address(ip_int)
+
+        if ip is not None and (ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved):
             return False
-    except ValueError:
+    except (ValueError, OverflowError):
         pass
 
     return True
@@ -597,11 +631,13 @@ def resolve_partner_url(
     partner: AffiliatePartner,
     value_tier: str = "starter",
     extra_params: Optional[Dict[str, str]] = None,
+    tenant: Optional[str] = None,
 ) -> str:
     """
     Resolves destination URL for an affiliate partner.
     Supports environment variable overrides (AFFILIATE_<KEY>_URL).
     Appends supported vendor-namespaced tracking parameters (ph_tier) without clobbering base parameters.
+    Rejects sub-affiliate aggregator redirect domains if property is prexvo.
     """
     env_override = os.getenv(partner.env_var)
     if env_override and env_override.strip():
@@ -615,6 +651,15 @@ def resolve_partner_url(
         )
 
     parsed = urllib.parse.urlsplit(raw_url)
+
+    prop = (tenant or partner.property_id or "").strip().lower()
+    if prop == "prexvo":
+        netloc_lower = parsed.netloc.lower()
+        if any(agg in netloc_lower for agg in ("sovrn", "skimlinks", "viglink")):
+            raise ValueError(
+                f"Sub-affiliate aggregator redirects are prohibited on Prexvo: '{raw_url}'"
+            )
+
     existing_query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
     query_params = list(existing_query)
     existing_keys = {k for k, _ in query_params}

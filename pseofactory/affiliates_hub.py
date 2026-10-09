@@ -52,10 +52,10 @@ def _validate_dashes_recursive(data: Any, context: str = "vault_data") -> None:
             _validate_dashes_recursive(item, context=f"{context}[{idx}]")
 
 
-DEFAULT_SOVRN_DOMAIN_KEY = "0a5ac1bfe04034bff021b394f5e71d90"
-DEFAULT_SOVRN_API_KEY = "039f430e9e7cad0bd9ff3e6c8d1c54769d5847c3"
-DEFAULT_PARTNERSTACK_API_KEY = "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP"
-DEFAULT_STRIPE_ACCOUNT_ID = "acct_1T6fSTIq0ckFsf5j"
+DEFAULT_SOVRN_DOMAIN_KEY = os.environ.get("SOVRN_COMMERCE_DOMAIN_KEY", "0a5ac1bfe04034bff021b394f5e71d90")
+DEFAULT_SOVRN_API_KEY = os.environ.get("SOVRN_COMMERCE_API_KEY", "039f430e9e7cad0bd9ff3e6c8d1c54769d5847c3")
+DEFAULT_PARTNERSTACK_API_KEY = os.environ.get("PARTNERSTACK_API_KEY", "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP")
+DEFAULT_STRIPE_ACCOUNT_ID = os.environ.get("STRIPE_ACCOUNT_ID", "acct_1T6fSTIq0ckFsf5j")
 SOVRN_REDIRECT_BASE = "https://redirect.viglink.com"
 
 # Slugs and patterns recognized as direct high-bounty partner tools for ProfitHelm
