@@ -94,7 +94,8 @@ def detect_engine_drift(
     recorded_hash: Optional[str] = None
     if s_path.exists():
         try:
-            data = json.loads(s_path.read_text(encoding="utf-8"))
+            from pseofactory.supervisor import AtomicStateLedger
+            data = AtomicStateLedger.load_json(s_path)
             if isinstance(data, dict):
                 recorded_hash = data.get("engine_hash")
         except Exception:
@@ -123,16 +124,18 @@ def record_engine_hash(
 ) -> str:
     """
     Persists the updated engine hash into state_file after a successful build/compilation.
+    Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.supervisor import AtomicStateLedger
+
     s_path = Path(state_file)
     final_hash = hash_value or compute_engine_hash(include_paths=include_paths, base_dirs=base_dirs)
     try:
-        s_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "engine_hash": final_hash,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        s_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        AtomicStateLedger.save_json(s_path, payload)
     except Exception as ex:
         print(f"Warning: Failed to persist engine hash: {ex}")
 
@@ -162,15 +165,16 @@ def record_asset_ledger(
     Enforces HWL-1349 post-pipeline commit latch.
     Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.supervisor import AtomicStateLedger
+
     l_path = Path(ledger_file).resolve()
-    l_path.parent.mkdir(parents=True, exist_ok=True)
     payload: Dict[str, Any] = {
         "engine_hash": engine_hash or compute_engine_hash(),
         "total_assets": len(asset_hashes),
         "assets": dict(sorted(asset_hashes.items())),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    l_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    AtomicStateLedger.save_json(l_path, payload)
     return payload
 
 
@@ -179,16 +183,15 @@ def load_asset_ledger(ledger_file: Union[str, Path]) -> Dict[str, Any]:
     Loads asset ledger from disk. Returns empty dictionary if file does not exist.
     Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.supervisor import AtomicStateLedger
+
     l_path = Path(ledger_file).resolve()
     if not l_path.is_file():
         return {}
     try:
-        data = json.loads(l_path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return data
+        return AtomicStateLedger.load_json(l_path)
     except Exception:
-        pass
-    return {}
+        return {}
 
 
 def trigger_drift_cascade(

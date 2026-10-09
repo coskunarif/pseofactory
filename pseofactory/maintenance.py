@@ -1938,19 +1938,6 @@ class MaintenanceLifecycle:
                     trend_status=trend_status_val,
                 )
 
-            # Stage 7: HWL-1349 Post-Pipeline State & Ledger Latch
-            all_assets = adapter.list_assets()
-            asset_hashes: Dict[str, str] = {}
-            for a in all_assets:
-                rel = a.relative_to(adapter.dist_dir).as_posix()
-                asset_hashes[rel] = compute_asset_fingerprint(a)
-
-            if not dry_run:
-                current_engine_hash = record_engine_hash(s_file)
-                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
-            else:
-                current_engine_hash = compute_engine_hash()
-
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
 
@@ -1987,11 +1974,24 @@ class MaintenanceLifecycle:
                         assets_refactored=cascade_res["refactored"],
                         assets_failed=1,
                         failed_records=[{"error": gitops_res.error or gitops_res.status, "gitops": gitops_res.to_dict()}],
-                        engine_hash=current_engine_hash,
+                        engine_hash=None,
                         duration_seconds=duration,
                         gitops_status="FAILED",
                         trend_status=trend_status_val,
                     )
+
+            # Stage 7: HWL-1349 Post-Pipeline State & Ledger Latch
+            all_assets = adapter.list_assets()
+            asset_hashes: Dict[str, str] = {}
+            for a in all_assets:
+                rel = a.relative_to(adapter.dist_dir).as_posix()
+                asset_hashes[rel] = compute_asset_fingerprint(a)
+
+            if not dry_run:
+                current_engine_hash = record_engine_hash(s_file)
+                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+            else:
+                current_engine_hash = compute_engine_hash()
 
             # Stage 9: Multi-Channel Syndication Draft Staging
             if enable_gitops:

@@ -444,6 +444,12 @@ from pseofactory.maintenance import (
     run_fleet_maintenance,
     audit_property_assets,
 )
+from pseofactory.supervisor import (
+    AutonomousLifecycleSupervisor,
+    AsyncFleetCoordinator,
+    AtomicStateLedger,
+    HeartbeatTracker,
+)
 from pseofactory.gitops import (
     GitOpsCoordinator,
     CICDWatcher,
@@ -926,6 +932,10 @@ __all__ = [
     "RefactorCascadeEngine",
     "MaintenanceLifecycle",
     "FleetMaintenanceCoordinator",
+    "AutonomousLifecycleSupervisor",
+    "AsyncFleetCoordinator",
+    "AtomicStateLedger",
+    "HeartbeatTracker",
     "run_maintenance_lifecycle",
     "run_fleet_maintenance",
     "audit_property_assets",

@@ -273,6 +273,69 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         return 0 if all_success else 1
 
 
+def cmd_supervisor(args: argparse.Namespace) -> int:
+    """
+    Executes continuous or single-cycle autonomous lifecycle supervisor:
+    1. Monitors engine hash drift and asset ledgers
+    2. Coordinates asynchronous multi-tenant rebuilds and audits
+    3. Enforces timeout budgets and failure backoff ceilings
+    4. Writes atomic heartbeat records (HWL-1231, HWL-1349)
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.supervisor import AutonomousLifecycleSupervisor
+
+    interval = getattr(args, "interval", 3600.0)
+    daemon = getattr(args, "daemon", False)
+    run_once = getattr(args, "run_once", False)
+    property_id = getattr(args, "property", None)
+    force = getattr(args, "force", False)
+    dry_run = getattr(args, "dry_run", False)
+    as_json = getattr(args, "json", False)
+    skip_ci = getattr(args, "skip_ci", False)
+
+    is_once = run_once or (not daemon)
+
+    supervisor = AutonomousLifecycleSupervisor(
+        interval=interval,
+    )
+
+    prop_ids = [property_id] if property_id else None
+
+    if is_once:
+        res = supervisor.run_cycle(
+            force=force,
+            dry_run=dry_run,
+            property_ids=prop_ids,
+            skip_ci=skip_ci,
+        )
+        if as_json:
+            print(json.dumps(res, indent=2))
+        else:
+            status = res.get("status", "UNKNOWN")
+            dur = res.get("duration_seconds", 0.0)
+            print(f"[SUPERVISOR] Cycle {res.get('cycle_id')}: status={status} duration={dur:.2f}s")
+            if "properties" in res and isinstance(res["properties"], dict):
+                for p, p_res in res["properties"].items():
+                    print(f"  - [{p}] status={p_res.get('status')}")
+        return 0 if res.get("status") in ("SUCCESS", "SKIPPED_ALIGNED", "SKIPPED_NO_CHANGES", "DRY_RUN", "NO_PROPERTIES") else 1
+    else:
+        try:
+            supervisor.start(
+                once=False,
+                force=force,
+                dry_run=dry_run,
+                property_ids=prop_ids,
+                skip_ci=skip_ci,
+            )
+            return 0
+        except KeyboardInterrupt:
+            print("\nSupervisor interrupted by operator. Exiting cleanly.")
+            return 0
+        except Exception as exc:
+            print(f"Supervisor error: {exc}", file=sys.stderr)
+            return 1
+
+
 def cmd_distribute(args: argparse.Namespace) -> int:
     """
     Executes multi-channel syndication export and Voice DNA verification.
@@ -1046,6 +1109,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_preflight.add_argument("--min-words", type=int, default=150, help="Minimum body word count threshold (default: 150)")
     p_preflight.add_argument("--tier1-cap", type=int, default=150, help="Maximum cap on Tier-1 Hub push URLs (default: 150)")
 
+    # supervisor
+    p_sup = subparsers.add_parser(
+        "supervisor",
+        help="Runs autonomous lifecycle supervisor babysitting fleet assets",
+    )
+    p_sup.add_argument("--interval", type=float, default=3600.0, help="Loop interval in seconds (default: 3600)")
+    p_sup.add_argument("--daemon", action="store_true", help="Run supervisor continuously as a daemon")
+    p_sup.add_argument("--run-once", action="store_true", help="Run single lifecycle cycle and exit")
+    p_sup.add_argument("--property", type=str, default=None, help="Restrict supervisor to specific property ID")
+    p_sup.add_argument("--force", action="store_true", help="Force rebuild and verification regardless of drift")
+    p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
+    p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
+    p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
+
     return parser
 
 
@@ -1060,6 +1137,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "cycle":
         return cmd_cycle(args)
+    elif args.command == "supervisor":
+        return cmd_supervisor(args)
     elif args.command == "audit":
         return cmd_audit(args)
     elif args.command == "maintain":
