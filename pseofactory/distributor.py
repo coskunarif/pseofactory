@@ -10,6 +10,7 @@ import html
 import re
 from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
+import urllib.parse
 
 import os
 
@@ -225,6 +226,83 @@ def _sanitize_youtube_text(text: Any) -> Any:
     return sanitized
 
 
+DEFAULT_TOOL_DEEP_LINK_PARAMS: Dict[str, Dict[str, Any]] = {
+    "irs-2027-tax-brackets": {
+        "gross_income": 150000,
+        "filing_status": "married_joint",
+        "state_jurisdiction": "CA",
+    },
+    "tax-brackets": {
+        "gross_income": 150000,
+        "filing_status": "married_joint",
+        "state_jurisdiction": "CA",
+    },
+    "saas-runway-calculator": {
+        "cash_balance": 1000000,
+        "monthly_revenue": 30000,
+        "gross_burn": 80000,
+    },
+    "section-179-vehicle-deduction": {
+        "purchase_price": 95000,
+        "business_use_pct": 85,
+        "vehicle_weight": "heavy_suv",
+    },
+    "section-179-calculator": {
+        "purchase_price": 95000,
+        "business_use_pct": 85,
+        "vehicle_weight": "heavy_suv",
+    },
+    "section-1031-calculator": {
+        "relinquished_sale_price": 2000000,
+        "adjusted_cost_basis": 800000,
+    },
+}
+
+
+def _get_tool_deep_link_params(slug: str, domain: Optional[str] = None) -> Dict[str, Any]:
+    if slug in DEFAULT_TOOL_DEEP_LINK_PARAMS:
+        return dict(DEFAULT_TOOL_DEEP_LINK_PARAMS[slug])
+    for k, v in DEFAULT_TOOL_DEEP_LINK_PARAMS.items():
+        if k in slug:
+            return dict(v)
+    if domain == "tax":
+        return {
+            "gross_income": 150000,
+            "filing_status": "married_joint",
+            "state_jurisdiction": "CA",
+        }
+    elif domain == "saas":
+        return {
+            "cash_balance": 1000000,
+            "monthly_revenue": 30000,
+            "gross_burn": 80000,
+        }
+    elif domain == "capex":
+        return {
+            "purchase_price": 95000,
+            "business_use_pct": 85,
+            "vehicle_weight": "heavy_suv",
+        }
+    return {}
+
+
+def _build_parameterized_calculator_url(
+    slug: str,
+    params: Optional[Dict[str, Any]] = None,
+    extra_query: Optional[Dict[str, str]] = None,
+) -> str:
+    base = f"{POST_URL_BASE}/tools/{slug}/"
+    q_dict: Dict[str, Any] = {}
+    if params:
+        q_dict.update(params)
+    if extra_query:
+        q_dict.update(extra_query)
+    if not q_dict:
+        return base
+    qs = urllib.parse.urlencode(q_dict)
+    return f"{base}?{qs}"
+
+
 def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     """
     Uses Jev System One semantic distribution router to synthesize community routing,
@@ -238,11 +316,12 @@ def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
     qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model provides deterministic projections and analytical modeling."))
     query = _sanitize_distribution_text(tool.get("primary_keyword", short_title))
-    url = f"{POST_URL_BASE}/tools/{slug}/"
-    x_url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=x&utm_medium=social&utm_campaign={slug}"
-    reddit_url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=reddit&utm_medium=social&utm_campaign={slug}"
-    li_url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
-    fb_url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=facebook&utm_medium=social&utm_campaign={slug}"
+    deep_params = _get_tool_deep_link_params(slug, domain)
+    url = _build_parameterized_calculator_url(slug, deep_params)
+    x_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "x", "utm_medium": "social", "utm_campaign": slug})
+    reddit_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "reddit", "utm_medium": "social", "utm_campaign": slug})
+    li_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "linkedin", "utm_medium": "social", "utm_campaign": slug, "utm_content": "company_post"})
+    fb_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "facebook", "utm_medium": "social", "utm_campaign": slug})
 
     try:
         from profithelm.jev import get_jev_client
@@ -1264,17 +1343,17 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
     """
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
+    domain = _classify_tool_domain(slug)
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:24]))
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
     qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis."))
-    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=linkedin_pulse&utm_medium=article&utm_campaign={slug}"
+    deep_params = _get_tool_deep_link_params(slug, domain)
+    url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "linkedin_pulse", "utm_medium": "article", "utm_campaign": slug})
 
     citations = get_dual_dataset_citations(slug)
     stat_cite = _sanitize_distribution_text(citations.get("statutory_source", "Internal Revenue Code Section 1"))
     econ_cite = _sanitize_distribution_text(citations.get("economic_source", "Federal Reserve FRED Economic Data"))
-
-    domain = _classify_tool_domain(slug)
     if domain == "saas":
         body = (
             f"# {title}: Quantitative Runway Analysis and Net Burn Modeling\n\n"
@@ -1412,17 +1491,17 @@ def generate_parasite_substack_teardown(tool_or_slug: Any) -> Dict[str, Any]:
     """
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
+    domain = _classify_tool_domain(slug)
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:24]))
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
     qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis."))
-    url = f"{POST_URL_BASE}/tools/{slug}/"
+    deep_params = _get_tool_deep_link_params(slug, domain)
+    url = _build_parameterized_calculator_url(slug, deep_params)
 
     citations = get_dual_dataset_citations(slug)
     stat_cite = _sanitize_distribution_text(citations.get("statutory_source", "Internal Revenue Code Section 1"))
     econ_cite = _sanitize_distribution_text(citations.get("economic_source", "Federal Reserve FRED Economic Data"))
-
-    domain = _classify_tool_domain(slug)
     if domain == "saas":
         content = f"""# {title}: The Definitive Mathematical Teardown and Strategic Playbook
 
