@@ -361,6 +361,19 @@ class PropertyAdapter(ABC):
         return None
 
     @property
+    def base_dirs(self) -> Optional[List[Path]]:
+        if self.repo_path and self.property_id:
+            prop_pkg = self.repo_path / self.property_id
+            if prop_pkg.is_dir() and (prop_pkg / "builder.py").is_file():
+                try:
+                    content = (prop_pkg / "builder.py").read_text(encoding="utf-8", errors="ignore")
+                    if "base_dirs" in content:
+                        return [prop_pkg]
+                except Exception:
+                    pass
+        return None
+
+    @property
     def tools(self) -> List[Dict[str, Any]]:
         """List of tool catalog definitions."""
         return []
@@ -710,9 +723,9 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 
                 cmd = self._build_command
                 if isinstance(cmd, str):
-                    res = subprocess.run(cmd, shell=True, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                    res = subprocess.run(cmd, shell=True, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 else:
-                    res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                    res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 75:
                     raise LockContentionError(
                         f"Build all command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
@@ -791,6 +804,7 @@ class WorkspacePropertyScanner:
         "arif-skills",
         "knowledge",
         "automations",
+        "personal",
         "node_modules",
         "_archive",
         ".agy",
@@ -1215,9 +1229,10 @@ class AssetIntegrityEvaluator:
 
         engine_drifted = False
         if check_engine_drift:
+            b_dirs = getattr(adapter, "base_dirs", None)
             s_file = state_file or (adapter.dist_dir.parent / ".agy" / "engine_hash.json")
             if Path(s_file).exists():
-                drift_res = detect_engine_drift(s_file)
+                drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
 
         for asset in assets:
@@ -1945,11 +1960,12 @@ class MaintenanceLifecycle:
                 rel = a.relative_to(adapter.dist_dir).as_posix()
                 asset_hashes[rel] = compute_asset_fingerprint(a)
 
+            b_dirs = getattr(adapter, "base_dirs", None)
             if not dry_run:
-                current_engine_hash = record_engine_hash(s_file)
+                current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
             else:
-                current_engine_hash = compute_engine_hash()
+                current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
