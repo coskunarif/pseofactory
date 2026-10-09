@@ -495,3 +495,147 @@ class NicheClusterProposal:
             created_at=str(data.get("created_at", datetime.now(timezone.utc).isoformat())),
             updated_at=str(data.get("updated_at", datetime.now(timezone.utc).isoformat())),
         )
+
+
+@dataclass
+class GSCDailyMetricRecord:
+    """Historical Google Search Console performance metric record for a property on a single date."""
+    property_id: str
+    date: str
+    clicks: int = 0
+    impressions: int = 0
+    ctr: float = 0.0
+    position: float = 0.0
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCDailyMetricRecord.property_id")
+        assert_no_forbidden_dashes(self.date, "GSCDailyMetricRecord.date")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GSCDailyMetricRecord":
+        return cls(
+            property_id=str(data.get("property_id", "")),
+            date=str(data.get("date", "")),
+            clicks=int(data.get("clicks", 0)),
+            impressions=int(data.get("impressions", 0)),
+            ctr=float(data.get("ctr", 0.0)),
+            position=float(data.get("position", 0.0)),
+            recorded_at=str(data.get("recorded_at", datetime.now(timezone.utc).isoformat())),
+        )
+
+
+@dataclass
+class GoogleUpdateEvent:
+    """Dated Google ranking algorithm update event."""
+    event_id: str
+    name: str
+    update_type: str = "CORE"
+    start_date: str = ""
+    end_date: Optional[str] = None
+    impact_buffer_days: int = 14
+    confirmed: int = 1
+    notes: str = ""
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.event_id, "GoogleUpdateEvent.event_id")
+        assert_no_forbidden_dashes(self.name, "GoogleUpdateEvent.name")
+        assert_no_forbidden_dashes(self.update_type, "GoogleUpdateEvent.update_type")
+        assert_no_forbidden_dashes(self.start_date, "GoogleUpdateEvent.start_date")
+        if self.end_date:
+            assert_no_forbidden_dashes(self.end_date, "GoogleUpdateEvent.end_date")
+        if self.notes:
+            assert_no_forbidden_dashes(self.notes, "GoogleUpdateEvent.notes")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GoogleUpdateEvent":
+        return cls(
+            event_id=str(data.get("event_id", "")),
+            name=str(data.get("name", "")),
+            update_type=str(data.get("update_type", "CORE")),
+            start_date=str(data.get("start_date", "")),
+            end_date=str(data["end_date"]) if data.get("end_date") else None,
+            impact_buffer_days=int(data.get("impact_buffer_days", 14)),
+            confirmed=int(data.get("confirmed", 1)),
+            notes=str(data.get("notes", "")),
+        )
+
+
+@dataclass
+class CeilingThresholdSpec:
+    """Threshold specification for algorithmic glass ceiling detection."""
+    threshold: float = 0.35
+    min_lookback_days: int = 28
+    analysis_window_days: int = 480
+    variance_cv_threshold: float = 0.35
+    drop_ratio_weight: float = 0.40
+    plateau_resistance_weight: float = 0.40
+    position_stagnation_weight: float = 0.20
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CeilingThresholdSpec":
+        return cls(
+            threshold=float(data.get("threshold", 0.35)),
+            min_lookback_days=int(data.get("min_lookback_days", 28)),
+            analysis_window_days=int(data.get("analysis_window_days", 480)),
+            variance_cv_threshold=float(data.get("variance_cv_threshold", 0.35)),
+            drop_ratio_weight=float(data.get("drop_ratio_weight", 0.40)),
+            plateau_resistance_weight=float(data.get("plateau_resistance_weight", 0.40)),
+            position_stagnation_weight=float(data.get("position_stagnation_weight", 0.20)),
+        )
+
+
+@dataclass
+class AlgorithmicCeilingAnalysis:
+    """Analytical evaluation of Search Console traffic trajectory against algorithmic ceilings."""
+    property_id: str
+    computed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    analysis_window_days: int = 480
+    total_days: int = 0
+    peak_impressions_rma28: float = 0.0
+    current_impressions_rma28: float = 0.0
+    ceiling_threshold: float = 0.35
+    ceiling_dampening_score: float = 0.0
+    ceiling_detected: bool = False
+    suppression_severity: str = "NONE"
+    correlated_updates: List[Dict[str, Any]] = field(default_factory=list)
+    recommendation: str = "BUILD_PAGE"
+    metrics_timeline: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "AlgorithmicCeilingAnalysis.property_id")
+        assert_no_forbidden_dashes(self.suppression_severity, "AlgorithmicCeilingAnalysis.suppression_severity")
+        assert_no_forbidden_dashes(self.recommendation, "AlgorithmicCeilingAnalysis.recommendation")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AlgorithmicCeilingAnalysis":
+        return cls(
+            property_id=str(data.get("property_id", "")),
+            computed_at=str(data.get("computed_at", datetime.now(timezone.utc).isoformat())),
+            analysis_window_days=int(data.get("analysis_window_days", 480)),
+            total_days=int(data.get("total_days", 0)),
+            peak_impressions_rma28=float(data.get("peak_impressions_rma28", 0.0)),
+            current_impressions_rma28=float(data.get("current_impressions_rma28", 0.0)),
+            ceiling_threshold=float(data.get("ceiling_threshold", 0.35)),
+            ceiling_dampening_score=float(data.get("ceiling_dampening_score", 0.0)),
+            ceiling_detected=bool(data.get("ceiling_detected", False)),
+            suppression_severity=str(data.get("suppression_severity", "NONE")),
+            correlated_updates=list(data.get("correlated_updates", [])),
+            recommendation=str(data.get("recommendation", "BUILD_PAGE")),
+            metrics_timeline=list(data.get("metrics_timeline", [])),
+            metadata=data.get("metadata"),
+        )
+

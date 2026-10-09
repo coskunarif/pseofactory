@@ -921,6 +921,128 @@ def cmd_indexing_preflight(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gsc_ceiling(args: argparse.Namespace) -> int:
+    """Executes Search Console traffic trends and algorithmic ceiling detection."""
+    from datetime import datetime, timezone
+    from pseofactory.trends.models import GSCDailyMetricRecord, GoogleUpdateEvent
+    from pseofactory.trends.gsc_ceiling import detect_algorithmic_ceiling, DEFAULT_GOOGLE_UPDATES
+    from pseofactory.trends.db import TrendHistoryDB
+    from pseofactory.ui import render_gsc_ceiling_dashboard
+
+    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    days = getattr(args, "days", 480)
+    fixture_path = getattr(args, "fixture", None)
+    threshold = getattr(args, "ceiling_threshold", 0.35)
+    updates_path = getattr(args, "updates", None)
+    output_json = getattr(args, "json", False)
+    html_out = getattr(args, "html", None)
+
+    records: List[GSCDailyMetricRecord] = []
+    updates: Optional[List[GoogleUpdateEvent]] = None
+
+    if fixture_path:
+        p = Path(fixture_path).resolve()
+        if not p.is_file():
+            print(f"Error: Fixture file not found: {fixture_path}", file=sys.stderr)
+            return 1
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                fix_data = json.load(f)
+            if isinstance(fix_data, dict):
+                metric_dicts = fix_data.get("metrics") or fix_data.get("records") or []
+                update_dicts = fix_data.get("google_updates") or fix_data.get("updates") or []
+                if "property_id" in fix_data and not getattr(args, "property", None):
+                    property_id = fix_data["property_id"]
+                if update_dicts and not updates_path:
+                    updates = [GoogleUpdateEvent.from_dict(u) for u in update_dicts]
+            elif isinstance(fix_data, list):
+                metric_dicts = fix_data
+            else:
+                metric_dicts = []
+
+            records = [
+                GSCDailyMetricRecord(
+                    property_id=m.get("property_id", property_id),
+                    date=m["date"],
+                    clicks=int(m.get("clicks", 0)),
+                    impressions=int(m.get("impressions", 0)),
+                    ctr=float(m.get("ctr", 0.0)),
+                    position=float(m.get("position", 0.0)),
+                    recorded_at=m.get("recorded_at", datetime.now(timezone.utc).isoformat()),
+                )
+                for m in metric_dicts
+            ]
+        except Exception as ex:
+            print(f"Error parsing fixture file: {ex}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            db = TrendHistoryDB()
+            records = db.get_gsc_daily_metrics(property_id, days=days)
+            if not updates_path:
+                updates = db.get_google_update_events()
+                if not updates:
+                    updates = DEFAULT_GOOGLE_UPDATES
+        except Exception as ex:
+            print(f"Error connecting to TrendHistoryDB: {ex}", file=sys.stderr)
+            return 1
+
+    if updates_path:
+        up_path = Path(updates_path).resolve()
+        if not up_path.is_file():
+            print(f"Error: Updates file not found: {updates_path}", file=sys.stderr)
+            return 1
+        try:
+            with open(up_path, "r", encoding="utf-8") as f:
+                up_data = json.load(f)
+            u_list = up_data if isinstance(up_data, list) else up_data.get("updates", [])
+            updates = [GoogleUpdateEvent.from_dict(u) for u in u_list]
+        except Exception as ex:
+            print(f"Error loading updates file: {ex}", file=sys.stderr)
+            return 1
+
+    analysis = detect_algorithmic_ceiling(records, updates=updates, threshold=threshold)
+
+    if not fixture_path:
+        try:
+            db = TrendHistoryDB()
+            db.record_gsc_ceiling_snapshot(analysis)
+        except Exception:
+            pass
+
+    if html_out:
+        html_markup = render_gsc_ceiling_dashboard(analysis)
+        h_path = Path(html_out).resolve()
+        h_path.parent.mkdir(parents=True, exist_ok=True)
+        h_path.write_text(html_markup, encoding="utf-8")
+        if not output_json:
+            print(f"Wrote GSC ceiling dashboard to {h_path}")
+
+    if output_json:
+        print(json.dumps(analysis.to_dict(), indent=2))
+    elif not html_out:
+        print("=" * 60)
+        print(f"GSC TRAFFIC TRENDS & CEILING ANALYSIS: {property_id.upper()}")
+        print("=" * 60)
+        print(f"Total Days Analyzed:      {analysis.total_days}")
+        print(f"Peak Impressions (RMA 28): {int(analysis.peak_impressions_rma28)}")
+        print(f"Current Velocity (RMA 28): {int(analysis.current_impressions_rma28)}")
+        print(f"Ceiling Threshold:        {analysis.ceiling_threshold}")
+        print(f"Dampening Score:          {analysis.ceiling_dampening_score:.2f}")
+        print(f"Ceiling Detected:         {'YES' if analysis.ceiling_detected else 'NO'}")
+        print(f"Suppression Severity:     {analysis.suppression_severity}")
+        print(f"Recommendation:           {analysis.recommendation}")
+        print(f"Correlated Updates:       {len(analysis.correlated_updates)}")
+        if analysis.correlated_updates:
+            print("-" * 60)
+            print("Correlated Google Updates:")
+            for cu in analysis.correlated_updates:
+                print(f"  * {cu['name']} ({cu['start_date']}): drop ratio {cu['drop_ratio']:.2%}")
+        print("=" * 60)
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -1123,6 +1245,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
 
+    # gsc-ceiling
+    p_ceiling = subparsers.add_parser(
+        "gsc-ceiling",
+        help="Analyze 480-day Search Console trajectory and detect algorithmic glass ceilings",
+    )
+    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo"], help="Target property identifier")
+    p_ceiling.add_argument("--days", type=int, default=480, help="Historical time series lookback days (default: 480)")
+    p_ceiling.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing historical GSC records")
+    p_ceiling.add_argument("--ceiling-threshold", type=float, default=0.35, help="Algorithmic ceiling dampening threshold (default: 0.35)")
+    p_ceiling.add_argument("--updates", type=str, default=None, help="Path to optional Google update intervals JSON fixture")
+    p_ceiling.add_argument("--json", action="store_true", help="Output analysis result as structured JSON")
+    p_ceiling.add_argument("--html", type=str, default=None, help="Output file path to render standalone minimal modern light HTML report")
+
     return parser
 
 
@@ -1173,6 +1308,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_partner_ui(args)
     elif args.command == "indexing-preflight":
         return cmd_indexing_preflight(args)
+    elif args.command == "gsc-ceiling":
+        return cmd_gsc_ceiling(args)
     else:
         parser.print_help()
         return 1

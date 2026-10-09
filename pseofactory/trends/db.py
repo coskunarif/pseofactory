@@ -29,6 +29,10 @@ from pseofactory.trends.models import (
     TregSnapshotRecord,
     JevEvaluationRecord,
     NicheClusterProposal,
+    GSCDailyMetricRecord,
+    GoogleUpdateEvent,
+    AlgorithmicCeilingAnalysis,
+    CeilingThresholdSpec,
 )
 from pseofactory.trends.filters import calculate_second_derivative_acceleration
 
@@ -296,6 +300,66 @@ class TrendHistoryDB:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_niche_proposals_yield ON niche_cluster_proposals(mean_composite_yield DESC);"
+            )
+
+            # 8. gsc_daily_metrics
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_daily_metrics (
+                    property_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    clicks INTEGER NOT NULL DEFAULT 0 CHECK(clicks >= 0),
+                    impressions INTEGER NOT NULL DEFAULT 0 CHECK(impressions >= 0),
+                    ctr REAL NOT NULL DEFAULT 0.0 CHECK(ctr >= 0.0 AND ctr <= 1.0),
+                    position REAL NOT NULL DEFAULT 0.0 CHECK(position >= 0.0),
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, date)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_daily_property_date ON gsc_daily_metrics(property_id, date DESC);"
+            )
+
+            # 9. google_update_events
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS google_update_events (
+                    event_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    update_type TEXT NOT NULL CHECK(update_type IN ('CORE', 'SPAM', 'HELPFUL_CONTENT', 'REVIEWS', 'REPUTATION_ABUSE', 'OTHER')),
+                    start_date TEXT NOT NULL,
+                    end_date TEXT,
+                    impact_buffer_days INTEGER NOT NULL DEFAULT 14,
+                    confirmed INTEGER NOT NULL DEFAULT 1 CHECK(confirmed IN (0, 1)),
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_google_updates_date ON google_update_events(start_date, end_date);"
+            )
+
+            # 10. gsc_ceiling_snapshots
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_ceiling_snapshots (
+                    snapshot_id TEXT PRIMARY KEY,
+                    property_id TEXT NOT NULL,
+                    computed_at TEXT NOT NULL,
+                    analysis_window_days INTEGER NOT NULL DEFAULT 480,
+                    peak_impressions_rma28 REAL NOT NULL,
+                    current_impressions_rma28 REAL NOT NULL,
+                    ceiling_detected INTEGER NOT NULL CHECK(ceiling_detected IN (0, 1)),
+                    ceiling_dampening_score REAL NOT NULL,
+                    correlated_update_id TEXT,
+                    recommendation TEXT NOT NULL CHECK(recommendation IN ('BUILD_PAGE', 'MONITOR', 'AUTHORITY_STRENGTHENING', 'FREEZE_EXPANSION')),
+                    metadata TEXT
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ceiling_snapshots_prop_time ON gsc_ceiling_snapshots(property_id, computed_at DESC);"
             )
 
     # -------------------------------------------------------------------------
@@ -837,3 +901,150 @@ class TrendHistoryDB:
             )
             for r in rows
         ]
+
+    # -------------------------------------------------------------------------
+    # Search Console Performance Metrics & Algorithmic Ceiling Operations
+    # -------------------------------------------------------------------------
+
+    def upsert_gsc_daily_metrics(self, records: List[GSCDailyMetricRecord]) -> int:
+        """Idempotently batch upserts daily Search Console performance metric records."""
+        if not records:
+            return 0
+        with self.transaction() as cur:
+            for r in records:
+                assert_no_forbidden_dashes(r.property_id, "upsert_gsc_daily_metrics.property_id")
+                assert_no_forbidden_dashes(r.date, "upsert_gsc_daily_metrics.date")
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO gsc_daily_metrics (
+                        property_id, date, clicks, impressions, ctr, position, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (
+                        r.property_id,
+                        r.date,
+                        r.clicks,
+                        r.impressions,
+                        r.ctr,
+                        r.position,
+                        r.recorded_at,
+                    ),
+                )
+        return len(records)
+
+    def get_gsc_daily_metrics(self, property_id: str, days: int = 480) -> List[GSCDailyMetricRecord]:
+        """Retrieves up to `days` daily Search Console metrics ordered chronologically (date ASC)."""
+        assert_no_forbidden_dashes(property_id, "get_gsc_daily_metrics.property_id")
+        conn = self.get_connection()
+        rows = conn.execute(
+            """
+            SELECT property_id, date, clicks, impressions, ctr, position, recorded_at
+            FROM gsc_daily_metrics
+            WHERE property_id = ?
+            ORDER BY date DESC
+            LIMIT ?;
+            """,
+            (property_id, days),
+        ).fetchall()
+        return [
+            GSCDailyMetricRecord(
+                property_id=r["property_id"],
+                date=r["date"],
+                clicks=r["clicks"],
+                impressions=r["impressions"],
+                ctr=r["ctr"],
+                position=r["position"],
+                recorded_at=r["recorded_at"],
+            )
+            for r in reversed(rows)
+        ]
+
+    def upsert_google_update_events(self, events: List[GoogleUpdateEvent]) -> int:
+        """Idempotently batch upserts Google ranking update events."""
+        if not events:
+            return 0
+        with self.transaction() as cur:
+            for ev in events:
+                assert_no_forbidden_dashes(ev.event_id, "upsert_google_update_events.event_id")
+                assert_no_forbidden_dashes(ev.name, "upsert_google_update_events.name")
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO google_update_events (
+                        event_id, name, update_type, start_date, end_date,
+                        impact_buffer_days, confirmed, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (
+                        ev.event_id,
+                        ev.name,
+                        ev.update_type,
+                        ev.start_date,
+                        ev.end_date,
+                        ev.impact_buffer_days,
+                        ev.confirmed,
+                        ev.notes,
+                    ),
+                )
+        return len(events)
+
+    def get_google_update_events(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[GoogleUpdateEvent]:
+        """Retrieves Google update events optionally bounded by date range."""
+        conn = self.get_connection()
+        query = "SELECT * FROM google_update_events WHERE 1=1"
+        params: List[Any] = []
+        if start_date:
+            query += " AND (end_date IS NULL OR end_date >= ?)"
+            params.append(start_date)
+        if end_date:
+            query += " AND start_date <= ?"
+            params.append(end_date)
+        query += " ORDER BY start_date ASC;"
+        rows = conn.execute(query, params).fetchall()
+        return [
+            GoogleUpdateEvent(
+                event_id=r["event_id"],
+                name=r["name"],
+                update_type=r["update_type"],
+                start_date=r["start_date"],
+                end_date=r["end_date"],
+                impact_buffer_days=r["impact_buffer_days"],
+                confirmed=r["confirmed"],
+                notes=r["notes"] or "",
+            )
+            for r in rows
+        ]
+
+    def record_gsc_ceiling_snapshot(self, analysis: AlgorithmicCeilingAnalysis) -> str:
+        """Persists an algorithmic ceiling snapshot into gsc_ceiling_snapshots."""
+        import uuid
+        snapshot_id = f"snap_ceil_{analysis.property_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        corr_id = analysis.correlated_updates[0].get("event_id") if analysis.correlated_updates else None
+        meta_json = json.dumps(analysis.metadata) if analysis.metadata else None
+        with self.transaction() as cur:
+            cur.execute(
+                """
+                INSERT INTO gsc_ceiling_snapshots (
+                    snapshot_id, property_id, computed_at, analysis_window_days,
+                    peak_impressions_rma28, current_impressions_rma28, ceiling_detected,
+                    ceiling_dampening_score, correlated_update_id, recommendation, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    snapshot_id,
+                    analysis.property_id,
+                    analysis.computed_at,
+                    analysis.analysis_window_days,
+                    analysis.peak_impressions_rma28,
+                    analysis.current_impressions_rma28,
+                    1 if analysis.ceiling_detected else 0,
+                    analysis.ceiling_dampening_score,
+                    corr_id,
+                    analysis.recommendation,
+                    meta_json,
+                ),
+            )
+        return snapshot_id
