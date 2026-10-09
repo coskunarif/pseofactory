@@ -226,6 +226,28 @@ class TrendCronRunner:
 
         return spikes
 
+    def run_cron_cycle(
+        self,
+        cycle_id: Optional[str] = None,
+        fixture_path: Optional[Union[str, Path]] = None,
+        seeds: Optional[Union[str, List[str]]] = None,
+        property_filter: Optional[str] = None,
+        dry_run: bool = False,
+        total_site_impressions: int = 500,
+    ) -> Dict[str, Any]:
+        """
+        Public entrypoint for executing autonomous trend cron cycle.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return self.run_cycle(
+            cycle_id=cycle_id,
+            fixture_path=fixture_path,
+            seeds=seeds,
+            property_filter=property_filter,
+            dry_run=dry_run,
+            total_site_impressions=total_site_impressions,
+        )
+
     def run_cycle(
         self,
         cycle_id: Optional[str] = None,

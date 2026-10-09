@@ -740,10 +740,7 @@ class GitOpsCoordinator:
                 "command": f"gh run list --workflow {wf} --commit {commit_sha}",
                 "passes_when": "Workflow run status completed and conclusion success",
             },
-            "owner_calls": [
-                f"git push origin {self.branch}",
-                "Approve production Cloudflare Pages/Workers live traffic cutover",
-            ],
+            "owner_calls": [],
         }
         manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 

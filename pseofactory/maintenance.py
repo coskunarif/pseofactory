@@ -129,6 +129,8 @@ class MaintenanceResult:
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     gitops_status: Optional[str] = None
     distribution_status: Optional[str] = None
+    indexing_status: Optional[str] = None
+    trend_status: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -147,6 +149,10 @@ class MaintenanceResult:
             d["gitops_status"] = self.gitops_status
         if self.distribution_status is not None:
             d["distribution_status"] = self.distribution_status
+        if self.indexing_status is not None:
+            d["indexing_status"] = self.indexing_status
+        if self.trend_status is not None:
+            d["trend_status"] = self.trend_status
         return d
 
 
@@ -1900,6 +1906,18 @@ class MaintenanceLifecycle:
                         distribution_status="FAILED",
                     )
 
+                # 5. Automated Post-Ship Indexing & Trend Cron Loop
+                from pseofactory.indexer import PushIndexer
+                from pseofactory.trends.cron import TrendCronRunner
+
+                indexer = PushIndexer()
+                idx_res = indexer.dispatch_automated_indexing(live=not dry_run)
+                indexing_status_val = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+
+                trend_runner = TrendCronRunner()
+                t_res = trend_runner.run_cron_cycle(dry_run=dry_run)
+                trend_status_val = t_res.get("status", "SUCCESS") if isinstance(t_res, dict) else "SUCCESS"
+
             duration = time.time() - start_time
             return MaintenanceResult(
                 property_id=adapter.property_id,
@@ -1912,6 +1930,8 @@ class MaintenanceLifecycle:
                 duration_seconds=duration,
                 gitops_status=gitops_status_val,
                 distribution_status=dist_status_val,
+                indexing_status=indexing_status_val,
+                trend_status=trend_status_val,
             )
 
 
