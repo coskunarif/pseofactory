@@ -543,6 +543,223 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_partner_sync(args: argparse.Namespace) -> int:
+    """
+    Executes automated email checking across zoho and personal inboxes,
+    reconciles partner applications, and routes operator action items.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+
+    engine = PartnerTrackingEngine()
+    try:
+        dashboard = engine.sync_and_evaluate(
+            force_mail_poll=getattr(args, "force", False),
+            personal_fixture=getattr(args, "personal_fixture", None),
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(dashboard.to_dict(), indent=2))
+        else:
+            print(f"Partner Correspondence Sync Complete [Updated: {dashboard.updated_at}]")
+            ph = dashboard.profithelm
+            px = dashboard.prexvo
+            print(f"  ProfitHelm Active Partners: {ph.active_partners_count} / {ph.total_registered_partners} (Readiness: {ph.monetization_readiness_score}%)")
+            print(f"  Prexvo Active Partners:     {px.active_partners_count} / {px.total_registered_partners} (Readiness: {px.monetization_readiness_score}%)")
+            pending_count = sum(1 for it in dashboard.all_action_items if it.status == "PENDING_OPERATOR")
+            print(f"  Human Action Bus Items:     {pending_count} pending operator confirmation")
+        return 0
+    except Exception as exc:
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": str(exc)}))
+        else:
+            print(f"Error during partner sync: {exc}", file=sys.stderr)
+        return 1
+
+
+def cmd_partner_status(args: argparse.Namespace) -> int:
+    """
+    Displays actionable application status and monetization readiness across ProfitHelm and Prexvo.
+    Optionally exports the minimal modern light interface HTML.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+    from pseofactory.ui import render_light_interface
+
+    engine = PartnerTrackingEngine()
+    try:
+        dashboard = engine.sync_and_evaluate(force_mail_poll=False)
+
+        if getattr(args, "html", None):
+            html_content = render_light_interface(dashboard)
+            with open(args.html, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            if not getattr(args, "json", False):
+                print(f"Standalone light interface exported to: {args.html}")
+
+        if getattr(args, "json", False):
+            res = dashboard.to_dict()
+            prop_filter = getattr(args, "property", None)
+            if prop_filter:
+                p_clean = prop_filter.strip().lower()
+                res = res.get(p_clean, res)
+            print(json.dumps(res, indent=2))
+            return 0
+
+        prop_filter = getattr(args, "property", None)
+        reports = []
+        if not prop_filter or prop_filter.lower() in ("all", "profithelm"):
+            reports.append(dashboard.profithelm)
+        if not prop_filter or prop_filter.lower() in ("all", "prexvo"):
+            reports.append(dashboard.prexvo)
+
+        for r in reports:
+            print(f"=== {r.property_name} Monetization Readiness: {r.monetization_readiness_score}% ===")
+            print(f"  Active Live: {r.active_partners_count} | Awaiting: {r.awaiting_response_count} | Follow-up: {r.requires_followup_count} | Pending: {r.pending_expansion_count}")
+            print("  Partners:")
+            for p in r.partners:
+                mark = "[LIVE]" if p.operational_status == "LIVE_ACTIVE" else f"[{p.operational_status}]"
+                req_str = f" (Needs: {', '.join(p.missing_requirements)})" if p.missing_requirements else ""
+                print(f"    - {mark} {p.name} ({p.category}) - Bounty: {p.bounty_est}{req_str}")
+
+        pending_actions = [it for it in dashboard.all_action_items if it.status == "PENDING_OPERATOR"]
+        if prop_filter and prop_filter.lower() != "all":
+            pending_actions = [it for it in pending_actions if it.property_id.lower() == prop_filter.lower()]
+        if pending_actions:
+            print(f"\n=== Dedicated Human Action Bus ({len(pending_actions)} Pending Operator Confirmation) ===")
+            for it in pending_actions:
+                dead_str = f" [Deadline: {it.deadline}]" if it.deadline else ""
+                print(f"  * [{it.severity}] [{it.property_id}] {it.title}{dead_str}")
+                print(f"    Action ID: {it.action_id} | Requires confirmation (auto-approval forbidden)")
+        return 0
+    except Exception as exc:
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": str(exc)}))
+        else:
+            print(f"Error evaluating partner status: {exc}", file=sys.stderr)
+        return 1
+
+
+def cmd_partner_action(args: argparse.Namespace) -> int:
+    """
+    Manages operator intervention actions on the human action bus.
+    Enforces that partner agreements cannot be auto-approved without operator confirmation.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.action_bus import HumanActionBus
+
+    bus = HumanActionBus()
+    action_subcmd = getattr(args, "action_command", "list")
+
+    if action_subcmd == "list":
+        pending = bus.get_pending_items(property_id=getattr(args, "property", None))
+        if getattr(args, "json", False):
+            print(json.dumps([it.to_dict() for it in pending], indent=2))
+        else:
+            print(f"Dedicated Human Action Bus ({len(pending)} pending decisions):")
+            for it in pending:
+                dead_str = f" [Deadline: {it.deadline}]" if it.deadline else ""
+                print(f"  - [{it.severity}] {it.action_id}: {it.title}{dead_str}")
+                print(f"    {it.description}")
+        return 0
+
+    action_id = getattr(args, "action_id", None)
+    if not action_id:
+        print("Error: action_id is required.", file=sys.stderr)
+        return 1
+
+    if action_subcmd in ("approve", "reject", "resolve"):
+        decision_map = {"approve": "APPROVE", "reject": "REJECT", "resolve": "RESOLVE"}
+        decision = decision_map[action_subcmd]
+        notes = getattr(args, "notes", "") or f"Manual operator {action_subcmd} executed via CLI."
+        operator = getattr(args, "operator", "operator") or "operator"
+        try:
+            updated = bus.confirm_decision(
+                action_id=action_id,
+                decision=decision,
+                operator=operator,
+                notes=notes,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps(updated.to_dict(), indent=2))
+            else:
+                print(f"Confirmed {decision} for action '{action_id}' (by {operator}). Status: {updated.status}")
+            return 0
+        except Exception as exc:
+            print(f"Error executing action decision: {exc}", file=sys.stderr)
+            return 1
+    else:
+        print(f"Unknown action command: {action_subcmd}", file=sys.stderr)
+        return 1
+
+
+def cmd_partner_ui(args: argparse.Namespace) -> int:
+    """
+    Starts minimal modern light interface dashboard server or inspects daemon status.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import subprocess
+    import urllib.request
+    from pseofactory.ui import run_ui_server, get_ui_runtime_state, DEFAULT_UI_PORT, DEFAULT_UI_HOST
+
+    if getattr(args, "status", False):
+        runtime_state = get_ui_runtime_state()
+        svc_active = False
+        try:
+            res = subprocess.run(
+                ["systemctl", "--user", "is-active", "pseofactory-partner-ui.service"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            svc_active = (res.returncode == 0 and res.stdout.strip() == "active")
+        except Exception:
+            svc_active = False
+
+        port = runtime_state.get("port", DEFAULT_UI_PORT) if runtime_state else getattr(args, "port", DEFAULT_UI_PORT)
+        host = runtime_state.get("host", DEFAULT_UI_HOST) if runtime_state else getattr(args, "host", DEFAULT_UI_HOST)
+        http_ok = False
+        try:
+            req = urllib.request.Request(f"http://{host}:{port}/api/status", headers={"User-Agent": "pseofactory-cli"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                http_ok = (resp.status == 200)
+        except Exception:
+            http_ok = False
+
+        status_info = {
+            "service_active": svc_active,
+            "http_responsive": http_ok,
+            "host": host,
+            "port": port,
+            "url": f"http://{host}:{port}/",
+            "runtime_state": runtime_state,
+        }
+
+        if getattr(args, "json", False):
+            print(json.dumps(status_info, indent=2))
+        else:
+            print("=== pseofactory Partner UI Status ===")
+            print(f"  Systemd Service: {'ACTIVE' if svc_active else 'INACTIVE'}")
+            print(f"  HTTP Endpoint:   {'RESPONSIVE (200 OK)' if http_ok else 'UNAVAILABLE'}")
+            print(f"  URL:             http://{host}:{port}/")
+            if runtime_state:
+                print(f"  PID:             {runtime_state.get('pid')}")
+                print(f"  State:           {runtime_state.get('status')}")
+                print(f"  Updated At:      {runtime_state.get('updated_at')}")
+        return 0 if (svc_active or http_ok) else 1
+
+    port = getattr(args, "port", None)
+    if port is None:
+        port = DEFAULT_UI_PORT
+    host = getattr(args, "host", DEFAULT_UI_HOST)
+    print(f"Starting partner dashboard server on http://{host}:{port}/")
+    try:
+        run_ui_server(port=port, host=host)
+        return 0
+    except Exception as exc:
+        print(f"Error starting dashboard server: {exc}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -674,6 +891,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_dist.add_argument("--dry-run", action="store_true", help="Dry-run simulation mode without live publishing")
     p_dist.add_argument("--json", action="store_true", help="Output machine-readable JSON distribution report")
 
+    # partner-sync
+    p_psync = subparsers.add_parser(
+        "partner-sync",
+        help="Automated correspondence check via himalaya CLI and personal inbox to update partner readiness",
+    )
+    p_psync.add_argument("--force", action="store_true", help="Bypass poll rate-limit interval to query mail server directly")
+    p_psync.add_argument("--personal-fixture", type=str, default=None, help="Path to optional personal inbox fixture JSON")
+    p_psync.add_argument("--json", action="store_true", help="Output result as JSON")
+
+    # partner-status
+    p_pstat = subparsers.add_parser(
+        "partner-status",
+        help="Display actionable affiliate application status, readiness scores, and action bus items",
+    )
+    p_pstat.add_argument("--property", type=str, default=None, help="Optional property filter (profithelm, prexvo, all)")
+    p_pstat.add_argument("--html", type=str, default=None, help="Export minimal modern light interface to specified HTML path")
+    p_pstat.add_argument("--json", action="store_true", help="Output result as JSON")
+
+    # partner-action
+    p_pact = subparsers.add_parser(
+        "partner-action",
+        help="Manage dedicated human action bus operator intervention and partner decisions",
+    )
+    p_pact.add_argument("action_command", choices=["list", "approve", "reject", "resolve"], help="Action operation")
+    p_pact.add_argument("--action-id", type=str, default=None, help="Target action item identifier")
+    p_pact.add_argument("--property", type=str, default=None, help="Optional property filter for listing")
+    p_pact.add_argument("--notes", type=str, default="", help="Operator notes for decision audit log")
+    p_pact.add_argument("--operator", type=str, default="operator", help="Operator name or identifier")
+    p_pact.add_argument("--json", action="store_true", help="Output result as JSON")
+
+    # partner-ui
+    p_pui = subparsers.add_parser(
+        "partner-ui",
+        help="Start minimal modern light interface dashboard server for live partner tracking",
+    )
+    p_pui.add_argument("--port", type=int, default=8090, help="Server port (default: 8090)")
+    p_pui.add_argument("--host", type=str, default="127.0.0.1", help="Server host (default: 127.0.0.1)")
+    p_pui.add_argument("--status", action="store_true", help="Inspect active runtime status of the partner UI daemon")
+    p_pui.add_argument("--json", action="store_true", help="Output status report as JSON")
+
     return parser
 
 
@@ -712,6 +969,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_sync_monetization(args)
     elif args.command == "distribute":
         return cmd_distribute(args)
+    elif args.command == "partner-sync":
+        return cmd_partner_sync(args)
+    elif args.command == "partner-status":
+        return cmd_partner_status(args)
+    elif args.command == "partner-action":
+        return cmd_partner_action(args)
+    elif args.command == "partner-ui":
+        return cmd_partner_ui(args)
     else:
         parser.print_help()
         return 1

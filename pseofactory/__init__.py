@@ -451,6 +451,30 @@ from pseofactory.affiliates import (
     get_affiliate_route,
 )
 from pseofactory.affiliates_hub import MonetizationHub
+from pseofactory.email_ingest import (
+    EmailIngestionEngine,
+    EmailMessage,
+    PartnerEmailClassification,
+)
+from pseofactory.action_bus import (
+    HumanActionBus,
+    ActionItem,
+)
+from pseofactory.partner_tracker import (
+    PartnerTrackingEngine,
+    PartnerStatusSummary,
+    PropertyReadinessReport,
+    FleetMonetizationDashboardData,
+)
+from pseofactory.ui import (
+    render_light_interface,
+    run_ui_server,
+    create_ui_server,
+    find_open_port,
+    get_ui_runtime_state,
+    DEFAULT_UI_PORT,
+    DEFAULT_UI_HOST,
+)
 from pseofactory.trends import (
     FeedSpike,
     TrendCandidate,
@@ -916,4 +940,20 @@ __all__ = [
     "JevEngine",
     "TrendPipeline",
     "run_trend_pipeline",
+    "EmailIngestionEngine",
+    "EmailMessage",
+    "PartnerEmailClassification",
+    "HumanActionBus",
+    "ActionItem",
+    "PartnerTrackingEngine",
+    "PartnerStatusSummary",
+    "PropertyReadinessReport",
+    "FleetMonetizationDashboardData",
+    "render_light_interface",
+    "run_ui_server",
+    "create_ui_server",
+    "find_open_port",
+    "get_ui_runtime_state",
+    "DEFAULT_UI_PORT",
+    "DEFAULT_UI_HOST",
 ]
