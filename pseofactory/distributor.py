@@ -2989,14 +2989,13 @@ def get_ai_coding_walkthroughs() -> Dict[str, Dict[str, Any]]:
     return walkthroughs
 
 
-def generate_youtube_syndication(tool_or_slug: Any) -> Dict[str, Any]:
+def _generate_youtube_transcript(tool_or_slug: Any) -> Dict[str, Any]:
     """
-    Generates YouTube video syndication metadata containing title, 5-part description
-    with timestamp chapters, high-converting pinned comment, SEO tags, and category 27.
-    Conforms strictly to HWL-1202 (zero angle brackets), zero em-dashes, and contracts.py invariants.
+    Generates indexable YouTube video spoken transcript with timestamped chapters,
+    Schema.org VideoObject JSON-LD, atomic 3-sentence answers, and ProfitHelm entity linkages.
+    Conforms strictly to zero forbidden dashes, zero angle brackets, and zero conversational filler.
     """
-    from pathlib import Path
-    from pseofactory.contracts import assert_youtube_description, assert_youtube_pinned_comment, assert_no_forbidden_dashes
+    from pseofactory.contracts import assert_youtube_transcript
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
@@ -3005,6 +3004,556 @@ def generate_youtube_syndication(tool_or_slug: Any) -> Dict[str, Any]:
     desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
     qa = tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis.")
     query = tool.get("primary_keyword", short_title.lower())
+    domain = _classify_tool_domain(tool)
+    cat_lower = str(tool.get("category", "")).lower()
+    slug_lower = slug.lower()
+
+    if slug == "irs-2027-tax-brackets":
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": "2027 TCJA Statutory Expiration Framework",
+                "target_query": "irs 2027 tax brackets",
+                "spoken_script": (
+                    "The 2027 TCJA expiration will cause marginal tax rates to rise. "
+                    "Taxpayers in the 22% bracket will face a 25% statutory rate under 26 U.S. Code section 1. "
+                    "ProfitHelm models dynamic after-tax projections across income tiers."
+                ),
+                "citable_passage": "The 2027 TCJA expiration increases individual marginal rates under 26 U.S. Code section 1.",
+                "entities": ["ProfitHelm", "IRS", "TCJA", "26 U.S. Code section 1"],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "Bracket Thresholds and Rate Calculations",
+                "target_query": "marginal tax rate 2027",
+                "spoken_script": (
+                    "The top federal marginal rate reverts from 37% to 39.6% on Jan 1, 2026. "
+                    "A single filer earning $125,000 faces an estimated $4,349 increase in annual tax liability. "
+                    "Evaluate your bracket exposure on ProfitHelm to optimize timing."
+                ),
+                "citable_passage": "Top federal tax rates revert to 39.6% post-TCJA sunset.",
+                "entities": ["ProfitHelm", "Marginal Tax Rates", "IRS Brackets"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "AMT Exemptions and Deduction Limits",
+                "target_query": "tcja sunset calculator",
+                "spoken_script": (
+                    "Calculating AMT exemptions prevents unanticipated secondary tax liabilities. "
+                    "Exemption phase-outs begin at statutory thresholds indexed under IRC Section 55. "
+                    "Review your exposure on ProfitHelm before year-end filing."
+                ),
+                "citable_passage": "AMT exemptions phase out at statutory thresholds under IRC Section 55.",
+                "entities": ["ProfitHelm", "Alternative Minimum Tax", "IRC Section 55"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": "Interactive Tax Modeling on ProfitHelm",
+                "target_query": "post 2025 tax bracket changes",
+                "spoken_script": (
+                    "Deterministic calculations eliminate guesswork when navigating statutory tax sunsets. "
+                    "ProfitHelm evaluates federal and state interactions in sub-100ms without login requirements. "
+                    "Access the interactive calculator today on ProfitHelm to secure your tax plan."
+                ),
+                "citable_passage": "ProfitHelm evaluates multi-tier tax changes in sub-100ms.",
+                "entities": ["ProfitHelm", "Deterministic Modeling"],
+            },
+        ]
+    elif slug == "crypto-tax-calculator":
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": "Crypto Capital Gains Reporting Framework",
+                "target_query": "crypto tax calculator 2027",
+                "spoken_script": (
+                    "Cryptocurrency transactions trigger capital gains reporting across short-term and long-term holding periods. "
+                    "Form 1099-DA broker reporting requirements mandate exact cost basis tracking under IRC Section 61. "
+                    "ProfitHelm models real-time crypto tax exposure across trades and staking rewards."
+                ),
+                "citable_passage": "Form 1099-DA mandates cost basis reporting under IRC Section 61.",
+                "entities": ["ProfitHelm", "IRS Form 1099-DA", "IRC Section 61"],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "DeFi Staking and Net Investment Income Tax",
+                "target_query": "defi staking tax rate",
+                "spoken_script": (
+                    "Staking rewards are taxed as ordinary income upon receipt rather than disposal date. "
+                    "High-income filers also incur a 3.8% Net Investment Income Tax under IRC Section 1411. "
+                    "ProfitHelm calculates your blended effective tax rate in sub-100ms."
+                ),
+                "citable_passage": "Staking income triggers ordinary rates and 3.8% NIIT under IRC Section 1411.",
+                "entities": ["ProfitHelm", "IRC Section 1411", "NIIT"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "Tax Loss Harvesting & Bracket Optimization",
+                "target_query": "irs form 8949 crypto",
+                "spoken_script": (
+                    "Offsetting short-term gains with capital losses can reduce your federal liability substantially. "
+                    "The IRS limits ordinary income loss deductions to $3,000 annually with indefinite carryforwards under IRC Section 1211. "
+                    "Plan your harvesting strategy on ProfitHelm before year-end."
+                ),
+                "citable_passage": "Capital losses offset capital gains with a $3,000 ordinary limit under IRC Section 1211.",
+                "entities": ["ProfitHelm", "IRC Section 1211", "Form 8949"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": "Interactive Crypto Tax Walkthrough",
+                "target_query": "crypto capital gains tax",
+                "spoken_script": (
+                    "Automated portfolio calculations ensure compliance without costly professional fees. "
+                    "ProfitHelm provides deterministic calculations without requiring wallet keys or logins. "
+                    "Access the interactive crypto tax tool on ProfitHelm today."
+                ),
+                "citable_passage": "ProfitHelm delivers deterministic crypto tax calculations.",
+                "entities": ["ProfitHelm", "Crypto Tax Planning"],
+            },
+        ]
+    elif domain == "saas" or "runway" in slug_lower or "burn" in slug_lower:
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Framework and Scope",
+                "target_query": f"{query} framework",
+                "spoken_script": (
+                    f"The {title} calculates quantitative cash runway and net burn metrics. "
+                    f"Startups analyze monthly gross burn against cash balances under GAAP ASC 205-40 going-concern rules. "
+                    f"ProfitHelm delivers instant runway projections with live parameter adjustments."
+                ),
+                "citable_passage": f"Startups evaluate cash runway under GAAP ASC 205-40 going-concern rules.",
+                "entities": ["ProfitHelm", "GAAP ASC 205-40", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "Net Burn Modeling and Cash Out Date",
+                "target_query": query,
+                "spoken_script": (
+                    f"Dividing gross cash by average burn overstates runway when customer contraction occurs. "
+                    f"A startup with $1,200,000 in cash burning $65,000 monthly faces a critical zero cash date in under 19 months. "
+                    f"Evaluate your true cash inflection date on ProfitHelm with sensitivity modeling."
+                ),
+                "citable_passage": f"Net burn modeling reveals accurate zero cash dates across variance scenarios.",
+                "entities": ["ProfitHelm", "Net Burn Rate", "Zero Cash Date"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "Runway Extension Scenarios",
+                "target_query": f"{query} model",
+                "spoken_script": (
+                    f"Scenario forecasting evaluates headcount freezes and growth adjustments to extend runway. "
+                    f"Early operational adjustments can preserve 6 to 12 months of additional working capital. "
+                    f"Model your hiring and burn scenarios on ProfitHelm to preserve cash reserves."
+                ),
+                "citable_passage": f"Scenario adjustments preserve 6 to 12 months of startup runway.",
+                "entities": ["ProfitHelm", "Scenario Modeling"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": f"Interactive {short_title} Walkthrough",
+                "target_query": f"profithelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Deterministic financial models provide actionable guidance for founders and operators. "
+                    f"ProfitHelm processes financial calculations in sub-100ms with zero login required. "
+                    f"Access the interactive runway calculator on ProfitHelm to secure your runway."
+                ),
+                "citable_passage": f"ProfitHelm computes startup runway models in sub-100ms.",
+                "entities": ["ProfitHelm", "Financial Modeling"],
+            },
+        ]
+    elif domain == "capex" or "179" in slug_lower or "depreciation" in slug_lower:
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Expensing Framework",
+                "target_query": query,
+                "spoken_script": (
+                    f"The {title} computes first-year expensing deductions for commercial property. "
+                    f"Taxpayers can expense qualifying equipment up to statutory thresholds under IRC Section 179. "
+                    f"ProfitHelm models accelerated tax savings across eligible capital expenditures."
+                ),
+                "citable_passage": f"IRC Section 179 permits first-year expensing for commercial equipment.",
+                "entities": ["ProfitHelm", "IRC Section 179", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "Phase-Out Thresholds and MACRS Bonus",
+                "target_query": f"{query} deduction",
+                "spoken_script": (
+                    f"Expensing allowances phase out dollar-for-dollar once equipment purchases exceed statutory limits. "
+                    f"Bonus depreciation rules under IRC Section 168(k) provide additional first-year write-offs for eligible assets. "
+                    f"Calculate your combined tax deferral on ProfitHelm before acquiring capital equipment."
+                ),
+                "citable_passage": f"Section 168(k) bonus depreciation combines with Section 179 expensing.",
+                "entities": ["ProfitHelm", "IRC Section 168(k)", "MACRS Depreciation"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "Year-End Capital Allocation",
+                "target_query": f"{query} calculator",
+                "spoken_script": (
+                    f"Timing asset placement in service determines your eligibility for first-year tax deductions. "
+                    f"A commercial asset costing $125,000 can generate substantial immediate tax relief for qualifying businesses. "
+                    f"Review your complete depreciation schedule on ProfitHelm to optimize tax timing."
+                ),
+                "citable_passage": f"Placing assets in service before year-end maximizes tax deductions.",
+                "entities": ["ProfitHelm", "Tax Planning"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": f"Interactive {short_title} Walkthrough",
+                "target_query": f"profithelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Deterministic calculation models ensure accurate tax deferral estimations without spreadsheet errors. "
+                    f"ProfitHelm delivers verified capital expenditure calculators with sub-100ms execution. "
+                    f"Access the full Section 179 calculator on ProfitHelm today."
+                ),
+                "citable_passage": f"ProfitHelm computes depreciation deductions in sub-100ms.",
+                "entities": ["ProfitHelm", "Section 179 Calculator"],
+            },
+        ]
+    elif domain == "quant" or "odds" in slug_lower or "market" in slug_lower:
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Probability Framework",
+                "target_query": query,
+                "spoken_script": (
+                    f"The {title} determines implied probability spreads and position sizing. "
+                    f"Contract pricing models evaluate binary event outcomes pursuant to CFTC Rule 40.11 guidelines. "
+                    f"ProfitHelm provides deterministic expected value modeling across event markets."
+                ),
+                "citable_passage": f"CFTC Rule 40.11 governs event contract pricing and probability.",
+                "entities": ["ProfitHelm", "CFTC Rule 40.11", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "Kelly Sizing and Risk Management",
+                "target_query": f"{query} strategy",
+                "spoken_script": (
+                    f"Applying Half-Kelly sizing prevents over-allocation when trading contract spreads. "
+                    f"A position with 52% implied odds versus 44% market price offers an attractive positive expected value. "
+                    f"Model your optimal risk allocation on ProfitHelm before placing market orders."
+                ),
+                "citable_passage": f"Half-Kelly sizing optimizes capital growth while controlling drawdown risk.",
+                "entities": ["ProfitHelm", "Kelly Criterion", "Expected Value"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "Spread Arbitrage and Execution",
+                "target_query": f"{query} calculator",
+                "spoken_script": (
+                    f"Monitoring liquidity and exchange fees ensures calculated edges remain profitable after transaction costs. "
+                    f"Quantitative risk controls protect portfolio capital from drawdown volatility during unexpected market events. "
+                    f"Review your spread analysis on ProfitHelm for real-time risk evaluation."
+                ),
+                "citable_passage": f"Real-time spread analysis accounts for transaction fees and market liquidity.",
+                "entities": ["ProfitHelm", "Arbitrage"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": f"Interactive {short_title} Walkthrough",
+                "target_query": f"profithelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Mathematical calculation engines give quants an analytical edge in dynamic prediction markets. "
+                    f"ProfitHelm executes position sizing formulas in sub-100ms with zero latency. "
+                    f"Access the interactive prediction market model on ProfitHelm today."
+                ),
+                "citable_passage": f"ProfitHelm executes position sizing formulas in sub-100ms.",
+                "entities": ["ProfitHelm", "Quant Models"],
+            },
+        ]
+    elif "loan" in slug_lower or "student" in slug_lower or "education" in cat_lower:
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Repayment Framework",
+                "target_query": query,
+                "spoken_script": (
+                    f"The {title} evaluates monthly obligations under Title IV statutory rules. "
+                    f"Borrowers analyze standard and income-driven repayment plans under federal statutory guidelines. "
+                    f"ProfitHelm calculates total interest and loan forgiveness timelines across repayment strategies."
+                ),
+                "citable_passage": f"Federal student loan repayment follows Title IV statutory regulations.",
+                "entities": ["ProfitHelm", "Title IV", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "Income-Driven Plans and Interest Amortization",
+                "target_query": f"{query} repayment",
+                "spoken_script": (
+                    f"Income-driven repayment caps monthly payments at a percentage of discretionary income above federal poverty guidelines. "
+                    f"A borrower with $60,000 in federal debt can lower monthly obligations while tracking forgiveness milestones. "
+                    f"Compare all repayment options on ProfitHelm to minimize lifetime interest costs."
+                ),
+                "citable_passage": f"Income-driven repayment caps payments using discretionary income thresholds.",
+                "entities": ["ProfitHelm", "IDR", "Amortization"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "Forgiveness Schedules and Regulatory Updates",
+                "target_query": f"{query} forgiveness",
+                "spoken_script": (
+                    f"Federal loan forgiveness programs discharge remaining balances after 20 to 25 years of qualifying payments. "
+                    f"Monitoring statutory adjustments protects borrowers from unanticipated changes in repayment regulations. "
+                    f"Model your complete forgiveness trajectory on ProfitHelm to optimize your repayment."
+                ),
+                "citable_passage": f"Qualifying repayment plans provide loan discharge after statutory horizons.",
+                "entities": ["ProfitHelm", "Loan Forgiveness"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": f"Interactive {short_title} Walkthrough",
+                "target_query": f"profithelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Deterministic repayment calculators eliminate confusion across complex federal loan rules. "
+                    f"ProfitHelm provides clear repayment comparisons in sub-100ms without account registration. "
+                    f"Access the student loan calculator on ProfitHelm today."
+                ),
+                "citable_passage": f"ProfitHelm computes student loan repayment models in sub-100ms.",
+                "entities": ["ProfitHelm", "Student Loan Calculator"],
+            },
+        ]
+    elif domain == "tax" or "tax" in slug_lower:
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Statutory Framework",
+                "target_query": query,
+                "spoken_script": (
+                    f"The {title} calculates federal and state liability under official statutory rules. "
+                    f"Taxpayers model marginal bracket thresholds and standard deduction allowances under IRC Section 1. "
+                    f"ProfitHelm evaluates dynamic tax liabilities across all filing statuses and income tiers."
+                ),
+                "citable_passage": f"Tax calculations follow IRC Section 1 statutory tax schedules.",
+                "entities": ["ProfitHelm", "IRC Section 1", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": "Marginal Bracket Modeling",
+                "target_query": f"{query} brackets",
+                "spoken_script": (
+                    f"Progressive tax schedules apply statutory rates across indexed income tiers to determine total liability. "
+                    f"Taxpayers in the 24% bracket face distinct marginal rates compared to effective average tax rates. "
+                    f"Evaluate your statutory brackets on ProfitHelm to plan deductions effectively."
+                ),
+                "citable_passage": f"Marginal brackets apply progressive tax rates across income thresholds.",
+                "entities": ["ProfitHelm", "Marginal Tax Brackets"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": "Deduction Optimization and Credits",
+                "target_query": f"{query} deductions",
+                "spoken_script": (
+                    f"Maximizing available credits and statutory deductions reduces net liability dollar-for-dollar. "
+                    f"Strategic retirement contributions and charitable deductions can lower taxable income below bracket thresholds. "
+                    f"Run your complete tax scenario on ProfitHelm to uncover optimization opportunities."
+                ),
+                "citable_passage": f"Strategic deductions lower taxable income below statutory bracket thresholds.",
+                "entities": ["ProfitHelm", "Tax Deductions"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": f"Interactive {short_title} Walkthrough",
+                "target_query": f"profithelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Deterministic tax calculators deliver immediate clarity on complex statutory codes. "
+                    f"ProfitHelm computes multi-tier tax projections in sub-100ms with zero login required. "
+                    f"Access the interactive tax model on ProfitHelm today."
+                ),
+                "citable_passage": f"ProfitHelm computes multi-tier tax projections in sub-100ms.",
+                "entities": ["ProfitHelm", "Tax Calculator"],
+            },
+        ]
+    else:
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Scope and Framework",
+                "target_query": query,
+                "spoken_script": (
+                    f"The {title} provides deterministic quantitative modeling for {short_title}. "
+                    f"Users evaluate key financial variables and benchmarks under official statutory guidelines. "
+                    f"ProfitHelm delivers verified mathematical formulas with sub-100ms real-time recalculation."
+                ),
+                "citable_passage": f"The model provides deterministic quantitative projections for {short_title}.",
+                "entities": ["ProfitHelm", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Methodology and Calculations",
+                "target_query": f"{query} methodology",
+                "spoken_script": (
+                    f"Applying standard quantitative methodologies ensures accurate analytical modeling and avoids common errors. "
+                    f"Evaluating variance between optimistic and conservative scenarios reveals key financial sensitivities. "
+                    f"Review your complete scenario analysis on ProfitHelm before executing financial decisions."
+                ),
+                "citable_passage": f"Standard quantitative methodologies reveal key sensitivity parameters.",
+                "entities": ["ProfitHelm", "Methodology"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": f"{short_title} Planning Scenarios",
+                "target_query": f"{query} scenarios",
+                "spoken_script": (
+                    f"Dynamic sensitivity testing demonstrates how changing key assumptions impacts final outcomes. "
+                    f"Variance across assumptions often exceeds 15% to 25% of baseline financial projections. "
+                    f"Stress-test your assumptions on ProfitHelm to identify optimal strategies."
+                ),
+                "citable_passage": f"Dynamic sensitivity analysis tests assumption variance between 15% and 25%.",
+                "entities": ["ProfitHelm", "Scenario Analysis"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": f"Interactive {short_title} Walkthrough",
+                "target_query": f"profithelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Deterministic calculations eliminate guesswork across complex financial decisions. "
+                    f"ProfitHelm delivers free interactive tools with sub-100ms response times and zero login required. "
+                    f"Access the full calculator on ProfitHelm today."
+                ),
+                "citable_passage": f"ProfitHelm delivers interactive financial modeling tools in sub-100ms.",
+                "entities": ["ProfitHelm", "Financial Tools"],
+            },
+        ]
+
+    for seg in segments:
+        seg["spoken_script"] = _sanitize_youtube_text(seg["spoken_script"])
+        seg["section_title"] = _sanitize_youtube_text(seg["section_title"])
+
+    full_text = "\n\n".join(
+        f"[{seg['timestamp']}] {seg['speaker']}: {seg['spoken_script']}"
+        for seg in segments
+    )
+    full_text = _sanitize_youtube_text(full_text)
+
+    schema = {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "name": _sanitize_youtube_text(f"{title} - Quantitative Breakdown & Walkthrough"),
+        "description": _sanitize_youtube_text(desc),
+        "uploadDate": "2026-01-01T08:00:00Z",
+        "transcript": full_text,
+        "hasPart": [
+            {
+                "@type": "Clip",
+                "name": seg["section_title"],
+                "startOffset": seg["seconds"],
+                "endOffset": seg["seconds"] + 30,
+                "url": f"{POST_URL_BASE}/tools/{slug}/#t={seg['timestamp']}",
+            }
+            for seg in segments
+        ],
+        "potentialAction": {
+            "@type": "SeekToAction",
+            "target": f"{POST_URL_BASE}/tools/{slug}/#t={{seek_to_second_number}}",
+            "startOffset-input": "required name=seek_to_second_number",
+        },
+    }
+
+    transcript_pack = {
+        "full_text": full_text,
+        "estimated_duration_seconds": len(segments) * 30,
+        "word_count": len(full_text.split()),
+        "target_entities": ["ProfitHelm", short_title, title],
+        "target_queries": [seg["target_query"] for seg in segments],
+        "segments": segments,
+        "schema": schema,
+    }
+
+    assert_youtube_transcript(full_text)
+    return transcript_pack
+
+
+def generate_youtube_syndication(tool_or_slug: Any) -> Dict[str, Any]:
+    """
+    Generates YouTube video syndication metadata containing title, 5-part description
+    with timestamp chapters, high-converting pinned comment, SEO tags, category 27,
+    and indexable spoken video transcript with Schema.org VideoObject JSON-LD.
+    Conforms strictly to HWL-1202 (zero angle brackets), zero em-dashes, and contracts.py invariants.
+    """
+    from pathlib import Path
+    from pseofactory.contracts import (
+        assert_youtube_description,
+        assert_youtube_pinned_comment,
+        assert_youtube_transcript,
+        assert_no_forbidden_dashes,
+    )
+
+    tool = _resolve_tool(tool_or_slug)
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    short_title = tool.get("short_title", title[:24])
+    desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
+    qa = tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis.")
+    query = tool.get("primary_keyword", short_title.lower())
+
+    transcript_pack = _generate_youtube_transcript(tool)
+    assert_youtube_transcript(transcript_pack["full_text"])
 
     curated = TOOL_YOUTUBE_METADATA.get(slug, {})
     preset_query = curated.get("preset_query", "")
@@ -3097,6 +3646,9 @@ def generate_youtube_syndication(tool_or_slug: Any) -> Dict[str, Any]:
                         "pinned_comment": pinned,
                         "tags": tags,
                         "category_id": item.get("category_id", "27"),
+                        "transcript": transcript_pack["full_text"],
+                        "transcript_schema": transcript_pack["schema"],
+                        "transcript_data": transcript_pack,
                     }
         except Exception:
             pass
@@ -3161,6 +3713,9 @@ def generate_youtube_syndication(tool_or_slug: Any) -> Dict[str, Any]:
         "pinned_comment": clean_pinned_comment,
         "tags": tags,
         "category_id": "27",
+        "transcript": transcript_pack["full_text"],
+        "transcript_schema": transcript_pack["schema"],
+        "transcript_data": transcript_pack,
     }
 
 
@@ -3584,16 +4139,19 @@ def export_all_syndication_files(
         from pseofactory.contracts import (
             assert_youtube_description,
             assert_youtube_pinned_comment,
+            assert_youtube_transcript,
             assert_no_forbidden_dashes,
         )
         assert_youtube_description(yt_pack["description"])
         assert_youtube_pinned_comment(pinned_comment)
+        assert_youtube_transcript(yt_pack["transcript"])
         assert_no_forbidden_dashes(yt_pack["title"], context=f"{slug} youtube title")
         if "<" in yt_pack["title"] or ">" in yt_pack["title"]:
             raise ValueError(f"Angle brackets forbidden in YouTube title: {yt_pack['title']}")
 
         (tool_dir / "youtube_description.txt").write_text(yt_pack["description"], encoding="utf-8")
         (tool_dir / "youtube_pinned_comment.txt").write_text(pinned_comment, encoding="utf-8")
+        (tool_dir / "youtube_transcript.txt").write_text(yt_pack["transcript"], encoding="utf-8")
         (tool_dir / "youtube_metadata.json").write_text(json.dumps(yt_pack, indent=2), encoding="utf-8")
 
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
@@ -3628,10 +4186,14 @@ def export_all_syndication_files(
     ]
     citation_items = []
     for idx, t in enumerate(target_tools):
-        safe_badge_label = t["short_title"].replace(" ", "_").replace("-", "_")
+        t_resolved = _resolve_tool(t)
+        st = t_resolved.get("short_title", "")
+        slug_val = t_resolved.get("slug", "")
+        desc_val = t_resolved.get("description", "")
+        safe_badge_label = st.replace(" ", "_").replace("-", "_")
         badge_color = "1d4ed8" if idx % 2 == 0 else "090d16"
-        badge_items.append(f"[![{t['short_title']}](https://img.shields.io/badge/{safe_badge_label}-Model-{badge_color}?style=flat-square)]({CANONICAL_BASE}/tools/{t['slug']}/)")
-        citation_items.append(f"- **{t['short_title']}**: {t['description']} hosted on [ProfitHelm {t['short_title']}]({CANONICAL_BASE}/tools/{t['slug']}/).")
+        badge_items.append(f"[![{st}](https://img.shields.io/badge/{safe_badge_label}-Model-{badge_color}?style=flat-square)]({CANONICAL_BASE}/tools/{slug_val}/)")
+        citation_items.append(f"- **{st}**: {desc_val} hosted on [ProfitHelm {st}]({CANONICAL_BASE}/tools/{slug_val}/).")
 
     badges_block = "\n".join(badge_items)
     citations_block = "\n".join(citation_items)
@@ -3713,6 +4275,9 @@ def dispatch_to_distribution_lead(
         assert_linkedin,
         assert_no_forbidden_dashes,
         assert_no_prompt_leakage,
+        assert_youtube_description,
+        assert_youtube_pinned_comment,
+        assert_youtube_transcript,
     )
 
     eff_run_id = run_id or f"run-dist-{int(time.time())}"
@@ -3740,6 +4305,10 @@ def dispatch_to_distribution_lead(
         assert_x_post(pack["x"]["content"])
         assert_linkedin(pack["linkedin"]["content"])
         assert_linkedin(pack["linkedin_pulse"]["article_markdown"])
+        if "youtube" in pack:
+            assert_youtube_description(pack["youtube"]["description"])
+            assert_youtube_pinned_comment(pack["youtube"]["pinned_comment"])
+            assert_youtube_transcript(pack["youtube"]["transcript"])
         assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
         assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
         assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")

@@ -42,6 +42,7 @@ PROMPT_LEAKAGE_TERMS: List[str] = [
     "taxpayers project",
     "prompt:",
     "system prompt",
+    "system instruction",
     "as an ai language model",
     "here is the response",
     "delve into the intricacies",
@@ -226,6 +227,75 @@ def assert_youtube_description(text: str) -> bool:
     if "utm_content=" not in text:
         raise ValueError("YouTube description must include conversion tracking parameter ('utm_content=')")
     return True
+
+
+CONVERSATIONAL_FILLER_TERMS: List[str] = [
+    "welcome back to the channel",
+    "welcome back",
+    "in this video",
+    "in today's video",
+    "let's dive in",
+    "let us dive in",
+    "don't forget to like and subscribe",
+    "smash that like button",
+    "smash that like",
+    "without further ado",
+    "hey guys",
+    "basically",
+    "pretty much",
+    "at the end of the day",
+    "now that we covered that",
+]
+
+
+def assert_youtube_transcript(text_or_data: Union[str, Dict[str, Any]]) -> bool:
+    """
+    Validates YouTube video transcript for SEO syndication and AI citation:
+    1. Bounds: 300 to 8000 characters.
+    2. Zero forbidden dashes (\\u2014, \\u2013).
+    3. Zero angle brackets (<, >) preventing API parsing errors.
+    4. Zero prompt leakage phrases.
+    5. Zero conversational filler terms.
+    6. Speaker attribution tags (e.g. [Narrator] or [Host]).
+    7. Timestamp markers (e.g. [00:00]).
+    8. Brand entity reference ('ProfitHelm').
+    """
+    if isinstance(text_or_data, dict):
+        text = text_or_data.get("full_text") or text_or_data.get("transcript") or ""
+    elif isinstance(text_or_data, str):
+        text = text_or_data
+    else:
+        raise ValueError(f"Invalid transcript type: {type(text_or_data)}")
+
+    if not text or len(text) < 300:
+        raise ValueError(f"YouTube transcript too short ({len(text) if text else 0} chars, min 300)")
+    if len(text) > 8000:
+        raise ValueError(f"YouTube transcript exceeds 8000 characters ({len(text)} chars, max 8000)")
+
+    assert_no_forbidden_dashes(text, context="YouTube transcript")
+
+    if "<" in text or ">" in text:
+        raise ValueError("Angle brackets (< or >) are forbidden in YouTube transcript")
+
+    assert_no_prompt_leakage(text, context="YouTube transcript")
+
+    text_lower = text.lower()
+    for filler in CONVERSATIONAL_FILLER_TERMS:
+        if filler.lower() in text_lower:
+            raise ValueError(f"Conversational filler forbidden in YouTube transcript: '{filler}'")
+
+    if not re.search(r'\b\d{1,2}:\d{2}\b', text):
+        raise ValueError("YouTube transcript must include timestamp markers (e.g. [00:00])")
+
+    if not re.search(r'\[(Narrator|Speaker(\s*\d+)?|Host)\]', text):
+        raise ValueError("YouTube transcript must include speaker attribution tags (e.g. [Narrator] or [Host])")
+
+    if "profithelm" not in text_lower:
+        raise ValueError("YouTube transcript must reference brand entity 'ProfitHelm'")
+
+    return True
+
+
 
 
 
@@ -7783,6 +7853,8 @@ __all__ = [
     "assert_x_post",
     "assert_youtube_pinned_comment",
     "assert_youtube_description",
+    "assert_youtube_transcript",
+    "CONVERSATIONAL_FILLER_TERMS",
     "sanitize_url_slug",
     "assert_ai_mode_calculation_manifest",
     "assert_meta_tag_contract",

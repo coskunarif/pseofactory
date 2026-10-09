@@ -10,6 +10,8 @@ from pseofactory.contracts import (
     assert_no_prompt_leakage,
     assert_linkedin,
     assert_x_post,
+    assert_youtube_transcript,
+    CONVERSATIONAL_FILLER_TERMS,
     assert_ai_mode_calculation_manifest,
     assert_meta_tag_contract,
     sanitize_url_slug,
@@ -407,6 +409,7 @@ from pseofactory.distributor import (
     generate_ai_benchmark_nodes,
     generate_all_distribution_assets,
     export_all_syndication_files,
+    _generate_youtube_transcript,
 )
 
 from pseofactory.drift import (
@@ -571,6 +574,7 @@ __all__ = [
     "generate_ai_benchmark_nodes",
     "generate_all_distribution_assets",
     "export_all_syndication_files",
+    "_generate_youtube_transcript",
     "compute_engine_hash",
     "detect_engine_drift",
     "record_engine_hash",
@@ -580,6 +584,8 @@ __all__ = [
     "assert_no_prompt_leakage",
     "assert_linkedin",
     "assert_x_post",
+    "assert_youtube_transcript",
+    "CONVERSATIONAL_FILLER_TERMS",
     "assert_ai_mode_calculation_manifest",
     "assert_meta_tag_contract",
     "sanitize_url_slug",
