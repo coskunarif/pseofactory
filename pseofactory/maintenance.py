@@ -1842,6 +1842,8 @@ class MaintenanceLifecycle:
 
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
+            indexing_status_val = None
+            trend_status_val = None
 
             # 3. GitOps Commit Latch: stage, commit, merge, push, watch CI/CD, and verify edge
             if enable_gitops:
