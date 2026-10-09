@@ -1,0 +1,4428 @@
+{
+  "property_id": "profithelm",
+  "total_days": 480,
+  "metrics": [
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-09",
+      "clicks": 36,
+      "impressions": 800,
+      "ctr": 0.045,
+      "position": 35.0,
+      "recorded_at": "2025-05-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-10",
+      "clicks": 42,
+      "impressions": 945,
+      "ctr": 0.045,
+      "position": 34.65,
+      "recorded_at": "2025-05-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-11",
+      "clicks": 49,
+      "impressions": 1090,
+      "ctr": 0.045,
+      "position": 34.29,
+      "recorded_at": "2025-05-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-12",
+      "clicks": 55,
+      "impressions": 1231,
+      "ctr": 0.045,
+      "position": 33.94,
+      "recorded_at": "2025-05-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-13",
+      "clicks": 61,
+      "impressions": 1367,
+      "ctr": 0.045,
+      "position": 33.59,
+      "recorded_at": "2025-05-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-14",
+      "clicks": 67,
+      "impressions": 1498,
+      "ctr": 0.045,
+      "position": 33.23,
+      "recorded_at": "2025-05-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-15",
+      "clicks": 72,
+      "impressions": 1622,
+      "ctr": 0.045,
+      "position": 32.88,
+      "recorded_at": "2025-05-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-16",
+      "clicks": 78,
+      "impressions": 1739,
+      "ctr": 0.045,
+      "position": 32.52,
+      "recorded_at": "2025-05-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-17",
+      "clicks": 83,
+      "impressions": 1848,
+      "ctr": 0.045,
+      "position": 32.17,
+      "recorded_at": "2025-05-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-18",
+      "clicks": 87,
+      "impressions": 1949,
+      "ctr": 0.045,
+      "position": 31.82,
+      "recorded_at": "2025-05-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-19",
+      "clicks": 91,
+      "impressions": 2042,
+      "ctr": 0.045,
+      "position": 31.46,
+      "recorded_at": "2025-05-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-20",
+      "clicks": 95,
+      "impressions": 2128,
+      "ctr": 0.045,
+      "position": 31.11,
+      "recorded_at": "2025-05-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-21",
+      "clicks": 99,
+      "impressions": 2208,
+      "ctr": 0.045,
+      "position": 30.76,
+      "recorded_at": "2025-05-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-22",
+      "clicks": 102,
+      "impressions": 2282,
+      "ctr": 0.045,
+      "position": 30.4,
+      "recorded_at": "2025-05-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-23",
+      "clicks": 105,
+      "impressions": 2352,
+      "ctr": 0.045,
+      "position": 30.05,
+      "recorded_at": "2025-05-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-24",
+      "clicks": 108,
+      "impressions": 2419,
+      "ctr": 0.045,
+      "position": 29.7,
+      "recorded_at": "2025-05-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-25",
+      "clicks": 111,
+      "impressions": 2485,
+      "ctr": 0.045,
+      "position": 29.34,
+      "recorded_at": "2025-05-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-26",
+      "clicks": 114,
+      "impressions": 2552,
+      "ctr": 0.045,
+      "position": 28.99,
+      "recorded_at": "2025-05-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-27",
+      "clicks": 117,
+      "impressions": 2621,
+      "ctr": 0.045,
+      "position": 28.63,
+      "recorded_at": "2025-05-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-28",
+      "clicks": 121,
+      "impressions": 2693,
+      "ctr": 0.045,
+      "position": 28.28,
+      "recorded_at": "2025-05-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-29",
+      "clicks": 124,
+      "impressions": 2770,
+      "ctr": 0.045,
+      "position": 27.93,
+      "recorded_at": "2025-05-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-30",
+      "clicks": 128,
+      "impressions": 2853,
+      "ctr": 0.045,
+      "position": 27.57,
+      "recorded_at": "2025-05-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-05-31",
+      "clicks": 132,
+      "impressions": 2943,
+      "ctr": 0.045,
+      "position": 27.22,
+      "recorded_at": "2025-05-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-01",
+      "clicks": 136,
+      "impressions": 3041,
+      "ctr": 0.045,
+      "position": 26.87,
+      "recorded_at": "2025-06-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-02",
+      "clicks": 141,
+      "impressions": 3147,
+      "ctr": 0.045,
+      "position": 26.51,
+      "recorded_at": "2025-06-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-03",
+      "clicks": 146,
+      "impressions": 3260,
+      "ctr": 0.045,
+      "position": 26.16,
+      "recorded_at": "2025-06-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-04",
+      "clicks": 152,
+      "impressions": 3381,
+      "ctr": 0.045,
+      "position": 25.8,
+      "recorded_at": "2025-06-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-05",
+      "clicks": 157,
+      "impressions": 3510,
+      "ctr": 0.045,
+      "position": 25.45,
+      "recorded_at": "2025-06-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-06",
+      "clicks": 163,
+      "impressions": 3644,
+      "ctr": 0.045,
+      "position": 25.1,
+      "recorded_at": "2025-06-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-07",
+      "clicks": 170,
+      "impressions": 3783,
+      "ctr": 0.045,
+      "position": 24.74,
+      "recorded_at": "2025-06-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-08",
+      "clicks": 176,
+      "impressions": 3927,
+      "ctr": 0.045,
+      "position": 24.39,
+      "recorded_at": "2025-06-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-09",
+      "clicks": 183,
+      "impressions": 4072,
+      "ctr": 0.045,
+      "position": 24.04,
+      "recorded_at": "2025-06-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-10",
+      "clicks": 189,
+      "impressions": 4218,
+      "ctr": 0.045,
+      "position": 23.68,
+      "recorded_at": "2025-06-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-11",
+      "clicks": 196,
+      "impressions": 4363,
+      "ctr": 0.045,
+      "position": 23.33,
+      "recorded_at": "2025-06-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-12",
+      "clicks": 202,
+      "impressions": 4506,
+      "ctr": 0.045,
+      "position": 22.98,
+      "recorded_at": "2025-06-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-13",
+      "clicks": 208,
+      "impressions": 4644,
+      "ctr": 0.045,
+      "position": 22.62,
+      "recorded_at": "2025-06-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-14",
+      "clicks": 215,
+      "impressions": 4778,
+      "ctr": 0.045,
+      "position": 22.27,
+      "recorded_at": "2025-06-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-15",
+      "clicks": 220,
+      "impressions": 4905,
+      "ctr": 0.045,
+      "position": 21.91,
+      "recorded_at": "2025-06-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-16",
+      "clicks": 226,
+      "impressions": 5025,
+      "ctr": 0.045,
+      "position": 21.56,
+      "recorded_at": "2025-06-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-17",
+      "clicks": 231,
+      "impressions": 5137,
+      "ctr": 0.045,
+      "position": 21.21,
+      "recorded_at": "2025-06-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-18",
+      "clicks": 235,
+      "impressions": 5241,
+      "ctr": 0.045,
+      "position": 20.85,
+      "recorded_at": "2025-06-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-19",
+      "clicks": 240,
+      "impressions": 5338,
+      "ctr": 0.045,
+      "position": 20.5,
+      "recorded_at": "2025-06-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-20",
+      "clicks": 244,
+      "impressions": 5427,
+      "ctr": 0.045,
+      "position": 20.15,
+      "recorded_at": "2025-06-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-21",
+      "clicks": 247,
+      "impressions": 5509,
+      "ctr": 0.045,
+      "position": 19.79,
+      "recorded_at": "2025-06-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-22",
+      "clicks": 251,
+      "impressions": 5585,
+      "ctr": 0.045,
+      "position": 19.44,
+      "recorded_at": "2025-06-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-23",
+      "clicks": 254,
+      "impressions": 5656,
+      "ctr": 0.045,
+      "position": 19.09,
+      "recorded_at": "2025-06-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-24",
+      "clicks": 257,
+      "impressions": 5725,
+      "ctr": 0.045,
+      "position": 18.73,
+      "recorded_at": "2025-06-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-25",
+      "clicks": 260,
+      "impressions": 5791,
+      "ctr": 0.045,
+      "position": 18.38,
+      "recorded_at": "2025-06-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-26",
+      "clicks": 263,
+      "impressions": 5857,
+      "ctr": 0.045,
+      "position": 18.02,
+      "recorded_at": "2025-06-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-27",
+      "clicks": 266,
+      "impressions": 5925,
+      "ctr": 0.045,
+      "position": 17.67,
+      "recorded_at": "2025-06-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-28",
+      "clicks": 269,
+      "impressions": 5996,
+      "ctr": 0.045,
+      "position": 17.32,
+      "recorded_at": "2025-06-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-29",
+      "clicks": 273,
+      "impressions": 6071,
+      "ctr": 0.045,
+      "position": 16.96,
+      "recorded_at": "2025-06-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-06-30",
+      "clicks": 276,
+      "impressions": 6151,
+      "ctr": 0.045,
+      "position": 16.61,
+      "recorded_at": "2025-06-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-01",
+      "clicks": 280,
+      "impressions": 6238,
+      "ctr": 0.045,
+      "position": 16.26,
+      "recorded_at": "2025-07-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-02",
+      "clicks": 284,
+      "impressions": 6333,
+      "ctr": 0.045,
+      "position": 15.9,
+      "recorded_at": "2025-07-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-03",
+      "clicks": 289,
+      "impressions": 6435,
+      "ctr": 0.045,
+      "position": 15.55,
+      "recorded_at": "2025-07-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-04",
+      "clicks": 294,
+      "impressions": 6545,
+      "ctr": 0.045,
+      "position": 15.2,
+      "recorded_at": "2025-07-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-05",
+      "clicks": 299,
+      "impressions": 6663,
+      "ctr": 0.045,
+      "position": 14.84,
+      "recorded_at": "2025-07-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-06",
+      "clicks": 305,
+      "impressions": 6789,
+      "ctr": 0.045,
+      "position": 14.49,
+      "recorded_at": "2025-07-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-07",
+      "clicks": 311,
+      "impressions": 6921,
+      "ctr": 0.045,
+      "position": 14.13,
+      "recorded_at": "2025-07-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-08",
+      "clicks": 317,
+      "impressions": 7058,
+      "ctr": 0.045,
+      "position": 13.78,
+      "recorded_at": "2025-07-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-09",
+      "clicks": 324,
+      "impressions": 7200,
+      "ctr": 0.045,
+      "position": 13.43,
+      "recorded_at": "2025-07-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-10",
+      "clicks": 330,
+      "impressions": 7344,
+      "ctr": 0.045,
+      "position": 13.07,
+      "recorded_at": "2025-07-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-11",
+      "clicks": 337,
+      "impressions": 7490,
+      "ctr": 0.045,
+      "position": 12.72,
+      "recorded_at": "2025-07-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-12",
+      "clicks": 343,
+      "impressions": 7636,
+      "ctr": 0.045,
+      "position": 12.37,
+      "recorded_at": "2025-07-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-13",
+      "clicks": 350,
+      "impressions": 7780,
+      "ctr": 0.045,
+      "position": 12.01,
+      "recorded_at": "2025-07-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-14",
+      "clicks": 356,
+      "impressions": 7920,
+      "ctr": 0.045,
+      "position": 11.66,
+      "recorded_at": "2025-07-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-15",
+      "clicks": 362,
+      "impressions": 8056,
+      "ctr": 0.045,
+      "position": 11.3,
+      "recorded_at": "2025-07-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-16",
+      "clicks": 368,
+      "impressions": 8186,
+      "ctr": 0.045,
+      "position": 10.95,
+      "recorded_at": "2025-07-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-17",
+      "clicks": 373,
+      "impressions": 8309,
+      "ctr": 0.045,
+      "position": 10.6,
+      "recorded_at": "2025-07-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-18",
+      "clicks": 379,
+      "impressions": 8424,
+      "ctr": 0.045,
+      "position": 10.24,
+      "recorded_at": "2025-07-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-19",
+      "clicks": 383,
+      "impressions": 8532,
+      "ctr": 0.045,
+      "position": 9.89,
+      "recorded_at": "2025-07-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-20",
+      "clicks": 388,
+      "impressions": 8632,
+      "ctr": 0.045,
+      "position": 9.54,
+      "recorded_at": "2025-07-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-21",
+      "clicks": 392,
+      "impressions": 8724,
+      "ctr": 0.045,
+      "position": 9.18,
+      "recorded_at": "2025-07-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-22",
+      "clicks": 396,
+      "impressions": 8808,
+      "ctr": 0.045,
+      "position": 8.83,
+      "recorded_at": "2025-07-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-23",
+      "clicks": 399,
+      "impressions": 8887,
+      "ctr": 0.045,
+      "position": 8.48,
+      "recorded_at": "2025-07-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-24",
+      "clicks": 403,
+      "impressions": 8960,
+      "ctr": 0.045,
+      "position": 8.12,
+      "recorded_at": "2025-07-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-25",
+      "clicks": 406,
+      "impressions": 9030,
+      "ctr": 0.045,
+      "position": 7.77,
+      "recorded_at": "2025-07-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-26",
+      "clicks": 409,
+      "impressions": 9097,
+      "ctr": 0.045,
+      "position": 7.41,
+      "recorded_at": "2025-07-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-27",
+      "clicks": 412,
+      "impressions": 9163,
+      "ctr": 0.045,
+      "position": 7.06,
+      "recorded_at": "2025-07-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-28",
+      "clicks": 415,
+      "impressions": 9230,
+      "ctr": 0.045,
+      "position": 6.71,
+      "recorded_at": "2025-07-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-29",
+      "clicks": 418,
+      "impressions": 9299,
+      "ctr": 0.045,
+      "position": 6.35,
+      "recorded_at": "2025-07-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-30",
+      "clicks": 421,
+      "impressions": 9372,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-07-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-07-31",
+      "clicks": 420,
+      "impressions": 9344,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-07-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-01",
+      "clicks": 419,
+      "impressions": 9322,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-02",
+      "clicks": 418,
+      "impressions": 9307,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-03",
+      "clicks": 418,
+      "impressions": 9300,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-04",
+      "clicks": 418,
+      "impressions": 9301,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-05",
+      "clicks": 418,
+      "impressions": 9310,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-06",
+      "clicks": 419,
+      "impressions": 9326,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-07",
+      "clicks": 420,
+      "impressions": 9349,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-08",
+      "clicks": 422,
+      "impressions": 9379,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-09",
+      "clicks": 423,
+      "impressions": 9413,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-10",
+      "clicks": 425,
+      "impressions": 9450,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-11",
+      "clicks": 427,
+      "impressions": 9490,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-12",
+      "clicks": 428,
+      "impressions": 9529,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-13",
+      "clicks": 430,
+      "impressions": 9568,
+      "ctr": 0.045,
+      "position": 6.0,
+      "recorded_at": "2025-08-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-14",
+      "clicks": 212,
+      "impressions": 8500,
+      "ctr": 0.025,
+      "position": 8.0,
+      "recorded_at": "2025-08-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-15",
+      "clicks": 253,
+      "impressions": 10128,
+      "ctr": 0.025,
+      "position": 9.5,
+      "recorded_at": "2025-08-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-16",
+      "clicks": 174,
+      "impressions": 6977,
+      "ctr": 0.025,
+      "position": 11.0,
+      "recorded_at": "2025-08-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-17",
+      "clicks": 149,
+      "impressions": 5998,
+      "ctr": 0.025,
+      "position": 12.5,
+      "recorded_at": "2025-08-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-18",
+      "clicks": 220,
+      "impressions": 8812,
+      "ctr": 0.025,
+      "position": 14.0,
+      "recorded_at": "2025-08-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-19",
+      "clicks": 193,
+      "impressions": 7730,
+      "ctr": 0.025,
+      "position": 15.5,
+      "recorded_at": "2025-08-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-20",
+      "clicks": 115,
+      "impressions": 4625,
+      "ctr": 0.025,
+      "position": 17.0,
+      "recorded_at": "2025-08-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-21",
+      "clicks": 158,
+      "impressions": 6335,
+      "ctr": 0.025,
+      "position": 18.5,
+      "recorded_at": "2025-08-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-22",
+      "clicks": 197,
+      "impressions": 7881,
+      "ctr": 0.025,
+      "position": 20.0,
+      "recorded_at": "2025-08-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-23",
+      "clicks": 117,
+      "impressions": 4686,
+      "ctr": 0.025,
+      "position": 21.5,
+      "recorded_at": "2025-08-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-24",
+      "clicks": 95,
+      "impressions": 3810,
+      "ctr": 0.025,
+      "position": 23.0,
+      "recorded_at": "2025-08-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-25",
+      "clicks": 165,
+      "impressions": 6621,
+      "ctr": 0.025,
+      "position": 24.5,
+      "recorded_at": "2025-08-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-26",
+      "clicks": 135,
+      "impressions": 5437,
+      "ctr": 0.025,
+      "position": 26.0,
+      "recorded_at": "2025-08-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-27",
+      "clicks": 59,
+      "impressions": 2382,
+      "ctr": 0.025,
+      "position": 27.5,
+      "recorded_at": "2025-08-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-28",
+      "clicks": 104,
+      "impressions": 4171,
+      "ctr": 0.025,
+      "position": 29.0,
+      "recorded_at": "2025-08-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-29",
+      "clicks": 140,
+      "impressions": 5631,
+      "ctr": 0.025,
+      "position": 30.5,
+      "recorded_at": "2025-08-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-30",
+      "clicks": 59,
+      "impressions": 2396,
+      "ctr": 0.025,
+      "position": 32.0,
+      "recorded_at": "2025-08-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-08-31",
+      "clicks": 40,
+      "impressions": 1624,
+      "ctr": 0.025,
+      "position": 33.5,
+      "recorded_at": "2025-08-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-01",
+      "clicks": 110,
+      "impressions": 4428,
+      "ctr": 0.025,
+      "position": 35.0,
+      "recorded_at": "2025-09-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-02",
+      "clicks": 78,
+      "impressions": 3143,
+      "ctr": 0.025,
+      "position": 36.5,
+      "recorded_at": "2025-09-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-03",
+      "clicks": 28,
+      "impressions": 1894,
+      "ctr": 0.015,
+      "position": 38.47,
+      "recorded_at": "2025-09-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-04",
+      "clicks": 29,
+      "impressions": 1934,
+      "ctr": 0.015,
+      "position": 38.39,
+      "recorded_at": "2025-09-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-05",
+      "clicks": 29,
+      "impressions": 1967,
+      "ctr": 0.015,
+      "position": 38.25,
+      "recorded_at": "2025-09-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-06",
+      "clicks": 29,
+      "impressions": 1989,
+      "ctr": 0.015,
+      "position": 38.06,
+      "recorded_at": "2025-09-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-07",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.83,
+      "recorded_at": "2025-09-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-08",
+      "clicks": 29,
+      "impressions": 1996,
+      "ctr": 0.015,
+      "position": 37.55,
+      "recorded_at": "2025-09-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-09",
+      "clicks": 29,
+      "impressions": 1979,
+      "ctr": 0.015,
+      "position": 37.24,
+      "recorded_at": "2025-09-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-10",
+      "clicks": 29,
+      "impressions": 1951,
+      "ctr": 0.015,
+      "position": 36.91,
+      "recorded_at": "2025-09-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-11",
+      "clicks": 28,
+      "impressions": 1914,
+      "ctr": 0.015,
+      "position": 36.55,
+      "recorded_at": "2025-09-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-12",
+      "clicks": 28,
+      "impressions": 1871,
+      "ctr": 0.015,
+      "position": 36.18,
+      "recorded_at": "2025-09-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-13",
+      "clicks": 27,
+      "impressions": 1826,
+      "ctr": 0.015,
+      "position": 35.8,
+      "recorded_at": "2025-09-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-14",
+      "clicks": 26,
+      "impressions": 1783,
+      "ctr": 0.015,
+      "position": 35.43,
+      "recorded_at": "2025-09-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-15",
+      "clicks": 26,
+      "impressions": 1746,
+      "ctr": 0.015,
+      "position": 35.07,
+      "recorded_at": "2025-09-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-16",
+      "clicks": 25,
+      "impressions": 1719,
+      "ctr": 0.015,
+      "position": 34.74,
+      "recorded_at": "2025-09-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-17",
+      "clicks": 25,
+      "impressions": 1703,
+      "ctr": 0.015,
+      "position": 34.43,
+      "recorded_at": "2025-09-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-18",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.16,
+      "recorded_at": "2025-09-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-19",
+      "clicks": 25,
+      "impressions": 1711,
+      "ctr": 0.015,
+      "position": 33.92,
+      "recorded_at": "2025-09-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-20",
+      "clicks": 26,
+      "impressions": 1734,
+      "ctr": 0.015,
+      "position": 33.74,
+      "recorded_at": "2025-09-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-21",
+      "clicks": 26,
+      "impressions": 1767,
+      "ctr": 0.015,
+      "position": 33.61,
+      "recorded_at": "2025-09-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-22",
+      "clicks": 27,
+      "impressions": 1808,
+      "ctr": 0.015,
+      "position": 33.53,
+      "recorded_at": "2025-09-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-23",
+      "clicks": 27,
+      "impressions": 1852,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2025-09-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-24",
+      "clicks": 28,
+      "impressions": 1896,
+      "ctr": 0.015,
+      "position": 33.53,
+      "recorded_at": "2025-09-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-25",
+      "clicks": 29,
+      "impressions": 1936,
+      "ctr": 0.015,
+      "position": 33.62,
+      "recorded_at": "2025-09-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-26",
+      "clicks": 29,
+      "impressions": 1969,
+      "ctr": 0.015,
+      "position": 33.76,
+      "recorded_at": "2025-09-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-27",
+      "clicks": 29,
+      "impressions": 1990,
+      "ctr": 0.015,
+      "position": 33.95,
+      "recorded_at": "2025-09-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-28",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.19,
+      "recorded_at": "2025-09-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-29",
+      "clicks": 29,
+      "impressions": 1995,
+      "ctr": 0.015,
+      "position": 34.46,
+      "recorded_at": "2025-09-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-09-30",
+      "clicks": 29,
+      "impressions": 1978,
+      "ctr": 0.015,
+      "position": 34.77,
+      "recorded_at": "2025-09-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-01",
+      "clicks": 29,
+      "impressions": 1949,
+      "ctr": 0.015,
+      "position": 35.11,
+      "recorded_at": "2025-10-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-02",
+      "clicks": 28,
+      "impressions": 1911,
+      "ctr": 0.015,
+      "position": 35.47,
+      "recorded_at": "2025-10-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-03",
+      "clicks": 28,
+      "impressions": 1868,
+      "ctr": 0.015,
+      "position": 35.84,
+      "recorded_at": "2025-10-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-04",
+      "clicks": 27,
+      "impressions": 1823,
+      "ctr": 0.015,
+      "position": 36.22,
+      "recorded_at": "2025-10-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-05",
+      "clicks": 26,
+      "impressions": 1781,
+      "ctr": 0.015,
+      "position": 36.59,
+      "recorded_at": "2025-10-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-06",
+      "clicks": 26,
+      "impressions": 1745,
+      "ctr": 0.015,
+      "position": 36.94,
+      "recorded_at": "2025-10-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-07",
+      "clicks": 25,
+      "impressions": 1718,
+      "ctr": 0.015,
+      "position": 37.28,
+      "recorded_at": "2025-10-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-08",
+      "clicks": 25,
+      "impressions": 1702,
+      "ctr": 0.015,
+      "position": 37.59,
+      "recorded_at": "2025-10-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-09",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 37.86,
+      "recorded_at": "2025-10-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-10",
+      "clicks": 25,
+      "impressions": 1712,
+      "ctr": 0.015,
+      "position": 38.09,
+      "recorded_at": "2025-10-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-11",
+      "clicks": 26,
+      "impressions": 1735,
+      "ctr": 0.015,
+      "position": 38.27,
+      "recorded_at": "2025-10-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-12",
+      "clicks": 26,
+      "impressions": 1769,
+      "ctr": 0.015,
+      "position": 38.4,
+      "recorded_at": "2025-10-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-13",
+      "clicks": 27,
+      "impressions": 1810,
+      "ctr": 0.015,
+      "position": 38.48,
+      "recorded_at": "2025-10-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-14",
+      "clicks": 27,
+      "impressions": 1855,
+      "ctr": 0.015,
+      "position": 38.5,
+      "recorded_at": "2025-10-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-15",
+      "clicks": 28,
+      "impressions": 1899,
+      "ctr": 0.015,
+      "position": 38.47,
+      "recorded_at": "2025-10-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-16",
+      "clicks": 29,
+      "impressions": 1938,
+      "ctr": 0.015,
+      "position": 38.38,
+      "recorded_at": "2025-10-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-17",
+      "clicks": 29,
+      "impressions": 1970,
+      "ctr": 0.015,
+      "position": 38.23,
+      "recorded_at": "2025-10-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-18",
+      "clicks": 29,
+      "impressions": 1991,
+      "ctr": 0.015,
+      "position": 38.04,
+      "recorded_at": "2025-10-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-19",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.8,
+      "recorded_at": "2025-10-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-20",
+      "clicks": 29,
+      "impressions": 1994,
+      "ctr": 0.015,
+      "position": 37.52,
+      "recorded_at": "2025-10-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-21",
+      "clicks": 29,
+      "impressions": 1976,
+      "ctr": 0.015,
+      "position": 37.21,
+      "recorded_at": "2025-10-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-22",
+      "clicks": 29,
+      "impressions": 1947,
+      "ctr": 0.015,
+      "position": 36.87,
+      "recorded_at": "2025-10-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-23",
+      "clicks": 28,
+      "impressions": 1909,
+      "ctr": 0.015,
+      "position": 36.51,
+      "recorded_at": "2025-10-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-24",
+      "clicks": 27,
+      "impressions": 1866,
+      "ctr": 0.015,
+      "position": 36.13,
+      "recorded_at": "2025-10-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-25",
+      "clicks": 27,
+      "impressions": 1821,
+      "ctr": 0.015,
+      "position": 35.76,
+      "recorded_at": "2025-10-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-26",
+      "clicks": 26,
+      "impressions": 1779,
+      "ctr": 0.015,
+      "position": 35.39,
+      "recorded_at": "2025-10-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-27",
+      "clicks": 26,
+      "impressions": 1743,
+      "ctr": 0.015,
+      "position": 35.04,
+      "recorded_at": "2025-10-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-28",
+      "clicks": 25,
+      "impressions": 1716,
+      "ctr": 0.015,
+      "position": 34.7,
+      "recorded_at": "2025-10-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-29",
+      "clicks": 25,
+      "impressions": 1702,
+      "ctr": 0.015,
+      "position": 34.4,
+      "recorded_at": "2025-10-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-30",
+      "clicks": 25,
+      "impressions": 1701,
+      "ctr": 0.015,
+      "position": 34.13,
+      "recorded_at": "2025-10-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-10-31",
+      "clicks": 25,
+      "impressions": 1713,
+      "ctr": 0.015,
+      "position": 33.9,
+      "recorded_at": "2025-10-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-01",
+      "clicks": 26,
+      "impressions": 1737,
+      "ctr": 0.015,
+      "position": 33.72,
+      "recorded_at": "2025-11-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-02",
+      "clicks": 26,
+      "impressions": 1771,
+      "ctr": 0.015,
+      "position": 33.59,
+      "recorded_at": "2025-11-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-03",
+      "clicks": 27,
+      "impressions": 1812,
+      "ctr": 0.015,
+      "position": 33.52,
+      "recorded_at": "2025-11-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-04",
+      "clicks": 27,
+      "impressions": 1857,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2025-11-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-05",
+      "clicks": 28,
+      "impressions": 1901,
+      "ctr": 0.015,
+      "position": 33.54,
+      "recorded_at": "2025-11-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-06",
+      "clicks": 29,
+      "impressions": 1940,
+      "ctr": 0.015,
+      "position": 33.63,
+      "recorded_at": "2025-11-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-07",
+      "clicks": 29,
+      "impressions": 1972,
+      "ctr": 0.015,
+      "position": 33.78,
+      "recorded_at": "2025-11-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-08",
+      "clicks": 29,
+      "impressions": 1992,
+      "ctr": 0.015,
+      "position": 33.97,
+      "recorded_at": "2025-11-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-09",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.21,
+      "recorded_at": "2025-11-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-10",
+      "clicks": 29,
+      "impressions": 1994,
+      "ctr": 0.015,
+      "position": 34.5,
+      "recorded_at": "2025-11-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-11",
+      "clicks": 29,
+      "impressions": 1975,
+      "ctr": 0.015,
+      "position": 34.81,
+      "recorded_at": "2025-11-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-12",
+      "clicks": 29,
+      "impressions": 1945,
+      "ctr": 0.015,
+      "position": 35.15,
+      "recorded_at": "2025-11-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-13",
+      "clicks": 28,
+      "impressions": 1907,
+      "ctr": 0.015,
+      "position": 35.51,
+      "recorded_at": "2025-11-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-14",
+      "clicks": 27,
+      "impressions": 1863,
+      "ctr": 0.015,
+      "position": 35.89,
+      "recorded_at": "2025-11-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-15",
+      "clicks": 27,
+      "impressions": 1818,
+      "ctr": 0.015,
+      "position": 36.26,
+      "recorded_at": "2025-11-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-16",
+      "clicks": 26,
+      "impressions": 1776,
+      "ctr": 0.015,
+      "position": 36.63,
+      "recorded_at": "2025-11-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-17",
+      "clicks": 26,
+      "impressions": 1741,
+      "ctr": 0.015,
+      "position": 36.98,
+      "recorded_at": "2025-11-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-18",
+      "clicks": 25,
+      "impressions": 1715,
+      "ctr": 0.015,
+      "position": 37.32,
+      "recorded_at": "2025-11-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-19",
+      "clicks": 25,
+      "impressions": 1701,
+      "ctr": 0.015,
+      "position": 37.62,
+      "recorded_at": "2025-11-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-20",
+      "clicks": 25,
+      "impressions": 1701,
+      "ctr": 0.015,
+      "position": 37.89,
+      "recorded_at": "2025-11-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-21",
+      "clicks": 25,
+      "impressions": 1714,
+      "ctr": 0.015,
+      "position": 38.11,
+      "recorded_at": "2025-11-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-22",
+      "clicks": 26,
+      "impressions": 1739,
+      "ctr": 0.015,
+      "position": 38.29,
+      "recorded_at": "2025-11-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-23",
+      "clicks": 26,
+      "impressions": 1773,
+      "ctr": 0.015,
+      "position": 38.41,
+      "recorded_at": "2025-11-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-24",
+      "clicks": 27,
+      "impressions": 1815,
+      "ctr": 0.015,
+      "position": 38.48,
+      "recorded_at": "2025-11-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-25",
+      "clicks": 27,
+      "impressions": 1860,
+      "ctr": 0.015,
+      "position": 38.5,
+      "recorded_at": "2025-11-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-26",
+      "clicks": 28,
+      "impressions": 1903,
+      "ctr": 0.015,
+      "position": 38.46,
+      "recorded_at": "2025-11-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-27",
+      "clicks": 29,
+      "impressions": 1942,
+      "ctr": 0.015,
+      "position": 38.36,
+      "recorded_at": "2025-11-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-28",
+      "clicks": 29,
+      "impressions": 1973,
+      "ctr": 0.015,
+      "position": 38.21,
+      "recorded_at": "2025-11-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-29",
+      "clicks": 29,
+      "impressions": 1993,
+      "ctr": 0.015,
+      "position": 38.01,
+      "recorded_at": "2025-11-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-11-30",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.77,
+      "recorded_at": "2025-11-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-01",
+      "clicks": 29,
+      "impressions": 1993,
+      "ctr": 0.015,
+      "position": 37.49,
+      "recorded_at": "2025-12-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-02",
+      "clicks": 29,
+      "impressions": 1974,
+      "ctr": 0.015,
+      "position": 37.17,
+      "recorded_at": "2025-12-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-03",
+      "clicks": 29,
+      "impressions": 1943,
+      "ctr": 0.015,
+      "position": 36.83,
+      "recorded_at": "2025-12-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-04",
+      "clicks": 28,
+      "impressions": 1904,
+      "ctr": 0.015,
+      "position": 36.47,
+      "recorded_at": "2025-12-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-05",
+      "clicks": 27,
+      "impressions": 1861,
+      "ctr": 0.015,
+      "position": 36.09,
+      "recorded_at": "2025-12-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-06",
+      "clicks": 27,
+      "impressions": 1816,
+      "ctr": 0.015,
+      "position": 35.72,
+      "recorded_at": "2025-12-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-07",
+      "clicks": 26,
+      "impressions": 1774,
+      "ctr": 0.015,
+      "position": 35.35,
+      "recorded_at": "2025-12-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-08",
+      "clicks": 26,
+      "impressions": 1739,
+      "ctr": 0.015,
+      "position": 35.0,
+      "recorded_at": "2025-12-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-09",
+      "clicks": 25,
+      "impressions": 1714,
+      "ctr": 0.015,
+      "position": 34.67,
+      "recorded_at": "2025-12-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-10",
+      "clicks": 25,
+      "impressions": 1701,
+      "ctr": 0.015,
+      "position": 34.37,
+      "recorded_at": "2025-12-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-11",
+      "clicks": 25,
+      "impressions": 1701,
+      "ctr": 0.015,
+      "position": 34.1,
+      "recorded_at": "2025-12-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-12",
+      "clicks": 25,
+      "impressions": 1715,
+      "ctr": 0.015,
+      "position": 33.88,
+      "recorded_at": "2025-12-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-13",
+      "clicks": 26,
+      "impressions": 1740,
+      "ctr": 0.015,
+      "position": 33.71,
+      "recorded_at": "2025-12-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-14",
+      "clicks": 26,
+      "impressions": 1775,
+      "ctr": 0.015,
+      "position": 33.58,
+      "recorded_at": "2025-12-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-15",
+      "clicks": 27,
+      "impressions": 1817,
+      "ctr": 0.015,
+      "position": 33.51,
+      "recorded_at": "2025-12-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-16",
+      "clicks": 27,
+      "impressions": 1862,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2025-12-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-17",
+      "clicks": 28,
+      "impressions": 1906,
+      "ctr": 0.015,
+      "position": 33.55,
+      "recorded_at": "2025-12-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-18",
+      "clicks": 29,
+      "impressions": 1944,
+      "ctr": 0.015,
+      "position": 33.64,
+      "recorded_at": "2025-12-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-19",
+      "clicks": 29,
+      "impressions": 1974,
+      "ctr": 0.015,
+      "position": 33.8,
+      "recorded_at": "2025-12-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-20",
+      "clicks": 29,
+      "impressions": 1993,
+      "ctr": 0.015,
+      "position": 34.0,
+      "recorded_at": "2025-12-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-21",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.24,
+      "recorded_at": "2025-12-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-22",
+      "clicks": 29,
+      "impressions": 1992,
+      "ctr": 0.015,
+      "position": 34.53,
+      "recorded_at": "2025-12-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-23",
+      "clicks": 29,
+      "impressions": 1972,
+      "ctr": 0.015,
+      "position": 34.85,
+      "recorded_at": "2025-12-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-24",
+      "clicks": 29,
+      "impressions": 1941,
+      "ctr": 0.015,
+      "position": 35.19,
+      "recorded_at": "2025-12-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-25",
+      "clicks": 28,
+      "impressions": 1902,
+      "ctr": 0.015,
+      "position": 35.56,
+      "recorded_at": "2025-12-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-26",
+      "clicks": 27,
+      "impressions": 1858,
+      "ctr": 0.015,
+      "position": 35.93,
+      "recorded_at": "2025-12-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-27",
+      "clicks": 27,
+      "impressions": 1813,
+      "ctr": 0.015,
+      "position": 36.3,
+      "recorded_at": "2025-12-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-28",
+      "clicks": 26,
+      "impressions": 1772,
+      "ctr": 0.015,
+      "position": 36.67,
+      "recorded_at": "2025-12-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-29",
+      "clicks": 26,
+      "impressions": 1738,
+      "ctr": 0.015,
+      "position": 37.02,
+      "recorded_at": "2025-12-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-30",
+      "clicks": 25,
+      "impressions": 1713,
+      "ctr": 0.015,
+      "position": 37.35,
+      "recorded_at": "2025-12-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2025-12-31",
+      "clicks": 25,
+      "impressions": 1701,
+      "ctr": 0.015,
+      "position": 37.65,
+      "recorded_at": "2025-12-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-01",
+      "clicks": 25,
+      "impressions": 1702,
+      "ctr": 0.015,
+      "position": 37.91,
+      "recorded_at": "2026-01-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-02",
+      "clicks": 25,
+      "impressions": 1716,
+      "ctr": 0.015,
+      "position": 38.13,
+      "recorded_at": "2026-01-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-03",
+      "clicks": 26,
+      "impressions": 1742,
+      "ctr": 0.015,
+      "position": 38.3,
+      "recorded_at": "2026-01-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-04",
+      "clicks": 26,
+      "impressions": 1778,
+      "ctr": 0.015,
+      "position": 38.42,
+      "recorded_at": "2026-01-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-05",
+      "clicks": 27,
+      "impressions": 1820,
+      "ctr": 0.015,
+      "position": 38.49,
+      "recorded_at": "2026-01-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-06",
+      "clicks": 27,
+      "impressions": 1865,
+      "ctr": 0.015,
+      "position": 38.5,
+      "recorded_at": "2026-01-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-07",
+      "clicks": 28,
+      "impressions": 1908,
+      "ctr": 0.015,
+      "position": 38.45,
+      "recorded_at": "2026-01-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-08",
+      "clicks": 29,
+      "impressions": 1946,
+      "ctr": 0.015,
+      "position": 38.35,
+      "recorded_at": "2026-01-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-09",
+      "clicks": 29,
+      "impressions": 1976,
+      "ctr": 0.015,
+      "position": 38.19,
+      "recorded_at": "2026-01-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-10",
+      "clicks": 29,
+      "impressions": 1994,
+      "ctr": 0.015,
+      "position": 37.99,
+      "recorded_at": "2026-01-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-11",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.74,
+      "recorded_at": "2026-01-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-12",
+      "clicks": 29,
+      "impressions": 1991,
+      "ctr": 0.015,
+      "position": 37.45,
+      "recorded_at": "2026-01-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-13",
+      "clicks": 29,
+      "impressions": 1971,
+      "ctr": 0.015,
+      "position": 37.13,
+      "recorded_at": "2026-01-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-14",
+      "clicks": 29,
+      "impressions": 1939,
+      "ctr": 0.015,
+      "position": 36.79,
+      "recorded_at": "2026-01-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-15",
+      "clicks": 28,
+      "impressions": 1900,
+      "ctr": 0.015,
+      "position": 36.42,
+      "recorded_at": "2026-01-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-16",
+      "clicks": 27,
+      "impressions": 1856,
+      "ctr": 0.015,
+      "position": 36.05,
+      "recorded_at": "2026-01-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-17",
+      "clicks": 27,
+      "impressions": 1811,
+      "ctr": 0.015,
+      "position": 35.68,
+      "recorded_at": "2026-01-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-18",
+      "clicks": 26,
+      "impressions": 1770,
+      "ctr": 0.015,
+      "position": 35.31,
+      "recorded_at": "2026-01-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-19",
+      "clicks": 26,
+      "impressions": 1736,
+      "ctr": 0.015,
+      "position": 34.96,
+      "recorded_at": "2026-01-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-20",
+      "clicks": 25,
+      "impressions": 1712,
+      "ctr": 0.015,
+      "position": 34.63,
+      "recorded_at": "2026-01-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-21",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.33,
+      "recorded_at": "2026-01-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-22",
+      "clicks": 25,
+      "impressions": 1702,
+      "ctr": 0.015,
+      "position": 34.07,
+      "recorded_at": "2026-01-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-23",
+      "clicks": 25,
+      "impressions": 1717,
+      "ctr": 0.015,
+      "position": 33.86,
+      "recorded_at": "2026-01-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-24",
+      "clicks": 26,
+      "impressions": 1744,
+      "ctr": 0.015,
+      "position": 33.69,
+      "recorded_at": "2026-01-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-25",
+      "clicks": 26,
+      "impressions": 1780,
+      "ctr": 0.015,
+      "position": 33.57,
+      "recorded_at": "2026-01-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-26",
+      "clicks": 27,
+      "impressions": 1822,
+      "ctr": 0.015,
+      "position": 33.51,
+      "recorded_at": "2026-01-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-27",
+      "clicks": 28,
+      "impressions": 1867,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2026-01-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-28",
+      "clicks": 28,
+      "impressions": 1910,
+      "ctr": 0.015,
+      "position": 33.55,
+      "recorded_at": "2026-01-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-29",
+      "clicks": 29,
+      "impressions": 1948,
+      "ctr": 0.015,
+      "position": 33.66,
+      "recorded_at": "2026-01-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-30",
+      "clicks": 29,
+      "impressions": 1977,
+      "ctr": 0.015,
+      "position": 33.82,
+      "recorded_at": "2026-01-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-01-31",
+      "clicks": 29,
+      "impressions": 1995,
+      "ctr": 0.015,
+      "position": 34.02,
+      "recorded_at": "2026-01-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-01",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.27,
+      "recorded_at": "2026-02-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-02",
+      "clicks": 29,
+      "impressions": 1991,
+      "ctr": 0.015,
+      "position": 34.56,
+      "recorded_at": "2026-02-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-03",
+      "clicks": 29,
+      "impressions": 1969,
+      "ctr": 0.015,
+      "position": 34.89,
+      "recorded_at": "2026-02-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-04",
+      "clicks": 29,
+      "impressions": 1937,
+      "ctr": 0.015,
+      "position": 35.23,
+      "recorded_at": "2026-02-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-05",
+      "clicks": 28,
+      "impressions": 1897,
+      "ctr": 0.015,
+      "position": 35.6,
+      "recorded_at": "2026-02-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-06",
+      "clicks": 27,
+      "impressions": 1853,
+      "ctr": 0.015,
+      "position": 35.97,
+      "recorded_at": "2026-02-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-07",
+      "clicks": 27,
+      "impressions": 1809,
+      "ctr": 0.015,
+      "position": 36.34,
+      "recorded_at": "2026-02-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-08",
+      "clicks": 26,
+      "impressions": 1768,
+      "ctr": 0.015,
+      "position": 36.71,
+      "recorded_at": "2026-02-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-09",
+      "clicks": 26,
+      "impressions": 1734,
+      "ctr": 0.015,
+      "position": 37.06,
+      "recorded_at": "2026-02-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-10",
+      "clicks": 25,
+      "impressions": 1711,
+      "ctr": 0.015,
+      "position": 37.39,
+      "recorded_at": "2026-02-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-11",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 37.68,
+      "recorded_at": "2026-02-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-12",
+      "clicks": 25,
+      "impressions": 1703,
+      "ctr": 0.015,
+      "position": 37.94,
+      "recorded_at": "2026-02-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-13",
+      "clicks": 25,
+      "impressions": 1718,
+      "ctr": 0.015,
+      "position": 38.15,
+      "recorded_at": "2026-02-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-14",
+      "clicks": 26,
+      "impressions": 1746,
+      "ctr": 0.015,
+      "position": 38.32,
+      "recorded_at": "2026-02-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-15",
+      "clicks": 26,
+      "impressions": 1782,
+      "ctr": 0.015,
+      "position": 38.43,
+      "recorded_at": "2026-02-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-16",
+      "clicks": 27,
+      "impressions": 1825,
+      "ctr": 0.015,
+      "position": 38.49,
+      "recorded_at": "2026-02-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-17",
+      "clicks": 28,
+      "impressions": 1870,
+      "ctr": 0.015,
+      "position": 38.49,
+      "recorded_at": "2026-02-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-18",
+      "clicks": 28,
+      "impressions": 1913,
+      "ctr": 0.015,
+      "position": 38.44,
+      "recorded_at": "2026-02-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-19",
+      "clicks": 29,
+      "impressions": 1950,
+      "ctr": 0.015,
+      "position": 38.33,
+      "recorded_at": "2026-02-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-20",
+      "clicks": 29,
+      "impressions": 1978,
+      "ctr": 0.015,
+      "position": 38.17,
+      "recorded_at": "2026-02-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-21",
+      "clicks": 29,
+      "impressions": 1995,
+      "ctr": 0.015,
+      "position": 37.96,
+      "recorded_at": "2026-02-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-22",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.71,
+      "recorded_at": "2026-02-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-23",
+      "clicks": 29,
+      "impressions": 1990,
+      "ctr": 0.015,
+      "position": 37.42,
+      "recorded_at": "2026-02-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-24",
+      "clicks": 29,
+      "impressions": 1968,
+      "ctr": 0.015,
+      "position": 37.1,
+      "recorded_at": "2026-02-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-25",
+      "clicks": 29,
+      "impressions": 1935,
+      "ctr": 0.015,
+      "position": 36.75,
+      "recorded_at": "2026-02-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-26",
+      "clicks": 28,
+      "impressions": 1895,
+      "ctr": 0.015,
+      "position": 36.38,
+      "recorded_at": "2026-02-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-27",
+      "clicks": 27,
+      "impressions": 1851,
+      "ctr": 0.015,
+      "position": 36.01,
+      "recorded_at": "2026-02-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-02-28",
+      "clicks": 27,
+      "impressions": 1806,
+      "ctr": 0.015,
+      "position": 35.64,
+      "recorded_at": "2026-02-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-01",
+      "clicks": 26,
+      "impressions": 1766,
+      "ctr": 0.015,
+      "position": 35.27,
+      "recorded_at": "2026-03-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-02",
+      "clicks": 25,
+      "impressions": 1733,
+      "ctr": 0.015,
+      "position": 34.92,
+      "recorded_at": "2026-03-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-03",
+      "clicks": 25,
+      "impressions": 1710,
+      "ctr": 0.015,
+      "position": 34.6,
+      "recorded_at": "2026-03-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-04",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.3,
+      "recorded_at": "2026-03-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-05",
+      "clicks": 25,
+      "impressions": 1703,
+      "ctr": 0.015,
+      "position": 34.05,
+      "recorded_at": "2026-03-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-06",
+      "clicks": 25,
+      "impressions": 1719,
+      "ctr": 0.015,
+      "position": 33.84,
+      "recorded_at": "2026-03-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-07",
+      "clicks": 26,
+      "impressions": 1747,
+      "ctr": 0.015,
+      "position": 33.67,
+      "recorded_at": "2026-03-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-08",
+      "clicks": 26,
+      "impressions": 1784,
+      "ctr": 0.015,
+      "position": 33.56,
+      "recorded_at": "2026-03-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-09",
+      "clicks": 27,
+      "impressions": 1827,
+      "ctr": 0.015,
+      "position": 33.51,
+      "recorded_at": "2026-03-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-10",
+      "clicks": 28,
+      "impressions": 1872,
+      "ctr": 0.015,
+      "position": 33.51,
+      "recorded_at": "2026-03-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-11",
+      "clicks": 28,
+      "impressions": 1915,
+      "ctr": 0.015,
+      "position": 33.56,
+      "recorded_at": "2026-03-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-12",
+      "clicks": 29,
+      "impressions": 1952,
+      "ctr": 0.015,
+      "position": 33.67,
+      "recorded_at": "2026-03-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-13",
+      "clicks": 29,
+      "impressions": 1980,
+      "ctr": 0.015,
+      "position": 33.84,
+      "recorded_at": "2026-03-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-14",
+      "clicks": 29,
+      "impressions": 1996,
+      "ctr": 0.015,
+      "position": 34.05,
+      "recorded_at": "2026-03-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-15",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.3,
+      "recorded_at": "2026-03-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-16",
+      "clicks": 29,
+      "impressions": 1989,
+      "ctr": 0.015,
+      "position": 34.6,
+      "recorded_at": "2026-03-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-17",
+      "clicks": 29,
+      "impressions": 1966,
+      "ctr": 0.015,
+      "position": 34.92,
+      "recorded_at": "2026-03-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-18",
+      "clicks": 28,
+      "impressions": 1933,
+      "ctr": 0.015,
+      "position": 35.27,
+      "recorded_at": "2026-03-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-19",
+      "clicks": 28,
+      "impressions": 1892,
+      "ctr": 0.015,
+      "position": 35.64,
+      "recorded_at": "2026-03-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-20",
+      "clicks": 27,
+      "impressions": 1848,
+      "ctr": 0.015,
+      "position": 36.01,
+      "recorded_at": "2026-03-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-21",
+      "clicks": 27,
+      "impressions": 1804,
+      "ctr": 0.015,
+      "position": 36.39,
+      "recorded_at": "2026-03-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-22",
+      "clicks": 26,
+      "impressions": 1764,
+      "ctr": 0.015,
+      "position": 36.75,
+      "recorded_at": "2026-03-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-23",
+      "clicks": 25,
+      "impressions": 1731,
+      "ctr": 0.015,
+      "position": 37.1,
+      "recorded_at": "2026-03-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-24",
+      "clicks": 25,
+      "impressions": 1709,
+      "ctr": 0.015,
+      "position": 37.42,
+      "recorded_at": "2026-03-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-25",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 37.71,
+      "recorded_at": "2026-03-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-26",
+      "clicks": 25,
+      "impressions": 1704,
+      "ctr": 0.015,
+      "position": 37.97,
+      "recorded_at": "2026-03-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-27",
+      "clicks": 25,
+      "impressions": 1721,
+      "ctr": 0.015,
+      "position": 38.17,
+      "recorded_at": "2026-03-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-28",
+      "clicks": 26,
+      "impressions": 1749,
+      "ctr": 0.015,
+      "position": 38.33,
+      "recorded_at": "2026-03-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-29",
+      "clicks": 26,
+      "impressions": 1787,
+      "ctr": 0.015,
+      "position": 38.44,
+      "recorded_at": "2026-03-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-30",
+      "clicks": 27,
+      "impressions": 1830,
+      "ctr": 0.015,
+      "position": 38.49,
+      "recorded_at": "2026-03-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-03-31",
+      "clicks": 28,
+      "impressions": 1875,
+      "ctr": 0.015,
+      "position": 38.49,
+      "recorded_at": "2026-03-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-01",
+      "clicks": 28,
+      "impressions": 1917,
+      "ctr": 0.015,
+      "position": 38.43,
+      "recorded_at": "2026-04-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-02",
+      "clicks": 29,
+      "impressions": 1954,
+      "ctr": 0.015,
+      "position": 38.32,
+      "recorded_at": "2026-04-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-03",
+      "clicks": 29,
+      "impressions": 1981,
+      "ctr": 0.015,
+      "position": 38.15,
+      "recorded_at": "2026-04-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-04",
+      "clicks": 29,
+      "impressions": 1996,
+      "ctr": 0.015,
+      "position": 37.94,
+      "recorded_at": "2026-04-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-05",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.68,
+      "recorded_at": "2026-04-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-06",
+      "clicks": 29,
+      "impressions": 1988,
+      "ctr": 0.015,
+      "position": 37.38,
+      "recorded_at": "2026-04-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-07",
+      "clicks": 29,
+      "impressions": 1964,
+      "ctr": 0.015,
+      "position": 37.06,
+      "recorded_at": "2026-04-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-08",
+      "clicks": 28,
+      "impressions": 1931,
+      "ctr": 0.015,
+      "position": 36.71,
+      "recorded_at": "2026-04-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-09",
+      "clicks": 28,
+      "impressions": 1890,
+      "ctr": 0.015,
+      "position": 36.34,
+      "recorded_at": "2026-04-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-10",
+      "clicks": 27,
+      "impressions": 1846,
+      "ctr": 0.015,
+      "position": 35.97,
+      "recorded_at": "2026-04-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-11",
+      "clicks": 27,
+      "impressions": 1801,
+      "ctr": 0.015,
+      "position": 35.59,
+      "recorded_at": "2026-04-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-12",
+      "clicks": 26,
+      "impressions": 1762,
+      "ctr": 0.015,
+      "position": 35.23,
+      "recorded_at": "2026-04-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-13",
+      "clicks": 25,
+      "impressions": 1730,
+      "ctr": 0.015,
+      "position": 34.88,
+      "recorded_at": "2026-04-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-14",
+      "clicks": 25,
+      "impressions": 1708,
+      "ctr": 0.015,
+      "position": 34.56,
+      "recorded_at": "2026-04-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-15",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.27,
+      "recorded_at": "2026-04-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-16",
+      "clicks": 25,
+      "impressions": 1704,
+      "ctr": 0.015,
+      "position": 34.02,
+      "recorded_at": "2026-04-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-17",
+      "clicks": 25,
+      "impressions": 1722,
+      "ctr": 0.015,
+      "position": 33.82,
+      "recorded_at": "2026-04-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-18",
+      "clicks": 26,
+      "impressions": 1751,
+      "ctr": 0.015,
+      "position": 33.66,
+      "recorded_at": "2026-04-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-19",
+      "clicks": 26,
+      "impressions": 1789,
+      "ctr": 0.015,
+      "position": 33.55,
+      "recorded_at": "2026-04-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-20",
+      "clicks": 27,
+      "impressions": 1832,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2026-04-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-21",
+      "clicks": 28,
+      "impressions": 1877,
+      "ctr": 0.015,
+      "position": 33.51,
+      "recorded_at": "2026-04-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-22",
+      "clicks": 28,
+      "impressions": 1919,
+      "ctr": 0.015,
+      "position": 33.57,
+      "recorded_at": "2026-04-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-23",
+      "clicks": 29,
+      "impressions": 1956,
+      "ctr": 0.015,
+      "position": 33.69,
+      "recorded_at": "2026-04-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-24",
+      "clicks": 29,
+      "impressions": 1982,
+      "ctr": 0.015,
+      "position": 33.86,
+      "recorded_at": "2026-04-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-25",
+      "clicks": 29,
+      "impressions": 1997,
+      "ctr": 0.015,
+      "position": 34.08,
+      "recorded_at": "2026-04-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-26",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.34,
+      "recorded_at": "2026-04-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-27",
+      "clicks": 29,
+      "impressions": 1987,
+      "ctr": 0.015,
+      "position": 34.63,
+      "recorded_at": "2026-04-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-28",
+      "clicks": 29,
+      "impressions": 1963,
+      "ctr": 0.015,
+      "position": 34.96,
+      "recorded_at": "2026-04-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-29",
+      "clicks": 28,
+      "impressions": 1929,
+      "ctr": 0.015,
+      "position": 35.31,
+      "recorded_at": "2026-04-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-04-30",
+      "clicks": 28,
+      "impressions": 1888,
+      "ctr": 0.015,
+      "position": 35.68,
+      "recorded_at": "2026-04-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-01",
+      "clicks": 27,
+      "impressions": 1843,
+      "ctr": 0.015,
+      "position": 36.05,
+      "recorded_at": "2026-05-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-02",
+      "clicks": 26,
+      "impressions": 1799,
+      "ctr": 0.015,
+      "position": 36.43,
+      "recorded_at": "2026-05-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-03",
+      "clicks": 26,
+      "impressions": 1760,
+      "ctr": 0.015,
+      "position": 36.79,
+      "recorded_at": "2026-05-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-04",
+      "clicks": 25,
+      "impressions": 1728,
+      "ctr": 0.015,
+      "position": 37.14,
+      "recorded_at": "2026-05-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-05",
+      "clicks": 25,
+      "impressions": 1707,
+      "ctr": 0.015,
+      "position": 37.46,
+      "recorded_at": "2026-05-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-06",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 37.74,
+      "recorded_at": "2026-05-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-07",
+      "clicks": 25,
+      "impressions": 1705,
+      "ctr": 0.015,
+      "position": 37.99,
+      "recorded_at": "2026-05-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-08",
+      "clicks": 25,
+      "impressions": 1723,
+      "ctr": 0.015,
+      "position": 38.2,
+      "recorded_at": "2026-05-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-09",
+      "clicks": 26,
+      "impressions": 1753,
+      "ctr": 0.015,
+      "position": 38.35,
+      "recorded_at": "2026-05-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-10",
+      "clicks": 26,
+      "impressions": 1791,
+      "ctr": 0.015,
+      "position": 38.45,
+      "recorded_at": "2026-05-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-11",
+      "clicks": 27,
+      "impressions": 1835,
+      "ctr": 0.015,
+      "position": 38.5,
+      "recorded_at": "2026-05-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-12",
+      "clicks": 28,
+      "impressions": 1880,
+      "ctr": 0.015,
+      "position": 38.49,
+      "recorded_at": "2026-05-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-13",
+      "clicks": 28,
+      "impressions": 1922,
+      "ctr": 0.015,
+      "position": 38.42,
+      "recorded_at": "2026-05-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-14",
+      "clicks": 29,
+      "impressions": 1957,
+      "ctr": 0.015,
+      "position": 38.3,
+      "recorded_at": "2026-05-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-15",
+      "clicks": 29,
+      "impressions": 1983,
+      "ctr": 0.015,
+      "position": 38.13,
+      "recorded_at": "2026-05-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-16",
+      "clicks": 29,
+      "impressions": 1997,
+      "ctr": 0.015,
+      "position": 37.91,
+      "recorded_at": "2026-05-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-17",
+      "clicks": 29,
+      "impressions": 1998,
+      "ctr": 0.015,
+      "position": 37.65,
+      "recorded_at": "2026-05-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-18",
+      "clicks": 29,
+      "impressions": 1986,
+      "ctr": 0.015,
+      "position": 37.35,
+      "recorded_at": "2026-05-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-19",
+      "clicks": 29,
+      "impressions": 1961,
+      "ctr": 0.015,
+      "position": 37.02,
+      "recorded_at": "2026-05-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-20",
+      "clicks": 28,
+      "impressions": 1927,
+      "ctr": 0.015,
+      "position": 36.67,
+      "recorded_at": "2026-05-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-21",
+      "clicks": 28,
+      "impressions": 1885,
+      "ctr": 0.015,
+      "position": 36.3,
+      "recorded_at": "2026-05-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-22",
+      "clicks": 27,
+      "impressions": 1840,
+      "ctr": 0.015,
+      "position": 35.92,
+      "recorded_at": "2026-05-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-23",
+      "clicks": 26,
+      "impressions": 1797,
+      "ctr": 0.015,
+      "position": 35.55,
+      "recorded_at": "2026-05-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-24",
+      "clicks": 26,
+      "impressions": 1758,
+      "ctr": 0.015,
+      "position": 35.19,
+      "recorded_at": "2026-05-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-25",
+      "clicks": 25,
+      "impressions": 1727,
+      "ctr": 0.015,
+      "position": 34.85,
+      "recorded_at": "2026-05-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-26",
+      "clicks": 25,
+      "impressions": 1707,
+      "ctr": 0.015,
+      "position": 34.53,
+      "recorded_at": "2026-05-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-27",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.24,
+      "recorded_at": "2026-05-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-28",
+      "clicks": 25,
+      "impressions": 1706,
+      "ctr": 0.015,
+      "position": 34.0,
+      "recorded_at": "2026-05-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-29",
+      "clicks": 25,
+      "impressions": 1725,
+      "ctr": 0.015,
+      "position": 33.79,
+      "recorded_at": "2026-05-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-30",
+      "clicks": 26,
+      "impressions": 1755,
+      "ctr": 0.015,
+      "position": 33.64,
+      "recorded_at": "2026-05-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-05-31",
+      "clicks": 26,
+      "impressions": 1794,
+      "ctr": 0.015,
+      "position": 33.55,
+      "recorded_at": "2026-05-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-01",
+      "clicks": 27,
+      "impressions": 1837,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2026-06-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-02",
+      "clicks": 28,
+      "impressions": 1882,
+      "ctr": 0.015,
+      "position": 33.51,
+      "recorded_at": "2026-06-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-03",
+      "clicks": 28,
+      "impressions": 1924,
+      "ctr": 0.015,
+      "position": 33.58,
+      "recorded_at": "2026-06-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-04",
+      "clicks": 29,
+      "impressions": 1959,
+      "ctr": 0.015,
+      "position": 33.71,
+      "recorded_at": "2026-06-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-05",
+      "clicks": 29,
+      "impressions": 1984,
+      "ctr": 0.015,
+      "position": 33.88,
+      "recorded_at": "2026-06-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-06",
+      "clicks": 29,
+      "impressions": 1998,
+      "ctr": 0.015,
+      "position": 34.1,
+      "recorded_at": "2026-06-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-07",
+      "clicks": 29,
+      "impressions": 1998,
+      "ctr": 0.015,
+      "position": 34.37,
+      "recorded_at": "2026-06-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-08",
+      "clicks": 29,
+      "impressions": 1985,
+      "ctr": 0.015,
+      "position": 34.67,
+      "recorded_at": "2026-06-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-09",
+      "clicks": 29,
+      "impressions": 1959,
+      "ctr": 0.015,
+      "position": 35.0,
+      "recorded_at": "2026-06-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-10",
+      "clicks": 28,
+      "impressions": 1924,
+      "ctr": 0.015,
+      "position": 35.35,
+      "recorded_at": "2026-06-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-11",
+      "clicks": 28,
+      "impressions": 1883,
+      "ctr": 0.015,
+      "position": 35.72,
+      "recorded_at": "2026-06-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-12",
+      "clicks": 27,
+      "impressions": 1838,
+      "ctr": 0.015,
+      "position": 36.1,
+      "recorded_at": "2026-06-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-13",
+      "clicks": 26,
+      "impressions": 1794,
+      "ctr": 0.015,
+      "position": 36.47,
+      "recorded_at": "2026-06-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-14",
+      "clicks": 26,
+      "impressions": 1756,
+      "ctr": 0.015,
+      "position": 36.83,
+      "recorded_at": "2026-06-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-15",
+      "clicks": 25,
+      "impressions": 1725,
+      "ctr": 0.015,
+      "position": 37.17,
+      "recorded_at": "2026-06-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-16",
+      "clicks": 25,
+      "impressions": 1706,
+      "ctr": 0.015,
+      "position": 37.49,
+      "recorded_at": "2026-06-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-17",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 37.77,
+      "recorded_at": "2026-06-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-18",
+      "clicks": 25,
+      "impressions": 1706,
+      "ctr": 0.015,
+      "position": 38.02,
+      "recorded_at": "2026-06-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-19",
+      "clicks": 25,
+      "impressions": 1726,
+      "ctr": 0.015,
+      "position": 38.21,
+      "recorded_at": "2026-06-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-20",
+      "clicks": 26,
+      "impressions": 1757,
+      "ctr": 0.015,
+      "position": 38.36,
+      "recorded_at": "2026-06-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-21",
+      "clicks": 26,
+      "impressions": 1796,
+      "ctr": 0.015,
+      "position": 38.46,
+      "recorded_at": "2026-06-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-22",
+      "clicks": 27,
+      "impressions": 1840,
+      "ctr": 0.015,
+      "position": 38.5,
+      "recorded_at": "2026-06-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-23",
+      "clicks": 28,
+      "impressions": 1884,
+      "ctr": 0.015,
+      "position": 38.48,
+      "recorded_at": "2026-06-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-24",
+      "clicks": 28,
+      "impressions": 1926,
+      "ctr": 0.015,
+      "position": 38.41,
+      "recorded_at": "2026-06-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-25",
+      "clicks": 29,
+      "impressions": 1961,
+      "ctr": 0.015,
+      "position": 38.29,
+      "recorded_at": "2026-06-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-26",
+      "clicks": 29,
+      "impressions": 1986,
+      "ctr": 0.015,
+      "position": 38.11,
+      "recorded_at": "2026-06-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-27",
+      "clicks": 29,
+      "impressions": 1998,
+      "ctr": 0.015,
+      "position": 37.88,
+      "recorded_at": "2026-06-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-28",
+      "clicks": 29,
+      "impressions": 1997,
+      "ctr": 0.015,
+      "position": 37.62,
+      "recorded_at": "2026-06-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-29",
+      "clicks": 29,
+      "impressions": 1984,
+      "ctr": 0.015,
+      "position": 37.31,
+      "recorded_at": "2026-06-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-06-30",
+      "clicks": 29,
+      "impressions": 1958,
+      "ctr": 0.015,
+      "position": 36.98,
+      "recorded_at": "2026-06-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-01",
+      "clicks": 28,
+      "impressions": 1922,
+      "ctr": 0.015,
+      "position": 36.63,
+      "recorded_at": "2026-07-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-02",
+      "clicks": 28,
+      "impressions": 1880,
+      "ctr": 0.015,
+      "position": 36.26,
+      "recorded_at": "2026-07-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-03",
+      "clicks": 27,
+      "impressions": 1835,
+      "ctr": 0.015,
+      "position": 35.88,
+      "recorded_at": "2026-07-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-04",
+      "clicks": 26,
+      "impressions": 1792,
+      "ctr": 0.015,
+      "position": 35.51,
+      "recorded_at": "2026-07-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-05",
+      "clicks": 26,
+      "impressions": 1754,
+      "ctr": 0.015,
+      "position": 35.15,
+      "recorded_at": "2026-07-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-06",
+      "clicks": 25,
+      "impressions": 1724,
+      "ctr": 0.015,
+      "position": 34.81,
+      "recorded_at": "2026-07-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-07",
+      "clicks": 25,
+      "impressions": 1705,
+      "ctr": 0.015,
+      "position": 34.49,
+      "recorded_at": "2026-07-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-08",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.21,
+      "recorded_at": "2026-07-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-09",
+      "clicks": 25,
+      "impressions": 1707,
+      "ctr": 0.015,
+      "position": 33.97,
+      "recorded_at": "2026-07-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-10",
+      "clicks": 25,
+      "impressions": 1728,
+      "ctr": 0.015,
+      "position": 33.78,
+      "recorded_at": "2026-07-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-11",
+      "clicks": 26,
+      "impressions": 1759,
+      "ctr": 0.015,
+      "position": 33.63,
+      "recorded_at": "2026-07-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-12",
+      "clicks": 26,
+      "impressions": 1798,
+      "ctr": 0.015,
+      "position": 33.54,
+      "recorded_at": "2026-07-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-13",
+      "clicks": 27,
+      "impressions": 1842,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2026-07-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-14",
+      "clicks": 28,
+      "impressions": 1887,
+      "ctr": 0.015,
+      "position": 33.52,
+      "recorded_at": "2026-07-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-15",
+      "clicks": 28,
+      "impressions": 1928,
+      "ctr": 0.015,
+      "position": 33.59,
+      "recorded_at": "2026-07-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-16",
+      "clicks": 29,
+      "impressions": 1962,
+      "ctr": 0.015,
+      "position": 33.72,
+      "recorded_at": "2026-07-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-17",
+      "clicks": 29,
+      "impressions": 1987,
+      "ctr": 0.015,
+      "position": 33.9,
+      "recorded_at": "2026-07-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-18",
+      "clicks": 29,
+      "impressions": 1998,
+      "ctr": 0.015,
+      "position": 34.13,
+      "recorded_at": "2026-07-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-19",
+      "clicks": 29,
+      "impressions": 1997,
+      "ctr": 0.015,
+      "position": 34.4,
+      "recorded_at": "2026-07-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-20",
+      "clicks": 29,
+      "impressions": 1982,
+      "ctr": 0.015,
+      "position": 34.7,
+      "recorded_at": "2026-07-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-21",
+      "clicks": 29,
+      "impressions": 1956,
+      "ctr": 0.015,
+      "position": 35.04,
+      "recorded_at": "2026-07-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-22",
+      "clicks": 28,
+      "impressions": 1920,
+      "ctr": 0.015,
+      "position": 35.39,
+      "recorded_at": "2026-07-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-23",
+      "clicks": 28,
+      "impressions": 1878,
+      "ctr": 0.015,
+      "position": 35.76,
+      "recorded_at": "2026-07-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-24",
+      "clicks": 27,
+      "impressions": 1833,
+      "ctr": 0.015,
+      "position": 36.14,
+      "recorded_at": "2026-07-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-25",
+      "clicks": 26,
+      "impressions": 1790,
+      "ctr": 0.015,
+      "position": 36.51,
+      "recorded_at": "2026-07-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-26",
+      "clicks": 26,
+      "impressions": 1752,
+      "ctr": 0.015,
+      "position": 36.87,
+      "recorded_at": "2026-07-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-27",
+      "clicks": 25,
+      "impressions": 1722,
+      "ctr": 0.015,
+      "position": 37.21,
+      "recorded_at": "2026-07-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-28",
+      "clicks": 25,
+      "impressions": 1705,
+      "ctr": 0.015,
+      "position": 37.52,
+      "recorded_at": "2026-07-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-29",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 37.8,
+      "recorded_at": "2026-07-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-30",
+      "clicks": 25,
+      "impressions": 1708,
+      "ctr": 0.015,
+      "position": 38.04,
+      "recorded_at": "2026-07-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-07-31",
+      "clicks": 25,
+      "impressions": 1729,
+      "ctr": 0.015,
+      "position": 38.23,
+      "recorded_at": "2026-07-31T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-01",
+      "clicks": 26,
+      "impressions": 1761,
+      "ctr": 0.015,
+      "position": 38.38,
+      "recorded_at": "2026-08-01T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-02",
+      "clicks": 27,
+      "impressions": 1801,
+      "ctr": 0.015,
+      "position": 38.47,
+      "recorded_at": "2026-08-02T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-03",
+      "clicks": 27,
+      "impressions": 1845,
+      "ctr": 0.015,
+      "position": 38.5,
+      "recorded_at": "2026-08-03T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-04",
+      "clicks": 28,
+      "impressions": 1889,
+      "ctr": 0.015,
+      "position": 38.48,
+      "recorded_at": "2026-08-04T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-05",
+      "clicks": 28,
+      "impressions": 1930,
+      "ctr": 0.015,
+      "position": 38.4,
+      "recorded_at": "2026-08-05T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-06",
+      "clicks": 29,
+      "impressions": 1964,
+      "ctr": 0.015,
+      "position": 38.27,
+      "recorded_at": "2026-08-06T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-07",
+      "clicks": 29,
+      "impressions": 1988,
+      "ctr": 0.015,
+      "position": 38.08,
+      "recorded_at": "2026-08-07T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-08",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 37.86,
+      "recorded_at": "2026-08-08T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-09",
+      "clicks": 29,
+      "impressions": 1997,
+      "ctr": 0.015,
+      "position": 37.58,
+      "recorded_at": "2026-08-09T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-10",
+      "clicks": 29,
+      "impressions": 1981,
+      "ctr": 0.015,
+      "position": 37.28,
+      "recorded_at": "2026-08-10T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-11",
+      "clicks": 29,
+      "impressions": 1954,
+      "ctr": 0.015,
+      "position": 36.94,
+      "recorded_at": "2026-08-11T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-12",
+      "clicks": 28,
+      "impressions": 1918,
+      "ctr": 0.015,
+      "position": 36.59,
+      "recorded_at": "2026-08-12T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-13",
+      "clicks": 28,
+      "impressions": 1875,
+      "ctr": 0.015,
+      "position": 36.22,
+      "recorded_at": "2026-08-13T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-14",
+      "clicks": 27,
+      "impressions": 1830,
+      "ctr": 0.015,
+      "position": 35.84,
+      "recorded_at": "2026-08-14T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-15",
+      "clicks": 26,
+      "impressions": 1787,
+      "ctr": 0.015,
+      "position": 35.47,
+      "recorded_at": "2026-08-15T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-16",
+      "clicks": 26,
+      "impressions": 1750,
+      "ctr": 0.015,
+      "position": 35.11,
+      "recorded_at": "2026-08-16T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-17",
+      "clicks": 25,
+      "impressions": 1721,
+      "ctr": 0.015,
+      "position": 34.77,
+      "recorded_at": "2026-08-17T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-18",
+      "clicks": 25,
+      "impressions": 1704,
+      "ctr": 0.015,
+      "position": 34.46,
+      "recorded_at": "2026-08-18T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-19",
+      "clicks": 25,
+      "impressions": 1700,
+      "ctr": 0.015,
+      "position": 34.18,
+      "recorded_at": "2026-08-19T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-20",
+      "clicks": 25,
+      "impressions": 1709,
+      "ctr": 0.015,
+      "position": 33.95,
+      "recorded_at": "2026-08-20T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-21",
+      "clicks": 25,
+      "impressions": 1731,
+      "ctr": 0.015,
+      "position": 33.76,
+      "recorded_at": "2026-08-21T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-22",
+      "clicks": 26,
+      "impressions": 1763,
+      "ctr": 0.015,
+      "position": 33.62,
+      "recorded_at": "2026-08-22T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-23",
+      "clicks": 27,
+      "impressions": 1803,
+      "ctr": 0.015,
+      "position": 33.53,
+      "recorded_at": "2026-08-23T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-24",
+      "clicks": 27,
+      "impressions": 1847,
+      "ctr": 0.015,
+      "position": 33.5,
+      "recorded_at": "2026-08-24T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-25",
+      "clicks": 28,
+      "impressions": 1892,
+      "ctr": 0.015,
+      "position": 33.53,
+      "recorded_at": "2026-08-25T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-26",
+      "clicks": 28,
+      "impressions": 1932,
+      "ctr": 0.015,
+      "position": 33.61,
+      "recorded_at": "2026-08-26T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-27",
+      "clicks": 29,
+      "impressions": 1966,
+      "ctr": 0.015,
+      "position": 33.74,
+      "recorded_at": "2026-08-27T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-28",
+      "clicks": 29,
+      "impressions": 1989,
+      "ctr": 0.015,
+      "position": 33.93,
+      "recorded_at": "2026-08-28T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-29",
+      "clicks": 29,
+      "impressions": 1999,
+      "ctr": 0.015,
+      "position": 34.16,
+      "recorded_at": "2026-08-29T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-30",
+      "clicks": 29,
+      "impressions": 1996,
+      "ctr": 0.015,
+      "position": 34.43,
+      "recorded_at": "2026-08-30T23:59:59Z"
+    },
+    {
+      "property_id": "profithelm",
+      "date": "2026-08-31",
+      "clicks": 29,
+      "impressions": 1980,
+      "ctr": 0.015,
+      "position": 34.74,
+      "recorded_at": "2026-08-31T23:59:59Z"
+    }
+  ],
+  "google_updates": [
+    {
+      "event_id": "goog_core_2024_08",
+      "name": "August 2024 Core Update",
+      "update_type": "CORE",
+      "start_date": "2024-08-15",
+      "end_date": "2024-09-03",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Independent publisher promotion, HCU feedback calibration"
+    },
+    {
+      "event_id": "goog_core_2024_11",
+      "name": "November 2024 Core Update",
+      "update_type": "CORE",
+      "start_date": "2024-11-11",
+      "end_date": "2024-11-29",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Pre-holiday core ranking recalibration"
+    },
+    {
+      "event_id": "goog_core_2024_12",
+      "name": "December 2024 Core Update",
+      "update_type": "CORE",
+      "start_date": "2024-12-12",
+      "end_date": "2024-12-18",
+      "impact_buffer_days": 7,
+      "confirmed": 1,
+      "notes": "Rapid volatility dampening update"
+    },
+    {
+      "event_id": "goog_core_2025_03",
+      "name": "March 2025 Core Update",
+      "update_type": "CORE",
+      "start_date": "2025-03-13",
+      "end_date": "2025-03-30",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "NavBoost click model recalibration and fresh intent scoring"
+    },
+    {
+      "event_id": "goog_reputation_2025_06",
+      "name": "June 2025 Spam and Site Reputation Abuse Update",
+      "update_type": "REPUTATION_ABUSE",
+      "start_date": "2025-06-10",
+      "end_date": "2025-06-24",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Enforcement against parasitic host leases and subdomains"
+    },
+    {
+      "event_id": "goog_core_2025_08",
+      "name": "August 2025 Core Update",
+      "update_type": "CORE",
+      "start_date": "2025-08-14",
+      "end_date": "2025-09-02",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Entity authority validation and GEO compliance weighting"
+    },
+    {
+      "event_id": "goog_quality_2025_11",
+      "name": "November 2025 Quality and Intent Update",
+      "update_type": "HELPFUL_CONTENT",
+      "start_date": "2025-11-06",
+      "end_date": "2025-11-22",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Crawl throttle on low-intent programmatic page clusters"
+    },
+    {
+      "event_id": "goog_core_2026_02",
+      "name": "February 2026 Core Update",
+      "update_type": "CORE",
+      "start_date": "2026-02-12",
+      "end_date": "2026-03-01",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "AI Overview inclusion alignment and search intent verification"
+    },
+    {
+      "event_id": "goog_ai_2026_05",
+      "name": "May 2026 AI Overviews and Quality Update",
+      "update_type": "HELPFUL_CONTENT",
+      "start_date": "2026-05-08",
+      "end_date": "2026-05-24",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Princeton GEO empirical evidence multiplier enforcement"
+    },
+    {
+      "event_id": "goog_core_2026_08",
+      "name": "August 2026 Core Update",
+      "update_type": "CORE",
+      "start_date": "2026-08-18",
+      "end_date": "2026-09-04",
+      "impact_buffer_days": 14,
+      "confirmed": 1,
+      "notes": "Information gain scoring and synthetic copy suppression"
+    }
+  ]
+}

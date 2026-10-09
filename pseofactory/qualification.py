@@ -150,6 +150,8 @@ def qualify_search_intent(
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     total_site_impressions: int = 500,
     sitemap_urls: Optional[List[str]] = None,
+    authority_dampened: bool = False,
+    ceiling_status: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Enforces Search Intent Doctrine triage across candidate queries:
@@ -287,6 +289,20 @@ def qualify_search_intent(
         }
 
     # 5. Distinct unserved query void: evaluate against Search Intent Doctrine
+    # Authority dampening suppression guard
+    if authority_dampened or (ceiling_status and ceiling_status.get("ceiling_detected")):
+        ceiling_score = 0.0
+        if ceiling_status:
+            ceiling_score = float(ceiling_status.get("ceiling_dampening_score", 0.0))
+        return {
+            "action": "MONITOR",
+            "query": q_text,
+            "position": pos,
+            "impressions": impr,
+            "ceiling_detected": True,
+            "reason": f"Domain authority dampening ceiling active (score {ceiling_score:.2f}) - suppress programmatic void page creation to preserve crawl budget until trust recovery",
+        }
+
     dynamic_floor = max(2, min(25, int(0.05 * total_site_impressions)))
 
     # Impressions below qualification floor indicate exploratory testing by search engines
