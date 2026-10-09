@@ -6,6 +6,7 @@ IndexNow (Bing/Copilot/Perplexity), WebSub Hubs, Ping-O-Matic, and Google Search
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
+import re
 import os
 import json
 import shutil
@@ -13,8 +14,9 @@ import subprocess
 import urllib.request
 import urllib.parse
 import urllib.error
+import urllib.robotparser
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 
@@ -40,6 +42,38 @@ DEFAULT_INDEXING_VELOCITY_LEDGER = (
 )
 
 
+class AirlockResult(tuple):
+    """
+    Dual tuple/dict result representing partitioned URLs from preflight airlock.
+    Tuple protocol: result[0] = valid_urls, result[1] = quarantined_urls.
+    Dict protocol: result.get("valid_urls"), result.get("quarantined_urls").
+    """
+    def __new__(cls, valid_urls: List[str], quarantined_urls: List[Dict[str, Any]]):
+        return super().__new__(cls, (valid_urls, quarantined_urls))
+
+    @property
+    def valid_urls(self) -> List[str]:
+        return self[0]
+
+    @property
+    def quarantined_urls(self) -> List[Dict[str, Any]]:
+        return self[1]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in ("valid_urls", "valid", "dispatched", "passed"):
+            return self[0]
+        if key in ("quarantined", "quarantined_urls", "quarantine", "rejected", "failed"):
+            return self[1]
+        return default
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, str):
+            val = self.get(item)
+            if val is not None:
+                return val
+        return super().__getitem__(item)
+
+
 class PushIndexer:
     """
     Parametric Instant Indexer & Discovery Dispatcher for Software Factories.
@@ -59,6 +93,7 @@ class PushIndexer:
         audit_log_path: Optional[Path] = None,
         rollover_queue_path: Optional[Path] = None,
         velocity_ledger_path: Optional[Path] = None,
+        quarantine_ledger_path: Optional[Path] = None,
     ):
         self.domain = domain
         self.canonical_base = canonical_base.rstrip("/")
@@ -71,7 +106,276 @@ class PushIndexer:
         self.audit_log_path = Path(audit_log_path) if audit_log_path else (self.base_dir / ".agy" / "indexing_audit_log.json")
         self.rollover_queue_path = Path(rollover_queue_path) if rollover_queue_path else (self.base_dir / ".agy" / "gsc_rollover_queue.json")
         self.velocity_ledger_path = Path(velocity_ledger_path) if velocity_ledger_path else DEFAULT_INDEXING_VELOCITY_LEDGER
+        self.quarantine_ledger_path = (
+            Path(quarantine_ledger_path)
+            if quarantine_ledger_path
+            else (self.base_dir / ".agy" / "indexing_quarantine_ledger.json")
+        )
         self.gsc_site = f"sc-domain:{self.domain}"
+
+    def preflight_airlock(
+        self,
+        urls: List[str],
+        robots_txt_path: Optional[Path] = None,
+        dist_dir: Optional[Path] = None,
+    ) -> AirlockResult:
+        """
+        3-Phase Preflight Crawler Accessibility Airlock.
+        Phase A: Evaluates robots.txt rules for search and AI crawlers.
+        Phase B: Evaluates reachability, legacy dead paths (410), redirects (301), and 404s.
+        Phase C: Evaluates metadata if HTML exists (noindex/none and canonical matches).
+        Quarantines defective URLs into indexing_quarantine_ledger.json.
+        """
+        eff_dist = Path(dist_dir) if dist_dir else self.dist_dir
+        rob_path = Path(robots_txt_path) if robots_txt_path else None
+        if not rob_path or not rob_path.exists():
+            candidates = [
+                eff_dist / "robots.txt",
+                self.base_dir / "dist" / "robots.txt",
+                self.base_dir / "robots.txt",
+            ]
+            for c in candidates:
+                if c.exists():
+                    rob_path = c
+                    break
+
+        target_bots = ["Googlebot", "Bingbot", "PerplexityBot", "ClaudeBot", "GPTBot", "*"]
+        rp = urllib.robotparser.RobotFileParser()
+        disallow_prefixes: List[str] = []
+        has_robots = False
+        if rob_path and rob_path.exists():
+            has_robots = True
+            try:
+                lines = rob_path.read_text(encoding="utf-8").splitlines()
+                rp.parse(lines)
+                for line in lines:
+                    line_clean = line.strip()
+                    if line_clean.lower().startswith("disallow:"):
+                        rule_path = line_clean.split(":", 1)[1].strip()
+                        if rule_path and rule_path != "/":
+                            disallow_prefixes.append(rule_path)
+            except Exception:
+                pass
+
+        valid_a: List[str] = []
+        quarantined: List[Dict[str, Any]] = []
+
+        for u in urls:
+            if not u or not isinstance(u, str):
+                continue
+            parsed = urllib.parse.urlparse(u)
+            u_path = parsed.path or "/"
+
+            is_disallowed = False
+            disallow_reason = ""
+            if has_robots:
+                for bot in target_bots:
+                    if not rp.can_fetch(bot, u):
+                        is_disallowed = True
+                        disallow_reason = f"Disallowed by robots.txt for user-agent '{bot}'"
+                        break
+                if not is_disallowed:
+                    for prefix in disallow_prefixes:
+                        if u_path == prefix or u_path.startswith(prefix if prefix.endswith("/") else prefix + "/"):
+                            is_disallowed = True
+                            disallow_reason = f"Matches robots.txt Disallow rule '{prefix}'"
+                            break
+
+            if is_disallowed:
+                quarantined.append({
+                    "url": u,
+                    "code": "QUARANTINE_ROBOTS_DISALLOWED",
+                    "quarantine_code": "QUARANTINE_ROBOTS_DISALLOWED",
+                    "reason": disallow_reason,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "phase": "PHASE_A_ROBOTS",
+                    "details": disallow_reason,
+                })
+            else:
+                valid_a.append(u)
+
+        legacy_prefixes = [
+            "/cart",
+            "/checkout",
+            "/checkouts",
+            "/products",
+            "/collections",
+            "/policies",
+            "/blogs",
+            "/pages",
+        ]
+
+        redirects_map: Dict[str, str] = {}
+        red_candidates = [
+            eff_dist / "_redirects",
+            self.base_dir / "dist" / "_redirects",
+            self.base_dir / "_redirects",
+        ]
+        for rpath in red_candidates:
+            if rpath.exists():
+                try:
+                    for rline in rpath.read_text(encoding="utf-8").splitlines():
+                        rline = rline.strip()
+                        if not rline or rline.startswith("#"):
+                            continue
+                        parts = rline.split()
+                        if len(parts) >= 2:
+                            redirects_map[parts[0]] = parts[1]
+                except Exception:
+                    pass
+                break
+
+        has_dist_html = eff_dist.exists() and any(eff_dist.glob("**/*.html"))
+        valid_b: List[Tuple[str, Optional[Path]]] = []
+        for u in valid_a:
+            parsed = urllib.parse.urlparse(u)
+            u_path = parsed.path or "/"
+
+            is_legacy = any(
+                u_path == lp or u_path.startswith(lp + "/")
+                for lp in legacy_prefixes
+            )
+            if is_legacy:
+                quarantined.append({
+                    "url": u,
+                    "code": "QUARANTINE_DEAD_PATH_410",
+                    "quarantine_code": "QUARANTINE_DEAD_PATH_410",
+                    "reason": f"Legacy path '{u_path}' returns HTTP 410 Gone",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "phase": "PHASE_B_REACHABILITY",
+                    "details": "Legacy path intercepted at edge with HTTP 410",
+                })
+                continue
+
+            norm_path = u_path.rstrip("/") if u_path != "/" else "/"
+            target_red = redirects_map.get(u_path) or redirects_map.get(norm_path)
+            if target_red:
+                quarantined.append({
+                    "url": u,
+                    "code": "QUARANTINE_REDIRECT",
+                    "quarantine_code": "QUARANTINE_REDIRECT",
+                    "reason": f"Path '{u_path}' is configured as a 301 redirect to '{target_red}'",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "phase": "PHASE_B_REACHABILITY",
+                    "details": f"Redirects to {target_red}",
+                })
+                continue
+
+            clean_rel = u_path.strip("/")
+            file_candidates = []
+            if not clean_rel:
+                file_candidates = [eff_dist / "index.html"]
+            else:
+                file_candidates = [
+                    eff_dist / clean_rel / "index.html",
+                    eff_dist / f"{clean_rel}.html",
+                    eff_dist / clean_rel,
+                ]
+
+            html_file = None
+            for fc in file_candidates:
+                if fc.exists() and fc.is_file() and fc.stat().st_size > 0:
+                    html_file = fc
+                    break
+
+            if not html_file and has_dist_html:
+                quarantined.append({
+                    "url": u,
+                    "code": "QUARANTINE_HTTP_ERROR",
+                    "quarantine_code": "QUARANTINE_HTTP_ERROR",
+                    "reason": f"Target route '{u_path}' not found in compiled dist artifacts (HTTP 404)",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "phase": "PHASE_B_REACHABILITY",
+                    "details": f"No valid index.html found in dist for {clean_rel}",
+                })
+                continue
+
+            valid_b.append((u, html_file))
+
+        valid_urls: List[str] = []
+        for u, html_file in valid_b:
+            if html_file and html_file.exists():
+                try:
+                    content = html_file.read_text(encoding="utf-8")
+                    robots_meta_match = re.search(
+                        r'<meta\s+[^>]*name=["\'](?:robots|googlebot)["\'][^>]*content=["\']([^"\']+)["\']',
+                        content,
+                        re.IGNORECASE,
+                    )
+                    if robots_meta_match:
+                        meta_val = robots_meta_match.group(1).lower()
+                        if "noindex" in meta_val or "none" in meta_val:
+                            quarantined.append({
+                                "url": u,
+                                "code": "QUARANTINE_UNINDEXABLE_META",
+                                "quarantine_code": "QUARANTINE_UNINDEXABLE_META",
+                                "reason": f"HTML contains unindexable robots directive: '{meta_val}'",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "phase": "PHASE_C_METADATA",
+                                "details": f"noindex robots meta tag detected in {html_file.name}",
+                            })
+                            continue
+
+                    canonical_match = re.search(
+                        r'<link\s+[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']',
+                        content,
+                        re.IGNORECASE,
+                    )
+                    if canonical_match:
+                        canon_href = canonical_match.group(1).strip()
+                        u_norm = u.rstrip("/") + ("/" if not re.search(r"\.[a-zA-Z0-9]{2,5}$", u) else "")
+                        c_norm = canon_href.rstrip("/") + ("/" if not re.search(r"\.[a-zA-Z0-9]{2,5}$", canon_href) else "")
+                        if u_norm.lower() != c_norm.lower():
+                            quarantined.append({
+                                "url": u,
+                                "code": "QUARANTINE_UNINDEXABLE_META",
+                                "quarantine_code": "QUARANTINE_UNINDEXABLE_META",
+                                "reason": f"Canonical mismatch: target '{u}' points to canonical '{canon_href}'",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "phase": "PHASE_C_METADATA",
+                                "details": f"Canonical URL {canon_href} does not match candidate URL {u}",
+                            })
+                            continue
+                except Exception:
+                    pass
+
+            valid_urls.append(u)
+
+        if quarantined:
+            ledger_targets = [
+                self.quarantine_ledger_path,
+                Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json"),
+                self.base_dir / ".agy" / "indexing_quarantine_ledger.json",
+            ]
+            run_dir = Path("/home/ubuntuadmin/projects/.agy/runs/run_pseofactory_indexing_20261009")
+            if run_dir.exists():
+                ledger_targets.append(run_dir / "quarantine_ledger.json")
+
+            for target in ledger_targets:
+                if not target:
+                    continue
+                try:
+                    target = Path(target)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    existing_data: Dict[str, Any] = {}
+                    if target.exists():
+                        try:
+                            existing_data = json.loads(target.read_text(encoding="utf-8"))
+                            if not isinstance(existing_data, dict):
+                                existing_data = {}
+                        except Exception:
+                            existing_data = {}
+
+                    for item in quarantined:
+                        existing_data[item["url"]] = item
+
+                    target.write_text(json.dumps(existing_data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+
+        return AirlockResult(valid_urls, quarantined)
+
+    validate_and_quarantine_urls = preflight_airlock
 
     def ensure_indexnow_key_file(self) -> Path:
         """Places the IndexNow verification key text file in dist/ and ~/.indexnow/ cache."""
@@ -382,6 +686,20 @@ class PushIndexer:
                 cleaned_urls.append(u)
 
         urls = cleaned_urls[:10000]
+
+        if urls:
+            airlock_res = self.preflight_airlock(urls)
+            urls = list(airlock_res[0])
+            if not urls:
+                return {
+                    "host": self.domain,
+                    "urls_submitted": 0,
+                    "urls_dispatched": 0,
+                    "urls_skipped_unchanged": 0,
+                    "results": [],
+                    "status": "QUARANTINED_ALL",
+                    "message": "All candidate URLs were quarantined by preflight airlock.",
+                }
 
         endpoints = [
             "https://api.indexnow.org/indexnow",
@@ -823,6 +1141,23 @@ class PushIndexer:
                 seen.add(u)
                 combined_urls.append(u)
         urls = combined_urls
+
+        if urls:
+            airlock_res = self.preflight_airlock(urls)
+            urls = list(airlock_res[0])
+            if not urls:
+                return {
+                    "site": self.gsc_site,
+                    "urls_targeted": 0,
+                    "results": [
+                        {
+                            "engine": "gsc_quarantined",
+                            "status": "QUARANTINED_ALL",
+                            "message": "All candidate URLs were quarantined by preflight airlock.",
+                        }
+                    ],
+                    "inspection_oracle": [],
+                }
 
         if hubs_only:
             urls, _ = self.partition_indexing_urls(urls)
@@ -1298,6 +1633,9 @@ class PushIndexer:
         if force:
             candidate_urls = all_urls
             dispatch_type = "FORCED_FULL_SUBMISSION"
+        elif urls:
+            candidate_urls = [u for u in urls if isinstance(u, str)]
+            dispatch_type = "EXPLICIT_URLS_SUBMITTED"
         elif new_assets:
             candidate_urls = [a["url"] for a in new_assets]
             dispatch_type = "NEW_ASSETS_SUBMITTED"
@@ -1308,6 +1646,12 @@ class PushIndexer:
         preflight_report = None
         blocked_urls: List[str] = []
         if candidate_urls:
+            airlock_res = self.preflight_airlock(candidate_urls)
+            candidate_urls = list(airlock_res[0])
+            for q_item in airlock_res[1]:
+                if q_item["url"] not in blocked_urls:
+                    blocked_urls.append(q_item["url"])
+
             from pseofactory.indexing.preflight import run_indexing_preflight
             dist_to_check = self.dist_dir if (self.dist_dir.exists() and any(self.dist_dir.glob("**/*.html"))) else None
             preflight_report = run_indexing_preflight(
@@ -1316,7 +1660,9 @@ class PushIndexer:
                 domain=self.domain,
             )
             urls_to_submit = preflight_report.push_eligible_urls
-            blocked_urls = preflight_report.blocked_urls
+            for bu in preflight_report.blocked_urls:
+                if bu not in blocked_urls:
+                    blocked_urls.append(bu)
             if blocked_urls:
                 blocked_log_path = self.base_dir / ".agy" / "indexing_preflight_blocked.json"
                 try:
@@ -1391,6 +1737,7 @@ class PushIndexer:
             "existing_assets_preserved": inspection["existing_assets_count"],
             "assets_submitted_count": len(urls_to_submit),
             "assets_submitted": urls_to_submit,
+            "urls_submitted": urls_to_submit,
             "engines_accepted": engines_accepted,
             "indexnow": indexnow_res,
             "websub": websub_res,
