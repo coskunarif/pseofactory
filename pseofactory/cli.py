@@ -715,22 +715,37 @@ def cmd_partner_ui(args: argparse.Namespace) -> int:
         except Exception:
             svc_active = False
 
-        port = runtime_state.get("port", DEFAULT_UI_PORT) if runtime_state else getattr(args, "port", DEFAULT_UI_PORT)
-        host = runtime_state.get("host", DEFAULT_UI_HOST) if runtime_state else getattr(args, "host", DEFAULT_UI_HOST)
+        host = getattr(args, "host", None) or (runtime_state.get("host") if runtime_state else None) or DEFAULT_UI_HOST
+        user_specified_port = any(arg.startswith("--port") for arg in sys.argv)
+        if user_specified_port and getattr(args, "port", None):
+            ports_to_probe = [args.port]
+        else:
+            ports_to_probe = []
+            if runtime_state and runtime_state.get("port"):
+                ports_to_probe.append(runtime_state["port"])
+            default_p = getattr(args, "port", DEFAULT_UI_PORT) or DEFAULT_UI_PORT
+            if default_p not in ports_to_probe:
+                ports_to_probe.append(default_p)
+
         http_ok = False
-        try:
-            req = urllib.request.Request(f"http://{host}:{port}/api/status", headers={"User-Agent": "pseofactory-cli"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                http_ok = (resp.status == 200)
-        except Exception:
-            http_ok = False
+        active_port = ports_to_probe[0] if ports_to_probe else DEFAULT_UI_PORT
+        for p in ports_to_probe:
+            try:
+                req = urllib.request.Request(f"http://{host}:{p}/api/status", headers={"User-Agent": "pseofactory-cli"})
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    if resp.status == 200:
+                        http_ok = True
+                        active_port = p
+                        break
+            except Exception:
+                continue
 
         status_info = {
             "service_active": svc_active,
             "http_responsive": http_ok,
             "host": host,
-            "port": port,
-            "url": f"http://{host}:{port}/",
+            "port": active_port,
+            "url": f"http://{host}:{active_port}/",
             "runtime_state": runtime_state,
         }
 
@@ -740,7 +755,7 @@ def cmd_partner_ui(args: argparse.Namespace) -> int:
             print("=== pseofactory Partner UI Status ===")
             print(f"  Systemd Service: {'ACTIVE' if svc_active else 'INACTIVE'}")
             print(f"  HTTP Endpoint:   {'RESPONSIVE (200 OK)' if http_ok else 'UNAVAILABLE'}")
-            print(f"  URL:             http://{host}:{port}/")
+            print(f"  URL:             http://{host}:{active_port}/")
             if runtime_state:
                 print(f"  PID:             {runtime_state.get('pid')}")
                 print(f"  State:           {runtime_state.get('status')}")
@@ -751,7 +766,6 @@ def cmd_partner_ui(args: argparse.Namespace) -> int:
     if port is None:
         port = DEFAULT_UI_PORT
     host = getattr(args, "host", DEFAULT_UI_HOST)
-    print(f"Starting partner dashboard server on http://{host}:{port}/")
     try:
         run_ui_server(port=port, host=host)
         return 0

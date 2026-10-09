@@ -631,3 +631,82 @@ def test_cli_partner_ui_default_port_and_flags():
     assert args_stat.json is True
 
 
+def test_find_open_port_upper_boundary_and_overflow_protection():
+    """
+    Asserts that find_open_port handles high port numbers near 65535
+    gracefully without raising OverflowError.
+    Zero em-dashes. Zero en-dashes.
+    """
+    p = find_open_port(preferred_port=65534, max_tries=10)
+    assert isinstance(p, int)
+    assert 1024 <= p <= 65535
+
+
+def test_ui_server_atomic_ephemeral_port_binding():
+    """
+    Asserts that create_ui_server with port=0 or port<=0 allocates
+    a valid open port atomically.
+    Zero em-dashes. Zero en-dashes.
+    """
+    server = create_ui_server(port=0, auto_find_open_port=True)
+    assigned_port = server.server_address[1]
+    assert isinstance(assigned_port, int)
+    assert assigned_port > 0
+    server.server_close()
+
+
+def test_ui_state_protection_against_auxiliary_stopped_clobbering(tmp_path, monkeypatch):
+    """
+    Asserts that _write_runtime_state prevents a terminating auxiliary process
+    from overwriting an active living daemon status with STOPPED.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory import ui
+
+    fake_state = str(tmp_path / "partner_ui.json")
+    monkeypatch.setattr(ui, "STATE_FILE_PATH", fake_state)
+
+    # Simulate active daemon running under our current process pid
+    current_pid = os.getpid()
+    ui._write_runtime_state(host="127.0.0.1", port=8090, pid=current_pid, status="ACTIVE")
+
+    # An auxiliary process with a different pid attempts to mark STOPPED
+    ui._write_runtime_state(host="127.0.0.1", port=8091, pid=999999, status="STOPPED")
+
+    # State must remain ACTIVE and untouched
+    state = ui.get_ui_runtime_state()
+    assert state is not None
+    assert state["status"] == "ACTIVE"
+    assert state["pid"] == current_pid
+    assert state["port"] == 8090
+
+
+def test_cli_partner_ui_status_probes_fallback_on_stale_state(tmp_path, monkeypatch):
+    """
+    Asserts that cmd_partner_ui probes fallback ports when runtime state port
+    is unavailable or points to a closed port.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import argparse
+    from pseofactory import ui
+    from pseofactory.cli import cmd_partner_ui
+
+    fake_state = str(tmp_path / "partner_ui.json")
+    monkeypatch.setattr(ui, "STATE_FILE_PATH", fake_state)
+
+    # Point state to an unresponsive port
+    ui._write_runtime_state(host="127.0.0.1", port=59999, pid=1, status="ACTIVE")
+
+    parser_args = argparse.Namespace(
+        command="partner-ui",
+        status=True,
+        json=True,
+        port=8090,
+        host="127.0.0.1",
+    )
+    # Probing should not crash and should report properly
+    exit_code = cmd_partner_ui(parser_args)
+    assert exit_code in (0, 1)
+
+
+

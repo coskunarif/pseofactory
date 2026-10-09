@@ -20,7 +20,7 @@ import json
 import os
 import re
 from typing import Dict, Any, List, Optional
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.parse
 
 from pseofactory.contracts import assert_no_forbidden_dashes, assert_touch_targets
@@ -1028,31 +1028,51 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-DEFAULT_UI_PORT: int = int(os.environ.get("PSEODASHBOARD_PORT") or os.environ.get("PORT") or 8090)
+def _get_default_port() -> int:
+    val = os.environ.get("PSEODASHBOARD_PORT") or os.environ.get("PORT") or "8090"
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 8090
+
+
+DEFAULT_UI_PORT: int = _get_default_port()
 DEFAULT_UI_HOST: str = os.environ.get("PSEODASHBOARD_HOST", "127.0.0.1")
 STATE_FILE_PATH: str = os.path.expanduser("~/.local/state/pseofactory/partner_ui.json")
+
+
+def is_pid_alive(pid: int) -> bool:
+    """Checks whether the specified process ID is currently alive on the system."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
 
 
 def find_open_port(preferred_port: int = 8090, host: str = "127.0.0.1", max_tries: int = 100) -> int:
     """
     Finds an available open TCP port starting from preferred_port.
-    If preferred_port is 0, lets the operating system allocate an open ephemeral port.
-    If preferred_port is busy, scans sequentially for the next available port.
+    If preferred_port is <= 0, lets the operating system allocate an open ephemeral port.
+    If preferred_port is busy, scans sequentially for the next available port up to 65535.
     """
     import socket
 
-    if preferred_port == 0:
+    if preferred_port <= 0:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind((host, 0))
             return s.getsockname()[1]
 
-    for p in range(preferred_port, preferred_port + max_tries):
+    upper_bound = min(65536, preferred_port + max_tries)
+    for p in range(preferred_port, upper_bound):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind((host, p))
                 return p
-            except OSError:
+            except (OSError, OverflowError):
                 continue
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -1065,6 +1085,13 @@ def _write_runtime_state(host: str, port: int, pid: int, status: str) -> None:
     try:
         from datetime import datetime, timezone
         os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
+        if status == "STOPPED":
+            current = get_ui_runtime_state()
+            if current and current.get("pid") != pid:
+                existing_pid = current.get("pid", 0)
+                if is_pid_alive(existing_pid):
+                    # Refuse to let an auxiliary or transient process mark the active daemon as STOPPED
+                    return
         tmp_path = f"{STATE_FILE_PATH}.tmp"
         payload = {
             "host": host,
@@ -1075,6 +1102,8 @@ def _write_runtime_state(host: str, port: int, pid: int, status: str) -> None:
         }
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, STATE_FILE_PATH)
     except Exception:
         pass
@@ -1098,7 +1127,7 @@ def create_ui_server(
     tracking_engine: Optional[PartnerTrackingEngine] = None,
 ) -> HTTPServer:
     """
-    Creates configured HTTPServer instance on an open port.
+    Creates configured ThreadingHTTPServer instance on an open port.
     If auto_find_open_port is True, transparently falls back to an open port
     if the designated port is already occupied.
     """
@@ -1106,23 +1135,21 @@ def create_ui_server(
     handler = lambda *args, **kwargs: DashboardRequestHandler(*args, tracking_engine=engine, **kwargs)
 
     requested_port = DEFAULT_UI_PORT if port is None else port
-    if requested_port == 0:
-        actual_port = find_open_port(0, host=host)
-        return HTTPServer((host, actual_port), handler)
+    if requested_port <= 0:
+        return ThreadingHTTPServer((host, 0), handler)
 
     if not auto_find_open_port:
-        return HTTPServer((host, requested_port), handler)
+        return ThreadingHTTPServer((host, requested_port), handler)
 
     current_port = requested_port
     max_attempts = 100
     for _ in range(max_attempts):
         try:
-            return HTTPServer((host, current_port), handler)
+            return ThreadingHTTPServer((host, current_port), handler)
         except OSError:
             current_port = find_open_port(current_port + 1, host=host)
 
-    fallback_port = find_open_port(0, host=host)
-    return HTTPServer((host, fallback_port), handler)
+    return ThreadingHTTPServer((host, 0), handler)
 
 
 def run_ui_server(
@@ -1135,7 +1162,11 @@ def run_ui_server(
     Runs lightweight local web server for the partner dashboard on an open port.
     If designated port is occupied, automatically binds next available open port.
     Persists active runtime metadata to ~/.local/state/pseofactory/partner_ui.json.
+    Handles SIGTERM gracefully to guarantee cleanup and state update on service shutdown.
     """
+    import signal
+    import sys
+
     server = create_ui_server(
         port=port,
         host=host,
@@ -1146,12 +1177,26 @@ def run_ui_server(
     if write_state:
         _write_runtime_state(host=host, port=actual_port, pid=os.getpid(), status="ACTIVE")
 
+    def _term_handler(signum, frame):
+        sys.exit(0)
+
+    try:
+        old_term = signal.signal(signal.SIGTERM, _term_handler)
+    except (ValueError, AttributeError):
+        old_term = None
+
     print(f"Partner Dashboard running at http://{host}:{actual_port}/")
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         if write_state:
             _write_runtime_state(host=host, port=actual_port, pid=os.getpid(), status="STOPPED")
         server.server_close()
+        if old_term is not None:
+            try:
+                signal.signal(signal.SIGTERM, old_term)
+            except Exception:
+                pass
+

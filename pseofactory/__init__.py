@@ -472,6 +472,7 @@ from pseofactory.ui import (
     create_ui_server,
     find_open_port,
     get_ui_runtime_state,
+    is_pid_alive,
     DEFAULT_UI_PORT,
     DEFAULT_UI_HOST,
 )
@@ -954,6 +955,7 @@ __all__ = [
     "create_ui_server",
     "find_open_port",
     "get_ui_runtime_state",
+    "is_pid_alive",
     "DEFAULT_UI_PORT",
     "DEFAULT_UI_HOST",
 ]
