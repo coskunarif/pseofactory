@@ -25,6 +25,7 @@ import urllib.parse
 
 from pseofactory.contracts import assert_no_forbidden_dashes, assert_touch_targets
 from pseofactory.partner_tracker import FleetMonetizationDashboardData, PartnerTrackingEngine
+from pseofactory.trends.models import AlgorithmicCeilingAnalysis
 
 
 def render_light_interface(data: FleetMonetizationDashboardData) -> str:
@@ -1221,4 +1222,325 @@ def run_ui_server(
                 signal.signal(signal.SIGTERM, old_term)
             except Exception:
                 pass
+
+
+def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
+    """
+    Renders standalone minimal modern light HTML dashboard for GSC traffic trends
+    and algorithmic glass ceiling analysis.
+    Asserts zero layout shifts (fixed SVG viewBox 0 0 1000 360, CLS = 0),
+    touch targets >= 44x44px, and zero forbidden dashes.
+    """
+    prop = html.escape(analysis.property_id.capitalize())
+    computed = html.escape(analysis.computed_at[:16].replace("T", " "))
+    score = analysis.ceiling_dampening_score
+    status_label = "AUTHORITY DAMPENED" if analysis.ceiling_detected else "UNCONSTRAINED GROWTH"
+    status_class = "status-dampened" if analysis.ceiling_detected else "status-growth"
+    rec_class = "badge-danger" if analysis.recommendation == "FREEZE_EXPANSION" else ("badge-warning" if analysis.recommendation == "MONITOR" else "badge-success")
+
+    # SVG chart calculation (fixed viewBox="0 0 1000 360")
+    timeline = analysis.metrics_timeline
+    w = 1000
+    h = 360
+    pad_left = 60
+    pad_right = 30
+    pad_top = 40
+    pad_bottom = 50
+    chart_w = w - pad_left - pad_right
+    chart_h = h - pad_top - pad_bottom
+
+    svg_elements = []
+
+    # Background grid
+    svg_elements.append(f'<rect x="0" y="0" width="{w}" height="{h}" fill="#ffffff" />')
+    for y_step in range(5):
+        y_pos = pad_top + (chart_h * y_step / 4)
+        svg_elements.append(f'<line x1="{pad_left}" y1="{y_pos:.1f}" x2="{w - pad_right}" y2="{y_pos:.1f}" stroke="#f1f5f9" stroke-width="1" />')
+
+    if timeline:
+        max_impr = max([d.get("impressions", 0) for d in timeline] + [d.get("rma_28", 0) for d in timeline] + [100])
+        n = len(timeline)
+
+        def get_coords(idx: int, val: float):
+            x = pad_left + (idx / max(1, n - 1)) * chart_w
+            y = pad_top + chart_h - (val / max(1.0, max_impr)) * chart_h
+            return x, y
+
+        # Shaded bands for correlated Google updates
+        for cu in analysis.correlated_updates:
+            s_date = cu.get("start_date")
+            e_date = cu.get("end_date") or s_date
+            matching_indices = [i for i, d in enumerate(timeline) if s_date <= d["date"] <= e_date]
+            if matching_indices:
+                x_start = pad_left + (matching_indices[0] / max(1, n - 1)) * chart_w
+                x_end = pad_left + (matching_indices[-1] / max(1, n - 1)) * chart_w
+                band_w = max(14.0, x_end - x_start)
+                svg_elements.append(
+                    f'<rect x="{x_start:.1f}" y="{pad_top}" width="{band_w:.1f}" height="{chart_h}" fill="rgba(220, 38, 38, 0.08)" />'
+                )
+                svg_elements.append(
+                    f'<line x1="{x_start:.1f}" y1="{pad_top}" x2="{x_start:.1f}" y2="{pad_top + chart_h}" stroke="#dc2626" stroke-dasharray="3 3" stroke-width="1" />'
+                )
+
+        # Ceiling threshold dashed line
+        if analysis.ceiling_detected and analysis.peak_impressions_rma28 > 0:
+            ceil_y = pad_top + chart_h - (analysis.peak_impressions_rma28 / max(1.0, max_impr)) * chart_h
+            svg_elements.append(
+                f'<line x1="{pad_left}" y1="{ceil_y:.1f}" x2="{w - pad_right}" y2="{ceil_y:.1f}" stroke="#d97706" stroke-dasharray="6 4" stroke-width="2" />'
+            )
+            svg_elements.append(
+                f'<text x="{w - pad_right - 140}" y="{ceil_y - 8:.1f}" fill="#d97706" font-size="11" font-weight="600">Ceiling: {int(analysis.peak_impressions_rma28)} impr/day</text>'
+            )
+
+        # Impressions polyline
+        impr_pts = []
+        for i, d in enumerate(timeline):
+            x, y = get_coords(i, d.get("impressions", 0))
+            impr_pts.append(f"{x:.1f},{y:.1f}")
+        svg_elements.append(f'<polyline fill="none" stroke="#93c5fd" stroke-width="1.5" points="{" ".join(impr_pts)}" />')
+
+        # RMA_28 trend line
+        rma_pts = []
+        for i, d in enumerate(timeline):
+            x, y = get_coords(i, d.get("rma_28", 0))
+            rma_pts.append(f"{x:.1f},{y:.1f}")
+        svg_elements.append(f'<polyline fill="none" stroke="#2563eb" stroke-width="2.5" points="{" ".join(rma_pts)}" />')
+
+        # Axis labels
+        svg_elements.append(f'<text x="{pad_left}" y="{pad_top - 12}" fill="#94a3b8" font-size="11">Peak: {int(max_impr)}</text>')
+        svg_elements.append(f'<text x="{pad_left}" y="{h - 15}" fill="#94a3b8" font-size="11">{timeline[0]["date"]}</text>')
+        svg_elements.append(f'<text x="{w - pad_right - 70}" y="{h - 15}" fill="#94a3b8" font-size="11">{timeline[-1]["date"]}</text>')
+
+    svg_markup = f'<svg viewBox="0 0 {w} {h}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:1000px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;">' + "".join(svg_elements) + "</svg>"
+
+    # Correlated updates rows
+    updates_html = []
+    if analysis.correlated_updates:
+        for cu in analysis.correlated_updates:
+            ev_name = html.escape(cu.get("name", "Google Update"))
+            drop_pct = int(cu.get("drop_ratio", 0.0) * 100)
+            pre_r = cu.get("pre_rma28", 0)
+            post_r = cu.get("post_rma28", 0)
+            updates_html.append(f"""
+            <tr>
+                <td><strong>{ev_name}</strong></td>
+                <td><span class="badge badge-danger">{cu.get('update_type', 'CORE')}</span></td>
+                <td>{html.escape(cu.get('start_date', ''))}</td>
+                <td>{pre_r}</td>
+                <td>{post_r}</td>
+                <td><span class="drop-pill">-{drop_pct}%</span></td>
+            </tr>
+            """)
+    else:
+        updates_html.append("""
+        <tr>
+            <td colspan="6" style="text-align:center;color:#64748b;">Zero correlated Google update penalties detected. Traffic moving freely.</td>
+        </tr>
+        """)
+
+    # Complete document
+    doc = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{prop} Search Console Traffic Trends and Ceiling Analysis</title>
+    <style>
+        :root {{
+            --bg-canvas: #ffffff;
+            --bg-subtle: #f8fafc;
+            --text-main: #0f172a;
+            --text-sub: #475569;
+            --text-muted: #94a3b8;
+            --border-subtle: #e2e8f0;
+            --primary: #2563eb;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --success: #059669;
+            --font-stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: var(--font-stack);
+            background: var(--bg-subtle);
+            color: var(--text-main);
+            padding: 24px 16px;
+            line-height: 1.5;
+        }}
+        .container {{
+            max-width: 1040px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }}
+        .card {{
+            background: var(--bg-canvas);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 24px;
+        }}
+        .header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }}
+        .title-group h1 {{
+            font-size: 22px;
+            font-weight: 700;
+        }}
+        .title-group p {{
+            color: var(--text-sub);
+            font-size: 13px;
+        }}
+        .metrics-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }}
+        .metric-box {{
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 16px;
+        }}
+        .metric-label {{
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }}
+        .metric-val {{
+            font-size: 24px;
+            font-weight: 700;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        .badge-danger {{ background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }}
+        .badge-warning {{ background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }}
+        .badge-success {{ background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }}
+        .status-dampened {{ color: var(--danger); font-weight: 700; }}
+        .status-growth {{ color: var(--success); font-weight: 700; }}
+        .drop-pill {{
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 12px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            margin-top: 12px;
+        }}
+        th, td {{
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-subtle);
+        }}
+        th {{
+            color: var(--text-sub);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+        button, .btn, a.btn {{
+            min-height: 44px;
+            min-width: 44px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-canvas);
+            color: var(--text-main);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+        }}
+        button:hover, .btn:hover {{
+            background: var(--bg-subtle);
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card header">
+            <div class="title-group">
+                <h1>{prop} Google Search Console Trajectory</h1>
+                <p>Analyzed window: {analysis.analysis_window_days} days | Computed: {computed}</p>
+            </div>
+            <div>
+                <span class="badge {rec_class}">{analysis.recommendation}</span>
+            </div>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-box">
+                <div class="metric-label">Status</div>
+                <div class="metric-val {status_class}">{status_label}</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Dampening Score</div>
+                <div class="metric-val">{score:.2f}</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Peak Impressions (RMA 28)</div>
+                <div class="metric-val">{int(analysis.peak_impressions_rma28)}</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Current Velocity (RMA 28)</div>
+                <div class="metric-val">{int(analysis.current_impressions_rma28)}</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 16px; margin-bottom: 16px;">Historical Impression Trajectory and Update Bands</h2>
+            {svg_markup}
+            <div style="display: flex; gap: 24px; margin-top: 12px; font-size: 12px; color: var(--text-sub);">
+                <span><strong style="color: #93c5fd;">&bull;</strong> Daily Impressions</span>
+                <span><strong style="color: #2563eb;">&bull;</strong> 28-day RMA Trend</span>
+                <span><strong style="color: #d97706;">---</strong> Glass Ceiling Resistance</span>
+                <span><strong style="color: #dc2626;">&#9632;</strong> Correlated Google Updates</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">Correlated Google Algorithm Updates</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Update Name</th>
+                        <th>Type</th>
+                        <th>Start Date</th>
+                        <th>Pre RMA 28</th>
+                        <th>Post RMA 28</th>
+                        <th>Erosion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {"".join(updates_html)}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    assert_no_forbidden_dashes(doc, "render_gsc_ceiling_dashboard")
+    assert_touch_targets(doc, context="render_gsc_ceiling_dashboard")
+    return doc
+
 
