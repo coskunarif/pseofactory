@@ -1229,10 +1229,9 @@ class AssetIntegrityEvaluator:
 
         engine_drifted = False
         if check_engine_drift:
-            b_dirs = getattr(adapter, "base_dirs", None)
             s_file = state_file or (adapter.dist_dir.parent / ".agy" / "engine_hash.json")
             if Path(s_file).exists():
-                drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
+                drift_res = detect_engine_drift(s_file, base_dirs=None)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
 
         for asset in assets:
@@ -1801,7 +1800,44 @@ class MaintenanceLifecycle:
                         f"(quarantined at {q_entry.get('timestamp')} for reasons {q_entry.get('reasons')})"
                     )
 
-            # Stage 3: Opportunity Discovery (TrendCronRunner)
+            # Stage 3: Retrofit-First Recompile & Quality Gate
+            cascade_res = {"refactored": 0, "failed": 0, "dependencies": []}
+            if actionable_drifted:
+                cascade_res = self.cascade_engine.refactor_all(
+                    actionable_drifted, adapter, force=force, dry_run=dry_run
+                )
+                retrofit_report = self.evaluator.audit_all(
+                    adapter=adapter,
+                    check_engine_drift=False,
+                    check_ledger=False,
+                )
+                lingering_drifted = [
+                    rec for rec in retrofit_report.drifted_assets
+                    if not self.cascade_engine.is_quarantined(rec, adapter.property_id)
+                ]
+                # Gate new candidate generation: Do NOT compile new candidate pages from trends
+                # if existing assets remain drifted or fail the integrity audit.
+                if len(lingering_drifted) > 0 and not dry_run:
+                    duration = time.time() - start_time
+                    status = (
+                        "PARTIAL_SUCCESS"
+                        if len(lingering_drifted) < len(actionable_drifted)
+                        else "FAILED"
+                    )
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status=status,
+                        assets_audited=retrofit_report.total_assets_checked,
+                        assets_drifted=retrofit_report.drifted_assets_count,
+                        assets_refactored=cascade_res.get("refactored", 0),
+                        assets_failed=retrofit_report.drifted_assets_count,
+                        failed_records=[r.to_dict() for r in retrofit_report.drifted_assets],
+                        engine_hash=None,
+                        duration_seconds=duration,
+                        trend_status="SKIPPED_UNVERIFIED_FLEET",
+                    )
+
+            # Stage 4: Opportunity Discovery (TrendCronRunner)
             trend_status_val: Optional[str] = None
             approved_build: List[Dict[str, Any]] = []
             refactor_pages: List[Dict[str, Any]] = []
@@ -1848,8 +1884,7 @@ class MaintenanceLifecycle:
                     partner_readiness_status="EVALUATED",
                 )
 
-            # Stage 4: Unified Build & Cascade Refactor
-            # 4A: Process approved builds
+            # Stage 5: Compile Approved Builds & Apply Refactor Overlays
             for item in approved_build:
                 b_slug = item.get("slug") if isinstance(item, dict) else str(item)
                 if dry_run:
@@ -1860,7 +1895,7 @@ class MaintenanceLifecycle:
                     except TypeError:
                         adapter.build_asset(b_slug)
 
-            # 4B: Process refactor overlays
+            overlay_drifted = []
             for item in refactor_pages:
                 r_slug = item.get("slug") if isinstance(item, dict) else str(item)
                 if not dry_run:
@@ -1892,14 +1927,16 @@ class MaintenanceLifecycle:
                     reasons=[DriftReason.OPPORTUNITY_OVERLAY],
                     details=["Opportunity overlay applied with 28-day measurement lock"],
                 )
-                actionable_drifted.append(r_rec)
+                overlay_drifted.append(r_rec)
 
-            # 4C: Refactor cascade
-            cascade_res = self.cascade_engine.refactor_all(
-                actionable_drifted, adapter, force=force, dry_run=dry_run
-            )
+            if overlay_drifted:
+                overlay_res = self.cascade_engine.refactor_all(
+                    overlay_drifted, adapter, force=force, dry_run=dry_run
+                )
+                cascade_res["refactored"] += overlay_res.get("refactored", 0)
+                cascade_res["failed"] += overlay_res.get("failed", 0)
 
-            # Stage 5: Fail-Closed Post-Build Verification Gate
+            # Stage 6: Fail-Closed Post-Build Verification Gate
             post_report = self.evaluator.audit_all(
                 adapter=adapter,
                 check_engine_drift=False,
@@ -1916,7 +1953,7 @@ class MaintenanceLifecycle:
                 duration = time.time() - start_time
                 status = (
                     "PARTIAL_SUCCESS"
-                    if len(post_actionable_drifted) < len(actionable_drifted)
+                    if len(post_actionable_drifted) < (len(actionable_drifted) + len(overlay_drifted))
                     else "FAILED"
                 )
                 return MaintenanceResult(
@@ -2002,12 +2039,11 @@ class MaintenanceLifecycle:
                 rel = a.relative_to(adapter.dist_dir).as_posix()
                 asset_hashes[rel] = compute_asset_fingerprint(a)
 
-            b_dirs = getattr(adapter, "base_dirs", None)
             if not dry_run:
-                current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
+                current_engine_hash = record_engine_hash(s_file, base_dirs=None)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
             else:
-                current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
+                current_engine_hash = compute_engine_hash(base_dirs=None)
 
             # Stage 9: Multi-Channel Syndication Draft Staging
             if enable_gitops:

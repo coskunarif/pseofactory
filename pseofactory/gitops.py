@@ -1183,28 +1183,51 @@ class LiveEdgeVerifier:
                     lat = res.get("latency_ms", 0)
                     title = res.get("title", "")
                     canon = res.get("canonical", "")
-                    print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP 200 (latency: {lat}ms, title: '{title}', canonical: '{canon}')")
+                    if not title:
+                        res["status"] = "FAIL"
+                        res["error"] = "Empty or missing document title"
+                        all_passed = False
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (empty or missing document title)")
+                    elif not canon or not canon.startswith(base):
+                        res["status"] = "FAIL"
+                        res["error"] = f"Mismatched canonical URL: expected '{base}', got '{canon}'"
+                        all_passed = False
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (mismatched canonical: expected '{base}', got '{canon}')")
+                    else:
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP 200 (latency: {lat}ms, title: '{title}', canonical: '{canon}')")
                 else:
                     all_passed = False
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP {status_code} ({res.get('error', 'probe failed')})")
             elif ep == f"{base}/robots.txt":
-                if res.get("status") == "PASS":
+                if res.get("status") == "PASS" and res.get("size_bytes", 0) > 0:
                     size = res.get("size_bytes", 0)
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET /robots.txt -> HTTP 200 (size: {size}B)")
                 else:
-                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /robots.txt -> HTTP {status_code} ({res.get('error', 'missing')})")
+                    all_passed = False
+                    if res.get("status") == "PASS":
+                        res["status"] = "FAIL"
+                        res["error"] = "Empty robots.txt"
+                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /robots.txt -> HTTP {status_code} ({res.get('error', 'missing or empty')})")
             elif ep == f"{base}/sitemap.xml":
-                if res.get("status") == "PASS":
+                if res.get("status") == "PASS" and res.get("size_bytes", 0) > 0:
                     entries = res.get("entries", 0)
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET /sitemap.xml -> HTTP 200 (entries: {entries})")
                 else:
-                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /sitemap.xml -> HTTP {status_code} ({res.get('error', 'missing')})")
+                    all_passed = False
+                    if res.get("status") == "PASS":
+                        res["status"] = "FAIL"
+                        res["error"] = "Empty sitemap.xml"
+                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /sitemap.xml -> HTTP {status_code} ({res.get('error', 'missing or invalid')})")
             elif ep == f"{base}/llms.txt":
-                if res.get("status") == "PASS":
+                if res.get("status") == "PASS" and res.get("size_bytes", 0) > 0:
                     size_kb = round(res.get("size_bytes", 0) / 1024, 1)
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET /llms.txt -> HTTP 200 (size: {size_kb}KB)")
                 else:
-                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /llms.txt -> HTTP {status_code} ({res.get('error', 'missing')})")
+                    all_passed = False
+                    if res.get("status") == "PASS":
+                        res["status"] = "FAIL"
+                        res["error"] = "Empty llms.txt"
+                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /llms.txt -> HTTP {status_code} ({res.get('error', 'missing or empty')})")
 
         root_res = results.get(f"{base}/", {})
         latency_val = root_res.get("latency_ms", 0) or 0
@@ -1217,6 +1240,7 @@ class LiveEdgeVerifier:
             f"Latency SLA (<500ms): {'PASS' if latency_sla else 'FAIL'} | DNS/SSL: VALID | Edge Status: {edge_status_label}"
         )
 
+        first_error = next((r.get("error") for r in results.values() if r.get("status") != "PASS" and r.get("error")), None)
         return {
             "status": "PASS" if all_passed else "FAIL",
             "base_url": base,
@@ -1225,6 +1249,8 @@ class LiveEdgeVerifier:
             "latency_compliant": latency_sla,
             "edge_status": edge_status_label,
             "local_audit": local_audit,
+            "local_build_accepted_as_edge": False,
+            "error": first_error,
         }
 
     def verify_property(self, base_url: str) -> Dict[str, Any]:

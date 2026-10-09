@@ -203,6 +203,7 @@ def trigger_drift_cascade(
     in_pipeline: bool = False,
     dry_run: bool = False,
     auto_record: bool = False,
+    verify_edge: bool = False,
 ) -> Dict[str, Any]:
     """
     Wires substrate drift detection into the full development lifecycle cascade:
@@ -340,7 +341,19 @@ def trigger_drift_cascade(
             except Exception as v_ex:
                 prop_res["verification"] = "FAIL"
                 prop_res["status"] = "FAIL"
-                prop_res["issues"].append(f"MasterSEOVerifier error: {v_ex}")
+        # Optional Live Edge Verification: Local build passes are never accepted as proof of live edge deployment
+        if verify_edge and not dry_run:
+            from pseofactory.gitops import LiveEdgeVerifier
+            verifier = LiveEdgeVerifier()
+            edge_url = f"https://{adapter.domain}"
+            edge_res = verifier.verify_edge_deployment(base_url=edge_url, dist_dir=adapter.dist_dir)
+            prop_res["edge"] = edge_res
+            if edge_res.get("status") != "PASS":
+                prop_res["verification"] = "FAIL"
+                prop_res["status"] = "FAIL"
+                prop_res["issues"].append(
+                    f"Live edge deployment verification failed for {edge_url}: {edge_res.get('error')}"
+                )
 
         property_results[p_id] = prop_res
 
