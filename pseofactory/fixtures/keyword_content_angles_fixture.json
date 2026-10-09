@@ -1,0 +1,169 @@
+[
+  {
+    "fixture_id": "b2b_saas_fleet_dispatch_underdog",
+    "query": "field service dispatch software for 2 person hvac team",
+    "market_segment": "b2b_saas",
+    "search_intent": "commercial_investigation",
+    "gsc_metrics": {
+      "impressions": 68,
+      "clicks": 4,
+      "position": 14.2,
+      "days_observed": 45
+    },
+    "incumbents": [
+      {
+        "domain": "servicetitan.com",
+        "rank": 1,
+        "title": "Enterprise Field Service Management Software",
+        "weakness_category": "broad_enterprise_pricing_gate",
+        "weakness_detail": "Requires 5+ technician minimum contract, enterprise pricing gate, 60-day setup delay."
+      },
+      {
+        "domain": "housecallpro.com",
+        "rank": 2,
+        "title": "HVAC Software & App for Contractors",
+        "weakness_category": "generic_derivative_listicle",
+        "weakness_detail": "Generic feature laundry list without micro-team route optimization or self-serve calibration."
+      }
+    ],
+    "existing_site_catalog": [
+      {
+        "slug": "direct-consolidation-loan-calculator",
+        "primary_keyword": "direct consolidation loan",
+        "secondary_keywords": [
+          "loan repayment options"
+        ]
+      }
+    ],
+    "expected_triage_action": "BUILD_PAGE",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "micro_team_instant_sync",
+        "target_audience_niche": "1 to 3 technician residential HVAC owner-operators",
+        "problem_scope": "Instant two-way calendar dispatch without enterprise seat minimums",
+        "geographic_or_vertical_bound": "North American residential HVAC emergency repairs",
+        "primary_value_proposition": "Zero-contract self-serve dispatcher tailored for 2-person van crews",
+        "first_party_utility_asset": "Interactive truck routing cost calculator and instant calendar bridge",
+        "divergence_score_min": 0.55
+      }
+    ]
+  },
+  {
+    "fixture_id": "fintech_section_179_cannibalization_trap",
+    "query": "section 179 vehicle deduction single member llc",
+    "market_segment": "fintech",
+    "search_intent": "informational",
+    "gsc_metrics": {
+      "impressions": 52,
+      "clicks": 6,
+      "position": 8.4,
+      "days_observed": 30
+    },
+    "incumbents": [
+      {
+        "domain": "investopedia.com",
+        "rank": 1,
+        "title": "Section 179 Deduction: Definition, Rules, and Limitations",
+        "weakness_category": "generic_derivative_listicle",
+        "weakness_detail": "High-level summary lacking statutory gross vehicle weight rating (GVWR) calculation formulas."
+      }
+    ],
+    "existing_site_catalog": [
+      {
+        "slug": "section-179-calculator",
+        "primary_keyword": "section 179 deduction",
+        "secondary_keywords": [
+          "first year equipment tax deduction",
+          "bonus depreciation limits"
+        ]
+      }
+    ],
+    "expected_triage_action": "REFACTOR_PAGE",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "single_member_llc_vehicle_overlay",
+        "target_audience_niche": "Single-member LLC solopreneurs financing work vehicles",
+        "problem_scope": "IRC Section 179 vehicle GVWR 6000lb threshold deduction calculations",
+        "geographic_or_vertical_bound": "US Federal tax code statutory bounds",
+        "primary_value_proposition": "28-day overlay module on existing Section 179 calculator addressing single-member LLC vehicle qualification",
+        "first_party_utility_asset": "Statutory GVWR vehicle weight qualification table and bonus depreciation slider",
+        "divergence_score_min": 0.5
+      }
+    ]
+  },
+  {
+    "fixture_id": "exploratory_impression_monitor_trap",
+    "query": "hvac seasonal maintenance agreement template pdf",
+    "market_segment": "b2b_saas",
+    "search_intent": "transactional",
+    "gsc_metrics": {
+      "impressions": 12,
+      "clicks": 0,
+      "position": 18.5,
+      "days_observed": 14
+    },
+    "incumbents": [
+      {
+        "domain": "template.net",
+        "rank": 1,
+        "title": "Free HVAC Maintenance Agreement Templates",
+        "weakness_category": "shallow_city_hub_syndication",
+        "weakness_detail": "Generic boilerplate Word and PDF downloads without equipment-specific maintenance schedules."
+      }
+    ],
+    "existing_site_catalog": [],
+    "expected_triage_action": "MONITOR",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "exploratory_monitoring_hold",
+        "target_audience_niche": "HVAC service business owners",
+        "problem_scope": "Maintenance agreement drafting",
+        "geographic_or_vertical_bound": "General US HVAC trade",
+        "primary_value_proposition": "Do not build page: impressions (12) are below dynamic floor (25); monitor query until genuine demand emerges.",
+        "first_party_utility_asset": "None (action held in MONITOR status per Search Intent Doctrine)",
+        "divergence_score_min": 0.0
+      }
+    ]
+  },
+  {
+    "fixture_id": "local_service_cold_chain_underdog",
+    "query": "commercial walk-in freezer compressor replacement austin tx",
+    "market_segment": "local_service",
+    "search_intent": "transactional",
+    "gsc_metrics": {
+      "impressions": 42,
+      "clicks": 5,
+      "position": 11.8,
+      "days_observed": 60
+    },
+    "incumbents": [
+      {
+        "domain": "yelp.com",
+        "rank": 1,
+        "title": "Top 10 Best Commercial Refrigeration Repair in Austin TX",
+        "weakness_category": "shallow_city_hub_syndication",
+        "weakness_detail": "Aggregator directory with zero emergency dispatch metrics or EPA 608 compliance verification."
+      },
+      {
+        "domain": "angi.com",
+        "rank": 2,
+        "title": "Commercial Refrigeration Contractors Austin TX",
+        "weakness_category": "generic_derivative_listicle",
+        "weakness_detail": "Lead-broker middleman without technical compressor sizing or local statutory refrigerant tracking."
+      }
+    ],
+    "existing_site_catalog": [],
+    "expected_triage_action": "BUILD_PAGE",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "travis_county_emergency_cold_chain",
+        "target_audience_niche": "Independent restaurant and bar operators in Travis County TX",
+        "problem_scope": "Emergency walk-in compressor breakdown during Austin summer peak",
+        "geographic_or_vertical_bound": "Austin TX metro area within 30-mile radius",
+        "primary_value_proposition": "Sub-2 hour emergency compressor triage with EPA Section 608 certified recovery log",
+        "first_party_utility_asset": "Compressor BTUH load sizing matrix and real-time refrigerant compliance manifest",
+        "divergence_score_min": 0.6
+      }
+    ]
+  }
+]

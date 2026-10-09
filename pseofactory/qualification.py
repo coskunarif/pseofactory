@@ -44,14 +44,16 @@ def check_search_intent_cannibalization(
             sec_kws = [str(k).lower().strip() for k in tool.get("secondary_keywords", []) if k]
 
             # Primary keyword match
-            if pk and (clean_q == pk or clean_q in pk or pk in clean_q):
-                return {
-                    "cannibalized": True,
-                    "is_cannibalizing": True,
-                    "parent_slug": tool_slug or "none",
-                    "reason": "matches_primary_keyword",
-                    "matched_tool": tool,
-                }
+            if pk:
+                pk_words = set(re.findall(r"\b[a-z0-9]+\b", pk))
+                if clean_q == pk or clean_q in pk or pk in clean_q or (pk_words and pk_words.issubset(query_words)):
+                    return {
+                        "cannibalized": True,
+                        "is_cannibalizing": True,
+                        "parent_slug": tool_slug or "none",
+                        "reason": "matches_primary_keyword",
+                        "matched_tool": tool,
+                    }
 
             # Secondary keyword match
             if clean_q in sec_kws:

@@ -222,6 +222,18 @@ from pseofactory.qualification import (
     assert_search_intent_qualified,
 )
 
+from pseofactory.content_angles import (
+    GrantOTriad,
+    IncumbentSummary,
+    UnderdogAngle,
+    ContentAngleBrief,
+    calculate_token_jaccard_divergence,
+    assert_underdog_angle_divergence,
+    evaluate_content_angles,
+    VALID_UNDERDOG_ARCHETYPES,
+)
+
+
 
 from pseofactory.verifier import (
     MasterSEOVerifier,
@@ -575,6 +587,14 @@ __all__ = [
     "qualify_search_intent",
     "check_search_intent_cannibalization",
     "assert_search_intent_qualified",
+    "GrantOTriad",
+    "IncumbentSummary",
+    "UnderdogAngle",
+    "ContentAngleBrief",
+    "calculate_token_jaccard_divergence",
+    "assert_underdog_angle_divergence",
+    "evaluate_content_angles",
+    "VALID_UNDERDOG_ARCHETYPES",
     "assert_url_safe_slug",
     "assert_technical_seo_spec",
     "assert_touch_targets",
