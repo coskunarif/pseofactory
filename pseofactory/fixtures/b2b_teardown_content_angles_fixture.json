@@ -1,0 +1,211 @@
+[
+  {
+    "fixture_id": "b2b_saas_billing_migration_teardown",
+    "query": "stripe billing vs chargebee subscription migration teardown",
+    "market_segment": "b2b_saas",
+    "search_intent": "commercial_investigation",
+    "gsc_metrics": {
+      "impressions": 85,
+      "clicks": 8,
+      "position": 12.4,
+      "days_observed": 60
+    },
+    "incumbents": [
+      {
+        "domain": "chargebee.com",
+        "rank": 1,
+        "title": "Enterprise Billing and Subscription Management Platform Guide",
+        "weakness_category": "broad_enterprise_pricing_gate",
+        "weakness_detail": "Mandatory sales qualification call with enterprise pricing gate and sixty day setup barrier."
+      },
+      {
+        "domain": "g2.com",
+        "rank": 2,
+        "title": "Best Subscription Billing Software Reviews and Pricing",
+        "weakness_category": "generic_derivative_listicle",
+        "weakness_detail": "Generic aggregated star ratings without technical export diffs or schema parity."
+      }
+    ],
+    "existing_site_catalog": [],
+    "expected_triage_action": "BUILD_PAGE",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "bofu_stripe_chargebee_migration_teardown",
+        "archetype": "Practitioner/Operator Teardown",
+        "target_audience_niche": "Bootstrapped B2B SaaS engineering founders processing 10k to 100k MRR",
+        "problem_scope": "Subscription billing platform migration data portability and webhook idempotency",
+        "geographic_or_vertical_bound": "Global B2B subscription software architectures",
+        "primary_value_proposition": "Deterministic billing migration matrix dissecting unannounced take-rate overages and raw webhook replay latency",
+        "first_party_utility_asset": "Interactive webhook retry simulator and subscription revenue leakage calculator",
+        "divergence_score_min": 0.85,
+        "teardown_spec": {
+          "framework_author": "Nick Zviadadze BOFU Teardown Blueprint",
+          "teardown_subject": "B2B SaaS Billing Platform Migration",
+          "icp_profile": "Bootstrapped B2B SaaS founders processing 10k to 100k MRR",
+          "evaluation_vectors": [
+            {
+              "vector_id": "pricing_cliff_transparency",
+              "benchmark_label": "Effective Take-Rate at 50k MRR",
+              "operator_baseline": "Transparent public pricing under 0.7 percent take-rate",
+              "incumbent_gap": "Mandatory sales qualification call with 0.75 percent overage take-rate",
+              "verifiable_metric": "0 sales calls required and $3,600 documented annual savings"
+            },
+            {
+              "vector_id": "webhook_retry_resilience",
+              "benchmark_label": "Idempotent Webhook Replay Delivery",
+              "operator_baseline": "Deterministic signature verification with automatic quadratic backoff",
+              "incumbent_gap": "Opaque retry queue dropping failed event webhooks after 3 attempts",
+              "verifiable_metric": "100 percent webhook delivery guarantee with verifiable replay log"
+            }
+          ],
+          "reproducible_workflow_steps": [
+            "Export customer payment token mappings from incumbent billing API",
+            "Replay historical invoice webhooks through idempotency verification harness",
+            "Audit prorated subscription tier adjustments against statutory tax rules"
+          ],
+          "utility_asset_type": "interactive_comparison_matrix"
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "b2b_saas_plg_onboarding_friction_teardown",
+    "query": "product led growth onboarding friction teardown b2b saas",
+    "market_segment": "b2b_saas",
+    "search_intent": "commercial_investigation",
+    "gsc_metrics": {
+      "impressions": 72,
+      "clicks": 6,
+      "position": 11.2,
+      "days_observed": 45
+    },
+    "incumbents": [
+      {
+        "domain": "productled.com",
+        "rank": 1,
+        "title": "Complete Guide to Product Led Growth Strategies and Metrics",
+        "weakness_category": "generic_derivative_listicle",
+        "weakness_detail": "High-level conceptual advice lacking step-by-step user onboarding friction audits or latency metrics."
+      },
+      {
+        "domain": "openviewpartners.com",
+        "rank": 2,
+        "title": "PLG Benchmarks and SaaS Onboarding Best Practices",
+        "weakness_category": "broad_enterprise_pricing_gate",
+        "weakness_detail": "Broad survey statistics without computable time-to-first-value drop-off calculations."
+      }
+    ],
+    "existing_site_catalog": [],
+    "expected_triage_action": "BUILD_PAGE",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "plg_activation_friction_audit",
+        "archetype": "Practitioner/Operator Teardown",
+        "target_audience_niche": "Product managers and growth engineers at self-serve B2B SaaS startups",
+        "problem_scope": "Eliminating mandatory sales demo walls and credit card gates during activation",
+        "geographic_or_vertical_bound": "Self-serve PLG software applications",
+        "primary_value_proposition": "Granular onboarding teardown quantifying activation bottleneck steps and self-serve workspace initialization speed",
+        "first_party_utility_asset": "Interactive onboarding friction scorecard and user drop-off step calculator",
+        "divergence_score_min": 0.85,
+        "teardown_spec": {
+          "framework_author": "Ben Goodey SaaS Workflow Teardown Blueprint",
+          "teardown_subject": "Product-Led Onboarding Activation Flow",
+          "icp_profile": "Product managers and growth engineers at self-serve B2B SaaS startups",
+          "evaluation_vectors": [
+            {
+              "vector_id": "time_to_first_value",
+              "benchmark_label": "Signup to Core Feature Interaction Latency",
+              "operator_baseline": "Frictionless guest workspace ready in under 90 seconds",
+              "incumbent_gap": "Mandatory email verification link and 7-field company questionnaire",
+              "verifiable_metric": "90 seconds time-to-value versus 14-minute incumbent average"
+            },
+            {
+              "vector_id": "card_gate_dropoff",
+              "benchmark_label": "Pre-Trial Credit Card Wall",
+              "operator_baseline": "Zero credit card required for complete sandbox evaluation",
+              "incumbent_gap": "Upfront payment card authorization with automatic 14-day renewal lock",
+              "verifiable_metric": "42 percent higher trial conversion with zero upfront credit card gate"
+            }
+          ],
+          "reproducible_workflow_steps": [
+            "Map every discrete user input field required from landing page to first dashboard render",
+            "Measure wall-clock latency of email verification round-trips and workspace initialization",
+            "Instrument telemetry drop-off events on permission authorization screens"
+          ],
+          "utility_asset_type": "onboarding_friction_scorecard"
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "b2b_saas_faceted_catalog_audit",
+    "query": "technical seo audit checklist for faceted b2b saas catalog",
+    "market_segment": "b2b_saas",
+    "search_intent": "informational",
+    "gsc_metrics": {
+      "impressions": 95,
+      "clicks": 9,
+      "position": 9.8,
+      "days_observed": 50
+    },
+    "incumbents": [
+      {
+        "domain": "searchengineland.com",
+        "rank": 1,
+        "title": "The Ultimate Technical SEO Audit Checklist for Enterprise Sites",
+        "weakness_category": "stale_generic_checklist",
+        "weakness_detail": "Outdated general checklist without faceted URL parameter matrix or SSR DOM hydration tests."
+      },
+      {
+        "domain": "ahrefs.com",
+        "rank": 2,
+        "title": "How to Do a Technical SEO Audit in 16 Steps",
+        "weakness_category": "generic_derivative_listicle",
+        "weakness_detail": "General tool marketing guide lacking actionable parameter indexation rules or automated validation scripts."
+      }
+    ],
+    "existing_site_catalog": [],
+    "expected_triage_action": "BUILD_PAGE",
+    "underdog_angle_specs": [
+      {
+        "angle_id": "deterministic_faceted_saas_technical_audit",
+        "archetype": "Regulatory/Audit Checklist",
+        "target_audience_niche": "Principal software engineers and technical SEO leads at faceted B2B directory sites",
+        "problem_scope": "Preventing crawl budget exhaustion and canonical loop traps across faceted filter dimensions",
+        "geographic_or_vertical_bound": "Enterprise B2B SaaS directories and programmatic catalogs",
+        "primary_value_proposition": "Four-tier deterministic technical audit checklist isolating crawl budget waste and canonical loop traps",
+        "first_party_utility_asset": "Faceted URL robots indexation decision tree and JSON-LD schema validator",
+        "divergence_score_min": 0.85,
+        "audit_spec": {
+          "framework_author": "Kristina Azarenko Technical SaaS Audit Blueprint",
+          "audit_domain_scope": "Faceted B2B SaaS application directory architecture",
+          "checklist": [
+            {
+              "check_id": "AUDIT-CRAWL-01",
+              "category": "crawlability_indexation",
+              "severity": "CRITICAL",
+              "diagnostic_rule": "Faceted filter combinations with 2 or more parameters must return robots noindex or be disallowed in robots.txt",
+              "verification_heuristic": "Verify HTTP response headers and meta robots tags on multi-parameter query URLs",
+              "remediation_pattern": "Add canonical self-referencing base URL and inject robots noindex header on faceted combinations"
+            },
+            {
+              "check_id": "AUDIT-RENDER-02",
+              "category": "rendering_efficiency",
+              "severity": "HIGH",
+              "diagnostic_rule": "Critical catalog cards and pricing formulas must be present in raw server-rendered HTML without client JS execution",
+              "verification_heuristic": "Compare DOM text content between curl raw response and headless browser post-hydration render",
+              "remediation_pattern": "Migrate dynamic catalog cards to static server-side rendering with streaming hydration"
+            }
+          ],
+          "metric_thresholds": {
+            "max_crawl_depth": 3,
+            "min_ssr_dom_parity_pct": 98.5,
+            "max_ttfb_ms": 200,
+            "target_cls": 0.0
+          },
+          "utility_asset_type": "faceted_indexation_decision_tree"
+        }
+      }
+    ]
+  }
+]

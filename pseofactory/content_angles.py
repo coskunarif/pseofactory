@@ -114,6 +114,138 @@ class IncumbentSummary:
 
 
 @dataclass
+class TeardownEvaluationVector:
+    """Structured evaluation vector comparing an incumbent tool against operator reality."""
+    vector_id: str
+    benchmark_label: str
+    operator_baseline: str
+    incumbent_gap: str
+    verifiable_metric: str
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "vector_id": self.vector_id,
+            "benchmark_label": self.benchmark_label,
+            "operator_baseline": self.operator_baseline,
+            "incumbent_gap": self.incumbent_gap,
+            "verifiable_metric": self.verifiable_metric,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> TeardownEvaluationVector:
+        return cls(
+            vector_id=str(data.get("vector_id", "")),
+            benchmark_label=str(data.get("benchmark_label", "")),
+            operator_baseline=str(data.get("operator_baseline", "")),
+            incumbent_gap=str(data.get("incumbent_gap", "")),
+            verifiable_metric=str(data.get("verifiable_metric", "")),
+        )
+
+
+@dataclass
+class PractitionerTeardownSpec:
+    """Specification model capturing practitioner teardown heuristics (Zviadadze/Goodey)."""
+    framework_author: str
+    teardown_subject: str
+    icp_profile: str
+    evaluation_vectors: List[TeardownEvaluationVector] = field(default_factory=list)
+    reproducible_workflow_steps: List[str] = field(default_factory=list)
+    utility_asset_type: str = "interactive_comparison_matrix"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "framework_author": self.framework_author,
+            "teardown_subject": self.teardown_subject,
+            "icp_profile": self.icp_profile,
+            "evaluation_vectors": [v.to_dict() for v in self.evaluation_vectors],
+            "reproducible_workflow_steps": self.reproducible_workflow_steps,
+            "utility_asset_type": self.utility_asset_type,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> PractitionerTeardownSpec:
+        raw_vectors = data.get("evaluation_vectors", [])
+        vectors = [
+            v if isinstance(v, TeardownEvaluationVector) else TeardownEvaluationVector.from_dict(v)
+            for v in raw_vectors
+        ]
+        return cls(
+            framework_author=str(data.get("framework_author", "")),
+            teardown_subject=str(data.get("teardown_subject", "")),
+            icp_profile=str(data.get("icp_profile", "")),
+            evaluation_vectors=vectors,
+            reproducible_workflow_steps=[str(s) for s in data.get("reproducible_workflow_steps", [])],
+            utility_asset_type=str(data.get("utility_asset_type", "interactive_comparison_matrix")),
+        )
+
+
+@dataclass
+class TechnicalAuditChecklistItem:
+    """Actionable technical audit item inspired by Kristina Azarenko technical SEO audits."""
+    check_id: str
+    category: str
+    severity: str
+    diagnostic_rule: str
+    verification_heuristic: str
+    remediation_pattern: str
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "check_id": self.check_id,
+            "category": self.category,
+            "severity": self.severity,
+            "diagnostic_rule": self.diagnostic_rule,
+            "verification_heuristic": self.verification_heuristic,
+            "remediation_pattern": self.remediation_pattern,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> TechnicalAuditChecklistItem:
+        return cls(
+            check_id=str(data.get("check_id", "")),
+            category=str(data.get("category", "")),
+            severity=str(data.get("severity", "MEDIUM")),
+            diagnostic_rule=str(data.get("diagnostic_rule", "")),
+            verification_heuristic=str(data.get("verification_heuristic", "")),
+            remediation_pattern=str(data.get("remediation_pattern", "")),
+        )
+
+
+@dataclass
+class SaaSTechnicalAuditSpec:
+    """Specification model capturing technical audit heuristics (Kristina Azarenko)."""
+    framework_author: str
+    audit_domain_scope: str
+    checklist: List[TechnicalAuditChecklistItem] = field(default_factory=list)
+    metric_thresholds: Dict[str, Union[int, float, str]] = field(default_factory=dict)
+    utility_asset_type: str = "faceted_indexation_decision_tree"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "framework_author": self.framework_author,
+            "audit_domain_scope": self.audit_domain_scope,
+            "checklist": [c.to_dict() for c in self.checklist],
+            "metric_thresholds": self.metric_thresholds,
+            "utility_asset_type": self.utility_asset_type,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> SaaSTechnicalAuditSpec:
+        raw_checklist = data.get("checklist", [])
+        items = [
+            c if isinstance(c, TechnicalAuditChecklistItem) else TechnicalAuditChecklistItem.from_dict(c)
+            for c in raw_checklist
+        ]
+        return cls(
+            framework_author=str(data.get("framework_author", "")),
+            audit_domain_scope=str(data.get("audit_domain_scope", "")),
+            checklist=items,
+            metric_thresholds=dict(data.get("metric_thresholds", {})),
+            utility_asset_type=str(data.get("utility_asset_type", "faceted_indexation_decision_tree")),
+        )
+
+
+@dataclass
 class UnderdogAngle:
     """An underdog content angle engineered to outrank incumbents."""
     angle_id: str
@@ -122,9 +254,11 @@ class UnderdogAngle:
     primary_value_proposition: str
     first_party_utility_asset: str
     divergence_score: float = 0.0
+    teardown_spec: Optional[PractitionerTeardownSpec] = None
+    audit_spec: Optional[SaaSTechnicalAuditSpec] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result: Dict[str, Any] = {
             "angle_id": self.angle_id,
             "triad": self.triad.to_dict(),
             "archetype": self.archetype,
@@ -132,6 +266,11 @@ class UnderdogAngle:
             "first_party_utility_asset": self.first_party_utility_asset,
             "divergence_score": self.divergence_score,
         }
+        if self.teardown_spec is not None:
+            result["teardown_spec"] = self.teardown_spec.to_dict()
+        if self.audit_spec is not None:
+            result["audit_spec"] = self.audit_spec.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> UnderdogAngle:
@@ -146,6 +285,17 @@ class UnderdogAngle:
                 problem_scope=str(data.get("problem_scope", "")),
                 geographic_or_vertical_bound=str(data.get("geographic_or_vertical_bound", "")),
             )
+
+        teardown = None
+        if "teardown_spec" in data and data["teardown_spec"]:
+            raw_t = data["teardown_spec"]
+            teardown = raw_t if isinstance(raw_t, PractitionerTeardownSpec) else PractitionerTeardownSpec.from_dict(raw_t)
+
+        audit = None
+        if "audit_spec" in data and data["audit_spec"]:
+            raw_a = data["audit_spec"]
+            audit = raw_a if isinstance(raw_a, SaaSTechnicalAuditSpec) else SaaSTechnicalAuditSpec.from_dict(raw_a)
+
         return cls(
             angle_id=str(data.get("angle_id", "")),
             triad=triad,
@@ -153,7 +303,10 @@ class UnderdogAngle:
             primary_value_proposition=str(data.get("primary_value_proposition", "")),
             first_party_utility_asset=str(data.get("first_party_utility_asset", "")),
             divergence_score=float(data.get("divergence_score", data.get("divergence_score_min", 0.0))),
+            teardown_spec=teardown,
+            audit_spec=audit,
         )
+
 
 
 @dataclass
@@ -332,6 +485,49 @@ def generate_markdown_brief(
                 f"- First-Party Utility Asset: {angle.first_party_utility_asset}",
                 f"- Divergence Score: {angle.divergence_score:.4f}",
             ])
+            if angle.teardown_spec:
+                ts = angle.teardown_spec
+                lines.extend([
+                    "#### Practitioner Teardown Specification",
+                    f"- Framework Author: {ts.framework_author}",
+                    f"- Teardown Subject: {ts.teardown_subject}",
+                    f"- ICP Profile: {ts.icp_profile}",
+                    f"- Utility Asset Type: {ts.utility_asset_type}",
+                ])
+                if ts.evaluation_vectors:
+                    lines.append("##### Evaluation Vectors")
+                    for vec in ts.evaluation_vectors:
+                        lines.extend([
+                            f"- Vector {vec.vector_id}: {vec.benchmark_label}",
+                            f"  - Operator Baseline: {vec.operator_baseline}",
+                            f"  - Incumbent Gap: {vec.incumbent_gap}",
+                            f"  - Verifiable Metric: {vec.verifiable_metric}",
+                        ])
+                if ts.reproducible_workflow_steps:
+                    lines.append("##### Reproducible Workflow Steps")
+                    for i, step in enumerate(ts.reproducible_workflow_steps, start=1):
+                        lines.append(f"{i}. {step}")
+            if angle.audit_spec:
+                aspec = angle.audit_spec
+                lines.extend([
+                    "#### SaaS Technical Audit Specification",
+                    f"- Framework Author: {aspec.framework_author}",
+                    f"- Audit Domain Scope: {aspec.audit_domain_scope}",
+                    f"- Utility Asset Type: {aspec.utility_asset_type}",
+                ])
+                if aspec.metric_thresholds:
+                    lines.append("##### Metric Thresholds")
+                    for k, v in aspec.metric_thresholds.items():
+                        lines.append(f"- {k}: {v}")
+                if aspec.checklist:
+                    lines.append("##### Technical Audit Checklist")
+                    for item in aspec.checklist:
+                        lines.extend([
+                            f"- Check {item.check_id} [{item.severity}] ({item.category})",
+                            f"  - Diagnostic Rule: {item.diagnostic_rule}",
+                            f"  - Verification Heuristic: {item.verification_heuristic}",
+                            f"  - Remediation Pattern: {item.remediation_pattern}",
+                        ])
     else:
         lines.extend([
             "",
