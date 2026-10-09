@@ -68,6 +68,18 @@ CLEAN_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+@pytest.fixture(autouse=True)
+def clean_sys_modules():
+    """
+    Ensures tenant packages are never leaked across tests in sys.modules (stateless worker physics).
+    Zero em-dashes. Zero en-dashes.
+    """
+    yield
+    for mod in list(sys.modules.keys()):
+        if mod in ("profithelm", "prexvo") or mod.startswith(("profithelm.", "prexvo.")):
+            sys.modules.pop(mod, None)
+
+
 def test_atomic_state_ledger_concurrency_and_fsync(tmp_path):
     """
     Verifies atomic JSON persistence under concurrent multithreaded writers and readers.
