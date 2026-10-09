@@ -868,6 +868,19 @@ class PushIndexer:
         if not urls:
             urls = [f"{self.canonical_base}/"] + [f"{self.canonical_base}/tools/{t['slug']}/" for t in self.tools]
 
+        if urls:
+            airlock_res = self.preflight_airlock(urls)
+            urls = list(airlock_res[0])
+            if not urls:
+                return {
+                    "engine": "fast-index",
+                    "domain": self.domain,
+                    "command": "",
+                    "status": "QUARANTINED_ALL",
+                    "actions": [],
+                    "note": "All candidate URLs were quarantined by preflight airlock.",
+                }
+
         target_url = urls[0] if urls else f"{self.canonical_base}/"
         candidates = [
             shutil.which("fast-index"),
@@ -1064,6 +1077,10 @@ class PushIndexer:
         target_site = site or self.gsc_site
         if not urls:
             urls = [f"{self.canonical_base}/"] + [f"{self.canonical_base}/tools/{t['slug']}/" for t in self.tools]
+
+        if urls:
+            airlock_res = self.preflight_airlock(urls)
+            urls = list(airlock_res[0])
 
         target_batch = urls[:max_urls]
         inspections = []
@@ -1278,6 +1295,20 @@ class PushIndexer:
 
         if hubs_only:
             urls, _ = self.partition_indexing_urls(urls)
+
+        if urls:
+            airlock_res = self.preflight_airlock(urls)
+            urls = list(airlock_res[0])
+            if not urls:
+                return {
+                    "engine": "indexmysite",
+                    "project_id": target_project_id,
+                    "status": "QUARANTINED_ALL",
+                    "urls_submitted": 0,
+                    "urls_targeted": 0,
+                    "urls": [],
+                    "note": "All candidate URLs were quarantined by preflight airlock.",
+                }
 
         opt_in = commercial or (os.environ.get(f"{self.domain.split('.')[0].upper()}_ENABLE_INDEXMYSITE") == "1")
 
@@ -1643,6 +1674,7 @@ class PushIndexer:
             candidate_urls = []
             dispatch_type = "IDEMPOTENT_NO_OP"
 
+        had_candidate_urls = bool(candidate_urls)
         preflight_report = None
         blocked_urls: List[str] = []
         if candidate_urls:
@@ -1680,37 +1712,6 @@ class PushIndexer:
         else:
             urls_to_submit = []
 
-        if urls_to_submit:
-            indexnow_res = self.submit_indexnow_batch(urls=urls_to_submit, dry_run=not live, force=force, hubs_only=hubs_only)
-            websub_res = self.ping_websub_hub(dry_run=not live)
-            pingomatic_res = self.ping_pingomatic(dry_run=not live)
-            gsc_res = self.submit_gsc_indexing(urls=urls_to_submit, live=live, hubs_only=hubs_only)
-            indexmysite_res = self.submit_indexmysite(urls=urls_to_submit, live=live, hubs_only=hubs_only, commercial=commercial)
-            fast_idx_res = self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
-            if live:
-                self.record_pushed_urls(urls_to_submit)
-        else:
-            indexnow_res = {
-                "host": self.domain,
-                "urls_submitted": len(all_urls),
-                "urls_dispatched": 0,
-                "urls_skipped_unchanged": len(all_urls),
-                "status": "IDEMPOTENT_NO_OP",
-                "message": f"All {len(all_urls)} assets are unchanged in push ledger. Zero byte churn.",
-            }
-            websub_res = self.ping_websub_hub(dry_run=not live)
-            pingomatic_res = self.ping_pingomatic(dry_run=not live)
-            gsc_res = {
-                "site": self.gsc_site,
-                "urls_targeted": len(all_urls),
-                "results": [{"engine": "gsc_idempotent", "status": "IDEMPOTENT_NO_OP", "message": "All assets already pushed"}],
-                "inspection_oracle": self.verify_gsc_indexation_loop(urls=all_urls[:5], live=live),
-            }
-            indexmysite_res = {"engine": "indexmysite", "status": "IDEMPOTENT_NO_OP", "urls_submitted": 0, "urls_targeted": len(all_urls)}
-            fast_idx_res = self.submit_fast_index(urls=all_urls[:5], dry_run=not live)
-
-        audit = self.audit_asset_submission_status(assets=inspection["assets"], live=live)
-
         engines_accepted = [
             "Google Indexing API",
             "Google Search Console",
@@ -1724,6 +1725,123 @@ class PushIndexer:
             "Googlebot RSS Feed (WebSub)",
             "Ping-O-Matic XML-RPC Hubs",
         ]
+
+        if (had_candidate_urls and not urls_to_submit) or (blocked_urls and not urls_to_submit):
+            report = {
+                "status": "QUARANTINED_ALL",
+                "mode": "LIVE" if live else "SIMULATED",
+                "timestamp": datetime.now().isoformat(),
+                "domain": self.domain,
+                "dispatch_type": dispatch_type,
+                "hubs_only": hubs_only,
+                "assets_inspected": inspection["total_assets"],
+                "new_assets_detected": inspection["new_assets_count"],
+                "existing_assets_preserved": inspection["existing_assets_count"],
+                "assets_submitted_count": 0,
+                "assets_submitted": [],
+                "urls_submitted": [],
+                "engines_accepted": engines_accepted,
+                "indexnow": {
+                    "host": self.domain,
+                    "urls_submitted": 0,
+                    "urls_dispatched": 0,
+                    "urls_skipped_unchanged": 0,
+                    "results": [],
+                    "status": "QUARANTINED_ALL",
+                    "message": "All candidate URLs were quarantined by preflight airlock.",
+                },
+                "websub": {
+                    "status": "QUARANTINED_ALL",
+                    "urls_submitted": 0,
+                    "message": "Zero outbound actions: all URLs quarantined.",
+                },
+                "pingomatic": {
+                    "status": "QUARANTINED_ALL",
+                    "urls_submitted": 0,
+                    "message": "Zero outbound actions: all URLs quarantined.",
+                },
+                "fast_index": {
+                    "engine": "fast-index",
+                    "domain": self.domain,
+                    "command": "",
+                    "status": "QUARANTINED_ALL",
+                    "actions": [],
+                    "note": "Zero outbound actions: all URLs quarantined.",
+                },
+                "google_indexing_api": {
+                    "site": self.gsc_site,
+                    "urls_targeted": 0,
+                    "results": [
+                        {
+                            "engine": "gsc_quarantined",
+                            "status": "QUARANTINED_ALL",
+                            "message": "All candidate URLs were quarantined by preflight airlock.",
+                        }
+                    ],
+                    "inspection_oracle": [],
+                },
+                "gsc_inspection_oracle": [],
+                "indexmysite": {
+                    "engine": "indexmysite",
+                    "status": "QUARANTINED_ALL",
+                    "urls_submitted": 0,
+                    "urls_targeted": 0,
+                },
+                "audit": self.audit_asset_submission_status(assets=inspection["assets"], live=live),
+                "preflight": preflight_report.to_dict() if preflight_report else None,
+                "blocked_urls": blocked_urls,
+                "audit_log_path": str(self.audit_log_path),
+            }
+            try:
+                self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+                self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            except Exception as ex:
+                report["audit_log_error"] = str(ex)
+            return report
+
+        if urls_to_submit:
+            indexnow_res = self.submit_indexnow_batch(urls=urls_to_submit, dry_run=not live, force=force, hubs_only=hubs_only)
+            websub_res = self.ping_websub_hub(dry_run=not live)
+            pingomatic_res = self.ping_pingomatic(dry_run=not live)
+            gsc_res = self.submit_gsc_indexing(urls=urls_to_submit, live=live, hubs_only=hubs_only)
+            indexmysite_res = self.submit_indexmysite(urls=urls_to_submit, live=live, hubs_only=hubs_only, commercial=commercial)
+            fast_idx_res = self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
+            if live:
+                self.record_pushed_urls(urls_to_submit)
+        else:
+            airlock_all, _ = self.preflight_airlock(all_urls) if all_urls else ([], [])
+            safe_all_urls = list(airlock_all)
+            indexnow_res = {
+                "host": self.domain,
+                "urls_submitted": len(safe_all_urls),
+                "urls_dispatched": 0,
+                "urls_skipped_unchanged": len(safe_all_urls),
+                "status": "IDEMPOTENT_NO_OP",
+                "message": f"All {len(safe_all_urls)} assets are unchanged in push ledger. Zero byte churn.",
+            }
+            websub_res = self.ping_websub_hub(dry_run=not live)
+            pingomatic_res = self.ping_pingomatic(dry_run=not live)
+            oracle_sample = safe_all_urls[:5]
+            gsc_res = {
+                "site": self.gsc_site,
+                "urls_targeted": len(safe_all_urls),
+                "results": [{"engine": "gsc_idempotent", "status": "IDEMPOTENT_NO_OP", "message": "All assets already pushed"}],
+                "inspection_oracle": self.verify_gsc_indexation_loop(urls=oracle_sample, live=live) if oracle_sample else [],
+            }
+            indexmysite_res = {"engine": "indexmysite", "status": "IDEMPOTENT_NO_OP", "urls_submitted": 0, "urls_targeted": len(safe_all_urls)}
+            if oracle_sample:
+                fast_idx_res = self.submit_fast_index(urls=oracle_sample, dry_run=not live)
+            else:
+                fast_idx_res = {
+                    "engine": "fast-index",
+                    "domain": self.domain,
+                    "command": "",
+                    "status": "IDEMPOTENT_NO_OP",
+                    "actions": [],
+                    "note": "No valid push-eligible URLs for fast-index",
+                }
+
+        audit = self.audit_asset_submission_status(assets=inspection["assets"], live=live)
 
         report = {
             "status": "SUCCESS",

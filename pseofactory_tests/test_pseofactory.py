@@ -688,3 +688,45 @@ def test_headers_x_robots_tag_nosnippet_detection(tmp_path):
     assert any("_headers applies 'nosnippet' to public route '/tools/*'" in issue for issue in res["issues"])
 
 
+def test_indexer_dispatch_automated_indexing_quarantined_all_no_outbound(tmp_path):
+    """Verifies calling dispatch_automated_indexing with quarantined URLs executes no outbound actions and returns QUARANTINED_ALL."""
+    ledger_path = tmp_path / "ledger.json"
+    audit_log_path = tmp_path / "audit.json"
+    quarantine_path = tmp_path / "quarantine.json"
+    base_dir = Path("/home/ubuntuadmin/projects/prexvo")
+    dist_dir = base_dir / "dist"
+
+    indexer = PushIndexer(
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        base_dir=base_dir,
+        dist_dir=dist_dir,
+        ledger_path=ledger_path,
+        audit_log_path=audit_log_path,
+        quarantine_ledger_path=quarantine_path,
+    )
+
+    res = indexer.dispatch_automated_indexing(urls=["https://prexvo.com/cart"], live=False)
+
+    assert res["status"] in ("QUARANTINED_ALL", "ALL_URLS_QUARANTINED")
+    assert res["urls_submitted"] == []
+
+    # Assert fast-index zero outbound actions and no quarantined URLs in payload
+    fast_idx = res.get("fast_index", {})
+    assert fast_idx.get("status") == "QUARANTINED_ALL"
+    assert fast_idx.get("command") == ""
+    assert fast_idx.get("actions") == []
+
+    # Assert IndexNow zero outbound actions
+    indexnow = res.get("indexnow", {})
+    assert indexnow.get("status") == "QUARANTINED_ALL"
+    assert indexnow.get("urls_submitted") == 0
+    assert indexnow.get("results") == []
+
+    # Assert GSC zero outbound actions
+    gsc = res.get("google_indexing_api", {})
+    assert gsc.get("urls_targeted") == 0
+    assert all("QUARANTINED_ALL" in str(r.get("status", "")) for r in gsc.get("results", []))
+
+
+
