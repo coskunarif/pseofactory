@@ -659,6 +659,58 @@ class IndexingPreflightEngine:
 
         return self.inspect_urls(urls)
 
+    def quarantine_blocked_urls(
+        self,
+        blocked_urls: List[Any],
+        ledger_path: Optional[Union[str, Path]] = None,
+        stage: str = "PREFLIGHT",
+        error: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Quarantines defective or blocked URLs into indexing_quarantine_ledger.json.
+        Preserves existing quarantine entries and writes updated ledger.
+        """
+        if ledger_path is not None:
+            target_path = Path(ledger_path).resolve()
+        elif self.dist_dir:
+            target_path = Path(self.dist_dir).parent / ".agy" / "indexing_quarantine_ledger.json"
+        else:
+            target_path = Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json")
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        existing_entries: List[Dict[str, Any]] = []
+        if target_path.exists():
+            try:
+                content = target_path.read_text(encoding="utf-8")
+                loaded = json.loads(content)
+                if isinstance(loaded, list):
+                    existing_entries = loaded
+                elif isinstance(loaded, dict) and "quarantined" in loaded:
+                    existing_entries = loaded.get("quarantined", [])
+            except Exception:
+                existing_entries = []
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        new_entries: List[Dict[str, Any]] = []
+
+        for item in blocked_urls:
+            url_str = item if isinstance(item, str) else getattr(item, "url", str(item))
+            entry = {
+                "property_id": self.property_id,
+                "domain": self.domain,
+                "url": url_str,
+                "status": "BLOCKED",
+                "stage": stage,
+                "error": error or "Failed preflight indexing airlock criteria",
+                "timestamp": now_iso,
+            }
+            new_entries.append(entry)
+
+        all_entries = existing_entries + new_entries
+        target_path.write_text(json.dumps(all_entries, indent=2), encoding="utf-8")
+        return new_entries
+
     def inspect_fixture(
         self, fixture_path_or_data: Union[str, Path, Dict[str, Any], List[Dict[str, Any]]]
     ) -> PreflightReport:

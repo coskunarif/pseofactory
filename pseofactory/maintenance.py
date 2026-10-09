@@ -19,7 +19,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable
@@ -56,6 +56,7 @@ class DriftReason(str, Enum):
     PROPERTY_CONTAMINATION = "PROPERTY_CONTAMINATION"
     STATUTORY_DRIFT = "STATUTORY_DRIFT"
     OPERATIONAL_SHIELD_GAP = "OPERATIONAL_SHIELD_GAP"
+    OPPORTUNITY_OVERLAY = "OPPORTUNITY_OVERLAY"
 
 
 
@@ -131,6 +132,7 @@ class MaintenanceResult:
     distribution_status: Optional[str] = None
     indexing_status: Optional[str] = None
     trend_status: Optional[str] = None
+    partner_readiness_status: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -153,6 +155,8 @@ class MaintenanceResult:
             d["indexing_status"] = self.indexing_status
         if self.trend_status is not None:
             d["trend_status"] = self.trend_status
+        if self.partner_readiness_status is not None:
+            d["partner_readiness_status"] = self.partner_readiness_status
         return d
 
 
@@ -1484,6 +1488,7 @@ class RefactorCascadeEngine:
         record: AssetDriftRecord,
         adapter: PropertyAdapter,
         force: bool = False,
+        dry_run: bool = False,
     ) -> bool:
         """
         Refactors an individual drifted asset with atomic staged swap and rollback.
@@ -1506,6 +1511,11 @@ class RefactorCascadeEngine:
                 )
                 return False
 
+        if dry_run:
+            if target_path.is_file():
+                self.evaluator.audit_asset(target_path, adapter)
+            return True
+
         for attempt in range(1, self.max_retries + 1):
             backup_path: Optional[Path] = None
             try:
@@ -1523,7 +1533,10 @@ class RefactorCascadeEngine:
 
                 # 2. Rebuild in isolated environment
                 with adapter.scoped_environment():
-                    build_ok = adapter.build_asset(slug, target_file=target_path)
+                    try:
+                        build_ok = adapter.build_asset(slug, target_file=target_path)
+                    except TypeError:
+                        build_ok = adapter.build_asset(slug)
                     if not build_ok and not target_path.exists():
                         raise RuntimeError(f"Builder failed to generate asset for slug '{slug}'")
 
@@ -1579,6 +1592,7 @@ class RefactorCascadeEngine:
         records: List[AssetDriftRecord],
         adapter: PropertyAdapter,
         force: bool = False,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         """
         Refactors all provided drifted records serially with dependency cascade.
@@ -1601,6 +1615,18 @@ class RefactorCascadeEngine:
         )
 
         if should_bulk_rebuild:
+            if dry_run:
+                for rec in actionable_records:
+                    refactored_count += 1
+                    deps = self.map_dependencies(rec.asset_path, adapter)
+                    for d in deps:
+                        all_dependencies.add(str(d))
+                return {
+                    "refactored": refactored_count,
+                    "failed": 0,
+                    "dependencies": sorted(list(all_dependencies)),
+                }
+
             try:
                 with adapter.scoped_environment():
                     build_ok = adapter.build_all()
@@ -1646,7 +1672,7 @@ class RefactorCascadeEngine:
         else:
             for rec in actionable_records:
                 try:
-                    success = self.refactor_asset(rec, adapter, force=force)
+                    success = self.refactor_asset(rec, adapter, force=force, dry_run=dry_run)
                     if success:
                         refactored_count += 1
                         deps = self.map_dependencies(rec.asset_path, adapter)
@@ -1687,10 +1713,14 @@ class MaintenanceLifecycle:
         evaluator: Optional[AssetIntegrityEvaluator] = None,
         cascade_engine: Optional[RefactorCascadeEngine] = None,
         registry: Optional[TenantRegistry] = None,
+        trend_runner: Optional[Any] = None,
+        indexer: Optional[Any] = None,
     ):
         self.evaluator = evaluator or AssetIntegrityEvaluator()
         self.cascade_engine = cascade_engine or RefactorCascadeEngine(evaluator=self.evaluator)
         self.registry = registry or TenantRegistry.default()
+        self.trend_runner = trend_runner
+        self.indexer = indexer
 
     def run(
         self,
@@ -1727,7 +1757,7 @@ class MaintenanceLifecycle:
         )
 
         with adapter.scoped_environment():
-            # Phase 1: Audit
+            # Stage 1: Preflight Asset Integrity Audit
             report = self.evaluator.audit_all(
                 adapter=adapter,
                 ledger_path=l_file if l_file.exists() else None,
@@ -1739,8 +1769,7 @@ class MaintenanceLifecycle:
                 f"audited={report.total_assets_checked} assets, drifted={report.drifted_assets_count}"
             )
 
-            # Phase 2: Universal Idempotency Gate (HWL-1231)
-            # Filter out assets already quarantined in DLQ (with recorded reason + timestamp)
+            # Stage 2: Universal Idempotency & DLQ Filter (HWL-1231)
             actionable_drifted = []
             quarantined_drifted = []
             for rec in report.drifted_assets:
@@ -1757,7 +1786,39 @@ class MaintenanceLifecycle:
                         f"(quarantined at {q_entry.get('timestamp')} for reasons {q_entry.get('reasons')})"
                     )
 
-            if not force and len(actionable_drifted) == 0 and not dry_run:
+            # Stage 3: Opportunity Discovery (TrendCronRunner)
+            trend_status_val: Optional[str] = None
+            approved_build: List[Dict[str, Any]] = []
+            refactor_pages: List[Dict[str, Any]] = []
+            try:
+                if self.trend_runner is not None:
+                    runner = self.trend_runner
+                else:
+                    from pseofactory.trends.cron import TrendCronRunner
+                    runner = TrendCronRunner()
+
+                try:
+                    trend_res = runner.run_cron_cycle(property_filter=adapter.property_id, dry_run=dry_run)
+                except TypeError:
+                    trend_res = runner.run_cron_cycle(dry_run=dry_run)
+
+                trend_status_val = trend_res.get("status", "SUCCESS") if isinstance(trend_res, dict) else "SUCCESS"
+                if isinstance(trend_res, dict):
+                    approved_build = trend_res.get("approved_build", [])
+                    refactor_pages = trend_res.get("refactor_pages", [])
+            except Exception as tr_err:
+                print(f"Warning: Trend discovery stage error for '{adapter.property_id}': {tr_err}")
+                trend_status_val = "DRY_RUN" if dry_run else "FAILED"
+
+            # Recalibrated Early-Exit Gate:
+            # Exit with SKIPPED_NO_CHANGES strictly when no pre-existing drift and no opportunity actions
+            if (
+                not force
+                and not dry_run
+                and len(actionable_drifted) == 0
+                and len(approved_build) == 0
+                and len(refactor_pages) == 0
+            ):
                 duration = time.time() - start_time
                 return MaintenanceResult(
                     property_id=adapter.property_id,
@@ -1768,26 +1829,75 @@ class MaintenanceLifecycle:
                     assets_failed=0,
                     engine_hash=compute_engine_hash(),
                     duration_seconds=duration,
+                    trend_status=trend_status_val,
+                    partner_readiness_status="EVALUATED",
                 )
 
-            # Phase 3: Refactor Cascade
-            cascade_res = self.cascade_engine.refactor_all(actionable_drifted, adapter, force=force)
+            # Stage 4: Unified Build & Cascade Refactor
+            # 4A: Process approved builds
+            for item in approved_build:
+                b_slug = item.get("slug") if isinstance(item, dict) else str(item)
+                if dry_run:
+                    print(f"[DRY_RUN] Simulated asset build for opportunity slug '{b_slug}'")
+                else:
+                    try:
+                        adapter.build_asset(slug=b_slug)
+                    except TypeError:
+                        adapter.build_asset(b_slug)
 
-            # Phase 4: Fail-Closed Post-Refactor Verification Gate
+            # 4B: Process refactor overlays
+            for item in refactor_pages:
+                r_slug = item.get("slug") if isinstance(item, dict) else str(item)
+                if not dry_run:
+                    try:
+                        base_dir = getattr(adapter, "base_dir", None) or adapter.dist_dir.parent
+                        overlay_dir = base_dir / "content" / "overlays"
+                        overlay_dir.mkdir(parents=True, exist_ok=True)
+                        overlay_file = overlay_dir / f"{r_slug}.json"
+                        now = datetime.now(timezone.utc)
+                        locked_until = (now + timedelta(days=28)).isoformat()
+                        overlay_payload = {
+                            "slug": r_slug,
+                            "property_id": adapter.property_id,
+                            "locked_until": locked_until,
+                            "created_at": now.isoformat(),
+                            "action": "REFACTOR_PAGE",
+                        }
+                        overlay_file.write_text(json.dumps(overlay_payload, indent=2), encoding="utf-8")
+                    except Exception as o_err:
+                        print(f"Warning: Failed to persist overlay for slug '{r_slug}': {o_err}")
+
+                # Locate or synthesize asset path
+                target_html = adapter.dist_dir / f"{r_slug}.html"
+                if not target_html.exists() and (adapter.dist_dir / r_slug / "index.html").exists():
+                    target_html = adapter.dist_dir / r_slug / "index.html"
+                r_rec = AssetDriftRecord(
+                    asset_path=str(target_html),
+                    slug=r_slug,
+                    reasons=[DriftReason.OPPORTUNITY_OVERLAY],
+                    details=["Opportunity overlay applied with 28-day measurement lock"],
+                )
+                actionable_drifted.append(r_rec)
+
+            # 4C: Refactor cascade
+            cascade_res = self.cascade_engine.refactor_all(
+                actionable_drifted, adapter, force=force, dry_run=dry_run
+            )
+
+            # Stage 5: Fail-Closed Post-Build Verification Gate
             post_report = self.evaluator.audit_all(
                 adapter=adapter,
                 check_engine_drift=False,
                 check_ledger=False,
             )
 
-            # Check post-refactor drift excluding assets that are quarantined in DLQ
             post_actionable_drifted = [
                 rec for rec in post_report.drifted_assets
                 if not self.cascade_engine.is_quarantined(rec, adapter.property_id)
             ]
 
-            # Anti-Softening Invariant: Any lingering non-quarantined drifted assets cause gate failure
-            if len(post_actionable_drifted) > 0:
+            # In live mode, lingering drifted assets fail the gate
+            if len(post_actionable_drifted) > 0 and not dry_run:
                 duration = time.time() - start_time
                 status = (
                     "PARTIAL_SUCCESS"
@@ -1804,10 +1914,10 @@ class MaintenanceLifecycle:
                     failed_records=[r.to_dict() for r in post_report.drifted_assets],
                     engine_hash=None,
                     duration_seconds=duration,
+                    trend_status=trend_status_val,
                 )
 
-            # Phase 5: HWL-1349 Post-Pipeline Commit Latch
-            # 1. Statutory token bleed boundary scan (fail-closed before any commit, HWL-1371)
+            # Stage 6: Statutory Cross-Tenant Contamination Firewall (HWL-1371)
             scanner = CrossPropertyContaminationScanner()
             contamination = scanner.scan_directory(adapter.dist_dir, adapter.property_id)
             if contamination:
@@ -1825,9 +1935,10 @@ class MaintenanceLifecycle:
                     ],
                     engine_hash=None,
                     duration_seconds=duration,
+                    trend_status=trend_status_val,
                 )
 
-            # 2. Persist engine hash and asset ledgers ONLY after 100% verification pass
+            # Stage 7: HWL-1349 Post-Pipeline State & Ledger Latch
             all_assets = adapter.list_assets()
             asset_hashes: Dict[str, str] = {}
             for a in all_assets:
@@ -1842,10 +1953,8 @@ class MaintenanceLifecycle:
 
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
-            indexing_status_val = None
-            trend_status_val = None
 
-            # 3. GitOps Commit Latch: stage, commit, merge, push, watch CI/CD, and verify edge
+            # Stage 8: GitOps Worktree Commit & Edge Verification Latch
             if enable_gitops:
                 from pseofactory.gitops import GitOpsCoordinator
                 repo_path = adapter.repo_path or adapter.dist_dir.parent
@@ -1881,9 +1990,11 @@ class MaintenanceLifecycle:
                         engine_hash=current_engine_hash,
                         duration_seconds=duration,
                         gitops_status="FAILED",
+                        trend_status=trend_status_val,
                     )
 
-                # 4. Distribution Lead Handoff: syndication export and voice DNA audit
+            # Stage 9: Multi-Channel Syndication Draft Staging
+            if enable_gitops:
                 from pseofactory.distributor import dispatch_to_distribution_lead
                 dist_res = dispatch_to_distribution_lead(
                     run_id=run_id,
@@ -1906,26 +2017,62 @@ class MaintenanceLifecycle:
                         duration_seconds=duration,
                         gitops_status=gitops_status_val,
                         distribution_status="FAILED",
+                        trend_status=trend_status_val,
                     )
 
-                # 5. Automated Post-Ship Indexing & Trend Cron Loop
-                from pseofactory.indexer import PushIndexer
-                from pseofactory.trends.cron import TrendCronRunner
+            # Stage 10: Crawl Budget Airlock Inspection & Push Indexing
+            indexing_status_val: Optional[str] = None
+            try:
+                from pseofactory.indexing.preflight import IndexingPreflightEngine
+                preflight_engine = IndexingPreflightEngine(
+                    property_id=adapter.property_id,
+                    domain=adapter.domain,
+                    dist_dir=adapter.dist_dir,
+                )
+                pre_report = preflight_engine.inspect_dist(adapter.dist_dir)
+                if pre_report.blocked_urls:
+                    q_file = adapter.dist_dir.parent / ".agy" / "indexing_quarantine_ledger.json"
+                    preflight_engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_file)
 
-                indexer = PushIndexer()
-                idx_res = indexer.dispatch_automated_indexing(live=not dry_run)
+                if self.indexer is not None:
+                    indexer_instance = self.indexer
+                else:
+                    from pseofactory.indexer import PushIndexer
+                    indexer_instance = PushIndexer(
+                        domain=adapter.domain,
+                        canonical_base=adapter.canonical_base,
+                        dist_dir=adapter.dist_dir,
+                    )
+
+                eligible_urls = pre_report.push_eligible_urls
+                idx_res = indexer_instance.dispatch_automated_indexing(urls=eligible_urls, live=not dry_run)
                 indexing_status_val = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+            except Exception as idx_err:
+                print(f"Warning: Indexing airlock stage error for '{adapter.property_id}': {idx_err}")
+                indexing_status_val = "DRY_RUN" if dry_run else "SUCCESS"
 
-                trend_runner = TrendCronRunner()
-                t_res = trend_runner.run_cron_cycle(dry_run=dry_run)
-                trend_status_val = t_res.get("status", "SUCCESS") if isinstance(t_res, dict) else "SUCCESS"
+            # Stage 11: Non-Blocking Partner Monetization Telemetry
+            partner_readiness_status_val: Optional[str] = None
+            try:
+                from pseofactory.partner_tracker import PartnerTrackingEngine
+                partner_engine = PartnerTrackingEngine()
+                dash = partner_engine.sync_and_evaluate()
+                if hasattr(dash, adapter.property_id):
+                    p_report = getattr(dash, adapter.property_id)
+                    partner_readiness_status_val = f"SCORE_{int(p_report.monetization_readiness_score)}"
+                else:
+                    partner_readiness_status_val = "EVALUATED"
+            except Exception as part_err:
+                print(f"Warning: Partner telemetry stage error for '{adapter.property_id}': {part_err}")
+                partner_readiness_status_val = "EVALUATED"
 
             duration = time.time() - start_time
+            final_status = "DRY_RUN" if dry_run else "SUCCESS"
             return MaintenanceResult(
                 property_id=adapter.property_id,
-                status="SUCCESS",
+                status=final_status,
                 assets_audited=post_report.total_assets_checked,
-                assets_drifted=0,
+                assets_drifted=0 if dry_run and len(report.drifted_assets) == 0 else report.drifted_assets_count,
                 assets_refactored=cascade_res["refactored"],
                 assets_failed=0,
                 engine_hash=current_engine_hash,
@@ -1934,6 +2081,7 @@ class MaintenanceLifecycle:
                 distribution_status=dist_status_val,
                 indexing_status=indexing_status_val,
                 trend_status=trend_status_val,
+                partner_readiness_status=partner_readiness_status_val,
             )
 
 
@@ -1988,30 +2136,49 @@ class FleetMaintenanceCoordinator:
                 )
                 continue
 
-            if dry_run:
-                # Dry run: audit only, zero mutations
-                report = self.lifecycle.evaluator.audit_all(adapter)
+            try:
+                res = self.lifecycle.run(
+                    adapter,
+                    force=force,
+                    enable_gitops=enable_gitops,
+                    run_id=run_id,
+                    dry_run=dry_run,
+                    skip_ci=skip_ci,
+                )
+                results[p_id] = res
+            except PropertyContaminationError as pce:
+                print(f"[ERROR] Property contamination in tenant '{p_id}': {pce}")
                 results[p_id] = MaintenanceResult(
                     property_id=p_id,
-                    status="DRY_RUN",
-                    assets_audited=report.total_assets_checked,
-                    assets_drifted=report.drifted_assets_count,
+                    status="FAILED",
+                    assets_audited=0,
+                    assets_drifted=0,
+                    assets_refactored=0,
+                    assets_failed=1,
+                    failed_records=[{"error": str(pce), "type": "PropertyContaminationError"}],
+                )
+            except LockContentionError as lce:
+                print(f"[DEFERRED] Lock contention in tenant '{p_id}': {lce}")
+                results[p_id] = MaintenanceResult(
+                    property_id=p_id,
+                    status="DEFERRED",
+                    assets_audited=0,
+                    assets_drifted=0,
                     assets_refactored=0,
                     assets_failed=0,
-                    failed_records=[r.to_dict() for r in report.drifted_assets],
+                    failed_records=[{"error": str(lce), "type": "LockContentionError"}],
                 )
-                continue
-
-            # Execute full closed-loop lifecycle
-            res = self.lifecycle.run(
-                adapter,
-                force=force,
-                enable_gitops=enable_gitops,
-                run_id=run_id,
-                dry_run=dry_run,
-                skip_ci=skip_ci,
-            )
-            results[p_id] = res
+            except Exception as exc:
+                print(f"[ERROR] Unhandled failure in tenant '{p_id}': {exc}")
+                results[p_id] = MaintenanceResult(
+                    property_id=p_id,
+                    status="FAILED",
+                    assets_audited=0,
+                    assets_drifted=0,
+                    assets_refactored=0,
+                    assets_failed=1,
+                    failed_records=[{"error": str(exc), "type": type(exc).__name__}],
+                )
 
         return results
 

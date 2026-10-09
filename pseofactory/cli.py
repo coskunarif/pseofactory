@@ -237,10 +237,11 @@ def cmd_cycle(args: argparse.Namespace) -> int:
             dist_tag = f" | Distribution: {res.distribution_status}" if getattr(res, "distribution_status", None) else ""
             idx_tag = f" | Indexing: {res.indexing_status}" if getattr(res, "indexing_status", None) else ""
             trend_tag = f" | Trends: {res.trend_status}" if getattr(res, "trend_status", None) else ""
+            partner_tag = f" | PartnerReadiness: {res.partner_readiness_status}" if getattr(res, "partner_readiness_status", None) else ""
             print(
                 f"[{res.status}] Property: {res.property_id} | "
                 f"Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | "
-                f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}{gitops_tag}{dist_tag}{idx_tag}{trend_tag}"
+                f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}{gitops_tag}{dist_tag}{idx_tag}{trend_tag}{partner_tag}"
             )
         return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN") else 1
     else:
@@ -257,10 +258,13 @@ def cmd_cycle(args: argparse.Namespace) -> int:
             for pid, res in results.items():
                 gitops_tag = f" | GitOps: {res.gitops_status}" if getattr(res, "gitops_status", None) else ""
                 dist_tag = f" | Distribution: {res.distribution_status}" if getattr(res, "distribution_status", None) else ""
+                idx_tag = f" | Indexing: {res.indexing_status}" if getattr(res, "indexing_status", None) else ""
+                trend_tag = f" | Trends: {res.trend_status}" if getattr(res, "trend_status", None) else ""
+                partner_tag = f" | PartnerReadiness: {res.partner_readiness_status}" if getattr(res, "partner_readiness_status", None) else ""
                 print(
                     f"[{res.status}] Property: {pid} | "
                     f"Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | "
-                    f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}{gitops_tag}{dist_tag}"
+                    f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}{gitops_tag}{dist_tag}{idx_tag}{trend_tag}{partner_tag}"
                 )
         all_success = all(
             r.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN")
