@@ -233,10 +233,12 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         if as_json:
             print(json.dumps(res.to_dict(), indent=2))
         else:
+            gitops_tag = f" | GitOps: {res.gitops_status}" if getattr(res, "gitops_status", None) else ""
+            dist_tag = f" | Distribution: {res.distribution_status}" if getattr(res, "distribution_status", None) else ""
             print(
                 f"[{res.status}] Property: {res.property_id} | "
                 f"Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | "
-                f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}"
+                f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}{gitops_tag}{dist_tag}"
             )
         return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN") else 1
     else:
@@ -251,16 +253,44 @@ def cmd_cycle(args: argparse.Namespace) -> int:
             print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
         else:
             for pid, res in results.items():
+                gitops_tag = f" | GitOps: {res.gitops_status}" if getattr(res, "gitops_status", None) else ""
+                dist_tag = f" | Distribution: {res.distribution_status}" if getattr(res, "distribution_status", None) else ""
                 print(
                     f"[{res.status}] Property: {pid} | "
                     f"Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | "
-                    f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}"
+                    f"Refactored: {res.assets_refactored} | Failed: {res.assets_failed}{gitops_tag}{dist_tag}"
                 )
         all_success = all(
             r.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN")
             for r in results.values()
         )
         return 0 if all_success else 1
+
+
+def cmd_distribute(args: argparse.Namespace) -> int:
+    """
+    Executes multi-channel syndication export and Voice DNA verification.
+    Zero em-dashes. Zero en-dashes.
+    """
+    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    dry_run = getattr(args, "dry_run", False)
+    as_json = getattr(args, "json", False)
+
+    from pseofactory.distributor import dispatch_to_distribution_lead
+    res = dispatch_to_distribution_lead(
+        run_id=None,
+        property_id=property_id,
+        dry_run=dry_run,
+    )
+    if as_json:
+        print(json.dumps(res, indent=2))
+    else:
+        print(
+            f"[{res.get('status', 'SUCCESS')}] Property: {property_id} | "
+            f"Assets: {res.get('total_assets_generated', 0)} | "
+            f"Voice Check: {'PASS' if res.get('voice_check_passed') else 'FAIL'}"
+        )
+    return 0 if res.get("status") in ("SUCCESS", "STAGED", "DRY_RUN") else 1
 
 
 def cmd_trend_intake(args: argparse.Namespace) -> int:
@@ -638,6 +668,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output machine-readable JSON synchronization report",
     )
 
+    # distribute
+    p_dist = subparsers.add_parser("distribute", help="Execute multi-channel syndication export and Voice DNA verification")
+    p_dist.add_argument("--property", type=str, default="profithelm", help="Target property identifier (default: profithelm)")
+    p_dist.add_argument("--dry-run", action="store_true", help="Dry-run simulation mode without live publishing")
+    p_dist.add_argument("--json", action="store_true", help="Output machine-readable JSON distribution report")
+
     return parser
 
 
@@ -674,6 +710,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_trend_backfill(args)
     elif args.command == "sync-monetization":
         return cmd_sync_monetization(args)
+    elif args.command == "distribute":
+        return cmd_distribute(args)
     else:
         parser.print_help()
         return 1

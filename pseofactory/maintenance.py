@@ -127,9 +127,11 @@ class MaintenanceResult:
     engine_hash: Optional[str] = None
     duration_seconds: float = 0.0
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    gitops_status: Optional[str] = None
+    distribution_status: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "property_id": self.property_id,
             "status": self.status,
             "assets_audited": self.assets_audited,
@@ -141,6 +143,11 @@ class MaintenanceResult:
             "duration_seconds": self.duration_seconds,
             "timestamp": self.timestamp,
         }
+        if self.gitops_status is not None:
+            d["gitops_status"] = self.gitops_status
+        if self.distribution_status is not None:
+            d["distribution_status"] = self.distribution_status
+        return d
 
 
 class PropertyContaminationError(ValueError):
@@ -1721,6 +1728,11 @@ class MaintenanceLifecycle:
                 state_file=s_file if s_file.exists() else None,
             )
 
+            print(
+                f"[DISPATCH:GROWTH_SEO] Preflight asset audit -> property={adapter.property_id}, "
+                f"audited={report.total_assets_checked} assets, drifted={report.drifted_assets_count}"
+            )
+
             # Phase 2: Universal Idempotency Gate (HWL-1231)
             # Filter out assets already quarantined in DLQ (with recorded reason + timestamp)
             actionable_drifted = []
@@ -1739,7 +1751,7 @@ class MaintenanceLifecycle:
                         f"(quarantined at {q_entry.get('timestamp')} for reasons {q_entry.get('reasons')})"
                     )
 
-            if not force and len(actionable_drifted) == 0:
+            if not force and len(actionable_drifted) == 0 and not dry_run:
                 duration = time.time() - start_time
                 return MaintenanceResult(
                     property_id=adapter.property_id,
@@ -1816,8 +1828,14 @@ class MaintenanceLifecycle:
                 rel = a.relative_to(adapter.dist_dir).as_posix()
                 asset_hashes[rel] = compute_asset_fingerprint(a)
 
-            current_engine_hash = record_engine_hash(s_file)
-            record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+            if not dry_run:
+                current_engine_hash = record_engine_hash(s_file)
+                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+            else:
+                current_engine_hash = compute_engine_hash()
+
+            gitops_status_val = "SKIPPED"
+            dist_status_val = "SKIPPED"
 
             # 3. GitOps Commit Latch: stage, commit, merge, push, watch CI/CD, and verify edge
             if enable_gitops:
@@ -1831,13 +1849,18 @@ class MaintenanceLifecycle:
                     workflow=workflow,
                 )
                 target_edge = edge_url or f"https://{adapter.domain}"
-                gitops_res = coordinator.coordinate_release(
+                gitops_res = coordinator.dispatch_to_shipper(
+                    run_id=run_id,
                     property_id=adapter.property_id,
+                    dry_run=dry_run,
                     commit_message=f"fix({adapter.property_id}): automated maintenance cycle",
                     skip_ci=skip_ci,
                     edge_url=target_edge,
+                    dist_dir=adapter.dist_dir,
+                    workflow=workflow,
                 )
-                if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN"):
+                gitops_status_val = gitops_res.status
+                if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
                     duration = time.time() - start_time
                     return MaintenanceResult(
                         property_id=adapter.property_id,
@@ -1849,6 +1872,32 @@ class MaintenanceLifecycle:
                         failed_records=[{"error": gitops_res.error or gitops_res.status, "gitops": gitops_res.to_dict()}],
                         engine_hash=current_engine_hash,
                         duration_seconds=duration,
+                        gitops_status="FAILED",
+                    )
+
+                # 4. Distribution Lead Handoff: syndication export and voice DNA audit
+                from pseofactory.distributor import dispatch_to_distribution_lead
+                dist_res = dispatch_to_distribution_lead(
+                    run_id=run_id,
+                    property_id=adapter.property_id,
+                    dry_run=dry_run,
+                    dist_dir=adapter.dist_dir,
+                )
+                dist_status_val = dist_res.get("status", "SUCCESS")
+                if dist_status_val not in ("SUCCESS", "STAGED", "DRY_RUN", "SKIPPED"):
+                    duration = time.time() - start_time
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="FAILED",
+                        assets_audited=post_report.total_assets_checked,
+                        assets_drifted=0,
+                        assets_refactored=cascade_res["refactored"],
+                        assets_failed=1,
+                        failed_records=[{"error": dist_res.get("error", "Distribution dispatch failed"), "distribution": dist_res}],
+                        engine_hash=current_engine_hash,
+                        duration_seconds=duration,
+                        gitops_status=gitops_status_val,
+                        distribution_status="FAILED",
                     )
 
             duration = time.time() - start_time
@@ -1861,6 +1910,8 @@ class MaintenanceLifecycle:
                 assets_failed=0,
                 engine_hash=current_engine_hash,
                 duration_seconds=duration,
+                gitops_status=gitops_status_val,
+                distribution_status=dist_status_val,
             )
 
 
