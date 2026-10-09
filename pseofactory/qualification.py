@@ -8,9 +8,35 @@ otherwise you're just creating URL bloat and potential cannibalization. #impress
 Zero em-dashes. Zero en-dashes.
 """
 
+import json
+import ast
 import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
+
+from pseofactory.contracts import (
+    assert_no_forbidden_dashes,
+    assert_no_prompt_leakage,
+    detect_ungrounded_synthetic_claims,
+    safe_eval_mathematical_formula,
+    assert_proprietary_model_integrity,
+    ECONOMIC_DATASET_PATTERNS,
+)
+
+STATUTORY_PROVENANCE_PATTERNS: List[str] = [
+    r"\b(?:26\s+U\.?S\.?C\.?|Title\s+26|\d+\s+U\.?S\.?C\.?)\b",
+    r"\b(?:26\s+C\.?F\.?R\.?|Treas\.?\s+Reg\.?|\d+\s+C\.?F\.?R\.?)\b",
+    r"\bIRC\b",
+    r"\bInternal\s+Revenue\s+Code\b",
+    r"\bIRS\b",
+    r"\bP\.?L\.?\s+\d+-\d+\b",
+    r"\bPublic\s+Law\b",
+    r"\bstatutory\b",
+    r"\bCFTC\b",
+    r"\bSEC\s+Rule\b",
+    r"\bCommodity\s+Exchange\s+Act\b",
+    r"\bSecurities\s+Exchange\s+Act\b",
+]
 
 
 def check_search_intent_cannibalization(
@@ -150,6 +176,7 @@ def qualify_search_intent(
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     total_site_impressions: int = 500,
     sitemap_urls: Optional[List[str]] = None,
+    require_high_effort: bool = False,
 ) -> Dict[str, Any]:
     """
     Enforces Search Intent Doctrine triage across candidate queries:
@@ -320,6 +347,28 @@ def qualify_search_intent(
         "source": "gsc_void_harvest",
         "discovered_at": datetime.now(timezone.utc).isoformat(),
     }
+    # Enrich with high-effort schema fields if present in query_data
+    for field in (
+        "statutory_authority",
+        "statutory_provenance",
+        "economic_dataset",
+        "economic_source",
+        "calculation_manifest",
+        "formula",
+        "inputs",
+        "model_name",
+        "sample_calculation",
+        "published_output",
+        "expected_output",
+        "slug",
+        "title",
+    ):
+        if field in query_data:
+            candidate_spec[field] = query_data[field]
+
+    if require_high_effort or query_data.get("require_high_effort"):
+        assert_high_effort_content_qualified(candidate_spec)
+
     return {
         "action": "BUILD_PAGE",
         "query": q_text,
@@ -330,13 +379,180 @@ def qualify_search_intent(
     }
 
 
+def assert_high_effort_content_qualified(
+    candidate_spec: Dict[str, Any],
+    context: str = "",
+) -> bool:
+    """
+    Validates candidate specification against High-Effort Content Qualification Gate.
+    Enforces:
+    1. Zero forbidden dashes (U+2014 em-dash, U+2013 en-dash) across entire specification.
+    2. Zero prompt leakage terms.
+    3. Zero ungrounded synthetic claims or mock markers ('mock', 'dummy', 'hypothetical', 'placeholder').
+    4. Primary statutory legal provenance (IRC, CFR, USC, Public Law, IRS guidance).
+    5. Empirical economic dataset series (BLS, FRED, BEA, Federal Reserve).
+    6. Non-empty formula, inputs, model_name, and sample_calculation.
+    7. Deterministic AST mathematical formula evaluability via safe_eval_mathematical_formula.
+    8. Input/output mathematical integrity within 0.01 tolerance via assert_proprietary_model_integrity.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" in {context}" if context else ""
+    if not isinstance(candidate_spec, dict):
+        raise ValueError(
+            f"High-effort candidate specification must be a dictionary, got {type(candidate_spec).__name__}{ctx}"
+        )
+
+    spec_json = json.dumps(candidate_spec, ensure_ascii=False)
+
+    # 1. Zero forbidden dashes
+    assert_no_forbidden_dashes(spec_json, context=f"high-effort candidate specification{ctx}")
+
+    # 2. Zero prompt leakage
+    assert_no_prompt_leakage(spec_json, context=f"high-effort candidate specification{ctx}")
+
+    # 3. Ungrounded synthetic claims and mock markers
+    syn_issues = detect_ungrounded_synthetic_claims(spec_json)
+    spec_lower = spec_json.lower()
+    for marker_pat in [r"\bmock\b", r"\bdummy\b", r"\bhypothetical\b", r"\bplaceholder\b"]:
+        m = re.search(marker_pat, spec_lower)
+        if m:
+            syn_issues.append(f"Mock or placeholder marker detected: '{m.group(0)}'")
+    if syn_issues:
+        raise ValueError(
+            f"High-effort qualification failed{ctx}: ungrounded synthetic claims or mock markers detected: {syn_issues[0]}"
+        )
+
+    # Extract manifest data if nested
+    manifest = candidate_spec.get("calculation_manifest") if isinstance(candidate_spec.get("calculation_manifest"), dict) else {}
+
+    # 4. Primary statutory provenance
+    statutory = (
+        candidate_spec.get("statutory_authority")
+        or candidate_spec.get("statutory_provenance")
+        or candidate_spec.get("authority")
+        or manifest.get("statutory_authority")
+        or manifest.get("statutory_provenance")
+        or manifest.get("authority")
+    )
+    if not statutory or (isinstance(statutory, str) and not statutory.strip()):
+        raise ValueError(f"High-effort qualification failed{ctx}: missing or empty primary statutory authority or provenance")
+
+    statutory_str = str(statutory).strip()
+    statutory_matched = any(re.search(pat, statutory_str, re.IGNORECASE) for pat in STATUTORY_PROVENANCE_PATTERNS)
+    if not statutory_matched:
+        raise ValueError(
+            f"High-effort qualification failed{ctx}: statutory authority '{statutory_str}' "
+            f"does not cite recognized primary statutory provenance (IRC, CFR, USC, Public Law, IRS guidance)"
+        )
+
+    # 5. Empirical economic dataset series
+    economic = (
+        candidate_spec.get("economic_dataset")
+        or candidate_spec.get("economic_source")
+        or manifest.get("economic_dataset")
+        or manifest.get("economic_source")
+    )
+    if not economic or (isinstance(economic, str) and not economic.strip()):
+        raise ValueError(f"High-effort qualification failed{ctx}: missing or empty empirical economic dataset")
+
+    economic_str = str(economic).strip()
+    economic_matched = any(re.search(pat, economic_str, re.IGNORECASE) for pat in ECONOMIC_DATASET_PATTERNS)
+    if not economic_matched:
+        raise ValueError(
+            f"High-effort qualification failed{ctx}: economic dataset '{economic_str}' "
+            f"does not cite recognized empirical economic dataset series (BLS, FRED, BEA, Federal Reserve)"
+        )
+
+    # 6. Formula, inputs, model name, sample calculation
+    formula = (
+        candidate_spec.get("formula")
+        or manifest.get("formula")
+    )
+    if not formula or not isinstance(formula, str) or not formula.strip():
+        raise ValueError(f"High-effort qualification failed{ctx}: missing or empty 'formula'")
+
+    inputs = (
+        candidate_spec.get("inputs")
+        if candidate_spec.get("inputs") is not None
+        else manifest.get("inputs")
+    )
+    if inputs is None or not isinstance(inputs, dict) or len(inputs) == 0:
+        raise ValueError(f"High-effort qualification failed{ctx}: missing or empty 'inputs' dictionary")
+
+    model_name = (
+        candidate_spec.get("model_name")
+        or candidate_spec.get("proprietary_model")
+        or manifest.get("model_name")
+        or manifest.get("proprietary_model")
+    )
+    if not model_name or (isinstance(model_name, str) and not model_name.strip()):
+        raise ValueError(f"High-effort qualification failed{ctx}: missing or empty 'model_name'")
+
+    sample_calc = (
+        candidate_spec.get("sample_calculation")
+        or candidate_spec.get("sample")
+        or manifest.get("sample_calculation")
+        or manifest.get("sample")
+    )
+    if not sample_calc or (isinstance(sample_calc, str) and not sample_calc.strip()):
+        raise ValueError(f"High-effort qualification failed{ctx}: missing or empty 'sample_calculation'")
+
+    # 7. Formula evaluability with safe_eval_mathematical_formula (clamping numeric inputs to >= 0 per HWL-1263)
+    clamped_inputs: Dict[str, Any] = {}
+    for k, v in inputs.items():
+        if isinstance(v, (int, float)):
+            clamped_inputs[k] = max(0.0, float(v)) if isinstance(v, float) else max(0, v)
+        elif isinstance(v, str):
+            v_clean = v.replace("$", "").replace(",", "").replace("%", "").strip()
+            try:
+                num_v = float(v_clean)
+                clamped_inputs[k] = max(0.0, num_v)
+            except ValueError:
+                clamped_inputs[k] = v
+        else:
+            clamped_inputs[k] = v
+
+    try:
+        calculated_num = safe_eval_mathematical_formula(formula, clamped_inputs)
+    except Exception as ex:
+        raise ValueError(f"High-effort qualification failed{ctx}: formula '{formula}' evaluation failed: {ex}")
+
+    # 8. Input/output mathematical parity if published_output is present
+    published_out = (
+        candidate_spec.get("published_output")
+        or candidate_spec.get("expected_output")
+        or candidate_spec.get("output")
+        or candidate_spec.get("result")
+        or manifest.get("published_output")
+        or manifest.get("expected_output")
+        or manifest.get("output")
+        or manifest.get("result")
+    )
+    if published_out is not None:
+        try:
+            assert_proprietary_model_integrity(
+                manifest_or_inputs=clamped_inputs,
+                published_output=published_out,
+                formula=formula,
+                tolerance=0.01,
+                context=f"candidate spec '{candidate_spec.get('slug', candidate_spec.get('query', ''))}'{ctx}",
+            )
+        except Exception as ex:
+            raise ValueError(f"High-effort qualification failed{ctx}: {ex}")
+
+    return True
+
+
 def assert_search_intent_qualified(
     candidate_spec: Dict[str, Any],
-    existing_tools: List[Dict[str, Any]],
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+    require_high_effort: bool = False,
 ) -> bool:
     """
     Validates candidate specification against Search Intent Doctrine.
     Raises ValueError if the candidate query cannibalizes existing tool catalog.
+    When require_high_effort=True or when candidate_spec contains high-effort keys,
+    validates high-effort content qualification gate.
     Zero em-dashes. Zero en-dashes.
     """
     if not isinstance(candidate_spec, dict):
@@ -366,5 +582,19 @@ def assert_search_intent_qualified(
             f"matches existing tool '{cannibal.get('parent_slug')}' ({cannibal.get('reason')}). "
             f"Search Intent Doctrine: An impression is not proof that a new page is missing."
         )
+
+    # High-effort content qualification check
+    high_effort_keys = (
+        "formula",
+        "calculation_manifest",
+        "model_name",
+        "statutory_authority",
+        "statutory_provenance",
+        "economic_dataset",
+        "economic_source",
+    )
+    has_high_effort_keys = any(bool(candidate_spec.get(k)) for k in high_effort_keys)
+    if require_high_effort or has_high_effort_keys:
+        assert_high_effort_content_qualified(candidate_spec)
 
     return True
