@@ -757,7 +757,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         )
         try:
             env = os.environ.copy()
-            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
             if res.returncode == 0:
                 return True
         except Exception:
@@ -780,7 +780,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PROFITHELM_AUTO_LIVE"] = "0"
                 env["PROFITHELM_CHECK_QUEUE"] = "0"
                 cmd = ["bash", str(factory_script), "--dry-run", "--force"]
-                res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
+                res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
                     return True
             except Exception:
