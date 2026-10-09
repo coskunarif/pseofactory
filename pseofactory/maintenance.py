@@ -1229,9 +1229,10 @@ class AssetIntegrityEvaluator:
 
         engine_drifted = False
         if check_engine_drift:
+            b_dirs = getattr(adapter, "base_dirs", None)
             s_file = state_file or (adapter.dist_dir.parent / ".agy" / "engine_hash.json")
             if Path(s_file).exists():
-                drift_res = detect_engine_drift(s_file, base_dirs=None)
+                drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
 
         for asset in assets:
@@ -2039,11 +2040,12 @@ class MaintenanceLifecycle:
                 rel = a.relative_to(adapter.dist_dir).as_posix()
                 asset_hashes[rel] = compute_asset_fingerprint(a)
 
+            b_dirs = getattr(adapter, "base_dirs", None)
             if not dry_run:
-                current_engine_hash = record_engine_hash(s_file, base_dirs=None)
+                current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
             else:
-                current_engine_hash = compute_engine_hash(base_dirs=None)
+                current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
             # Stage 9: Multi-Channel Syndication Draft Staging
             if enable_gitops:
