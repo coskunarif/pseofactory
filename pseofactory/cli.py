@@ -6,6 +6,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import os
 import sys
 import json
 import argparse
@@ -443,6 +444,75 @@ def cmd_trend_backfill(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_sync_monetization(args: argparse.Namespace) -> int:
+    """
+    Synchronizes approved partner programs into local monetization vault.
+    Supports payload file or raw JSON string, dry-run evaluation, and JSON reporting.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates_hub import MonetizationHub
+
+    hub = MonetizationHub()
+    payload_data = None
+
+    if args.payload:
+        raw_val = args.payload.strip()
+        if os.path.isfile(raw_val):
+            try:
+                with open(raw_val, "r", encoding="utf-8") as f:
+                    payload_data = json.load(f)
+            except Exception as exc:
+                if args.json:
+                    print(json.dumps({"ok": False, "error": f"Failed to read payload file: {exc}"}))
+                else:
+                    print(f"Error: Failed to read payload file: {exc}", file=sys.stderr)
+                return 1
+        else:
+            try:
+                payload_data = json.loads(raw_val)
+            except json.JSONDecodeError as exc:
+                if args.json:
+                    print(json.dumps({"ok": False, "error": f"Invalid JSON payload: {exc}"}))
+                else:
+                    print(f"Error: Invalid JSON payload: {exc}", file=sys.stderr)
+                return 1
+    else:
+        if args.json:
+            print(json.dumps({"ok": False, "error": "Missing --payload argument"}))
+        else:
+            print("Error: --payload argument is required.", file=sys.stderr)
+        return 1
+
+    try:
+        report = hub.sync_from_network_payload(
+            network=args.network,
+            payload=payload_data,
+            property_id=args.property,
+            save=not args.dry_run,
+        )
+        report["ok"] = True
+        report["dry_run"] = args.dry_run
+
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"Monetization Sync Complete [{args.network} -> {args.property}]")
+            print(f"  Received: {report.get('total_received', 0)}")
+            print(f"  Updated:  {report.get('updated', 0)}")
+            print(f"  Skipped:  {report.get('skipped', 0)}")
+            if report.get("errors"):
+                print(f"  Errors:   {len(report['errors'])}")
+                for err in report["errors"]:
+                    print(f"    - {err}")
+        return 0
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}))
+        else:
+            print(f"Sync failed: {exc}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -534,6 +604,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_backfill.add_argument("--dry-run", action="store_true", help="Parse and validate without committing mutations to SQLite")
     p_backfill.add_argument("--json", action="store_true", help="Output machine-readable JSON backfill summary")
 
+    # sync-monetization
+    p_sync = subparsers.add_parser(
+        "sync-monetization",
+        help="Synchronize approved partner programs into local monetization vault",
+    )
+    p_sync.add_argument(
+        "--network",
+        type=str,
+        default="partnerstack",
+        help="Affiliate network identifier (e.g. partnerstack, impact, sovrn_commerce)",
+    )
+    p_sync.add_argument(
+        "--payload",
+        type=str,
+        default=None,
+        help="Path to JSON payload file or raw JSON payload string",
+    )
+    p_sync.add_argument(
+        "--property",
+        type=str,
+        default="profithelm",
+        help="Target property identifier (default: profithelm)",
+    )
+    p_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Evaluate synchronization and print summary without writing to disk",
+    )
+    p_sync.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON synchronization report",
+    )
+
     return parser
 
 
@@ -568,6 +672,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_trend_cron(args)
     elif args.command == "trend-backfill":
         return cmd_trend_backfill(args)
+    elif args.command == "sync-monetization":
+        return cmd_sync_monetization(args)
     else:
         parser.print_help()
         return 1

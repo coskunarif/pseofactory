@@ -549,6 +549,7 @@ def validate_affiliate_url(url: str) -> bool:
     - Scheme must be http or https
     - Netloc must be present
     - No javascript:, data:, or relative URLs
+    - No localhost, loopback, or SSRF link-local metadata endpoints
     - Zero em-dashes and zero en-dashes
     """
     if not url or not isinstance(url, str):
@@ -570,6 +571,25 @@ def validate_affiliate_url(url: str) -> bool:
     url_lower = url_clean.lower()
     if "javascript:" in url_lower or "data:" in url_lower:
         return False
+
+    # SSRF protection: reject localhost, loopback, link-local metadata, and private IP addresses
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+    if hostname in ("localhost", "127.0.0.1", "::1", "169.254.169.254"):
+        return False
+    if hostname.endswith(".local") or hostname.endswith(".localhost"):
+        return False
+    if hostname.startswith("127.") or hostname.startswith("169.254."):
+        return False
+    try:
+        import ipaddress
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved:
+            return False
+    except ValueError:
+        pass
+
     return True
 
 

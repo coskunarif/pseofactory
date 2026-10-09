@@ -273,3 +273,323 @@ def test_ipx1031_section_1031_calculator_route():
     assert route["rel"] == "noopener sponsored nofollow"
     assert route["target"] == "_blank"
 
+
+def test_monetization_vault_atomic_save(tmp_path):
+    """Verifies atomic vault save with fsync, timestamp update, and dash rejection."""
+    vault_file = tmp_path / "test_vault.json"
+    hub = MonetizationHub(vault_path=str(vault_file))
+
+    # Save vault to disk
+    hub.save_vault()
+    assert vault_file.is_file()
+
+    # Read back and verify valid JSON with 2-space indentation
+    content = vault_file.read_text(encoding="utf-8")
+    assert '  "hub_metadata":' in content
+    data = json.loads(content)
+    assert "updated_at" in data["hub_metadata"]
+
+    # Modify data and save again
+    hub.vault_data["hub_metadata"]["description"] = "Updated test vault"
+    hub.save_vault()
+    data2 = json.loads(vault_file.read_text(encoding="utf-8"))
+    assert data2["hub_metadata"]["description"] == "Updated test vault"
+
+    # Verify dash violation in save_vault raises ValueError
+    hub.vault_data["hub_metadata"]["description"] = "Invalid em\u2014dash description"
+    with pytest.raises(ValueError, match="Forbidden em-dash"):
+        hub.save_vault()
+
+
+def test_sync_partner_program_updates_vault(tmp_path):
+    """Verifies sync_partner_program updates vault category and resolves direct active route."""
+    vault_file = tmp_path / "vault.json"
+    hub = MonetizationHub(vault_path=str(vault_file))
+    hub.save_vault()
+
+    program_data = {
+        "program_key": "rippling",
+        "category": "PAYROLL_HR",
+        "direct_url": "https://rippling.grsm.io/profithelm",
+        "status": "approved",
+        "bounty": "$600-$1600",
+    }
+    res = hub.sync_partner_program("partnerstack", program_data, property_id="profithelm", save=True)
+    assert res["status"] == "updated"
+    assert res["program_key"] == "rippling"
+    assert res["ledger_status"] == "active_direct"
+
+    # Verify vault data updated
+    payroll_cat = hub.vault_data["properties"]["profithelm"]["categories"]["PAYROLL_HR"]
+    assert payroll_cat["primary_partner"] == "rippling"
+    assert payroll_cat["direct_url"] == "https://rippling.grsm.io/profithelm"
+    assert payroll_cat["status"] == "active_direct"
+
+    # Verify get_route reflects direct active partner and bypasses Sovrn fallback
+    route = hub.get_route("profithelm", "saas-runway-calculator", partner_key="rippling")
+    assert route["status"] == "active_direct"
+    assert route["url"] == "https://rippling.grsm.io/profithelm"
+    assert "redirect.viglink.com" not in route["url"]
+    assert route["rel"] == "noopener sponsored nofollow"
+    assert route["target"] == "_blank"
+
+
+def test_sync_from_network_payload_idempotency(tmp_path):
+    """Verifies batch payload ingestion and idempotency across repeated runs."""
+    vault_file = tmp_path / "vault.json"
+    hub = MonetizationHub(vault_path=str(vault_file))
+    hub.save_vault()
+
+    payload = {
+        "network": "partnerstack",
+        "property_id": "profithelm",
+        "programs": [
+            {
+                "program_key": "rippling",
+                "category": "PAYROLL_HR",
+                "direct_url": "https://rippling.grsm.io/profithelm",
+                "status": "approved",
+                "bounty": "$600-$1600",
+            },
+            {
+                "program_key": "mercury",
+                "category": "STARTUP_BANKING",
+                "direct_url": "https://mercury.com/?ref=profithelm",
+                "status": "approved",
+                "bounty": "$250",
+            },
+            {
+                "program_key": "ramp",
+                "category": "CORPORATE_SPEND",
+                "direct_url": "https://ramp.com/?ref=profithelm",
+                "status": "pending",
+                "bounty": "$500",
+            },
+        ],
+    }
+
+    report1 = hub.sync_from_network_payload("partnerstack", payload, property_id="profithelm", save=True)
+    assert report1["total_received"] == 3
+    assert report1["updated"] == 2
+    assert report1["skipped"] == 1
+    assert len(report1["errors"]) == 0
+
+    state1 = json.loads(vault_file.read_text(encoding="utf-8"))
+    # Replay same payload
+    report2 = hub.sync_from_network_payload("partnerstack", payload, property_id="profithelm", save=True)
+    assert report2["total_received"] == 3
+    assert report2["updated"] == 2
+    assert report2["skipped"] == 1
+
+    state2 = json.loads(vault_file.read_text(encoding="utf-8"))
+    # Categories state must remain identical
+    assert state1["properties"]["profithelm"]["categories"] == state2["properties"]["profithelm"]["categories"]
+
+
+def test_sync_partner_program_rejects_prexvo_b2b():
+    """Verifies Prexvo student loan isolation strictly rejects commercial B2B partners and unapproved categories."""
+    hub = MonetizationHub()
+
+    # Reject commercial B2B partner on Prexvo
+    with pytest.raises(ValueError, match="Strict isolation violation: Commercial B2B partner 'mercury'"):
+        hub.sync_partner_program(
+            "partnerstack",
+            {
+                "program_key": "mercury",
+                "category": "STUDENT_LOAN_REFINANCE",
+                "direct_url": "https://mercury.com/?ref=prexvo",
+                "status": "approved",
+            },
+            property_id="prexvo",
+            save=False,
+        )
+
+    with pytest.raises(ValueError, match="Strict isolation violation: Commercial B2B partner 'rippling'"):
+        hub.sync_partner_program(
+            "partnerstack",
+            {
+                "program_key": "rippling",
+                "category": "STUDENT_LOAN_REFINANCE",
+                "direct_url": "https://rippling.com/?ref=prexvo",
+                "status": "approved",
+            },
+            property_id="prexvo",
+            save=False,
+        )
+
+    # Reject unapproved category on Prexvo
+    with pytest.raises(ValueError, match="Strict isolation violation: Unapproved category 'PAYROLL_HR'"):
+        hub.sync_partner_program(
+            "in_house",
+            {
+                "program_key": "splash_financial",
+                "category": "PAYROLL_HR",
+                "direct_url": "https://splashfinancial.com/",
+                "status": "approved",
+            },
+            property_id="prexvo",
+            save=False,
+        )
+
+    # Reject aggregator fallback on Prexvo
+    with pytest.raises(ValueError, match="Strict isolation violation: Sub-affiliate aggregator fallback"):
+        hub.sync_partner_program(
+            "sovrn_commerce",
+            {
+                "program_key": "sovrn_commerce",
+                "category": "STUDENT_LOAN_REFINANCE",
+                "direct_url": "https://example.com/",
+                "status": "approved",
+            },
+            property_id="prexvo",
+            save=False,
+        )
+
+
+def test_sync_partner_program_preserves_1031_exchange(tmp_path):
+    """Verifies that 1031 exchange links preserve direct start-an-exchange URL and reject Sovrn wrapping."""
+    vault_file = tmp_path / "vault.json"
+    hub = MonetizationHub(vault_path=str(vault_file))
+    hub.save_vault()
+
+    direct_exchange_url = "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral"
+    program_data = {
+        "program_key": "ipx1031",
+        "category": "SECTION_1031_EXCHANGE",
+        "direct_url": direct_exchange_url,
+        "status": "approved",
+        "bounty": "$250-$750",
+    }
+    res = hub.sync_partner_program("in_house", program_data, property_id="profithelm", save=True)
+    assert res["ledger_status"] == "active_direct"
+
+    route = hub.get_route("profithelm", "section-1031-calculator")
+    assert route["partner"] == "ipx1031"
+    assert route["url"] == direct_exchange_url
+    assert "redirect.viglink.com" not in route["url"]
+    assert route["status"] == "active_direct"
+
+    # Reject wrapping 1031 exchange with Viglink
+    wrapped_exchange = "https://redirect.viglink.com?key=somekey&u=https%3A%2F%2Fwww.ipx1031.com"
+    with pytest.raises(ValueError, match="1031 exchange direct link must not be wrapped with Sovrn Viglink redirect"):
+        hub.sync_partner_program(
+            "in_house",
+            {
+                "program_key": "ipx1031",
+                "category": "SECTION_1031_EXCHANGE",
+                "direct_url": wrapped_exchange,
+                "status": "approved",
+            },
+            property_id="profithelm",
+            save=False,
+        )
+
+
+def test_sync_partner_program_rejects_forbidden_dashes(tmp_path):
+    """Verifies that partner metadata with em-dashes or en-dashes is rejected."""
+    hub = MonetizationHub()
+
+    # Reject em-dash in name
+    with pytest.raises(ValueError, match="Forbidden em-dash"):
+        hub.sync_partner_program(
+            "partnerstack",
+            {
+                "program_key": "mercury",
+                "category": "STARTUP_BANKING",
+                "direct_url": "https://mercury.com/",
+                "status": "approved",
+                "name": "Mercury \u2014 Startup Banking",
+            },
+            property_id="profithelm",
+            save=False,
+        )
+
+    # Reject en-dash in bounty
+    with pytest.raises(ValueError, match="Forbidden en-dash"):
+        hub.sync_partner_program(
+            "partnerstack",
+            {
+                "program_key": "mercury",
+                "category": "STARTUP_BANKING",
+                "direct_url": "https://mercury.com/",
+                "status": "approved",
+                "bounty": "$150\u2013$300",
+            },
+            property_id="profithelm",
+            save=False,
+        )
+
+
+def test_sync_partner_program_ssrf_and_url_validation():
+    """Verifies that localhost, link-local, loopback, and unsafe schemes are rejected."""
+    hub = MonetizationHub()
+
+    unsafe_urls = [
+        "javascript:alert(1)",
+        "http://localhost:8080/hook",
+        "http://127.0.0.1/",
+        "http://169.254.169.254/latest/meta-data/",
+        "data:text/html;base64,PHNjcmlwdD4=",
+        "ftp://ftp.example.com/",
+    ]
+
+    for bad_url in unsafe_urls:
+        with pytest.raises(ValueError, match="Invalid or unsafe affiliate URL"):
+            hub.sync_partner_program(
+                "partnerstack",
+                {
+                    "program_key": "mercury",
+                    "category": "STARTUP_BANKING",
+                    "direct_url": bad_url,
+                    "status": "approved",
+                },
+                property_id="profithelm",
+                save=False,
+            )
+
+
+def test_cli_sync_monetization_execution(tmp_path):
+    """Verifies CLI sync-monetization execution with fixtures, dry-run, and json mode."""
+    from pseofactory.cli import main
+
+    payload_file = tmp_path / "test_payload.json"
+    payload = {
+        "network": "partnerstack",
+        "property_id": "profithelm",
+        "programs": [
+            {
+                "program_key": "rippling",
+                "category": "PAYROLL_HR",
+                "direct_url": "https://rippling.grsm.io/profithelm",
+                "status": "approved",
+                "bounty": "$600-$1600",
+            }
+        ],
+    }
+    payload_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Dry-run with JSON output
+    exit_code = main([
+        "sync-monetization",
+        "--payload", str(payload_file),
+        "--dry-run",
+        "--json",
+    ])
+    assert exit_code == 0
+
+    # Inline JSON string payload with dry-run
+    exit_code_inline = main([
+        "sync-monetization",
+        "--payload", json.dumps(payload),
+        "--dry-run",
+    ])
+    assert exit_code_inline == 0
+
+    # Missing payload should fail
+    exit_code_missing = main(["sync-monetization", "--json"])
+    assert exit_code_missing == 1
+
+    # Invalid JSON payload should fail
+    exit_code_invalid = main(["sync-monetization", "--payload", "not-a-json", "--json"])
+    assert exit_code_invalid == 1
+
