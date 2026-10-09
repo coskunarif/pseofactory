@@ -447,6 +447,65 @@ def cmd_trend_cron(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_factory_pipeline(args: argparse.Namespace) -> int:
+    """
+    Executes automated discovery and content generation pipeline across breakout search spikes.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.pipeline import FactoryPipeline, PipelineConfig
+
+    spikes_data = []
+    if getattr(args, "fixture", None):
+        fix_path = Path(args.fixture).resolve()
+        if not fix_path.exists():
+            print(f"[ERROR] Fixture file not found: {fix_path}", file=sys.stderr)
+            return 1
+        raw = json.loads(fix_path.read_text(encoding="utf-8"))
+        spikes_data = raw if isinstance(raw, list) else [raw]
+    elif getattr(args, "seeds", None):
+        from pseofactory.trends.collectors import MultiSourceCollector
+        seeds = [s.strip() for s in args.seeds.split(",") if s.strip()]
+        collector = MultiSourceCollector()
+        spikes = collector.harvest(seeds)
+        if getattr(args, "source", None):
+            spikes = [s for s in spikes if s.source == args.source]
+        spikes_data = spikes
+    else:
+        print("[ERROR] Must provide either --fixture or --seeds", file=sys.stderr)
+        return 1
+
+    config = PipelineConfig(
+        min_jev_score=getattr(args, "min_jev", 1.20),
+        min_durable_prob=getattr(args, "min_prob", 0.50),
+        min_build_yield=getattr(args, "min_yield", 60.0),
+        sink_path=Path(args.sink) if getattr(args, "sink", None) else None,
+        dry_run=getattr(args, "dry_run", False),
+    )
+
+    pipeline = FactoryPipeline(config=config)
+    result = pipeline.execute(
+        raw_spikes=spikes_data,
+        output_dir=getattr(args, "output_dir", None),
+    )
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print(
+            f"[FACTORY PIPELINE] Total: {result.total_spikes} | "
+            f"Filtered Noise: {result.filtered_noise_count} | "
+            f"Evaluated: {result.evaluated_count} | "
+            f"Compiled: {result.compiled_count} | "
+            f"Aborted: {result.aborted_count}"
+        )
+        for asset in result.compiled_assets:
+            print(f" -> [COMPILED] [{asset.tenant}] {asset.query} ({asset.slug}) - HTML len: {asset.html_length}")
+        for aborted in result.aborted_opportunities:
+            print(f" -> [ABORTED] {aborted.query} - Reason: {aborted.reason} [{aborted.action}]")
+
+    return 0
+
+
 def cmd_trend_backfill(args: argparse.Namespace) -> int:
     """
     Executes historical session crawl and idempotent bulk insert into trend history DB.
@@ -1043,6 +1102,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_intake.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold (default: 60.0)")
     p_intake.add_argument("--json", action="store_true", help="Output result as JSON")
 
+    # factory-run
+    p_factory = subparsers.add_parser("factory-run", help="Execute automated discovery and content generation pipeline")
+    p_factory.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing raw spikes")
+    p_factory.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries for streaming intake")
+    p_factory.add_argument("--source", type=str, default=None, help="Optional feed source filter")
+    p_factory.add_argument("--sink", type=str, default=None, help="Optional sink path for flock JSONL output")
+    p_factory.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield (default: 60.0)")
+    p_factory.add_argument("--min-jev", type=float, default=1.20, help="Minimum Jev durability score (default: 1.20)")
+    p_factory.add_argument("--min-prob", type=float, default=0.50, help="Minimum durability probability (default: 0.50)")
+    p_factory.add_argument("--output-dir", type=str, default=None, help="Optional directory to write compiled HTML assets")
+    p_factory.add_argument("--dry-run", action="store_true", help="Dry run mode without writing compiled assets to disk")
+    p_factory.add_argument("--json", action="store_true", help="Output result as JSON")
+
     # trend-monitor
     p_monitor = subparsers.add_parser("trend-monitor", help="Monitor live streaming suggest queries and report momentum rankings")
     p_monitor.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries to monitor")
@@ -1209,6 +1281,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_replay_dlq(args)
     elif args.command == "trend-intake":
         return cmd_trend_intake(args)
+    elif args.command == "factory-run":
+        return cmd_factory_pipeline(args)
     elif args.command == "trend-monitor":
         return cmd_trend_monitor(args)
     elif args.command == "trend-cron":

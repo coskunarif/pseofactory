@@ -513,6 +513,15 @@ from pseofactory.trends import (
     TrendPipeline,
     run_trend_pipeline,
 )
+from pseofactory.pipeline import (
+    PipelineConfig,
+    QualifiedOpportunity,
+    AbortedOpportunity,
+    CompiledAssetResult,
+    DriverExecutionResult,
+    FactoryPipeline,
+    run_factory_pipeline,
+)
 
 __version__ = "0.1.0"
 
@@ -967,6 +976,13 @@ __all__ = [
     "JevEngine",
     "TrendPipeline",
     "run_trend_pipeline",
+    "PipelineConfig",
+    "QualifiedOpportunity",
+    "AbortedOpportunity",
+    "CompiledAssetResult",
+    "DriverExecutionResult",
+    "FactoryPipeline",
+    "run_factory_pipeline",
     "EmailIngestionEngine",
     "EmailMessage",
     "PartnerEmailClassification",

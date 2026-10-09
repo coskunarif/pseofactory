@@ -15,6 +15,7 @@ Enforces:
 Zero em-dashes. Zero en-dashes.
 """
 
+import os
 import json
 import re
 from typing import Dict, Any, Optional
@@ -190,13 +191,19 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     # Format output value for display
     display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
 
+    canonical_base = (
+        str(candidate_spec.get("canonical_base") or "").strip()
+        or os.environ.get("FACTORY_CANONICAL_BASE")
+        or "https://profithelm.com"
+    ).rstrip("/")
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title}</title>
-  <link rel="canonical" href="https://profithelm.com/tools/{slug}/" />
+  <link rel="canonical" href="{canonical_base}/tools/{slug}/" />
   <style>
     :root {{
       --bg: #07090e;
@@ -296,7 +303,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     "name": "{title}",
     "applicationCategory": "BusinessApplication",
     "operatingSystem": "All",
-    "url": "https://profithelm.com/tools/{slug}/",
+    "url": "{canonical_base}/tools/{slug}/",
     "offers": {{
       "@type": "Offer",
       "price": "0.00",
@@ -402,7 +409,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     </section>
 
     <footer class="card" style="text-align: center;">
-      <a href="https://profithelm.com/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
+      <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
         Launch Full {title} Engine
       </a>
     </footer>
