@@ -75,6 +75,19 @@ PROFITHELM_STATUTORY_TOKENS: List[str] = [
     "clean energy 179d",
     "cost segregation",
     "capital gains tax",
+    "tax bracket",
+    "tax brackets",
+    "tcja sunset",
+    "saas runway",
+    "runway calculator",
+    "burn rate",
+    "prediction market tax",
+    "section 1256",
+    "1256 contract",
+    "niit",
+    "crypto tax",
+    "treasury yield",
+    "financial simulation",
 ]
 
 DEFAULT_CRON_SEEDS = "calculator,tax deduction,compliance,student loan,amortization"

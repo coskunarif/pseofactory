@@ -6314,6 +6314,7 @@ SUPPORTED_AUXILIARY_SCHEMAS: Set[str] = {
     "Person",
     "LocalBusiness",
     "FinancialService",
+    "FinancialProduct",
     "ProfessionalService",
     "GeoCoordinates",
     "OpeningHoursSpecification",
