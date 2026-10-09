@@ -776,6 +776,84 @@ def cmd_partner_ui(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_indexing_preflight(args: argparse.Namespace) -> int:
+    """
+    Executes automated indexing preflight inspection and crawl budget partitioning.
+    Returns 0 on success/clean, 1 on strict blocked URLs, 2 on argument/config error.
+    """
+    property_id = getattr(args, "property", None) or "profithelm"
+    domain = f"{property_id}.com"
+    dist_dir = Path(args.dist_dir).resolve() if getattr(args, "dist_dir", None) else None
+
+    reg = TenantRegistry.default()
+    if getattr(args, "property", None):
+        try:
+            adapter = reg.get_adapter(args.property)
+            domain = adapter.domain
+            if not dist_dir:
+                dist_dir = adapter.dist_dir
+        except KeyError:
+            if not getattr(args, "fixture", None) and not getattr(args, "urls", None) and not getattr(args, "sitemap", None) and not dist_dir:
+                print(f"Error: Property '{args.property}' not found in registry and no targets provided", file=sys.stderr)
+                return 2
+
+    if not getattr(args, "fixture", None) and not getattr(args, "urls", None) and not getattr(args, "sitemap", None) and not dist_dir:
+        default_dist = Path("dist")
+        if default_dist.exists():
+            dist_dir = default_dist.resolve()
+        else:
+            print("Error: No inspection target specified (--fixture, --urls, --sitemap, --dist-dir)", file=sys.stderr)
+            return 2
+
+    from pseofactory.indexing.preflight import run_indexing_preflight
+    try:
+        report = run_indexing_preflight(
+            urls=getattr(args, "urls", None),
+            dist_dir=dist_dir,
+            sitemap_path=getattr(args, "sitemap", None),
+            fixture_path=getattr(args, "fixture", None),
+            domain=domain,
+            property_id=property_id,
+            min_words=getattr(args, "min_words", 150),
+            tier1_cap=getattr(args, "tier1_cap", 150),
+        )
+    except Exception as ex:
+        print(f"Error executing indexing preflight: {ex}", file=sys.stderr)
+        return 2
+
+    as_json = getattr(args, "json", False) or getattr(args, "format", "table") == "json"
+    if as_json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print("=" * 60)
+        print(f"INDEXING PREFLIGHT REPORT: {property_id.upper()} ({domain})")
+        print("=" * 60)
+        print(f"Total Inspected:       {report.total_inspected}")
+        print(f"Passed URLs:           {report.passed_count}")
+        print(f"Blocked URLs:          {report.blocked_count}")
+        print(f"Tier-1 Hubs (Push):    {report.tier1_hubs_eligible} (cap {getattr(args, 'tier1_cap', 150)})")
+        print(f"Tier-2 Leaves (Queue): {report.tier2_leaves_queued}")
+        print(f"Gate Status:           {'PASS' if report.is_gate_passed else 'FAIL'}")
+        print("-" * 60)
+        print("Breakdown:")
+        for status_name, cnt in report.breakdown.items():
+            print(f"  {status_name:<30}: {cnt}")
+        if report.blocked_urls:
+            print("-" * 60)
+            print(f"Blocked Sample (up to 5 of {len(report.blocked_urls)}):")
+            for u in report.blocked_urls[:5]:
+                print(f"  [X] {u}")
+        print("=" * 60)
+
+    if getattr(args, "dry_run", False):
+        return 0
+
+    if getattr(args, "strict", False) and not report.is_gate_passed:
+        return 1
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -947,6 +1025,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_pui.add_argument("--status", action="store_true", help="Inspect active runtime status of the partner UI daemon")
     p_pui.add_argument("--json", action="store_true", help="Output status report as JSON")
 
+    # indexing-preflight
+    p_preflight = subparsers.add_parser(
+        "indexing-preflight",
+        help="Execute automated indexing preflight inspection and crawl budget partition",
+    )
+    p_preflight.add_argument("--property", type=str, default=None, help="Property ID (e.g. profithelm, prexvo)")
+    p_preflight.add_argument("--urls", nargs="*", default=None, help="Explicit URLs to inspect")
+    p_preflight.add_argument("--sitemap", type=str, default=None, help="Path or URL to sitemap.xml")
+    p_preflight.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory")
+    p_preflight.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file")
+    p_preflight.add_argument("--strict", action="store_true", help="Fail with exit code 1 if any blocked URLs exist")
+    p_preflight.add_argument("--dry-run", action="store_true", help="Simulate inspection and exit 0 without blocking")
+    p_preflight.add_argument("--format", type=str, choices=["json", "table"], default="table", help="Output format (json or table)")
+    p_preflight.add_argument("--json", action="store_true", help="Alias for --format json")
+    p_preflight.add_argument("--min-words", type=int, default=150, help="Minimum body word count threshold (default: 150)")
+    p_preflight.add_argument("--tier1-cap", type=int, default=150, help="Maximum cap on Tier-1 Hub push URLs (default: 150)")
+
     return parser
 
 
@@ -993,6 +1088,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_partner_action(args)
     elif args.command == "partner-ui":
         return cmd_partner_ui(args)
+    elif args.command == "indexing-preflight":
+        return cmd_indexing_preflight(args)
     else:
         parser.print_help()
         return 1

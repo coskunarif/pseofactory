@@ -30,6 +30,14 @@ from pseofactory.indexer import (
     run_full_indexing_sweep,
     GOOGLE_INDEXING_DAILY_QUOTA,
 )
+from pseofactory.indexing.preflight import (
+    IndexingPreflightEngine,
+    PreflightStatus,
+    TierClassification,
+    PreflightURLRecord,
+    PreflightReport,
+    run_indexing_preflight,
+)
 
 __all__ = [
     "PushIndexer",
@@ -62,4 +70,11 @@ __all__ = [
     "get_latest_indexing_audit_log",
     "run_full_indexing_sweep",
     "GOOGLE_INDEXING_DAILY_QUOTA",
+    "IndexingPreflightEngine",
+    "PreflightStatus",
+    "TierClassification",
+    "PreflightURLRecord",
+    "PreflightReport",
+    "run_indexing_preflight",
 ]
+
