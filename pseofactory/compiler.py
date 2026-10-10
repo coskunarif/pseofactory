@@ -191,10 +191,28 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     # Format output value for display
     display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
 
+    is_prexvo = (
+        "prexvo" in str(candidate_spec.get("property_id") or "").lower()
+        or "prexvo" in str(candidate_spec.get("property") or "").lower()
+        or "prexvo" in str(candidate_spec.get("tenant") or "").lower()
+        or "prexvo" in str(candidate_spec.get("domain") or "").lower()
+        or "prexvo" in str(candidate_spec.get("brand_name") or "").lower()
+        or "prexvo" in os.environ.get("FACTORY_PROPERTY_ID", "").lower()
+        or "prexvo" in os.environ.get("FACTORY_BRAND_NAME", "").lower()
+        or "prexvo" in os.environ.get("FACTORY_DOMAIN", "").lower()
+        or any(
+            t in str(candidate_spec.get("statutory_authority") or "").lower()
+            for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
+        )
+    )
+    default_base = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
+    env_base = os.environ.get("FACTORY_CANONICAL_BASE", "").strip()
+    if is_prexvo and "profithelm.com" in env_base.lower():
+        env_base = ""
     canonical_base = (
         str(candidate_spec.get("canonical_base") or "").strip()
-        or os.environ.get("FACTORY_CANONICAL_BASE")
-        or "https://profithelm.com"
+        or env_base
+        or default_base
     ).rstrip("/")
 
     html_content = f"""<!DOCTYPE html>
@@ -216,6 +234,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     }}
     * {{
       box-sizing: border-box;
+    }}
+    *:focus-visible {{
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }}
     body {{
       background-color: var(--bg);
@@ -239,6 +261,23 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     h1, h2, h3 {{
       color: var(--text);
       margin-top: 0;
+    }}
+    h1 {{
+      font-size: 28px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }}
+    h2 {{
+      font-size: 20px;
+      line-height: 1.3;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }}
+    h3 {{
+      font-size: 16px;
+      line-height: 1.4;
+      font-weight: 600;
     }}
     .touch-target {{
       min-height: 44px;
@@ -270,10 +309,20 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       border-radius: 8px;
       margin-bottom: 24px;
     }}
+    .table-wrap {{
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-top: 16px;
+    }}
     .calculation-table {{
       width: 100%;
       border-collapse: collapse;
-      margin-top: 16px;
+      margin-top: 0;
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
     }}
     .calculation-table th, .calculation-table td {{
       border: 1px solid var(--border);
@@ -294,6 +343,26 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       font-weight: 600;
       min-height: 44px;
       min-width: 44px;
+    }}
+    @media (max-width: 640px) {{
+      body {{
+        padding: 16px 12px;
+      }}
+      .card {{
+        padding: 16px;
+        margin-bottom: 16px;
+      }}
+      .calculator-form {{
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }}
+      h1 {{
+        font-size: 22px;
+      }}
+      h2 {{
+        font-size: 18px;
+      }}
     }}
   </style>
   <script type="application/ld+json">
@@ -377,19 +446,21 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </div>
 
       <figure>
-        <table class="calculation-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
-          <thead>
-            <tr>
-              <th>Input Variable</th>
-              <th>Clamped Value</th>
-              <th>Statutory Authority</th>
-              <th>Economic Benchmark</th>
-            </tr>
-          </thead>
-          <tbody>
+        <div class="table-wrap">
+          <table class="calculation-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
+            <thead>
+              <tr>
+                <th>Input Variable</th>
+                <th>Clamped Value</th>
+                <th>Statutory Authority</th>
+                <th>Economic Benchmark</th>
+              </tr>
+            </thead>
+            <tbody>
 {table_rows_str}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
         <figcaption style="margin-top: 8px; color: var(--text-muted); font-size: 14px;">
           Table 1: Grounded calculation parameters citing statutory authority {statutory_authority} and economic dataset {economic_dataset}.
         </figcaption>

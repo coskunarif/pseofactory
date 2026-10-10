@@ -257,10 +257,15 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             background: var(--bg-subtle);
             border-color: var(--border-strong);
         }}
+        .btn:focus-visible, .tab-btn:focus-visible, .partner-link:focus-visible {{
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }}
         .btn-approve {{
             background: var(--success-subtle);
             color: var(--success);
             border-color: #a7f3d0;
+            min-height: 44px;
             min-width: 90px;
         }}
         .btn-approve:hover {{
@@ -270,6 +275,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             background: var(--danger-subtle);
             color: var(--danger);
             border-color: #fecdd3;
+            min-height: 44px;
             min-width: 90px;
         }}
         .btn-reject:hover {{
@@ -279,6 +285,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             background: var(--primary-subtle);
             color: var(--primary);
             border-color: #bfdbfe;
+            min-height: 44px;
             min-width: 90px;
         }}
         .btn-resolve:hover {{
@@ -298,6 +305,10 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             background: var(--bg-canvas);
             color: var(--text-sub);
             cursor: pointer;
+        }}
+        .tab-btn:focus-visible {{
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
         }}
         .tab-btn.active {{
             background: var(--text-main);
@@ -364,9 +375,9 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             border-color: #e2e8f0;
         }}
         .badge-type {{
-            background: #f3e8ff;
-            color: #7e22ce;
-            border-color: #e9d5ff;
+            background: #f0f9ff;
+            color: #0284c7;
+            border-color: #bae6fd;
         }}
         .badge-subtle {{
             background: #f8fafc;
@@ -405,6 +416,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             color: var(--text-main);
             letter-spacing: -0.03em;
             line-height: 1.1;
+            font-variant-numeric: tabular-nums;
         }}
         .kpi-meta {{
             font-size: 12px;
@@ -457,7 +469,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             gap: 12px;
         }}
         .action-card[data-property="prexvo"] {{
-            border-left-color: #8b5cf6;
+            border-left-color: #0284c7;
         }}
         .action-card-header {{
             display: flex;
@@ -519,14 +531,17 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         /* Tables (table-layout fixed to prevent CLS) */
         .table-wrap {{
             overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
+            width: 100%;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
             table-layout: fixed;
             font-size: 13px;
+            font-variant-numeric: tabular-nums;
         }}
         th {{
             background: var(--bg-subtle);
@@ -607,6 +622,53 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             display: none;
             z-index: 1000;
         }}
+        *:focus-visible {{
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }}
+        @media (max-width: 768px) {{
+            body {{
+                padding: 16px 12px;
+            }}
+            .header {{
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                padding: 16px;
+            }}
+            .header-actions {{
+                width: 100%;
+                justify-content: space-between;
+            }}
+            .kpi-grid {{
+                grid-template-columns: 1fr;
+            }}
+            .section {{
+                padding: 16px;
+            }}
+            .section-header {{
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }}
+            .action-card {{
+                padding: 14px;
+            }}
+            .action-footer {{
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }}
+            .action-btn-group {{
+                width: 100%;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }}
+            .action-btn-group .btn {{
+                flex: 1 1 auto;
+            }}
+        }}
     </style>
 </head>
 <body>
@@ -636,7 +698,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-label">Prexvo Readiness</span>
-                    <span class="badge badge-property" style="background:#f3e8ff;color:#7e22ce;border-color:#e9d5ff;">Prexvo</span>
+                    <span class="badge badge-property" style="background:#f0f9ff;color:#0284c7;border-color:#bae6fd;">Prexvo</span>
                 </div>
                 <div class="kpi-value">{px.monetization_readiness_score}%</div>
                 <div class="kpi-meta">0 Active (Gate 1 Payout Verification Pending)</div>
