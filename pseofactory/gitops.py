@@ -145,13 +145,39 @@ class GitOpsCoordinator:
         )
         return res.returncode == 0
 
-    def stage_tracked(self, target_dir: Optional[Union[str, Path]] = None) -> List[str]:
+    def get_negative_pathspecs(self, target_dir: Optional[Union[str, Path]] = None) -> List[str]:
         """
-        Stages tracked modifications and new source files excluding dist and run state.
+        Returns repository-aware negative pathspecs.
+        Omits :!dist/* and :!dist if dist contains tracked files.
         Zero em-dashes. Zero en-dashes.
         """
         td = Path(target_dir).resolve() if target_dir else self.repo_path
-        cmd = ["git", "-C", str(td), "add", "-A", "--", "."] + self.NEGATIVE_PATHSPECS
+        has_tracked_dist = False
+        if td.is_dir():
+            res = subprocess.run(
+                ["git", "-C", str(td), "ls-files", "dist"],
+                capture_output=True,
+                text=True,
+                env=self._get_git_env(),
+                check=False,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                has_tracked_dist = True
+
+        specs = []
+        for spec in self.NEGATIVE_PATHSPECS:
+            if has_tracked_dist and spec in (":!dist/*", ":!dist"):
+                continue
+            specs.append(spec)
+        return specs
+
+    def stage_tracked(self, target_dir: Optional[Union[str, Path]] = None) -> List[str]:
+        """
+        Stages tracked modifications and new source files excluding dist (if untracked) and run state.
+        Zero em-dashes. Zero en-dashes.
+        """
+        td = Path(target_dir).resolve() if target_dir else self.repo_path
+        cmd = ["git", "-C", str(td), "add", "-A", "--", "."] + self.get_negative_pathspecs(td)
         subprocess.run(cmd, env=self._get_git_env(), capture_output=True, text=True, check=False)
 
         # Retrieve staged file list
