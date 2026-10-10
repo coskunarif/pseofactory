@@ -1064,6 +1064,16 @@ class LiveEdgeVerifier:
     Zero em-dashes. Zero en-dashes.
     """
 
+    AI_BOT_PROBE_MATRIX: Dict[str, str] = {
+        "GPTBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+        "ClaudeBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
+        "PerplexityBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+        "Google-Extended": "Mozilla/5.0 (compatible; Google-Extended/1.0; +https://developers.google.com/search/docs/crawling-indexing/google-extended)",
+        "Googlebot": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Bingbot": "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+        "Applebot-Extended": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15 (Applebot-Extended/0.1; +http://www.apple.com/go/applebot)",
+    }
+
     def __init__(
         self,
         timeout: float = 15.0,
@@ -1074,12 +1084,13 @@ class LiveEdgeVerifier:
         self.retries = retries
         self.backoff = backoff
 
-    def verify_url(self, url: str) -> Dict[str, Any]:
+    def verify_url(self, url: str, user_agent: Optional[str] = None) -> Dict[str, Any]:
         """
         Probes individual endpoint with retries and asserts HTTP 200 and markup parity.
         Zero em-dashes. Zero en-dashes.
         """
-        headers = {"User-Agent": "pseofactory-live-edge-verifier/1.0"}
+        ua = user_agent or "pseofactory-live-edge-verifier/1.0"
+        headers = {"User-Agent": ua}
         req = urllib.request.Request(url, headers=headers)
         last_error = ""
 
@@ -1289,3 +1300,332 @@ class LiveEdgeVerifier:
         Zero em-dashes. Zero en-dashes.
         """
         return self.verify_edge_deployment(base_url=base_url)
+
+    def probe_two_phase(
+        self,
+        url: str,
+        user_agent: Optional[str] = None,
+        canonical_base: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Two-phase edge probe engine:
+        Phase 1: Cold probe asserting HTTP 200, latency SLA (<1000ms), zero bot challenge wall,
+                 absence of fatal noindex/nosnippet barriers, and RFC 5988 link headers.
+        Phase 2: Warm repeat probe asserting HTTP 200, latency SLA (<200ms), and edge cache retention
+                 (cf-cache-status: HIT or Age > 0 or s-maxage retention).
+        Zero em-dashes. Zero en-dashes.
+        """
+        ua = user_agent or self.AI_BOT_PROBE_MATRIX["GPTBot"]
+        issues: List[str] = []
+
+        def _exec_http(target_url: str, target_ua: str) -> Dict[str, Any]:
+            req = urllib.request.Request(target_url, headers={"User-Agent": target_ua})
+            t0 = time.time()
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    lat_ms = round((time.time() - t0) * 1000, 1)
+                    hdrs = {k.lower(): v for k, v in resp.headers.items()}
+                    body = resp.read().decode("utf-8", errors="ignore")
+                    return {
+                        "status_code": resp.getcode(),
+                        "latency_ms": lat_ms,
+                        "headers": hdrs,
+                        "body": body,
+                        "error": None,
+                    }
+            except urllib.error.HTTPError as he:
+                lat_ms = round((time.time() - t0) * 1000, 1)
+                hdrs = {k.lower(): v for k, v in he.headers.items()} if hasattr(he, "headers") and he.headers else {}
+                try:
+                    body = he.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    body = ""
+                return {
+                    "status_code": he.code,
+                    "latency_ms": lat_ms,
+                    "headers": hdrs,
+                    "body": body,
+                    "error": f"HTTP Error {he.code}: {he.reason}",
+                }
+            except Exception as ex:
+                lat_ms = round((time.time() - t0) * 1000, 1)
+                return {
+                    "status_code": 0,
+                    "latency_ms": lat_ms,
+                    "headers": {},
+                    "body": "",
+                    "error": str(ex),
+                }
+
+        # --- Phase 1: Cold probe ---
+        cold_res = _exec_http(url, ua)
+        cold_ok = True
+        cold_headers = cold_res["headers"]
+        cold_body = cold_res["body"]
+
+        # 1. Challenge wall detection
+        is_challenge = (
+            cold_headers.get("cf-mitigated", "").lower() == "challenge"
+            or "cf-chl-bypass" in cold_headers
+            or "turnstile" in cold_body.lower()
+            or "challenge-platform" in cold_body.lower()
+            or (cold_res["status_code"] in (403, 429) and "challenge" in cold_body.lower())
+        )
+        if is_challenge:
+            return {
+                "url": url,
+                "status": "FAIL",
+                "error": "BOT_CHALLENGE_WALL_DETECTED",
+                "issues": ["BOT_CHALLENGE_WALL_DETECTED"],
+                "cold_phase": {**cold_res, "status": "FAIL", "error": "BOT_CHALLENGE_WALL_DETECTED"},
+                "warm_phase": None,
+                "cache_hit": False,
+            }
+
+        # 2. Cold status code check
+        if cold_res["status_code"] != 200:
+            cold_ok = False
+            issues.append(f"Cold probe failed with HTTP {cold_res['status_code']}: {cold_res['error']}")
+
+        # 3. Cold latency SLA (< 1000ms SLA, apex root < 500ms)
+        is_apex = url.rstrip("/").endswith(canonical_base.rstrip("/")) if canonical_base else False
+        cold_sla_threshold = 500.0 if is_apex else 1000.0
+        if cold_res["latency_ms"] > cold_sla_threshold:
+            cold_ok = False
+            issues.append(f"Cold probe latency SLA exceeded: {cold_res['latency_ms']}ms > {cold_sla_threshold}ms")
+
+        # 4. Crawler barriers check
+        x_robots = cold_headers.get("x-robots-tag", "").lower()
+        if any(b in x_robots for b in ["noindex", "nofollow", "nosnippet", "max-snippet:0"]):
+            cold_ok = False
+            issues.append(f"Lethal crawler barrier detected in X-Robots-Tag: '{x_robots}'")
+
+        # --- Phase 2: Warm Repeat probe ---
+        warm_res = _exec_http(url, ua)
+        warm_ok = True
+        warm_headers = warm_res["headers"]
+
+        if warm_res["status_code"] != 200:
+            warm_ok = False
+            issues.append(f"Warm repeat probe failed with HTTP {warm_res['status_code']}: {warm_res['error']}")
+
+        # Warm repeat latency SLA (< 200ms)
+        warm_latency_sla = warm_res["latency_ms"] <= 200.0
+        if not warm_latency_sla:
+            issues.append(f"Warm repeat probe latency SLA exceeded: {warm_res['latency_ms']}ms > 200ms")
+
+        # Cache retention check (cf-cache-status: HIT, Age > 0, or s-maxage retention)
+        cf_cache_status = warm_headers.get("cf-cache-status", "").upper()
+        age_header = warm_headers.get("age", "")
+        age_val = int(age_header) if age_header.isdigit() else 0
+        cc_warm = warm_headers.get("cache-control", "").lower()
+        has_smaxage = "s-maxage" in cc_warm and "stale-while-revalidate" in cc_warm
+
+        is_cache_hit = (cf_cache_status == "HIT") or (age_val > 0)
+        if not is_cache_hit:
+            if cf_cache_status and cf_cache_status != "HIT":
+                warm_ok = False
+                issues.append(f"Warm probe cf-cache-status is {cf_cache_status}, expected HIT")
+            elif not has_smaxage and age_val == 0:
+                issues.append("Warm probe response missing edge cache retention indicators (HIT/Age/s-maxage)")
+
+        overall_status = "PASS" if (cold_ok and warm_ok and len(issues) == 0) else "FAIL"
+
+        return {
+            "url": url,
+            "status": overall_status,
+            "cache_hit": is_cache_hit,
+            "issues": issues,
+            "cold_phase": {
+                "status": "PASS" if cold_ok else "FAIL",
+                "status_code": cold_res["status_code"],
+                "latency_ms": cold_res["latency_ms"],
+                "headers": cold_headers,
+                "error": cold_res.get("error"),
+            },
+            "warm_phase": {
+                "status": "PASS" if warm_ok else "FAIL",
+                "status_code": warm_res["status_code"],
+                "latency_ms": warm_res["latency_ms"],
+                "headers": warm_headers,
+                "cache_hit": is_cache_hit,
+                "error": warm_res.get("error"),
+            },
+        }
+
+    verify_two_phase = probe_two_phase
+    two_phase_probe = probe_two_phase
+
+    def verify_content_structure(self, html_content: str, url: str = "") -> Dict[str, Any]:
+        """
+        Validates machine-extractable content structure:
+        1. H1->H2->H3 hierarchy: exactly one H1, no level skips, no empty headings.
+        2. Quick-answer block: detects quick-answer container, asserts sentence 1 in < 20 words,
+           asserts strictly zero data-nosnippet attribute.
+        3. Scoped table headers: data tables declare <th> with scope="col" or scope="row".
+        4. JSON-LD schemas: extracts <script type="application/ld+json"> and parses valid JSON.
+        Zero em-dashes. Zero en-dashes.
+        """
+        issues: List[str] = []
+
+        # 1. Heading hierarchy check
+        headings = re.findall(r"<h([1-6])\b([^>]*)>(.*?)</h\1>", html_content, re.IGNORECASE | re.DOTALL)
+        h1_count = 0
+        prev_level = 0
+        for lvl_str, attrs, text in headings:
+            lvl = int(lvl_str)
+            clean_text = re.sub(r"<[^>]+>", "", text).strip()
+            if not clean_text:
+                issues.append(f"Empty heading <h{lvl}> tag detected")
+            if lvl == 1:
+                h1_count += 1
+            if prev_level > 0 and lvl > prev_level + 1:
+                issues.append(f"Heading level skip detected: H{prev_level} followed by H{lvl}")
+            prev_level = lvl
+
+        if h1_count == 0:
+            issues.append("Missing H1 heading tag")
+        elif h1_count > 1:
+            issues.append(f"Multiple H1 tags detected (found {h1_count})")
+
+        # 2. Quick-answer block check
+        qa_match = re.search(
+            r"<([a-zA-Z0-9]+)\b[^>]*class=[\"'][^\"']*\bquick-answer\b[^\"']*[\"'][^>]*>(.*?)</\1>",
+            html_content,
+            re.IGNORECASE | re.DOTALL,
+        )
+        has_qa = qa_match is not None
+        has_nosnippet = False
+        if qa_match:
+            full_qa = qa_match.group(0)
+            qa_body = qa_match.group(2)
+            if "data-nosnippet" in full_qa.lower():
+                has_nosnippet = True
+                issues.append("Quick-answer block contains 'data-nosnippet' attribute, blocking crawler snippet")
+
+            clean_qa_text = re.sub(r"<[^>]+>", " ", qa_body).strip()
+            sentences = [s.strip() for s in re.split(r"[.!?]", clean_qa_text) if s.strip()]
+            sentence_1 = sentences[0] if sentences else ""
+            words_s1 = sentence_1.split()
+            if len(words_s1) > 20:
+                issues.append(f"Quick-answer sentence 1 exceeds 20 words (found {len(words_s1)} words)")
+
+        # 3. Scoped table headers check
+        tables = re.findall(r"<table\b[^>]*>(.*?)</table>", html_content, re.IGNORECASE | re.DOTALL)
+        tables_scoped = True
+        for tbl in tables:
+            th_tags = re.findall(r"<th\b([^>]*)>", tbl, re.IGNORECASE)
+            if th_tags:
+                for th_attr in th_tags:
+                    if not re.search(r'\bscope=[\'"](col|row)[\'"]', th_attr, re.IGNORECASE):
+                        tables_scoped = False
+                        issues.append("Data table <th> header tag missing valid scope attribute (col/row)")
+                        break
+
+        # 4. JSON-LD schemas check
+        json_ld_scripts = re.findall(
+            r"<script\b[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+            html_content,
+            re.IGNORECASE | re.DOTALL,
+        )
+        json_ld_valid = True
+        for s in json_ld_scripts:
+            raw_json = s.strip()
+            if raw_json:
+                try:
+                    json.loads(raw_json)
+                except Exception as e:
+                    json_ld_valid = False
+                    issues.append(f"Invalid JSON-LD schema JSON: {e}")
+
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "url": url,
+            "violations_count": len(issues),
+            "issues": issues,
+            "h1_count": h1_count,
+            "headings_count": len(headings),
+            "quick_answer_found": has_qa,
+            "tables_count": len(tables),
+            "tables_scoped": tables_scoped,
+            "json_ld_count": len(json_ld_scripts),
+            "json_ld_valid": json_ld_valid,
+        }
+
+    def simulate_multi_bot_crawl(
+        self,
+        urls: List[str],
+        bot_matrix: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Simulates multi-bot crawler audit across URLs using canonical 7-bot matrix.
+        Asserts sub-second latency SLA (<1000ms), HTTP 200, zero challenge walls,
+        and absence of crawler barriers.
+        Zero em-dashes. Zero en-dashes.
+        """
+        matrix = bot_matrix if bot_matrix is not None else self.AI_BOT_PROBE_MATRIX
+        probes: Dict[str, Dict[str, Any]] = {}
+        total_issues: List[str] = []
+        total_count = 0
+        pass_count = 0
+
+        for url in urls:
+            probes[url] = {}
+            for bot_name, ua in matrix.items():
+                total_count += 1
+                t0 = time.time()
+                req = urllib.request.Request(url, headers={"User-Agent": ua})
+                try:
+                    with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                        lat_ms = round((time.time() - t0) * 1000, 1)
+                        code = resp.getcode()
+                        hdrs = {k.lower(): v for k, v in resp.headers.items()}
+                        body = resp.read().decode("utf-8", errors="ignore")
+
+                        is_wall = (
+                            hdrs.get("cf-mitigated", "").lower() == "challenge"
+                            or "cf-chl-bypass" in hdrs
+                            or "turnstile" in body.lower()
+                        )
+                        xr = hdrs.get("x-robots-tag", "").lower()
+                        has_barrier = any(b in xr for b in ["noindex", "nosnippet", "max-snippet:0"])
+
+                        bot_passed = (code == 200) and (lat_ms < 1000.0) and not is_wall and not has_barrier
+                        if bot_passed:
+                            pass_count += 1
+                        else:
+                            if code != 200:
+                                total_issues.append(f"{bot_name} got HTTP {code} on {url}")
+                            if lat_ms >= 1000.0:
+                                total_issues.append(f"{bot_name} exceeded 1000ms SLA ({lat_ms}ms) on {url}")
+                            if is_wall:
+                                total_issues.append(f"{bot_name} encountered challenge wall on {url}")
+                            if has_barrier:
+                                total_issues.append(f"{bot_name} encountered crawler barrier in X-Robots-Tag on {url}")
+
+                        probes[url][bot_name] = {
+                            "status": "PASS" if bot_passed else "FAIL",
+                            "status_code": code,
+                            "latency_ms": lat_ms,
+                            "challenge_wall": is_wall,
+                            "crawler_barrier": has_barrier,
+                        }
+                except Exception as ex:
+                    lat_ms = round((time.time() - t0) * 1000, 1)
+                    total_issues.append(f"{bot_name} probe failed on {url}: {ex}")
+                    probes[url][bot_name] = {
+                        "status": "FAIL",
+                        "status_code": 0,
+                        "latency_ms": lat_ms,
+                        "error": str(ex),
+                    }
+
+        all_ok = len(total_issues) == 0 and (pass_count == total_count)
+        return {
+            "status": "PASS" if all_ok else "FAIL",
+            "urls_checked": len(urls),
+            "total_probes": total_count,
+            "passed_probes": pass_count,
+            "probes": probes,
+            "issues": total_issues,
+        }

@@ -3299,6 +3299,45 @@ class MasterSEOVerifier:
 
     verify_operational_shield = check_operational_shield_gate
 
+    # 29. Host Config Hygiene Gate
+    def check_host_hygiene_gate(
+        self,
+        repo_path: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Gate 29: Host Configuration Hygiene Verification.
+        Audits firebase.json, wrangler.toml, etc., detecting blanket noindex directives
+        and asserting cache retention policies.
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.edge import HostHygieneAuditor
+
+        target_repo = Path(repo_path) if repo_path else (self.dist_dir.parent if self.dist_dir else Path.cwd())
+        res = HostHygieneAuditor.audit_repo_host_configs(target_repo)
+        res["gate"] = "check_host_hygiene_gate"
+        return res
+
+    verify_host_hygiene = check_host_hygiene_gate
+
+    # 30. Edge Cache Policy Gate
+    def check_edge_cache_policy_gate(
+        self,
+        dist_dir: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Gate 30: Edge Cache Policy Verification.
+        Audits dist/_headers for s-maxage, stale-while-revalidate, and immutable static assets.
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.edge import validate_edge_headers_file
+
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        headers_path = target / "_headers" if target.is_dir() else target
+        res = validate_edge_headers_file(headers_path)
+        res["gate"] = "check_edge_cache_policy_gate"
+        return res
+
+    verify_edge_cache_policy = check_edge_cache_policy_gate
 
     # 25. Schema Validation Gate (Auxiliary)
     def check_schema_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -3916,6 +3955,8 @@ class MasterSEOVerifier:
         g_citability = self.check_citability_gate(target)
         g_cleanliness = self.check_cleanliness_gate(target)
         g_indexing = self.check_indexing_gate(target)
+        g_host_hygiene = self.check_host_hygiene_gate(target.parent if target else None)
+        g_edge_cache_policy = self.check_edge_cache_policy_gate(target)
 
         gates = {
             "check_alt_text_gate": g_alt_text,
@@ -3996,6 +4037,8 @@ class MasterSEOVerifier:
             "check_free_web_application_schema_gate": g_free_web_app_schema,
             "check_operational_shield_gate": g_operational_shield,
             "check_content_relevance_gate": content_relevance_gate,
+            "check_host_hygiene_gate": g_host_hygiene,
+            "check_edge_cache_policy_gate": g_edge_cache_policy,
 
             # Auxiliary and legacy aliases
             "check_ai_mode_manifest_gate": g_ai_mode_manifest,
@@ -4178,6 +4221,10 @@ verify_llms_txt_file = _default_verifier.verify_llms_txt_file
 verify_llms_full_txt = _default_verifier.verify_llms_full_txt
 verify_llmstxt = _default_verifier.verify_llmstxt
 verify_curated_llms_txt = _default_verifier.verify_curated_llms_txt
+check_host_hygiene_gate = _default_verifier.check_host_hygiene_gate
+check_edge_cache_policy_gate = _default_verifier.check_edge_cache_policy_gate
+verify_host_hygiene = _default_verifier.verify_host_hygiene
+verify_edge_cache_policy = _default_verifier.verify_edge_cache_policy
 
 
 
