@@ -1283,6 +1283,10 @@ class AssetIntegrityEvaluator:
         self.scanner = scanner or CrossPropertyContaminationScanner()
         self.enforce_master_seo = enforce_master_seo
         self.enforce_operational_shield = enforce_operational_shield
+        self._audit_cache: Dict[Tuple[str, float, int], Optional[AssetDriftRecord]] = {}
+        self._asset_audit_cache = self._audit_cache
+        self._fingerprint_cache: Dict[Tuple[str, float, int], str] = {}
+        self._seo_verifier: Optional[Any] = None
 
 
     def extract_slug(self, asset_path: Path, dist_dir: Path) -> Optional[str]:
@@ -1323,6 +1327,36 @@ class AssetIntegrityEvaluator:
             )
 
         try:
+            st = p.stat()
+            mtime, size = st.st_mtime, st.st_size
+        except OSError:
+            mtime, size = None, None
+
+        cache_key = (str(p), mtime, size) if mtime is not None else None
+        rel_key = (
+            p.relative_to(adapter.dist_dir).as_posix()
+            if p.is_relative_to(adapter.dist_dir)
+            else p.name
+        )
+
+        recorded_hash: Optional[str] = None
+        if ledger and "assets" in ledger:
+            recorded_hash = ledger["assets"].get(rel_key)
+
+        # Differential cache check for verified clean assets
+        if not engine_drifted and cache_key and cache_key in self._audit_cache:
+            cached_rec = self._audit_cache[cache_key]
+            if cached_rec is None:
+                if recorded_hash is not None and hasattr(self, "_fingerprint_cache"):
+                    cached_fingerprint = self._fingerprint_cache.get(cache_key)
+                    if cached_fingerprint is not None and cached_fingerprint != recorded_hash:
+                        pass
+                    else:
+                        return None
+                else:
+                    return None
+
+        try:
             content = p.read_text(encoding="utf-8", errors="ignore")
         except Exception as ex:
             return AssetDriftRecord(
@@ -1333,15 +1367,6 @@ class AssetIntegrityEvaluator:
             )
 
         current_hash = compute_asset_fingerprint(p)
-        recorded_hash: Optional[str] = None
-        rel_key = (
-            p.relative_to(adapter.dist_dir).as_posix()
-            if p.is_relative_to(adapter.dist_dir)
-            else p.name
-        )
-
-        if ledger and "assets" in ledger:
-            recorded_hash = ledger["assets"].get(rel_key)
 
         # 1. Engine hash / Asset hash drift
         if engine_drifted:
@@ -1425,7 +1450,7 @@ class AssetIntegrityEvaluator:
 
 
         if reasons:
-            return AssetDriftRecord(
+            rec = AssetDriftRecord(
                 asset_path=str(p),
                 slug=self.extract_slug(p, adapter.dist_dir),
                 reasons=reasons,
@@ -1434,6 +1459,14 @@ class AssetIntegrityEvaluator:
                 recorded_hash=recorded_hash,
                 metadata={"rel_key": rel_key},
             )
+            if cache_key and not engine_drifted:
+                self._audit_cache[cache_key] = rec
+            return rec
+
+        if cache_key and not engine_drifted:
+            self._audit_cache[cache_key] = None
+            if hasattr(self, "_fingerprint_cache"):
+                self._fingerprint_cache[cache_key] = current_hash
         return None
 
     def audit_all(
@@ -1484,13 +1517,15 @@ class AssetIntegrityEvaluator:
         if self.enforce_master_seo and adapter.dist_dir.exists() and (adapter.dist_dir / "sitemap.xml").is_file():
             try:
                 from pseofactory.verifier import MasterSEOVerifier
-                v = MasterSEOVerifier(
-                    dist_dir=adapter.dist_dir,
-                    canonical_base=adapter.canonical_base,
-                    domain=adapter.domain,
-                    brand_name=adapter.brand_name,
-                    tools=getattr(adapter, "tools", None),
-                )
+                if self._seo_verifier is None or getattr(self._seo_verifier, "dist_dir", None) != adapter.dist_dir:
+                    self._seo_verifier = MasterSEOVerifier(
+                        dist_dir=adapter.dist_dir,
+                        canonical_base=adapter.canonical_base,
+                        domain=adapter.domain,
+                        brand_name=adapter.brand_name,
+                        tools=getattr(adapter, "tools", None),
+                    )
+                v = self._seo_verifier
                 seo_report = v.audit_seo_checklist(
                     dist_dir=adapter.dist_dir,
                     raise_on_error=False,

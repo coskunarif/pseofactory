@@ -1454,6 +1454,29 @@ class MasterSEOVerifier:
                 "/privacy/",
                 "/tools/",
             ]
+        self._file_cache: Dict[str, Tuple[float, int, str]] = {}
+
+    def _read_cached_html(self, file_path: Union[str, Path]) -> str:
+        """
+        Reads HTML from file, memoizing by (st_mtime, st_size) across gate passes.
+        Zero em-dashes. Zero en-dashes.
+        """
+        p = Path(file_path).resolve()
+        key = str(p)
+        try:
+            st = p.stat()
+            mtime, size = st.st_mtime, st.st_size
+        except OSError:
+            return p.read_text(encoding="utf-8", errors="ignore")
+
+        if key in self._file_cache:
+            cached_mtime, cached_size, content = self._file_cache[key]
+            if cached_mtime == mtime and cached_size == size:
+                return content
+
+        content = p.read_text(encoding="utf-8", errors="ignore")
+        self._file_cache[key] = (mtime, size, content)
+        return content
 
     # 1. Alt Text Gate
     def check_alt_text_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -1463,7 +1486,7 @@ class MasterSEOVerifier:
         if target.exists():
             for p in target.glob("**/*.html"):
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 for m in re.finditer(r'<img\b([^>]*)>', content, re.IGNORECASE):
                     images_checked += 1
                     attrs = m.group(1)
@@ -1529,7 +1552,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 m = re.search(r'<title\b[^>]*>(.*?)</title>', content, re.IGNORECASE | re.DOTALL)
                 if not m:
                     issues.append(f"Missing <title> tag in {rel}")
@@ -1561,7 +1584,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 h1s = re.findall(r'<h1\b[^>]*>(.*?)</h1>', content, re.IGNORECASE | re.DOTALL)
                 if len(h1s) == 0:
                     issues.append(f"Missing <h1> tag in {rel}")
@@ -1612,7 +1635,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 m = re.search(r'<html\b[^>]*\blang=["\']([^"\']*)["\']', content, re.IGNORECASE)
                 if not m:
                     issues.append(f"Missing lang attribute on <html> in {rel}")
@@ -1638,7 +1661,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 m = re.search(r'<link\b[^>]*\brel=["\']canonical["\'][^>]*\bhref=["\']([^"\']*)["\']', content, re.IGNORECASE)
                 if not m:
                     m = re.search(r'<link\b[^>]*\bhref=["\']([^"\']*)["\'][^>]*\brel=["\']canonical["\']', content, re.IGNORECASE)
@@ -1902,7 +1925,7 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 matches = re.findall(r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', content, re.IGNORECASE | re.DOTALL)
                 if not matches:
                     issues.append(f"Missing Schema.org JSON-LD in {rel}")
@@ -1935,7 +1958,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 if re.search(r'<meta[^>]*\bcontent=["\'][^"\']*noindex[^"\']*["\'][^>]*>', content, re.IGNORECASE):
                     issues.append(f"Public page {rel} contains accidental 'noindex' directive")
 
@@ -1957,7 +1980,7 @@ class MasterSEOVerifier:
             for p in tools_dir.glob("**/index.html"):
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 links = re.findall(r'<a\b[^>]*\bhref=["\']([^"\']*)["\'][^>]*>(.*?)</a>', content, re.IGNORECASE | re.DOTALL)
                 internal_links = [h for h, _ in links if h.startswith("/") or self.domain in h or self.canonical_base in h]
                 if len(internal_links) < 3:
@@ -1980,7 +2003,7 @@ class MasterSEOVerifier:
             for p in target.glob("**/*.html"):
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 for m in re.finditer(r'<script\b([^>]*)>', content, re.IGNORECASE):
                     attrs = m.group(1).lower()
                     if 'type="application/ld+json"' in attrs:
@@ -2015,7 +2038,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 m = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', content, re.IGNORECASE)
                 if not m:
                     m = re.search(r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']description["\']', content, re.IGNORECASE)
@@ -2067,7 +2090,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 m = re.search(r'<meta[^>]*name=["\']google-site-verification["\'][^>]*content=["\']([^"\']+)["\']', content, re.IGNORECASE)
                 if not m:
                     m = re.search(r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']google-site-verification["\']', content, re.IGNORECASE)
@@ -2123,7 +2146,7 @@ class MasterSEOVerifier:
             for p in tools_dir.glob("**/index.html"):
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 clean = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', content, flags=re.IGNORECASE)
                 clean = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', clean, flags=re.IGNORECASE)
                 text = re.sub(r'<[^>]+>', ' ', clean)
@@ -2201,7 +2224,7 @@ class MasterSEOVerifier:
             for p in target.glob("**/*.html"):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 rel = p.relative_to(target).as_posix()
                 m_snippet = re.search(r'<(?:aside|div)[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>(.*?)</(?:aside|div)>', content, re.IGNORECASE | re.DOTALL)
                 if m_snippet:
@@ -2243,7 +2266,7 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 parser = SinglePassSEODocumentParser(self.brand_domain)
                 parser.feed(content)
 
@@ -2364,7 +2387,7 @@ class MasterSEOVerifier:
                 if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 t_query = None
                 if target_queries and rel in target_queries:
                     t_query = target_queries[rel]
@@ -2417,7 +2440,7 @@ class MasterSEOVerifier:
                 if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_brand_entity_in_llm_memory(
                     content,
                     brand_name=b_name,
@@ -2480,7 +2503,7 @@ class MasterSEOVerifier:
                 if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_citable_specific_facts(
                     content,
                     rel_path=rel,
@@ -2556,7 +2579,7 @@ class MasterSEOVerifier:
                 if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 page_set[rel] = content
                 res = verify_html_organic_fan_out_coverage(
                     content,
@@ -2718,7 +2741,7 @@ class MasterSEOVerifier:
                 if rel in ("index.html", "tools/index.html", "privacy/index.html", "about/index.html", "terms/index.html"):
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_unique_first_party_information(
                     content,
                     rel_path=rel,
@@ -2785,7 +2808,7 @@ class MasterSEOVerifier:
                 if rel in ("index.html", "tools/index.html", "privacy/index.html", "about/index.html", "terms/index.html") and not require_corroboration:
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_cross_web_consensus_and_corroboration(
                     content,
                     rel_path=rel,
@@ -2848,7 +2871,7 @@ class MasterSEOVerifier:
                 if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html") and not require_strict:
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_source_publisher_reputation(
                     content,
                     rel_path=rel,
@@ -2914,7 +2937,7 @@ class MasterSEOVerifier:
                 if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html") and not require_strict:
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_extractable_content_structure(
                     content,
                     rel_path=rel,
@@ -2981,7 +3004,7 @@ class MasterSEOVerifier:
                 if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html", "about/index.html", "contact/index.html") and not require_strict:
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_answer_prominence(
                     content,
                     rel_path=rel,
@@ -3055,7 +3078,7 @@ class MasterSEOVerifier:
                 if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html") and not require_strict:
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 res = verify_html_structured_data(
                     content,
                     rel_path=rel,
@@ -3211,7 +3234,7 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 is_tool = rel.startswith("tools/") and rel != "tools/index.html"
                 has_form_tag = "<form" in content.lower() or 'role="form"' in content.lower()
                 if is_tool or has_form_tag:
@@ -3254,7 +3277,7 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 is_tool = rel.startswith("tools/") and rel != "tools/index.html"
                 has_app_schema = '"webapplication"' in content.lower() or '"softwareapplication"' in content.lower()
                 if is_tool or has_app_schema or require_strict:
@@ -3356,7 +3379,7 @@ class MasterSEOVerifier:
                 if "tools" not in p.parts:
                     continue
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore").lower()
+                content = self._read_cached_html(p).lower()
                 if "<ol" not in content:
                     issues.append(f"Missing <ol> calculation steps procedure in {rel}")
                 if "<table" not in content and p.name != "index.html":
@@ -3378,7 +3401,7 @@ class MasterSEOVerifier:
         if target.exists():
             for p in target.glob("**/*.html"):
                 pages_checked += 1
-                content = p.read_text(encoding="utf-8", errors="ignore")
+                content = self._read_cached_html(p)
                 rel = p.relative_to(target).as_posix()
 
                 if "\u2014" in content or "\u2013" in content:
@@ -3468,7 +3491,7 @@ class MasterSEOVerifier:
         if target.exists():
             for p in target.glob("**/*.html"):
                 rel = p.relative_to(target).as_posix()
-                raw_html = p.read_text(encoding="utf-8", errors="ignore")
+                raw_html = self._read_cached_html(p)
                 parser = SinglePassSEODocumentParser(brand_domain=self.domain)
                 parser.feed(raw_html)
                 parsed_docs[rel] = (p, raw_html, parser)
