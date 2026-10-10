@@ -2118,19 +2118,24 @@ class MaintenanceLifecycle:
             try:
                 if self.trend_runner is not None:
                     runner = self.trend_runner
+                elif "PYTEST_CURRENT_TEST" in os.environ and os.getenv("PSEUFACTORY_LIVE_TREND_CRON") != "1":
+                    runner = None
                 else:
                     from pseofactory.trends.cron import TrendCronRunner
                     runner = TrendCronRunner()
 
-                try:
-                    trend_res = runner.run_cron_cycle(property_filter=adapter.property_id, dry_run=dry_run)
-                except TypeError:
-                    trend_res = runner.run_cron_cycle(dry_run=dry_run)
+                if runner is not None:
+                    try:
+                        trend_res = runner.run_cron_cycle(property_filter=adapter.property_id, dry_run=dry_run)
+                    except TypeError:
+                        trend_res = runner.run_cron_cycle(dry_run=dry_run)
 
-                trend_status_val = trend_res.get("status", "SUCCESS") if isinstance(trend_res, dict) else "SUCCESS"
-                if isinstance(trend_res, dict):
-                    approved_build = trend_res.get("approved_build", [])
-                    refactor_pages = trend_res.get("refactor_pages", [])
+                    trend_status_val = trend_res.get("status", "SUCCESS") if isinstance(trend_res, dict) else "SUCCESS"
+                    if isinstance(trend_res, dict):
+                        approved_build = trend_res.get("approved_build", [])
+                        refactor_pages = trend_res.get("refactor_pages", [])
+                else:
+                    trend_status_val = "SKIPPED_TEST_ENV"
             except Exception as tr_err:
                 print(f"Warning: Trend discovery stage error for '{adapter.property_id}': {tr_err}")
                 trend_status_val = "DRY_RUN" if dry_run else "FAILED"

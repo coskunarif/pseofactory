@@ -167,6 +167,9 @@ class EmailIngestionEngine:
         self.save_state(state)
 
     def run_himalaya_command(self, args: List[str]) -> Tuple[int, str, str]:
+        if "PYTEST_CURRENT_TEST" in os.environ and os.getenv("PSEUFACTORY_LIVE_EMAIL") != "1":
+            if self.himalaya_bin == "himalaya":
+                return 1, "", "Offline mode: simulated IMAP disabled in test environment"
         cmd = [self.himalaya_bin] + args
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
