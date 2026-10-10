@@ -44,6 +44,29 @@ from pseofactory.drift import (
     cascade_drift_lifecycle,
 )
 
+# Pre-warm high-latency dependencies at module level to eliminate cold import overhead in run()
+try:
+    import bs4
+except ImportError:
+    bs4 = None
+
+try:
+    from pseofactory.indexing.preflight import IndexingPreflightEngine
+except ImportError:
+    IndexingPreflightEngine = None
+
+try:
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+except ImportError:
+    PartnerTrackingEngine = None
+
+try:
+    from pseofactory.indexer import PushIndexer
+except ImportError:
+    PushIndexer = None
+
+
+
 
 class DriftReason(str, Enum):
     """
