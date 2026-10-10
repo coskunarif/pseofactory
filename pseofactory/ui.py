@@ -222,6 +222,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             display: flex;
             align-items: center;
             gap: 12px;
+            flex-wrap: wrap;
         }}
         /* Touch Targets Strictly >= 44px */
         .btn {{
@@ -538,6 +539,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         }}
         table {{
             width: 100%;
+            min-width: 680px;
             border-collapse: collapse;
             table-layout: fixed;
             font-size: 13px;
@@ -1373,7 +1375,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
         svg_elements.append(f'<text x="{pad_left}" y="{h - 15}" fill="#94a3b8" font-size="11">{timeline[0]["date"]}</text>')
         svg_elements.append(f'<text x="{w - pad_right - 70}" y="{h - 15}" fill="#94a3b8" font-size="11">{timeline[-1]["date"]}</text>')
 
-    svg_markup = f'<svg viewBox="0 0 {w} {h}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:1000px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;">' + "".join(svg_elements) + "</svg>"
+    svg_markup = f'<svg viewBox="0 0 {w} {h}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:1000px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;aspect-ratio:{w}/{h};">' + "".join(svg_elements) + "</svg>"
 
     # Correlated updates rows
     updates_html = []
@@ -1604,5 +1606,9 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
     assert_no_forbidden_dashes(doc, "render_gsc_ceiling_dashboard")
     assert_touch_targets(doc, context="render_gsc_ceiling_dashboard")
     return doc
+
+
+# Canonical alias for ceiling chart renderer
+render_ceiling_chart_page = render_gsc_ceiling_dashboard
 
 

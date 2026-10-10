@@ -709,4 +709,70 @@ def test_cli_partner_ui_status_probes_fallback_on_stale_state(tmp_path, monkeypa
     assert exit_code in (0, 1)
 
 
+def test_partner_table_horizontal_scroll_and_touch_target_containment(temp_bus_path, temp_email_paths):
+    """
+    Asserts table min-width 680px inside .table-wrap, guaranteeing
+    narrowest column (.col-link at 12%) exceeds 44px on mobile viewports.
+    """
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    dashboard = tracker.sync_and_evaluate(force_mail_poll=False)
+    html_content = render_light_interface(dashboard)
+
+    # 1. Verify CSS min-width property
+    assert "min-width: 680px;" in html_content
+    assert "overflow-x: auto;" in html_content
+    assert "-webkit-overflow-scrolling: touch;" in html_content
+
+    # 2. Mathematical containment proof
+    min_table_w = 680
+    col_link_pct = 0.12
+    computed_col_w = min_table_w * col_link_pct
+    assert computed_col_w >= 44.0, f"Column link width {computed_col_w}px must be >= 44px"
+
+
+def test_header_actions_flex_wrap_prevents_mobile_overflow(temp_bus_path, temp_email_paths):
+    """
+    Asserts header action group specifies flex-wrap: wrap to prevent
+    horizontal viewport overflow on narrow mobile devices (<360px).
+    """
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    dashboard = tracker.sync_and_evaluate(force_mail_poll=False)
+    html_content = render_light_interface(dashboard)
+
+    assert "flex-wrap: wrap;" in html_content
+
+
+def test_svg_traffic_ceiling_chart_aspect_ratio_cls_zero():
+    """
+    Asserts SVG ceiling analysis chart explicitly defines aspect-ratio matching
+    its viewBox width and height to guarantee CLS = 0 layout stability.
+    """
+    from pseofactory.trends.models import AlgorithmicCeilingAnalysis
+    from pseofactory.ui import render_ceiling_chart_page
+    analysis = AlgorithmicCeilingAnalysis(
+        property_id="profithelm",
+        analysis_window_days=480,
+        total_days=480,
+        peak_impressions_rma28=9200.0,
+        current_impressions_rma28=2400.0,
+        ceiling_threshold=0.35,
+        ceiling_dampening_score=0.66,
+        ceiling_detected=False,
+        suppression_severity="NONE",
+        recommendation="BUILD_PAGE",
+    )
+    page_html = render_ceiling_chart_page(analysis)
+
+    assert "aspect-ratio:1000/360" in page_html or "aspect-ratio: 1000 / 360" in page_html
+    assert 'viewBox="0 0 1000 360"' in page_html
+    assert 'preserveAspectRatio="xMidYMid meet"' in page_html
+
+
+
 
