@@ -608,3 +608,259 @@ def test_tenant_registry_dynamic_discovery(tmp_path):
     assert "profithelm" not in adapters
     TenantRegistry.reset_default()
 
+
+def test_stage_execution_order_airlock_before_gitops_and_push_indexing_post_deploy(tmp_path):
+    """
+    Verifies that MaintenanceLifecycle enforces sequential progression:
+    Indexing Preflight airlock executes BEFORE GitOps release dispatch,
+    and Push Indexing executes strictly AFTER GitOps edge verification succeeds.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from unittest.mock import patch
+    from pseofactory.gitops import GitOpsResult
+    from pseofactory.indexing.preflight import PreflightReport
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+    )
+
+    call_order = []
+
+    mock_report = PreflightReport(
+        property_id="profithelm",
+        domain="profithelm.com",
+        total_inspected=1,
+        passed_count=1,
+        blocked_count=0,
+        tier1_hubs_eligible=1,
+        tier2_leaves_queued=0,
+        breakdown={},
+        push_eligible_urls=["https://profithelm.com/tools/sample-calc/"],
+        sitemap_eligible_urls=["https://profithelm.com/tools/sample-calc/"],
+        blocked_urls=[],
+        is_gate_passed=True,
+    )
+
+    def fake_inspect_dist(*args, **kwargs):
+        call_order.append("preflight_airlock")
+        return mock_report
+
+    def fake_dispatch_to_shipper(*args, **kwargs):
+        call_order.append("gitops_shipper")
+        return GitOpsResult(
+            status="SUCCESS",
+            property_id="profithelm",
+            head_sha="abc1234567890",
+            branch="main",
+            staged_files=[],
+            edge_status="PASS",
+        )
+
+    def fake_dispatch_automated_indexing(*args, **kwargs):
+        call_order.append("push_indexing")
+        return {"status": "SUCCESS", "urls_submitted": kwargs.get("urls", [])}
+
+    lifecycle = MaintenanceLifecycle()
+
+    with patch("pseofactory.indexing.preflight.IndexingPreflightEngine.inspect_dist", side_effect=fake_inspect_dist), \
+         patch("pseofactory.gitops.GitOpsCoordinator.dispatch_to_shipper", side_effect=fake_dispatch_to_shipper), \
+         patch("pseofactory.indexer.PushIndexer.dispatch_automated_indexing", side_effect=fake_dispatch_automated_indexing):
+
+        res = lifecycle.run(
+            adapter,
+            force=True,
+            enable_gitops=True,
+            state_file=agy_dir / "engine_hash.json",
+            ledger_file=agy_dir / "asset_ledger.json",
+        )
+
+    assert res.status == "SUCCESS"
+    assert res.gitops_status == "SUCCESS"
+    assert res.indexing_status == "SUCCESS"
+
+    # Assert sequential ordering: Preflight airlock BEFORE GitOps shipper
+    assert "preflight_airlock" in call_order
+    assert "gitops_shipper" in call_order
+    assert "push_indexing" in call_order
+    preflight_idx = call_order.index("preflight_airlock")
+    gitops_idx = call_order.index("gitops_shipper")
+    push_idx = call_order.index("push_indexing")
+
+    assert preflight_idx < gitops_idx, "Airlock must execute before GitOps shipper dispatch"
+    assert gitops_idx < push_idx, "Push indexing must execute after GitOps shipper verification"
+
+
+def test_premature_victory_fail_closed_prevents_push_indexing(tmp_path):
+    """
+    Verifies Anti-Early-Halt doctrine:
+    If edge verification fails in GitOps shipper dispatch, execution fails closed
+    and PushIndexer is NEVER invoked.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from unittest.mock import patch
+    from pseofactory.gitops import GitOpsResult
+    from pseofactory.indexing.preflight import PreflightReport
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+    )
+
+    call_order = []
+
+    def fake_inspect_dist(*args, **kwargs):
+        call_order.append("preflight_airlock")
+        return PreflightReport(
+            property_id="profithelm",
+            domain="profithelm.com",
+            total_inspected=1,
+            passed_count=1,
+            blocked_count=0,
+            tier1_hubs_eligible=1,
+            tier2_leaves_queued=0,
+            breakdown={},
+            push_eligible_urls=["https://profithelm.com/tools/sample-calc/"],
+            sitemap_eligible_urls=["https://profithelm.com/tools/sample-calc/"],
+            blocked_urls=[],
+            is_gate_passed=True,
+        )
+
+    def fake_dispatch_to_shipper_fail(*args, **kwargs):
+        call_order.append("gitops_shipper")
+        return GitOpsResult(
+            status="EDGE_VERIFICATION_FAILED",
+            property_id="profithelm",
+            head_sha="bad1234",
+            branch="main",
+            staged_files=[],
+            edge_status="FAIL",
+            error="Live edge HTTP 502 / canonical mismatch",
+        )
+
+    def fake_dispatch_automated_indexing(*args, **kwargs):
+        call_order.append("push_indexing")
+        return {"status": "SUCCESS"}
+
+    lifecycle = MaintenanceLifecycle()
+
+    with patch("pseofactory.indexing.preflight.IndexingPreflightEngine.inspect_dist", side_effect=fake_inspect_dist), \
+         patch("pseofactory.gitops.GitOpsCoordinator.dispatch_to_shipper", side_effect=fake_dispatch_to_shipper_fail), \
+         patch("pseofactory.indexer.PushIndexer.dispatch_automated_indexing", side_effect=fake_dispatch_automated_indexing):
+
+        res = lifecycle.run(
+            adapter,
+            force=True,
+            enable_gitops=True,
+            state_file=agy_dir / "engine_hash.json",
+            ledger_file=agy_dir / "asset_ledger.json",
+        )
+
+    assert res.status == "FAILED"
+    assert res.gitops_status == "FAILED"
+    assert "preflight_airlock" in call_order
+    assert "gitops_shipper" in call_order
+    # Push indexing must NEVER have been invoked on edge failure!
+    assert "push_indexing" not in call_order
+
+
+def test_indexing_preflight_airlock_quarantines_blocked_urls_without_failing_clean_siblings(tmp_path):
+    """
+    Verifies that Indexing Preflight airlock quarantines defective URLs
+    into indexing_quarantine_ledger.json while allowing clean sibling URLs to proceed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from unittest.mock import patch
+    from pseofactory.gitops import GitOpsResult
+    from pseofactory.indexing.preflight import PreflightReport
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "clean.html").write_text(CLEAN_HTML, encoding="utf-8")
+
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+    )
+
+    pushed_urls = []
+
+    def fake_inspect_dist_with_blocked(*args, **kwargs):
+        return PreflightReport(
+            property_id="profithelm",
+            domain="profithelm.com",
+            total_inspected=2,
+            passed_count=1,
+            blocked_count=1,
+            tier1_hubs_eligible=1,
+            tier2_leaves_queued=0,
+            breakdown={},
+            push_eligible_urls=["https://profithelm.com/clean/"],
+            sitemap_eligible_urls=["https://profithelm.com/clean/"],
+            blocked_urls=["https://profithelm.com/blocked-404/"],
+            is_gate_passed=True,
+        )
+
+    def fake_dispatch_to_shipper(*args, **kwargs):
+        return GitOpsResult(
+            status="SUCCESS",
+            property_id="profithelm",
+            head_sha="head1234",
+            branch="main",
+            staged_files=[],
+            edge_status="PASS",
+        )
+
+    def fake_dispatch_automated_indexing(*args, **kwargs):
+        urls = kwargs.get("urls", [])
+        pushed_urls.extend(urls)
+        return {"status": "SUCCESS", "urls_submitted": urls}
+
+    lifecycle = MaintenanceLifecycle()
+
+    with patch("pseofactory.indexing.preflight.IndexingPreflightEngine.inspect_dist", side_effect=fake_inspect_dist_with_blocked), \
+         patch("pseofactory.gitops.GitOpsCoordinator.dispatch_to_shipper", side_effect=fake_dispatch_to_shipper), \
+         patch("pseofactory.indexer.PushIndexer.dispatch_automated_indexing", side_effect=fake_dispatch_automated_indexing):
+
+        res = lifecycle.run(
+            adapter,
+            force=True,
+            enable_gitops=True,
+            state_file=agy_dir / "engine_hash.json",
+            ledger_file=agy_dir / "asset_ledger.json",
+        )
+
+    assert res.status == "SUCCESS"
+    # Clean sibling proceeds to push indexing
+    assert "https://profithelm.com/clean/" in pushed_urls
+    assert "https://profithelm.com/blocked-404/" not in pushed_urls
+
+    # Blocked URL is quarantined into ledger
+    ledger_path = tmp_path / ".agy" / "indexing_quarantine_ledger.json"
+    assert ledger_path.exists()
+    entries = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert any(e.get("url") == "https://profithelm.com/blocked-404/" for e in entries)
+

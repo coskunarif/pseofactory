@@ -13,6 +13,7 @@ import re
 import json
 import fcntl
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Union
@@ -62,6 +63,10 @@ from pseofactory.audit import (
     ContentAccuracyAuditReport,
     ContentAccuracyAuditError,
 )
+from pseofactory.indexing_inspector import DailyIndexingInspector
+
+
+logger = logging.getLogger("pseofactory.pipeline")
 
 
 class RejectionReason:
@@ -73,6 +78,8 @@ class RejectionReason:
     REFACTOR_PAGE_CANNIBALIZATION = "REFACTOR_PAGE_CANNIBALIZATION"
     AUDIT_STAGE_FAILED = "AUDIT_STAGE_FAILED"
     CONTENT_ACCURACY_FAILED = "CONTENT_ACCURACY_FAILED"
+    COMPILATION_FAILED = "COMPILATION_FAILED"
+    ALGORITHMIC_EXPANSION_FREEZE = "ALGORITHMIC_EXPANSION_FREEZE"
 
 
 from pseofactory.verifier import MasterSEOVerifier
@@ -91,6 +98,9 @@ class PipelineConfig:
     total_site_impressions: int = 500
     strict_audit: bool = True
     audit_tolerance: float = 0.01
+    enable_gitops: bool = False
+    enable_indexing_feedback: bool = False
+    adaptive_jev_floor_bump: float = 0.30
 
 
 @dataclass
@@ -190,9 +200,11 @@ class DriverExecutionResult:
     compiled_assets: List[CompiledAssetResult]
     aborted_opportunities: List[AbortedOpportunity]
     rankings: List[Dict[str, Any]]
+    preflight_reports: Optional[Dict[str, Any]] = None
+    gitops_results: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "total_spikes": self.total_spikes,
             "filtered_noise_count": self.filtered_noise_count,
             "evaluated_count": self.evaluated_count,
@@ -203,6 +215,33 @@ class DriverExecutionResult:
             "aborted_opportunities": [o.to_dict() for o in self.aborted_opportunities],
             "rankings": self.rankings,
         }
+        if self.preflight_reports is not None:
+            d["preflight_reports"] = self.preflight_reports
+        if self.gitops_results is not None:
+            d["gitops_results"] = self.gitops_results
+        return d
+
+
+def _slug_matches_quarantined_url(slug: str, quarantined_url: str) -> bool:
+    """
+    Checks if candidate slug matches a quarantined URL.
+    Zero em-dashes. Zero en-dashes.
+    """
+    s = slug.strip().strip("/").lower()
+    q = quarantined_url.strip().lower()
+    if not s or not q:
+        return False
+    if s == q:
+        return True
+    q_clean = q.split("?")[0].split("#")[0].strip("/")
+    if s == q_clean:
+        return True
+    segments = [seg.strip() for seg in q_clean.split("/") if seg.strip()]
+    if s in segments:
+        return True
+    if q_clean.endswith(f"/{s}"):
+        return True
+    return False
 
 
 class FactoryPipeline:
@@ -221,6 +260,7 @@ class FactoryPipeline:
         jev_engine: Optional[JevEngine] = None,
         scanner: Optional[CrossPropertyContaminationScanner] = None,
         tenant_registry: Optional[TenantRegistry] = None,
+        indexing_inspector: Optional[DailyIndexingInspector] = None,
     ):
         self.config = config or PipelineConfig()
         self.noise_filter = noise_filter or NoiseFilter()
@@ -235,6 +275,9 @@ class FactoryPipeline:
         )
         self.scanner = scanner or CrossPropertyContaminationScanner()
         self.tenant_registry = tenant_registry or TenantRegistry.default()
+        self.indexing_inspector = indexing_inspector
+        if self.config.enable_indexing_feedback and self.indexing_inspector is None:
+            self.indexing_inspector = DailyIndexingInspector()
 
     def determine_property_assignment(
         self,
@@ -346,6 +389,7 @@ class FactoryPipeline:
         existing_tools: Optional[List[Dict[str, Any]]] = None,
         sitemap_urls: Optional[List[str]] = None,
         output_dir: Optional[Union[str, Path]] = None,
+        enable_gitops: Optional[bool] = None,
     ) -> DriverExecutionResult:
         """
         Executes end-to-end processing across raw breakout search opportunities.
@@ -365,7 +409,95 @@ class FactoryPipeline:
         compiled_assets: List[CompiledAssetResult] = []
         aborted_opportunities: List[AbortedOpportunity] = []
         rankings: List[Dict[str, Any]] = []
+        preflight_reports: Dict[str, Any] = {}
+        gitops_results: Dict[str, Any] = {}
         seen_idempotency_keys: Set[str] = set()
+
+        effective_enable_gitops = (
+            self.config.enable_gitops if enable_gitops is None else enable_gitops
+        )
+
+        effective_min_jev = self.config.min_jev_score
+        effective_min_durable = self.config.min_durable_prob
+        quarantined_urls: List[str] = []
+
+        if self.config.enable_indexing_feedback and self.indexing_inspector is not None:
+            gsc_audit = self.indexing_inspector.audit_gsc_rollover_queue()
+            backlog_exceeded = bool(gsc_audit.get("backlog_exceeded", False))
+            quota_exhausted = bool(gsc_audit.get("quota_exhausted", False))
+            feedback_governor_active = backlog_exceeded or quota_exhausted
+
+            if feedback_governor_active:
+                effective_min_jev = (
+                    self.config.min_jev_score + self.config.adaptive_jev_floor_bump
+                )
+                effective_min_durable = self.config.min_durable_prob + 0.10
+
+            if hasattr(self.indexing_inspector, "quarantined_urls"):
+                q_urls = getattr(self.indexing_inspector, "quarantined_urls")
+                quarantined_urls.extend(q_urls() if callable(q_urls) else (q_urls or []))
+
+            if hasattr(self.indexing_inspector, "get_quarantined_urls"):
+                try:
+                    quarantined_urls.extend(
+                        self.indexing_inspector.get_quarantined_urls() or []
+                    )
+                except Exception:
+                    pass
+
+            if hasattr(self.indexing_inspector, "audit_airlock_quarantine"):
+                try:
+                    q_audit = self.indexing_inspector.audit_airlock_quarantine()
+                    if isinstance(q_audit, dict):
+                        if "quarantined_urls" in q_audit:
+                            quarantined_urls.extend(q_audit["quarantined_urls"] or [])
+                        details = q_audit.get("details", {})
+                        if isinstance(details, dict):
+                            for cat, items in details.items():
+                                if isinstance(items, list):
+                                    for item in items:
+                                        if isinstance(item, dict) and "url" in item:
+                                            quarantined_urls.append(item["url"])
+                                        elif isinstance(item, str):
+                                            quarantined_urls.append(item)
+                except Exception:
+                    pass
+
+            if not quarantined_urls and hasattr(self.indexing_inspector, "quarantine_ledger_path"):
+                try:
+                    q_path = Path(self.indexing_inspector.quarantine_ledger_path)
+                    if not q_path.exists() and hasattr(self.indexing_inspector, "base_dir"):
+                        local_q = Path(self.indexing_inspector.base_dir) / ".agy" / "indexing_quarantine_ledger.json"
+                        if local_q.exists():
+                            q_path = local_q
+                    if q_path.exists():
+                        with open(q_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if isinstance(data, dict):
+                                for url_key, details_val in data.items():
+                                    if isinstance(details_val, dict):
+                                        quarantined_urls.append(details_val.get("url", url_key))
+                                    else:
+                                        quarantined_urls.append(url_key)
+                            elif isinstance(data, list):
+                                quarantined_urls.extend(data)
+                except Exception:
+                    pass
+
+            if isinstance(gsc_audit, dict) and "quarantined_urls" in gsc_audit:
+                quarantined_urls.extend(gsc_audit["quarantined_urls"] or [])
+
+            quarantined_urls = list(dict.fromkeys(str(u) for u in quarantined_urls if u))
+
+            preflight_reports["indexing_feedback_audit"] = {
+                "gsc_audit": gsc_audit,
+                "backlog_exceeded": backlog_exceeded,
+                "quota_exhausted": quota_exhausted,
+                "feedback_governor_active": feedback_governor_active,
+                "effective_min_jev": effective_min_jev,
+                "effective_min_durable": effective_min_durable,
+                "quarantined_urls": quarantined_urls,
+            }
 
         for spike in spikes:
             # 1. Universal Idempotency: sha256(tenant + spike_id + query)
@@ -512,13 +644,52 @@ class FactoryPipeline:
                 position=pos,
                 total_site_impressions=self.config.total_site_impressions,
             )
+            # Check closed-loop indexing feedback quarantine freeze
+            if self.config.enable_indexing_feedback and self.indexing_inspector is not None:
+                slug_to_check = decision.slug or cand.slug or ""
+                if any(_slug_matches_quarantined_url(slug_to_check, q) for q in quarantined_urls):
+                    decision.action = "REJECT"
+                    decision.passed_thresholds = False
+                    decision.decision_reason = "Quarantined route: ALGORITHMIC_EXPANSION_FREEZE"
+                    rankings.append(decision.to_dict())
+                    aborted_opportunities.append(
+                        AbortedOpportunity(
+                            query=decision.query,
+                            slug=decision.slug,
+                            reason=RejectionReason.ALGORITHMIC_EXPANSION_FREEZE,
+                            jev_score=decision.jev_score,
+                            durable_prob=decision.durable_prob,
+                            search_volume=treg_res.search_volume,
+                            keyword_difficulty=treg_res.keyword_difficulty,
+                            foreign_tokens=[],
+                            action="REJECT",
+                        )
+                    )
+                    continue
+
+            # Check adaptive elevated Jev thresholds under indexing feedback governor
+            if (
+                decision.action == "BUILD_PAGE"
+                and (
+                    decision.jev_score < effective_min_jev
+                    or decision.durable_prob < effective_min_durable
+                )
+            ):
+                decision.action = "REJECT"
+                decision.passed_thresholds = False
+                decision.decision_reason = (
+                    f"Failed adaptive Jev durability threshold "
+                    f"(score {decision.jev_score:.2f} < {effective_min_jev:.2f} "
+                    f"or durable_prob {decision.durable_prob:.2f} < {effective_min_durable:.2f})"
+                )
+
             rankings.append(decision.to_dict())
 
             # Evaluate decision action
             if decision.action == "REJECT":
                 if (
-                    decision.jev_score < self.config.min_jev_score
-                    or decision.durable_prob < self.config.min_durable_prob
+                    decision.jev_score < effective_min_jev
+                    or decision.durable_prob < effective_min_durable
                 ):
                     reason = "LOW_JEV_DURABILITY"
                 elif cand.acceleration <= 0.0 and treg_res.search_volume < 1000:
@@ -745,45 +916,67 @@ class FactoryPipeline:
             candidate_spec.setdefault("query", decision.query)
             candidate_spec.setdefault("slug", decision.slug)
 
-            # Pre-compilation gate
-            assert_high_effort_content_qualified(
-                candidate_spec, context=f"pipeline compilation for {tenant}"
-            )
-
-            # Obtain property adapter for scoped environment isolation
-            adapter = None
+            # Pre-compilation and compilation execution with fault isolation
             try:
-                adapter = self.tenant_registry.get_adapter(tenant)
-            except KeyError:
-                adapter = ConfigurablePropertyAdapter(
-                    property_id=tenant,
-                    brand_name=tenant.capitalize(),
-                    domain=f"{tenant}.com",
-                    canonical_base=f"https://{tenant}.com",
-                    dist_dir=Path(f"/tmp/{tenant}-dist"),
+                assert_high_effort_content_qualified(
+                    candidate_spec, context=f"pipeline compilation for {tenant}"
                 )
 
-            # Scoped execution under PropertyAdapter.scoped_environment()
-            with adapter.scoped_environment():
-                compiled_res = compile_high_effort_page(candidate_spec)
+                # Obtain property adapter for scoped environment isolation
+                adapter = None
+                try:
+                    adapter = self.tenant_registry.get_adapter(tenant)
+                except KeyError:
+                    adapter = ConfigurablePropertyAdapter(
+                        property_id=tenant,
+                        brand_name=tenant.capitalize(),
+                        domain=f"{tenant}.com",
+                        canonical_base=f"https://{tenant}.com",
+                        dist_dir=Path(f"/tmp/{tenant}-dist"),
+                    )
 
-            # 9. Post-compilation contamination firewall (fails closed on foreign tokens)
-            self.scanner.assert_clean(
-                compiled_res["html"],
-                property_id=tenant,
-                context=f"compiled page '{decision.slug}'",
-            )
+                # Scoped execution under PropertyAdapter.scoped_environment()
+                with adapter.scoped_environment():
+                    compiled_res = compile_high_effort_page(candidate_spec)
 
-            # 10. Autonomous Content Accuracy & Truthfulness Audit Stage
-            audit_stage = ContentAccuracyAuditStage(
-                tolerance=self.config.audit_tolerance,
-                strict=False,
-            )
-            audit_report = audit_stage.audit(
-                html=compiled_res["html"],
-                candidate_spec=candidate_spec,
-                tenant=tenant,
-            )
+                # 9. Post-compilation contamination firewall (fails closed on foreign tokens)
+                self.scanner.assert_clean(
+                    compiled_res["html"],
+                    property_id=tenant,
+                    context=f"compiled page '{decision.slug}'",
+                )
+
+                # 10. Autonomous Content Accuracy & Truthfulness Audit Stage
+                audit_stage = ContentAccuracyAuditStage(
+                    tolerance=self.config.audit_tolerance,
+                    strict=False,
+                )
+                audit_report = audit_stage.audit(
+                    html=compiled_res["html"],
+                    candidate_spec=candidate_spec,
+                    tenant=tenant,
+                )
+            except Exception as comp_exc:
+                clean_err = str(comp_exc).replace("\u2014", "-").replace("\u2013", "-")
+                logger.warning(
+                    f"Opportunity compilation failed for query '{decision.query}' ({decision.slug}): {clean_err}"
+                )
+                aborted_opp = AbortedOpportunity(
+                    query=decision.query,
+                    slug=decision.slug,
+                    tenant=tenant,
+                    reason=f"COMPILATION_FAILED: {clean_err}",
+                    jev_score=decision.jev_score,
+                    durable_prob=decision.durable_prob,
+                    search_volume=getattr(decision, "search_volume", 0),
+                    keyword_difficulty=getattr(decision, "keyword_difficulty", 0.0),
+                    foreign_tokens=[],
+                    action="REJECT",
+                )
+                aborted_opportunities.append(aborted_opp)
+                if hasattr(self, "aborted_opportunities") and isinstance(self.aborted_opportunities, list) and self.aborted_opportunities is not aborted_opportunities:
+                    self.aborted_opportunities.append(aborted_opp)
+                continue
 
             if not audit_report.passed:
                 if self.config.strict_audit:
@@ -860,6 +1053,30 @@ class FactoryPipeline:
                 out_path.write_text(compiled_res["html"], encoding="utf-8")
                 out_file = out_path
 
+                try:
+                    from pseofactory.edge import build_edge_headers
+                    tenant_dist = Path(output_dir) / tenant
+                    c_base = adapter.canonical_base if adapter else f"https://{tenant}.com"
+                    route_path = f"/tools/{decision.slug}/"
+                    headers_file = tenant_dist / "_headers"
+                    existing_routes = []
+                    if headers_file.exists():
+                        try:
+                            for line in headers_file.read_text(encoding="utf-8").splitlines():
+                                line_s = line.strip()
+                                if line_s.startswith("/tools/"):
+                                    existing_routes.append(line_s)
+                        except Exception:
+                            pass
+                    all_routes = list(dict.fromkeys(existing_routes + [route_path]))
+                    headers_content = build_edge_headers(
+                        canonical_base=c_base,
+                        routes=all_routes,
+                    )
+                    headers_file.write_text(headers_content, encoding="utf-8")
+                except Exception as he:
+                    logger.warning(f"Failed to generate edge _headers for {tenant}: {he}")
+
             compiled_assets.append(
                 CompiledAssetResult(
                     query=decision.query,
@@ -873,6 +1090,28 @@ class FactoryPipeline:
                     audit_report=audit_report.to_dict(),
                 )
             )
+
+            # 11.5 Indexing Preflight Airlock Inspection
+            target_dist = (
+                Path(output_dir) / tenant
+                if output_dir
+                else (adapter.dist_dir if adapter and adapter.dist_dir.exists() else None)
+            )
+            try:
+                from pseofactory.indexing.preflight import IndexingPreflightEngine
+                engine = IndexingPreflightEngine(
+                    property_id=tenant,
+                    domain=adapter.domain if adapter else "profithelm.com",
+                    dist_dir=target_dist,
+                )
+                pre_report = engine.inspect_dist(target_dist)
+                if pre_report and pre_report.blocked_urls and target_dist:
+                    q_ledger = Path(target_dist).parent / ".agy" / "indexing_quarantine_ledger.json"
+                    engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_ledger)
+                if pre_report:
+                    preflight_reports[tenant] = pre_report.to_dict()
+            except Exception:
+                pass
 
         # 11. Atomic flock sink persistence if configured (HWL-1253)
         if self.config.sink_path:
@@ -900,6 +1139,53 @@ class FactoryPipeline:
             rankings, key=lambda d: d.get("composite_profit_yield", 0.0), reverse=True
         )
 
+        # 13. Unified GitOps release dispatch if enabled
+        if effective_enable_gitops and compiled_assets:
+            from pseofactory.gitops import GitOpsCoordinator
+            tenants_compiled = {ca.tenant for ca in compiled_assets}
+            for t in tenants_compiled:
+                try:
+                    t_adapter = self.tenant_registry.get_adapter(t)
+                except Exception:
+                    t_adapter = None
+                t_dist = (
+                    Path(output_dir) / t
+                    if output_dir and (Path(output_dir) / t).exists()
+                    else (t_adapter.dist_dir if t_adapter else None)
+                )
+                repo_path = (
+                    (t_adapter.repo_path if t_adapter else None)
+                    or (Path(output_dir).parent if output_dir else None)
+                    or (t_dist.parent if t_dist else Path.cwd())
+                )
+                coordinator = GitOpsCoordinator(
+                    repo_path=repo_path,
+                    branch="main",
+                    dry_run=self.config.dry_run,
+                )
+                edge_url = f"https://{t_adapter.domain}" if t_adapter else None
+                gitops_res = coordinator.dispatch_to_shipper(
+                    property_id=t,
+                    dry_run=self.config.dry_run,
+                    commit_message=f"feat({t}): automated breakout content generation",
+                    dist_dir=t_dist,
+                    edge_url=edge_url,
+                )
+                gitops_results[t] = gitops_res.to_dict()
+                if gitops_res.status in ("SUCCESS", "DRY_RUN"):
+                    try:
+                        from pseofactory.indexer import PushIndexer
+                        indexer = PushIndexer(
+                            domain=t_adapter.domain if t_adapter else "profithelm.com",
+                            canonical_base=t_adapter.canonical_base if t_adapter else "https://profithelm.com",
+                            dist_dir=t_dist,
+                        )
+                        t_pre = preflight_reports.get(t)
+                        eligible = t_pre.get("push_eligible_urls") if isinstance(t_pre, dict) else None
+                        indexer.dispatch_automated_indexing(urls=eligible, live=not self.config.dry_run)
+                    except Exception:
+                        pass
+
         return DriverExecutionResult(
             total_spikes=total_spikes,
             filtered_noise_count=filtered_noise_count,
@@ -910,6 +1196,8 @@ class FactoryPipeline:
             compiled_assets=compiled_assets,
             aborted_opportunities=aborted_opportunities,
             rankings=sorted_rankings,
+            preflight_reports=preflight_reports if preflight_reports else None,
+            gitops_results=gitops_results if gitops_results else None,
         )
 
 
@@ -919,15 +1207,21 @@ def run_factory_pipeline(
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     sitemap_urls: Optional[List[str]] = None,
     output_dir: Optional[Union[str, Path]] = None,
+    enable_gitops: Optional[bool] = None,
+    indexing_inspector: Optional[DailyIndexingInspector] = None,
 ) -> DriverExecutionResult:
     """
     Convenience helper to run the complete automated discovery and content generation pipeline.
     Zero em-dashes. Zero en-dashes.
     """
-    pipeline = FactoryPipeline(config=config)
+    pipeline = FactoryPipeline(
+        config=config,
+        indexing_inspector=indexing_inspector,
+    )
     return pipeline.execute(
         raw_spikes=spikes,
         existing_tools=existing_tools,
         sitemap_urls=sitemap_urls,
         output_dir=output_dir,
+        enable_gitops=enable_gitops,
     )

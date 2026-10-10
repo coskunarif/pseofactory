@@ -190,6 +190,37 @@ class DailyIndexingInspector:
             "ledger_path": str(q_path),
         }
 
+    def get_quarantined_urls(self) -> List[str]:
+        """
+        Returns list of quarantined URLs from airlock quarantine ledger.
+        Zero em-dashes. Zero en-dashes.
+        """
+        q_path = self.quarantine_ledger_path
+        if not q_path.exists():
+            local_q = self.base_dir / ".agy" / "indexing_quarantine_ledger.json"
+            if local_q.exists():
+                q_path = local_q
+
+        if not q_path.exists():
+            return []
+
+        try:
+            with open(q_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    urls = []
+                    for url, details in data.items():
+                        if isinstance(details, dict):
+                            urls.append(details.get("url", url))
+                        else:
+                            urls.append(url)
+                    return urls
+                elif isinstance(data, list):
+                    return [str(u) for u in data]
+        except Exception:
+            return []
+        return []
+
     def audit_velocity_stagnation(self, stagnation_threshold_hours: float = 336.0) -> Dict[str, Any]:
         """
         Audits velocity ledger for routes exhibiting time-to-first-crawl (TTFC)

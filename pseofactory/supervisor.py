@@ -218,6 +218,7 @@ class AsyncFleetCoordinator:
         concurrency_ceiling: int = DEFAULT_CONCURRENCY_CEILING,
         tenant_timeout_budget: float = DEFAULT_TENANT_BUDGET,
         tenant_timeout_budget_seconds: Optional[float] = None,
+        tenant_budgets: Optional[Dict[str, float]] = None,
     ):
         self.registry = registry or TenantRegistry.default()
         self.lifecycle = lifecycle or MaintenanceLifecycle(registry=self.registry)
@@ -227,6 +228,19 @@ class AsyncFleetCoordinator:
             if tenant_timeout_budget_seconds is not None
             else tenant_timeout_budget
         )
+        self.default_tenant_budget: float = self.tenant_timeout_budget
+        self.tenant_budgets: Dict[str, float] = (
+            dict(tenant_budgets) if tenant_budgets is not None else {"profithelm": 3600.0}
+        )
+
+    def get_tenant_budget(self, tenant_id: str) -> float:
+        """
+        Resolves execution timeout budget for specific tenant in seconds.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if self.tenant_budgets and tenant_id in self.tenant_budgets:
+            return float(self.tenant_budgets[tenant_id])
+        return float(self.default_tenant_budget)
 
     def _run_tenant_sync(
         self,
@@ -366,6 +380,7 @@ class AsyncFleetCoordinator:
                     pass
             loop = asyncio.get_running_loop()
             t0 = time.time()
+            tenant_budget = self.get_tenant_budget(adapter.property_id)
             try:
                 result = await asyncio.wait_for(
                     loop.run_in_executor(
@@ -379,7 +394,7 @@ class AsyncFleetCoordinator:
                             skip_ci=skip_ci,
                         ),
                     ),
-                    timeout=self.tenant_timeout_budget,
+                    timeout=tenant_budget,
                 )
                 return result
             except asyncio.TimeoutError:
@@ -392,7 +407,7 @@ class AsyncFleetCoordinator:
                     assets_refactored=0,
                     assets_failed=1,
                     failed_records=[{
-                        "error": f"Tenant '{adapter.property_id}' execution timed out after {self.tenant_timeout_budget}s",
+                        "error": f"Tenant '{adapter.property_id}' execution timed out after {tenant_budget}s",
                         "type": "TimeoutError",
                     }],
                     duration_seconds=duration,
@@ -412,6 +427,17 @@ class AsyncFleetCoordinator:
                     }],
                     duration_seconds=duration,
                 )
+
+    @staticmethod
+    def _enforce_subprocess_memory_firewall() -> None:
+        """
+        Guarantees tenant modules are never leaked into host process sys.modules.
+        Zero em-dashes. Zero en-dashes.
+        """
+        import sys
+        for mod in list(sys.modules.keys()):
+            if mod in ("profithelm", "prexvo") or mod.startswith(("profithelm.", "prexvo.")):
+                sys.modules.pop(mod, None)
 
     async def run_fleet_async(
         self,
@@ -470,6 +496,7 @@ class AsyncFleetCoordinator:
             results_list = await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
+            self._enforce_subprocess_memory_firewall()
 
         results: Dict[str, MaintenanceResult] = {}
         for pid, res in zip(target_ids, results_list):
@@ -503,33 +530,36 @@ class AsyncFleetCoordinator:
         Zero em-dashes. Zero en-dashes.
         """
         try:
-            loop = asyncio.get_running_loop()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(
-                    lambda: asyncio.run(
-                        self.run_fleet_async(
-                            property_ids=property_ids,
-                            force=force,
-                            dry_run=dry_run,
-                            enable_gitops=enable_gitops,
-                            run_id=run_id,
-                            skip_ci=skip_ci,
-                            on_tenant_start=on_tenant_start,
+            try:
+                loop = asyncio.get_running_loop()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(
+                        lambda: asyncio.run(
+                            self.run_fleet_async(
+                                property_ids=property_ids,
+                                force=force,
+                                dry_run=dry_run,
+                                enable_gitops=enable_gitops,
+                                run_id=run_id,
+                                skip_ci=skip_ci,
+                                on_tenant_start=on_tenant_start,
+                            )
                         )
+                    ).result()
+            except RuntimeError:
+                return asyncio.run(
+                    self.run_fleet_async(
+                        property_ids=property_ids,
+                        force=force,
+                        dry_run=dry_run,
+                        enable_gitops=enable_gitops,
+                        run_id=run_id,
+                        skip_ci=skip_ci,
+                        on_tenant_start=on_tenant_start,
                     )
-                ).result()
-        except RuntimeError:
-            return asyncio.run(
-                self.run_fleet_async(
-                    property_ids=property_ids,
-                    force=force,
-                    dry_run=dry_run,
-                    enable_gitops=enable_gitops,
-                    run_id=run_id,
-                    skip_ci=skip_ci,
-                    on_tenant_start=on_tenant_start,
                 )
-            )
+        finally:
+            self._enforce_subprocess_memory_firewall()
 
 
 class AutonomousLifecycleSupervisor:
@@ -618,7 +648,7 @@ class AutonomousLifecycleSupervisor:
         self,
         force: bool = False,
         dry_run: bool = False,
-        enable_gitops: bool = False,
+        enable_gitops: bool = True,
         property_ids: Optional[List[str]] = None,
         skip_ci: bool = False,
     ) -> Dict[str, Any]:
