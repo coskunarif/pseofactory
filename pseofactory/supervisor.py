@@ -618,7 +618,7 @@ class AutonomousLifecycleSupervisor:
         self,
         force: bool = False,
         dry_run: bool = False,
-        enable_gitops: bool = False,
+        enable_gitops: bool = True,
         property_ids: Optional[List[str]] = None,
         skip_ci: bool = False,
     ) -> Dict[str, Any]:

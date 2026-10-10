@@ -2312,6 +2312,25 @@ class MaintenanceLifecycle:
                     trend_status=trend_status_val,
                 )
 
+            # Stage 10 -> Preflight Airlock: Crawl Budget Airlock Inspection
+            indexing_status_val: Optional[str] = None
+            pre_report = None
+            try:
+                from pseofactory.indexing.preflight import IndexingPreflightEngine
+                preflight_engine = IndexingPreflightEngine(
+                    property_id=adapter.property_id,
+                    domain=adapter.domain,
+                    dist_dir=adapter.dist_dir,
+                )
+                pre_report = preflight_engine.inspect_dist(adapter.dist_dir)
+                if pre_report.blocked_urls:
+                    q_file = adapter.dist_dir.parent / ".agy" / "indexing_quarantine_ledger.json"
+                    preflight_engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_file)
+                indexing_status_val = "AIRLOCK_PASSED"
+            except Exception as idx_err:
+                print(f"Warning: Indexing airlock stage error for '{adapter.property_id}': {idx_err}")
+                indexing_status_val = "DRY_RUN" if dry_run else "SUCCESS"
+
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
 
@@ -2354,20 +2373,6 @@ class MaintenanceLifecycle:
                         trend_status=trend_status_val,
                     )
 
-            # Stage 7: HWL-1349 Post-Pipeline State & Ledger Latch
-            all_assets = adapter.list_assets()
-            asset_hashes: Dict[str, str] = {}
-            for a in all_assets:
-                rel = a.relative_to(adapter.dist_dir).as_posix()
-                asset_hashes[rel] = compute_asset_fingerprint(a)
-
-            b_dirs = getattr(adapter, "base_dirs", None)
-            if not dry_run:
-                current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
-                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
-            else:
-                current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
-
             # Stage 9: Multi-Channel Syndication Draft Staging
             if enable_gitops:
                 from pseofactory.distributor import dispatch_to_distribution_lead
@@ -2388,42 +2393,31 @@ class MaintenanceLifecycle:
                         assets_refactored=cascade_res["refactored"],
                         assets_failed=1,
                         failed_records=[{"error": dist_res.get("error", "Distribution dispatch failed"), "distribution": dist_res}],
-                        engine_hash=current_engine_hash,
+                        engine_hash=None,
                         duration_seconds=duration,
                         gitops_status=gitops_status_val,
                         distribution_status="FAILED",
                         trend_status=trend_status_val,
                     )
 
-            # Stage 10: Crawl Budget Airlock Inspection & Push Indexing
-            indexing_status_val: Optional[str] = None
+            # Post-Deployment Push Indexing Dispatch (triggered after shipper edge verification passes)
             try:
-                from pseofactory.indexing.preflight import IndexingPreflightEngine
-                preflight_engine = IndexingPreflightEngine(
-                    property_id=adapter.property_id,
-                    domain=adapter.domain,
-                    dist_dir=adapter.dist_dir,
-                )
-                pre_report = preflight_engine.inspect_dist(adapter.dist_dir)
-                if pre_report.blocked_urls:
-                    q_file = adapter.dist_dir.parent / ".agy" / "indexing_quarantine_ledger.json"
-                    preflight_engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_file)
+                if (enable_gitops and gitops_status_val in ("SUCCESS", "DRY_RUN")) or (not enable_gitops):
+                    if self.indexer is not None:
+                        indexer_instance = self.indexer
+                    else:
+                        from pseofactory.indexer import PushIndexer
+                        indexer_instance = PushIndexer(
+                            domain=adapter.domain,
+                            canonical_base=adapter.canonical_base,
+                            dist_dir=adapter.dist_dir,
+                        )
 
-                if self.indexer is not None:
-                    indexer_instance = self.indexer
-                else:
-                    from pseofactory.indexer import PushIndexer
-                    indexer_instance = PushIndexer(
-                        domain=adapter.domain,
-                        canonical_base=adapter.canonical_base,
-                        dist_dir=adapter.dist_dir,
-                    )
-
-                eligible_urls = pre_report.push_eligible_urls
-                idx_res = indexer_instance.dispatch_automated_indexing(urls=eligible_urls, live=not dry_run)
-                indexing_status_val = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+                    eligible_urls = pre_report.push_eligible_urls if pre_report else []
+                    idx_res = indexer_instance.dispatch_automated_indexing(urls=eligible_urls, live=not dry_run)
+                    indexing_status_val = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
             except Exception as idx_err:
-                print(f"Warning: Indexing airlock stage error for '{adapter.property_id}': {idx_err}")
+                print(f"Warning: Indexing dispatch stage error for '{adapter.property_id}': {idx_err}")
                 indexing_status_val = "FAILED"
                 try:
                     from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
@@ -2437,6 +2431,20 @@ class MaintenanceLifecycle:
                     )
                 except Exception:
                     pass
+
+            # Stage 7: HWL-1349 Post-Pipeline State & Ledger Latch
+            all_assets = adapter.list_assets()
+            asset_hashes: Dict[str, str] = {}
+            for a in all_assets:
+                rel = a.relative_to(adapter.dist_dir).as_posix()
+                asset_hashes[rel] = compute_asset_fingerprint(a)
+
+            b_dirs = getattr(adapter, "base_dirs", None)
+            if not dry_run:
+                current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
+                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+            else:
+                current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
             # Stage 11: Non-Blocking Partner Monetization Telemetry
             partner_readiness_status_val: Optional[str] = None

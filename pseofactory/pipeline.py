@@ -91,6 +91,7 @@ class PipelineConfig:
     total_site_impressions: int = 500
     strict_audit: bool = True
     audit_tolerance: float = 0.01
+    enable_gitops: bool = False
 
 
 @dataclass
@@ -190,9 +191,11 @@ class DriverExecutionResult:
     compiled_assets: List[CompiledAssetResult]
     aborted_opportunities: List[AbortedOpportunity]
     rankings: List[Dict[str, Any]]
+    preflight_reports: Optional[Dict[str, Any]] = None
+    gitops_results: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "total_spikes": self.total_spikes,
             "filtered_noise_count": self.filtered_noise_count,
             "evaluated_count": self.evaluated_count,
@@ -203,6 +206,11 @@ class DriverExecutionResult:
             "aborted_opportunities": [o.to_dict() for o in self.aborted_opportunities],
             "rankings": self.rankings,
         }
+        if self.preflight_reports is not None:
+            d["preflight_reports"] = self.preflight_reports
+        if self.gitops_results is not None:
+            d["gitops_results"] = self.gitops_results
+        return d
 
 
 class FactoryPipeline:
@@ -346,6 +354,7 @@ class FactoryPipeline:
         existing_tools: Optional[List[Dict[str, Any]]] = None,
         sitemap_urls: Optional[List[str]] = None,
         output_dir: Optional[Union[str, Path]] = None,
+        enable_gitops: Optional[bool] = None,
     ) -> DriverExecutionResult:
         """
         Executes end-to-end processing across raw breakout search opportunities.
@@ -365,7 +374,13 @@ class FactoryPipeline:
         compiled_assets: List[CompiledAssetResult] = []
         aborted_opportunities: List[AbortedOpportunity] = []
         rankings: List[Dict[str, Any]] = []
+        preflight_reports: Dict[str, Any] = {}
+        gitops_results: Dict[str, Any] = {}
         seen_idempotency_keys: Set[str] = set()
+
+        effective_enable_gitops = (
+            self.config.enable_gitops if enable_gitops is None else enable_gitops
+        )
 
         for spike in spikes:
             # 1. Universal Idempotency: sha256(tenant + spike_id + query)
@@ -874,6 +889,28 @@ class FactoryPipeline:
                 )
             )
 
+            # 11.5 Indexing Preflight Airlock Inspection
+            target_dist = (
+                Path(output_dir) / tenant
+                if output_dir
+                else (adapter.dist_dir if adapter and adapter.dist_dir.exists() else None)
+            )
+            try:
+                from pseofactory.indexing.preflight import IndexingPreflightEngine
+                engine = IndexingPreflightEngine(
+                    property_id=tenant,
+                    domain=adapter.domain if adapter else "profithelm.com",
+                    dist_dir=target_dist,
+                )
+                pre_report = engine.inspect_dist(target_dist)
+                if pre_report and pre_report.blocked_urls and target_dist:
+                    q_ledger = Path(target_dist).parent / ".agy" / "indexing_quarantine_ledger.json"
+                    engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_ledger)
+                if pre_report:
+                    preflight_reports[tenant] = pre_report.to_dict()
+            except Exception:
+                pass
+
         # 11. Atomic flock sink persistence if configured (HWL-1253)
         if self.config.sink_path:
             sink_file = Path(self.config.sink_path).resolve()
@@ -900,6 +937,53 @@ class FactoryPipeline:
             rankings, key=lambda d: d.get("composite_profit_yield", 0.0), reverse=True
         )
 
+        # 13. Unified GitOps release dispatch if enabled
+        if effective_enable_gitops and compiled_assets:
+            from pseofactory.gitops import GitOpsCoordinator
+            tenants_compiled = {ca.tenant for ca in compiled_assets}
+            for t in tenants_compiled:
+                try:
+                    t_adapter = self.tenant_registry.get_adapter(t)
+                except Exception:
+                    t_adapter = None
+                t_dist = (
+                    Path(output_dir) / t
+                    if output_dir and (Path(output_dir) / t).exists()
+                    else (t_adapter.dist_dir if t_adapter else None)
+                )
+                repo_path = (
+                    (t_adapter.repo_path if t_adapter else None)
+                    or (Path(output_dir).parent if output_dir else None)
+                    or (t_dist.parent if t_dist else Path.cwd())
+                )
+                coordinator = GitOpsCoordinator(
+                    repo_path=repo_path,
+                    branch="main",
+                    dry_run=self.config.dry_run,
+                )
+                edge_url = f"https://{t_adapter.domain}" if t_adapter else None
+                gitops_res = coordinator.dispatch_to_shipper(
+                    property_id=t,
+                    dry_run=self.config.dry_run,
+                    commit_message=f"feat({t}): automated breakout content generation",
+                    dist_dir=t_dist,
+                    edge_url=edge_url,
+                )
+                gitops_results[t] = gitops_res.to_dict()
+                if gitops_res.status in ("SUCCESS", "DRY_RUN"):
+                    try:
+                        from pseofactory.indexer import PushIndexer
+                        indexer = PushIndexer(
+                            domain=t_adapter.domain if t_adapter else "profithelm.com",
+                            canonical_base=t_adapter.canonical_base if t_adapter else "https://profithelm.com",
+                            dist_dir=t_dist,
+                        )
+                        t_pre = preflight_reports.get(t)
+                        eligible = t_pre.get("push_eligible_urls") if isinstance(t_pre, dict) else None
+                        indexer.dispatch_automated_indexing(urls=eligible, live=not self.config.dry_run)
+                    except Exception:
+                        pass
+
         return DriverExecutionResult(
             total_spikes=total_spikes,
             filtered_noise_count=filtered_noise_count,
@@ -910,6 +994,8 @@ class FactoryPipeline:
             compiled_assets=compiled_assets,
             aborted_opportunities=aborted_opportunities,
             rankings=sorted_rankings,
+            preflight_reports=preflight_reports if preflight_reports else None,
+            gitops_results=gitops_results if gitops_results else None,
         )
 
 
@@ -919,6 +1005,7 @@ def run_factory_pipeline(
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     sitemap_urls: Optional[List[str]] = None,
     output_dir: Optional[Union[str, Path]] = None,
+    enable_gitops: Optional[bool] = None,
 ) -> DriverExecutionResult:
     """
     Convenience helper to run the complete automated discovery and content generation pipeline.
@@ -930,4 +1017,5 @@ def run_factory_pipeline(
         existing_tools=existing_tools,
         sitemap_urls=sitemap_urls,
         output_dir=output_dir,
+        enable_gitops=enable_gitops,
     )
