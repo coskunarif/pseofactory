@@ -28,6 +28,36 @@ from pseofactory.contracts import (
 )
 from pseofactory.verifier import verify_html_unique_first_party_information
 
+PROFITHELM_PREDICTION_CLUSTER = [
+    ("prediction-market-odds", "Prediction Market Odds Calculator"),
+    ("prediction-market-tax", "Prediction Market Section 1256 Tax Calculator"),
+    ("prediction-market-ev", "Prediction Market Expected Value (EV) Calculator"),
+    ("prediction-market-kelly-criterion", "Prediction Market Kelly Criterion Calculator"),
+    ("prediction-market-implied-probability", "Prediction Market Implied Probability Calculator"),
+    ("prediction-market-kalshi-fees", "Kalshi Quadratic Fee Drag Calculator"),
+    ("prediction-market-arbitrage", "Prediction Market Cross-Platform Arbitrage Calculator"),
+    ("prediction-market-vig-spread", "Prediction Market Vig and Spread Calculator"),
+    ("prediction-market-break-even", "Prediction Market Break-Even Probability Calculator"),
+]
+
+PROFITHELM_TAX_CLUSTER = [
+    ("section-179-calculator", "Section 179 Equipment Expense Tax Deduction Calculator"),
+    ("section-1031-calculator", "Section 1031 Like-Kind Exchange Tax Deferral Calculator"),
+    ("qsbs-section-1202-calculator", "QSBS Section 1202 Capital Gains Exemption Calculator"),
+    ("tcja-sunset-bracket-calculator", "TCJA Sunset 2027 Marginal Tax Bracket Calculator"),
+    ("saas-runway-calculator", "SaaS Runway and Capital Burn Rate Calculator"),
+    ("crypto-tax-calculator", "Cryptocurrency Tax Loss Harvesting Calculator"),
+    ("treasury-yield-calculator", "Treasury Yield Curve Arbitrage Calculator"),
+]
+
+PREXVO_STUDENT_LOAN_CLUSTER = [
+    ("student-loan-repayment-calculator", "Title IV Student Loan Standard Repayment Calculator"),
+    ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs IBR Monthly Payment Calculator"),
+    ("student-loan-forgiveness-calculator", "Student Loan Forgiveness Timeline Calculator"),
+    ("pslf-qualifying-payment-calculator", "PSLF 120 Qualifying Payments Verification Calculator"),
+    ("student-loan-interest-subsidy-calculator", "Title IV Unpaid Interest Subsidy Benefit Calculator"),
+]
+
 
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -215,11 +245,251 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         or default_base
     ).rstrip("/")
 
+    is_prexvo_js = "true" if is_prexvo else "false"
+
+    is_prediction_tool = any(
+        tok in slug.lower()
+        for tok in (
+            "prediction",
+            "odds",
+            "kalshi",
+            "kelly",
+            "arbitrage",
+            "ev",
+            "vig",
+            "break-even",
+        )
+    )
+
+    application_category = "FinanceApplication"
+
+    if is_prexvo:
+        cluster = PREXVO_STUDENT_LOAN_CLUSTER
+        cluster_title = "Related Title IV Student Loan Repayment Tools"
+    elif is_prediction_tool:
+        cluster = PROFITHELM_PREDICTION_CLUSTER
+        cluster_title = "Related Prediction Market Quantitative Tools"
+    else:
+        cluster = PROFITHELM_TAX_CLUSTER
+        cluster_title = "Related Tax and Capital Optimization Tools"
+
+    sibling_links = [(s_slug, s_title) for (s_slug, s_title) in cluster if s_slug != slug]
+    if not sibling_links:
+        sibling_links = cluster
+
+    cluster_items_html = []
+    for s_slug, s_title in sibling_links:
+        cluster_items_html.append(
+            f'        <li style="margin-bottom: 8px;">\n'
+            f'          <a href="{canonical_base}/tools/{s_slug}/" class="touch-target" style="display: block; background: #1e293b; color: var(--accent); padding: 12px 16px; border-radius: 8px; text-decoration: none; min-height: 44px; min-width: 44px;">{s_title}</a>\n'
+            f'        </li>'
+        )
+    cluster_links_html = "\n".join(cluster_items_html)
+
+    # High-intent conversational FAQPage entities
+    faq_entities = [
+        {
+            "@type": "Question",
+            "name": f"How is {title} determined under statutory authority guidelines?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": f"The deterministic calculation model evaluates {formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What empirical benchmarks validate this firsthand calculation model?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": f"The proprietary model cross-references empirical economic series from {economic_dataset} with statutory authority {statutory_authority}."
+            }
+        }
+    ]
+
+    if is_prediction_tool:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": "How does fee drag impact prediction market profitability on Kalshi and Polymarket?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Kalshi charges quadratic transaction fees peaking at 1.75 cents per contract at fifty-fifty odds, requiring traders to account for fee drag alongside expected value and implied probability spreads."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Why is the Kelly criterion fraction critical for prediction market risk management?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The Kelly criterion formula determines the mathematically optimal bankroll fraction to wager, protecting capital against volatility while maximizing long-term compound growth."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How are prediction market gains taxed under IRC Section 1256 rules?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Regulated exchange contracts on CFTC-approved venues like Kalshi qualify for Section 1256 sixty-forty tax treatment, splitting gains into sixty percent long-term and forty percent short-term capital rates."
+                }
+            }
+        ])
+    elif is_prexvo:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": "Who is eligible for the Repayment Assistance Plan (RAP) under Title IV rules?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Under 34 CFR Part 685, borrowers with eligible federal Direct Loans qualify for RAP based on adjusted gross income and family size relative to federal poverty guidelines."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How does RAP compare to income-driven repayment options like IBR and SAVE?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "RAP establishes affordable monthly payment caps based on discretionary income while preventing runaway balance growth through federal interest subsidies on qualifying Title IV loans."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What requirements determine qualifying monthly payments for PSLF loan forgiveness?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Public Service Loan Forgiveness requires 120 verified on-time monthly payments under an accepted income-driven plan while employed full-time by a qualifying public service employer."
+                }
+            }
+        ])
+    else:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": f"What documentation is required to substantiate deductions under {statutory_authority}?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"Taxpayers must retain contemporaneous equipment purchase invoices, financing agreements, and tax return statements verifying placing property in service during the eligible tax year."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How do economic phaseout thresholds adjust over time across benchmark series?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"Statutory deduction limits and phaseout brackets adjust annually for inflation based on index metrics published in official series like {economic_dataset}."
+                }
+            }
+        ])
+
+    faq_json_str = json.dumps(faq_entities, ensure_ascii=False, indent=6)
+
+    if is_prexvo:
+        calc_js_body = f"""      var balance = inputs.balance || inputs.principal || inputs.loan_amount || 35000;
+      var rate = (inputs.rate || inputs.interest_rate || 6.5) / 100;
+      var income = inputs.income || inputs.agi || 55000;
+      var povertyLine = inputs.poverty_line || 15060;
+
+      if (slug.indexOf("rap") !== -1) {{
+        var discretionary = Math.max(0, income - (2.25 * povertyLine));
+        return Math.round(((discretionary * 0.05) / 12) * 100) / 100;
+      }}
+      if (slug.indexOf("ibr") !== -1) {{
+        var discIbr = Math.max(0, income - (1.50 * povertyLine));
+        return Math.round(((discIbr * 0.10) / 12) * 100) / 100;
+      }}
+      if (slug.indexOf("forgiveness") !== -1 || slug.indexOf("qualifying") !== -1) {{
+        return inputs.qualifying_payments ? Math.max(0, 120 - inputs.qualifying_payments) : 120;
+      }}
+      if (slug.indexOf("interest-subsidy") !== -1) {{
+        var monthlyInterest = (balance * rate) / 12;
+        var monthlyPay = Math.max(0, (Math.max(0, income - 2.25 * povertyLine) * 0.05) / 12);
+        return Math.max(0, Math.round((monthlyInterest - monthlyPay) * 100) / 100);
+      }}
+      var monthlyRate = rate / 12;
+      var nMonths = 120;
+      if (monthlyRate === 0) return balance / nMonths;
+      var monthlyPmt = (balance * monthlyRate * Math.pow(1 + monthlyRate, nMonths)) / (Math.pow(1 + monthlyRate, nMonths) - 1);
+      return Math.round(monthlyPmt * 100) / 100;"""
+    else:
+      calc_js_body = f"""      if (slug === "prediction-market-kalshi-fees" || slug.indexOf("kalshi-fee") !== -1) {{
+        var contracts = inputs.contracts || inputs.volume || 100;
+        var p = inputs.probability || inputs.price || inputs.p || 0.5;
+        if (p > 1) p = p / 100;
+        return Math.ceil(0.07 * contracts * p * (1 - p) * 100) / 100;
+      }}
+      if (slug === "prediction-market-ev" || slug.indexOf("ev-") !== -1 || slug.indexOf("-ev") !== -1) {{
+        var pWin = inputs.prob_win || inputs.probability || inputs.p || 0.5;
+        if (pWin > 1) pWin = pWin / 100;
+        var stake = inputs.stake || inputs.capital || 100;
+        var payout = inputs.payout || inputs.win_payout || 100;
+        return (pWin * payout) - ((1 - pWin) * stake);
+      }}
+      if (slug === "prediction-market-kelly-criterion" || slug.indexOf("kelly") !== -1) {{
+        var p = inputs.probability || inputs.prob_win || 0.55;
+        if (p > 1) p = p / 100;
+        var b = inputs.odds || inputs.net_odds || 1.0;
+        var q = 1 - p;
+        var f = b > 0 ? (b * p - q) / b : 0;
+        return Math.max(0, Math.round(f * 10000) / 100);
+      }}
+      if (slug === "prediction-market-implied-probability" || slug.indexOf("implied-prob") !== -1) {{
+        var price = inputs.price || inputs.cents || 50;
+        if (price > 1) return Math.min(100, Math.max(0, price));
+        return Math.min(100, Math.max(0, price * 100));
+      }}
+      if (slug === "prediction-market-arbitrage" || slug.indexOf("arbitrage") !== -1) {{
+        var yesPrice = inputs.yes_price || inputs.yes || 52;
+        var noPrice = inputs.no_price || inputs.no || 44;
+        if (yesPrice > 1) yesPrice = yesPrice / 100;
+        if (noPrice > 1) noPrice = noPrice / 100;
+        var spread = 1.0 - (yesPrice + noPrice);
+        return Math.round(spread * 10000) / 100;
+      }}
+      if (slug === "prediction-market-vig-spread" || slug.indexOf("vig-spread") !== -1) {{
+        var y = inputs.yes || inputs.yes_price || 53;
+        var n = inputs.no || inputs.no_price || 51;
+        if (y > 1) y = y / 100;
+        if (n > 1) n = n / 100;
+        var totalImplied = y + n;
+        var vig = totalImplied > 1 ? (totalImplied - 1) * 100 : 0;
+        return Math.round(vig * 100) / 100;
+      }}
+      if (slug === "prediction-market-break-even" || slug.indexOf("break-even") !== -1) {{
+        var cost = inputs.cost || inputs.price || 55;
+        var fee = inputs.fee || 2;
+        return cost + fee;
+      }}
+      if (slug === "prediction-market-tax" || slug.indexOf("sec1256") !== -1) {{
+        var gain = inputs.pmgain || inputs.gain || inputs.capital_gain || 10000;
+        var rate60 = inputs.rate_lt || 0.20;
+        var rate40 = inputs.rate_st || 0.37;
+        return (gain * 0.60 * rate60) + (gain * 0.40 * rate40);
+      }}
+      if (slug.indexOf("179") !== -1) {{
+        var cost = inputs.cost || inputs.investment || 0;
+        var cap = inputs.cap || 1220000;
+        var phaseout = inputs.phaseout || 3050000;
+        return Math.max(0, Math.min(cost, cap) - Math.max(0, cost - phaseout));
+      }}
+      if (slug.indexOf("runway") !== -1) {{
+        var cash = inputs.cash || inputs.capital || 100000;
+        var burn = inputs.burn || inputs.monthly_burn || 10000;
+        return burn > 0 ? Math.round((cash / burn) * 10) / 10 : 0;
+      }}
+      return {published_output};"""
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+  <meta property="og:title" content="{title}" />
+  <meta property="og:description" content="Verified quantitative calculation engine evaluating {title} deterministically." />
+  <meta property="og:url" content="{canonical_base}/tools/{slug}/" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{title}" />
+  <meta name="twitter:description" content="Verified quantitative calculation engine evaluating {title} deterministically." />
   <title>{title}</title>
   <link rel="canonical" href="{canonical_base}/tools/{slug}/" />
   <style>
@@ -365,12 +635,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       }}
     }}
   </style>
+  <!-- Schema.org Application Type: "@type": "SoftwareApplication" -->
   <script type="application/ld+json">
   {{
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
+    "@type": ["WebApplication", "SoftwareApplication"],
+    "@id": "{canonical_base}/tools/{slug}/#app",
     "name": "{title}",
-    "applicationCategory": "BusinessApplication",
+    "applicationCategory": "{application_category}",
     "operatingSystem": "All",
     "url": "{canonical_base}/tools/{slug}/",
     "offers": {{
@@ -383,25 +655,39 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <script type="application/ld+json">
   {{
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
+    "@type": "BreadcrumbList",
+    "@id": "{canonical_base}/tools/{slug}/#breadcrumb",
+    "itemListElement": [
       {{
-        "@type": "Question",
-        "name": "How is {title} determined under statutory authority guidelines?",
-        "acceptedAnswer": {{
-          "@type": "Answer",
-          "text": "The deterministic calculation model evaluates {formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}."
-        }}
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "{canonical_base}/"
       }},
       {{
-        "@type": "Question",
-        "name": "What empirical benchmarks validate this firsthand calculation model?",
-        "acceptedAnswer": {{
-          "@type": "Answer",
-          "text": "The proprietary model cross-references empirical economic series from {economic_dataset} with statutory authority {statutory_authority}."
-        }}
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Tools",
+        "item": "{canonical_base}/tools/"
+      }},
+      {{
+        "@type": "ListItem",
+        "position": 3,
+        "name": "{title}",
+        "item": "{canonical_base}/tools/{slug}/"
       }}
     ]
+  }}
+  </script>
+  <script type="application/ld+json">
+  {{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "@id": "{canonical_base}/tools/{slug}/#faq",
+    "about": {{
+      "@id": "{canonical_base}/tools/{slug}/#app"
+    }},
+    "mainEntity": {faq_json_str}
   }}
   </script>
 </head>
@@ -434,7 +720,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
         (greater than or equal to zero) per HWL-1263 to prevent crawler or user state corruption.
       </p>
-      <form class="calculator-form" id="{slug}-calculator" method="post" action="#">
+      <form class="calculator-form" id="{slug}-calculator" method="post" action="javascript:void(0);">
 {form_inputs_str}
         <button type="submit" class="touch-target" id="calculate-btn" style="min-height: 44px; min-width: 44px;">Recalculate Output</button>
       </form>
@@ -479,6 +765,16 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </p>
     </section>
 
+    <nav class="cluster-nav card" aria-label="{cluster_title}">
+      <h2>{cluster_title}</h2>
+      <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
+        Explore verified peer computational models in this specialized quantitative cluster:
+      </p>
+      <ul style="list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+{cluster_links_html}
+      </ul>
+    </nav>
+
     <footer class="card" style="text-align: center;">
       <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
         Launch Full {title} Engine
@@ -488,6 +784,88 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
   <script type="application/json" class="calculation-manifest" id="{slug}-manifest">
 {manifest_json_str}
+  </script>
+
+  <script>
+  (function() {{
+    var form = document.getElementById("{slug}-calculator");
+    if (!form) return;
+    var outputElem = document.querySelector(".output-value");
+    var slug = "{slug}";
+    function formatNumber(val) {{
+      if (isNaN(val) || !isFinite(val)) return "0";
+      return new Intl.NumberFormat("en-US", {{
+        minimumFractionDigits: Number.isInteger(val) ? 0 : 2,
+        maximumFractionDigits: 2
+      }}).format(val);
+    }}
+
+    function getInputs() {{
+      var inputs = {{}};
+      var elements = form.querySelectorAll("input, select");
+      for (var i = 0; i < elements.length; i++) {{
+        var el = elements[i];
+        var name = el.name || el.id;
+        if (!name) continue;
+        var cleanName = name.replace(/^input-/, "");
+        var v = parseFloat(el.value);
+        inputs[cleanName] = isNaN(v) ? 0 : Math.max(0, v);
+      }}
+      return inputs;
+    }}
+
+    var debounceTimer = null;
+    function updateQueryParams(inputs) {{
+      if (!window.history || !window.history.replaceState) return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function() {{
+        try {{
+          var url = new URL(window.location.href);
+          for (var k in inputs) {{
+            url.searchParams.set(k, inputs[k]);
+          }}
+          window.history.replaceState({{}}, "", url.toString());
+        }} catch (e) {{}}
+      }}, 150);
+    }}
+
+    function syncInputsFromParams() {{
+      if (!window.location || !window.location.search) return;
+      try {{
+        var params = new URLSearchParams(window.location.search);
+        var elements = form.querySelectorAll("input, select");
+        for (var i = 0; i < elements.length; i++) {{
+          var el = elements[i];
+          var name = (el.name || el.id || "").replace(/^input-/, "");
+          if (params.has(name)) {{
+            el.value = params.get(name);
+          }}
+        }}
+      }} catch (e) {{}}
+    }}
+
+    function calculate(inputs) {{
+{calc_js_body}
+    }}
+
+    function handleRecompute() {{
+      var inputs = getInputs();
+      updateQueryParams(inputs);
+      var result = calculate(inputs);
+      if (outputElem) {{
+        outputElem.textContent = formatNumber(result);
+      }}
+    }}
+
+    syncInputsFromParams();
+    form.addEventListener("input", handleRecompute);
+    form.addEventListener("change", handleRecompute);
+    form.addEventListener("submit", function(e) {{
+      e.preventDefault();
+      handleRecompute();
+      return false;
+    }});
+  }})();
   </script>
 </body>
 </html>

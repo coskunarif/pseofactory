@@ -511,7 +511,7 @@ def audit_rendered_asset(
         has_faq = False
         for block in jsonld_blocks:
             b_type = block.get("@type")
-            if b_type == "SoftwareApplication":
+            if b_type == "SoftwareApplication" or (isinstance(b_type, list) and "SoftwareApplication" in b_type):
                 has_app = True
                 app_name = block.get("name")
                 if app_name != expected_title:

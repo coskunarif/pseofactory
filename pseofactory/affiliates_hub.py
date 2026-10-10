@@ -71,6 +71,13 @@ PROFITHELM_DIRECT_SLUGS: Set[str] = {
     "irs-2027-tax-brackets",
     "tcja-sunset-bracket-calculator",
     "prediction-market-odds",
+    "prediction-market-ev",
+    "prediction-market-kelly-criterion",
+    "prediction-market-implied-probability",
+    "prediction-market-kalshi-fees",
+    "prediction-market-arbitrage",
+    "prediction-market-vig-spread",
+    "prediction-market-break-even",
 }
 
 # Slugs recognized as direct high-bounty student loan tools for Prexvo

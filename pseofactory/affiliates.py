@@ -293,7 +293,17 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$80-$150",
         network="In-House Direct",
         description="CFTC-regulated exchange to trade event contracts on interest rates, inflation, and political milestones.",
-        target_tools=["prediction-market-tax", "prediction-market-odds"],
+        target_tools=[
+            "prediction-market-tax",
+            "prediction-market-odds",
+            "prediction-market-ev",
+            "prediction-market-kelly-criterion",
+            "prediction-market-implied-probability",
+            "prediction-market-kalshi-fees",
+            "prediction-market-arbitrage",
+            "prediction-market-vig-spread",
+            "prediction-market-break-even",
+        ],
         supported_params=["ph_tier"],
         cta_text="Trade Regulated Event Contracts on Kalshi",
     ),
@@ -516,6 +526,12 @@ PROFITHELM_TOOL_PATTERNS: List[str] = [
     "arbitrage",
     "prediction",
     "odds",
+    "ev",
+    "kelly",
+    "implied-probability",
+    "kalshi-fees",
+    "vig-spread",
+    "break-even",
     "treasury",
     "yield",
     "qsbs",
@@ -711,7 +727,16 @@ def _select_partner_for_slug(property_id: str, slug: str) -> str:
             return "mercury"
         if "1031" in s:
             return "ipx1031"
-        if "arbitrage" in s or "prediction" in s or "odds" in s:
+        if (
+            "arbitrage" in s
+            or "prediction" in s
+            or "odds" in s
+            or "kalshi" in s
+            or "kelly" in s
+            or "ev" in s
+            or "vig" in s
+            or "break-even" in s
+        ):
             return "kalshi"
         if "treasury" in s or "yield" in s:
             return "interactive_brokers"
