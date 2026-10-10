@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.indexing.milestones import (
     EVENT_SEARCH_INDEXED,
@@ -26,13 +26,42 @@ from pseofactory.indexing.milestones import (
 )
 from pseofactory.indexing.preflight import IndexingPreflightEngine, PreflightReport
 from pseofactory.indexing_inspector import DailyIndexingInspector
-from pseofactory.maintenance import (
-    TenantRegistry,
-    WorkspacePropertyScanner,
-    reflect_and_recompile_all_assets,
-)
-from pseofactory.supervisor import AtomicStateLedger
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
+
+if TYPE_CHECKING:
+    from pseofactory.maintenance import (
+        TenantRegistry,
+        WorkspacePropertyScanner,
+    )
+
+
+def reflect_and_recompile_all_assets(*args: Any, **kwargs: Any) -> Any:
+    """
+    Deferred wrapper to prevent circular import between maintenance and indexing.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import (
+        reflect_and_recompile_all_assets as _reflect,
+    )
+    return _reflect(*args, **kwargs)
+
+
+def __getattr__(name: str) -> Any:
+    """
+    Lazy module attribute resolution for maintenance symbols.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if name in {"TenantRegistry", "WorkspacePropertyScanner"}:
+        from pseofactory.maintenance import (
+            TenantRegistry,
+            WorkspacePropertyScanner,
+        )
+        mapping = {
+            "TenantRegistry": TenantRegistry,
+            "WorkspacePropertyScanner": WorkspacePropertyScanner,
+        }
+        return mapping[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 logger = logging.getLogger("pseofactory.indexing.feedback_loop")
 
@@ -291,12 +320,20 @@ class IndexingFeedbackLoop:
         # Discover property adapter if available
         adapter = None
         try:
-            adapter = TenantRegistry.default().get_adapter(self.property_id)
+            tenant_registry_cls = globals().get("TenantRegistry")
+            if tenant_registry_cls is None:
+                from pseofactory.maintenance import TenantRegistry
+                tenant_registry_cls = TenantRegistry
+            adapter = tenant_registry_cls.default().get_adapter(self.property_id)
         except Exception:
             pass
         if not adapter:
             try:
-                scanner = WorkspacePropertyScanner()
+                scanner_cls = globals().get("WorkspacePropertyScanner")
+                if scanner_cls is None:
+                    from pseofactory.maintenance import WorkspacePropertyScanner
+                    scanner_cls = WorkspacePropertyScanner
+                scanner = scanner_cls()
                 discovered = scanner.discover_properties()
                 by_id = {p.property_id.lower(): p for p in discovered}
                 adapter = by_id.get(self.property_id)
