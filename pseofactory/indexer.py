@@ -96,6 +96,7 @@ class PushIndexer:
         rollover_queue_path: Optional[Path] = None,
         velocity_ledger_path: Optional[Path] = None,
         quarantine_ledger_path: Optional[Path] = None,
+        tenant_id: Optional[str] = None,
     ):
         self.domain = domain
         self.canonical_base = canonical_base.rstrip("/")
@@ -113,6 +114,7 @@ class PushIndexer:
             if quarantine_ledger_path
             else (self.base_dir / ".agy" / "indexing_quarantine_ledger.json")
         )
+        self.tenant_id = (tenant_id or "profithelm").lower()
         self.gsc_site = f"sc-domain:{self.domain}"
 
     def preflight_airlock(
@@ -411,6 +413,13 @@ class PushIndexer:
 
     def load_pushed_ledger(self) -> Dict[str, Any]:
         """Loads and returns the current push ledger dictionary."""
+        try:
+            from pseofactory.supervisor import AtomicStateLedger
+            data = AtomicStateLedger.load_json(self.ledger_path)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
         if self.ledger_path.exists():
             try:
                 return json.loads(self.ledger_path.read_text(encoding="utf-8"))
@@ -419,26 +428,33 @@ class PushIndexer:
         return {}
 
     def save_pushed_ledger(self, ledger: Dict[str, Any]):
-        """Persists push ledger dictionary."""
+        """Persists push ledger dictionary atomically using flock and temporary file."""
         try:
-            self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-            self.ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
-        except Exception as ex:
-            print(f"Warning: Failed to persist push ledger: {ex}")
+            from pseofactory.supervisor import AtomicStateLedger
+            AtomicStateLedger.save_json(self.ledger_path, ledger)
+        except Exception:
+            try:
+                self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+                self.ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+            except Exception as ex:
+                print(f"Warning: Failed to persist push ledger: {ex}")
 
     def filter_unchanged_push_urls(
         self,
         urls: List[str],
         force: bool = False,
         engine: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> Tuple[List[str], List[str]]:
         """
         Filters out URLs whose content has not changed since last push using persistent ledger.
+        Evaluates composite idempotency (tenant_id, target_url, engine, content_sha256).
         Supports per-engine checking (engine='indexnow', engine='google').
         """
         if force:
             return urls, []
 
+        eff_tenant = (tenant_id or getattr(self, "tenant_id", "profithelm") or "profithelm").lower()
         ledger = self.load_pushed_ledger()
         to_push = []
         skipped = []
@@ -446,6 +462,11 @@ class PushIndexer:
             curr_hash = self.get_url_content_hash(u)
             prev_entry = ledger.get(u)
             if not prev_entry:
+                to_push.append(u)
+                continue
+
+            rec_tenant = prev_entry.get("tenant_id")
+            if rec_tenant and rec_tenant.lower() != eff_tenant:
                 to_push.append(u)
                 continue
 
@@ -463,12 +484,18 @@ class PushIndexer:
 
         return to_push, skipped
 
-    def record_pushed_urls(self, urls: List[str], engine: Optional[str] = None):
+    def record_pushed_urls(
+        self,
+        urls: List[str],
+        engine: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+    ):
         """Records successfully pushed URLs and content hashes in push ledger."""
         if not urls:
             return
+        eff_tenant = (tenant_id or getattr(self, "tenant_id", "profithelm") or "profithelm").lower()
         ledger = self.load_pushed_ledger()
-        now_iso = datetime.now().isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         for u in urls:
             curr_hash = self.get_url_content_hash(u)
             prev = ledger.get(u, {})
@@ -479,12 +506,14 @@ class PushIndexer:
                     "hash": curr_hash,
                     "last_pushed": now_iso,
                     "push_count": prev_eng.get("push_count", 0) + 1,
+                    "tenant_id": eff_tenant,
                 }
 
             ledger[u] = {
                 "hash": curr_hash,
                 "last_pushed": now_iso,
                 "push_count": prev.get("push_count", 0) + 1,
+                "tenant_id": eff_tenant,
                 "engines": engines,
             }
         self.save_pushed_ledger(ledger)
@@ -1117,6 +1146,13 @@ class PushIndexer:
         }
 
     def load_gsc_rollover_queue(self) -> List[str]:
+        try:
+            from pseofactory.supervisor import AtomicStateLedger
+            data = AtomicStateLedger.load_json(self.rollover_queue_path)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
         if self.rollover_queue_path.exists():
             try:
                 data = json.loads(self.rollover_queue_path.read_text(encoding="utf-8"))
@@ -1128,10 +1164,14 @@ class PushIndexer:
 
     def save_gsc_rollover_queue(self, urls: List[str]):
         try:
-            self.rollover_queue_path.parent.mkdir(parents=True, exist_ok=True)
-            self.rollover_queue_path.write_text(json.dumps(urls, indent=2), encoding="utf-8")
-        except Exception as ex:
-            print(f"Warning: Failed to persist GSC rollover queue: {ex}")
+            from pseofactory.supervisor import AtomicStateLedger
+            AtomicStateLedger.save_json(self.rollover_queue_path, urls)
+        except Exception:
+            try:
+                self.rollover_queue_path.parent.mkdir(parents=True, exist_ok=True)
+                self.rollover_queue_path.write_text(json.dumps(urls, indent=2), encoding="utf-8")
+            except Exception as ex:
+                print(f"Warning: Failed to persist GSC rollover queue: {ex}")
 
     def submit_gsc_indexing(
         self,
@@ -1211,8 +1251,11 @@ class PushIndexer:
 
         to_push = []
         skipped = []
+        interrupted = False
         if live and gsccli_bin:
-            to_push, skipped = self.filter_unchanged_push_urls(urls, force=False, engine="google")
+            to_push, skipped = self.filter_unchanged_push_urls(
+                urls, force=False, engine="google", tenant_id=getattr(self, "tenant_id", None)
+            )
             if len(to_push) > GOOGLE_INDEXING_DAILY_QUOTA:
                 overflow = to_push[GOOGLE_INDEXING_DAILY_QUOTA:]
                 to_push = to_push[:GOOGLE_INDEXING_DAILY_QUOTA]
@@ -1220,28 +1263,78 @@ class PushIndexer:
             api_results = []
             accepted_urls = []
             failed_urls = []
-            for u in to_push:
+            for idx, u in enumerate(to_push):
                 try:
                     cmd = [gsccli_bin, "index", "publish", u, "--type", "URL_UPDATED"]
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
                     status = "ACCEPTED" if proc.returncode == 0 else "FAIL"
+                    output_text = (proc.stdout or "").strip() or (proc.stderr or "").strip()
                     api_results.append({
                         "url": u,
                         "status": status,
-                        "output": proc.stdout.strip() or proc.stderr.strip(),
+                        "output": output_text,
                     })
+
+                    is_429 = (
+                        proc.returncode != 0
+                        and (
+                            "429" in output_text
+                            or "quota" in output_text.lower()
+                            or "rate limit" in output_text.lower()
+                        )
+                    )
+
                     if status == "ACCEPTED":
                         accepted_urls.append(u)
+                    elif is_429:
+                        interrupted = True
+                        failed_urls.append(u)
+                        remaining_untried = to_push[idx + 1:]
+                        failed_urls.extend(remaining_untried)
+                        try:
+                            from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
+                            AtomicTelemetryLogger().log_event(
+                                TelemetryEvent(
+                                    event_type="INDEXING_ANOMALY",
+                                    tenant_id=getattr(self, "tenant_id", "profithelm"),
+                                    error_type="HTTP_429_QUOTA_EXHAUSTED",
+                                    error_message=f"429 Quota exhausted during GSC indexing on {u}: {output_text}",
+                                    action_taken="PRESERVED_ROLLOVER",
+                                )
+                            )
+                        except Exception:
+                            pass
+                        break
                     else:
                         failed_urls.append(u)
+                except subprocess.TimeoutExpired as tex:
+                    interrupted = True
+                    api_results.append({"url": u, "status": "ERROR", "note": f"Timeout expired: {tex}"})
+                    failed_urls.append(u)
+                    remaining_untried = to_push[idx + 1:]
+                    failed_urls.extend(remaining_untried)
+                    try:
+                        from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
+                        AtomicTelemetryLogger().log_event(
+                            TelemetryEvent(
+                                event_type="INDEXING_ANOMALY",
+                                tenant_id=getattr(self, "tenant_id", "profithelm"),
+                                error_type="NETWORK_TIMEOUT",
+                                error_message=f"Timeout expired during GSC indexing on {u}: {tex}",
+                                action_taken="PRESERVED_ROLLOVER",
+                            )
+                        )
+                    except Exception:
+                        pass
+                    break
                 except Exception as e:
                     api_results.append({"url": u, "status": "ERROR", "note": str(e)})
                     failed_urls.append(u)
 
             if accepted_urls:
-                self.record_pushed_urls(accepted_urls, engine="google")
+                self.record_pushed_urls(accepted_urls, engine="google", tenant_id=getattr(self, "tenant_id", None))
 
-            # Preserve quota spillover and re-save FAIL/ERROR URLs to rollover queue
+            # Preserve quota spillover and re-save FAIL/ERROR/untried URLs to rollover queue
             remaining_rollover = []
             seen_rem = set()
             for u in rollover_spillover + failed_urls:
@@ -1259,20 +1352,23 @@ class PushIndexer:
                 "rollover_queue_drained": len(rollover_loaded),
                 "rollover_queue_spillover": len(remaining_rollover),
             })
-            try:
-                sitemap_url = f"{self.canonical_base}/sitemap.xml"
-                sm_cmd = [gsccli_bin, "sitemaps", "submit", sitemap_url, "-s", self.gsc_site]
-                sm_proc = subprocess.run(sm_cmd, capture_output=True, text=True, timeout=15)
-                gsc_results.append({
-                    "engine": "gsc_sitemaps",
-                    "sitemap": sitemap_url,
-                    "status": "ACCEPTED" if sm_proc.returncode == 0 else "FAIL",
-                    "output": sm_proc.stdout.strip() or sm_proc.stderr.strip(),
-                })
-            except Exception as e:
-                gsc_results.append({"engine": "gsc_sitemaps", "status": "ERROR", "note": str(e)})
+            if not interrupted:
+                try:
+                    sitemap_url = f"{self.canonical_base}/sitemap.xml"
+                    sm_cmd = [gsccli_bin, "sitemaps", "submit", sitemap_url, "-s", self.gsc_site]
+                    sm_proc = subprocess.run(sm_cmd, capture_output=True, text=True, timeout=15)
+                    gsc_results.append({
+                        "engine": "gsc_sitemaps",
+                        "sitemap": sitemap_url,
+                        "status": "ACCEPTED" if sm_proc.returncode == 0 else "FAIL",
+                        "output": sm_proc.stdout.strip() or sm_proc.stderr.strip(),
+                    })
+                except Exception as e:
+                    gsc_results.append({"engine": "gsc_sitemaps", "status": "ERROR", "note": str(e)})
 
-        inspection_oracle = self.verify_gsc_indexation_loop(urls=urls, site=self.gsc_site, max_urls=5, live=live)
+        inspection_oracle = []
+        if not interrupted:
+            inspection_oracle = self.verify_gsc_indexation_loop(urls=urls, site=self.gsc_site, max_urls=5, live=live)
 
         return {
             "site": self.gsc_site,

@@ -13,6 +13,11 @@ import argparse
 from pathlib import Path
 from typing import List, Optional
 
+# Ensure package root takes precedence in sys.path when invoked directly
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from pseofactory.maintenance import (
     TenantRegistry,
     ConfigurablePropertyAdapter,
@@ -1172,6 +1177,35 @@ def cmd_indexing_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_indexing_feedback_loop(args: argparse.Namespace) -> int:
+    """
+    Executes autonomous closed-loop indexing feedback coordinator (Loop 4).
+    Audits unindexed pages, diagnoses root causes, reflects engine repairs,
+    enforces preflight airlock, and dispatches multi-engine push indexing.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
+    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    dry_run = getattr(args, "dry_run", False)
+    live = getattr(args, "live", False)
+    output_json = getattr(args, "json", False)
+
+    coordinator = IndexingFeedbackLoop(property_id=property_id)
+    result = coordinator.run_feedback_cycle(dry_run=dry_run, live=live)
+
+    if output_json:
+        print(json.dumps(result, indent=2))
+    else:
+        status = result.get("status", "UNKNOWN")
+        print(f"[{status}] Indexing Feedback Loop for '{result.get('property_id')}':")
+        print(f"  - Audited unindexed: {result.get('unindexed_audited', 0)}")
+        print(f"  - Diagnosed defects: {len(result.get('diagnosed_defects', []))}")
+        print(f"  - Repaired & recompiled assets: {result.get('repair_summary', {}).get('recompiled_assets_count', 0)}")
+        print(f"  - Preflight inspected: {result.get('preflight_summary', {}).get('total_inspected', 0)} (push eligible: {result.get('preflight_summary', {}).get('push_eligible', 0)})")
+        print(f"  - Multi-engine push status: {result.get('push_summary', {}).get('status')}")
+    return 0 if result.get("status") in ("SUCCESS", "PARTIAL") else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -1414,6 +1448,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--sample", action="store_true", help="Audit sample partition")
     p_inspect.add_argument("--json", action="store_true", help="Output inspection results as structured JSON")
 
+    # indexing-feedback-loop
+    p_feedback = subparsers.add_parser(
+        "indexing-feedback-loop",
+        help="Execute autonomous closed-loop indexing feedback coordinator (Loop 4)",
+    )
+    p_feedback.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Target property/tenant identifier (default: profithelm)")
+    p_feedback.add_argument("--dry-run", action="store_true", help="Audit and diagnose without executing actual live pushes or asset recompiles")
+    p_feedback.add_argument("--live", action="store_true", help="Execute live network push submissions and live GSC inspections")
+    p_feedback.add_argument("--json", action="store_true", help="Output feedback cycle results as structured JSON")
+
     # reflect
     p_ref = subparsers.add_parser(
         "reflect",
@@ -1482,6 +1526,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_gsc_ceiling(args)
     elif args.command == "indexing-inspect":
         return cmd_indexing_inspect(args)
+    elif args.command == "indexing-feedback-loop":
+        return cmd_indexing_feedback_loop(args)
     else:
         parser.print_help()
         return 1

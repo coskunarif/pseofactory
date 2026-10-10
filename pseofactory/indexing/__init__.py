@@ -126,6 +126,34 @@ __all__ = [
     "EVENT_CANONICAL_STABILIZED",
     "EVENT_MILESTONE_BREACHED",
     "EVENT_QUARANTINE_TRIGGERED",
+    "RootCauseClassification",
+    "DiagnosisResult",
+    "GSCRootCauseClassifier",
+    "IndexingFeedbackLoop",
+    "THIN_OR_ANSWER_DEFICIENCY",
+    "CONTENT_QUALITY_OR_ANSWER_DEFICIENCY",
+    "CRAWL_BUDGET_SIGNAL_LAG",
+    "DEAD_ROUTE_IN_SITEMAP",
+    "CANONICAL_TEMPLATE_DEFECT",
+    "CONTENT_DEPTH_DEFICIT",
+    "ALGORITHMIC_EXPANSION_FREEZE",
+    "UNKNOWN_OR_UNCLASSIFIED",
 ]
+
+from pseofactory.indexing.feedback_loop import (
+    RootCauseClassification,
+    DiagnosisResult,
+    GSCRootCauseClassifier,
+    IndexingFeedbackLoop,
+    THIN_OR_ANSWER_DEFICIENCY,
+    CONTENT_QUALITY_OR_ANSWER_DEFICIENCY,
+    CRAWL_BUDGET_SIGNAL_LAG,
+    DEAD_ROUTE_IN_SITEMAP,
+    CANONICAL_TEMPLATE_DEFECT,
+    CONTENT_DEPTH_DEFICIT,
+    ALGORITHMIC_EXPANSION_FREEZE,
+    UNKNOWN_OR_UNCLASSIFIED,
+)
+
 
 
