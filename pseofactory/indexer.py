@@ -41,6 +41,8 @@ DEFAULT_INDEXING_VELOCITY_LEDGER = (
     else (DEFAULT_BASE_DIR / ".agy" / "indexing_velocity_ledger.json")
 )
 
+from pseofactory.indexing_inspector import DailyIndexingInspector
+
 
 class AirlockResult(tuple):
     """

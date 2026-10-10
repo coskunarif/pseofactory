@@ -195,6 +195,40 @@ class LockContentionError(Exception):
         self.exit_code = exit_code
 
 
+class SubprocessCrashError(Exception):
+    """
+    Raised when child worker process crashes or exits non-zero (other than 75).
+    Zero em-dashes. Zero en-dashes.
+    """
+    def __init__(
+        self,
+        message: str,
+        returncode: int = 1,
+        stderr_tail: str = "",
+        stdout_tail: str = "",
+        property_id: str = "",
+        command: Union[str, List[str]] = "",
+    ):
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr_tail = stderr_tail
+        self.stdout_tail = stdout_tail
+        self.property_id = property_id
+        self.command = command
+
+    @property
+    def exit_code(self) -> int:
+        return self.returncode
+
+    @property
+    def stderr(self) -> str:
+        return self.stderr_tail
+
+    @property
+    def stdout(self) -> str:
+        return self.stdout_tail
+
+
 class CrossPropertyContaminationScanner:
     """
     Scans rendered markup, schemas, and syndication files for foreign property tokens.
@@ -614,6 +648,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         Zero em-dashes. Zero en-dashes.
         """
         if self._build_asset_command:
+            formatted_cmd = None
             try:
                 env = os.environ.copy()
                 env["FACTORY_CANONICAL_BASE"] = self.canonical_base
@@ -643,23 +678,53 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                         )
                         for arg in cmd
                     ]
+                    formatted_cmd = formatted_args
                     res = subprocess.run(formatted_args, env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
                 if res.returncode == 75:
                     raise LockContentionError(
                         f"Build asset command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
                         property_id=self._property_id,
                     )
-                return res.returncode == 0
-            except LockContentionError:
+                if res.returncode != 0:
+                    stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+                    stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+                    raise SubprocessCrashError(
+                        f"Build asset command for '{self._property_id}' failed with exit {res.returncode}",
+                        returncode=res.returncode,
+                        stderr_tail=stderr_tail,
+                        stdout_tail=stdout_tail,
+                        property_id=self._property_id,
+                        command=formatted_cmd,
+                    )
+                return True
+            except (LockContentionError, SubprocessCrashError):
                 raise
-            except Exception:
-                return False
+            except subprocess.TimeoutExpired as te:
+                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 120s"
+                stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+                raise SubprocessCrashError(
+                    f"Build asset command timed out for '{self._property_id}'",
+                    returncode=124,
+                    stderr_tail=stderr_tail,
+                    stdout_tail=stdout_tail,
+                    property_id=self._property_id,
+                    command=formatted_cmd or str(self._build_asset_command),
+                )
+            except Exception as exc:
+                raise SubprocessCrashError(
+                    f"Build asset invocation error for '{self._property_id}': {exc}",
+                    returncode=1,
+                    stderr_tail=str(exc),
+                    property_id=self._property_id,
+                    command=formatted_cmd or str(self._build_asset_command),
+                )
 
         factory_script = self._repo_path / "run_factory.sh"
         if not factory_script.is_file():
             factory_script = self._repo_path / "scripts" / "run_factory.sh"
 
         if factory_script.is_file():
+            cmd = ["bash", str(factory_script), "--target", slug]
             try:
                 env = os.environ.copy()
                 env["FACTORY_CANONICAL_BASE"] = self.canonical_base
@@ -669,18 +734,45 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_ASSET_SLUG"] = slug
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
-                cmd = ["bash", str(factory_script), "--target", slug]
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
                 if res.returncode == 75:
                     raise LockContentionError(
                         f"Factory runner '{factory_script.name}' exited with 75 (EX_TEMPFAIL) on lock contention for '{self._property_id}'",
                         property_id=self._property_id,
                     )
-                return res.returncode == 0
-            except LockContentionError:
+                if res.returncode != 0:
+                    stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+                    stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+                    raise SubprocessCrashError(
+                        f"Factory runner '{factory_script.name}' exited with {res.returncode} for '{self._property_id}'",
+                        returncode=res.returncode,
+                        stderr_tail=stderr_tail,
+                        stdout_tail=stdout_tail,
+                        property_id=self._property_id,
+                        command=cmd,
+                    )
+                return True
+            except (LockContentionError, SubprocessCrashError):
                 raise
-            except Exception:
-                return False
+            except subprocess.TimeoutExpired as te:
+                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 180s"
+                stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+                raise SubprocessCrashError(
+                    f"Factory runner '{factory_script.name}' timed out after 180s for '{self._property_id}'",
+                    returncode=124,
+                    stderr_tail=stderr_tail,
+                    stdout_tail=stdout_tail,
+                    property_id=self._property_id,
+                    command=cmd,
+                )
+            except Exception as exc:
+                raise SubprocessCrashError(
+                    f"Factory runner error for '{self._property_id}': {exc}",
+                    returncode=1,
+                    stderr_tail=str(exc),
+                    property_id=self._property_id,
+                    command=cmd,
+                )
 
         # Isolated python execution in child process
         script = (
@@ -690,22 +782,64 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"try:\n"
             f"    import importlib\n"
             f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"except ModuleNotFoundError:\n"
+            f"    sys.exit(127)\n"
+            f"try:\n"
             f"    if hasattr(mod, 'build_asset'):\n"
             f"        mod.build_asset({repr(slug)}, target_file={repr(str(target_file) if target_file else None)})\n"
             f"        sys.exit(0)\n"
             f"    elif hasattr(mod, 'build_all'):\n"
             f"        mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
             f"        sys.exit(0)\n"
+            f"    sys.exit(127)\n"
             f"except Exception as ex:\n"
+            f"    import traceback\n"
+            f"    traceback.print_exc()\n"
             f"    sys.exit(1)\n"
-            f"sys.exit(1)\n"
         )
         try:
             env = os.environ.copy()
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
-            return res.returncode == 0
-        except Exception:
-            return False
+            if res.returncode == 0:
+                return True
+            if res.returncode == 75:
+                raise LockContentionError(
+                    f"Isolated builder for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
+                    property_id=self._property_id,
+                )
+            if res.returncode == 127:
+                return False
+            stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+            stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+            raise SubprocessCrashError(
+                f"Isolated builder for '{self._property_id}' failed with exit {res.returncode}",
+                returncode=res.returncode,
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+                property_id=self._property_id,
+                command=[sys.executable, "-c", script],
+            )
+        except (LockContentionError, SubprocessCrashError):
+            raise
+        except subprocess.TimeoutExpired as te:
+            stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 120s"
+            stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+            raise SubprocessCrashError(
+                f"Isolated builder for '{self._property_id}' timed out after 120s",
+                returncode=124,
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+                property_id=self._property_id,
+                command=[sys.executable, "-c", script],
+            )
+        except Exception as exc:
+            raise SubprocessCrashError(
+                f"Isolated builder execution error for '{self._property_id}': {exc}",
+                returncode=1,
+                stderr_tail=str(exc),
+                property_id=self._property_id,
+                command=[sys.executable, "-c", script],
+            )
 
     def build_all(self) -> bool:
         """
@@ -731,11 +865,39 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                         f"Build all command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
                         property_id=self._property_id,
                     )
-                return res.returncode == 0
-            except LockContentionError:
+                if res.returncode != 0:
+                    stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+                    stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+                    raise SubprocessCrashError(
+                        f"Build all command for '{self._property_id}' exited with {res.returncode}",
+                        returncode=res.returncode,
+                        stderr_tail=stderr_tail,
+                        stdout_tail=stdout_tail,
+                        property_id=self._property_id,
+                        command=cmd,
+                    )
+                return True
+            except (LockContentionError, SubprocessCrashError):
                 raise
-            except Exception:
-                return False
+            except subprocess.TimeoutExpired as te:
+                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
+                stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+                raise SubprocessCrashError(
+                    f"Build all command timed out after 600s for '{self._property_id}'",
+                    returncode=124,
+                    stderr_tail=stderr_tail,
+                    stdout_tail=stdout_tail,
+                    property_id=self._property_id,
+                    command=str(self._build_command),
+                )
+            except Exception as exc:
+                raise SubprocessCrashError(
+                    f"Build all invocation error for '{self._property_id}': {exc}",
+                    returncode=1,
+                    stderr_tail=str(exc),
+                    property_id=self._property_id,
+                    command=str(self._build_command),
+                )
 
         # Prioritize isolated python execution in child process
         script = (
@@ -745,21 +907,56 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"try:\n"
             f"    import importlib\n"
             f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"except ModuleNotFoundError:\n"
+            f"    sys.exit(127)\n"
+            f"try:\n"
             f"    if hasattr(mod, 'build_all'):\n"
             f"        try:\n"
             f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
             f"        except TypeError:\n"
             f"            mod.build_all()\n"
             f"        sys.exit(0)\n"
+            f"    sys.exit(127)\n"
             f"except Exception as ex:\n"
+            f"    import traceback\n"
+            f"    traceback.print_exc()\n"
             f"    sys.exit(1)\n"
-            f"sys.exit(1)\n"
         )
+        last_error = None
         try:
             env = os.environ.copy()
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
             if res.returncode == 0:
                 return True
+            if res.returncode == 75:
+                raise LockContentionError(
+                    f"Isolated builder for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
+                    property_id=self._property_id,
+                )
+            if res.returncode != 127:
+                stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+                stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+                last_error = SubprocessCrashError(
+                    f"Isolated builder for '{self._property_id}' failed with exit {res.returncode}",
+                    returncode=res.returncode,
+                    stderr_tail=stderr_tail,
+                    stdout_tail=stdout_tail,
+                    property_id=self._property_id,
+                    command=[sys.executable, "-c", script],
+                )
+        except (LockContentionError, SubprocessCrashError):
+            raise
+        except subprocess.TimeoutExpired as te:
+            stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
+            stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+            raise SubprocessCrashError(
+                f"Isolated builder for '{self._property_id}' timed out after 600s",
+                returncode=124,
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+                property_id=self._property_id,
+                command=[sys.executable, "-c", script],
+            )
         except Exception:
             pass
 
@@ -768,6 +965,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             factory_script = self._repo_path / "scripts" / "run_factory.sh"
 
         if factory_script.is_file():
+            cmd = ["bash", str(factory_script), "--dry-run", "--force"]
             try:
                 env = os.environ.copy()
                 env["FACTORY_CANONICAL_BASE"] = self.canonical_base
@@ -779,14 +977,51 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PREXVO_CHECK_QUEUE"] = "0"
                 env["PROFITHELM_AUTO_LIVE"] = "0"
                 env["PROFITHELM_CHECK_QUEUE"] = "0"
-                cmd = ["bash", str(factory_script), "--dry-run", "--force"]
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
                     return True
-            except Exception:
-                pass
+                if res.returncode == 75:
+                    raise LockContentionError(
+                        f"Factory runner '{factory_script.name}' exited with 75 (EX_TEMPFAIL) on lock contention for '{self._property_id}'",
+                        property_id=self._property_id,
+                    )
+                stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+                stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+                raise SubprocessCrashError(
+                    f"Factory runner '{factory_script.name}' failed with exit {res.returncode} for '{self._property_id}'",
+                    returncode=res.returncode,
+                    stderr_tail=stderr_tail,
+                    stdout_tail=stdout_tail,
+                    property_id=self._property_id,
+                    command=cmd,
+                )
+            except (LockContentionError, SubprocessCrashError):
+                raise
+            except subprocess.TimeoutExpired as te:
+                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
+                stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+                raise SubprocessCrashError(
+                    f"Factory runner '{factory_script.name}' timed out after 600s for '{self._property_id}'",
+                    returncode=124,
+                    stderr_tail=stderr_tail,
+                    stdout_tail=stdout_tail,
+                    property_id=self._property_id,
+                    command=cmd,
+                )
+            except Exception as exc:
+                raise SubprocessCrashError(
+                    f"Factory runner error for '{self._property_id}': {exc}",
+                    returncode=1,
+                    stderr_tail=str(exc),
+                    property_id=self._property_id,
+                    command=cmd,
+                )
+
+        if last_error:
+            raise last_error
 
         return False
+
 
 
 class WorkspacePropertyScanner:

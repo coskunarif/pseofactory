@@ -1102,6 +1102,40 @@ def cmd_gsc_ceiling(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_indexing_inspect(args: argparse.Namespace) -> int:
+    """
+    Executes Daily Indexing Inspector audit across GSC rollover queue, airlock quarantine,
+    velocity ledger, and search traffic trajectory (Loop 3).
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    strict = getattr(args, "strict", False)
+    dry_run = getattr(args, "dry_run", False)
+    sample = getattr(args, "sample", False)
+    output_json = getattr(args, "json", False)
+
+    inspector = DailyIndexingInspector(tenant_id=property_id)
+    report = inspector.run_inspection(strict=strict, dry_run=dry_run, sample=sample)
+
+    if output_json:
+        print(json.dumps(report, indent=2))
+    else:
+        status = report.get("audit_status", "UNKNOWN")
+        print(f"[{status}] Daily Indexing Inspection for '{report.get('tenant_id')}':")
+        print(f"  - Rollover Queue: size={report['gsc_rollover']['queue_size']}, quota_exhausted={report['gsc_rollover']['quota_exhausted']}")
+        print(f"  - Quarantine: total={report['airlock_quarantine']['total_quarantined']}, 404s={report['airlock_quarantine']['breakdown'].get('HTTP_404', 0)}")
+        print(f"  - Velocity: stalled={report['velocity_stagnation']['stalled_routes_count']}/{report['velocity_stagnation']['routes_monitored']}")
+        if report.get("remediation_prompts"):
+            print("  Suggested Remediation Prompts:")
+            for prompt in report["remediation_prompts"]:
+                print(f"    * {prompt}")
+
+    if strict and report.get("audit_status") in ("FAIL", "WARN"):
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -1330,6 +1364,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_ceiling.add_argument("--json", action="store_true", help="Output analysis result as structured JSON")
     p_ceiling.add_argument("--html", type=str, default=None, help="Output file path to render standalone minimal modern light HTML report")
 
+    # indexing-inspect
+    p_inspect = subparsers.add_parser(
+        "indexing-inspect",
+        help="Execute daily indexing inspection auditing GSC rollover, quarantine, and velocity (Loop 3)",
+    )
+    p_inspect.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Target property/tenant identifier")
+    p_inspect.add_argument("--strict", action="store_true", help="Fail with non-zero exit code if anomalies or warnings detected")
+    p_inspect.add_argument("--dry-run", action="store_true", help="Audit without updating recovery ledger on disk")
+    p_inspect.add_argument("--sample", action="store_true", help="Audit sample partition")
+    p_inspect.add_argument("--json", action="store_true", help="Output inspection results as structured JSON")
+
     return parser
 
 
@@ -1384,6 +1429,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_indexing_preflight(args)
     elif args.command == "gsc-ceiling":
         return cmd_gsc_ceiling(args)
+    elif args.command == "indexing-inspect":
+        return cmd_indexing_inspect(args)
     else:
         parser.print_help()
         return 1
