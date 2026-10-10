@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Set, Optional, Tuple, Callable, Union, Iterable
 
 FORBIDDEN_JARGON: List[str] = [
+    "synergistic alignment 1791603786",
     "synergistic alignment 1791603771",
     "delve",
     "delving",
