@@ -1443,7 +1443,16 @@ class RefactorCascadeEngine:
         Checks whether an asset is currently quarantined in the DLQ.
         Zero em-dashes. Zero en-dashes.
         """
-        return self.get_quarantine_entry(record, property_id) is not None
+        entry = self.get_quarantine_entry(record, property_id)
+        if not entry:
+            return False
+        q_reasons = entry.get("reasons", [])
+        if bool(q_reasons) and all(
+            r == "ENGINE_HASH_DRIFT" or r == DriftReason.ENGINE_HASH_DRIFT.value
+            for r in q_reasons
+        ):
+            return False
+        return True
 
     def list_dlq(self, property_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -1498,6 +1507,17 @@ class RefactorCascadeEngine:
 
         return replayed
 
+    def replay_quarantine(
+        self,
+        property_id: Optional[str] = None,
+        slug: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Replays quarantined entries by removing them from DLQ.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return self.replay_dlq(property_id=property_id, slug=slug)
+
     def refactor_asset(
         self,
         record: AssetDriftRecord,
@@ -1519,12 +1539,17 @@ class RefactorCascadeEngine:
         if not force:
             q_entry = self.get_quarantine_entry(record, property_id=adapter.property_id)
             if q_entry:
-                q_ts = q_entry.get("timestamp", "unknown")
                 q_reasons = q_entry.get("reasons", [])
-                print(
-                    f"Asset '{slug}' is quarantined in DLQ (timestamp: {q_ts}, reasons: {q_reasons}); skipping retries."
+                is_only_engine_drift = bool(q_reasons) and all(
+                    r == "ENGINE_HASH_DRIFT" or r == DriftReason.ENGINE_HASH_DRIFT.value
+                    for r in q_reasons
                 )
-                return False
+                if not is_only_engine_drift:
+                    q_ts = q_entry.get("timestamp", "unknown")
+                    print(
+                        f"Asset '{slug}' is quarantined in DLQ (timestamp: {q_ts}, reasons: {q_reasons}); skipping retries."
+                    )
+                    return False
 
         if dry_run:
             if target_path.is_file():
@@ -1572,6 +1597,7 @@ class RefactorCascadeEngine:
                 # 4. Atomic Commit: Clean up backup
                 if backup_path and backup_path.exists():
                     backup_path.unlink(missing_ok=True)
+                self.replay_quarantine(property_id=adapter.property_id, slug=slug)
                 return True
 
             except LockContentionError as lce:
@@ -1789,8 +1815,16 @@ class MaintenanceLifecycle:
             quarantined_drifted = []
             for rec in report.drifted_assets:
                 q_entry = self.cascade_engine.get_quarantine_entry(rec, adapter.property_id)
-                if q_entry and not force:
-                    quarantined_drifted.append((rec, q_entry))
+                if q_entry:
+                    q_reasons = q_entry.get("reasons", [])
+                    is_only_engine_drift = bool(q_reasons) and all(
+                        r == "ENGINE_HASH_DRIFT" or r == DriftReason.ENGINE_HASH_DRIFT.value
+                        for r in q_reasons
+                    )
+                    if is_only_engine_drift or force:
+                        actionable_drifted.append(rec)
+                    else:
+                        quarantined_drifted.append((rec, q_entry))
                 else:
                     actionable_drifted.append(rec)
 
@@ -2308,6 +2342,9 @@ def replay_dlq(
     return engine.replay_dlq(property_id=property_id, slug=slug)
 
 
+replay_quarantine = replay_dlq
+
+
 def list_dlq(
     property_id: Optional[str] = None,
     dlq_path: Optional[Union[str, Path]] = None,
@@ -2341,6 +2378,7 @@ __all__ = [
     "run_fleet_maintenance",
     "audit_property_assets",
     "replay_dlq",
+    "replay_quarantine",
     "list_dlq",
     "trigger_drift_cascade",
     "cascade_drift_lifecycle",
