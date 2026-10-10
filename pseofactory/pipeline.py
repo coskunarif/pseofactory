@@ -13,6 +13,7 @@ import re
 import json
 import fcntl
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Union
@@ -64,6 +65,9 @@ from pseofactory.audit import (
 )
 
 
+logger = logging.getLogger("pseofactory.pipeline")
+
+
 class RejectionReason:
     LOW_JEV_DURABILITY = "LOW_JEV_DURABILITY"
     HIGH_TREG_COMPETITION = "HIGH_TREG_COMPETITION"
@@ -73,6 +77,7 @@ class RejectionReason:
     REFACTOR_PAGE_CANNIBALIZATION = "REFACTOR_PAGE_CANNIBALIZATION"
     AUDIT_STAGE_FAILED = "AUDIT_STAGE_FAILED"
     CONTENT_ACCURACY_FAILED = "CONTENT_ACCURACY_FAILED"
+    COMPILATION_FAILED = "COMPILATION_FAILED"
 
 
 from pseofactory.verifier import MasterSEOVerifier
@@ -760,45 +765,67 @@ class FactoryPipeline:
             candidate_spec.setdefault("query", decision.query)
             candidate_spec.setdefault("slug", decision.slug)
 
-            # Pre-compilation gate
-            assert_high_effort_content_qualified(
-                candidate_spec, context=f"pipeline compilation for {tenant}"
-            )
-
-            # Obtain property adapter for scoped environment isolation
-            adapter = None
+            # Pre-compilation and compilation execution with fault isolation
             try:
-                adapter = self.tenant_registry.get_adapter(tenant)
-            except KeyError:
-                adapter = ConfigurablePropertyAdapter(
-                    property_id=tenant,
-                    brand_name=tenant.capitalize(),
-                    domain=f"{tenant}.com",
-                    canonical_base=f"https://{tenant}.com",
-                    dist_dir=Path(f"/tmp/{tenant}-dist"),
+                assert_high_effort_content_qualified(
+                    candidate_spec, context=f"pipeline compilation for {tenant}"
                 )
 
-            # Scoped execution under PropertyAdapter.scoped_environment()
-            with adapter.scoped_environment():
-                compiled_res = compile_high_effort_page(candidate_spec)
+                # Obtain property adapter for scoped environment isolation
+                adapter = None
+                try:
+                    adapter = self.tenant_registry.get_adapter(tenant)
+                except KeyError:
+                    adapter = ConfigurablePropertyAdapter(
+                        property_id=tenant,
+                        brand_name=tenant.capitalize(),
+                        domain=f"{tenant}.com",
+                        canonical_base=f"https://{tenant}.com",
+                        dist_dir=Path(f"/tmp/{tenant}-dist"),
+                    )
 
-            # 9. Post-compilation contamination firewall (fails closed on foreign tokens)
-            self.scanner.assert_clean(
-                compiled_res["html"],
-                property_id=tenant,
-                context=f"compiled page '{decision.slug}'",
-            )
+                # Scoped execution under PropertyAdapter.scoped_environment()
+                with adapter.scoped_environment():
+                    compiled_res = compile_high_effort_page(candidate_spec)
 
-            # 10. Autonomous Content Accuracy & Truthfulness Audit Stage
-            audit_stage = ContentAccuracyAuditStage(
-                tolerance=self.config.audit_tolerance,
-                strict=False,
-            )
-            audit_report = audit_stage.audit(
-                html=compiled_res["html"],
-                candidate_spec=candidate_spec,
-                tenant=tenant,
-            )
+                # 9. Post-compilation contamination firewall (fails closed on foreign tokens)
+                self.scanner.assert_clean(
+                    compiled_res["html"],
+                    property_id=tenant,
+                    context=f"compiled page '{decision.slug}'",
+                )
+
+                # 10. Autonomous Content Accuracy & Truthfulness Audit Stage
+                audit_stage = ContentAccuracyAuditStage(
+                    tolerance=self.config.audit_tolerance,
+                    strict=False,
+                )
+                audit_report = audit_stage.audit(
+                    html=compiled_res["html"],
+                    candidate_spec=candidate_spec,
+                    tenant=tenant,
+                )
+            except Exception as comp_exc:
+                clean_err = str(comp_exc).replace("\u2014", "-").replace("\u2013", "-")
+                logger.warning(
+                    f"Opportunity compilation failed for query '{decision.query}' ({decision.slug}): {clean_err}"
+                )
+                aborted_opp = AbortedOpportunity(
+                    query=decision.query,
+                    slug=decision.slug,
+                    tenant=tenant,
+                    reason=f"COMPILATION_FAILED: {clean_err}",
+                    jev_score=decision.jev_score,
+                    durable_prob=decision.durable_prob,
+                    search_volume=getattr(decision, "search_volume", 0),
+                    keyword_difficulty=getattr(decision, "keyword_difficulty", 0.0),
+                    foreign_tokens=[],
+                    action="REJECT",
+                )
+                aborted_opportunities.append(aborted_opp)
+                if hasattr(self, "aborted_opportunities") and isinstance(self.aborted_opportunities, list) and self.aborted_opportunities is not aborted_opportunities:
+                    self.aborted_opportunities.append(aborted_opp)
+                continue
 
             if not audit_report.passed:
                 if self.config.strict_audit:
@@ -874,6 +901,30 @@ class FactoryPipeline:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(compiled_res["html"], encoding="utf-8")
                 out_file = out_path
+
+                try:
+                    from pseofactory.edge import build_edge_headers
+                    tenant_dist = Path(output_dir) / tenant
+                    c_base = adapter.canonical_base if adapter else f"https://{tenant}.com"
+                    route_path = f"/tools/{decision.slug}/"
+                    headers_file = tenant_dist / "_headers"
+                    existing_routes = []
+                    if headers_file.exists():
+                        try:
+                            for line in headers_file.read_text(encoding="utf-8").splitlines():
+                                line_s = line.strip()
+                                if line_s.startswith("/tools/"):
+                                    existing_routes.append(line_s)
+                        except Exception:
+                            pass
+                    all_routes = list(dict.fromkeys(existing_routes + [route_path]))
+                    headers_content = build_edge_headers(
+                        canonical_base=c_base,
+                        routes=all_routes,
+                    )
+                    headers_file.write_text(headers_content, encoding="utf-8")
+                except Exception as he:
+                    logger.warning(f"Failed to generate edge _headers for {tenant}: {he}")
 
             compiled_assets.append(
                 CompiledAssetResult(

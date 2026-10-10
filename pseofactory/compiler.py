@@ -18,6 +18,7 @@ Zero em-dashes. Zero en-dashes.
 import os
 import json
 import re
+import ast
 from typing import Dict, Any, Optional
 
 from pseofactory.qualification import assert_high_effort_content_qualified
@@ -57,6 +58,106 @@ PREXVO_STUDENT_LOAN_CLUSTER = [
     ("pslf-qualifying-payment-calculator", "PSLF 120 Qualifying Payments Verification Calculator"),
     ("student-loan-interest-subsidy-calculator", "Title IV Unpaid Interest Subsidy Benefit Calculator"),
 ]
+
+
+def compile_ast_to_js(
+    formula_str: str,
+    input_keys: Optional[Any] = None,
+) -> str:
+    """
+    Translates a deterministic arithmetic formula string into a client-side JavaScript expression.
+    Parses mathematical expressions via ast.parse(..., mode='eval') and translates AST operators
+    (+, -, *, /, etc.) and variable names into JavaScript expressions referencing inputs (e.g. inputs.a + inputs.b).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not formula_str or not isinstance(formula_str, str):
+        raise ValueError("Formula must be a non-empty string")
+
+    clean_f = formula_str.strip()
+    clean_f = re.sub(r'(\d+(?:\.\d+)?)\s*%', r'(\1 / 100.0)', clean_f)
+    clean_f = clean_f.replace("$", "")
+    clean_f = re.sub(r'(?<=\d),(?=\d)', '', clean_f)
+
+    try:
+        parsed_ast = ast.parse(clean_f, mode="eval")
+    except Exception as ex:
+        raise ValueError(f"Formula '{formula_str}' failed AST parse: {ex}")
+
+    def _node_to_js(node: ast.AST) -> str:
+        if isinstance(node, ast.Expression):
+            return _node_to_js(node.body)
+        elif isinstance(node, ast.Constant):
+            if isinstance(node.value, bool):
+                return "true" if node.value else "false"
+            elif isinstance(node.value, (int, float)):
+                return str(node.value)
+            raise ValueError(f"Unsupported constant type in formula: {type(node.value).__name__}")
+        elif isinstance(node, ast.Name):
+            name = node.id
+            if name.lower() == "pi":
+                return "Math.PI"
+            elif name.lower() == "e":
+                return "Math.E"
+            return f"inputs.{name}"
+        elif isinstance(node, ast.BinOp):
+            left_js = _node_to_js(node.left)
+            right_js = _node_to_js(node.right)
+            if isinstance(node.op, ast.Add):
+                return f"({left_js} + {right_js})"
+            elif isinstance(node.op, ast.Sub):
+                return f"({left_js} - {right_js})"
+            elif isinstance(node.op, ast.Mult):
+                return f"({left_js} * {right_js})"
+            elif isinstance(node.op, ast.Div):
+                return f"({left_js} / {right_js})"
+            elif isinstance(node.op, ast.FloorDiv):
+                return f"Math.floor({left_js} / {right_js})"
+            elif isinstance(node.op, ast.Mod):
+                return f"({left_js} % {right_js})"
+            elif isinstance(node.op, ast.Pow):
+                return f"Math.pow({left_js}, {right_js})"
+            else:
+                raise ValueError(f"Unsupported binary operator in formula: {type(node.op).__name__}")
+        elif isinstance(node, ast.UnaryOp):
+            operand_js = _node_to_js(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return f"(+{operand_js})"
+            elif isinstance(node.op, ast.USub):
+                return f"(-{operand_js})"
+            else:
+                raise ValueError(f"Unsupported unary operator in formula: {type(node.op).__name__}")
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                func_name = node.func.id.lower()
+                args_js = [_node_to_js(arg) for arg in node.args]
+                if func_name == "min":
+                    return f"Math.min({', '.join(args_js)})"
+                elif func_name == "max":
+                    return f"Math.max({', '.join(args_js)})"
+                elif func_name == "abs":
+                    return f"Math.abs({', '.join(args_js)})"
+                elif func_name in ("floor", "ceil"):
+                    return f"Math.{func_name}({', '.join(args_js)})"
+                elif func_name == "round":
+                    if len(args_js) == 2:
+                        return f"(Math.round({args_js[0]} * Math.pow(10, {args_js[1]})) / Math.pow(10, {args_js[1]}))"
+                    elif len(args_js) == 1:
+                        return f"Math.round({args_js[0]})"
+                    else:
+                        raise ValueError(f"round() expects 1 or 2 arguments, got {len(args_js)}")
+                elif func_name == "pow" and len(args_js) == 2:
+                    return f"Math.pow({args_js[0]}, {args_js[1]})"
+                else:
+                    raise ValueError(f"Unsupported function call in formula: {node.func.id}")
+            else:
+                raise ValueError(f"Unsupported function call in formula: {ast.dump(node.func)}")
+        else:
+            raise ValueError(f"Unsupported expression element in formula: {ast.dump(node)}")
+
+    return _node_to_js(parsed_ast)
+
+
+compile_formula_to_js = compile_ast_to_js
 
 
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -382,6 +483,18 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     faq_json_str = json.dumps(faq_entities, ensure_ascii=False, indent=6)
 
+    dynamic_return_js = f"return {published_output};"
+    if formula:
+        try:
+            dynamic_expr = compile_ast_to_js(
+                formula,
+                input_keys=list(raw_inputs.keys()) if isinstance(raw_inputs, dict) else None,
+            )
+            if dynamic_expr:
+                dynamic_return_js = f"return {dynamic_expr};"
+        except Exception:
+            dynamic_return_js = f"return {published_output};"
+
     if is_prexvo:
         calc_js_body = f"""      var balance = inputs.balance || inputs.principal || inputs.loan_amount || 35000;
       var rate = (inputs.rate || inputs.interest_rate || 6.5) / 100;
@@ -403,6 +516,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         var monthlyInterest = (balance * rate) / 12;
         var monthlyPay = Math.max(0, (Math.max(0, income - 2.25 * povertyLine) * 0.05) / 12);
         return Math.max(0, Math.round((monthlyInterest - monthlyPay) * 100) / 100);
+      }}
+      if (slug.indexOf("loan") === -1 && slug.indexOf("student") === -1 && slug.indexOf("repayment") === -1) {{
+        {dynamic_return_js}
       }}
       var monthlyRate = rate / 12;
       var nMonths = 120;
@@ -475,7 +591,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         var burn = inputs.burn || inputs.monthly_burn || 10000;
         return burn > 0 ? Math.round((cash / burn) * 10) / 10 : 0;
       }}
-      return {published_output};"""
+      {dynamic_return_js}"""
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
