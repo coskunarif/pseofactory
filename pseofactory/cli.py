@@ -85,8 +85,16 @@ def cmd_maintain(args: argparse.Namespace) -> int:
     Returns 0 on SUCCESS or SKIPPED_NO_CHANGES, 1 on failure.
     Zero em-dashes. Zero en-dashes.
     """
+    if getattr(args, "fast", False):
+        os.environ["PSEUFACTORY_FAST_MODE"] = "1"
+        os.environ.setdefault("PSEUFACTORY_CI_DISCOVERY_INTERVAL", "0.05")
+        os.environ.setdefault("PSEUFACTORY_CI_POLL_INTERVAL", "0.25")
+        os.environ.setdefault("PSEUFACTORY_GIT_BACKOFF", "0.05,0.1,0.2")
+        os.environ.setdefault("PSEUFACTORY_EDGE_BACKOFF", "0.001")
+
     property_id = args.property or "prexvo"
-    res = run_maintenance_lifecycle(property_id=property_id, force=args.force)
+    auto_heal = getattr(args, "auto_heal", False)
+    res = run_maintenance_lifecycle(property_id=property_id, force=args.force or auto_heal)
     if args.json:
         print(json.dumps(res.to_dict(), indent=2))
     else:
@@ -229,6 +237,13 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     6. Live Edge Verification: LiveEdgeVerifier
     Zero em-dashes. Zero en-dashes.
     """
+    if getattr(args, "fast", False):
+        os.environ["PSEUFACTORY_FAST_MODE"] = "1"
+        os.environ.setdefault("PSEUFACTORY_CI_DISCOVERY_INTERVAL", "0.05")
+        os.environ.setdefault("PSEUFACTORY_CI_POLL_INTERVAL", "0.25")
+        os.environ.setdefault("PSEUFACTORY_GIT_BACKOFF", "0.05,0.1,0.2")
+        os.environ.setdefault("PSEUFACTORY_EDGE_BACKOFF", "0.001")
+
     property_id = getattr(args, "property", None)
     dry_run = getattr(args, "dry_run", False)
     timeout = getattr(args, "timeout", 300)
@@ -1171,6 +1186,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_cycle.add_argument("--dry-run", action="store_true", help="Dry-run audit mode without committing or pushing")
     p_cycle.add_argument("--timeout", type=int, default=300, help="Timeout in seconds for CI watcher")
     p_cycle.add_argument("--skip-ci", action="store_true", help="Skip remote CI/CD quality gate watching")
+    p_cycle.add_argument("--fast", action="store_true", help="Enable fast mode: aggressive polling intervals and concurrency")
     p_cycle.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # audit
@@ -1183,6 +1199,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_maintain = subparsers.add_parser("maintain", help="Execute closed-loop maintenance lifecycle on a property")
     p_maintain.add_argument("--property", type=str, default="prexvo", help="Property ID (default: prexvo)")
     p_maintain.add_argument("--force", action="store_true", help="Force rebuild even if no drift detected")
+    p_maintain.add_argument("--fast", action="store_true", help="Enable fast mode: aggressive polling intervals and concurrency")
+    p_maintain.add_argument("--auto-heal", action="store_true", help="Automatically heal drifted assets in single pass")
     p_maintain.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # refactor

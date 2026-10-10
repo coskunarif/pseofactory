@@ -18,6 +18,7 @@ import shutil
 import hashlib
 import tempfile
 import subprocess
+import concurrent.futures
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -553,7 +554,17 @@ class GitOpsCoordinator:
             return {"status": "SKIPPED_NO_REMOTE", "branch": tb}
 
         last_error = ""
-        backoffs = [1.0, 2.0, 4.0]
+        env_backoff = os.environ.get("PSEUFACTORY_GIT_BACKOFF", "").strip()
+        fast_mode = os.environ.get("PSEUFACTORY_FAST_MODE", "").strip() in ("1", "true", "TRUE")
+        if env_backoff:
+            try:
+                backoffs = [float(x.strip()) for x in env_backoff.split(",") if x.strip()]
+            except ValueError:
+                backoffs = [0.05, 0.1, 0.2] if fast_mode else [1.0, 2.0, 4.0]
+        elif fast_mode:
+            backoffs = [0.05, 0.1, 0.2]
+        else:
+            backoffs = [1.0, 2.0, 4.0]
 
         for attempt in range(1, max_attempts + 1):
             cmd = ["git", "-C", str(self.repo_path), "push", "origin", tb]
@@ -834,12 +845,32 @@ class CICDWatcher:
         repo_slug: Optional[str] = None,
         workflow: Optional[str] = None,
         timeout: int = 300,
-        poll_interval: float = 5.0,
+        poll_interval: Optional[float] = None,
+        discovery_interval: Optional[float] = None,
     ):
+        fast_mode = os.environ.get("PSEUFACTORY_FAST_MODE", "").strip() in ("1", "true", "TRUE")
         self.repo_slug = repo_slug
         self.workflow = workflow
         self.timeout = timeout
-        self.poll_interval = poll_interval
+
+        if poll_interval is not None:
+            self.poll_interval = float(poll_interval)
+        elif "PSEUFACTORY_CI_POLL_INTERVAL" in os.environ:
+            self.poll_interval = float(os.environ["PSEUFACTORY_CI_POLL_INTERVAL"])
+        elif fast_mode:
+            self.poll_interval = 0.25
+        else:
+            self.poll_interval = 5.0
+
+        if discovery_interval is not None:
+            self.discovery_interval = float(discovery_interval)
+        elif "PSEUFACTORY_CI_DISCOVERY_INTERVAL" in os.environ:
+            self.discovery_interval = float(os.environ["PSEUFACTORY_CI_DISCOVERY_INTERVAL"])
+        elif fast_mode:
+            self.discovery_interval = 0.05
+        else:
+            self.discovery_interval = 2.0
+
         self.runs_base = Path("/home/ubuntuadmin/projects/.agy/runs")
 
     def resolve_repo_slug(self, repo_path: Path) -> Optional[str]:
@@ -912,7 +943,7 @@ class CICDWatcher:
                         break
                 except Exception:
                     pass
-            time.sleep(2.0)
+            time.sleep(self.discovery_interval)
 
         # Phase B: Polling until completed or timeout
         while True:
@@ -1052,6 +1083,8 @@ class CICDWatcher:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         incident_file.write_text(json.dumps(incident, indent=2), encoding="utf-8")
+        
+    watch_run = watch
 
 
 class LiveEdgeVerifier:
@@ -1223,9 +1256,18 @@ class LiveEdgeVerifier:
         results: Dict[str, Any] = {}
         all_passed = True
 
+        max_workers = min(4, len(endpoints))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_ep = {executor.submit(self.verify_url, ep): ep for ep in endpoints}
+            for future in concurrent.futures.as_completed(future_to_ep):
+                ep = future_to_ep[future]
+                try:
+                    results[ep] = future.result()
+                except Exception as e:
+                    results[ep] = {"status": "FAIL", "error": str(e), "status_code": 0}
+
         for ep in endpoints:
-            res = self.verify_url(ep)
-            results[ep] = res
+            res = results.get(ep, {})
             status_code = res.get("status_code") or 0
 
             if ep == f"{base}/":
@@ -1309,6 +1351,8 @@ class LiveEdgeVerifier:
         Zero em-dashes. Zero en-dashes.
         """
         return self.verify_edge_deployment(base_url=base_url)
+
+    verify_fleet = verify_edge_deployment
 
     def probe_two_phase(
         self,
