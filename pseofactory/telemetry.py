@@ -179,6 +179,8 @@ class AtomicTelemetryLogger:
             finally:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
+    log_event = log
+
     def record(
         self,
         event_type: str,

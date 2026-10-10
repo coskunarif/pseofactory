@@ -2416,7 +2416,19 @@ class MaintenanceLifecycle:
                 indexing_status_val = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
             except Exception as idx_err:
                 print(f"Warning: Indexing airlock stage error for '{adapter.property_id}': {idx_err}")
-                indexing_status_val = "DRY_RUN" if dry_run else "SUCCESS"
+                indexing_status_val = "FAILED"
+                try:
+                    from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
+                    AtomicTelemetryLogger().log_event(
+                        TelemetryEvent(
+                            event_type="INDEXING_DISPATCH_FAILURE",
+                            tenant_id=adapter.property_id,
+                            error_message=str(idx_err),
+                            action_taken="RECORDED",
+                        )
+                    )
+                except Exception:
+                    pass
 
             # Stage 11: Non-Blocking Partner Monetization Telemetry
             partner_readiness_status_val: Optional[str] = None
@@ -2434,7 +2446,10 @@ class MaintenanceLifecycle:
                 partner_readiness_status_val = "EVALUATED"
 
             duration = time.time() - start_time
-            final_status = "DRY_RUN" if dry_run else "SUCCESS"
+            if indexing_status_val == "FAILED":
+                final_status = "PARTIAL"
+            else:
+                final_status = "DRY_RUN" if dry_run else "SUCCESS"
             return MaintenanceResult(
                 property_id=adapter.property_id,
                 status=final_status,
