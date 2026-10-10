@@ -37,6 +37,7 @@ FORBIDDEN_JARGON: List[str] = [
 ]
 
 PROMPT_LEAKAGE_TERMS: List[str] = [
+    "model system prompt instructions 1791603786",
     "model system prompt instructions 1791603771",
     "captures striking distance",
     "search demand for position",
