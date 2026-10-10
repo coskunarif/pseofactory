@@ -91,6 +91,13 @@ class IndexingPreflightEngine:
     """
     Deterministic 6-stage indexing preflight engine with multi-tier partitioning.
     """
+    _memo_cache: Dict[Tuple[str, float, int], PreflightURLRecord] = {}
+    _dist_memo_cache: Dict[Any, PreflightReport] = {}
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._memo_cache.clear()
+        cls._dist_memo_cache.clear()
 
     def __init__(
         self,
@@ -107,6 +114,11 @@ class IndexingPreflightEngine:
         self.min_words = min_words
         self.tier1_cap = tier1_cap
         self.live = live
+
+        self._memo_cache = IndexingPreflightEngine._memo_cache
+        self._file_cache = self._memo_cache
+        self._dist_memo_cache = IndexingPreflightEngine._dist_memo_cache
+        self._dist_cache = self._dist_memo_cache
 
         self._redirect_rules: List[Tuple[str, str, int]] = []
         self._header_rules: List[Tuple[str, Dict[str, str]]] = []
@@ -229,6 +241,66 @@ class IndexingPreflightEngine:
             return TierClassification.TIER_1_HUB
         return TierClassification.TIER_2_LEAF
 
+    def inspect_file(
+        self,
+        file_path: Union[str, Path],
+        url: Optional[str] = None,
+    ) -> PreflightURLRecord:
+        """
+        Inspects a single static HTML file with memoization cache keyed by (file_path, st_mtime, st_size).
+        Prevents repeated BeautifulSoup DOM parsing during maintenance cycles.
+        """
+        path_obj = Path(file_path).resolve()
+        if not path_obj.is_file():
+            target_url = url or f"https://{self.domain}/{path_obj.name}"
+            return PreflightURLRecord(
+                url=target_url,
+                status=PreflightStatus.BLOCKED_404,
+                http_status_code=404,
+                issues=[f"File not found in dist: {path_obj}"],
+            )
+
+        try:
+            st = path_obj.stat()
+            cache_key = (str(path_obj), st.st_mtime, st.st_size)
+            if cache_key in self._memo_cache:
+                return self._memo_cache[cache_key]
+        except OSError:
+            cache_key = None
+
+        if not url:
+            if self.dist_dir:
+                try:
+                    rel = path_obj.relative_to(self.dist_dir).as_posix()
+                    if rel == "index.html":
+                        url_path = "/"
+                    elif rel.endswith("/index.html"):
+                        url_path = "/" + rel[:-11].strip("/") + "/"
+                    elif rel.endswith(".html"):
+                        url_path = "/" + rel[:-5].strip("/") + "/"
+                    else:
+                        url_path = "/" + rel.strip("/") + "/"
+                    url = f"https://{self.domain}{url_path}"
+                except ValueError:
+                    url = f"https://{self.domain}/{path_obj.name}"
+            else:
+                url = f"https://{self.domain}/{path_obj.name}"
+
+        raw = path_obj.read_text(encoding="utf-8", errors="ignore")
+        if len(raw.strip()) < 100 or "<html" not in raw.lower():
+            rec = PreflightURLRecord(
+                url=url,
+                status=PreflightStatus.BLOCKED_404,
+                http_status_code=404,
+                issues=[f"Dist file {path_obj.name} is corrupt or truncated (<100B)"],
+            )
+        else:
+            rec = self.inspect_url(url=url, html_content=raw)
+
+        if cache_key is not None:
+            self._memo_cache[cache_key] = rec
+        return rec
+
     def inspect_url(
         self,
         url: str,
@@ -324,14 +396,7 @@ class IndexingPreflightEngine:
                     http_status_code = 404
                     issues.append(f"File not found in dist: {path}")
                 else:
-                    raw = found_file.read_text(encoding="utf-8", errors="ignore")
-                    if len(raw.strip()) < 100 or "<html" not in raw.lower():
-                        status = PreflightStatus.BLOCKED_404
-                        http_status_code = 404
-                        issues.append(f"Dist file {found_file.name} is corrupt or truncated (<100B)")
-                    else:
-                        html_content = raw
-                        content_hash = sha256(raw.encode("utf-8")).hexdigest()
+                    return self.inspect_file(found_file, url=url)
 
         # ---------------------------------------------------------
         # Stage 3: Canonical & Edge Directives
@@ -625,9 +690,30 @@ class IndexingPreflightEngine:
                 is_gate_passed=False,
             )
 
+        html_files = sorted(list(target.glob("**/*.html")))
+        file_signatures: List[Tuple[str, float, int]] = []
+        for h in html_files:
+            try:
+                st = h.stat()
+                file_signatures.append((str(h.resolve()), st.st_mtime, st.st_size))
+            except OSError:
+                pass
+
+        sitemap_file = target / "sitemap.xml"
+        sitemap_sig = None
+        if sitemap_file.is_file():
+            try:
+                st_s = sitemap_file.stat()
+                sitemap_sig = (st_s.st_mtime, st_s.st_size)
+            except OSError:
+                pass
+
+        dist_cache_key = (str(target), self.domain, sitemap_sig, tuple(file_signatures))
+        if dist_cache_key in self._dist_memo_cache:
+            return self._dist_memo_cache[dist_cache_key]
+
         urls: List[str] = []
         # Check sitemap.xml first if present
-        sitemap_file = target / "sitemap.xml"
         if sitemap_file.is_file():
             try:
                 tree = ET.parse(sitemap_file)
@@ -641,7 +727,7 @@ class IndexingPreflightEngine:
                 pass
 
         # Also discover HTML files
-        for html_path in target.glob("**/*.html"):
+        for html_path in html_files:
             rel = html_path.relative_to(target).as_posix()
             if rel.startswith("404") or rel.startswith("500"):
                 continue
@@ -657,7 +743,14 @@ class IndexingPreflightEngine:
             if page_url not in urls:
                 urls.append(page_url)
 
-        return self.inspect_urls(urls)
+        prev_dist = self.dist_dir
+        self.dist_dir = target
+        try:
+            report = self.inspect_urls(urls)
+            self._dist_memo_cache[dist_cache_key] = report
+            return report
+        finally:
+            self.dist_dir = prev_dist
 
     def quarantine_blocked_urls(
         self,

@@ -16,11 +16,12 @@ import time
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pseofactory.trends.gsc_ceiling import GSCDailyMetricRecord
 
 from pseofactory.telemetry import TelemetryEvent, AtomicTelemetryLogger
-from pseofactory.supervisor import AtomicStateLedger
-from pseofactory.trends.gsc_ceiling import compute_rolling_averages, GSCDailyMetricRecord
 
 DEFAULT_AGY_DIR = Path("/home/ubuntuadmin/projects/.agy")
 DEFAULT_METRIC_RECOVERY_LEDGER = DEFAULT_AGY_DIR / "metric_recovery_ledger.json"
@@ -259,6 +260,7 @@ class DailyIndexingInspector:
                 "drop_percentage": 0.0,
             }
 
+        from pseofactory.trends.gsc_ceiling import compute_rolling_averages
         timeline = compute_rolling_averages(gsc_records)
         if len(timeline) < 14:
             return {
@@ -415,6 +417,7 @@ class DailyIndexingInspector:
 
     def _persist_recovery_ledger(self, report: Dict[str, Any]) -> None:
         """Atomically persists inspection findings into metric_recovery_ledger.json."""
+        from pseofactory.supervisor import AtomicStateLedger
         existing = AtomicStateLedger.load_json(self.recovery_ledger_path)
         existing[self.tenant_id] = report
         existing["last_inspected"] = report["timestamp"]
