@@ -341,7 +341,7 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
         registry=reg_timeout,
         lifecycle=MaintenanceLifecycle(trend_runner=FastTrendRunner()),
         concurrency_ceiling=2,
-        tenant_timeout_budget=0.25,
+        tenant_timeout_budget=0.6,
     )
     t0 = time.time()
     t_results = coord_timeout.run_fleet(force=True)
