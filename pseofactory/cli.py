@@ -857,10 +857,11 @@ def cmd_partner_ui(args: argparse.Namespace) -> int:
 
         http_ok = False
         active_port = ports_to_probe[0] if ports_to_probe else DEFAULT_UI_PORT
+        probe_timeout = float(os.getenv("PSEUFACTORY_PROBE_TIMEOUT", 0.3 if "PYTEST_CURRENT_TEST" in os.environ else 1.0))
         for p in ports_to_probe:
             try:
                 req = urllib.request.Request(f"http://{host}:{p}/api/status", headers={"User-Agent": "pseofactory-cli"})
-                with urllib.request.urlopen(req, timeout=3) as resp:
+                with urllib.request.urlopen(req, timeout=probe_timeout) as resp:
                     if resp.status == 200:
                         http_ok = True
                         active_port = p

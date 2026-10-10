@@ -25,3 +25,4 @@ where = ["."]
 include = ["pseofactory*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
+addopts = "-n auto"

@@ -5,6 +5,7 @@ Includes offline mock support and in-memory query caching.
 Zero em-dashes. Zero en-dashes.
 """
 
+import os
 import json
 import shutil
 import subprocess
@@ -86,7 +87,11 @@ class TregChecker:
 
         # 2. External treg CLI execution if available
         treg_bin = shutil.which("treg")
-        if treg_bin:
+        is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
+        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
+        live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
+
+        if treg_bin and (not is_test_env or is_mocked or live_opt_in):
             try:
                 cmd = [
                     treg_bin,

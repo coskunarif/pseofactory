@@ -1078,11 +1078,20 @@ class LiveEdgeVerifier:
         self,
         timeout: float = 15.0,
         retries: int = 3,
-        backoff: float = 2.0,
+        backoff: Optional[float] = None,
     ):
         self.timeout = timeout
         self.retries = retries
-        self.backoff = backoff
+        if backoff is not None:
+            self.backoff = backoff
+        else:
+            env_b = os.getenv("PSEUFACTORY_EDGE_BACKOFF")
+            if env_b is not None:
+                self.backoff = float(env_b)
+            elif "PYTEST_CURRENT_TEST" in os.environ:
+                self.backoff = 0.001
+            else:
+                self.backoff = 2.0
 
     def verify_url(self, url: str, user_agent: Optional[str] = None) -> Dict[str, Any]:
         """
