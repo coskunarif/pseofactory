@@ -21,12 +21,17 @@ import uuid
 
 from pseofactory.maintenance import (
     LockContentionError,
+    SubprocessCrashError,
     MaintenanceLifecycle,
     MaintenanceResult,
     PropertyAdapter,
     PropertyContaminationError,
     TenantRegistry,
     WorkspacePropertyScanner,
+)
+from pseofactory.telemetry import (
+    TelemetryEvent,
+    AtomicTelemetryLogger,
 )
 from pseofactory.drift import (
     compute_asset_fingerprint,
@@ -245,7 +250,44 @@ class AsyncFleetCoordinator:
                 dry_run=dry_run,
                 skip_ci=skip_ci,
             )
+        except SubprocessCrashError as sce:
+            logger = AtomicTelemetryLogger()
+            event = TelemetryEvent(
+                event_type="SUBPROCESS_CRASH",
+                tenant_id=adapter.property_id,
+                exit_code=sce.returncode,
+                error_type="SubprocessCrashError",
+                error_message=str(sce),
+                stderr_tail=sce.stderr_tail,
+                action_taken="ESCALATED",
+                run_id=run_id,
+            )
+            logger.log(event)
+            return MaintenanceResult(
+                property_id=adapter.property_id,
+                status="FAILED",
+                assets_audited=0,
+                assets_drifted=0,
+                assets_refactored=0,
+                assets_failed=1,
+                failed_records=[{
+                    "error": str(sce),
+                    "type": "SubprocessCrashError",
+                    "returncode": sce.returncode,
+                    "stderr_tail": sce.stderr_tail,
+                }],
+            )
         except PropertyContaminationError as pce:
+            logger = AtomicTelemetryLogger()
+            event = TelemetryEvent(
+                event_type="PROPERTY_CONTAMINATION",
+                tenant_id=adapter.property_id,
+                error_type="PropertyContaminationError",
+                error_message=str(pce),
+                action_taken="QUARANTINED",
+                run_id=run_id,
+            )
+            logger.log(event)
             return MaintenanceResult(
                 property_id=adapter.property_id,
                 status="FAILED",
@@ -256,6 +298,17 @@ class AsyncFleetCoordinator:
                 failed_records=[{"error": str(pce), "type": "PropertyContaminationError"}],
             )
         except LockContentionError as lce:
+            logger = AtomicTelemetryLogger()
+            event = TelemetryEvent(
+                event_type="LOCK_CONTENTION",
+                tenant_id=adapter.property_id,
+                exit_code=getattr(lce, "exit_code", 75),
+                error_type="LockContentionError",
+                error_message=str(lce),
+                action_taken="DEFERRED",
+                run_id=run_id,
+            )
+            logger.log(event)
             return MaintenanceResult(
                 property_id=adapter.property_id,
                 status="DEFERRED",
@@ -266,6 +319,19 @@ class AsyncFleetCoordinator:
                 failed_records=[{"error": str(lce), "type": "LockContentionError"}],
             )
         except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
+            logger = AtomicTelemetryLogger()
+            event = TelemetryEvent(
+                event_type="UNHANDLED_EXCEPTION",
+                tenant_id=adapter.property_id,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                stderr_tail=tb[-2048:],
+                action_taken="ESCALATED",
+                run_id=run_id,
+            )
+            logger.log(event)
             return MaintenanceResult(
                 property_id=adapter.property_id,
                 status="FAILED",
@@ -273,7 +339,7 @@ class AsyncFleetCoordinator:
                 assets_drifted=0,
                 assets_refactored=0,
                 assets_failed=1,
-                failed_records=[{"error": str(exc), "type": type(exc).__name__}],
+                failed_records=[{"error": str(exc), "type": type(exc).__name__, "traceback": tb}],
             )
 
     async def run_tenant_async(
@@ -730,6 +796,17 @@ class AutonomousLifecycleSupervisor:
                 if self.consecutive_failures >= self.max_consecutive_failures
                 else "ERROR"
             )
+            try:
+                AtomicTelemetryLogger().record(
+                    event_type="SUPERVISOR_CYCLE_ERROR",
+                    tenant_id="fleet",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    action_taken=cycle_status,
+                    run_id=cycle_id,
+                )
+            except Exception:
+                pass
             self.heartbeat_tracker.emit(
                 status=cycle_status,
                 cycle_id=cycle_id,
