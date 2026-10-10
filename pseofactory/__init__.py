@@ -527,6 +527,13 @@ from pseofactory.pipeline import (
     DriverExecutionResult,
     FactoryPipeline,
     run_factory_pipeline,
+    RejectionReason,
+)
+from pseofactory.audit import (
+    ContentAccuracyAuditStage,
+    ContentAccuracyAuditReport,
+    ContentAccuracyAuditError,
+    audit_rendered_asset,
 )
 
 __version__ = "0.1.0"
@@ -993,6 +1000,11 @@ __all__ = [
     "DriverExecutionResult",
     "FactoryPipeline",
     "run_factory_pipeline",
+    "RejectionReason",
+    "ContentAccuracyAuditStage",
+    "ContentAccuracyAuditReport",
+    "ContentAccuracyAuditError",
+    "audit_rendered_asset",
     "EmailIngestionEngine",
     "EmailMessage",
     "PartnerEmailClassification",
