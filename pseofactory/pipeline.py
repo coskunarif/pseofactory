@@ -57,6 +57,22 @@ from pseofactory.content_angles import (
     IncumbentSummary,
 )
 from pseofactory.compiler import compile_high_effort_page
+from pseofactory.audit import (
+    ContentAccuracyAuditStage,
+    ContentAccuracyAuditReport,
+    ContentAccuracyAuditError,
+)
+
+
+class RejectionReason:
+    LOW_JEV_DURABILITY = "LOW_JEV_DURABILITY"
+    HIGH_TREG_COMPETITION = "HIGH_TREG_COMPETITION"
+    TRANSIENT_NOISE_OR_DECELERATION = "TRANSIENT_NOISE_OR_DECELERATION"
+    CROSS_PROPERTY_CONTAMINATION = "CROSS_PROPERTY_CONTAMINATION"
+    DERIVATIVE_SERP_ANGLE = "DERIVATIVE_SERP_ANGLE"
+    REFACTOR_PAGE_CANNIBALIZATION = "REFACTOR_PAGE_CANNIBALIZATION"
+    AUDIT_STAGE_FAILED = "AUDIT_STAGE_FAILED"
+    CONTENT_ACCURACY_FAILED = "CONTENT_ACCURACY_FAILED"
 
 
 @dataclass
@@ -70,6 +86,8 @@ class PipelineConfig:
     dry_run: bool = False
     sink_path: Optional[Path] = None
     total_site_impressions: int = 500
+    strict_audit: bool = True
+    audit_tolerance: float = 0.01
 
 
 @dataclass
@@ -138,6 +156,7 @@ class CompiledAssetResult:
     manifest: Dict[str, Any] = field(default_factory=dict)
     audit_passed: bool = True
     contamination_clean: bool = True
+    audit_report: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -149,6 +168,7 @@ class CompiledAssetResult:
             "manifest": self.manifest,
             "audit_passed": self.audit_passed,
             "contamination_clean": self.contamination_clean,
+            "audit_report": self.audit_report,
         }
 
 
@@ -747,7 +767,35 @@ class FactoryPipeline:
                 context=f"compiled page '{decision.slug}'",
             )
 
-            # 10. Persistence and result assembly
+            # 10. Autonomous Content Accuracy & Truthfulness Audit Stage
+            audit_stage = ContentAccuracyAuditStage(
+                tolerance=self.config.audit_tolerance,
+                strict=False,
+            )
+            audit_report = audit_stage.audit(
+                html=compiled_res["html"],
+                candidate_spec=candidate_spec,
+                tenant=tenant,
+            )
+
+            if not audit_report.passed:
+                if self.config.strict_audit:
+                    aborted_opportunities.append(
+                        AbortedOpportunity(
+                            query=decision.query,
+                            slug=decision.slug,
+                            reason=RejectionReason.AUDIT_STAGE_FAILED,
+                            jev_score=decision.jev_score,
+                            durable_prob=decision.durable_prob,
+                            search_volume=getattr(decision, "search_volume", 0),
+                            keyword_difficulty=getattr(decision, "keyword_difficulty", 0.0),
+                            foreign_tokens=list(audit_report.violations),
+                            action="REJECT",
+                        )
+                    )
+                    continue
+
+            # 11. Persistence and result assembly
             out_file = None
             if output_dir:
                 out_path = Path(output_dir) / tenant / "tools" / decision.slug / "index.html"
@@ -763,8 +811,9 @@ class FactoryPipeline:
                     html_length=len(compiled_res["html"]),
                     output_file=out_file,
                     manifest=compiled_res.get("manifest", {}),
-                    audit_passed=compiled_res.get("verified", True),
+                    audit_passed=audit_report.passed,
                     contamination_clean=True,
+                    audit_report=audit_report.to_dict(),
                 )
             )
 
