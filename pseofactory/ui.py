@@ -154,25 +154,56 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     <title>pseofactory Partner Tracking & Monetization Readiness</title>
     <style>
         :root {{
+            /* Canvas & Surfaces */
             --bg-canvas: #ffffff;
             --bg-subtle: #f8fafc;
             --bg-surface: #ffffff;
+            --bg-inset: #f1f5f9;
+
+            /* Borders */
             --border-subtle: #e2e8f0;
             --border-strong: #cbd5e1;
+
+            /* Typography */
             --text-main: #0f172a;
             --text-sub: #475569;
             --text-muted: #94a3b8;
+
+            /* Functional Status Semantics */
             --primary: #2563eb;
+            --primary-hover: #1d4ed8;
             --primary-subtle: #eff6ff;
+            --primary-border: #bfdbfe;
+
             --success: #059669;
+            --success-hover: #047857;
             --success-subtle: #ecfdf5;
+            --success-border: #a7f3d0;
+
             --warning: #d97706;
             --warning-subtle: #fffbeb;
+            --warning-border: #fde68a;
+
             --danger: #dc2626;
+            --danger-hover: #b91c1c;
             --danger-subtle: #fef2f2;
+            --danger-border: #fecaca;
+
+            --info: #0284c7;
+            --info-subtle: #f0f9ff;
+            --info-border: #bae6fd;
+
+            --neutral-subtle: #f8fafc;
+            --neutral-border: #e2e8f0;
+
+            /* Elevation */
+            --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+            --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+
             --radius-md: 8px;
             --radius-lg: 12px;
-            --font-stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         }}
         * {{
             box-sizing: border-box;
@@ -237,9 +268,12 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             border-radius: var(--radius-md);
             border: 1px solid transparent;
             cursor: pointer;
-            transition: background-color 0.15s ease, border-color 0.15s ease;
+            transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
             text-decoration: none;
             user-select: none;
+        }}
+        .btn:active, .tab-btn:active {{
+            transform: scale(0.97);
         }}
         .btn-primary {{
             background: var(--primary);
@@ -247,7 +281,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             border-color: var(--primary);
         }}
         .btn-primary:hover {{
-            background: #1d4ed8;
+            background: var(--primary-hover);
         }}
         .btn-subtle {{
             background: var(--bg-canvas);
@@ -265,32 +299,35 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         .btn-approve {{
             background: var(--success-subtle);
             color: var(--success);
-            border-color: #a7f3d0;
+            border-color: var(--success-border);
             min-height: 44px;
             min-width: 90px;
         }}
         .btn-approve:hover {{
-            background: #d1fae5;
+            background: var(--success-subtle);
+            border-color: var(--success-hover);
         }}
         .btn-reject {{
             background: var(--danger-subtle);
             color: var(--danger);
-            border-color: #fecdd3;
+            border-color: var(--danger-border);
             min-height: 44px;
             min-width: 90px;
         }}
         .btn-reject:hover {{
-            background: #ffe4e6;
+            background: var(--danger-subtle);
+            border-color: var(--danger-hover);
         }}
         .btn-resolve {{
             background: var(--primary-subtle);
             color: var(--primary);
-            border-color: #bfdbfe;
+            border-color: var(--primary-border);
             min-height: 44px;
             min-width: 90px;
         }}
         .btn-resolve:hover {{
-            background: #dbeafe;
+            background: var(--primary-subtle);
+            border-color: var(--primary-hover);
         }}
         .tab-btn {{
             min-height: 44px;
@@ -306,6 +343,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             background: var(--bg-canvas);
             color: var(--text-sub);
             cursor: pointer;
+            transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease;
         }}
         .tab-btn:focus-visible {{
             outline: 2px solid var(--primary);
@@ -333,57 +371,57 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         .badge-live {{
             background: var(--success-subtle);
             color: var(--success);
-            border-color: #a7f3d0;
+            border-color: var(--success-border);
         }}
         .badge-awaiting {{
             background: var(--warning-subtle);
             color: var(--warning);
-            border-color: #fde68a;
+            border-color: var(--warning-border);
         }}
         .badge-followup {{
             background: var(--danger-subtle);
             color: var(--danger);
-            border-color: #fecdd3;
+            border-color: var(--danger-border);
         }}
         .badge-pending {{
-            background: #f1f5f9;
-            color: #475569;
-            border-color: #cbd5e1;
+            background: var(--bg-inset);
+            color: var(--text-sub);
+            border-color: var(--border-strong);
         }}
         .badge-property {{
-            background: #eff6ff;
-            color: #1d4ed8;
-            border-color: #bfdbfe;
+            background: var(--primary-subtle);
+            color: var(--primary-hover);
+            border-color: var(--primary-border);
         }}
         .badge-critical {{
-            background: #fef2f2;
-            color: #b91c1c;
-            border-color: #fecaca;
+            background: var(--danger-subtle);
+            color: var(--danger-hover);
+            border-color: var(--danger-border);
         }}
         .badge-high {{
-            background: #fff7ed;
-            color: #c2410c;
-            border-color: #fed7aa;
+            background: var(--warning-subtle);
+            color: var(--warning);
+            border-color: var(--warning-border);
         }}
         .badge-medium {{
-            background: #fefce8;
-            color: #a16207;
-            border-color: #fef08a;
+            background: var(--warning-subtle);
+            color: var(--warning);
+            border-color: var(--warning-border);
         }}
         .badge-low {{
-            background: #f8fafc;
-            color: #475569;
-            border-color: #e2e8f0;
+            background: var(--neutral-subtle);
+            color: var(--text-sub);
+            border-color: var(--neutral-border);
         }}
         .badge-type {{
-            background: #f0f9ff;
-            color: #0284c7;
-            border-color: #bae6fd;
+            background: var(--info-subtle);
+            color: var(--info);
+            border-color: var(--info-border);
         }}
         .badge-subtle {{
-            background: #f8fafc;
-            color: #64748b;
-            border-color: #e2e8f0;
+            background: var(--neutral-subtle);
+            color: var(--text-sub);
+            border-color: var(--neutral-border);
         }}
         /* KPI Cards Grid */
         .kpi-grid {{
@@ -460,7 +498,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             gap: 16px;
         }}
         .action-card {{
-            background: #ffffff;
+            background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-left: 4px solid var(--primary);
             border-radius: var(--radius-md);
@@ -468,9 +506,10 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             display: flex;
             flex-direction: column;
             gap: 12px;
+            box-shadow: var(--shadow-sm);
         }}
         .action-card[data-property="prexvo"] {{
-            border-left-color: #0284c7;
+            border-left-color: var(--info);
         }}
         .action-card-header {{
             display: flex;
@@ -492,7 +531,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             background: var(--danger-subtle);
             padding: 4px 8px;
             border-radius: var(--radius-md);
-            border: 1px solid #fecaca;
+            border: 1px solid var(--danger-border);
         }}
         .action-title {{
             font-size: 15px;
@@ -506,7 +545,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         .action-reqs {{
             margin-left: 20px;
             font-size: 12px;
-            color: #64748b;
+            color: var(--text-sub);
         }}
         .action-reqs li {{
             margin-bottom: 4px;
@@ -564,7 +603,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             border-bottom: none;
         }}
         tr:hover td {{
-            background-color: #fafbfc;
+            background-color: var(--bg-subtle);
         }}
         .col-name {{ width: 22%; }}
         .col-cat {{ width: 15%; }}
@@ -588,16 +627,18 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             min-width: 44px;
             display: inline-flex;
             align-items: center;
+            transition: color 160ms ease;
         }}
         .partner-link:hover {{
+            color: var(--primary-hover);
             text-decoration: underline;
         }}
         .text-muted {{
             color: var(--text-muted);
         }}
         .standing-card {{
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
             padding: 12px 16px;
             font-size: 12px;
@@ -605,6 +646,10 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         }}
         .empty-state {{
             padding: 32px;
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             text-align: center;
             color: var(--text-muted);
             font-size: 14px;
@@ -1413,15 +1458,30 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
         :root {{
             --bg-canvas: #ffffff;
             --bg-subtle: #f8fafc;
+            --bg-surface: #ffffff;
+            --bg-inset: #f1f5f9;
             --text-main: #0f172a;
             --text-sub: #475569;
             --text-muted: #94a3b8;
             --border-subtle: #e2e8f0;
+            --border-strong: #cbd5e1;
             --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --primary-subtle: #eff6ff;
+            --primary-border: #bfdbfe;
             --danger: #dc2626;
+            --danger-hover: #b91c1c;
+            --danger-subtle: #fef2f2;
+            --danger-border: #fecaca;
             --warning: #d97706;
+            --warning-subtle: #fffbeb;
+            --warning-border: #fde68a;
             --success: #059669;
-            --font-stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --success-hover: #047857;
+            --success-subtle: #ecfdf5;
+            --success-border: #a7f3d0;
+            --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         }}
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{
@@ -1480,6 +1540,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
         .metric-val {{
             font-size: 24px;
             font-weight: 700;
+            font-variant-numeric: tabular-nums;
         }}
         .badge {{
             display: inline-block;
@@ -1488,24 +1549,34 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
             font-size: 12px;
             font-weight: 600;
         }}
-        .badge-danger {{ background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }}
-        .badge-warning {{ background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }}
-        .badge-success {{ background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }}
+        .badge-danger {{ background: var(--danger-subtle); color: var(--danger); border: 1px solid var(--danger-border); }}
+        .badge-warning {{ background: var(--warning-subtle); color: var(--warning); border: 1px solid var(--warning-border); }}
+        .badge-success {{ background: var(--success-subtle); color: var(--success); border: 1px solid var(--success-border); }}
         .status-dampened {{ color: var(--danger); font-weight: 700; }}
         .status-growth {{ color: var(--success); font-weight: 700; }}
         .drop-pill {{
-            background: #fef2f2;
-            color: #dc2626;
+            background: var(--danger-subtle);
+            color: var(--danger);
             padding: 2px 8px;
             border-radius: 4px;
             font-weight: 600;
             font-size: 12px;
         }}
+        .table-wrap {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            width: 100%;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            margin-top: 12px;
+        }}
         table {{
             width: 100%;
+            table-layout: fixed;
             border-collapse: collapse;
             font-size: 14px;
-            margin-top: 12px;
+            font-variant-numeric: tabular-nums;
+            margin-top: 0;
         }}
         th, td {{
             padding: 10px 12px;
@@ -1533,9 +1604,13 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
             font-weight: 500;
             cursor: pointer;
             text-decoration: none;
+            transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease;
         }}
         button:hover, .btn:hover {{
             background: var(--bg-subtle);
+        }}
+        button:active, .btn:active, a.btn:active {{
+            transform: scale(0.97);
         }}
     </style>
 </head>
@@ -1583,6 +1658,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
 
         <div class="card">
             <h2 style="font-size: 16px; margin-bottom: 12px;">Correlated Google Algorithm Updates</h2>
+            <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
@@ -1598,6 +1674,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
                     {"".join(updates_html)}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </body>

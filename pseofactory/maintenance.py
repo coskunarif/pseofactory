@@ -783,8 +783,11 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 )
 
         # Isolated python execution in child process
+        pkg_root = str(Path(__file__).resolve().parent.parent)
         script = (
             f"import sys\n"
+            f"if {repr(pkg_root)} not in sys.path:\n"
+            f"    sys.path.insert(0, {repr(pkg_root)})\n"
             f"if {repr(str(self._repo_path))} not in sys.path:\n"
             f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
             f"try:\n"
@@ -807,6 +810,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         )
         try:
             env = os.environ.copy()
+            env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
             if res.returncode == 0:
                 return True
@@ -908,8 +912,11 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 )
 
         # Prioritize isolated python execution in child process
+        pkg_root = str(Path(__file__).resolve().parent.parent)
         script = (
             f"import sys\n"
+            f"if {repr(pkg_root)} not in sys.path:\n"
+            f"    sys.path.insert(0, {repr(pkg_root)})\n"
             f"if {repr(str(self._repo_path))} not in sys.path:\n"
             f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
             f"try:\n"
@@ -933,6 +940,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         last_error = None
         try:
             env = os.environ.copy()
+            env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
             if res.returncode == 0:
                 return True
@@ -976,6 +984,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             cmd = ["bash", str(factory_script), "--dry-run", "--force"]
             try:
                 env = os.environ.copy()
+                env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
                 env["FACTORY_CANONICAL_BASE"] = self.canonical_base
                 env["FACTORY_DOMAIN"] = self.domain
                 env["FACTORY_BRAND_NAME"] = self.brand_name
@@ -2720,6 +2729,22 @@ def reflect_and_recompile_all_assets(
             except Exception as b_err:
                 if verbose:
                     print(f"Error rebuilding assets for '{p_id}': {b_err}")
+
+        if recompiled_count > 0:
+            try:
+                s_file = adapter.dist_dir.parent / ".agy" / "engine_hash.json"
+                l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
+                s_file.parent.mkdir(parents=True, exist_ok=True)
+                b_dirs = getattr(adapter, "base_dirs", None)
+                cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
+                asset_hashes = {
+                    a.relative_to(adapter.dist_dir).as_posix(): compute_asset_fingerprint(a)
+                    for a in adapter.list_assets()
+                }
+                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+            except Exception as l_err:
+                if verbose:
+                    print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
 
         post_report = evaluator.audit_all(adapter) if recompiled_count > 0 else report
 

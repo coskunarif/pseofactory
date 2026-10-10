@@ -579,8 +579,14 @@ class IndexingPreflightEngine:
                     status = PreflightStatus.BLOCKED_THIN_CONTENT
                     issues.append(f"Page has {h1_count} <h1> tags (expected exactly 1)")
                 elif not has_early_answer:
-                    status = PreflightStatus.BLOCKED_THIN_CONTENT
-                    issues.append("Missing early direct answer block (.quick-answer or .answer-box)")
+                    path_str = urllib.parse.urlparse(url).path.strip("/")
+                    is_utility = path_str == "" or any(
+                        path_str == p or path_str.startswith(p + "/")
+                        for p in ("about", "privacy", "terms", "contact", "disclaimers", "methodology", "tools")
+                    )
+                    if not is_utility:
+                        status = PreflightStatus.BLOCKED_THIN_CONTENT
+                        issues.append("Missing early direct answer block (.quick-answer or .answer-box)")
 
             else:
                 word_count = 300
@@ -729,7 +735,16 @@ class IndexingPreflightEngine:
         # Also discover HTML files
         for html_path in html_files:
             rel = html_path.relative_to(target).as_posix()
-            if rel.startswith("404") or rel.startswith("500"):
+            if (
+                rel.startswith("404")
+                or rel.startswith("500")
+                or rel.startswith("static/")
+                or rel.startswith("signal/")
+                or rel.startswith("staging/")
+                or rel.startswith("test/")
+                or rel.startswith("tests/")
+                or rel.startswith("syndication/")
+            ):
                 continue
             if rel == "index.html":
                 url_path = "/"

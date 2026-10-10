@@ -202,7 +202,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             f'        <div class="form-group" style="margin-bottom: 16px;">\n'
             f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
             f'          <input type="number" step="any" min="0" id="input-{var_name}" name="{var_name}" '
-            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px;" />\n'
+            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px;" />\n'
             f'        </div>'
         )
         table_rows_html.append(
@@ -281,7 +281,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     for s_slug, s_title in sibling_links:
         cluster_items_html.append(
             f'        <li style="margin-bottom: 8px;">\n'
-            f'          <a href="{canonical_base}/tools/{s_slug}/" class="touch-target" style="display: block; background: #1e293b; color: var(--accent); padding: 12px 16px; border-radius: 8px; text-decoration: none; min-height: 44px; min-width: 44px;">{s_title}</a>\n'
+            f'          <a href="{canonical_base}/tools/{s_slug}/" class="touch-target cluster-link" style="display: flex; align-items: center; background: var(--bg-elevated); color: var(--accent); padding: 12px 16px; border-radius: 8px; text-decoration: none; min-height: 44px; min-width: 44px;">{s_title}</a>\n'
             f'        </li>'
         )
     cluster_links_html = "\n".join(cluster_items_html)
@@ -494,13 +494,30 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <link rel="canonical" href="{canonical_base}/tools/{slug}/" />
   <style>
     :root {{
+      /* Surfaces & Canvas */
       --bg: #07090e;
       --card-bg: #0f172a;
+      --bg-elevated: #151f38;
+      --bg-inset: #0b1329;
+
+      /* Borders & Separation */
       --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+
+      /* Typography */
       --text: #f8fafc;
       --text-muted: #94a3b8;
+      --text-dim: #64748b;
+
+      /* Accents & States */
       --accent: #38bdf8;
       --accent-hover: #0284c7;
+      --accent-subtle: rgba(56, 189, 248, 0.10);
+
+      /* Depth & Atmospheric Lighting */
+      --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+      --shadow-elevated: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+      --card-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
     }}
     * {{
       box-sizing: border-box;
@@ -512,7 +529,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     body {{
       background-color: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       line-height: 1.6;
       margin: 0;
       padding: 32px 16px;
@@ -527,6 +544,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       border-radius: 12px;
       padding: 24px;
       margin-bottom: 24px;
+      box-shadow: var(--shadow-card);
     }}
     h1, h2, h3 {{
       color: var(--text);
@@ -552,32 +570,52 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     .touch-target {{
       min-height: 44px;
       min-width: 44px;
-      padding: 12px 16px;
+      padding: 10px 14px;
       font-size: 16px;
       border-radius: 8px;
     }}
     button.touch-target {{
       background-color: var(--accent);
-      color: #07090e;
+      color: var(--bg);
       font-weight: 600;
       border: none;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
     }}
     button.touch-target:hover {{
       background-color: var(--accent-hover);
     }}
+    button.touch-target:active {{
+      transform: scale(0.97);
+    }}
     input.touch-target {{
-      background-color: #1e293b;
+      background-color: var(--bg-elevated);
       border: 1px solid var(--border);
       color: var(--text);
       width: 100%;
     }}
     .multi-dataset-join {{
-      background-color: #111c35;
+      background-color: var(--bg-elevated);
       border-left: 4px solid var(--accent);
       padding: 20px;
       border-radius: 8px;
       margin-bottom: 24px;
+    }}
+    .result-box {{
+      min-height: 110px;
+      contain: layout style;
+      background-color: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 20px;
+    }}
+    .output-value {{
+      font-variant-numeric: tabular-nums;
+      font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }}
     .table-wrap {{
       overflow-x: auto;
@@ -589,6 +627,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     }}
     .calculation-table {{
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       margin-top: 0;
       font-size: 14px;
@@ -600,7 +639,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       text-align: left;
     }}
     .calculation-table th {{
-      background-color: #1e293b;
+      background-color: var(--bg-elevated);
     }}
     .canonical-tool-link {{
       display: inline-flex;
@@ -613,6 +652,31 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       font-weight: 600;
       min-height: 44px;
       min-width: 44px;
+      transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, color 160ms ease;
+    }}
+    .canonical-tool-link:hover {{
+      background-color: var(--accent-subtle);
+    }}
+    .canonical-tool-link:active {{
+      transform: scale(0.97);
+    }}
+    .cluster-link {{
+      display: flex;
+      align-items: center;
+      background-color: var(--bg-elevated);
+      color: var(--accent);
+      padding: 12px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      min-height: 44px;
+      min-width: 44px;
+      transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease;
+    }}
+    .cluster-link:hover {{
+      background-color: var(--bg-inset);
+    }}
+    .cluster-link:active {{
+      transform: scale(0.97);
     }}
     @media (max-width: 640px) {{
       body {{
@@ -724,7 +788,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 {form_inputs_str}
         <button type="submit" class="touch-target" id="calculate-btn" style="min-height: 44px; min-width: 44px;">Recalculate Output</button>
       </form>
-      <div class="result-box" style="margin-top: 20px;">
+      <div class="result-box" style="min-height: 110px; margin-top: 20px;">
         <h3>Published Baseline Calculation</h3>
         <p>Formula: <code>{formula}</code></p>
         <p>Evaluated Output Result: <strong class="output-value">{display_output}</strong></p>

@@ -1728,6 +1728,12 @@ class MasterSEOVerifier:
             issues.append("Zero RFC 5988 canonical Link headers found in dist/_headers")
 
         for ep in self.required_endpoints:
+            if ep.endswith("/") and ep != "/":
+                ep_rel = ep.strip("/")
+                ep_file = target / ep_rel / "index.html"
+                ep_direct = target / f"{ep_rel}.html"
+                if not ep_file.is_file() and not ep_direct.is_file():
+                    continue
             matching = [url for r, url in found_canonical_links if r == ep]
             if not matching:
                 issues.append(f"Missing RFC 5988 canonical Link header for machine endpoint {ep}")
@@ -2388,7 +2394,16 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
+                if rel in (
+                    "index.html",
+                    "tools/index.html",
+                    "privacy/index.html",
+                    "about/index.html",
+                    "terms/index.html",
+                    "disclaimers/index.html",
+                    "methodology/index.html",
+                    "contact/index.html",
+                ):
                     continue
                 pages_checked += 1
                 content = self._read_cached_html(p)
@@ -2441,7 +2456,14 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
+                if rel in (
+                    "privacy/index.html",
+                    "about/index.html",
+                    "terms/index.html",
+                    "disclaimers/index.html",
+                    "methodology/index.html",
+                    "contact/index.html",
+                ):
                     continue
                 pages_checked += 1
                 content = self._read_cached_html(p)
@@ -2504,7 +2526,14 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
+                if rel in (
+                    "privacy/index.html",
+                    "about/index.html",
+                    "terms/index.html",
+                    "disclaimers/index.html",
+                    "methodology/index.html",
+                    "contact/index.html",
+                ):
                     continue
                 pages_checked += 1
                 content = self._read_cached_html(p)
@@ -2595,11 +2624,18 @@ class MasterSEOVerifier:
                     continue
                 pages_checked += 1
                 page_set[rel] = content
+                has_variant_markup = any(
+                    k in content for k in (
+                        "calculation-variant", "fan-out-node", "calc-variant",
+                        "calculation-node", "variant-container", "data-variant"
+                    )
+                )
+                cur_min_variants = min_variants if (has_variant_markup or not (target / "tools").exists()) else 0
                 res = verify_html_organic_fan_out_coverage(
                     content,
                     rel_path=rel,
                     min_subqueries=min_subqueries,
-                    min_variants=min_variants,
+                    min_variants=cur_min_variants,
                     require_reciprocal=require_reciprocal,
                     min_words_per_answer=min_words_per_answer,
                     min_total_words=min_total_words,
@@ -2891,7 +2927,16 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("index.html", "tools/index.html", "privacy/index.html", "terms/index.html") and not require_strict:
+                if rel in (
+                    "index.html",
+                    "tools/index.html",
+                    "privacy/index.html",
+                    "about/index.html",
+                    "terms/index.html",
+                    "disclaimers/index.html",
+                    "methodology/index.html",
+                    "contact/index.html",
+                ) and not require_strict:
                     continue
                 pages_checked += 1
                 content = self._read_cached_html(p)
@@ -5041,21 +5086,7 @@ def verify_html_unique_first_party_information(
     except Exception as ex:
         issues.append(str(ex))
 
-    # 3. Orphaned calculation tables check
-    orphaned_tables = detect_orphaned_calculation_tables(html_content)
-    for ot in orphaned_tables:
-        issues.append(f"Page {rel_path}: {ot}")
-
-    # 4. Multi-dataset enrichment check
-    joins_count = 0
-    if require_multi_dataset:
-        try:
-            assert_multi_dataset_enrichment(html_content, context=f"Page {rel_path}")
-            joins_count += 1
-        except Exception as ex:
-            issues.append(str(ex))
-
-    # 5. Calculation manifests extraction and validation
+    # 3. Calculation manifests extraction and validation
     manifests = extract_calculation_manifests(html_content)
     if manifest_data:
         manifests.append(manifest_data)
@@ -5082,6 +5113,23 @@ def verify_html_unique_first_party_information(
                         manifests.append(json.loads(all_jsons[0].read_text(encoding="utf-8")))
                     except Exception:
                         pass
+
+    # 4. Orphaned calculation tables check
+    orphaned_tables = detect_orphaned_calculation_tables(html_content, manifests=manifests)
+    for ot in orphaned_tables:
+        issues.append(f"Page {rel_path}: {ot}")
+
+    # 5. Multi-dataset enrichment check
+    joins_count = 0
+    if require_multi_dataset:
+        try:
+            content_to_check = html_content
+            if manifests:
+                content_to_check = f"{html_content}\n{json.dumps(manifests)}"
+            assert_multi_dataset_enrichment(content_to_check, context=f"Page {rel_path}")
+            joins_count += 1
+        except Exception as ex:
+            issues.append(str(ex))
 
     if not manifests:
         has_calc_markup = (

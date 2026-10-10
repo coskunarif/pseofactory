@@ -26,12 +26,16 @@ from pseofactory.indexing.milestones import (
 )
 from pseofactory.indexing.preflight import IndexingPreflightEngine, PreflightReport
 from pseofactory.indexing_inspector import DailyIndexingInspector
-from pseofactory.maintenance import (
-    TenantRegistry,
-    WorkspacePropertyScanner,
-    reflect_and_recompile_all_assets,
-)
-from pseofactory.supervisor import AtomicStateLedger
+try:
+    from pseofactory.maintenance import (
+        TenantRegistry,
+        WorkspacePropertyScanner,
+        reflect_and_recompile_all_assets,
+    )
+except ImportError:
+    TenantRegistry = None
+    WorkspacePropertyScanner = None
+    reflect_and_recompile_all_assets = None
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
 
 logger = logging.getLogger("pseofactory.indexing.feedback_loop")
@@ -291,11 +295,13 @@ class IndexingFeedbackLoop:
         # Discover property adapter if available
         adapter = None
         try:
+            from pseofactory.maintenance import TenantRegistry
             adapter = TenantRegistry.default().get_adapter(self.property_id)
         except Exception:
             pass
         if not adapter:
             try:
+                from pseofactory.maintenance import WorkspacePropertyScanner
                 scanner = WorkspacePropertyScanner()
                 discovered = scanner.discover_properties()
                 by_id = {p.property_id.lower(): p for p in discovered}
@@ -476,7 +482,11 @@ class IndexingFeedbackLoop:
                 reflection_res = {"status": "DRY_RUN", "total_recompiled": 0}
             else:
                 try:
-                    reflection_res = reflect_and_recompile_all_assets(
+                    ref_fn = reflect_and_recompile_all_assets
+                    if ref_fn is None:
+                        from pseofactory.maintenance import reflect_and_recompile_all_assets as _rf
+                        ref_fn = _rf
+                    reflection_res = ref_fn(
                         properties=[self.property_id],
                         force=force,
                         verbose=False,

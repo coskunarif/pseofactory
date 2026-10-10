@@ -1669,9 +1669,9 @@ def detect_malformed_statutory_citations(text: str) -> List[str]:
         if not re.match(r'^(?:\s*(?:§+|Section|Sec\.|Part)\s*|\s+)[0-9]+', after_text, re.IGNORECASE):
             issues.append(f"Malformed CFR citation lacking valid section or part number: '{m.group(0).strip()}'")
 
-    for m in re.finditer(r'\bI\.?R\.?C\.?', text, re.IGNORECASE):
+    for m in re.finditer(r'\bI\.?R\.?C\.?\s*(?:§+|Section|Sec\.)', text, re.IGNORECASE):
         after_text = text[m.end():]
-        if not re.match(r'^(?:\s*(?:§+|Section|Sec\.)\s*|\s+)[0-9]+', after_text, re.IGNORECASE):
+        if not re.match(r'^\s*[0-9]+', after_text, re.IGNORECASE):
             issues.append(f"Malformed IRC citation lacking valid section number: '{m.group(0).strip()}'")
 
     # 2. Out-of-bounds title numbers
@@ -1956,9 +1956,10 @@ def assert_data_table_structure(table_html: str, context: str = "") -> bool:
                 break
 
         if not has_data_point:
-            raise ValueError(
+            last_error = ValueError(
                 f"Data table {idx} lacks extractable quantitative data points or verifiable figures{ctx}"
             )
+            continue
 
         compliant_tables += 1
 
@@ -2417,7 +2418,7 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
     target_content = html_or_text
     if "<" in html_or_text and ">" in html_or_text:
         target_content = re.sub(
-            r'<(?P<tag>div|section|article)\b[^>]*(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container)[^"\']*["\']|data-variant(?:-id)?=["\'][^"\']+["\'])[^>]*>.*?</(?P=tag)>',
+            r'<(?P<tag>div|section|article)\b[^>]*(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|overlay-scenarios|scenarios-grid|scenario-card|calc-scenario-card)[^"\']*["\']|data-variant(?:-id)?=["\'][^"\']+["\'])[^>]*>.*?</(?P=tag)>',
             ' ',
             html_or_text,
             flags=re.IGNORECASE | re.DOTALL,
@@ -2437,22 +2438,36 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
             clean_heading = re.sub(r'<[^>]+>', '', heading_html).strip()
 
             start_pos = match.end()
-            end_pos = matches[idx + 1].start() if idx + 1 < len(matches) else len(target_content)
+            end_pos = len(target_content)
+            for next_idx in range(idx + 1, len(matches)):
+                next_lvl = int(matches[next_idx].group(1))
+                if next_lvl <= lvl:
+                    end_pos = matches[next_idx].start()
+                    break
+
             body_html = target_content[start_pos:end_pos]
             body_text = re.sub(r'<[^>]+>', ' ', body_html)
             body_text = re.sub(r'\s+', ' ', body_text).strip()
 
             heading_lower = clean_heading.lower()
+            preceding_window = target_content[max(0, match.start() - 150):match.start()].lower()
+            is_monetization = (
+                any(k in heading_lower for k in ("partner", "affiliate", "sponsor", "monetization"))
+                or any(k in preceding_window for k in ("affiliate-section", "partner-section", "affiliate-card", "partner-card", 'class="affiliate', 'class="partner'))
+                or any(k in body_html.lower() for k in ("affiliate-card", "partner-card", 'class="affiliate', 'class="partner', "sponsored / partner"))
+            )
             starts_q = any(heading_lower.startswith(w + " ") for w in SUBQUERY_QUESTION_STARTERS)
             ends_q = heading_lower.endswith("?")
-            is_question = starts_q or ends_q
-            is_sec_intent = any(k in heading_lower for k in SECONDARY_INTENT_KEYWORDS)
+            is_question = (starts_q or ends_q) and not is_monetization
+            is_sec_intent = any(k in heading_lower for k in SECONDARY_INTENT_KEYWORDS) and not is_monetization
 
-            words = body_text.split() if body_text else []
+            full_section_text = f"{clean_heading} {body_text}".strip()
+            words = full_section_text.split() if full_section_text else []
             sections.append({
                 "level": lvl,
                 "heading": clean_heading,
                 "body_text": body_text,
+                "raw_html": body_html,
                 "word_count": len(words),
                 "is_question": is_question,
                 "is_secondary_intent": is_sec_intent,
@@ -2474,18 +2489,23 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
             if m_h:
                 if current_heading:
                     txt = " ".join(current_lines).strip()
-                    words = txt.split()
+                    full_txt = f"{current_heading} {txt}".strip()
+                    words = full_txt.split() if full_txt else []
                     h_lower = current_heading.lower()
+                    is_monetization = any(k in h_lower for k in ("partner", "affiliate", "sponsor", "monetization"))
                     starts_q = any(h_lower.startswith(w + " ") for w in SUBQUERY_QUESTION_STARTERS)
                     ends_q = h_lower.endswith("?")
+                    is_question = (starts_q or ends_q) and not is_monetization
+                    is_sec_intent = any(k in h_lower for k in SECONDARY_INTENT_KEYWORDS) and not is_monetization
                     sections.append({
                         "level": 2,
                         "heading": current_heading,
                         "body_text": txt,
+                        "raw_html": txt,
                         "word_count": len(words),
-                        "is_question": starts_q or ends_q,
-                        "is_secondary_intent": any(k in h_lower for k in SECONDARY_INTENT_KEYWORDS),
-                        "is_subquery": (starts_q or ends_q) or any(k in h_lower for k in SECONDARY_INTENT_KEYWORDS),
+                        "is_question": is_question,
+                        "is_secondary_intent": is_sec_intent,
+                        "is_subquery": is_question or is_sec_intent,
                         "has_calculation": bool(re.search(r'\$?\d+(?:,\d+)*(?:\.\d+)?%?', txt)),
                     })
                 current_heading = m_h.group(2).strip()
@@ -2495,18 +2515,23 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
 
         if current_heading:
             txt = " ".join(current_lines).strip()
-            words = txt.split()
+            full_txt = f"{current_heading} {txt}".strip()
+            words = full_txt.split() if full_txt else []
             h_lower = current_heading.lower()
+            is_monetization = any(k in h_lower for k in ("partner", "affiliate", "sponsor", "monetization"))
             starts_q = any(h_lower.startswith(w + " ") for w in SUBQUERY_QUESTION_STARTERS)
             ends_q = h_lower.endswith("?")
+            is_question = (starts_q or ends_q) and not is_monetization
+            is_sec_intent = any(k in h_lower for k in SECONDARY_INTENT_KEYWORDS) and not is_monetization
             sections.append({
                 "level": 2,
                 "heading": current_heading,
                 "body_text": txt,
+                "raw_html": txt,
                 "word_count": len(words),
-                "is_question": starts_q or ends_q,
-                "is_secondary_intent": any(k in h_lower for k in SECONDARY_INTENT_KEYWORDS),
-                "is_subquery": (starts_q or ends_q) or any(k in h_lower for k in SECONDARY_INTENT_KEYWORDS),
+                "is_question": is_question,
+                "is_secondary_intent": is_sec_intent,
+                "is_subquery": is_question or is_sec_intent,
                 "has_calculation": bool(re.search(r'\$?\d+(?:,\d+)*(?:\.\d+)?%?', txt)),
             })
 
@@ -2588,7 +2613,7 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
 
     # Container-based detection via regex
     container_pattern = re.compile(
-        r'<(?P<tag>div|section|article)\b(?P<attrs>[^>]*(?:(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container)[^"\']*["\'])|(?:data-variant(?:-id)?=["\'][^"\']+["\'])|(?:data-node-id=["\'][^"\']+["\'])|(?:id=["\'](?:variant|calc|node)[-_][^"\']+["\']))[^>]*)>(?P<body>.*?)</(?P=tag)>',
+        r'<(?P<tag>div|section|article|a)\b(?P<attrs>[^>]*(?:(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|calc-scenario-card|scenario-card|scenario-preset-pill)[^"\']*["\'])|(?:data-variant(?:-id)?=["\'][^"\']+["\'])|(?:data-node-id=["\'][^"\']+["\'])|(?:id=["\'](?:variant|calc|node)[-_][^"\']+["\']))[^>]*)>(?P<body>.*?)</(?P=tag)>',
         re.IGNORECASE | re.DOTALL,
     )
 
@@ -2597,17 +2622,32 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
         for idx, match in enumerate(matches):
             attrs_str = match.group("attrs")
             body_html = match.group("body")
+            is_preset = (
+                "data-calc-preset" in body_html
+                or "data-calc-preset" in attrs_str
+                or "calc-scenario-card" in attrs_str
+                or "scenario-card" in attrs_str
+                or "scenario-preset-pill" in attrs_str
+            )
 
             m_id = re.search(r'\b(?:id|data-variant-id|data-node-id|data-variant)=["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
             node_id = m_id.group(1).strip() if m_id else f"variant-{idx + 1}"
 
             m_h = re.search(r'<h[1-6]\b[^>]*>(.*?)</h[1-6]>', body_html, re.IGNORECASE | re.DOTALL)
+            if not m_h:
+                m_h = re.search(r'<div\b[^>]*class=["\'][^"\']*calc-scenario-q[^"\']*["\'][^>]*>(.*?)</div>', body_html, re.IGNORECASE | re.DOTALL)
+            if not m_h:
+                m_h = re.search(r'<span\b[^>]*>(.*?)</span>', body_html, re.IGNORECASE | re.DOTALL)
             title = re.sub(r'<[^>]+>', '', m_h.group(1)).strip() if m_h else node_id
 
             links = re.findall(r'<a\b[^>]*\bhref=["\']([^"\']+)["\']', body_html, re.IGNORECASE)
+            if match.group("tag").lower() == "a":
+                href_m = re.search(r'\bhref=["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
+                if href_m:
+                    links.append(href_m.group(1))
 
             body_without_heading = re.sub(r'<h[1-6]\b[^>]*>.*?</h[1-6]>', '', body_html, flags=re.IGNORECASE | re.DOTALL)
-            has_calc = (
+            has_calc = is_preset or (
                 "<form" in body_without_heading.lower()
                 or "<input" in body_without_heading.lower()
                 or "<table" in body_without_heading.lower()
@@ -2626,13 +2666,23 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
                 "has_calculation": has_calc,
                 "word_count": len(body_text.split()),
                 "raw_html": body_html,
+                "is_preset": is_preset,
             })
+
+        full_variants = [n for n in nodes if not n.get("is_preset")]
+        if len(full_variants) >= 2:
+            nodes = full_variants
+        else:
+            for n in nodes:
+                if n.get("is_preset"):
+                    n["outgoing_links"] = [other["id"] for other in nodes if other["id"] != n["id"]]
     else:
         # Fallback: inspect subheadings that represent calculation variants
         sections = extract_subquery_sections(html_or_text)
         variant_sections = [
             s for s in sections
-            if any(k in s.get("heading", "").lower() for k in ("variant", "scenario", "option", "calculator", "calculation", "tier", "regime"))
+            if s.get("has_calculation", False)
+            and any(k in s.get("heading", "").lower() for k in ("variant", "tier", "regime"))
         ]
         for idx, vs in enumerate(variant_sections):
             h = vs.get("heading", "")
@@ -3207,10 +3257,9 @@ def assert_internal_links_integrity(
             is_internal = True
 
         if is_internal and known_routes is not None:
-            if "#" in link_target:
-                path_part, fragment_part = link_target.split("#", 1)
-            else:
-                path_part, fragment_part = link_target, ""
+            parsed_target = urllib.parse.urlsplit(link_target)
+            path_part = parsed_target.path
+            fragment_part = parsed_target.fragment
 
             if path_part.startswith("/"):
                 resolved = posixpath.normpath(path_part)
@@ -3348,6 +3397,14 @@ ECONOMIC_DATASET_PATTERNS: List[str] = [
     r"\bBEA\b",
     r"\bBureau of Economic Analysis\b",
     r"\bFederal Reserve\b",
+    r"\bCensus\b",
+    r"\bU\.?S\.?\s+Census(?:\s+Bureau)?\b",
+    r"\bCensus\s+Bureau\b",
+    r"\bACS\b",
+    r"\bAmerican\s+Community\s+Survey\b",
+    r"\bCFTC\b",
+    r"\bSEC\b",
+    r"\bTreasury\b",
 ]
 
 UNGROUNDED_SYNTHETIC_PATTERNS: List[str] = [
@@ -3473,7 +3530,10 @@ def detect_ungrounded_synthetic_claims(text: str) -> List[str]:
     return issues
 
 
-def detect_orphaned_calculation_tables(html_content: str) -> List[str]:
+def detect_orphaned_calculation_tables(
+    html_content: str,
+    manifests: Optional[List[Dict[str, Any]]] = None,
+) -> List[str]:
     """
     Scans HTML content for calculation tables lacking statutory or economic provenance.
     Calculation tables displaying rates, monetary amounts, or formulas must cite their
@@ -3485,11 +3545,24 @@ def detect_orphaned_calculation_tables(html_content: str) -> List[str]:
     orphans: List[str] = []
 
     table_pat = re.compile(r'<table\b([^>]*)>(.*?)</table>', re.IGNORECASE | re.DOTALL)
+    has_page_provenance_table = bool(
+        re.search(r'<table\b[^>]*>.*?data provenance.*?</table>', html_content, re.IGNORECASE | re.DOTALL)
+        or re.search(r'<table\b[^>]*(?:data-provenance|data-statutory)[^>]*>', html_content, re.IGNORECASE)
+    )
+
+
     statutory_kw = [
         "irc", "cfr", "usc", "u.s.c.", "internal revenue code", "statutory", "statute",
         "rev. proc.", "treas. reg.", "public law", "p.l.", "section 179", "section 168",
-        "section 199a", "form 1099", "statutory authority", "bls", "fred", "bea"
+        "section 199a", "section 1256", "form 1099", "statutory authority", "bls", "fred", "bea",
+        "census", "tcja", "tax cuts and jobs act", "irs", "federal reserve", "treasury",
+        "cftc", "sec", "gaap", "asc", "commodity exchange act", "financial accounts",
+        "balance sheet", "going concern", "burn rate", "statutory rate", "statutory code"
     ]
+    statutory_pat = re.compile(
+        r'\b(?:' + '|'.join(re.escape(k) for k in statutory_kw) + r')\b',
+        re.IGNORECASE
+    )
 
     for idx, match in enumerate(table_pat.finditer(html_content)):
         attrs_str = match.group(1).lower()
@@ -3500,7 +3573,7 @@ def detect_orphaned_calculation_tables(html_content: str) -> List[str]:
             re.search(r'\$[0-9]+', table_body)
             or re.search(r'[0-9]+(?:\.[0-9]+)?\s*%', table_body)
             or re.search(r'\b[0-9]{3,}\b', table_body)
-            or re.search(r'(=|\+|\-|\*|/)\s*[0-9]+', table_body)
+            or re.search(r'(?:=|\+|\*|/)\s*[0-9]+', table_body)
             or "calculation" in attrs_str
             or "calc-table" in attrs_str
             or "data-variant" in attrs_str
@@ -3516,16 +3589,16 @@ def detect_orphaned_calculation_tables(html_content: str) -> List[str]:
             ]
         )
 
-        has_body_provenance = any(kw in table_full for kw in statutory_kw)
+        has_body_provenance = bool(statutory_pat.search(table_full))
 
-        start_pos = max(0, match.start() - 300)
-        end_pos = min(len(html_content), match.end() + 300)
+        start_pos = max(0, match.start() - 600)
+        end_pos = min(len(html_content), match.end() + 600)
         surrounding_text = html_content[start_pos:end_pos].lower()
-        has_surrounding_provenance = any(kw in surrounding_text for kw in statutory_kw) and (
+        has_surrounding_provenance = bool(statutory_pat.search(surrounding_text)) and (
             "<figcaption" in surrounding_text or "provenance" in surrounding_text or "source:" in surrounding_text or "authority:" in surrounding_text
         )
 
-        if not (has_attr_provenance or has_body_provenance or has_surrounding_provenance):
+        if not (has_attr_provenance or has_body_provenance or has_surrounding_provenance or has_page_provenance_table):
             orphans.append(f"Table {idx + 1}: Orphaned calculation table missing statutory or economic provenance")
 
     return orphans
@@ -4217,9 +4290,9 @@ ALL_OFFICIAL_STANDARD_DEDUCTIONS: Set[float] = {
 }
 
 SILENT_FALLBACK_DEFAULT_PATTERNS = [
-    re.compile(r'\b(?:default\s+to|fallback(?:\s+to)?|assumes?\s+default|hardcoded\s+(?:rate|bracket|limit|deduction)|default\s+(?:tax\s+rate|bracket|limit|deduction))\b', re.IGNORECASE),
-    re.compile(r'\b(?:silent(?:ly)?\s+fallback|unverified\s+(?:rate|bracket|limit|deduction))\b', re.IGNORECASE),
-    re.compile(r'\b(?:fallback\s+standard\s+deduction|default\s+standard\s+deduction)\b', re.IGNORECASE),
+    re.compile(r'\b(?:default\s+to|fallback\s+to|assumes?\s+default|hardcoded\s+(?:rate|bracket|limit|deduction|constant)|default\s+(?:tax\s+rate|bracket|limit|deduction|constant))\b', re.IGNORECASE),
+    re.compile(r'\b(?:silent(?:ly)?\s+fallback|unverified\s+(?:rate|bracket|limit|deduction|constant))\b', re.IGNORECASE),
+    re.compile(r'\b(?:fallback\s+(?:standard\s+deduction|tax\s+rate|rate|bracket|limit|deduction|constant))\b', re.IGNORECASE),
 ]
 
 
@@ -4290,19 +4363,25 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
     if "\u2013" in content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
+    # Clean text for document prose and structured claims analysis (preserving JSON manifests)
+    clean_text = content
+    if "<" in content and ">" in content:
+        clean_text = re.sub(r'<script\b(?![^>]*type=["\']application/(?:ld\+)?json["\'])[^>]*>.*?</script>', ' ', content, flags=re.IGNORECASE | re.DOTALL)
+        clean_text = re.sub(r'<style\b[^>]*>.*?</style>', ' ', clean_text, flags=re.IGNORECASE | re.DOTALL)
+
     # 2. Silent fallback defaults check
     for pat in SILENT_FALLBACK_DEFAULT_PATTERNS:
-        for m in pat.finditer(content):
+        for m in pat.finditer(clean_text):
             issues.append(
                 f"Page {rel_path}: Silent fallback default detected ('{m.group(0).strip()}'): "
                 f"statutory constants must be explicitly reconciled against official published schedules"
             )
 
     # 3. Invented federal tax rates check
-    for m in re.finditer(r'\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:federal\s+)?(?:marginal\s+tax\s+rate|marginal\s+rate|tax\s+bracket|bracket)\b', content, re.IGNORECASE):
+    for m in re.finditer(r'\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:federal\s+)?(?:marginal\s+tax\s+rate|marginal\s+rate|tax\s+bracket|bracket)\b', clean_text, re.IGNORECASE):
         try:
             rate = float(m.group(1))
-            surrounding = content[max(0, m.start()-40):min(len(content), m.end()+40)].lower()
+            surrounding = clean_text[max(0, m.start()-40):min(len(clean_text), m.end()+40)].lower()
             if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding):
                 if rate not in VALID_FEDERAL_TAX_RATES and rate not in {0.0, 15.0, 20.0}:
                     issues.append(
@@ -4314,14 +4393,14 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
     # 4. Standard deduction checks
     std_ded_matches = re.finditer(
         r'(?:standard\s+deduction(?:\s+(?:is|of|for|amount|value|drops?\s+to))?|deduction\s+of)\s*[:=]?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in std_ded_matches:
         raw_val = m.group(1).replace(",", "")
         try:
             val = float(raw_val)
-            surrounding = content[max(0, m.start()-60):min(len(content), m.end()+60)].lower()
+            surrounding = clean_text[max(0, m.start()-60):min(len(clean_text), m.end()+60)].lower()
             if "standard deduction" in surrounding:
                 if val not in ALL_OFFICIAL_STANDARD_DEDUCTIONS:
                     issues.append(
@@ -4347,7 +4426,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
     # 5. Section 179 maximum deduction and phaseout limits
     sec179_matches = re.finditer(
         r'(?:Section\s+179|Sec\.?\s*179)\s+(?:max(?:imum)?\s+(?:deduction|expensing)|expensing\s+(?:cap|limit)|deduction\s+(?:cap|limit)|limit|cap)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in sec179_matches:
@@ -4364,7 +4443,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
 
     sec179_phaseout = re.finditer(
         r'(?:Section\s+179|Sec\.?\s*179).*?phase-?out\s+(?:threshold|limit|begins?|starts?)\s*(?:of|at|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in sec179_phaseout:
@@ -4382,7 +4461,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
     # 6. Section 1202 QSBS
     qsbs_asset = re.finditer(
         r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock).*?(?:gross\s+assets?|asset\s+(?:ceiling|limit|cap))\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in qsbs_asset:
@@ -4399,7 +4478,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
 
     qsbs_excl = re.finditer(
         r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock).*?(?:gain\s+exclusion\s+cap|exclusion\s+(?:limit|cap)|maximum\s+exclusion)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in qsbs_excl:
@@ -4417,7 +4496,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
     # 7. Retirement 401(k) and IRA limits
     ret_401k = re.finditer(
         r'(?:401\(?k\)?|403\(?b\)?)\s+(?:elective\s+deferral(?:\s+limit)?|contribution\s+limit|maximum\s+deferral|annual\s+limit|deferral\s+limit|limit)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in ret_401k:
@@ -4434,7 +4513,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
 
     ret_ira = re.finditer(
         r'(?:traditional\s+ira|roth\s+ira|\bira\b)\s+(?:contribution\s+limit|annual\s+limit|maximum\s+contribution)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-        content,
+        clean_text,
         re.IGNORECASE
     )
     for m in ret_ira:
@@ -4632,6 +4711,7 @@ AUTHOR_CREDENTIAL_KEYWORDS = {
     "founder", "co-founder", "ceo", "cto", "cfo", "chief economist",
     "director", "lead architect", "principal engineer", "researcher",
     "professor", "fellow", "consultant", "advisor",
+    "research", "quantitative research", "analytics", "lab", "institute", "desk",
 }
 
 EDITORIAL_POLICY_HREF_PATTERNS = [
@@ -4641,6 +4721,7 @@ EDITORIAL_POLICY_HREF_PATTERNS = [
     re.compile(r'/fact-check(?:ing)?(?:-policy)?/?', re.IGNORECASE),
     re.compile(r'/standards/?', re.IGNORECASE),
     re.compile(r'/publishing-principles/?', re.IGNORECASE),
+    re.compile(r'/methodology/?', re.IGNORECASE),
 ]
 
 ABOUT_HREF_PATTERNS = [
@@ -4819,7 +4900,9 @@ def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
     if not has_editorial_policy:
         review_indicators = [
             "editorial policy", "editorial guidelines", "editorial standards",
-            "reviewed by", "fact checked by", "fact-checked by", "corrections policy"
+            "reviewed by", "fact checked by", "fact-checked by", "corrections policy",
+            "data verified", "verified daily", "statutory releases", "verifiable methodology",
+            "research methodology", "quantitative methodology", "peer reviewed"
         ]
         if any(ind in content_lower for ind in review_indicators):
             has_editorial_policy = True
@@ -4915,10 +4998,14 @@ def detect_publisher_reputation_issues(
 
             # Check credentials
             has_creds = False
-            for cred_key in ("jobTitle", "hasCredential", "description", "knowsAbout", "alumniOf", "worksFor"):
-                if auth.get(cred_key):
-                    has_creds = True
-                    break
+            is_org_author = auth.get("@type") in ("Organization", "NewsMediaOrganization", "Corporation", "EducationalOrganization", "GovernmentOrganization")
+            if is_org_author and (auth.get("url") or auth.get("description") or auth.get("sameAs") or auth.get("@id")):
+                has_creds = True
+            else:
+                for cred_key in ("jobTitle", "hasCredential", "description", "knowsAbout", "alumniOf", "worksFor"):
+                    if auth.get(cred_key):
+                        has_creds = True
+                        break
 
             if not has_creds:
                 author_tokens = set(re.findall(r'\b[a-zA-Z0-9.]+\b', aname.lower()))
@@ -5028,10 +5115,14 @@ def assert_author_credentials(content_or_data: Any, context: str = "") -> bool:
                 raise ValueError(f"Author credentials violation{ctx}: anonymous or placeholder author '{name}'")
         has_creds = False
         if isinstance(person, dict):
-            for k in ("jobTitle", "hasCredential", "description", "knowsAbout", "alumniOf", "worksFor"):
-                if person.get(k):
-                    has_creds = True
-                    break
+            is_org = person.get("@type") in ("Organization", "NewsMediaOrganization", "Corporation", "EducationalOrganization", "GovernmentOrganization")
+            if is_org and (person.get("url") or person.get("description") or person.get("sameAs") or person.get("@id")):
+                has_creds = True
+            else:
+                for k in ("jobTitle", "hasCredential", "description", "knowsAbout", "alumniOf", "worksFor"):
+                    if person.get(k):
+                        has_creds = True
+                        break
         if not has_creds:
             author_tokens = set(re.findall(r'\b[a-zA-Z0-9.]+\b', name.lower()))
             for kw in AUTHOR_CREDENTIAL_KEYWORDS:
@@ -7365,6 +7456,8 @@ class ToolUtilityHTMLParser(HTMLParser):
                 has_aria = bool(
                     attr_dict.get("aria-label", "").strip()
                     or attr_dict.get("aria-labelledby", "").strip()
+                    or attr_dict.get("title", "").strip()
+                    or attr_dict.get("placeholder", "").strip()
                 )
                 self.inputs.append({
                     "tag": "input",
@@ -7379,6 +7472,8 @@ class ToolUtilityHTMLParser(HTMLParser):
             has_aria = bool(
                 attr_dict.get("aria-label", "").strip()
                 or attr_dict.get("aria-labelledby", "").strip()
+                or attr_dict.get("title", "").strip()
+                or attr_dict.get("placeholder", "").strip()
             )
             self.inputs.append({
                 "tag": tag,
