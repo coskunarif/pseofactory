@@ -63,6 +63,7 @@ from pseofactory.audit import (
     ContentAccuracyAuditReport,
     ContentAccuracyAuditError,
 )
+from pseofactory.indexing_inspector import DailyIndexingInspector
 
 
 logger = logging.getLogger("pseofactory.pipeline")
@@ -78,6 +79,7 @@ class RejectionReason:
     AUDIT_STAGE_FAILED = "AUDIT_STAGE_FAILED"
     CONTENT_ACCURACY_FAILED = "CONTENT_ACCURACY_FAILED"
     COMPILATION_FAILED = "COMPILATION_FAILED"
+    ALGORITHMIC_EXPANSION_FREEZE = "ALGORITHMIC_EXPANSION_FREEZE"
 
 
 from pseofactory.verifier import MasterSEOVerifier
@@ -97,6 +99,8 @@ class PipelineConfig:
     strict_audit: bool = True
     audit_tolerance: float = 0.01
     enable_gitops: bool = False
+    enable_indexing_feedback: bool = False
+    adaptive_jev_floor_bump: float = 0.30
 
 
 @dataclass
@@ -218,6 +222,28 @@ class DriverExecutionResult:
         return d
 
 
+def _slug_matches_quarantined_url(slug: str, quarantined_url: str) -> bool:
+    """
+    Checks if candidate slug matches a quarantined URL.
+    Zero em-dashes. Zero en-dashes.
+    """
+    s = slug.strip().strip("/").lower()
+    q = quarantined_url.strip().lower()
+    if not s or not q:
+        return False
+    if s == q:
+        return True
+    q_clean = q.split("?")[0].split("#")[0].strip("/")
+    if s == q_clean:
+        return True
+    segments = [seg.strip() for seg in q_clean.split("/") if seg.strip()]
+    if s in segments:
+        return True
+    if q_clean.endswith(f"/{s}"):
+        return True
+    return False
+
+
 class FactoryPipeline:
     """
     Automated discovery, validation, and content generation pipeline.
@@ -234,6 +260,7 @@ class FactoryPipeline:
         jev_engine: Optional[JevEngine] = None,
         scanner: Optional[CrossPropertyContaminationScanner] = None,
         tenant_registry: Optional[TenantRegistry] = None,
+        indexing_inspector: Optional[DailyIndexingInspector] = None,
     ):
         self.config = config or PipelineConfig()
         self.noise_filter = noise_filter or NoiseFilter()
@@ -248,6 +275,9 @@ class FactoryPipeline:
         )
         self.scanner = scanner or CrossPropertyContaminationScanner()
         self.tenant_registry = tenant_registry or TenantRegistry.default()
+        self.indexing_inspector = indexing_inspector
+        if self.config.enable_indexing_feedback and self.indexing_inspector is None:
+            self.indexing_inspector = DailyIndexingInspector()
 
     def determine_property_assignment(
         self,
@@ -386,6 +416,88 @@ class FactoryPipeline:
         effective_enable_gitops = (
             self.config.enable_gitops if enable_gitops is None else enable_gitops
         )
+
+        effective_min_jev = self.config.min_jev_score
+        effective_min_durable = self.config.min_durable_prob
+        quarantined_urls: List[str] = []
+
+        if self.config.enable_indexing_feedback and self.indexing_inspector is not None:
+            gsc_audit = self.indexing_inspector.audit_gsc_rollover_queue()
+            backlog_exceeded = bool(gsc_audit.get("backlog_exceeded", False))
+            quota_exhausted = bool(gsc_audit.get("quota_exhausted", False))
+            feedback_governor_active = backlog_exceeded or quota_exhausted
+
+            if feedback_governor_active:
+                effective_min_jev = (
+                    self.config.min_jev_score + self.config.adaptive_jev_floor_bump
+                )
+                effective_min_durable = self.config.min_durable_prob + 0.10
+
+            if hasattr(self.indexing_inspector, "quarantined_urls"):
+                q_urls = getattr(self.indexing_inspector, "quarantined_urls")
+                quarantined_urls.extend(q_urls() if callable(q_urls) else (q_urls or []))
+
+            if hasattr(self.indexing_inspector, "get_quarantined_urls"):
+                try:
+                    quarantined_urls.extend(
+                        self.indexing_inspector.get_quarantined_urls() or []
+                    )
+                except Exception:
+                    pass
+
+            if hasattr(self.indexing_inspector, "audit_airlock_quarantine"):
+                try:
+                    q_audit = self.indexing_inspector.audit_airlock_quarantine()
+                    if isinstance(q_audit, dict):
+                        if "quarantined_urls" in q_audit:
+                            quarantined_urls.extend(q_audit["quarantined_urls"] or [])
+                        details = q_audit.get("details", {})
+                        if isinstance(details, dict):
+                            for cat, items in details.items():
+                                if isinstance(items, list):
+                                    for item in items:
+                                        if isinstance(item, dict) and "url" in item:
+                                            quarantined_urls.append(item["url"])
+                                        elif isinstance(item, str):
+                                            quarantined_urls.append(item)
+                except Exception:
+                    pass
+
+            if not quarantined_urls and hasattr(self.indexing_inspector, "quarantine_ledger_path"):
+                try:
+                    q_path = Path(self.indexing_inspector.quarantine_ledger_path)
+                    if not q_path.exists() and hasattr(self.indexing_inspector, "base_dir"):
+                        local_q = Path(self.indexing_inspector.base_dir) / ".agy" / "indexing_quarantine_ledger.json"
+                        if local_q.exists():
+                            q_path = local_q
+                    if q_path.exists():
+                        with open(q_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if isinstance(data, dict):
+                                for url_key, details_val in data.items():
+                                    if isinstance(details_val, dict):
+                                        quarantined_urls.append(details_val.get("url", url_key))
+                                    else:
+                                        quarantined_urls.append(url_key)
+                            elif isinstance(data, list):
+                                quarantined_urls.extend(data)
+                except Exception:
+                    pass
+
+            if isinstance(gsc_audit, dict) and "quarantined_urls" in gsc_audit:
+                quarantined_urls.extend(gsc_audit["quarantined_urls"] or [])
+
+            quarantined_urls = list(dict.fromkeys(str(u) for u in quarantined_urls if u))
+
+            preflight_reports["indexing_feedback_audit"] = {
+                "gsc_audit": gsc_audit,
+                "backlog_exceeded": backlog_exceeded,
+                "quota_exhausted": quota_exhausted,
+                "feedback_governor_active": feedback_governor_active,
+                "effective_min_jev": effective_min_jev,
+                "effective_min_durable": effective_min_durable,
+                "quarantined_urls": quarantined_urls,
+            }
 
         for spike in spikes:
             # 1. Universal Idempotency: sha256(tenant + spike_id + query)
@@ -532,13 +644,52 @@ class FactoryPipeline:
                 position=pos,
                 total_site_impressions=self.config.total_site_impressions,
             )
+            # Check closed-loop indexing feedback quarantine freeze
+            if self.config.enable_indexing_feedback and self.indexing_inspector is not None:
+                slug_to_check = decision.slug or cand.slug or ""
+                if any(_slug_matches_quarantined_url(slug_to_check, q) for q in quarantined_urls):
+                    decision.action = "REJECT"
+                    decision.passed_thresholds = False
+                    decision.decision_reason = "Quarantined route: ALGORITHMIC_EXPANSION_FREEZE"
+                    rankings.append(decision.to_dict())
+                    aborted_opportunities.append(
+                        AbortedOpportunity(
+                            query=decision.query,
+                            slug=decision.slug,
+                            reason=RejectionReason.ALGORITHMIC_EXPANSION_FREEZE,
+                            jev_score=decision.jev_score,
+                            durable_prob=decision.durable_prob,
+                            search_volume=treg_res.search_volume,
+                            keyword_difficulty=treg_res.keyword_difficulty,
+                            foreign_tokens=[],
+                            action="REJECT",
+                        )
+                    )
+                    continue
+
+            # Check adaptive elevated Jev thresholds under indexing feedback governor
+            if (
+                decision.action == "BUILD_PAGE"
+                and (
+                    decision.jev_score < effective_min_jev
+                    or decision.durable_prob < effective_min_durable
+                )
+            ):
+                decision.action = "REJECT"
+                decision.passed_thresholds = False
+                decision.decision_reason = (
+                    f"Failed adaptive Jev durability threshold "
+                    f"(score {decision.jev_score:.2f} < {effective_min_jev:.2f} "
+                    f"or durable_prob {decision.durable_prob:.2f} < {effective_min_durable:.2f})"
+                )
+
             rankings.append(decision.to_dict())
 
             # Evaluate decision action
             if decision.action == "REJECT":
                 if (
-                    decision.jev_score < self.config.min_jev_score
-                    or decision.durable_prob < self.config.min_durable_prob
+                    decision.jev_score < effective_min_jev
+                    or decision.durable_prob < effective_min_durable
                 ):
                     reason = "LOW_JEV_DURABILITY"
                 elif cand.acceleration <= 0.0 and treg_res.search_volume < 1000:
@@ -1057,12 +1208,16 @@ def run_factory_pipeline(
     sitemap_urls: Optional[List[str]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     enable_gitops: Optional[bool] = None,
+    indexing_inspector: Optional[DailyIndexingInspector] = None,
 ) -> DriverExecutionResult:
     """
     Convenience helper to run the complete automated discovery and content generation pipeline.
     Zero em-dashes. Zero en-dashes.
     """
-    pipeline = FactoryPipeline(config=config)
+    pipeline = FactoryPipeline(
+        config=config,
+        indexing_inspector=indexing_inspector,
+    )
     return pipeline.execute(
         raw_spikes=spikes,
         existing_tools=existing_tools,

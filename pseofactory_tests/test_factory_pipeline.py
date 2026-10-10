@@ -18,12 +18,16 @@ Zero em-dashes. Zero en-dashes.
 import os
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 from pseofactory.pipeline import (
     FactoryPipeline,
     run_factory_pipeline,
     PipelineConfig,
     DriverExecutionResult,
+    RejectionReason,
 )
 from pseofactory.trends.models import FeedSpike
 from pseofactory.maintenance import CrossPropertyContaminationScanner
@@ -610,3 +614,121 @@ def test_run_factory_pipeline_convenience_helper_and_flock_sink(tmp_path):
         record = json.loads(line)
         assert "composite_profit_yield" in record
         assert "action" in record
+
+
+def test_pipeline_closed_loop_indexing_feedback_governor():
+    """
+    Validates closed-loop indexing feedback governor in FactoryPipeline:
+    a) Elevated Jev durability floor bumps from 1.20 to 1.50 under GSC backlog,
+       causing marginal candidates (jev_score=1.30) to abort with LOW_JEV_DURABILITY.
+    b) High-yield candidates (jev_score=1.80) proceed to compilation.
+    c) Quarantined route candidates abort with ALGORITHMIC_EXPANSION_FREEZE.
+    Zero em-dashes. Zero en-dashes.
+    """
+    mock_inspector = MagicMock()
+    mock_inspector.audit_gsc_rollover_queue.return_value = {
+        "status": "FAIL",
+        "queue_size": 250,
+        "backlog_exceeded": True,
+        "quota_exhausted": False,
+        "quota_reasons": ["Backlog exceeded 200 URLs"],
+        "sample_urls": [],
+    }
+
+    quarantined_slug = "bonus-depreciation-commercial-equipment-allowance-matrix"
+    mock_inspector.get_quarantined_urls.return_value = [
+        f"https://profithelm.com/tools/{quarantined_slug}/"
+    ]
+    mock_inspector.quarantined_urls = [
+        f"https://profithelm.com/tools/{quarantined_slug}/"
+    ]
+
+    # Spike A: Marginal candidate (normally passes at min 1.20, but fails elevated 1.50)
+    spike_marginal = _make_spike(
+        spike_id="spike-gov-marginal",
+        query="section 179 equipment expense tax deduction calculator",
+        tenant="profithelm",
+        search_volume=10000,
+        cpc_usd=8.5,
+        z_score=4.5,
+        keyword_difficulty=10.0,
+        position_zero_vacant=True,
+        jev_score=1.30,
+        durable_prob=0.90,
+    )
+
+    # Spike B: High-yield candidate (passes elevated 1.50 floor)
+    spike_high_yield = _make_spike(
+        spike_id="spike-gov-high-yield",
+        query="1031 exchange replacement property boot gain tax calculator",
+        tenant="profithelm",
+        search_volume=10000,
+        cpc_usd=8.5,
+        z_score=4.5,
+        keyword_difficulty=10.0,
+        position_zero_vacant=True,
+        jev_score=1.80,
+        durable_prob=0.90,
+    )
+
+    # Spike C: Quarantined candidate (matches quarantined URL)
+    spike_quarantined = _make_spike(
+        spike_id="spike-gov-quarantined",
+        query="bonus depreciation commercial equipment allowance matrix",
+        tenant="profithelm",
+        search_volume=10000,
+        cpc_usd=8.5,
+        z_score=4.5,
+        keyword_difficulty=10.0,
+        position_zero_vacant=True,
+        jev_score=1.85,
+        durable_prob=0.95,
+    )
+
+    config = PipelineConfig(
+        enable_indexing_feedback=True,
+        min_jev_score=1.20,
+        min_durable_prob=0.50,
+        adaptive_jev_floor_bump=0.30,
+    )
+
+    pipeline = FactoryPipeline(
+        config=config,
+        indexing_inspector=mock_inspector,
+    )
+
+    result = pipeline.execute([spike_marginal, spike_high_yield, spike_quarantined])
+
+    # 1. Verification of counts
+    assert result.total_spikes == 3
+    assert result.compiled_count == 1
+    assert result.aborted_count == 2
+
+    # 2. High-yield candidate proceeded to compilation
+    assert len(result.compiled_assets) == 1
+    assert result.compiled_assets[0].query == spike_high_yield.query
+
+    # 3. Marginal candidate aborted with LOW_JEV_DURABILITY
+    marginal_aborted = next(
+        a for a in result.aborted_opportunities if a.query == spike_marginal.query
+    )
+    assert marginal_aborted.reason == "LOW_JEV_DURABILITY"
+    assert marginal_aborted.action == "REJECT"
+    assert marginal_aborted.jev_score == 1.30
+
+    # 4. Quarantined candidate aborted with ALGORITHMIC_EXPANSION_FREEZE
+    quarantined_aborted = next(
+        a for a in result.aborted_opportunities if a.query == spike_quarantined.query
+    )
+    assert quarantined_aborted.reason == "ALGORITHMIC_EXPANSION_FREEZE"
+    assert quarantined_aborted.action == "REJECT"
+
+    # 5. Preflight reports record indexing feedback audit
+    assert result.preflight_reports is not None
+    assert "indexing_feedback_audit" in result.preflight_reports
+    audit = result.preflight_reports["indexing_feedback_audit"]
+    assert audit["backlog_exceeded"] is True
+    assert audit["feedback_governor_active"] is True
+    assert audit["effective_min_jev"] == pytest.approx(1.50)
+    assert audit["effective_min_durable"] == pytest.approx(0.60)
+
