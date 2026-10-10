@@ -11,7 +11,15 @@ import json
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
+
+
+_ENGINE_HASH_CACHE: Dict[Tuple[Any, ...], Tuple[float, str]] = {}
+
+
+def clear_engine_hash_cache() -> None:
+    """Clears the in-memory engine hash cache."""
+    _ENGINE_HASH_CACHE.clear()
 
 
 def compute_engine_hash(
@@ -22,10 +30,63 @@ def compute_engine_hash(
     Computes a deterministic SHA-256 fingerprint across all Python code,
     schemas, and templates defining the programmatic SEO substrate.
     """
-    files_to_hash: Dict[str, bytes] = {}
-
-    # 1. By default, hash all .py files in the pseofactory package itself
     pseofactory_pkg_dir = Path(__file__).resolve().parent
+
+    # Determine stat/mtime of pkg and extra paths to check cache validity
+    mtimes: List[float] = []
+    try:
+        mtimes.append(pseofactory_pkg_dir.stat().st_mtime)
+    except OSError:
+        pass
+
+    if base_dirs:
+        for bdir in base_dirs:
+            bpath = Path(bdir).resolve()
+            if bpath.is_dir():
+                try:
+                    mtimes.append(bpath.stat().st_mtime)
+                except OSError:
+                    pass
+                for p in bpath.glob("**/*.py"):
+                    if "__pycache__" not in p.parts and not p.name.endswith(".pyc"):
+                        try:
+                            mtimes.append(p.stat().st_mtime)
+                        except OSError:
+                            pass
+
+    if include_paths:
+        for ip in include_paths:
+            ipath = Path(ip).resolve()
+            if ipath.is_file():
+                try:
+                    mtimes.append(ipath.stat().st_mtime)
+                except OSError:
+                    pass
+            elif ipath.is_dir():
+                try:
+                    mtimes.append(ipath.stat().st_mtime)
+                except OSError:
+                    pass
+                for p in ipath.glob("**/*"):
+                    if p.is_file() and "__pycache__" not in p.parts and not p.name.endswith(".pyc"):
+                        try:
+                            mtimes.append(p.stat().st_mtime)
+                        except OSError:
+                            pass
+
+    composite_mtime = max(mtimes) if mtimes else 0.0
+
+    cache_key = (
+        tuple(sorted(str(Path(p).resolve()) for p in include_paths)) if include_paths else (),
+        tuple(sorted(str(Path(b).resolve()) for b in base_dirs)) if base_dirs else (),
+    )
+
+    if cache_key in _ENGINE_HASH_CACHE:
+        cached_mtime, cached_hash = _ENGINE_HASH_CACHE[cache_key]
+        if cached_mtime == composite_mtime:
+            return cached_hash
+
+    files_to_hash: Dict[str, bytes] = {}
     for p in pseofactory_pkg_dir.glob("**/*.py"):
         if "__pycache__" in p.parts or p.name.endswith(".pyc"):
             continue
@@ -74,7 +135,9 @@ def compute_engine_hash(
         file_sha = hashlib.sha256(files_to_hash[rel_path]).hexdigest()
         master.update(f"{rel_path}:{file_sha}\n".encode("utf-8"))
 
-    return master.hexdigest()
+    final_hash = master.hexdigest()
+    _ENGINE_HASH_CACHE[cache_key] = (composite_mtime, final_hash)
+    return final_hash
 
 
 def detect_engine_drift(
@@ -130,6 +193,7 @@ def record_engine_hash(
 
     s_path = Path(state_file)
     final_hash = hash_value or compute_engine_hash(include_paths=include_paths, base_dirs=base_dirs)
+    _ENGINE_HASH_CACHE.clear()
     try:
         payload = {
             "engine_hash": final_hash,
