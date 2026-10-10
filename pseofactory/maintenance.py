@@ -1277,7 +1277,7 @@ class AssetIntegrityEvaluator:
     def __init__(
         self,
         scanner: Optional[CrossPropertyContaminationScanner] = None,
-        enforce_master_seo: bool = False,
+        enforce_master_seo: bool = True,
         enforce_operational_shield: bool = False,
     ):
         self.scanner = scanner or CrossPropertyContaminationScanner()
@@ -1481,7 +1481,7 @@ class AssetIntegrityEvaluator:
                 drifted.append(record)
 
         # Optional Master SEO Checklist check
-        if self.enforce_master_seo and adapter.dist_dir.exists():
+        if self.enforce_master_seo and adapter.dist_dir.exists() and (adapter.dist_dir / "sitemap.xml").is_file():
             try:
                 from pseofactory.verifier import MasterSEOVerifier
                 v = MasterSEOVerifier(
@@ -1489,9 +1489,13 @@ class AssetIntegrityEvaluator:
                     canonical_base=adapter.canonical_base,
                     domain=adapter.domain,
                     brand_name=adapter.brand_name,
-                    tools=adapter.tools,
+                    tools=getattr(adapter, "tools", None),
                 )
-                seo_report = v.audit_seo_checklist(dist_dir=adapter.dist_dir, raise_on_error=False)
+                seo_report = v.audit_seo_checklist(
+                    dist_dir=adapter.dist_dir,
+                    raise_on_error=False,
+                    enforce_relevance=(len(assets) >= 10),
+                )
                 if seo_report.get("status") == "FAIL":
                     for issue in seo_report.get("issues", []):
                         drifted.append(
@@ -2592,6 +2596,88 @@ def list_dlq(
     return engine.list_dlq(property_id=property_id)
 
 
+def reflect_and_recompile_all_assets(
+    properties: Optional[List[str]] = None,
+    force: bool = False,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """
+    Scans workspace properties and audits existing static assets using
+    AssetIntegrityEvaluator(enforce_master_seo=True). Detects drifted
+    or unverified assets and triggers recompilation/updates to automatically
+    reflect engine changes across all existing assets.
+    Zero em-dashes. Zero en-dashes.
+    """
+    scanner = WorkspacePropertyScanner()
+    discovered = scanner.discover_properties()
+    by_id = {p.property_id.lower(): p for p in discovered}
+
+    target_ids = (
+        [p.lower() for p in properties]
+        if properties
+        else sorted(list(by_id.keys()))
+    )
+
+    evaluator = AssetIntegrityEvaluator(enforce_master_seo=True)
+
+    results: Dict[str, Any] = {
+        "status": "PASS",
+        "properties_scanned": len(target_ids),
+        "total_assets_checked": 0,
+        "total_drifted": 0,
+        "total_recompiled": 0,
+        "property_reports": {},
+    }
+
+    for p_id in target_ids:
+        adapter = by_id.get(p_id)
+        if not adapter:
+            try:
+                adapter = TenantRegistry.default().get_adapter(p_id)
+            except KeyError:
+                if verbose:
+                    print(f"Property adapter '{p_id}' not found.")
+                continue
+
+        report = evaluator.audit_all(adapter)
+        drifted_records = report.drifted_assets
+        recompiled_count = 0
+
+        if drifted_records or force:
+            try:
+                if hasattr(adapter, "build_all"):
+                    build_ok = adapter.build_all()
+                    if build_ok:
+                        recompiled_count = report.total_assets_checked
+                elif hasattr(adapter, "build_asset"):
+                    for d_rec in drifted_records:
+                        if d_rec.slug:
+                            adapter.build_asset(d_rec.slug)
+                            recompiled_count += 1
+            except Exception as b_err:
+                if verbose:
+                    print(f"Error rebuilding assets for '{p_id}': {b_err}")
+
+        post_report = evaluator.audit_all(adapter) if recompiled_count > 0 else report
+
+        results["total_assets_checked"] += report.total_assets_checked
+        results["total_drifted"] += len(drifted_records)
+        results["total_recompiled"] += recompiled_count
+        results["property_reports"][p_id] = {
+            "initial_drifted": len(drifted_records),
+            "recompiled": recompiled_count,
+            "final_status": post_report.status,
+            "compliant_assets": post_report.compliant_assets_count,
+        }
+        if post_report.status != "PASS" and not force:
+            results["status"] = "DRIFT"
+
+    return results
+
+
+recompile_drifted_assets = reflect_and_recompile_all_assets
+
+
 __all__ = [
     "DriftReason",
     "AssetDriftRecord",
@@ -2617,5 +2703,7 @@ __all__ = [
     "list_dlq",
     "trigger_drift_cascade",
     "cascade_drift_lifecycle",
+    "reflect_and_recompile_all_assets",
+    "recompile_drifted_assets",
 ]
 

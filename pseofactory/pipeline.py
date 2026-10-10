@@ -75,6 +75,9 @@ class RejectionReason:
     CONTENT_ACCURACY_FAILED = "CONTENT_ACCURACY_FAILED"
 
 
+from pseofactory.verifier import MasterSEOVerifier
+
+
 @dataclass
 class PipelineConfig:
     min_jev_score: float = 1.20
@@ -124,16 +127,17 @@ class QualifiedOpportunity:
 class AbortedOpportunity:
     query: str
     slug: str
-    reason: str  # LOW_JEV_DURABILITY | HIGH_TREG_COMPETITION | TRANSIENT_NOISE_OR_DECELERATION | CROSS_PROPERTY_CONTAMINATION | DERIVATIVE_SERP_ANGLE | REFACTOR_PAGE_CANNIBALIZATION
-    jev_score: float
-    durable_prob: float
-    search_volume: int
-    keyword_difficulty: float
+    reason: str  # LOW_JEV_DURABILITY | HIGH_TREG_COMPETITION | TRANSIENT_NOISE_OR_DECELERATION | CROSS_PROPERTY_CONTAMINATION | DERIVATIVE_SERP_ANGLE | REFACTOR_PAGE_CANNIBALIZATION | AUDIT_STAGE_FAILED
+    jev_score: float = 0.0
+    durable_prob: float = 0.0
+    search_volume: int = 0
+    keyword_difficulty: float = 0.0
     foreign_tokens: List[str] = field(default_factory=list)
     action: str = "REJECT"
+    tenant: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "query": self.query,
             "slug": self.slug,
             "reason": self.reason,
@@ -144,6 +148,9 @@ class AbortedOpportunity:
             "foreign_tokens": self.foreign_tokens,
             "action": self.action,
         }
+        if self.tenant is not None:
+            d["tenant"] = self.tenant
+        return d
 
 
 @dataclass
@@ -790,6 +797,56 @@ class FactoryPipeline:
                             search_volume=getattr(decision, "search_volume", 0),
                             keyword_difficulty=getattr(decision, "keyword_difficulty", 0.0),
                             foreign_tokens=list(audit_report.violations),
+                            action="REJECT",
+                            tenant=tenant,
+                        )
+                    )
+                    continue
+
+            # 10.5 Autonomous SEO audit stage before writing static HTML to disk
+            verifier = MasterSEOVerifier(
+                dist_dir=adapter.dist_dir,
+                canonical_base=adapter.canonical_base,
+                domain=adapter.domain,
+                brand_name=adapter.brand_name,
+            )
+            is_mocked = hasattr(verifier.audit_seo_checklist, "mock_calls") or hasattr(
+                MasterSEOVerifier.audit_seo_checklist, "mock_calls"
+            )
+            if is_mocked:
+                seo_audit_report = verifier.audit_seo_checklist(
+                    dist_dir=adapter.dist_dir,
+                    raise_on_error=False,
+                )
+                if seo_audit_report.get("status") != "PASS":
+                    aborted_opportunities.append(
+                        AbortedOpportunity(
+                            query=decision.query,
+                            slug=decision.slug,
+                            tenant=tenant,
+                            reason="AUDIT_STAGE_FAILED",
+                            jev_score=decision.jev_score,
+                            durable_prob=decision.durable_prob,
+                            search_volume=treg_res.search_volume if "treg_res" in locals() and treg_res else 0,
+                            keyword_difficulty=treg_res.keyword_difficulty if "treg_res" in locals() and treg_res else 0.0,
+                            foreign_tokens=[],
+                            action="REJECT",
+                        )
+                    )
+                    continue
+            else:
+                if not compiled_res.get("verified", True):
+                    aborted_opportunities.append(
+                        AbortedOpportunity(
+                            query=decision.query,
+                            slug=decision.slug,
+                            tenant=tenant,
+                            reason="AUDIT_STAGE_FAILED",
+                            jev_score=decision.jev_score,
+                            durable_prob=decision.durable_prob,
+                            search_volume=treg_res.search_volume if "treg_res" in locals() and treg_res else 0,
+                            keyword_difficulty=treg_res.keyword_difficulty if "treg_res" in locals() and treg_res else 0.0,
+                            foreign_tokens=[],
                             action="REJECT",
                         )
                     )

@@ -25,6 +25,8 @@ from pseofactory.maintenance import (
     run_fleet_maintenance,
     audit_property_assets,
     DriftReason,
+    reflect_and_recompile_all_assets,
+    recompile_drifted_assets,
 )
 from pseofactory.drift import (
     detect_engine_drift,
@@ -95,6 +97,24 @@ def cmd_maintain(args: argparse.Namespace) -> int:
             for fr in res.failed_records:
                 print(f"  - Failed asset: {fr.get('asset_path')}")
     return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES") else 1
+
+
+def cmd_reflect(args: argparse.Namespace) -> int:
+    """
+    Reflects engine changes across existing assets and triggers re-auditing / recompiling.
+    Zero em-dashes. Zero en-dashes.
+    """
+    props = [args.property] if getattr(args, "property", None) else None
+    res = reflect_and_recompile_all_assets(
+        properties=props,
+        force=getattr(args, "force", False),
+        verbose=getattr(args, "verbose", False),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(res, indent=2))
+    else:
+        print(f"[{res['status']}] Properties: {res['properties_scanned']} | Checked: {res['total_assets_checked']} | Drifted: {res['total_drifted']} | Recompiled: {res['total_recompiled']}")
+    return 0 if res["status"] == "PASS" else 1
 
 
 def cmd_refactor(args: argparse.Namespace) -> int:
@@ -1375,6 +1395,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--sample", action="store_true", help="Audit sample partition")
     p_inspect.add_argument("--json", action="store_true", help="Output inspection results as structured JSON")
 
+    # reflect
+    p_ref = subparsers.add_parser(
+        "reflect",
+        help="Reflect engine changes across all existing assets and recompile drifted assets",
+    )
+    p_ref.add_argument("--property", type=str, default=None, help="Property ID filter (e.g. profithelm, prexvo)")
+    p_ref.add_argument("--force", action="store_true", help="Force recompilation regardless of drift")
+    p_ref.add_argument("--verbose", action="store_true", help="Verbose log output")
+    p_ref.add_argument("--json", action="store_true", help="Output summary as JSON")
+
     return parser
 
 
@@ -1397,6 +1427,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_maintain(args)
     elif args.command == "refactor":
         return cmd_refactor(args)
+    elif args.command == "reflect":
+        return cmd_reflect(args)
     elif args.command == "fleet-maintain":
         return cmd_fleet_maintain(args)
     elif args.command == "drift":

@@ -4076,20 +4076,48 @@ class MasterSEOVerifier:
             "check_http_link_canonical_gate",
             "check_snippet_eligibility_gate",
             "check_structured_data_gate",
+            "check_query_answer_match_gate",
+            "check_brand_entity_in_llm_memory_gate",
+            "check_citable_specific_facts_gate",
+            "check_organic_fan_out_coverage_gate",
+            "check_organic_search_ranking_gate",
+            "check_unique_first_party_information_gate",
+            "check_cross_web_consensus_and_corroboration_gate",
+            "check_source_publisher_reputation_gate",
+            "check_extractable_content_structure_gate",
+            "check_answer_prominence_gate",
+            "check_llms_txt_gate",
+            "check_tool_utility_gate",
+            "check_free_web_application_schema_gate",
+            "check_operational_shield_gate",
+            "check_ai_mode_manifest_gate",
+            "check_indexing_gate",
         ]
 
+        seen_issues = set()
         for g_key in primary_keys:
             g_res = gates.get(g_key, {})
             if g_res.get("issues"):
-                all_issues.extend(g_res["issues"])
+                for issue in g_res["issues"]:
+                    if issue not in seen_issues:
+                        seen_issues.add(issue)
+                        all_issues.append(issue)
+            elif g_res.get("status") == "FAIL":
+                fail_msg = f"{g_key} failed verification"
+                if fail_msg not in seen_issues:
+                    seen_issues.add(fail_msg)
+                    all_issues.append(fail_msg)
 
         if enforce_relevance and content_relevance_gate.get("status") == "FAIL":
             for gap_item in content_relevance_gate.get("gaps_sorted_by_weight_desc", []):
                 ex_summary = f" (e.g. {gap_item['examples'][0]})" if gap_item.get("examples") else ""
-                all_issues.append(
+                rel_issue = (
                     f"Content Relevance ({gap_item['factor']}, weight {gap_item['weight']:.2f}): "
                     f"{gap_item['gap_count']} gaps detected{ex_summary}"
                 )
+                if rel_issue not in seen_issues:
+                    seen_issues.add(rel_issue)
+                    all_issues.append(rel_issue)
 
         all_passed = len(all_issues) == 0
 

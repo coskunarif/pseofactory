@@ -443,6 +443,8 @@ from pseofactory.maintenance import (
     run_maintenance_lifecycle,
     run_fleet_maintenance,
     audit_property_assets,
+    reflect_and_recompile_all_assets,
+    recompile_drifted_assets,
 )
 from pseofactory.supervisor import (
     AutonomousLifecycleSupervisor,
@@ -955,6 +957,8 @@ __all__ = [
     "run_maintenance_lifecycle",
     "run_fleet_maintenance",
     "audit_property_assets",
+    "reflect_and_recompile_all_assets",
+    "recompile_drifted_assets",
     "GitOpsCoordinator",
     "CICDWatcher",
     "LiveEdgeVerifier",
