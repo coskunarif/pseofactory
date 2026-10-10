@@ -12,3 +12,8 @@ build/
 *.db-wal
 *.db.lock
 trends/data/*.db*
+
+*.db.bak
+.manifest.lock
+run_manifest.json
+**/.tgrep/

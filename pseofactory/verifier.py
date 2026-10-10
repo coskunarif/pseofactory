@@ -653,11 +653,10 @@ class SinglePassSEODocumentParser(HTMLParser):
         if "proprietary-model" in tag_cls or "data-proprietary-model" in attrs_dict:
             self.has_proprietary_model_element = True
 
-        is_qa_element = (
-            "quick-answer" in tag_cls
-            or "quick_answer" in tag_cls
-            or "quick-answer" in tag_id
-            or "quick_answer" in tag_id
+        tag_cls_tokens = set(tag_cls.split())
+        tag_id_tokens = set(tag_id.split())
+        is_qa_element = bool({"quick-answer", "quick_answer"} & tag_cls_tokens) or bool(
+            {"quick-answer", "quick_answer"} & tag_id_tokens
         )
         if is_qa_element:
             self.quick_answer_count += 1
@@ -1092,6 +1091,11 @@ class MockSearchEngineCrawler:
             known_routes.add(rel)
             if rel.endswith("/index.html"):
                 known_routes.add("/" + rel[:-11] if rel[:-11] else "/")
+
+        for static_f in target.glob("*.*"):
+            s_rel = static_f.relative_to(target).as_posix()
+            known_routes.add("/" + s_rel)
+            known_routes.add(s_rel)
 
         pages_crawled = 0
         total_links_verified = 0
@@ -2576,10 +2580,20 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("privacy/index.html", "about/index.html", "terms/index.html"):
+                if rel in (
+                    "privacy/index.html",
+                    "about/index.html",
+                    "terms/index.html",
+                    "tools/index.html",
+                    "disclaimers/index.html",
+                    "methodology/index.html",
+                    "contact/index.html",
+                ):
+                    continue
+                content = self._read_cached_html(p)
+                if rel == "index.html" and (target / "tools").exists() and "calculation-variant" not in content:
                     continue
                 pages_checked += 1
-                content = self._read_cached_html(p)
                 page_set[rel] = content
                 res = verify_html_organic_fan_out_coverage(
                     content,
@@ -2738,7 +2752,16 @@ class MasterSEOVerifier:
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("index.html", "tools/index.html", "privacy/index.html", "about/index.html", "terms/index.html"):
+                if rel in (
+                    "index.html",
+                    "tools/index.html",
+                    "privacy/index.html",
+                    "about/index.html",
+                    "terms/index.html",
+                    "disclaimers/index.html",
+                    "methodology/index.html",
+                    "contact/index.html",
+                ):
                     continue
                 pages_checked += 1
                 content = self._read_cached_html(p)

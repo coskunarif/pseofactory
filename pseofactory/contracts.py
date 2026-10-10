@@ -1119,6 +1119,7 @@ AUTHORITATIVE_PROFILE_DOMAINS: Set[str] = {
     "capterra.com",
     "bbb.org",
     "reuters.com",
+    "wa.gov",
 }
 
 BRAND_ENTITY_TAXONOMY: Set[str] = {
@@ -4748,11 +4749,11 @@ def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
                 if "author" in obj:
                     author_val = obj["author"]
                     if isinstance(author_val, dict):
-                        if author_val not in authors:
+                        if ("@type" in author_val or "name" in author_val) and author_val not in authors:
                             authors.append(author_val)
                     elif isinstance(author_val, list):
                         for a in author_val:
-                            if isinstance(a, dict) and a not in authors:
+                            if isinstance(a, dict) and ("@type" in a or "name" in a) and a not in authors:
                                 authors.append(a)
                             elif isinstance(a, str):
                                 authors.append({"@type": "Person", "name": a})
@@ -4763,7 +4764,7 @@ def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
                 if "publisher" in obj:
                     pub_val = obj["publisher"]
                     if isinstance(pub_val, dict):
-                        if pub_val not in publishers:
+                        if ("@type" in pub_val or "name" in pub_val) and pub_val not in publishers:
                             publishers.append(pub_val)
                     elif isinstance(pub_val, str):
                         publishers.append({"@type": "Organization", "name": pub_val})
