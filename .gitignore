@@ -17,3 +17,4 @@ trends/data/*.db*
 .manifest.lock
 run_manifest.json
 **/.tgrep/
+syndication/
