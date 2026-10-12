@@ -42,7 +42,7 @@ from pseofactory.drift import (
 )
 
 MAX_CONSECUTIVE_FAILURES: int = 5
-DEFAULT_TICK_BUDGET: float = 900.0
+DEFAULT_TICK_BUDGET: float = float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0"))
 DEFAULT_TENANT_BUDGET: float = 300.0
 DEFAULT_CONCURRENCY_CEILING: int = 2
 HEARTBEAT_PATH: str = ".agy/supervisor_heartbeat.json"

@@ -334,9 +334,11 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     skip_ci = getattr(args, "skip_ci", False)
 
     is_once = run_once or (not daemon)
+    budget = getattr(args, "budget", None) or float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0"))
 
     supervisor = AutonomousLifecycleSupervisor(
         interval=interval,
+        execution_budget_seconds=budget,
     )
 
     prop_ids = [property_id] if property_id else None
@@ -1423,6 +1425,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
+    p_sup.add_argument("--budget", type=float, default=float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0")), help="Execution budget in seconds (default: 2400)")
 
     # gsc-ceiling
     p_ceiling = subparsers.add_parser(
