@@ -18,6 +18,7 @@ import shutil
 import hashlib
 import tempfile
 import subprocess
+import fcntl
 import concurrent.futures
 import urllib.request
 import urllib.error
@@ -82,20 +83,35 @@ class IdempotencyLedger:
     def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
         self.ledger_path = Path(ledger_path or DEFAULT_GITOPS_LEDGER_PATH)
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.ledger_path.with_suffix(".lock")
 
     def _read_records(self) -> Dict[str, Any]:
         if not self.ledger_path.exists():
             return {}
         try:
-            return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_path, "a+") as lock_f:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_SH)
+                try:
+                    if not self.ledger_path.exists():
+                        return {}
+                    return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+                finally:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
         except Exception:
             return {}
 
     def _write_records(self, records: Dict[str, Any]) -> None:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.ledger_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
-        tmp.replace(self.ledger_path)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                tmp = self.ledger_path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
+                tmp.replace(self.ledger_path)
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def has_token(self, token: str) -> bool:
         records = self._read_records()
@@ -239,6 +255,7 @@ class GitOpsCoordinator:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_PAGER"] = "cat"
+        env["AGY_WORKTREES_BASE"] = str(self.worktrees_base)
         return env
 
     def is_git_repo(self, path: Optional[Path] = None) -> bool:
@@ -261,6 +278,7 @@ class GitOpsCoordinator:
         """
         td = Path(target_dir).resolve() if target_dir else self.repo_path
         has_tracked_dist = False
+        has_tracked_db = False
         if td.is_dir():
             res = subprocess.run(
                 ["git", "-C", str(td), "ls-files", "dist"],
@@ -272,9 +290,21 @@ class GitOpsCoordinator:
             if res.returncode == 0 and res.stdout.strip():
                 has_tracked_dist = True
 
+            res_db = subprocess.run(
+                ["git", "-C", str(td), "ls-files", "*.db"],
+                capture_output=True,
+                text=True,
+                env=self._get_git_env(),
+                check=False,
+            )
+            if res_db.returncode == 0 and res_db.stdout.strip():
+                has_tracked_db = True
+
         specs = []
         for spec in self.NEGATIVE_PATHSPECS:
             if has_tracked_dist and spec in (":!dist/*", ":!dist"):
+                continue
+            if has_tracked_db and spec in (":!*.db", ":!*.db-shm", ":!*.db-wal", ":!*.db.lock", ":!trends/data/*.db*"):
                 continue
             specs.append(spec)
         return specs
@@ -675,41 +705,54 @@ class GitOpsCoordinator:
 
         for attempt in range(1, max_attempts + 1):
             cmd = ["git", "-C", str(self.repo_path), "push", "origin", tb]
-            res = subprocess.run(cmd, env=self._get_git_env(), capture_output=True, text=True, check=False)
-            if res.returncode == 0:
-                return {"status": "SUCCESS", "attempts": attempt, "branch": tb}
+            try:
+                res = subprocess.run(cmd, env=self._get_git_env(), capture_output=True, text=True, check=False, timeout=30)
+                if res.returncode == 0:
+                    return {"status": "SUCCESS", "attempts": attempt, "branch": tb}
+                last_error = res.stderr.strip() or res.stdout.strip()
+            except subprocess.TimeoutExpired:
+                last_error = f"git push origin {tb} timed out after 30s"
 
-            last_error = res.stderr.strip() or res.stdout.strip()
             if attempt < max_attempts:
-                subprocess.run(
-                    ["git", "-C", str(self.repo_path), "fetch", "origin", tb],
-                    env=self._get_git_env(),
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                rebase_res = subprocess.run(
-                    ["git", "-C", str(self.repo_path), "rebase", f"origin/{tb}"],
-                    env=self._get_git_env(),
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if rebase_res.returncode != 0 and self.ast_merge_path.is_file():
+                try:
                     subprocess.run(
-                        [sys.executable, str(self.ast_merge_path), str(self.repo_path)],
+                        ["git", "-C", str(self.repo_path), "fetch", "origin", tb],
                         env=self._get_git_env(),
                         capture_output=True,
                         text=True,
                         check=False,
+                        timeout=30,
                     )
-                    subprocess.run(
-                        ["git", "-C", str(self.repo_path), "-c", "core.editor=true", "rebase", "--continue"],
+                except subprocess.TimeoutExpired:
+                    pass
+                try:
+                    rebase_res = subprocess.run(
+                        ["git", "-C", str(self.repo_path), "rebase", f"origin/{tb}"],
                         env=self._get_git_env(),
                         capture_output=True,
                         text=True,
                         check=False,
+                        timeout=30,
                     )
+                    if rebase_res.returncode != 0 and self.ast_merge_path.is_file():
+                        subprocess.run(
+                            [sys.executable, str(self.ast_merge_path), str(self.repo_path)],
+                            env=self._get_git_env(),
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=30,
+                        )
+                        subprocess.run(
+                            ["git", "-C", str(self.repo_path), "-c", "core.editor=true", "rebase", "--continue"],
+                            env=self._get_git_env(),
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=30,
+                        )
+                except subprocess.TimeoutExpired:
+                    pass
                 time.sleep(backoffs[min(attempt - 1, len(backoffs) - 1)])
 
         return {
@@ -787,7 +830,6 @@ class GitOpsCoordinator:
                 branch=self.branch,
                 details={"idempotency_token": idempotency_token, "reason": "Already released"},
             )
-        ledger.record_token(idempotency_token, {"property_id": property_id, "branch": self.branch, "run_id": eff_run_id})
 
         # Stage 1: Preflight containment check
         is_container_root = str(self.repo_path) == "/home/ubuntuadmin/projects"
@@ -808,27 +850,38 @@ class GitOpsCoordinator:
 
         # Stage 3: Staging queue submission
         token_abbr = f"{idempotency_token[:16]}..."
+        queue = ShipperQueue(property_id=property_id)
+        queue.enqueue({
+            "run_id": eff_run_id,
+            "property_id": property_id,
+            "token": idempotency_token,
+            "head_sha": base_commit_sha,
+            "branch": self.branch,
+            "repo_path": str(self.repo_path),
+        })
         print(f"[DISPATCH:SHIPPER] Stage 3: Staging queue submission -> token={token_abbr} (simulated flock merge, HWL-1212 PASS)")
 
         commit_sha = base_commit_sha
-        if not eff_dry_run and self.is_git_repo(active_target) and self.check_idempotency(active_target):
-            commit_sha = self.create_conventional_commit(
-                message=commit_message,
-                target_dir=active_target,
-                commit_type="fix",
-                scope=property_id,
-            )
-            merge_res = self.atomic_flock_merge(run_id=eff_run_id, target_branch=self.branch)
-            if merge_res.get("status") == "CONFLICT_BLOCKED":
-                return GitOpsResult(
-                    status="CONFLICT_BLOCKED",
-                    property_id=property_id,
-                    head_sha=commit_sha,
-                    branch=self.branch,
-                    staged_files=staged,
-                    error=merge_res.get("error", "Merge conflict"),
-                )
-            commit_sha = merge_res.get("head_sha") or commit_sha
+        if not eff_dry_run and self.is_git_repo(active_target):
+            if self.check_idempotency(active_target):
+                commit_sha = self.create_conventional_commit(
+                    message=commit_message,
+                    target_dir=active_target,
+                    commit_type="fix",
+                    scope=property_id,
+                ) or commit_sha
+            if wt_path.is_dir():
+                merge_res = self.atomic_flock_merge(run_id=eff_run_id, target_branch=self.branch)
+                if merge_res.get("status") == "CONFLICT_BLOCKED":
+                    return GitOpsResult(
+                        status="CONFLICT_BLOCKED",
+                        property_id=property_id,
+                        head_sha=commit_sha,
+                        branch=self.branch,
+                        staged_files=staged,
+                        error=merge_res.get("error", "Merge conflict"),
+                    )
+                commit_sha = merge_res.get("head_sha") or commit_sha
 
         # Stage 4: Remote push dry-run / push backoff under owner_calls
         push_res: Dict[str, Any] = {"status": "SKIPPED_DRY_RUN" if eff_dry_run else "SUCCESS"}
@@ -886,6 +939,10 @@ class GitOpsCoordinator:
                     error=edge_res.get("error", "Live edge probe failed"),
                     details={"edge": edge_res},
                 )
+
+        # Latch token into IdempotencyLedger strictly post-Stage 6 success (HWL-1349)
+        if not eff_dry_run:
+            ledger.record_token(idempotency_token, {"property_id": property_id, "branch": self.branch, "run_id": eff_run_id})
 
         # Output release_manifest.json to .agy/runs/{run_id}/release_manifest.json
         manifest_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run_id
@@ -1068,15 +1125,15 @@ class CICDWatcher:
                 "--json",
                 "databaseId,headSha,conclusion,status",
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            if res.returncode == 0:
-                try:
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=15)
+                if res.returncode == 0:
                     data = json.loads(res.stdout.strip() or "[]")
                     if isinstance(data, list) and len(data) > 0:
                         gh_run_id = data[0].get("databaseId")
                         break
-                except Exception:
-                    pass
+            except Exception:
+                pass
             time.sleep(self.discovery_interval)
 
         # Phase B: Polling until completed or timeout
@@ -1094,9 +1151,9 @@ class CICDWatcher:
                 "--json",
                 "databaseId,headSha,conclusion,status",
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            if res.returncode == 0:
-                try:
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=15)
+                if res.returncode == 0:
                     data = json.loads(res.stdout.strip() or "[]")
                     if isinstance(data, list) and len(data) > 0:
                         entry = data[0]
@@ -1128,8 +1185,8 @@ class CICDWatcher:
                                     "conclusion": conclusion,
                                     "error": f"CI/CD workflow '{self.workflow}' concluded with '{conclusion}'",
                                 }
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
             elapsed = time.time() - start_time
             if elapsed >= self.timeout:
@@ -1159,12 +1216,16 @@ class CICDWatcher:
         conclusion: str,
     ) -> None:
         if gh_run_id:
-            subprocess.run(
-                ["gh", "-R", slug, "run", "view", str(gh_run_id), "--log-failed"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                subprocess.run(
+                    ["gh", "-R", slug, "run", "view", str(gh_run_id), "--log-failed"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=15,
+                )
+            except Exception:
+                pass
 
         subprocess.run(
             ["git", "-C", str(repo_path), "branch", f"quarantine/ci-fail-{run_id}", target_sha],
