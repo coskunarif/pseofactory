@@ -252,7 +252,10 @@ CONVERSATIONAL_FILLER_TERMS: List[str] = [
 ]
 
 
-def assert_youtube_transcript(text_or_data: Union[str, Dict[str, Any]]) -> bool:
+def assert_youtube_transcript(
+    text_or_data: Union[str, Dict[str, Any]],
+    brand_name: str = "ProfitHelm",
+) -> bool:
     """
     Validates YouTube video transcript for SEO syndication and AI citation:
     1. Bounds: 300 to 8000 characters.
@@ -262,7 +265,7 @@ def assert_youtube_transcript(text_or_data: Union[str, Dict[str, Any]]) -> bool:
     5. Zero conversational filler terms.
     6. Speaker attribution tags (e.g. [Narrator] or [Host]).
     7. Timestamp markers (e.g. [00:00]).
-    8. Brand entity reference ('ProfitHelm').
+    8. Brand entity reference (dynamic brand_name).
     """
     if isinstance(text_or_data, dict):
         text = text_or_data.get("full_text") or text_or_data.get("transcript") or ""
@@ -294,8 +297,9 @@ def assert_youtube_transcript(text_or_data: Union[str, Dict[str, Any]]) -> bool:
     if not re.search(r'\[(Narrator|Speaker(\s*\d+)?|Host)\]', text):
         raise ValueError("YouTube transcript must include speaker attribution tags (e.g. [Narrator] or [Host])")
 
-    if "profithelm" not in text_lower:
-        raise ValueError("YouTube transcript must reference brand entity 'ProfitHelm'")
+    brand_lower = brand_name.lower()
+    if brand_lower not in text_lower:
+        raise ValueError(f"YouTube transcript must reference brand entity '{brand_name}'")
 
     return True
 

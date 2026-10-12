@@ -69,6 +69,113 @@ class GitOpsResult:
         }
 
 
+DEFAULT_GITOPS_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/gitops_idempotency_ledger.json")
+
+
+class IdempotencyLedger:
+    """
+    Persistent idempotency ledger for GitOps release operations.
+    Stores release tokens to reject duplicate release triggers (HWL-1212/HWL-1231).
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
+        self.ledger_path = Path(ledger_path or DEFAULT_GITOPS_LEDGER_PATH)
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _read_records(self) -> Dict[str, Any]:
+        if not self.ledger_path.exists():
+            return {}
+        try:
+            return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _write_records(self, records: Dict[str, Any]) -> None:
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.ledger_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
+        tmp.replace(self.ledger_path)
+
+    def has_token(self, token: str) -> bool:
+        records = self._read_records()
+        return token in records
+
+    def record_token(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        records = self._read_records()
+        records[token] = {
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            **(metadata or {}),
+        }
+        self._write_records(records)
+
+    def check_and_record(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        """Returns True if duplicate, False if newly recorded."""
+        if self.has_token(token):
+            return True
+        self.record_token(token, metadata)
+        return False
+
+
+def check_persistent_idempotency(token: str, ledger_path: Optional[Union[str, Path]] = None) -> bool:
+    """Returns True if token exists in persistent ledger, False otherwise."""
+    ledger = IdempotencyLedger(ledger_path)
+    return ledger.has_token(token)
+
+
+class ShipperQueue:
+    """
+    Write-Ahead Log staging queue and dead letter queue for GitOps releases (HWL-1145).
+    Zero em-dashes. Zero en-dashes.
+    """
+    DEFAULT_QUEUES_DIR = Path("/home/ubuntuadmin/projects/.agy/queues")
+
+    def __init__(
+        self,
+        property_id: str = "factory",
+        queues_dir: Optional[Union[str, Path]] = None,
+        max_attempts: int = 3,
+    ):
+        self.property_id = property_id.lower()
+        self.queues_dir = Path(queues_dir or self.DEFAULT_QUEUES_DIR)
+        self.queues_dir.mkdir(parents=True, exist_ok=True)
+        self.max_attempts = max_attempts
+        self.queue_file = self.queues_dir / f"{self.property_id}_release_queue.jsonl"
+        self.dlq_file = self.queues_dir / f"{self.property_id}_dlq.jsonl"
+
+    def enqueue(self, payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
+        eid = event_id or f"evt_{hashlib.sha256(str(payload).encode('utf-8')).hexdigest()[:16]}"
+        record = {
+            "event_id": eid,
+            "property_id": self.property_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "attempts": 0,
+            "max_attempts": self.max_attempts,
+            "status": "PENDING",
+            "payload": payload,
+        }
+        line = json.dumps(record) + "\n"
+        with open(self.queue_file, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+        return record
+
+    def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
+        dlq_record = dict(record)
+        dlq_record["status"] = "QUARANTINED"
+        dlq_record["quarantined_at"] = datetime.now(timezone.utc).isoformat()
+        dlq_record["error"] = error or "Max release retry attempts exceeded"
+        line = json.dumps(dlq_record) + "\n"
+        with open(self.dlq_file, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+
+
+WALQueue = ShipperQueue
+
+
 class GitOpsCoordinator:
     """
     Unified GitOps coordinator managing safe releases:
@@ -638,6 +745,20 @@ class GitOpsCoordinator:
         eff_dry_run = self.dry_run if dry_run is None else dry_run
         wf = workflow or self.workflow or "ci.yml"
 
+        # Dynamic tenant resolution via TenantRegistry
+        if property_id and property_id not in ("factory", "default"):
+            try:
+                from pseofactory.maintenance import TenantRegistry
+                adapter = TenantRegistry.default().get_adapter(property_id)
+                if not edge_url:
+                    edge_url = adapter.canonical_base
+                if not dist_dir:
+                    dist_dir = adapter.dist_dir
+                if adapter.repo_path and self.repo_path == Path.cwd().resolve():
+                    self.repo_path = adapter.repo_path
+            except Exception:
+                pass
+
         # Base commit SHA
         base_commit_sha = "0000000000000000000000000000000000000000"
         if self.is_git_repo(self.repo_path):
@@ -651,9 +772,22 @@ class GitOpsCoordinator:
             if sha_res.returncode == 0 and sha_res.stdout.strip():
                 base_commit_sha = sha_res.stdout.strip()
 
-        # Idempotency token computation: sha256(repo_path + run_id + branch + base_commit_sha)
-        token_str = f"{self.repo_path}:{eff_run_id}:{self.branch}:{base_commit_sha}"
+        # Idempotency token computation: sha256(repo_path + property_id + branch + base_commit_sha)
+        token_str = f"{self.repo_path}:{property_id}:{self.branch}:{base_commit_sha}"
         idempotency_token = hashlib.sha256(token_str.encode("utf-8")).hexdigest()
+
+        # Persistent idempotency ledger rejection (HWL-1212/HWL-1231)
+        ledger = IdempotencyLedger()
+        if ledger.has_token(idempotency_token):
+            print(f"[DISPATCH:SHIPPER] Stage 3: Duplicate release token detected -> token={idempotency_token[:16]}... (SKIPPED_NO_CHANGES HWL-1212/HWL-1231)")
+            return GitOpsResult(
+                status="SKIPPED_NO_CHANGES",
+                property_id=property_id,
+                head_sha=base_commit_sha,
+                branch=self.branch,
+                details={"idempotency_token": idempotency_token, "reason": "Already released"},
+            )
+        ledger.record_token(idempotency_token, {"property_id": property_id, "branch": self.branch, "run_id": eff_run_id})
 
         # Stage 1: Preflight containment check
         is_container_root = str(self.repo_path) == "/home/ubuntuadmin/projects"

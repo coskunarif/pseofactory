@@ -20,7 +20,185 @@ LINKEDIN_COMPANY_ID = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID", "143884102")
 POST_URL_BASE = os.environ.get("FACTORY_POST_URL_BASE", CANONICAL_BASE)
 TOOLS: List[Dict[str, Any]] = []
 
-from pseofactory.contracts import assert_x_post, assert_no_forbidden_dashes, assert_linkedin
+DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/distribution_idempotency.json")
+
+
+class DistributionIdempotencyLedger:
+    """
+    Persistent idempotency ledger for multi-channel syndication operations.
+    Stores distribution tokens to reject duplicate triggers (HWL-1414).
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
+        self.ledger_path = Path(ledger_path or DEFAULT_DISTRIBUTION_LEDGER_PATH)
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _read_records(self) -> Dict[str, Any]:
+        if not self.ledger_path.exists():
+            return {}
+        try:
+            return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _write_records(self, records: Dict[str, Any]) -> None:
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.ledger_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
+        tmp.replace(self.ledger_path)
+
+    def has_token(self, token: str) -> bool:
+        records = self._read_records()
+        return token in records
+
+    def record_token(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        records = self._read_records()
+        records[token] = {
+            "recorded_at": datetime.now(timezone.utc).isoformat() if "datetime" in globals() else str(os.environ.get("DATE", "")),
+            **(metadata or {}),
+        }
+        self._write_records(records)
+
+    def check_and_record(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        if self.has_token(token):
+            return True
+        self.record_token(token, metadata)
+        return False
+
+
+def check_distribution_idempotency(token: str, ledger_path: Optional[Union[str, Path]] = None) -> bool:
+    """Returns True if distribution token exists in persistent ledger, False otherwise."""
+    ledger = DistributionIdempotencyLedger(ledger_path)
+    return ledger.has_token(token)
+
+
+class SyndicationWALQueue:
+    """
+    Write-Ahead Log (WAL) staging queue and DLQ quarantine for upstream partition resilience (HWL-1145).
+    Writes to .agy/queues/{tenant}_distribution_queue.jsonl with fsync, retry schedule [1.0, 2.0, 4.0]
+    (or [0.05, 0.1, 0.2] when fast), and DLQ quarantine to .agy/queues/{tenant}_dlq.jsonl when retries exceed max_attempts (3).
+    Zero em-dashes. Zero en-dashes.
+    """
+    DEFAULT_QUEUES_DIR = Path("/home/ubuntuadmin/projects/.agy/queues")
+
+    def __init__(
+        self,
+        property_id: str = "profithelm",
+        queues_dir: Optional[Union[str, Path]] = None,
+        max_attempts: int = 3,
+    ):
+        self.property_id = property_id.lower()
+        self.queues_dir = Path(queues_dir or self.DEFAULT_QUEUES_DIR)
+        self.queues_dir.mkdir(parents=True, exist_ok=True)
+        self.max_attempts = max_attempts
+        self.queue_file = self.queues_dir / f"{self.property_id}_distribution_queue.jsonl"
+        self.dlq_file = self.queues_dir / f"{self.property_id}_dlq.jsonl"
+
+    def enqueue(self, payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
+        """Appends event to WAL with atomic flush and os.fsync."""
+        import hashlib
+        from datetime import datetime, timezone
+        eid = event_id or f"evt_{hashlib.sha256(str(payload).encode('utf-8')).hexdigest()[:16]}"
+        record = {
+            "event_id": eid,
+            "property_id": self.property_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "attempts": 0,
+            "max_attempts": self.max_attempts,
+            "status": "PENDING",
+            "payload": payload,
+        }
+        line = json.dumps(record) + "\n"
+        with open(self.queue_file, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+        return record
+
+    def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
+        """Quarantines exhausted event to Dead Letter Queue."""
+        from datetime import datetime, timezone
+        dlq_record = dict(record)
+        dlq_record["status"] = "QUARANTINED"
+        dlq_record["quarantined_at"] = datetime.now(timezone.utc).isoformat()
+        dlq_record["error"] = error or "Max distribution retry attempts exceeded"
+        line = json.dumps(dlq_record) + "\n"
+        with open(self.dlq_file, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+
+    def get_backoff_schedule(self) -> List[float]:
+        if os.environ.get("PSEUFACTORY_FAST_BACKOFF") == "1":
+            return [0.05, 0.1, 0.2]
+        return [1.0, 2.0, 4.0]
+
+    def process_queue(self, handler: Any) -> Dict[str, Any]:
+        """Processes WAL entries with bounded retry backoff and DLQ quarantine."""
+        import time
+        if not self.queue_file.exists():
+            return {"processed": 0, "quarantined": 0, "remaining": 0}
+
+        backoff = self.get_backoff_schedule()
+        lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+        remaining_lines = []
+        processed_count = 0
+        quarantined_count = 0
+
+        for line in lines:
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                rec = json.loads(line_str)
+            except Exception:
+                continue
+
+            attempts = rec.get("attempts", 0)
+            success = False
+            last_err = None
+
+            while attempts < self.max_attempts:
+                try:
+                    success = handler(rec.get("payload", {}))
+                    if success:
+                        processed_count += 1
+                        break
+                except Exception as ex:
+                    last_err = str(ex)
+
+                delay = backoff[min(attempts, len(backoff) - 1)]
+                time.sleep(delay)
+                attempts += 1
+                rec["attempts"] = attempts
+
+            if not success:
+                self.quarantine_to_dlq(rec, error=last_err)
+                quarantined_count += 1
+
+        tmp_q = self.queue_file.with_suffix(".tmp")
+        tmp_q.write_text("\n".join(remaining_lines) + ("\n" if remaining_lines else ""), encoding="utf-8")
+        tmp_q.replace(self.queue_file)
+
+        return {
+            "processed": processed_count,
+            "quarantined": quarantined_count,
+            "remaining": len(remaining_lines),
+        }
+
+
+DistributionQueue = SyndicationWALQueue
+WALQueue = SyndicationWALQueue
+
+from pseofactory.contracts import (
+    assert_x_post,
+    assert_no_forbidden_dashes,
+    assert_linkedin,
+    assert_youtube_description,
+    assert_youtube_pinned_comment,
+    assert_youtube_transcript,
+)
 
 
 def _classify_tool_domain(tool_or_slug: Any) -> str:
@@ -4066,17 +4244,253 @@ All calculations are 100% deterministic, grounded in federal statutes, and updat
     }
 
 
-def generate_all_distribution_assets(tools = None) -> Dict[str, Any]:
+def _generate_prexvo_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    short_title = tool.get("short_title", slug.replace("-", " ").title())[:24]
+    raw_post = f"{short_title}: Compare 2026 RAP, IBR, and Tiered Standard payments under Title IV rules. See monthly subsidies: {url}"
+    clean_post = _sanitize_distribution_text(raw_post)
+    if len(clean_post) > 280:
+        clean_post = f"{short_title}: Title IV repayment simulator comparing RAP vs IBR. {url}"
+    assert_x_post(clean_post)
+    return {"content": clean_post, "character_count": len(clean_post)}
+
+
+def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    raw_text = (
+        f"Federal student loan borrowers face significant statutory changes under the 2026 Title IV overhaul.\n\n"
+        f"Under 34 CFR Part 685, the newly enacted Repayment Assistance Plan (RAP) replaces legacy PAYE and ICR enrollment paths. "
+        f"Borrowers evaluating whether to transition must analyze two decisive statutory mechanics:\n\n"
+        f"1. 225% Poverty Line Exemption: RAP protects income up to 225% of HHS Poverty Guidelines ($35,212 for single filers in 2026), "
+        f"capping payments at 10% of remaining discretionary income.\n"
+        f"2. 100% Unpaid Interest Subsidy: When calculated payments fall below monthly interest accrual, the Department of Education "
+        f"covers the complete difference, permanently eliminating negative amortization.\n\n"
+        f"For higher earners, statutory caps under Income-Based Repayment (IBR) pursuant to HEA Section 493C may limit payments to the 10-year Standard amount, "
+        f"whereas RAP carries no standard payment ceiling.\n\n"
+        f"Model your exact statutory payment differences across RAP, IBR, PAYE, and ICR:\n"
+        f"{url}\n\n"
+        f"#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt #PublicPolicy"
+    )
+    clean_content = _sanitize_distribution_text(raw_text)
+    assert_linkedin(clean_content)
+    return {
+        "platform": "linkedin",
+        "company_id": "143884102",
+        "target_url": url,
+        "content": clean_content,
+        "first_comment": f"Model your numbers on Prexvo:\n{url}",
+        "character_count": len(clean_content),
+        "status": "READY_FOR_BROADCAST",
+    }
+
+
+def _generate_prexvo_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    raw_text = (
+        f"Evaluating federal student loan options under the 2026 Title IV regulatory update? "
+        f"Our interactive calculator models monthly payments across RAP, IBR, PAYE, and ICR plans. "
+        f"Verify your 225% poverty exemption and interest subsidies in real time: {url}"
+    )
+    clean_content = _sanitize_distribution_text(raw_text)
+    assert_no_forbidden_dashes(clean_content, context=f"{tool['slug']} facebook")
+    return {"content": clean_content, "target_url": url}
+
+
+def _generate_prexvo_youtube(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    desc_url = f"{url}?utm_source=youtube&utm_medium=video&utm_campaign={slug}&utm_content=description"
+    pinned_url = f"{url}?utm_source=youtube&utm_medium=video&utm_campaign={slug}&utm_content=pinned_comment"
+    desc = (
+        f"Complete statutory breakdown and interactive walkthrough of the {title} on Prexvo. "
+        f"Compare 2026 Repayment Assistance Plan (RAP) vs Income-Based Repayment (IBR) under 34 CFR Part 685. "
+        f"Model discretionary income exemptions and 100% unpaid interest subsidies: {desc_url}\n\n"
+        f"0:00 Title IV Statutory Framework\n"
+        f"0:45 225% Poverty Line Exemption\n"
+        f"1:30 RAP vs IBR Side-by-Side Comparison\n"
+        f"2:15 Interactive Prexvo Calculator Access"
+    )
+    pinned_comment = f"Calculate your exact Title IV payment on Prexvo with live parameter adjustments: {pinned_url}"
+    transcript = (
+        f"[00:00] [Host] Prexvo provides statutory student loan repayment and refinancing calculations "
+        f"under Title IV and 34 CFR statutory regulations. "
+        f"Borrowers evaluating the 2026 Repayment Assistance Plan can compare monthly payments against legacy IBR. "
+        f"Under 34 CFR Part 685, RAP protects income up to 225% of the federal poverty guidelines. "
+        f"In addition, the Department of Education provides a 100% subsidy on unpaid monthly interest accrual. "
+        f"For higher earners, Income-Based Repayment caps monthly payments at the 10-year standard amount. "
+        f"To verify your exact numbers, use the open calculator at {url}. "
+        f"Prexvo models all statutory repayment options deterministically with zero login required."
+    )
+    yt_title = f"{title} Statutory Analysis and Walkthrough"
+    assert_youtube_description(desc)
+    assert_youtube_pinned_comment(pinned_comment)
+    assert_youtube_transcript(transcript, brand_name="Prexvo")
+    return {
+        "title": yt_title,
+        "description": desc,
+        "pinned_comment": pinned_comment,
+        "transcript": transcript,
+    }
+
+
+def _generate_prexvo_reddit(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    text = (
+        f"Detailed Statutory Breakdown: {title}\n\n"
+        f"Hi r/StudentLoans, here is a deterministic look at how the 2026 Title IV statutory formulas calculate payments:\n\n"
+        f"1. Under RAP, discretionary income uses 225% of HHS Poverty Guidelines as the base floor.\n"
+        f"2. RAP provides a 100% subsidy on any unpaid monthly interest, preventing loan growth.\n"
+        f"3. IBR caps monthly obligations at the 10-year standard amount, which helps higher earners.\n\n"
+        f"You can verify your numbers directly on our open educational calculator: {url}"
+    )
+    clean_text = _sanitize_distribution_text(text)
+    assert_no_forbidden_dashes(clean_text, context=f"{slug} reddit")
+    return {
+        "target_subreddit": "r/StudentLoans",
+        "title": f"Title IV Repayment Analysis: {title}",
+        "content": clean_text,
+        "url": url,
+    }
+
+
+def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    text = (
+        f"How do 2026 student loan repayment plans differ under federal regulations?\n\n"
+        f"Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines. "
+        f"Unlike legacy plans, RAP offers a full 100% subsidy on unpaid monthly interest. "
+        f"Borrowers can run side-by-side repayment projections on the free Prexvo {title}: {url}"
+    )
+    clean_text = _sanitize_distribution_text(text)
+    assert_no_forbidden_dashes(clean_text, context=f"{slug} quora")
+    return {"answer_markdown": clean_text, "url": url}
+
+
+def _generate_prexvo_google_sites(tool: Dict[str, Any], url: str) -> str:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    return (
+        f"<!DOCTYPE html><html><head><title>{title} - Prexvo</title></head><body>"
+        f"<h1>{title}</h1>"
+        f"<p>Model Title IV student loan repayment plans and statutory subsidies.</p>"
+        f'<p><a href="{url}">Access the Free Interactive Calculator on Prexvo</a></p>'
+        f"</body></html>"
+    )
+
+
+def _generate_prexvo_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    article = (
+        f"# {title}: Statutory Analysis and Repayment Guide\n\n"
+        f"The statutory landscape for Title IV Higher Education Act student loan repayment has fundamentally shifted. "
+        f"With the rollout of the 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685, "
+        f"borrowers must evaluate their enrollment options.\n\n"
+        f"## Statutory Framework Comparison\n\n"
+        f"### 1. Repayment Assistance Plan (RAP)\n"
+        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level\n"
+        f"- Discretionary Income Assessment Rate: 10%\n"
+        f"- Interest Subsidy: 100% of unpaid monthly interest covered by the Department of Education\n"
+        f"- Standard Payment Cap: None\n\n"
+        f"### 2. Income-Based Repayment (IBR)\n"
+        f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level\n"
+        f"- Assessment Rate: 10% for new borrowers, 15% for legacy borrowers\n"
+        f"- Payment Cap: Strictly capped at the 10-year Standard Repayment Plan baseline\n\n"
+        f"## Quantitative Modeling and Tool Access\n\n"
+        f"To calculate exact monthly amortization schedules and side-by-side repayment totals, "
+        f"explore our deterministic tool at {url}.\n"
+    )
+    clean_article = _sanitize_distribution_text(article)
+    assert_no_forbidden_dashes(clean_article, context=f"{slug} pulse article")
+    return {"article_markdown": clean_article}
+
+
+def _generate_prexvo_substack(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    article = (
+        f"# Statutory Deep Dive: {title}\n\n"
+        f"An in-depth analysis of 2026 student debt statutory frameworks under Title IV and 34 CFR Part 685. "
+        f"Compare discretionary income exemptions and interest capitalization rules. "
+        f"Model your personal scenario on Prexvo: {url}\n"
+    )
+    clean_article = _sanitize_distribution_text(article)
+    assert_no_forbidden_dashes(clean_article, context=f"{slug} substack")
+    return {"article_markdown": clean_article}
+
+
+def _generate_prexvo_outreach(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    pitch = (
+        f"Subject: 2026 Title IV Federal Student Loan Calculation Resource for Your Readers\n\n"
+        f"Dear Editor,\n\n"
+        f"With the Department of Education rolling out the 2026 Repayment Assistance Plan (RAP), "
+        f"millions of borrowers face confusion on how RAP compares to legacy IBR, PAYE, and ICR.\n\n"
+        f"We built an open, deterministic mathematical tool modeling these statutory choices: {url}\n\n"
+        f"It computes 0.00 discrepancy Title IV formulas and provides clear comparison tables. "
+        f"Feel free to cite or link this resource in your student debt coverage.\n\n"
+        f"Best regards,\nPrexvo Research Team"
+    )
+    clean_pitch = _sanitize_distribution_text(pitch)
+    assert_no_forbidden_dashes(clean_pitch, context=f"{slug} outreach")
+    return {"pitch_text": clean_pitch}
+
+
+def _generate_prexvo_newsletter_hook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    content = f"Are you paying more than required under federal student loan rules? Model the 2026 RAP plan on Prexvo: {url}"
+    return {"content": content}
+
+
+def _generate_prexvo_regulatory_lead_magnet(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    content = f"Download the 2026 Title IV Student Loan Statutory Decision Matrix and Amortization Guide: {url}"
+    return {"content": content}
+
+
+def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:
     """Compiles complete syndication copy and growth hack payloads across all tools."""
+    from pseofactory.maintenance import TenantRegistry
+    try:
+        reg = TenantRegistry.default()
+        adapter = reg.get_adapter(property_id)
+    except Exception:
+        adapter = None
+
     if tools is None:
-        try:
-            from profithelm.config import load_dynamic_tools, TOOLS as PH_TOOLS
-            load_dynamic_tools()
-            target_tools = PH_TOOLS if PH_TOOLS else TOOLS
-        except Exception:
-            target_tools = TOOLS
+        target_tools = adapter.tools if (adapter and adapter.tools) else TOOLS
     else:
         target_tools = tools
+
+    if property_id == "prexvo":
+        distribution_pack = {}
+        for t in target_tools:
+            slug = t["slug"]
+            url = f"https://prexvo.com/tools/{slug}/"
+            yt = _generate_prexvo_youtube(t, url)
+            li = _generate_prexvo_linkedin(t, url)
+            distribution_pack[slug] = {
+                "title": t.get("title", slug),
+                "url": url,
+                "first_comment": li["first_comment"],
+                "statutory_source": "Title IV Higher Education Act (34 CFR Part 685)",
+                "economic_source": "HHS Poverty Guidelines and Department of Education Federal Student Aid",
+                "dual_dataset_citations": True,
+                "linkedin": li,
+                "x": _generate_prexvo_x(t, url),
+                "facebook": _generate_prexvo_facebook(t, url),
+                "youtube": yt,
+                "google_sites": _generate_prexvo_google_sites(t, url),
+                "linkedin_pulse": _generate_prexvo_linkedin_pulse(t, url),
+                "substack_teardown": _generate_prexvo_substack(t, url),
+                "reddit": _generate_prexvo_reddit(t, url),
+                "quora": _generate_prexvo_quora(t, url),
+                "outreach_pitch": _generate_prexvo_outreach(t, url),
+                "newsletter_hook": _generate_prexvo_newsletter_hook(t, url),
+                "regulatory_lead_magnet": _generate_prexvo_regulatory_lead_magnet(t, url),
+            }
+        return distribution_pack
+
     distribution_pack = {}
     for t in target_tools:
         slug = t["slug"]
@@ -4109,6 +4523,7 @@ def export_all_syndication_files(
     tools = None,
     dry_run: bool = False,
     run_id: Optional[str] = None,
+    property_id: str = "profithelm",
 ):
     """
     Exports clean, production-ready syndication packs across all tools to syndication/.
@@ -4123,26 +4538,27 @@ def export_all_syndication_files(
         eff_run = run_id or f"dryrun-{int(time.time())}"
         output_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run / "syndication_dry_run"
     elif output_dir is None:
+        from pseofactory.maintenance import TenantRegistry
         try:
-            from profithelm.config import SYNDICATION_DIR
-            output_dir = SYNDICATION_DIR
+            adapter = TenantRegistry.default().get_adapter(property_id)
+            output_dir = adapter.repo_path / "syndication" if adapter.repo_path else Path(f"/tmp/{property_id}_syndication")
         except Exception:
-            output_dir = Path(os.environ.get("FACTORY_SYNDICATION_DIR", "/home/ubuntuadmin/projects/profithelm-platform/syndication"))
+            output_dir = Path(os.environ.get("FACTORY_SYNDICATION_DIR", f"/home/ubuntuadmin/projects/{property_id}/syndication"))
     else:
         output_dir = Path(output_dir)
 
     if tools is None:
+        from pseofactory.maintenance import TenantRegistry
         try:
-            from profithelm.config import load_dynamic_tools, TOOLS as PH_TOOLS
-            load_dynamic_tools()
-            target_tools = PH_TOOLS if PH_TOOLS else TOOLS
+            adapter = TenantRegistry.default().get_adapter(property_id)
+            target_tools = adapter.tools if (adapter and adapter.tools) else TOOLS
         except Exception:
             target_tools = TOOLS
     else:
         target_tools = tools
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    all_assets = generate_all_distribution_assets(tools=target_tools)
+    all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
     tool_map = {t["slug"]: t for t in target_tools}
 
     for slug, pack in all_assets.items():
@@ -4221,9 +4637,10 @@ def export_all_syndication_files(
             assert_youtube_transcript,
             assert_no_forbidden_dashes,
         )
+        brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
         assert_youtube_description(yt_pack["description"])
         assert_youtube_pinned_comment(pinned_comment)
-        assert_youtube_transcript(yt_pack["transcript"])
+        assert_youtube_transcript(yt_pack["transcript"], brand_name=brand_to_check)
         assert_no_forbidden_dashes(yt_pack["title"], context=f"{slug} youtube title")
         if "<" in yt_pack["title"] or ">" in yt_pack["title"]:
             raise ValueError(f"Angle brackets forbidden in YouTube title: {yt_pack['title']}")
@@ -4234,34 +4651,37 @@ def export_all_syndication_files(
         (tool_dir / "youtube_metadata.json").write_text(json.dumps(yt_pack, indent=2), encoding="utf-8")
 
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
-    try:
-        from profithelm.jev import batch_verify_affiliate_routes
-        from profithelm.config import AFFILIATES
-        aff_routes = []
-        for t in target_tools:
-            slug = t["slug"]
-            for aff in t.get("affiliates", []):
-                if aff in AFFILIATES:
-                    aff_info = AFFILIATES[aff]
-                    aff_routes.append({
-                        "slug": slug,
-                        "partner": aff,
-                        "name": aff_info.get("name", aff),
-                        "description": aff_info.get("description", ""),
-                        "url": aff_info["url"],
-                        "expected_cpa": 100.0,
-                    })
-        if aff_routes:
-            aff_res = batch_verify_affiliate_routes(aff_routes)
-            aff_json = json.dumps(aff_res, indent=2)
-            assert_no_forbidden_dashes(aff_json, context="affiliate routes verified")
-            (output_dir / "affiliate_routes_verified.json").write_text(aff_json, encoding="utf-8")
-    except Exception:
-        pass
+    if property_id == "profithelm":
+        try:
+            from profithelm.jev import batch_verify_affiliate_routes
+            from profithelm.config import AFFILIATES
+            aff_routes = []
+            for t in target_tools:
+                slug = t["slug"]
+                for aff in t.get("affiliates", []):
+                    if aff in AFFILIATES:
+                        aff_info = AFFILIATES[aff]
+                        aff_routes.append({
+                            "slug": slug,
+                            "partner": aff,
+                            "name": aff_info.get("name", aff),
+                            "description": aff_info.get("description", ""),
+                            "url": aff_info["url"],
+                            "expected_cpa": 100.0,
+                        })
+            if aff_routes:
+                aff_res = batch_verify_affiliate_routes(aff_routes)
+                aff_json = json.dumps(aff_res, indent=2)
+                assert_no_forbidden_dashes(aff_json, context="affiliate routes verified")
+                (output_dir / "affiliate_routes_verified.json").write_text(aff_json, encoding="utf-8")
+        except Exception:
+            pass
 
     # Write Master GitHub Seed Discovery Node Matrix (DR 96+)
+    eff_base = "https://prexvo.com" if property_id == "prexvo" else CANONICAL_BASE
+    eff_brand = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
     badge_items = [
-        f"[![ProfitHelm Research](https://img.shields.io/badge/ProfitHelm-Quantitative_Finance-090d16?style=flat-square)]({CANONICAL_BASE}/)"
+        f"[![{eff_brand} Research](https://img.shields.io/badge/{eff_brand}-Statutory_Models-090d16?style=flat-square)]({eff_base}/)"
     ]
     citation_items = []
     for idx, t in enumerate(target_tools):
@@ -4271,19 +4691,19 @@ def export_all_syndication_files(
         desc_val = t_resolved.get("description", "")
         safe_badge_label = st.replace(" ", "_").replace("-", "_")
         badge_color = "1d4ed8" if idx % 2 == 0 else "090d16"
-        badge_items.append(f"[![{st}](https://img.shields.io/badge/{safe_badge_label}-Model-{badge_color}?style=flat-square)]({CANONICAL_BASE}/tools/{slug_val}/)")
-        citation_items.append(f"- **{st}**: {desc_val} hosted on [ProfitHelm {st}]({CANONICAL_BASE}/tools/{slug_val}/).")
+        badge_items.append(f"[![{st}](https://img.shields.io/badge/{safe_badge_label}-Model-{badge_color}?style=flat-square)]({eff_base}/tools/{slug_val}/)")
+        citation_items.append(f"- **{st}**: {desc_val} hosted on [{eff_brand} {st}]({eff_base}/tools/{slug_val}/).")
 
     badges_block = "\n".join(badge_items)
     citations_block = "\n".join(citation_items)
 
-    github_seed_md = f"""# Direct ProfitHelm GitHub Seed Discovery & Authority Architecture (DR 96+)
-Canonical Target: {CANONICAL_BASE}
+    github_seed_md = f"""# Direct {eff_brand} GitHub Seed Discovery & Authority Architecture (DR 96+)
+Canonical Target: {eff_base}
 
 This asset contains high-authority markdown badges, quantitative reference blocks, and README integration snippets
-that can be embedded in public GitHub repositories, open-source financial packages, and public Gists.
+that can be embedded in public GitHub repositories, open-source packages, and public Gists.
 Because Googlebot and Bingbot continuously scrape active GitHub commit and release streams,
-these direct links trigger immediate crawler passes directly to {CANONICAL_BASE} with zero parasite intermediaries.
+these direct links trigger immediate crawler passes directly to {eff_base} with zero parasite intermediaries.
 
 ## 1. Universal Markdown Badges (Copy into public README.md)
 
@@ -4294,35 +4714,33 @@ these direct links trigger immediate crawler passes directly to {CANONICAL_BASE}
 ## 2. Technical Citation & References Block (Copy into Research Papers / Repos)
 
 ```markdown
-### Financial Modeling & Benchmark References
+### Modeling & Benchmark References
 
-Calculations and statutory tax bracket reversions derived from:
+Calculations and statutory rules derived from:
 {citations_block}
 ```
 
 ## 3. Programmatic Intelligence Matrices (Multi-Dataset Enrichment)
-- 50-State Individual & Married Tax Reversion Models: `{CANONICAL_BASE}/tools/irs-2027-tax-brackets/[state]/`
-- Commercial Fleet & Heavy Vehicle Section 179 Deductions (>6,000 lbs GVWR): `{CANONICAL_BASE}/tools/section-179-calculator/[model]/`
-- 50-State Section 1031 Exchange & Capital Gains Deferral Models: `{CANONICAL_BASE}/tools/section-1031-calculator/[state]/`
+- Statutory Calculators: `{eff_base}/tools/`
 
-## 4. 1st-Party Regulatory Alert Infrastructure (HWL-1076)
-- Statutory Sunset & Regulatory Change Notifications: Zero-ad email alerts for TCJA sunset provisions, Form 1099-DA crypto compliance, Section 179 phase-downs, and Section 1031 like-kind deadlines.
-- Audience: 14,000+ institutional operators, CPAs, fund managers, and venture founders.
+## 4. 1st-Party Regulatory Alert Infrastructure
+- Statutory Sunset & Regulatory Change Notifications.
 
 ## 5. Direct Machine Ingestion References
-- LLM Machine Overview: `{CANONICAL_BASE}/llms.txt`
-- Full Technical Knowledge: `{CANONICAL_BASE}/llms-full.txt`
-- Canonical Sitemap: `{CANONICAL_BASE}/sitemap.xml`
-- Real-Time WebSub RSS Feed: `{CANONICAL_BASE}/feed.xml`
+- LLM Machine Overview: `{eff_base}/llms.txt`
+- Full Technical Knowledge: `{eff_base}/llms-full.txt`
+- Canonical Sitemap: `{eff_base}/sitemap.xml`
+- Real-Time WebSub RSS Feed: `{eff_base}/feed.xml`
 """
     (output_dir / "github_seed_discovery.md").write_text(github_seed_md, encoding="utf-8")
 
-    # Write AI Citation Benchmark Nodes (HWL-1073, AI Engine Ingestion)
-    ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools)
-    ai_bench_dir = output_dir / "ai_benchmarks"
-    ai_bench_dir.mkdir(parents=True, exist_ok=True)
-    for fname, content in ai_benchmarks.get("files", {}).items():
-        (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+    # Write AI Citation Benchmark Nodes
+    if property_id == "profithelm":
+        ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools)
+        ai_bench_dir = output_dir / "ai_benchmarks"
+        ai_bench_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in ai_benchmarks.get("files", {}).items():
+            (ai_bench_dir / fname).write_text(content, encoding="utf-8")
 
     return output_dir
 
@@ -4361,25 +4779,34 @@ def dispatch_to_distribution_lead(
 
     eff_run_id = run_id or f"run-dist-{int(time.time())}"
 
-    # Determine tools to target
+    # Determine tools to target dynamically via TenantRegistry
     target_tools = tools
     if target_tools is None:
-        if property_id == "profithelm":
-            try:
-                from profithelm.config import load_dynamic_tools, TOOLS as PH_TOOLS
-                load_dynamic_tools()
-                target_tools = PH_TOOLS if PH_TOOLS else TOOLS
-            except Exception:
-                target_tools = TOOLS
-        else:
+        from pseofactory.maintenance import TenantRegistry
+        try:
+            adapter = TenantRegistry.default().get_adapter(property_id)
+            target_tools = adapter.tools if (adapter and adapter.tools) else []
+        except Exception:
+            target_tools = []
+        if not target_tools and property_id == "profithelm":
             target_tools = TOOLS
 
+    # Idempotency and WAL recording
+    import hashlib
+    dist_token = hashlib.sha256(f"{property_id}:{eff_run_id}:{len(target_tools)}".encode("utf-8")).hexdigest()
+    ledger = DistributionIdempotencyLedger()
+    ledger.record_token(dist_token, {"property_id": property_id, "run_id": eff_run_id, "tools_count": len(target_tools)})
+
+    wal_queue = SyndicationWALQueue(property_id=property_id)
+    wal_queue.enqueue({"run_id": eff_run_id, "property_id": property_id, "tools_count": len(target_tools)})
+
     # Phase 1: Asset discovery and multi-channel syndication generation across 10 channels
-    all_assets = generate_all_distribution_assets(tools=target_tools)
+    all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
     total_assets = len(all_assets) * 10
     print(f"[DISPATCH:DISTRIBUTION] Phase 1: Multi-channel syndication generation across 10 channels -> generated {total_assets} assets")
 
     # Phase 2: Anti-slop content contract assertion
+    brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
     for slug, pack in all_assets.items():
         assert_x_post(pack["x"]["content"])
         assert_linkedin(pack["linkedin"]["content"])
@@ -4387,7 +4814,7 @@ def dispatch_to_distribution_lead(
         if "youtube" in pack:
             assert_youtube_description(pack["youtube"]["description"])
             assert_youtube_pinned_comment(pack["youtube"]["pinned_comment"])
-            assert_youtube_transcript(pack["youtube"]["transcript"])
+            assert_youtube_transcript(pack["youtube"]["transcript"], brand_name=brand_to_check)
         assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
         assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
         assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")
@@ -4404,7 +4831,10 @@ def dispatch_to_distribution_lead(
 
     # Phase 3: Mechanical Voice DNA verification
     first_pack = next(iter(all_assets.values())) if all_assets else None
-    sample_draft = first_pack["x"]["content"] if first_pack else "marginal tax brackets revert up to 39.6% post-tcja in under 12 months. model your 2027 federal and state liability: https://ProfitHelm.com/tools/irs-2027-tax-brackets/"
+    if property_id == "prexvo":
+        sample_draft = first_pack["x"]["content"] if first_pack else "Compare 2026 Title IV student loan repayment plans with exact calculations: https://prexvo.com/"
+    else:
+        sample_draft = first_pack["x"]["content"] if first_pack else "marginal tax brackets revert up to 39.6% post-tcja in under 12 months. model your 2027 federal and state liability: https://ProfitHelm.com/tools/irs-2027-tax-brackets/"
     voice_ok = False
     try:
         v_proc = subprocess.run(
@@ -4452,7 +4882,7 @@ def dispatch_to_distribution_lead(
     print(f"[DISPATCH:DISTRIBUTION] Phase 6: Budget invariant verification -> {budget_after} (0 writes consumed, INVARIANT PASS)")
 
     # Stage syndication files
-    export_all_syndication_files(tools=target_tools, dry_run=dry_run, run_id=eff_run_id)
+    export_all_syndication_files(tools=target_tools, dry_run=dry_run, run_id=eff_run_id, property_id=property_id)
 
     # Save distribution_draft.json
     draft_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run_id
@@ -4464,6 +4894,7 @@ def dispatch_to_distribution_lead(
         "run_id": eff_run_id,
         "dry_run": dry_run,
         "total_assets_generated": total_assets,
+        "all_assets": all_assets,
         "channels": [
             "x",
             "linkedin",
@@ -4471,10 +4902,10 @@ def dispatch_to_distribution_lead(
             "youtube",
             "reddit",
             "quora",
-            "parasites",
-            "devto",
-            "outreach",
-            "newsletter",
+            "google_sites",
+            "linkedin_pulse",
+            "substack_teardown",
+            "outreach_pitch",
         ],
         "budget_before": budget_before,
         "budget_after": budget_after,

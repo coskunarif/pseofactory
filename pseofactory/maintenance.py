@@ -1231,6 +1231,45 @@ class WorkspacePropertyScanner:
     discover = discover_properties
 
 
+PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
+    {
+        "slug": "student-loan-repayment-calculator",
+        "title": "Federal Student Loan Repayment Plan Calculator",
+        "short_title": "Repayment Calculator",
+        "description": "Calculate and compare Title IV student loan repayment plans side by side. Model monthly payments and forgiveness horizons for RAP, IBR, PAYE, and ICR.",
+        "primary_keyword": "student loan repayment calculator",
+    },
+    {
+        "slug": "rap-vs-ibr-calculator",
+        "title": "RAP vs IBR Student Loan Plan Comparison Engine",
+        "short_title": "RAP vs IBR",
+        "description": "Compare monthly obligations, 225% poverty exemption rules, interest subsidies, and statutory forgiveness schedules between the 2026 RAP and IBR plans.",
+        "primary_keyword": "rap vs ibr",
+    },
+    {
+        "slug": "tiered-standard-calculator",
+        "title": "Tiered Standard Repayment Plan Amortization Model",
+        "short_title": "Tiered Standard",
+        "description": "Calculate 10 to 30 year standard amortization schedules across federal consolidation balance tiers pursuant to Title IV 34 CFR 685.208 regulations.",
+        "primary_keyword": "tiered standard repayment plan",
+    },
+    {
+        "slug": "paye-sunset-calculator",
+        "title": "PAYE Sunset & Plan Transition Analysis Engine",
+        "short_title": "PAYE Sunset",
+        "description": "Analyze 2026 PAYE sunset rules, grandfathering protections, and 10-year standard payment caps to model whether switching to RAP reduces total repayment.",
+        "primary_keyword": "paye vs ibr",
+    },
+    {
+        "slug": "icr-repayment-calculator",
+        "title": "Income-Contingent Repayment (ICR) Formula Tool",
+        "short_title": "ICR Calculator",
+        "description": "Model Income-Contingent Repayment under dual statutory formulas: 20% discretionary income vs 12-year income-adjusted payments for Parent PLUS debt.",
+        "primary_keyword": "icr vs ibr",
+    },
+]
+
+
 class TenantRegistry:
     """
     Registry for tenant property adapters.
@@ -1269,8 +1308,67 @@ class TenantRegistry:
             scanner = WorkspacePropertyScanner(workspace_root=workspace_root)
             for adapter in scanner.discover_properties():
                 reg.register_adapter(adapter)
+            cls._ensure_tenant_tools(reg, workspace_root=workspace_root)
             cls._global_registry = reg
         return cls._global_registry
+
+    @classmethod
+    def _ensure_tenant_tools(cls, reg: TenantRegistry, workspace_root: Optional[Union[str, Path]] = None) -> None:
+        root = Path(
+            workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+        ).resolve()
+
+        # 1. Ensure Prexvo adapter with non-empty Title IV tools matching prexvo.com
+        px_tools: List[Dict[str, Any]] = list(PREXVO_DEFAULT_TOOLS)
+        try:
+            px_repo = root / "prexvo"
+            if px_repo.is_dir() and str(px_repo) not in sys.path:
+                sys.path.insert(0, str(px_repo))
+            from prexvo.config import TOOLS as DYN_PX_TOOLS
+            if DYN_PX_TOOLS:
+                px_tools = list(DYN_PX_TOOLS)
+        except Exception:
+            pass
+
+        try:
+            px_adapter = reg.get_adapter("prexvo")
+            if not px_adapter.tools:
+                if hasattr(px_adapter, "_tools"):
+                    px_adapter._tools = px_tools
+                elif hasattr(px_adapter, "tools") and isinstance(px_adapter.tools, list):
+                    px_adapter.tools.extend(px_tools)
+        except KeyError:
+            px_repo = root / "prexvo"
+            dist_dir = (px_repo / "dist").resolve() if px_repo.is_dir() else Path("/tmp/prexvo_dist")
+            reg.register_adapter(
+                SubprocessPropertyAdapter(
+                    property_id="prexvo",
+                    brand_name="Prexvo",
+                    domain="prexvo.com",
+                    canonical_base="https://prexvo.com",
+                    dist_dir=dist_dir,
+                    repo_path=px_repo if px_repo.is_dir() else None,
+                    tools=px_tools,
+                    foreign_tokens=CrossPropertyContaminationScanner.DEFAULT_FOREIGN_TOKENS.get("prexvo", set()),
+                    statutory_tokens={"title iv", "34 cfr", "rap", "ibr", "paye", "icr", "pslf"},
+                )
+            )
+
+        # 2. Ensure ProfitHelm tools
+        try:
+            ph_adapter = reg.get_adapter("profithelm")
+            if not ph_adapter.tools:
+                try:
+                    ph_repo = root / "profithelm-platform"
+                    if ph_repo.is_dir() and str(ph_repo) not in sys.path:
+                        sys.path.insert(0, str(ph_repo))
+                    from profithelm.config import TOOLS as PH_TOOLS
+                    if PH_TOOLS and hasattr(ph_adapter, "_tools"):
+                        ph_adapter._tools = list(PH_TOOLS)
+                except Exception:
+                    pass
+        except KeyError:
+            pass
 
     @classmethod
     def reset_default(cls) -> None:

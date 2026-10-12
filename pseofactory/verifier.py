@@ -1417,23 +1417,23 @@ class MasterSEOVerifier:
         self.canonical_base = (
             canonical_base
             if canonical_base is not None
-            else os.environ.get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
+            else os.environ.get("FACTORY_CANONICAL_BASE", "")
         ).rstrip("/")
         self.domain = (
             domain
             if domain is not None
-            else os.environ.get("FACTORY_DOMAIN", "profithelm.com")
+            else os.environ.get("FACTORY_DOMAIN", "")
         )
         self.brand_domain = self.domain
         self.brand_name = (
             brand_name
             if brand_name is not None
-            else os.environ.get("FACTORY_BRAND_NAME", "ProfitHelm")
+            else os.environ.get("FACTORY_BRAND_NAME", "")
         )
         self.dist_dir = (
             Path(dist_dir)
             if dist_dir is not None
-            else Path(os.environ.get("FACTORY_DIST_DIR", "/home/ubuntuadmin/projects/profithelm-platform/dist"))
+            else Path(os.environ.get("FACTORY_DIST_DIR", "."))
         )
         self.tools = list(tools) if tools else []
         self.min_manifests = min_manifests
@@ -4232,6 +4232,36 @@ class MasterSEOVerifier:
             )
 
         return result
+
+
+class ContentAccuracyAuditEngine(MasterSEOVerifier):
+    """
+    Parametric Content Accuracy Audit and Air-Lock Verification Engine.
+    Requires explicit tenant configuration or active scoped_environment context.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(
+        self,
+        dist_dir: Optional[Path] = None,
+        canonical_base: Optional[str] = None,
+        domain: Optional[str] = None,
+        brand_name: Optional[str] = None,
+        **kwargs: Any,
+    ):
+        eff_canonical = canonical_base or os.environ.get("FACTORY_CANONICAL_BASE")
+        eff_brand = brand_name or os.environ.get("FACTORY_BRAND_NAME")
+        if not eff_canonical or not eff_brand:
+            raise ValueError(
+                "ContentAccuracyAuditEngine requires explicit tenant configuration or active scoped_environment context"
+            )
+        super().__init__(
+            dist_dir=dist_dir,
+            canonical_base=eff_canonical,
+            domain=domain,
+            brand_name=eff_brand,
+            **kwargs,
+        )
 
 
 # Default module-level MasterSEOVerifier instance
