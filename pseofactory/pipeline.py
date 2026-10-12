@@ -98,7 +98,8 @@ class PipelineConfig:
     total_site_impressions: int = 500
     strict_audit: bool = True
     audit_tolerance: float = 0.01
-    enable_gitops: bool = False
+    enable_gitops: bool = True
+    enable_distribution: bool = True
     enable_indexing_feedback: bool = False
     adaptive_jev_floor_bump: float = 0.30
 
@@ -202,6 +203,7 @@ class DriverExecutionResult:
     rankings: List[Dict[str, Any]]
     preflight_reports: Optional[Dict[str, Any]] = None
     gitops_results: Optional[Dict[str, Any]] = None
+    distribution_results: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -219,6 +221,8 @@ class DriverExecutionResult:
             d["preflight_reports"] = self.preflight_reports
         if self.gitops_results is not None:
             d["gitops_results"] = self.gitops_results
+        if self.distribution_results is not None:
+            d["distribution_results"] = self.distribution_results
         return d
 
 
@@ -398,6 +402,7 @@ class FactoryPipeline:
         sitemap_urls: Optional[List[str]] = None,
         output_dir: Optional[Union[str, Path]] = None,
         enable_gitops: Optional[bool] = None,
+        enable_distribution: Optional[bool] = None,
     ) -> DriverExecutionResult:
         """
         Executes end-to-end processing across raw breakout search opportunities.
@@ -419,10 +424,16 @@ class FactoryPipeline:
         rankings: List[Dict[str, Any]] = []
         preflight_reports: Dict[str, Any] = {}
         gitops_results: Dict[str, Any] = {}
+        distribution_results: Dict[str, Any] = {}
         seen_idempotency_keys: Set[str] = set()
 
         effective_enable_gitops = (
             self.config.enable_gitops if enable_gitops is None else enable_gitops
+        )
+        effective_enable_distribution = (
+            getattr(self.config, "enable_distribution", True)
+            if enable_distribution is None
+            else enable_distribution
         )
 
         effective_min_jev = self.config.min_jev_score
@@ -1232,6 +1243,30 @@ class FactoryPipeline:
                     except Exception:
                         pass
 
+        # 14. Multi-Channel Syndication Distribution dispatch if enabled
+        if effective_enable_distribution and compiled_assets:
+            from pseofactory.distributor import dispatch_to_distribution_lead
+            tenants_compiled = {ca.tenant for ca in compiled_assets}
+            for t in tenants_compiled:
+                try:
+                    t_adapter = self.tenant_registry.get_adapter(t)
+                except Exception:
+                    t_adapter = None
+                t_dist = (
+                    Path(output_dir) / t
+                    if output_dir and (Path(output_dir) / t).exists()
+                    else (t_adapter.dist_dir if t_adapter else None)
+                )
+                try:
+                    dist_res = dispatch_to_distribution_lead(
+                        property_id=t,
+                        dry_run=self.config.dry_run,
+                        dist_dir=t_dist,
+                    )
+                    distribution_results[t] = dist_res
+                except Exception:
+                    pass
+
         return DriverExecutionResult(
             total_spikes=total_spikes,
             filtered_noise_count=filtered_noise_count,
@@ -1244,6 +1279,7 @@ class FactoryPipeline:
             rankings=sorted_rankings,
             preflight_reports=preflight_reports if preflight_reports else None,
             gitops_results=gitops_results if gitops_results else None,
+            distribution_results=distribution_results if distribution_results else None,
         )
 
 
@@ -1254,6 +1290,7 @@ def run_factory_pipeline(
     sitemap_urls: Optional[List[str]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     enable_gitops: Optional[bool] = None,
+    enable_distribution: Optional[bool] = None,
     indexing_inspector: Optional[DailyIndexingInspector] = None,
 ) -> DriverExecutionResult:
     """
@@ -1270,4 +1307,5 @@ def run_factory_pipeline(
         sitemap_urls=sitemap_urls,
         output_dir=output_dir,
         enable_gitops=enable_gitops,
+        enable_distribution=enable_distribution,
     )

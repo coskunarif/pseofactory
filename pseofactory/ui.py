@@ -187,11 +187,11 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
 
             --danger: #dc2626;
             --danger-hover: #b91c1c;
-            --danger-subtle: #fef2f2;
+            --danger-subtle: rgba(220, 38, 38, 0.10);
             --danger-border: #fecaca;
 
             --info: #0284c7;
-            --info-subtle: #f0f9ff;
+            --info-subtle: rgba(2, 132, 199, 0.10);
             --info-border: #bae6fd;
 
             --neutral-subtle: #f8fafc;
@@ -746,7 +746,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-label">Prexvo Readiness</span>
-                    <span class="badge badge-property" style="background:#f0f9ff;color:#0284c7;border-color:#bae6fd;">Prexvo</span>
+                    <span class="badge badge-property" style="background:var(--info-subtle);color:var(--info);border-color:var(--info-border);">Prexvo</span>
                 </div>
                 <div class="kpi-value">{px.monetization_readiness_score}%</div>
                 <div class="kpi-meta">0 Active (Gate 1 Payout Verification Pending)</div>
@@ -826,7 +826,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
                     <h2>Prexvo Partner Matrix & Statutory Protections</h2>
                     <p>Federal student loan relief and refinance comparison partners. Commercial B2B monetization is strictly prohibited.</p>
                 </div>
-                <span class="badge" style="background:#fef2f2;color:#b91c1c;border-color:#fecaca;">Sub-Affiliate Fallback Prohibited</span>
+                <span class="badge" style="background:var(--danger-subtle);color:var(--danger);border-color:var(--danger-border);">Sub-Affiliate Fallback Prohibited</span>
             </div>
             <div class="standing-card">
                 <strong>CFPB Compliance & Standing Restriction:</strong> Prexvo student loan refinance hypothesis is strictly conditional pending Gate 1 (written payout >= $45). Mandatory YMYL warning required: refinancing federal loans permanently forfeits federal protections. Sub-affiliate aggregator redirects are strictly prohibited.

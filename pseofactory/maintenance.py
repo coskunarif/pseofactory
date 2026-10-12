@@ -2116,7 +2116,8 @@ class MaintenanceLifecycle:
         force: bool = False,
         state_file: Optional[Union[str, Path]] = None,
         ledger_file: Optional[Union[str, Path]] = None,
-        enable_gitops: bool = False,
+        enable_gitops: bool = True,
+        enable_distribution: bool = True,
         run_id: Optional[str] = None,
         dry_run: bool = False,
         skip_ci: bool = False,
@@ -2410,7 +2411,7 @@ class MaintenanceLifecycle:
                     dry_run=dry_run,
                     workflow=workflow,
                 )
-                target_edge = edge_url or f"https://{adapter.domain}"
+                target_edge = edge_url
                 gitops_res = coordinator.dispatch_to_shipper(
                     run_id=run_id,
                     property_id=adapter.property_id,
@@ -2439,7 +2440,7 @@ class MaintenanceLifecycle:
                     )
 
             # Stage 9: Multi-Channel Syndication Draft Staging
-            if enable_gitops:
+            if enable_distribution:
                 from pseofactory.distributor import dispatch_to_distribution_lead
                 dist_res = dispatch_to_distribution_lead(
                     run_id=run_id,
@@ -2568,7 +2569,8 @@ class FleetMaintenanceCoordinator:
         property_ids: Optional[List[str]] = None,
         force: bool = False,
         dry_run: bool = False,
-        enable_gitops: bool = False,
+        enable_gitops: bool = True,
+        enable_distribution: bool = True,
         run_id: Optional[str] = None,
         skip_ci: bool = False,
     ) -> Dict[str, MaintenanceResult]:
@@ -2604,6 +2606,7 @@ class FleetMaintenanceCoordinator:
                     adapter,
                     force=force,
                     enable_gitops=enable_gitops,
+                    enable_distribution=enable_distribution,
                     run_id=run_id,
                     dry_run=dry_run,
                     skip_ci=skip_ci,

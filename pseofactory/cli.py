@@ -561,6 +561,32 @@ def cmd_factory_pipeline(args: argparse.Namespace) -> int:
     """
     from pseofactory.pipeline import FactoryPipeline, PipelineConfig
 
+    if not getattr(args, "fixture", None) and not getattr(args, "seeds", None):
+        from pseofactory.maintenance import TenantRegistry, FleetMaintenanceCoordinator
+        reg = TenantRegistry.default()
+        coordinator = FleetMaintenanceCoordinator(registry=reg)
+        dry_run = getattr(args, "dry_run", False)
+        skip_ci = getattr(args, "skip_ci", False)
+        results = coordinator.run_fleet(
+            force=getattr(args, "force", False),
+            dry_run=dry_run,
+            enable_gitops=True,
+            enable_distribution=True,
+            skip_ci=skip_ci,
+        )
+        if getattr(args, "json", False):
+            print(json.dumps({k: v.to_dict() if hasattr(v, "to_dict") else str(v) for k, v in results.items()}, indent=2))
+        else:
+            for pid, res in results.items():
+                p_id = getattr(res, "property_id", pid)
+                st = getattr(res, "status", "UNKNOWN")
+                print(f"[{st}] Property: {p_id}")
+        all_ok = all(
+            (getattr(r, "status", None) in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"))
+            for r in results.values()
+        )
+        return 0 if all_ok else 1
+
     spikes_data = []
     if getattr(args, "fixture", None):
         fix_path = Path(args.fixture).resolve()
@@ -577,9 +603,6 @@ def cmd_factory_pipeline(args: argparse.Namespace) -> int:
         if getattr(args, "source", None):
             spikes = [s for s in spikes if s.source == args.source]
         spikes_data = spikes
-    else:
-        print("[ERROR] Must provide either --fixture or --seeds", file=sys.stderr)
-        return 1
 
     config = PipelineConfig(
         min_jev_score=getattr(args, "min_jev", 1.20),

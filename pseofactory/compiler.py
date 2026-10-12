@@ -26,6 +26,7 @@ from pseofactory.contracts import (
     safe_eval_mathematical_formula,
     assert_proprietary_model_integrity,
     assert_no_forbidden_dashes,
+    assert_touch_targets,
 )
 from pseofactory.verifier import verify_html_unique_first_party_information
 
@@ -1053,6 +1054,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     # 7. Strictly verify zero forbidden dashes
     assert_no_forbidden_dashes(html_content, context=f"compiled page '{slug}'")
+    assert_touch_targets(html_content, context=f"compiled page '{slug}'")
 
     # 8. Self-verify using verify_html_unique_first_party_information
     audit_res = verify_html_unique_first_party_information(
