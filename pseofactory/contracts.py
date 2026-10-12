@@ -3215,12 +3215,18 @@ def assert_internal_links_integrity(
     elem_names = set(re.findall(r'\bname=["\']([^"\']+)["\']', html_content, re.IGNORECASE))
     valid_anchors = elem_ids | elem_names
 
-    links = re.findall(r'<a\b[^>]*\bhref=["\']([^"\']*)["\']', html_content, re.IGNORECASE)
-
     clean_curr = current_route if current_route.startswith("/") else f"/{current_route}"
     curr_dir = clean_curr if clean_curr.endswith("/") else posixpath.dirname(clean_curr) + "/"
 
-    for raw_href in links:
+    for tag_match in re.finditer(r'<a\b([^>]*)>', html_content, re.IGNORECASE):
+        tag_attrs = tag_match.group(1)
+        href_match = re.search(r'\bhref=["\']([^"\']*)["\']', tag_attrs, re.IGNORECASE)
+        if not href_match:
+            continue
+        raw_href = href_match.group(1)
+        rel_match = re.search(r'\brel=["\']([^"\']*)["\']', tag_attrs, re.IGNORECASE)
+        rel_val = rel_match.group(1).lower() if rel_match else ""
+
         href = raw_href.strip()
         if href == "":
             raise ValueError(f"Empty href attribute detected in internal link{ctx}")
@@ -3238,6 +3244,12 @@ def assert_internal_links_integrity(
             continue
 
         if href_lower.startswith(("mailto:", "tel:", "sms:", "data:")):
+            continue
+
+        if href_lower.startswith(("/r/", "/api/")):
+            continue
+
+        if "sponsored" in rel_val:
             continue
 
         is_internal = False
@@ -3264,6 +3276,9 @@ def assert_internal_links_integrity(
             parsed_target = urllib.parse.urlsplit(link_target)
             path_part = parsed_target.path
             fragment_part = parsed_target.fragment
+
+            if path_part.lower().startswith(("/r/", "/api/")):
+                continue
 
             if path_part.startswith("/"):
                 resolved = posixpath.normpath(path_part)
