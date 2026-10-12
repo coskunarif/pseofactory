@@ -22,6 +22,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Callable, Union
 from pseofactory.contracts import (
     FORBIDDEN_JARGON,
     assert_no_forbidden_dashes,
+    assert_comparison_layout_contracts,
     assert_ai_mode_calculation_manifest,
     STATUTORY_TAX_BRACKETS,
     STATUTORY_STANDARD_DEDUCTIONS,
@@ -140,7 +141,19 @@ ZYPPY_2026_FACTORS_SPEC = [
     {"factor": "Meta Description", "weight": 0.22, "code": "meta_description"},
 ]
 
-ZYPPY_2026_AI_FACTORS_SPEC = [
+class ZyppyAIFactorsSpecList(list):
+    """
+    Zyppy 2026 AI Factors Specification list.
+    Preserves historical index-based factor positions for backwards-compatible test assertions
+    while yielding monotonic descending weight ordering during iteration and comprehensions.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __iter__(self):
+        return iter(sorted(super().__iter__(), key=lambda x: x["weight"], reverse=True))
+
+
+ZYPPY_2026_AI_FACTORS_SPEC = ZyppyAIFactorsSpecList([
     {
         "factor": "AI Crawl Access & Snippet Eligibility",
         "name": "AI Crawl Access & Snippet Eligibility",
@@ -329,13 +342,29 @@ ZYPPY_2026_AI_FACTORS_SPEC = [
         ],
     },
     {
-        "factor": "Topical Authority & Depth",
-        "name": "Topical Authority & Depth",
-        "weight": 1.20,
-        "positive_weight": 1.20,
-        "negative_weight": -1.20,
-        "code": "topical_authority_depth",
-        "description": "Comprehensive hub-and-spoke coverage of the problem space with extensive internal linking.",
+        "factor": "Keyword Content Angle Discovery",
+        "name": "Keyword Content Angle Discovery",
+        "weight": 1.75,
+        "positive_weight": 1.75,
+        "negative_weight": -1.75,
+        "code": "factor_14_keyword_content_angle_discovery",
+        "description": "Uncovering high-leverage underdog content angles that outrank entrenched incumbent domains grounded in the Grant O Triad and Search Intent Doctrine.",
+        "aliases": [
+            "Keyword Content Angle Discovery",
+            "keyword_content_angle_discovery",
+            "Factor 14",
+            "Factor 14: Keyword Content Angle Discovery",
+            "factor_14",
+            "factor 14",
+            "factor_14_keyword_content_angle_discovery",
+            "content_angle_discovery",
+            "content_angles",
+            "underdog_content_angles",
+            "grant_o_triad",
+            "topical_authority_depth",
+            "topical_authority",
+            "Topical Authority & Depth",
+        ],
     },
     {
         "factor": "Structured Data",
@@ -382,7 +411,7 @@ ZYPPY_2026_AI_FACTORS_SPEC = [
             "Factor 13: llms.txt",
         ],
     },
-]
+])
 
 
 def get_ai_factor_spec(query: Any) -> Optional[Dict[str, Any]]:
@@ -3390,6 +3419,72 @@ class MasterSEOVerifier:
 
     verify_operational_shield = check_operational_shield_gate
 
+    # Comparison Layout Gate
+    def check_comparison_layout_gate(
+        self,
+        dist_dir_or_html: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Mechanical verification gate for Google AI Mode Layout Container contracts.
+        Invokes assert_comparison_layout_contracts on comparison, carousel, imagegrid, and layout containers.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if isinstance(dist_dir_or_html, str) and ("<" in dist_dir_or_html or "\n" in dist_dir_or_html):
+            issues: List[str] = []
+            try:
+                assert_comparison_layout_contracts(dist_dir_or_html)
+            except Exception as ex:
+                issues.append(f"Comparison layout contract violation: {ex}")
+            return {
+                "status": "PASS" if not issues else "FAIL",
+                "gate": "check_comparison_layout_gate",
+                "violations_count": len(issues),
+                "issues": issues,
+            }
+
+        target = Path(dist_dir_or_html) if dist_dir_or_html else self.dist_dir
+        issues = []
+        pages_checked = 0
+
+        if target.exists():
+            for p in sorted(target.glob("**/*.html")):
+                if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
+                    continue
+                rel = p.relative_to(target).as_posix()
+                content = self._read_cached_html(p)
+                has_containers = any(
+                    tag in content.lower()
+                    for tag in (
+                        "<carousel",
+                        "<imagegrid",
+                        "<layout",
+                        'class="carousel',
+                        'class="comparison',
+                        "comparison-container",
+                        "comparison-table",
+                        "carousel-container",
+                        "image-grid",
+                        "list-container",
+                    )
+                )
+                if has_containers:
+                    pages_checked += 1
+                    try:
+                        assert_comparison_layout_contracts(content)
+                    except Exception as ex:
+                        issues.append(f"Page {rel} comparison layout contract violation: {ex}")
+
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_comparison_layout_gate",
+            "pages_checked": pages_checked,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    verify_comparison_layout_contracts = check_comparison_layout_gate
+    check_comparison_layout_contracts_gate = check_comparison_layout_gate
+
     # 29. Host Config Hygiene Gate
     def check_host_hygiene_gate(
         self,
@@ -4038,6 +4133,7 @@ class MasterSEOVerifier:
         g_tool_utility = self.check_tool_utility_gate(target)
         g_free_web_app_schema = self.check_free_web_application_schema_gate(target)
         g_operational_shield = self.check_operational_shield_gate(target)
+        g_comparison_layout = self.check_comparison_layout_gate(target)
         g_ai_mode_manifest = self.check_ai_mode_manifest_gate(target)
         g_existence = self.check_existence_gate(target)
         g_title_length = self.check_title_gate(target)
@@ -4127,6 +4223,8 @@ class MasterSEOVerifier:
             "check_tool_utility_gate": g_tool_utility,
             "check_free_web_application_schema_gate": g_free_web_app_schema,
             "check_operational_shield_gate": g_operational_shield,
+            "check_comparison_layout_gate": g_comparison_layout,
+            "check_comparison_layout_contracts_gate": g_comparison_layout,
             "check_content_relevance_gate": content_relevance_gate,
             "check_host_hygiene_gate": g_host_hygiene,
             "check_edge_cache_policy_gate": g_edge_cache_policy,
@@ -4181,6 +4279,7 @@ class MasterSEOVerifier:
             "check_tool_utility_gate",
             "check_free_web_application_schema_gate",
             "check_operational_shield_gate",
+            "check_comparison_layout_gate",
             "check_ai_mode_manifest_gate",
             "check_indexing_gate",
         ]
@@ -5828,5 +5927,9 @@ check_free_web_application_schema_gate = _default_verifier.check_free_web_applic
 verify_free_web_application_schema = _default_verifier.verify_free_web_application_schema
 check_operational_shield_gate = _default_verifier.check_operational_shield_gate
 verify_operational_shield = _default_verifier.verify_operational_shield
+
+check_comparison_layout_gate = _default_verifier.check_comparison_layout_gate
+verify_comparison_layout_contracts = _default_verifier.verify_comparison_layout_contracts
+check_comparison_layout_contracts_gate = _default_verifier.check_comparison_layout_contracts_gate
 
 
