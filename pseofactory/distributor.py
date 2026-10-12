@@ -13,6 +13,10 @@ from pathlib import Path
 import urllib.parse
 
 import os
+import fcntl
+import uuid
+import time
+from datetime import datetime, timezone
 
 CANONICAL_BASE = os.environ.get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
 SITE_NAME = os.environ.get("FACTORY_SITE_NAME", "ProfitHelm")
@@ -33,38 +37,120 @@ class DistributionIdempotencyLedger:
     def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
         self.ledger_path = Path(ledger_path or DEFAULT_DISTRIBUTION_LEDGER_PATH)
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.ledger_path.with_suffix(".lock")
 
-    def _read_records(self) -> Dict[str, Any]:
+    def _read_records(self, _caller_lock: Optional[Any] = None) -> Dict[str, Any]:
         if not self.ledger_path.exists():
             return {}
+        if _caller_lock is not None:
+            try:
+                return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+            with open(self.lock_path, "a+", encoding="utf-8") as lock_f:
+                deadline = time.time() + 30.0
+                while True:
+                    try:
+                        fcntl.flock(lock_f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+                        break
+                    except (BlockingIOError, OSError) as e:
+                        if time.time() >= deadline:
+                            raise TimeoutError("Timed out acquiring flock after 30s") from e
+                        time.sleep(0.05)
+                try:
+                    if not self.ledger_path.exists():
+                        return {}
+                    return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+                finally:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
         except Exception:
             return {}
 
-    def _write_records(self, records: Dict[str, Any]) -> None:
+    def _write_records(self, records: Dict[str, Any], _caller_lock: Optional[Any] = None) -> None:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.ledger_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
-        tmp.replace(self.ledger_path)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _do_write() -> None:
+            tmp = self.ledger_path.with_suffix(f".tmp.{os.getpid()}_{uuid.uuid4().hex[:8]}")
+            with open(tmp, "w", encoding="utf-8") as tf:
+                tf.write(json.dumps(records, indent=2))
+                tf.flush()
+                os.fsync(tf.fileno())
+            os.replace(tmp, self.ledger_path)
+
+        if _caller_lock is not None:
+            _do_write()
+            return
+
+        with open(self.lock_path, "a+", encoding="utf-8") as lock_f:
+            deadline = time.time() + 30.0
+            while True:
+                try:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except (BlockingIOError, OSError) as e:
+                    if time.time() >= deadline:
+                        raise TimeoutError("Timed out acquiring flock after 30s") from e
+                    time.sleep(0.05)
+            try:
+                _do_write()
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def has_token(self, token: str) -> bool:
         records = self._read_records()
         return token in records
 
     def record_token(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> None:
-        records = self._read_records()
-        records[token] = {
-            "recorded_at": datetime.now(timezone.utc).isoformat() if "datetime" in globals() else str(os.environ.get("DATE", "")),
-            **(metadata or {}),
-        }
-        self._write_records(records)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+", encoding="utf-8") as lock_f:
+            deadline = time.time() + 30.0
+            while True:
+                try:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except (BlockingIOError, OSError) as e:
+                    if time.time() >= deadline:
+                        raise TimeoutError("Timed out acquiring flock after 30s") from e
+                    time.sleep(0.05)
+            try:
+                records = self._read_records(_caller_lock=lock_f)
+                records[token] = {
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    **(metadata or {}),
+                }
+                self._write_records(records, _caller_lock=lock_f)
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def check_and_record(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
-        if self.has_token(token):
-            return True
-        self.record_token(token, metadata)
-        return False
+        """Returns True if duplicate, False if newly recorded."""
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+", encoding="utf-8") as lock_f:
+            deadline = time.time() + 30.0
+            while True:
+                try:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except (BlockingIOError, OSError) as e:
+                    if time.time() >= deadline:
+                        raise TimeoutError("Timed out acquiring flock after 30s") from e
+                    time.sleep(0.05)
+            try:
+                records = self._read_records(_caller_lock=lock_f)
+                if token in records:
+                    return True
+                records[token] = {
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    **(metadata or {}),
+                }
+                self._write_records(records, _caller_lock=lock_f)
+                return False
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+
 
 
 def check_distribution_idempotency(token: str, ledger_path: Optional[Union[str, Path]] = None) -> bool:
