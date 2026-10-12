@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Union
+from urllib.parse import urlparse
 
 from pseofactory.contracts import assert_no_forbidden_dashes, assert_no_prompt_leakage
 from pseofactory.qualification import qualify_search_intent
@@ -42,6 +44,25 @@ VALID_UNDERDOG_ARCHETYPES: List[str] = [
     "Free Interactive Tool/Calculator",
     "Regulatory/Audit Checklist",
 ]
+
+# Canonical SERP weakness taxonomy categories
+SERP_WEAKNESS_CATEGORIES: List[str] = [
+    "FORUM_INCOMPLETE_ANSWER",
+    "GENERIC_THIN_ARTICLE",
+    "MISSING_QUANTITATIVE_SPECIFICATIONS",
+    "OUTDATED_STATUTORY_DATA",
+    "AUDIENCE_MISMATCH",
+]
+
+# UGC and community forum domains indicating thin or fragmented answers
+UGC_FORUM_DOMAINS: Set[str] = {
+    "reddit.com",
+    "quora.com",
+    "facebook.com",
+    "pinterest.com",
+    "stackexchange.com",
+    "stackoverflow.com",
+}
 
 
 @dataclass
@@ -111,6 +132,137 @@ class IncumbentSummary:
             weakness_category=str(data.get("weakness_category", "")),
             weakness_detail=str(data.get("weakness_detail", "")),
         )
+
+
+def classify_serp_incumbent(
+    serp_item: Dict[str, Any],
+    target_query: str = "",
+) -> IncumbentSummary:
+    """
+    Classifies a raw SERP incumbent result into an IncumbentSummary model.
+    Applies deterministic weakness taxonomy:
+    1. UGC_FORUM_DOMAINS -> FORUM_INCOMPLETE_ANSWER
+    2. Date or year older than current year - 1 -> OUTDATED_STATUTORY_DATA
+    3. Snippet or title mentions missing specs or lacks data -> MISSING_QUANTITATIVE_SPECIFICATIONS
+    4. Default -> GENERIC_THIN_ARTICLE
+    Zero em-dashes. Zero en-dashes.
+    """
+    if target_query:
+        assert_no_forbidden_dashes(target_query, "classify_serp_incumbent.target_query")
+
+    # Extract and normalize domain
+    raw_domain = str(serp_item.get("domain", "")).strip().lower()
+    if not raw_domain and "url" in serp_item:
+        try:
+            raw_domain = urlparse(str(serp_item["url"])).netloc.lower()
+        except Exception:
+            raw_domain = ""
+
+    if ":" in raw_domain:
+        raw_domain = raw_domain.split(":")[0]
+
+    domain = raw_domain
+    clean_domain = raw_domain.removeprefix("www.")
+
+    rank = int(serp_item.get("rank", serp_item.get("position", 1)))
+    title = str(serp_item.get("title", "Untitled")).strip()
+    snippet = str(serp_item.get("snippet", serp_item.get("description", ""))).strip()
+    combined_text = f"{title} {snippet}".lower()
+
+    # Determine publication year
+    current_year = datetime.now(timezone.utc).year
+    item_year: Optional[int] = None
+    if "year" in serp_item and serp_item["year"] is not None:
+        try:
+            item_year = int(serp_item["year"])
+        except (ValueError, TypeError):
+            pass
+
+    if item_year is None and "date" in serp_item and serp_item["date"] is not None:
+        date_val = serp_item["date"]
+        if hasattr(date_val, "year"):
+            item_year = int(date_val.year)
+        else:
+            m = re.search(r"\b(19\d\d|20\d\d)\b", str(date_val))
+            if m:
+                item_year = int(m.group(1))
+
+    # Evaluate weakness conditions
+    is_forum = clean_domain in UGC_FORUM_DOMAINS or any(
+        clean_domain.endswith("." + f) for f in UGC_FORUM_DOMAINS
+    )
+
+    is_outdated = item_year is not None and item_year < current_year - 1
+
+    missing_specs_signals = [
+        "missing specs",
+        "missing spec",
+        "missing specifications",
+        "missing quantitative",
+        "lacks data",
+        "lacking data",
+        "lack data",
+        "lacks specs",
+        "lacks specifications",
+        "no specifications",
+        "no specs",
+        "no data",
+        "missing data",
+        "no calculator",
+        "missing calculator",
+        "no formula",
+        "missing formula",
+        "unspecified",
+    ]
+    has_missing_specs = (
+        bool(serp_item.get("missing_specs"))
+        or bool(serp_item.get("lacks_data"))
+        or any(sig in combined_text for sig in missing_specs_signals)
+    )
+
+    if is_forum:
+        category = "FORUM_INCOMPLETE_ANSWER"
+        detail = serp_item.get("weakness_detail") or f"UGC forum discussion on {clean_domain} lacks authoritative synthesis or quantitative precision."
+    elif is_outdated:
+        category = "OUTDATED_STATUTORY_DATA"
+        detail = serp_item.get("weakness_detail") or f"Content published in {item_year} is older than statutory threshold {current_year - 1}."
+    elif has_missing_specs:
+        category = "MISSING_QUANTITATIVE_SPECIFICATIONS"
+        detail = serp_item.get("weakness_detail") or "Snippet or title indicates missing quantitative specifications and data formulas."
+    elif serp_item.get("weakness_category") in SERP_WEAKNESS_CATEGORIES:
+        category = str(serp_item["weakness_category"])
+        detail = serp_item.get("weakness_detail") or f"Identified weakness category {category}."
+    else:
+        category = "GENERIC_THIN_ARTICLE"
+        detail = serp_item.get("weakness_detail") or "Generic thin article lacking specialized operator depth or actionable workflows."
+
+    summary = IncumbentSummary(
+        domain=domain or "unknown",
+        rank=rank,
+        title=title,
+        weakness_category=category,
+        weakness_detail=detail,
+    )
+    assert_no_forbidden_dashes(summary.weakness_category, "IncumbentSummary.weakness_category")
+    assert_no_forbidden_dashes(summary.weakness_detail, "IncumbentSummary.weakness_detail")
+    return summary
+
+
+def classify_serp_incumbents(
+    serp_items: List[Dict[str, Any]],
+    target_query: str = "",
+) -> List[IncumbentSummary]:
+    """
+    Classifies a list of SERP result items into structured IncumbentSummary objects.
+    Zero em-dashes. Zero en-dashes.
+    """
+    results: List[IncumbentSummary] = []
+    for item in serp_items:
+        if isinstance(item, IncumbentSummary):
+            results.append(item)
+        elif isinstance(item, dict):
+            results.append(classify_serp_incumbent(item, target_query=target_query))
+    return results
 
 
 @dataclass
@@ -585,7 +737,7 @@ def evaluate_content_angles(
 
     # Normalize incumbents
     if incumbents is None:
-        raw_incumbents = query_data.get("incumbents", [])
+        raw_incumbents = query_data.get("incumbents", query_data.get("serp_results", []))
     else:
         raw_incumbents = incumbents
 
@@ -594,7 +746,10 @@ def evaluate_content_angles(
         if isinstance(inc, IncumbentSummary):
             incumbent_objects.append(inc)
         elif isinstance(inc, dict):
-            incumbent_objects.append(IncumbentSummary.from_dict(inc))
+            if "weakness_category" in inc and inc["weakness_category"]:
+                incumbent_objects.append(IncumbentSummary.from_dict(inc))
+            else:
+                incumbent_objects.append(classify_serp_incumbent(inc, target_query=q_text))
 
     # 2. Qualify search intent
     qualification = qualify_search_intent(

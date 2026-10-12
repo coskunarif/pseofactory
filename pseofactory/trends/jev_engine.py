@@ -114,10 +114,12 @@ class JevEngine:
         jev_score: float,
         durable_prob: float,
         cannibalization_risk: float,
+        serp_weakness_count: int = 0,
     ) -> float:
         """
         Computes composite profit yield score in [0.0, 100.0]:
         CompositeYield = 100.0 * pow(0.35 * V_norm + 0.65 * S_norm, 0.85) * DecelPenalty * D * J_norm * max(0.0, 1.0 - R) * Y_asset
+        Discounts risk R when serp_weakness_count >= 1 or position_zero_vacant is True.
         """
         v_norm = calculate_normalized_velocity(candidate.z_score)
         s_norm = calculate_normalized_volume(treg_result.search_volume)
@@ -133,9 +135,19 @@ class JevEngine:
         d = durable_prob
         j_norm = min(1.0, max(0.0, jev_score / 2.0))
 
+        weakness_count = serp_weakness_count
+        if weakness_count <= 0 and candidate.metadata:
+            weakness_count = int(candidate.metadata.get("serp_weakness_count", 0))
+
         # Risk R blends cannibalization and keyword difficulty
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
         r = 0.6 * cannibalization_risk + 0.4 * kd_norm
+
+        # When serp_weakness_count >= 1 or treg_result.position_zero_vacant, discount risk r
+        if weakness_count >= 1 or treg_result.position_zero_vacant:
+            effective_weakness = max(1, weakness_count) if treg_result.position_zero_vacant else weakness_count
+            r_discount = max(0.60, 1.0 - 0.10 * min(effective_weakness, 4))
+            r = r * r_discount
 
         y_intent = calculate_intent_weight(candidate.intent_cluster, candidate.query)
         cpc_norm = min(1.0, max(0.0, treg_result.cpc_usd / 10.0))
@@ -157,6 +169,7 @@ class JevEngine:
         jev_mock: Optional[Dict[str, Any]] = None,
         position: float = 100.0,
         total_site_impressions: int = 500,
+        serp_weakness_count: Optional[int] = None,
     ) -> JevDecisionResult:
         """
         Evaluates candidate against 5-step triage decision framework.
@@ -177,12 +190,19 @@ class JevEngine:
         matching_tool = cann_ctx.get("matches_existing_slug")
         pos = float(cann_ctx.get("current_position", position))
 
+        weakness_cnt = (
+            serp_weakness_count
+            if serp_weakness_count is not None
+            else int((candidate.metadata or {}).get("serp_weakness_count", 0))
+        )
+
         composite_yield = self.compute_composite_yield(
             candidate=candidate,
             treg_result=treg_result,
             jev_score=jev_score,
             durable_prob=durable_prob,
             cannibalization_risk=c_cannibal,
+            serp_weakness_count=weakness_cnt,
         )
 
         now_iso = datetime.now(timezone.utc).isoformat()

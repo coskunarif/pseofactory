@@ -27,6 +27,10 @@ from pseofactory.content_angles import (
     evaluate_content_angles,
     generate_markdown_brief,
     VALID_UNDERDOG_ARCHETYPES,
+    SERP_WEAKNESS_CATEGORIES,
+    UGC_FORUM_DOMAINS,
+    classify_serp_incumbent,
+    classify_serp_incumbents,
 )
 
 
@@ -303,3 +307,170 @@ def test_content_angle_brief_generation_contracts():
             assert "- Geographic or Vertical Bound:" in markdown
             assert "- Value Proposition:" in markdown
             assert "- First-Party Utility Asset:" in markdown
+
+
+def test_classify_serp_incumbent_forum_domains():
+    """Validates classify_serp_incumbent assigns FORUM_INCOMPLETE_ANSWER for UGC forum domains."""
+    for forum in UGC_FORUM_DOMAINS:
+        item = {
+            "domain": forum,
+            "rank": 1,
+            "title": f"Community discussion on {forum}",
+            "snippet": "User questions and opinions",
+        }
+        res = classify_serp_incumbent(item, target_query="equipment lease calculator")
+        assert res.weakness_category == "FORUM_INCOMPLETE_ANSWER"
+        assert res.domain == forum
+        assert "UGC forum discussion" in res.weakness_detail
+
+    # Test subdomain and www prefix
+    item_subdomain = {
+        "domain": "old.reddit.com",
+        "rank": 2,
+        "title": "Subreddit advice thread",
+        "snippet": "Casual answers",
+    }
+    res_sub = classify_serp_incumbent(item_subdomain)
+    assert res_sub.weakness_category == "FORUM_INCOMPLETE_ANSWER"
+
+    # Test URL extraction
+    item_url = {
+        "url": "https://www.quora.com/What-is-section-179",
+        "rank": 3,
+        "title": "Quora answers",
+        "snippet": "Answers by contributors",
+    }
+    res_url = classify_serp_incumbent(item_url)
+    assert res_url.weakness_category == "FORUM_INCOMPLETE_ANSWER"
+
+
+def test_classify_serp_incumbent_outdated_statutory_data():
+    """Validates classify_serp_incumbent assigns OUTDATED_STATUTORY_DATA for old items."""
+    # Year-based item
+    item_old_year = {
+        "domain": "taxadvisorblog.com",
+        "rank": 1,
+        "title": "Section 179 Limits and Thresholds Guide",
+        "year": 2020,
+        "snippet": "Guide to the 2020 deduction limits",
+    }
+    res_year = classify_serp_incumbent(item_old_year)
+    assert res_year.weakness_category == "OUTDATED_STATUTORY_DATA"
+    assert "older than statutory threshold" in res_year.weakness_detail
+
+    # Date string item
+    item_old_date = {
+        "domain": "accountingtoday.com",
+        "rank": 2,
+        "title": "Bonus depreciation breakdown",
+        "date": "2021-08-14",
+        "snippet": "Rules for asset expensing in 2021",
+    }
+    res_date = classify_serp_incumbent(item_old_date)
+    assert res_date.weakness_category == "OUTDATED_STATUTORY_DATA"
+
+
+def test_classify_serp_incumbent_missing_specs():
+    """Validates classify_serp_incumbent assigns MISSING_QUANTITATIVE_SPECIFICATIONS."""
+    # Mentions missing specs in title
+    item_title_specs = {
+        "domain": "industryreview.com",
+        "rank": 1,
+        "title": "HVAC Software Overview (Missing Specs Comparison)",
+        "snippet": "General features and screenshots",
+    }
+    res_title = classify_serp_incumbent(item_title_specs)
+    assert res_title.weakness_category == "MISSING_QUANTITATIVE_SPECIFICATIONS"
+
+    # Mentions lacks data in snippet
+    item_snippet_data = {
+        "domain": "softwarelist.com",
+        "rank": 2,
+        "title": "Top Dispatch Platforms for Contractors",
+        "snippet": "Summary of products, but lacks data on pricing tiers or limits",
+    }
+    res_snippet = classify_serp_incumbent(item_snippet_data)
+    assert res_snippet.weakness_category == "MISSING_QUANTITATIVE_SPECIFICATIONS"
+
+
+def test_classify_serp_incumbent_generic_article_default():
+    """Validates default fallback to GENERIC_THIN_ARTICLE when no specific triggers fire."""
+    item_generic = {
+        "domain": "freshb2bblog.org",
+        "rank": 1,
+        "title": "Fleet Management Platform Best Practices",
+        "year": 2026,
+        "snippet": "Comprehensive operational workflow guide for dispatching teams",
+    }
+    res_generic = classify_serp_incumbent(item_generic)
+    assert res_generic.weakness_category == "GENERIC_THIN_ARTICLE"
+    assert "Generic thin article" in res_generic.weakness_detail
+
+
+def test_classify_serp_incumbents_batch_and_evaluate_angles_integration():
+    """Validates batch classification and evaluate_content_angles integration with raw SERP dicts."""
+    raw_serp_items = [
+        {
+            "domain": "reddit.com",
+            "rank": 1,
+            "title": "What tools do you use for cold chain dispatch?",
+            "snippet": "Looking for recommendations on cold chain temperature sync",
+        },
+        {
+            "domain": "coldchaininsider.com",
+            "rank": 2,
+            "title": "Cold Storage Transport Standards",
+            "year": 2021,
+            "snippet": "Historical standards from 2021 regulatory revisions",
+        },
+        {
+            "domain": "logisticsdaily.com",
+            "rank": 3,
+            "title": "Commercial Refrigerated Truck Fleet Guide",
+            "snippet": "General marketing article outlining cold chain benefits",
+        },
+    ]
+
+    # Batch classify
+    classified_list = classify_serp_incumbents(raw_serp_items, target_query="cold chain dispatch tool")
+    assert len(classified_list) == 3
+    assert classified_list[0].weakness_category == "FORUM_INCOMPLETE_ANSWER"
+    assert classified_list[1].weakness_category == "OUTDATED_STATUTORY_DATA"
+    assert classified_list[2].weakness_category == "GENERIC_THIN_ARTICLE"
+
+    # Direct integration with evaluate_content_angles accepting raw SERP dicts
+    query_payload = {
+        "query": "cold chain reefer dispatch software 2 truck fleet",
+        "gsc_metrics": {
+            "position": 12.0,
+            "impressions": 45,
+            "days_observed": 30,
+            "clicks": 3,
+        },
+        "incumbents": raw_serp_items,
+        "existing_site_catalog": [],
+        "underdog_angle_specs": [
+            {
+                "angle_id": "cold_chain_realtime_temp_telemetry",
+                "target_audience_niche": "Independent 2-truck reefer fleet owner-operators",
+                "problem_scope": "Continuous temperature audit logging without enterprise telematics contracts",
+                "geographic_or_vertical_bound": "North American interstate refrigerated transport",
+                "primary_value_proposition": "Self-serve reefer compliance telemetry calculator with HACCP export",
+                "first_party_utility_asset": "Interactive reefer HACCP compliance logger and trip audit tool",
+                "divergence_score_min": 0.50,
+            }
+        ],
+    }
+
+    brief = evaluate_content_angles(query_payload, total_site_impressions=500)
+    assert brief.triage_action == "BUILD_PAGE"
+    markdown = brief.to_markdown()
+
+    # Invariants verification
+    assert_no_forbidden_dashes(markdown, "raw SERP dict brief")
+    assert_no_prompt_leakage(markdown, "raw SERP dict brief")
+
+    # Verify classified weaknesses are properly rendered in markdown
+    assert "FORUM_INCOMPLETE_ANSWER" in markdown
+    assert "OUTDATED_STATUTORY_DATA" in markdown
+    assert "GENERIC_THIN_ARTICLE" in markdown

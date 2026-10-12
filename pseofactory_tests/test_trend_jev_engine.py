@@ -5,6 +5,8 @@ composite profit yield ranking, and Search Intent Doctrine strategic triage.
 Zero em-dashes. Zero en-dashes.
 """
 
+import pytest
+
 from pseofactory.trends.models import TrendCandidate, TregDurabilityResult, JevDecisionResult
 from pseofactory.trends.jev_engine import (
     JevEngine,
@@ -192,3 +194,111 @@ def test_determine_target_asset_type():
     assert determine_target_asset_type("form 8829 deduction calculator", "calculator") == "interactive_calculator"
     assert determine_target_asset_type("commercial clean energy matrix", "statutory_compliance") == "statutory_matrix"
     assert determine_target_asset_type("stripe vs paypal fee comparison", "comparison") == "comparison_engine"
+
+
+def test_compute_composite_yield_serp_weakness_discount():
+    """
+    Verifies that serp_weakness_count and position_zero_vacant apply risk discount:
+    r_discount = max(0.60, 1.0 - 0.10 * min(serp_weakness_count, 4))
+    r = r * r_discount
+    """
+    engine = JevEngine()
+    cand = TrendCandidate(
+        id="cand-weakness",
+        query="commercial hvac maintenance cost estimator",
+        slug="commercial-hvac-maintenance-cost-estimator",
+        source="google_suggest",
+        velocity=40.0,
+        acceleration=5.0,
+        z_score=3.0,
+        intent_cluster="calculator",
+    )
+    treg = TregDurabilityResult(
+        query=cand.query,
+        search_volume=2000,
+        cpc_usd=5.0,
+        keyword_difficulty=40.0,
+        position_zero_vacant=False,
+    )
+
+    # Base yield with zero weaknesses and position zero not vacant
+    yield_base = engine.compute_composite_yield(
+        candidate=cand,
+        treg_result=treg,
+        jev_score=1.50,
+        durable_prob=0.80,
+        cannibalization_risk=0.20,
+        serp_weakness_count=0,
+    )
+
+    # Yield with 2 SERP weaknesses (20% discount on risk r)
+    yield_weak_2 = engine.compute_composite_yield(
+        candidate=cand,
+        treg_result=treg,
+        jev_score=1.50,
+        durable_prob=0.80,
+        cannibalization_risk=0.20,
+        serp_weakness_count=2,
+    )
+    assert yield_weak_2 > yield_base
+
+    # Yield with 4 SERP weaknesses (40% discount, cap)
+    yield_weak_4 = engine.compute_composite_yield(
+        candidate=cand,
+        treg_result=treg,
+        jev_score=1.50,
+        durable_prob=0.80,
+        cannibalization_risk=0.20,
+        serp_weakness_count=4,
+    )
+    assert yield_weak_4 > yield_weak_2
+
+    # Yield with 5 SERP weaknesses (capped at 4 / 0.60 floor)
+    yield_weak_5 = engine.compute_composite_yield(
+        candidate=cand,
+        treg_result=treg,
+        jev_score=1.50,
+        durable_prob=0.80,
+        cannibalization_risk=0.20,
+        serp_weakness_count=5,
+    )
+    assert yield_weak_5 == pytest.approx(yield_weak_4, rel=1e-5)
+
+    # Verification via candidate metadata
+    cand.metadata = {"serp_weakness_count": 2}
+    yield_meta = engine.compute_composite_yield(
+        candidate=cand,
+        treg_result=treg,
+        jev_score=1.50,
+        durable_prob=0.80,
+        cannibalization_risk=0.20,
+    )
+    assert yield_meta == pytest.approx(yield_weak_2, rel=1e-5)
+
+    # Verification of position_zero_vacant discounting risk
+    treg_p0 = TregDurabilityResult(
+        query=cand.query,
+        search_volume=2000,
+        cpc_usd=5.0,
+        keyword_difficulty=40.0,
+        position_zero_vacant=True,
+    )
+    cand_no_meta = TrendCandidate(
+        id="cand-p0",
+        query="commercial hvac maintenance cost estimator",
+        slug="commercial-hvac-maintenance-cost-estimator",
+        source="google_suggest",
+        velocity=40.0,
+        acceleration=5.0,
+        z_score=3.0,
+        intent_cluster="calculator",
+    )
+    yield_p0 = engine.compute_composite_yield(
+        candidate=cand_no_meta,
+        treg_result=treg_p0,
+        jev_score=1.50,
+        durable_prob=0.80,
+        cannibalization_risk=0.20,
+        serp_weakness_count=0,
+    )
+    assert yield_p0 > yield_base
