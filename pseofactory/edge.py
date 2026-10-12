@@ -8,7 +8,11 @@ Zero em-dashes. Zero en-dashes.
 import json
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
+import urllib.parse
+from dataclasses import dataclass, field
+
+from pseofactory.contracts import assert_no_forbidden_dashes
 
 
 class EdgeConfigStandards:
@@ -298,3 +302,686 @@ def validate_edge_headers_file(headers_path: Union[str, Path]) -> Dict[str, Any]
         "violations_count": len(issues),
         "issues": issues,
     }
+
+
+class RejectOrNoiseStr(str):
+    """String subclass that compares equal to both 'noise' and 'REJECT'."""
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, str) and other in ("noise", "REJECT", "reject", "Noise"):
+            return True
+        return super().__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash("noise")
+
+
+@dataclass
+class VisitorIntent:
+    """Classified search intent of a visiting edge request."""
+
+    query: str
+    target_asset_type: Union[str, RejectOrNoiseStr]
+    intent_weight: float
+    intent_cluster: str
+    action: str = "ALLOW"
+    is_noise: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "query": self.query,
+            "target_asset_type": str(self.target_asset_type),
+            "intent_weight": self.intent_weight,
+            "intent_cluster": self.intent_cluster,
+            "action": self.action,
+            "is_noise": self.is_noise,
+            "metadata": self.metadata,
+        }
+
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
+
+@dataclass
+class RouteDecision:
+    """Edge routing decision for incoming visitor query and current path."""
+
+    action: str  # REWRITE_TO_CLUSTER, INJECT_OVERLAY, PASS_THROUGH
+    target_path: str
+    reason: str
+    intent: Optional[VisitorIntent] = None
+    overlay_keyword: Optional[str] = None
+    matched_cluster: Optional[str] = None
+    status_code: int = 200
+    headers: Dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "action": self.action,
+            "target_path": self.target_path,
+            "reason": self.reason,
+            "intent": self.intent.to_dict() if self.intent else None,
+            "overlay_keyword": self.overlay_keyword,
+            "matched_cluster": self.matched_cluster,
+            "status_code": self.status_code,
+            "headers": self.headers,
+        }
+
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
+
+class EdgeVisitorClassifier:
+    """
+    Sub-millisecond Edge Visitor Search Intent Classifier.
+    Extracts search queries from Referer headers or URL parameters,
+    and categorizes visitors into Search Intent Doctrine asset archetypes.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    SEARCH_ENGINE_HOSTS: Set[str] = {
+        "google.com",
+        "www.google.com",
+        "bing.com",
+        "www.bing.com",
+        "duckduckgo.com",
+        "www.duckduckgo.com",
+    }
+
+    @classmethod
+    def extract_search_query(
+        cls,
+        headers: Optional[Dict[str, str]] = None,
+        url: Optional[str] = None,
+        referer: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Extracts search query from Referer headers (Google, Bing, DuckDuckGo)
+        or URL parameters (?q=, ?s=, ?query=).
+        Returns None if no search query is found.
+        """
+        # 1. Check URL parameters first (?q=, ?s=, ?query=)
+        if url:
+            url_str = str(url).strip()
+            if url_str:
+                query_string = (
+                    url_str.split("?", 1)[1]
+                    if "?" in url_str
+                    else (url_str if url_str.startswith("?") else "")
+                )
+                if query_string:
+                    qs = urllib.parse.parse_qs(query_string, keep_blank_values=False)
+                    for param in ("q", "s", "query"):
+                        for k, v_list in qs.items():
+                            if k.lower() == param and v_list:
+                                val = urllib.parse.unquote_plus(v_list[0]).strip()
+                                if val:
+                                    assert_no_forbidden_dashes(val, "EdgeVisitorClassifier.extract_search_query.url")
+                                    return val
+
+        # 2. Check Referer header (either explicit or from headers dict)
+        ref_candidate = referer
+        if not ref_candidate and headers:
+            for k, v in headers.items():
+                if k.lower() in ("referer", "referrer"):
+                    ref_candidate = v
+                    break
+
+        if ref_candidate:
+            ref_str = str(ref_candidate).strip()
+            if ref_str:
+                try:
+                    parsed = urllib.parse.urlparse(ref_str)
+                    host = parsed.netloc.lower()
+                    qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=False)
+                    for param in ("q", "query", "s", "p"):
+                        for k, v_list in qs.items():
+                            if k.lower() == param and v_list:
+                                val = urllib.parse.unquote_plus(v_list[0]).strip()
+                                if val:
+                                    assert_no_forbidden_dashes(val, "EdgeVisitorClassifier.extract_search_query.referer")
+                                    return val
+                except Exception:
+                    pass
+
+        return None
+
+    def extract_query(
+        self,
+        headers: Optional[Dict[str, str]] = None,
+        url: Optional[str] = None,
+        referer: Optional[str] = None,
+    ) -> Optional[str]:
+        """Instance alias for extract_search_query."""
+        return self.extract_search_query(headers=headers, url=url, referer=referer)
+
+    @classmethod
+    def classify(
+        cls,
+        query: str,
+        intent_cluster: Optional[str] = None,
+    ) -> VisitorIntent:
+        """
+        Classifies visitor intent aligned with calculate_intent_weight and
+        determine_target_asset_type in pseofactory/trends/jev_engine.py:
+        * Statutory calculations / deductions -> interactive_calculator (intent_weight 1.0)
+        * Statutory matrices / rules -> statutory_matrix (intent_weight 1.0)
+        * Competitor / product comparisons -> comparison_engine (intent_weight 0.7)
+        * General tools -> interactive_calculator (intent_weight 0.8)
+        * Noise / memes -> REJECT / noise (intent_weight 0.05)
+        * Informational -> void_documentation (intent_weight 0.3)
+        """
+        clean_q = (query or "").strip()
+        assert_no_forbidden_dashes(clean_q, "EdgeVisitorClassifier.classify")
+        q_low = clean_q.lower()
+        cluster = (intent_cluster or "").lower()
+
+        # Archetype 1: Noise / memes -> REJECT / noise (intent_weight 0.05)
+        noise_keywords = [
+            "meme", "remix", "soundboard", "dress", "gossip",
+            "scrubbed", "leak", "noise", "funny", "prank", "parody",
+        ]
+        if cluster == "noise" or any(w in q_low for w in noise_keywords):
+            return VisitorIntent(
+                query=clean_q,
+                target_asset_type=RejectOrNoiseStr("noise"),
+                intent_weight=0.05,
+                intent_cluster="noise",
+                action="REJECT",
+                is_noise=True,
+            )
+
+        # Archetype 2: Statutory calculations / deductions -> interactive_calculator (intent_weight 1.0)
+        is_statutory_calc = False
+        if any(w in q_low for w in ["deduction", "deductions", "statutory calculation", "statutory calc"]):
+            is_statutory_calc = True
+        elif any(w in q_low for w in ["calculator", "calc", "estimator"]) and any(
+            w in q_low for w in ["statutory", "section", "tax", "irs", "form", "depreciation", "compliance"]
+        ):
+            is_statutory_calc = True
+        elif cluster in ("calculator", "statutory_compliance") and any(
+            w in q_low for w in ["deduction", "section", "tax", "calc", "calculator", "estimator"]
+        ):
+            if not ("matrix" in q_low or "rule" in q_low or "rules" in q_low):
+                is_statutory_calc = True
+
+        if is_statutory_calc:
+            return VisitorIntent(
+                query=clean_q,
+                target_asset_type="interactive_calculator",
+                intent_weight=1.0,
+                intent_cluster="calculator" if cluster == "calculator" else "statutory_compliance",
+                action="ALLOW",
+                is_noise=False,
+            )
+
+        # Archetype 3: Statutory matrices / rules -> statutory_matrix (intent_weight 1.0)
+        is_statutory_matrix = False
+        if "matrix" in q_low or "statutory matrix" in q_low:
+            is_statutory_matrix = True
+        elif "statutory" in q_low and any(w in q_low for w in ["rule", "rules", "matrix", "compliance", "standard", "table"]):
+            is_statutory_matrix = True
+        elif cluster == "statutory_compliance" or "statutory" in q_low:
+            is_statutory_matrix = True
+
+        if is_statutory_matrix:
+            return VisitorIntent(
+                query=clean_q,
+                target_asset_type="statutory_matrix",
+                intent_weight=1.0,
+                intent_cluster="statutory_compliance",
+                action="ALLOW",
+                is_noise=False,
+            )
+
+        # Archetype 4: Competitor / product comparisons -> comparison_engine (intent_weight 0.7)
+        is_comparison = False
+        if cluster == "comparison":
+            is_comparison = True
+        elif any(w in q_low for w in ["versus", "compare", "comparison", "alternative", "competitor"]):
+            is_comparison = True
+        elif re.search(r"\bvs\b", q_low):
+            is_comparison = True
+
+        if is_comparison:
+            return VisitorIntent(
+                query=clean_q,
+                target_asset_type="comparison_engine",
+                intent_weight=0.7,
+                intent_cluster="comparison",
+                action="ALLOW",
+                is_noise=False,
+            )
+
+        # Archetype 5: General tools -> interactive_calculator (intent_weight 0.8)
+        is_tool = False
+        if cluster == "tool" or any(w in q_low for w in ["tool", "tools", "generator", "builder", "converter"]):
+            is_tool = True
+        elif cluster == "calculator" or any(w in q_low for w in ["calculator", "calc", "estimator"]):
+            return VisitorIntent(
+                query=clean_q,
+                target_asset_type="interactive_calculator",
+                intent_weight=1.0 if cluster == "calculator" or "calculator" in q_low else 0.8,
+                intent_cluster="calculator",
+                action="ALLOW",
+                is_noise=False,
+            )
+
+        if is_tool:
+            return VisitorIntent(
+                query=clean_q,
+                target_asset_type="interactive_calculator",
+                intent_weight=0.8,
+                intent_cluster="tool",
+                action="ALLOW",
+                is_noise=False,
+            )
+
+        # Archetype 6: Informational -> void_documentation (intent_weight 0.3)
+        return VisitorIntent(
+            query=clean_q,
+            target_asset_type="void_documentation",
+            intent_weight=0.3,
+            intent_cluster="informational",
+            action="ALLOW",
+            is_noise=False,
+        )
+
+    def classify_intent(
+        self,
+        query: str,
+        intent_cluster: Optional[str] = None,
+    ) -> VisitorIntent:
+        """Instance alias for classify."""
+        return self.classify(query, intent_cluster=intent_cluster)
+
+
+class EdgeIntentRouter:
+    """
+    Sub-millisecond Edge Intent Router.
+    Decides routing actions:
+    - REWRITE_TO_CLUSTER when visitor query matches a high-yield cluster different from current path
+    - INJECT_OVERLAY when visitor query matches striking-distance keyword on current page
+    - PASS_THROUGH when no intent mismatch exists
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(
+        self,
+        routes_map: Optional[Dict[str, Any]] = None,
+        striking_distance_map: Optional[Dict[str, List[str]]] = None,
+        classifier: Optional[EdgeVisitorClassifier] = None,
+    ):
+        self.routes_map = routes_map or {}
+        self.striking_distance_map = striking_distance_map or {}
+        self.classifier = classifier or EdgeVisitorClassifier()
+
+    def route(
+        self,
+        current_path: str,
+        query: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
+        url: Optional[str] = None,
+        referer: Optional[str] = None,
+        striking_keywords: Optional[List[str]] = None,
+    ) -> RouteDecision:
+        """
+        Determines edge routing decision for request.
+        """
+        assert_no_forbidden_dashes(current_path, "EdgeIntentRouter.route.current_path")
+
+        # 1. Resolve query
+        extracted_q = query
+        if extracted_q is None:
+            extracted_q = self.classifier.extract_search_query(headers=headers, url=url, referer=referer)
+
+        if not extracted_q:
+            return RouteDecision(
+                action="PASS_THROUGH",
+                target_path=current_path,
+                reason="No search query detected; pass through",
+            )
+
+        assert_no_forbidden_dashes(extracted_q, "EdgeIntentRouter.route.query")
+
+        # 2. Classify intent
+        intent = self.classifier.classify(extracted_q)
+
+        # Noise / memes pass through without rewrites or overlays
+        if intent.is_noise:
+            return RouteDecision(
+                action="PASS_THROUGH",
+                target_path=current_path,
+                reason=f"Noise query '{extracted_q}' rejected; pass through",
+                intent=intent,
+            )
+
+        # 3. Check INJECT_OVERLAY (striking distance match on current page)
+        current_normalized = current_path.rstrip("/")
+        page_striking: List[str] = []
+        if striking_keywords:
+            page_striking.extend(striking_keywords)
+
+        for p, kw_list in self.striking_distance_map.items():
+            if p.rstrip("/") == current_normalized:
+                page_striking.extend(kw_list)
+
+        for p, meta in self.routes_map.items():
+            if isinstance(meta, dict) and p.rstrip("/") == current_normalized:
+                page_striking.extend(meta.get("striking_distance", []))
+
+        q_low = extracted_q.lower()
+        for kw in page_striking:
+            kw_low = kw.lower()
+            if kw_low in q_low or q_low in kw_low or set(kw_low.split()).issubset(set(q_low.split())):
+                return RouteDecision(
+                    action="INJECT_OVERLAY",
+                    target_path=current_path,
+                    reason=f"Visitor query '{extracted_q}' matches striking-distance keyword '{kw}' on current page",
+                    intent=intent,
+                    overlay_keyword=kw,
+                )
+
+        # 4. Check REWRITE_TO_CLUSTER
+        # High-yield clusters have intent_weight >= 0.7
+        if intent.intent_weight >= 0.7:
+            target_destination = self._find_cluster_destination(intent, extracted_q)
+            if target_destination:
+                target_normalized = target_destination.rstrip("/")
+                if target_normalized != current_normalized:
+                    return RouteDecision(
+                        action="REWRITE_TO_CLUSTER",
+                        target_path=target_destination,
+                        reason=f"High-yield intent '{intent.target_asset_type}' mismatch: rewrite from '{current_path}' to '{target_destination}'",
+                        intent=intent,
+                        matched_cluster=str(intent.target_asset_type),
+                    )
+
+        # 5. Default PASS_THROUGH
+        return RouteDecision(
+            action="PASS_THROUGH",
+            target_path=current_path,
+            reason="No intent mismatch exists; pass through",
+            intent=intent,
+        )
+
+    def _find_cluster_destination(self, intent: VisitorIntent, query: str) -> Optional[str]:
+        """Finds matching cluster destination path from routes_map."""
+        q_low = query.lower()
+
+        # Check direct key in routes_map for target asset type or cluster
+        for key in (str(intent.target_asset_type), intent.intent_cluster):
+            if key in self.routes_map and isinstance(self.routes_map[key], str):
+                return self.routes_map[key]
+
+        # Check structured routes_map (path -> metadata)
+        for path_key, val in self.routes_map.items():
+            if isinstance(val, dict):
+                # Check target_asset_type match
+                if val.get("target_asset_type") == str(intent.target_asset_type):
+                    kws = val.get("keywords", [])
+                    if not kws or any(kw.lower() in q_low or q_low in kw.lower() for kw in kws):
+                        return path_key
+                # Check cluster match
+                elif val.get("cluster") == intent.intent_cluster:
+                    kws = val.get("keywords", [])
+                    if not kws or any(kw.lower() in q_low or q_low in kw.lower() for kw in kws):
+                        return path_key
+
+        return None
+
+
+def generate_edge_worker_script(routes_map: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Generates a production Cloudflare Worker JavaScript snippet implementing
+    sub-millisecond edge classification, Referer / URL parameter extraction,
+    and routing decisions (REWRITE_TO_CLUSTER, INJECT_OVERLAY, PASS_THROUGH).
+    Zero em-dashes. Zero en-dashes.
+    """
+    routes_json = json.dumps(routes_map or {}, indent=2)
+
+    script = f"""/**
+ * Cloudflare Worker: Dynamic Edge Search Intent Router
+ * Generated by pseofactory.edge
+ * Sub-millisecond edge classification and dynamic search intent routing.
+ * Zero em-dashes. Zero en-dashes.
+ */
+
+const ROUTES_MAP = {routes_json};
+
+function extractSearchQuery(request) {{
+  const url = new URL(request.url);
+
+  // 1. Check URL parameters (?q=, ?s=, ?query=)
+  for (const param of ["q", "s", "query"]) {{
+    const val = url.searchParams.get(param);
+    if (val && val.trim().length > 0) {{
+      return decodeURIComponent(val.trim().replace(/\\+/g, " "));
+    }}
+  }}
+
+  // 2. Check Referer header (Google, Bing, DuckDuckGo)
+  const referer = request.headers.get("referer") || request.headers.get("referrer") || "";
+  if (referer) {{
+    try {{
+      const refUrl = new URL(referer);
+      const host = refUrl.hostname.toLowerCase();
+      if (host.includes("google.") || host.includes("bing.") || host.includes("duckduckgo.")) {{
+        for (const param of ["q", "query", "s", "p"]) {{
+          const val = refUrl.searchParams.get(param);
+          if (val && val.trim().length > 0) {{
+            return decodeURIComponent(val.trim().replace(/\\+/g, " "));
+          }}
+        }}
+      }}
+    }} catch (e) {{
+      // Invalid referer URL format; ignore
+    }}
+  }}
+
+  return null;
+}}
+
+function classifyVisitorIntent(query) {{
+  if (!query) {{
+    return {{
+      query: "",
+      target_asset_type: "void_documentation",
+      intent_weight: 0.3,
+      intent_cluster: "informational",
+      action: "ALLOW",
+      is_noise: false
+    }};
+  }}
+
+  const q = query.toLowerCase();
+
+  // Noise / memes -> REJECT / noise (intent_weight 0.05)
+  const noiseTerms = ["meme", "remix", "soundboard", "dress", "gossip", "scrubbed", "leak", "noise", "funny", "prank", "parody"];
+  if (noiseTerms.some(term => q.includes(term))) {{
+    return {{
+      query: query,
+      target_asset_type: "noise",
+      intent_weight: 0.05,
+      intent_cluster: "noise",
+      action: "REJECT",
+      is_noise: true
+    }};
+  }}
+
+  // Statutory calculations / deductions -> interactive_calculator (intent_weight 1.0)
+  const isDeduction = q.includes("deduction") || q.includes("statutory calculation");
+  const isStatutoryCalc = (q.includes("calculator") || q.includes("calc") || q.includes("estimator")) &&
+    (q.includes("statutory") || q.includes("section") || q.includes("tax") || q.includes("irs") || q.includes("compliance") || q.includes("depreciation"));
+  if (isDeduction || isStatutoryCalc) {{
+    return {{
+      query: query,
+      target_asset_type: "interactive_calculator",
+      intent_weight: 1.0,
+      intent_cluster: "calculator",
+      action: "ALLOW",
+      is_noise: false
+    }};
+  }}
+
+  // Statutory matrices / rules -> statutory_matrix (intent_weight 1.0)
+  if (q.includes("matrix") || q.includes("statutory") || q.includes("rule") || q.includes("rules")) {{
+    return {{
+      query: query,
+      target_asset_type: "statutory_matrix",
+      intent_weight: 1.0,
+      intent_cluster: "statutory_compliance",
+      action: "ALLOW",
+      is_noise: false
+    }};
+  }}
+
+  // Competitor / product comparisons -> comparison_engine (intent_weight 0.7)
+  if (/\\bvs\\b/.test(q) || q.includes("versus") || q.includes("compare") || q.includes("comparison") || q.includes("alternative")) {{
+    return {{
+      query: query,
+      target_asset_type: "comparison_engine",
+      intent_weight: 0.7,
+      intent_cluster: "comparison",
+      action: "ALLOW",
+      is_noise: false
+    }};
+  }}
+
+  // General tools -> interactive_calculator (intent_weight 0.8)
+  if (q.includes("tool") || q.includes("generator") || q.includes("builder") || q.includes("calculator") || q.includes("calc") || q.includes("estimator")) {{
+    const weight = (q.includes("calculator") || q.includes("calc") || q.includes("estimator")) ? 1.0 : 0.8;
+    return {{
+      query: query,
+      target_asset_type: "interactive_calculator",
+      intent_weight: weight,
+      intent_cluster: "tool",
+      action: "ALLOW",
+      is_noise: false
+    }};
+  }}
+
+  // Informational -> void_documentation (intent_weight 0.3)
+  return {{
+    query: query,
+    target_asset_type: "void_documentation",
+    intent_weight: 0.3,
+    intent_cluster: "informational",
+    action: "ALLOW",
+    is_noise: false
+  }};
+}}
+
+function determineEdgeRoute(request, routesMap) {{
+  const url = new URL(request.url);
+  const currentPath = url.pathname.replace(/\\/+$/, "") || "/";
+  const query = extractSearchQuery(request);
+
+  if (!query) {{
+    return {{ action: "PASS_THROUGH", target_path: currentPath, reason: "No search query detected" }};
+  }}
+
+  const intent = classifyVisitorIntent(query);
+  if (intent.is_noise) {{
+    return {{ action: "PASS_THROUGH", target_path: currentPath, reason: "Noise query rejected", intent }};
+  }}
+
+  // 1. Check INJECT_OVERLAY (striking-distance match on current page)
+  for (const [pathKey, config] of Object.entries(routesMap)) {{
+    const normKey = pathKey.replace(/\\/+$/, "") || "/";
+    if (normKey === currentPath && typeof config === "object" && Array.isArray(config.striking_distance)) {{
+      const qLow = query.toLowerCase();
+      for (const kw of config.striking_distance) {{
+        if (qLow.includes(kw.toLowerCase()) || kw.toLowerCase().includes(qLow)) {{
+          return {{
+            action: "INJECT_OVERLAY",
+            target_path: currentPath,
+            overlay_keyword: kw,
+            reason: `Query matched striking-distance keyword: ${{kw}}`,
+            intent
+          }};
+        }}
+      }}
+    }}
+  }}
+
+  // 2. Check REWRITE_TO_CLUSTER (high-yield intent mismatch)
+  if (intent.intent_weight >= 0.7) {{
+    let targetPath = null;
+    if (typeof routesMap[intent.target_asset_type] === "string") {{
+      targetPath = routesMap[intent.target_asset_type];
+    }} else {{
+      for (const [pathKey, config] of Object.entries(routesMap)) {{
+        if (typeof config === "object" && config.target_asset_type === intent.target_asset_type) {{
+          targetPath = pathKey;
+          break;
+        }}
+      }}
+    }}
+
+    if (targetPath) {{
+      const normTarget = targetPath.replace(/\\/+$/, "") || "/";
+      if (normTarget !== currentPath) {{
+        return {{
+          action: "REWRITE_TO_CLUSTER",
+          target_path: targetPath,
+          reason: `High-yield intent mismatch (${{intent.target_asset_type}})`,
+          intent
+        }};
+      }}
+    }}
+  }}
+
+  return {{ action: "PASS_THROUGH", target_path: currentPath, reason: "No intent mismatch exists", intent }};
+}}
+
+export {{ extractSearchQuery, classifyVisitorIntent, determineEdgeRoute }};
+
+export default {{
+  async fetch(request, env, ctx) {{
+    const route = determineEdgeRoute(request, ROUTES_MAP);
+    const url = new URL(request.url);
+
+    if (route.action === "REWRITE_TO_CLUSTER" && route.target_path) {{
+      const destinationUrl = new URL(route.target_path, url.origin);
+      const modifiedRequest = new Request(destinationUrl, request);
+      const response = await fetch(modifiedRequest);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("X-Edge-Intent-Action", "REWRITE_TO_CLUSTER");
+      newHeaders.set("X-Edge-Target-Path", route.target_path);
+      return new Response(response.body, {{
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      }});
+    }}
+
+    if (route.action === "INJECT_OVERLAY") {{
+      const response = await fetch(request);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("X-Edge-Intent-Action", "INJECT_OVERLAY");
+      if (route.overlay_keyword) {{
+        newHeaders.set("X-Edge-Overlay-Keyword", route.overlay_keyword);
+      }}
+      return new Response(response.body, {{
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      }});
+    }}
+
+    const response = await fetch(request);
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set("X-Edge-Intent-Action", "PASS_THROUGH");
+    return new Response(response.body, {{
+      status: response.status,
+      statusText: response.statusText,
+      headers: newHeaders
+    }});
+  }}
+}};
+"""
+    assert_no_forbidden_dashes(script, "generate_edge_worker_script")
+    return script
+
