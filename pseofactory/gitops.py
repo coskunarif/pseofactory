@@ -212,7 +212,7 @@ class GitOpsCoordinator:
         repo_path: Optional[Union[str, Path]] = None,
         branch: str = "main",
         run_id: Optional[str] = None,
-        timeout: int = 300,
+        timeout: Optional[int] = None,
         dry_run: bool = False,
         workflow: Optional[str] = None,
         harness_path: Optional[Union[str, Path]] = None,
@@ -221,7 +221,7 @@ class GitOpsCoordinator:
         self.repo_path = Path(repo_path).resolve() if repo_path else Path.cwd().resolve()
         self.branch = branch
         self.run_id = run_id or f"run-gitops-{int(time.time())}"
-        self.timeout = timeout
+        self.timeout = int(timeout) if timeout is not None else int(os.environ.get("PSEUFACTORY_CI_TIMEOUT", "900"))
         self.dry_run = dry_run
         self.workflow = workflow
         self.harness_path = Path(
@@ -978,14 +978,14 @@ class CICDWatcher:
         self,
         repo_slug: Optional[str] = None,
         workflow: Optional[str] = None,
-        timeout: int = 300,
+        timeout: Optional[int] = None,
         poll_interval: Optional[float] = None,
         discovery_interval: Optional[float] = None,
     ):
         fast_mode = os.environ.get("PSEUFACTORY_FAST_MODE", "").strip() in ("1", "true", "TRUE")
         self.repo_slug = repo_slug
         self.workflow = workflow
-        self.timeout = timeout
+        self.timeout = int(timeout) if timeout is not None else int(os.environ.get("PSEUFACTORY_CI_TIMEOUT", "900"))
 
         if poll_interval is not None:
             self.poll_interval = float(poll_interval)
