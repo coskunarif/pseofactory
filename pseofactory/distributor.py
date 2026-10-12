@@ -4458,7 +4458,16 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         adapter = None
 
     if tools is None:
-        target_tools = adapter.tools if (adapter and adapter.tools) else TOOLS
+        target_tools = adapter.tools if (adapter and adapter.tools) else None
+        if not target_tools:
+            try:
+                import importlib
+                cfg = importlib.import_module(f"{property_id}.config")
+                target_tools = getattr(cfg, "TOOLS", None)
+            except Exception:
+                pass
+        if not target_tools:
+            target_tools = TOOLS
     else:
         target_tools = tools
 
@@ -4543,7 +4552,15 @@ def export_all_syndication_files(
             adapter = TenantRegistry.default().get_adapter(property_id)
             output_dir = adapter.repo_path / "syndication" if adapter.repo_path else Path(f"/tmp/{property_id}_syndication")
         except Exception:
-            output_dir = Path(os.environ.get("FACTORY_SYNDICATION_DIR", f"/home/ubuntuadmin/projects/{property_id}/syndication"))
+            output_dir = None
+            try:
+                import importlib
+                cfg = importlib.import_module(f"{property_id}.config")
+                output_dir = getattr(cfg, "SYNDICATION_DIR", None)
+            except Exception:
+                pass
+            if output_dir is None:
+                output_dir = Path(os.environ.get("FACTORY_SYNDICATION_DIR", f"/tmp/{property_id}_syndication"))
     else:
         output_dir = Path(output_dir)
 
@@ -4551,8 +4568,17 @@ def export_all_syndication_files(
         from pseofactory.maintenance import TenantRegistry
         try:
             adapter = TenantRegistry.default().get_adapter(property_id)
-            target_tools = adapter.tools if (adapter and adapter.tools) else TOOLS
+            target_tools = adapter.tools if (adapter and adapter.tools) else None
         except Exception:
+            target_tools = None
+        if not target_tools:
+            try:
+                import importlib
+                cfg = importlib.import_module(f"{property_id}.config")
+                target_tools = getattr(cfg, "TOOLS", None)
+            except Exception:
+                pass
+        if not target_tools:
             target_tools = TOOLS
     else:
         target_tools = tools
@@ -4723,7 +4749,7 @@ Calculations and statutory rules derived from:
 ## 3. Programmatic Intelligence Matrices (Multi-Dataset Enrichment)
 - Statutory Calculators: `{eff_base}/tools/`
 
-## 4. 1st-Party Regulatory Alert Infrastructure
+## 4. 1st-Party Regulatory Alert Infrastructure (HWL-1076)
 - Statutory Sunset & Regulatory Change Notifications.
 
 ## 5. Direct Machine Ingestion References
