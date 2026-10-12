@@ -16,7 +16,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set, Union
+from typing import List, Dict, Any, Optional, Set, Union, Tuple
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -290,6 +290,32 @@ class FactoryPipeline:
         self.indexing_inspector = indexing_inspector
         if self.config.enable_indexing_feedback and self.indexing_inspector is None:
             self.indexing_inspector = DailyIndexingInspector()
+
+    def arbitrate_actions(
+        self,
+        spikes: Optional[List[Any]] = None,
+        drift_records: Optional[List[Any]] = None,
+        indexing_defects: Optional[List[Any]] = None,
+        refactor_candidates: Optional[List[Any]] = None,
+        existing_tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[str, Any]:
+        """
+        Implements post5.md's 'One action per run' single-scale prioritization:
+        - Rank 1 (P0): TRUTH_CONTRADICTION & PROPERTY_CONTAMINATION in dist/live assets
+          takes absolute priority over new builds.
+        - Rank 2 (P1): INDEXING_DEFECT (404s, redirect loops, canonical mismatches)
+        - Rank 3 (P2): REFACTOR_PAGE (striking distance refreshes, engine drift)
+        - Rank 4 (P3): BUILD_PAGE (new breakout search opportunities)
+        Returns (action_type, winning_payload).
+        Zero em-dashes. Zero en-dashes.
+        """
+        return arbitrate_actions(
+            spikes=spikes,
+            drift_records=drift_records,
+            indexing_defects=indexing_defects,
+            refactor_candidates=refactor_candidates,
+            existing_tools=existing_tools,
+        )
 
     def determine_property_assignment(
         self,
@@ -1309,3 +1335,72 @@ def run_factory_pipeline(
         enable_gitops=enable_gitops,
         enable_distribution=enable_distribution,
     )
+
+
+def arbitrate_actions(
+    spikes: Optional[List[Any]] = None,
+    drift_records: Optional[List[Any]] = None,
+    indexing_defects: Optional[List[Any]] = None,
+    refactor_candidates: Optional[List[Any]] = None,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[str, Any]:
+    """
+    Implements post5.md's 'One action per run' single-scale prioritization:
+    - Rank 1 (P0): TRUTH_CONTRADICTION & PROPERTY_CONTAMINATION in dist/live assets
+      takes absolute priority over new builds.
+    - Rank 2 (P1): INDEXING_DEFECT (404s, redirect loops, canonical mismatches)
+    - Rank 3 (P2): REFACTOR_PAGE (striking distance refreshes, engine drift)
+    - Rank 4 (P3): BUILD_PAGE (new breakout search opportunities)
+    Returns (action_type, winning_payload).
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import DriftReason
+
+    # 1. Rank 1 (P0): Truth contradictions and cross-property contamination
+    if drift_records:
+        for rec in drift_records:
+            reasons = getattr(rec, "reasons", []) or []
+            reason_vals = [r.value if hasattr(r, "value") else str(r) for r in reasons]
+            if (
+                DriftReason.TRUTH_CONTRADICTION in reasons
+                or "TRUTH_CONTRADICTION" in reason_vals
+            ):
+                return ("REPAIR_TRUTH_CONTRADICTION", rec)
+            if (
+                DriftReason.PROPERTY_CONTAMINATION in reasons
+                or "PROPERTY_CONTAMINATION" in reason_vals
+            ):
+                return ("REPAIR_PROPERTY_CONTAMINATION", rec)
+
+    # 2. Rank 2 (P1): Indexing defects
+    if indexing_defects:
+        return ("REPAIR_INDEXING_DEFECT", indexing_defects[0])
+
+    if drift_records:
+        for rec in drift_records:
+            reasons = getattr(rec, "reasons", []) or []
+            reason_vals = [r.value if hasattr(r, "value") else str(r) for r in reasons]
+            if "INDEXING_DEFECT" in reason_vals or getattr(rec, "metadata", {}).get("indexing_defect"):
+                return ("REPAIR_INDEXING_DEFECT", rec)
+
+    # 3. Rank 3 (P2): Refactor page
+    if refactor_candidates:
+        return ("REFACTOR_PAGE", refactor_candidates[0])
+
+    if drift_records:
+        for rec in drift_records:
+            reasons = getattr(rec, "reasons", []) or []
+            reason_vals = [r.value if hasattr(r, "value") else str(r) for r in reasons]
+            if (
+                DriftReason.ENGINE_HASH_DRIFT in reasons
+                or DriftReason.STRUCTURAL_CONTRACT_VIOLATION in reasons
+                or "ENGINE_HASH_DRIFT" in reason_vals
+                or "STRUCTURAL_CONTRACT_VIOLATION" in reason_vals
+            ):
+                return ("REFACTOR_PAGE", rec)
+
+    # 4. Rank 4 (P3): Build page (new candidate spikes)
+    if spikes:
+        return ("BUILD_PAGE", spikes[0])
+
+    return ("NO_OP", None)

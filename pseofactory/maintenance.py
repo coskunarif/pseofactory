@@ -65,6 +65,7 @@ class DriftReason(str, Enum):
     STATUTORY_DRIFT = "STATUTORY_DRIFT"
     OPERATIONAL_SHIELD_GAP = "OPERATIONAL_SHIELD_GAP"
     OPPORTUNITY_OVERLAY = "OPPORTUNITY_OVERLAY"
+    TRUTH_CONTRADICTION = "TRUTH_CONTRADICTION"
 
 
 
@@ -1365,6 +1366,120 @@ class TenantRegistry:
         cls._global_registry = None
 
 
+class LiveTruthAuditEngine:
+    """
+    Scans compiled static HTML assets or live edge URLs against TenantFactStore.
+    Detects:
+    1. Banned marketing claims
+    2. Pricing contradictions ($XX/mo not matching official pricing tiers)
+    3. Missing mandatory disclosures (e.g. Prexvo YMYL forfeiture disclaimer on refinance pages)
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self, fact_store: Optional[Any] = None):
+        if fact_store is None:
+            from pseofactory.tenant_facts import TenantFactStore
+            self.fact_store = TenantFactStore.get_instance()
+        else:
+            self.fact_store = fact_store
+
+    def audit_html(
+        self,
+        html_content: str,
+        property_id: str,
+        context: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Audits raw HTML content for truth contradictions against tenant facts.
+        Returns a list of violation detail strings.
+        Zero em-dashes. Zero en-dashes.
+        """
+        profile = self.fact_store.get_profile(property_id)
+        if not profile:
+            return []
+
+        violations: List[str] = []
+        html_lower = html_content.lower()
+
+        # 1. Banned claims
+        for banned in profile.claims_banned:
+            if banned.lower() in html_lower:
+                violations.append(
+                    f"Banned claim detected for {profile.brand_name}: '{banned}' in {context or 'asset'}"
+                )
+
+        # 2. Pricing contradictions
+        pricing_matches = re.findall(
+            r'\$(\d+(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
+            html_content,
+            re.IGNORECASE,
+        )
+        valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
+        for price_str in pricing_matches:
+            price_val = float(price_str)
+            if price_val not in valid_prices:
+                violations.append(
+                    f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
+                )
+
+        # 3. Mandatory disclosures
+        prop_norm = str(property_id).lower().strip()
+        if prop_norm == "prexvo" and ("refinance" in html_lower or "refinancing" in html_lower):
+            has_ymyl = (
+                "waives federal protections" in html_lower
+                or "eliminates federal protections" in html_lower
+            )
+            if not has_ymyl:
+                violations.append(
+                    "Missing mandatory YMYL forfeiture disclaimer on student loan refinance asset"
+                )
+
+        return violations
+
+    def audit_file(
+        self,
+        file_path: Union[str, Path],
+        property_id: str,
+    ) -> List[str]:
+        """Audits a single static HTML file path. Returns violations."""
+        p = Path(file_path).resolve()
+        if not p.is_file() or p.suffix != ".html":
+            return []
+        try:
+            content = p.read_text(encoding="utf-8", errors="ignore")
+            return self.audit_html(content, property_id=property_id, context=p.name)
+        except Exception as ex:
+            return [f"Failed to read file {p}: {ex}"]
+
+    def scan_dist_dir(
+        self,
+        dist_dir: Union[str, Path],
+        property_id: str,
+    ) -> List[AssetDriftRecord]:
+        """
+        Scans all HTML files in dist_dir for truth contradictions.
+        Returns list of AssetDriftRecord with DriftReason.TRUTH_CONTRADICTION.
+        Zero em-dashes. Zero en-dashes.
+        """
+        d = Path(dist_dir).resolve()
+        if not d.is_dir():
+            return []
+        drifted: List[AssetDriftRecord] = []
+        for html_file in d.rglob("*.html"):
+            violations = self.audit_file(html_file, property_id=property_id)
+            if violations:
+                drifted.append(
+                    AssetDriftRecord(
+                        asset_path=str(html_file),
+                        slug=html_file.stem,
+                        reasons=[DriftReason.TRUTH_CONTRADICTION],
+                        details=violations,
+                        metadata={"property_id": property_id},
+                    )
+                )
+        return drifted
+
+
 class AssetIntegrityEvaluator:
     """
     Audits compiled static assets against engine baselines:
@@ -1375,6 +1490,7 @@ class AssetIntegrityEvaluator:
     - AI Mode layout homogeneity and minimum asset counts
     - Cross-property boundary contamination
     - Substrate ledger hash alignment
+    - Live truth contradictions against TenantFactStore
     Zero em-dashes. Zero en-dashes.
     """
 
@@ -1383,10 +1499,12 @@ class AssetIntegrityEvaluator:
         scanner: Optional[CrossPropertyContaminationScanner] = None,
         enforce_master_seo: bool = True,
         enforce_operational_shield: bool = False,
+        truth_engine: Optional[LiveTruthAuditEngine] = None,
     ):
         self.scanner = scanner or CrossPropertyContaminationScanner()
         self.enforce_master_seo = enforce_master_seo
         self.enforce_operational_shield = enforce_operational_shield
+        self.truth_engine = truth_engine or LiveTruthAuditEngine()
         self._audit_cache: Dict[Tuple[str, float, int], Optional[AssetDriftRecord]] = {}
         self._asset_audit_cache = self._audit_cache
         self._fingerprint_cache: Dict[Tuple[str, float, int], str] = {}
@@ -1551,6 +1669,17 @@ class AssetIntegrityEvaluator:
             except ValueError as ex:
                 reasons.append(DriftReason.OPERATIONAL_SHIELD_GAP)
                 details.append(f"Operational shield gap: {ex}")
+
+        # 11. Live Truth Audit (Pricing, Banned Claims, Mandatory Disclosures)
+        if p.suffix == ".html":
+            truth_violations = self.truth_engine.audit_html(
+                content,
+                property_id=adapter.property_id,
+                context=rel_key,
+            )
+            if truth_violations:
+                reasons.append(DriftReason.TRUTH_CONTRADICTION)
+                details.extend([f"Truth contradiction: {v}" for v in truth_violations])
 
 
         if reasons:
@@ -2878,6 +3007,7 @@ __all__ = [
     "WorkspacePropertyScanner",
     "ConfigurablePropertyAdapter",
     "TenantRegistry",
+    "LiveTruthAuditEngine",
     "AssetIntegrityEvaluator",
     "RefactorCascadeEngine",
     "MaintenanceLifecycle",

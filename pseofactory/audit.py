@@ -600,6 +600,70 @@ def audit_rendered_asset(
 
     gate_results["antislop_and_touch_target"] = g10_ok
 
+    # =========================================================================
+    # Gate 11: Tenant Fact Parity Gate
+    # Inspects HTML for:
+    # 1. Banned claims according to TenantFactStore
+    # 2. Unverified pricing numbers ($XX/mo) contradicting pricing tiers
+    # 3. Mandatory disclosures (e.g. YMYL Federal Forfeiture Disclaimer on Prexvo refinance pages)
+    # =========================================================================
+    g11_ok = True
+    html_lower = html_content.lower()
+    try:
+        from pseofactory.tenant_facts import TenantFactStore
+        fact_store = TenantFactStore.get_instance()
+        profile = fact_store.get_profile(tenant)
+        if profile is not None:
+            # 1. Check for banned claims
+            for banned in profile.claims_banned:
+                if banned.lower() in html_lower:
+                    g11_ok = False
+                    violations.append(
+                        f"Gate 11 (Tenant Fact Parity): Found banned claim '{banned}' for tenant '{tenant}'"
+                    )
+
+            # 2. Check for pricing contradictions
+            pricing_matches = re.findall(
+                r'\$(\d+(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
+                html_content,
+                re.IGNORECASE,
+            )
+            valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
+            for price_str in pricing_matches:
+                price_val = float(price_str)
+                if price_val not in valid_prices:
+                    g11_ok = False
+                    violations.append(
+                        f"Gate 11 (Tenant Fact Parity): Unverified price claim '${price_val}' contradicts tenant pricing tiers {valid_prices}"
+                    )
+
+            # 3. Check for mandatory disclosures
+            # On Prexvo student loan refinance pages, YMYL forfeiture disclaimer is mandatory
+            if tenant.lower().strip() == "prexvo" and ("refinance" in html_lower or "refinancing" in html_lower):
+                has_ymyl = (
+                    "waives federal protections" in html_lower
+                    or "eliminates federal protections" in html_lower
+                )
+                if not has_ymyl:
+                    g11_ok = False
+                    violations.append(
+                        "Gate 11 (Tenant Fact Parity): Missing mandatory YMYL forfeiture disclaimer containing 'Refinancing federal student loans permanently waives federal protections'"
+                    )
+
+            # Check explicit mandatory disclosures requested in candidate_spec
+            spec_disclosures = candidate_spec.get("mandatory_disclosures") or []
+            for disclosure_phrase in spec_disclosures:
+                if disclosure_phrase.lower() not in html_lower:
+                    g11_ok = False
+                    violations.append(
+                        f"Gate 11 (Tenant Fact Parity): Missing mandatory disclosure containing '{disclosure_phrase}'"
+                    )
+    except Exception as ex:
+        g11_ok = False
+        violations.append(f"Gate 11 (Tenant Fact Parity): Fact store check failed: {ex}")
+
+    gate_results["tenant_fact_parity"] = g11_ok
+
     passed = len(violations) == 0
     return ContentAccuracyAuditReport(
         passed=passed,
