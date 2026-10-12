@@ -17,7 +17,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from dataclasses import dataclass, asdict
 import os
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 import urllib.parse
 
 from pseofactory.contracts import assert_no_forbidden_dashes
@@ -45,11 +45,39 @@ class AffiliatePartner:
     supported_params: List[str]
     cta_text: str = ""
 
+    @property
+    def url(self) -> str:
+        return resolve_partner_url(self)
+
     def __getitem__(self, item: str) -> Any:
-        return getattr(self, item)
+        if not isinstance(item, str):
+            raise KeyError(item)
+        if item == "url":
+            return self.url
+        if hasattr(self, item):
+            return getattr(self, item)
+        raise KeyError(item)
 
     def get(self, item: str, default: Any = None) -> Any:
+        if item == "url":
+            return self.url
         return getattr(self, item, default)
+
+    def __contains__(self, item: Any) -> bool:
+        if not isinstance(item, str):
+            return False
+        if item == "url":
+            return True
+        return hasattr(self, item)
+
+    def keys(self) -> List[str]:
+        return list(asdict(self).keys()) + ["url"]
+
+    def values(self) -> List[Any]:
+        return [getattr(self, k) if k != "url" else self.url for k in self.keys()]
+
+    def items(self) -> List[Tuple[str, Any]]:
+        return [(k, self[k]) for k in self.keys()]
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -360,6 +388,10 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
 }
 
+# Legacy Aliases
+PROFITHELM_AFFILIATES["equipment_macrs"] = PROFITHELM_AFFILIATES["crest_capital"]
+PROFITHELM_AFFILIATES["first_american_1031"] = PROFITHELM_AFFILIATES["first_american"]
+
 
 # ---------------------------------------------------------------------------
 # Prexvo Disclosures, Standing Restriction & Monetization Registry
@@ -485,6 +517,8 @@ AFFILIATE_REGISTRY: Dict[str, AffiliatePartner] = {
     **PROFITHELM_AFFILIATES,
     **PREXVO_AFFILIATES,
 }
+AFFILIATE_REGISTRY["equipment_macrs"] = PROFITHELM_AFFILIATES["crest_capital"]
+AFFILIATE_REGISTRY["first_american_1031"] = PROFITHELM_AFFILIATES["first_american"]
 
 # Boundary Sets
 B2B_PARTNER_KEYS: Set[str] = {

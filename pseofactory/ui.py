@@ -16,6 +16,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import html
+import hmac
 import json
 import os
 import re
@@ -1077,17 +1078,30 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def _check_api_auth(self) -> bool:
-        """Validates PSEODASHBOARD_API_TOKEN if set."""
-        auth_token = os.environ.get("PSEODASHBOARD_API_TOKEN")
+        """
+        Validates PSEODASHBOARD_API_TOKEN.
+        Enforces fail-closed rejection on mutating requests (POST/PUT/PATCH/DELETE)
+        if PSEODASHBOARD_API_TOKEN is unset or empty.
+        Uses hmac.compare_digest for timing-safe token comparison.
+        """
+        auth_token = os.environ.get("PSEODASHBOARD_API_TOKEN", "").strip()
+        is_mutating = getattr(self, "command", "POST") in ("POST", "PUT", "PATCH", "DELETE")
         if not auth_token:
+            if is_mutating:
+                return False
             return True
+
         header_val = self.headers.get("Authorization", "")
         req_token = ""
         if header_val.startswith("Bearer "):
             req_token = header_val[7:].strip()
         elif "X-API-Key" in self.headers:
             req_token = self.headers.get("X-API-Key", "").strip()
-        return req_token == auth_token
+
+        if not req_token:
+            return False
+
+        return hmac.compare_digest(req_token, auth_token)
 
     def do_POST(self) -> None:
         if not self._check_api_auth():
