@@ -774,6 +774,23 @@ class TrendHistoryDB:
     def record_treg_snapshot(self, snapshot: TregSnapshotRecord) -> None:
         """Records Treg metric snapshot."""
         conn = self.get_connection()
+        now_iso = snapshot.checked_at or datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO crawl_cycles (
+                cycle_id, executed_at, seeds_used, sources_crawled, status
+            ) VALUES (?, ?, '[]', '[]', 'COMPLETED');
+            """,
+            (snapshot.cycle_id, now_iso),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO keyword_history (
+                query_slug, query, intent_cluster, first_seen_at, last_seen_at
+            ) VALUES (?, ?, 'informational', ?, ?);
+            """,
+            (snapshot.query_slug, snapshot.query_slug.replace("-", " "), now_iso, now_iso),
+        )
         conn.execute(
             """
             INSERT OR REPLACE INTO treg_metric_snapshots (
@@ -798,6 +815,58 @@ class TrendHistoryDB:
                 snapshot.volatility_score,
                 snapshot.checked_at,
             ),
+        )
+
+    def get_latest_treg_snapshot(
+        self,
+        query_slug: str,
+        max_age_days: Optional[int] = 30,
+    ) -> Optional[TregSnapshotRecord]:
+        """
+        Retrieves most recent TregSnapshotRecord for given query_slug from treg_metric_snapshots table.
+        Optionally validates snapshot freshness against max_age_days.
+        Zero em-dashes. Zero en-dashes.
+        """
+        assert_url_safe_slug(query_slug)
+        conn = self.get_connection()
+        row = conn.execute(
+            """
+            SELECT * FROM treg_metric_snapshots
+            WHERE query_slug = ?
+            ORDER BY checked_at DESC
+            LIMIT 1;
+            """,
+            (query_slug,),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        if max_age_days is not None:
+            checked_at_str = row["checked_at"]
+            try:
+                checked_dt = datetime.fromisoformat(checked_at_str.replace("Z", "+00:00"))
+                now_dt = datetime.now(timezone.utc)
+                age_days = (now_dt - checked_dt).total_seconds() / 86400.0
+                if age_days > max_age_days:
+                    return None
+            except Exception:
+                pass
+
+        return TregSnapshotRecord(
+            snapshot_id=row["snapshot_id"],
+            query_slug=row["query_slug"],
+            cycle_id=row["cycle_id"],
+            search_volume=row["search_volume"],
+            cpc_usd=row["cpc_usd"],
+            competition_index=row["competition_index"],
+            keyword_difficulty=row["keyword_difficulty"],
+            position_zero_vacant=row["position_zero_vacant"],
+            historical_stability=row["historical_stability"],
+            volume_delta_pct=row["volume_delta_pct"],
+            cpc_delta_pct=row["cpc_delta_pct"],
+            volatility_score=row["volatility_score"],
+            checked_at=row["checked_at"],
         )
 
     def record_jev_evaluation(self, evaluation: JevEvaluationRecord) -> None:

@@ -12,7 +12,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
-from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.contracts import assert_no_forbidden_dashes, sanitize_url_slug
 from pseofactory.trends.models import TregDurabilityResult
 
 
@@ -31,6 +31,7 @@ class TregChecker:
         mock_data: Optional[Dict[str, Dict[str, Any]]] = None,
         max_cost: str = MAX_ROUTE_COST,
         timeout: float = 5.0,
+        db: Optional[Any] = None,
     ):
         self.mock_registry: Dict[str, Dict[str, Any]] = {}
         if mock_data:
@@ -38,6 +39,7 @@ class TregChecker:
                 self.mock_registry[k.lower().strip()] = v
         self.max_cost = max_cost
         self.timeout = timeout
+        self.db = db
         self.cache: Dict[str, TregDurabilityResult] = {}
 
     def register_mock(self, query: str, metrics: Dict[str, Any]) -> None:
@@ -66,7 +68,6 @@ class TregChecker:
             checked_at=datetime.now(timezone.utc).isoformat(),
             raw_ideas=[],
         )
-        self.cache[q_key] = result
         return result
 
     def check_query(
@@ -115,7 +116,30 @@ class TregChecker:
             self.cache[q_key] = result
             return result
 
-        # 2. External treg CLI execution if available
+        # 2. Persistent SQLite snapshot lookup
+        if self.db is not None and hasattr(self.db, "get_latest_treg_snapshot"):
+            slug = sanitize_url_slug(clean_q)
+            try:
+                snap = self.db.get_latest_treg_snapshot(slug)
+                if snap is not None:
+                    result = TregDurabilityResult(
+                        query=clean_q,
+                        endpoint_called=f"{ENDPOINT_IDEAS}#snapshot_cache",
+                        search_volume=snap.search_volume,
+                        cpc_usd=snap.cpc_usd,
+                        competition_index=snap.competition_index,
+                        keyword_difficulty=snap.keyword_difficulty,
+                        position_zero_vacant=bool(snap.position_zero_vacant),
+                        historical_stability=snap.historical_stability,
+                        checked_at=snap.checked_at,
+                        raw_ideas=[],
+                    )
+                    self.cache[q_key] = result
+                    return result
+            except Exception:
+                pass
+
+        # 3. External treg CLI execution if available
         treg_bin = shutil.which("treg")
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
         is_test_env = "PYTEST_CURRENT_TEST" in os.environ

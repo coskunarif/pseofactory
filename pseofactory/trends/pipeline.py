@@ -10,7 +10,7 @@ import time
 import json
 import fcntl
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Set
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -43,12 +43,17 @@ class TrendPipeline:
         jev_engine: Optional[JevEngine] = None,
         batch_size: int = 15,
         cycle_budget: float = 240.0,
+        db: Optional[Any] = None,
     ):
         self.noise_filter = noise_filter or NoiseFilter()
-        self.treg_checker = treg_checker or TregChecker()
+        if treg_checker is not None:
+            self.treg_checker = treg_checker
+        else:
+            self.treg_checker = TregChecker(db=db)
         self.jev_engine = jev_engine or JevEngine()
         self.batch_size = batch_size
         self.cycle_budget = cycle_budget
+        self.db = db
 
     def process_spikes(
         self,
@@ -103,25 +108,29 @@ class TrendPipeline:
             else:
                 candidates_to_eval.append(cand)
 
-        # 2. Process viable candidates surviving noise filter bounded by batch_size and cycle_budget
-        eval_batch = candidates_to_eval[: self.batch_size]
+        # 2. Batch deduplication by normalized query string
+        seen_queries: Set[str] = set()
+        unique_candidates: List[TrendCandidate] = []
+        duplicate_candidates: List[TrendCandidate] = []
+        for cand in candidates_to_eval:
+            norm_q = " ".join(cand.query.strip().lower().split())
+            if norm_q not in seen_queries:
+                seen_queries.add(norm_q)
+                unique_candidates.append(cand)
+            else:
+                duplicate_candidates.append(cand)
+
+        eval_batch = unique_candidates[: self.batch_size]
+        primary_decisions: Dict[str, JevDecisionResult] = {}
+
         for cand in eval_batch:
+            norm_q = " ".join(cand.query.strip().lower().split())
             elapsed = time.monotonic() - start_time
             remaining_budget = max(0.0, self.cycle_budget - elapsed)
 
-            # Treg demand cross-check
-            mock_treg = None
             raw_meta = cand.metadata or {}
-            if "treg_mock" in raw_meta:
-                mock_treg = raw_meta["treg_mock"]
 
-            treg_res = self.treg_checker.check_query(
-                cand.query,
-                mock_override=mock_treg,
-                remaining_budget=remaining_budget,
-            )
-
-            # Check search intent cannibalization against existing catalog
+            # Upfront search intent cannibalization screening against existing catalog
             cannibal_info = check_search_intent_cannibalization(
                 cand.query,
                 existing_tools=existing_tools,
@@ -135,6 +144,9 @@ class TrendPipeline:
             if cannibal_info.get("is_cannibalizing"):
                 cann_score = 0.85
                 matching_tool = cannibal_info.get("parent_slug")
+                if "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
+                    if "position" in cannibal_info["matched_tool"]:
+                        pos = float(cannibal_info["matched_tool"]["position"])
 
             # Check if cannibalization context was pre-supplied (e.g. from evaluation fixtures)
             if "cannibalization_context" in raw_meta:
@@ -144,24 +156,88 @@ class TrendPipeline:
                     matching_tool = str(cc["matches_existing_slug"])
                 pos = float(cc.get("current_position", pos))
 
+            if matching_tool and existing_tools and pos == 100.0:
+                for tool in existing_tools:
+                    if tool.get("slug") == matching_tool and "position" in tool:
+                        pos = float(tool["position"])
+                        break
+
             cann_ctx = {
                 "cannibalization_score": cann_score,
                 "matches_existing_slug": matching_tool,
                 "current_position": pos,
             }
 
-            mock_jev = raw_meta.get("jev_mock")
+            is_striking = (4.0 <= pos <= 20.0)
+            is_collision = (cann_score >= 0.50 or cannibal_info.get("is_cannibalizing", False))
 
-            # Jev decision scoring and strategic triage
-            decision = self.jev_engine.evaluate(
-                candidate=cand,
-                treg_result=treg_res,
-                cannibalization_context=cann_ctx,
-                jev_mock=mock_jev,
-                position=pos,
-                total_site_impressions=total_site_impressions,
-            )
+            # Prune / reject cannibalizing queries outside striking distance upfront (zero external Treg lookups)
+            if is_collision and not is_striking:
+                tool_slug = matching_tool or "existing-tool"
+                reason = f"Position {pos:.1f} matches existing tool '{tool_slug}'; preserve existing authority and prevent URL bloat"
+                decision = JevDecisionResult(
+                    query=cand.query,
+                    slug=cand.slug or sanitize_url_slug(cand.query),
+                    action="MONITOR",
+                    jev_score=0.10,
+                    durable_prob=0.05,
+                    composite_profit_yield=0.0,
+                    cannibalization_risk=cann_score,
+                    target_asset_type="none",
+                    decision_reason=reason,
+                    passed_thresholds=False,
+                    evaluated_at=cand.discovered_at,
+                    matching_tool=tool_slug,
+                )
+            else:
+                # Treg demand cross-check ONLY for non-cannibalized or striking distance candidates
+                mock_treg = None
+                if "treg_mock" in raw_meta:
+                    mock_treg = raw_meta["treg_mock"]
+
+                treg_res = self.treg_checker.check_query(
+                    cand.query,
+                    mock_override=mock_treg,
+                    remaining_budget=remaining_budget,
+                )
+
+                mock_jev = raw_meta.get("jev_mock")
+
+                # Jev decision scoring and strategic triage
+                decision = self.jev_engine.evaluate(
+                    candidate=cand,
+                    treg_result=treg_res,
+                    cannibalization_context=cann_ctx,
+                    jev_mock=mock_jev,
+                    position=pos,
+                    total_site_impressions=total_site_impressions,
+                )
+
+            primary_decisions[norm_q] = decision
             results.append(decision)
+
+        # Duplicate candidates inherit primary decision without redundant lookups
+        for dup in duplicate_candidates:
+            norm_q = " ".join(dup.query.strip().lower().split())
+            if norm_q in primary_decisions:
+                prim = primary_decisions[norm_q]
+                dup_decision = JevDecisionResult(
+                    query=dup.query,
+                    slug=dup.slug or prim.slug,
+                    action=prim.action,
+                    jev_score=prim.jev_score,
+                    durable_prob=prim.durable_prob,
+                    composite_profit_yield=prim.composite_profit_yield,
+                    cannibalization_risk=prim.cannibalization_risk,
+                    target_asset_type=prim.target_asset_type,
+                    decision_reason=prim.decision_reason,
+                    passed_thresholds=prim.passed_thresholds,
+                    evaluated_at=dup.discovered_at,
+                    matching_tool=prim.matching_tool,
+                    candidate_spec=prim.candidate_spec,
+                    overlay_spec=prim.overlay_spec,
+                )
+                results.append(dup_decision)
 
         # 3. Content invariant assertions on all generated decisions
         for dec in results:
@@ -218,6 +294,7 @@ def run_trend_pipeline(
     jev_engine: Optional[JevEngine] = None,
     batch_size: int = 15,
     cycle_budget: float = 240.0,
+    db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Convenience helper to run the complete trend pipeline."""
     pipe = TrendPipeline(
@@ -226,6 +303,7 @@ def run_trend_pipeline(
         jev_engine=jev_engine,
         batch_size=batch_size,
         cycle_budget=cycle_budget,
+        db=db,
     )
     return pipe.process_spikes(
         raw_spikes=spikes,

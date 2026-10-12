@@ -13,7 +13,7 @@ import json
 import hashlib
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Set
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -110,7 +110,12 @@ class TrendCronRunner:
     ):
         self.db_path = Path(db_path or DEFAULT_DB_PATH).resolve()
         self.min_yield = float(min_yield)
-        self.treg_checker = treg_checker or TregChecker()
+        if treg_checker is not None:
+            self.treg_checker = treg_checker
+            if getattr(self.treg_checker, "db", None) is None:
+                self.treg_checker.db = TrendHistoryDB(self.db_path)
+        else:
+            self.treg_checker = TregChecker(db=TrendHistoryDB(self.db_path))
         self.jev_engine = jev_engine or JevEngine(min_build_yield=self.min_yield)
         self.noise_filter = noise_filter or NoiseFilter()
         self.scanner = scanner or CrossPropertyContaminationScanner()
@@ -336,6 +341,7 @@ class TrendCronRunner:
             rejected: List[Dict[str, Any]] = []
             all_rankings: List[Dict[str, Any]] = []
             filtered_noise_count = 0
+            seen_cycle_queries: Set[str] = set()
 
             # 4. Process each spike
             for rank_idx, spike in enumerate(spikes):
@@ -361,6 +367,10 @@ class TrendCronRunner:
                     raw_payload=spike.raw_payload,
                 )
                 obs_records.append(raw_obs)
+
+                if norm_q in seen_cycle_queries:
+                    continue
+                seen_cycle_queries.add(norm_q)
 
                 # Check hint search volume from treg mock if present
                 treg_hint = 0
@@ -482,25 +492,7 @@ class TrendCronRunner:
                         keyword_rollups.append(rollup)
                     continue
 
-                # Step 4C: Treg demand cross-check
-                mock_treg = raw_meta.get("treg_mock")
-                treg_res = self.treg_checker.check_query(clean_q, mock_override=mock_treg)
-
-                snap_rec = TregSnapshotRecord(
-                    snapshot_id=f"treg_{slug}_{cycle_id}",
-                    query_slug=slug,
-                    cycle_id=cycle_id,
-                    search_volume=treg_res.search_volume,
-                    cpc_usd=treg_res.cpc_usd,
-                    competition_index=treg_res.competition_index,
-                    keyword_difficulty=treg_res.keyword_difficulty,
-                    position_zero_vacant=1 if treg_res.position_zero_vacant else 0,
-                    historical_stability=treg_res.historical_stability,
-                    checked_at=now_iso,
-                )
-                snapshot_records.append(snap_rec)
-
-                # Step 4D: Cannibalization check against tenant existing tools
+                # Step 4C: Cannibalization check against tenant existing tools
                 tenant_tools = existing_tools_map.get(assigned_property, [])
                 cannibal_info = check_search_intent_cannibalization(clean_q, existing_tools=tenant_tools)
 
@@ -511,6 +503,9 @@ class TrendCronRunner:
                 if cannibal_info.get("is_cannibalizing"):
                     cann_score = 0.85
                     matching_tool = cannibal_info.get("parent_slug")
+                    if "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
+                        if "position" in cannibal_info["matched_tool"]:
+                            pos = float(cannibal_info["matched_tool"]["position"])
 
                 # Check if cannibalization context was pre-supplied (e.g. from evaluation fixtures)
                 if "cannibalization_context" in raw_meta:
@@ -531,10 +526,89 @@ class TrendCronRunner:
                     if "cannibalization_score" in raw_meta:
                         cann_score = float(raw_meta["cannibalization_score"])
 
+                if matching_tool and tenant_tools and pos == 100.0:
+                    for tool in tenant_tools:
+                        if tool.get("slug") == matching_tool and "position" in tool:
+                            pos = float(tool["position"])
+                            break
+
                 assign_rec.matched_existing_slug = matching_tool
                 assign_rec.cannibalization_score = cann_score
                 assign_rec.current_position = pos
                 assignment_records.append(assign_rec)
+
+                is_striking = (4.0 <= pos <= 20.0)
+                is_collision = (cann_score >= 0.50 or cannibal_info.get("is_cannibalizing", False))
+
+                # Step 4D: Upfront triage for catalog collisions outside striking distance
+                if is_collision and not is_striking:
+                    tool_slug = matching_tool or "existing-tool"
+                    reason = f"Position {pos:.1f} matches existing tool '{tool_slug}'; preserve existing authority and prevent URL bloat"
+                    monitored.append({
+                        "query": clean_q,
+                        "slug": slug,
+                        "property_id": assigned_property,
+                        "composite_profit_yield": 0.0,
+                        "reason": reason,
+                    })
+                    eval_rec = JevEvaluationRecord(
+                        evaluation_id=f"eval_{slug}_{cycle_id}",
+                        query_slug=slug,
+                        cycle_id=cycle_id,
+                        property_id=assigned_property,
+                        jev_score=0.10,
+                        durable_prob=0.05,
+                        composite_profit_yield=0.0,
+                        cannibalization_risk=cann_score,
+                        action="MONITOR",
+                        target_asset_type="none",
+                        passed_thresholds=0,
+                        decision_reason=reason,
+                        spec_payload=None,
+                        evaluated_at=now_iso,
+                    )
+                    eval_records.append(eval_rec)
+                    all_rankings.append({
+                        "query": clean_q,
+                        "slug": slug,
+                        "property_id": assigned_property,
+                        "action": "MONITOR",
+                        "composite_profit_yield": 0.0,
+                        "consecutive_cycles": 1,
+                        "target_asset_type": "none",
+                    })
+                    if not dry_run:
+                        rollup = db.upsert_keyword_history(
+                            query_slug=slug,
+                            query=clean_q,
+                            cycle_id=cycle_id,
+                            observed_velocity=spike.velocity,
+                            intent_cluster=cand.intent_cluster,
+                            property_id=assigned_property,
+                            status="monitored",
+                            observed_at=now_iso,
+                            override_acceleration=spike.acceleration,
+                        )
+                        keyword_rollups.append(rollup)
+                    continue
+
+                # Step 4E: Treg demand cross-check (ONLY for non-cannibalized or striking distance)
+                mock_treg = raw_meta.get("treg_mock")
+                treg_res = self.treg_checker.check_query(clean_q, mock_override=mock_treg)
+
+                snap_rec = TregSnapshotRecord(
+                    snapshot_id=f"treg_{slug}_{cycle_id}",
+                    query_slug=slug,
+                    cycle_id=cycle_id,
+                    search_volume=treg_res.search_volume,
+                    cpc_usd=treg_res.cpc_usd,
+                    competition_index=treg_res.competition_index,
+                    keyword_difficulty=treg_res.keyword_difficulty,
+                    position_zero_vacant=1 if treg_res.position_zero_vacant else 0,
+                    historical_stability=treg_res.historical_stability,
+                    checked_at=now_iso,
+                )
+                snapshot_records.append(snap_rec)
 
                 cann_ctx = {
                     "cannibalization_score": cann_score,
@@ -542,7 +616,7 @@ class TrendCronRunner:
                     "current_position": pos,
                 }
 
-                # Step 4E: Evaluate Jev decision
+                # Step 4F: Evaluate Jev decision
                 mock_jev = raw_meta.get("jev_mock")
                 decision = self.jev_engine.evaluate(
                     candidate=cand,

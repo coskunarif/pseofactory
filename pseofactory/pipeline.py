@@ -261,13 +261,21 @@ class FactoryPipeline:
         scanner: Optional[CrossPropertyContaminationScanner] = None,
         tenant_registry: Optional[TenantRegistry] = None,
         indexing_inspector: Optional[DailyIndexingInspector] = None,
+        db: Optional[Any] = None,
     ):
         self.config = config or PipelineConfig()
         self.noise_filter = noise_filter or NoiseFilter()
-        self.treg_checker = treg_checker or TregChecker(
-            max_cost=self.config.max_route_cost,
-            timeout=self.config.treg_timeout,
-        )
+        self.db = db
+        if treg_checker is not None:
+            self.treg_checker = treg_checker
+            if self.db is not None and getattr(self.treg_checker, "db", None) is None:
+                self.treg_checker.db = self.db
+        else:
+            self.treg_checker = TregChecker(
+                max_cost=self.config.max_route_cost,
+                timeout=self.config.treg_timeout,
+                db=self.db,
+            )
         self.jev_engine = jev_engine or JevEngine(
             min_score=self.config.min_jev_score,
             min_durable_prob=self.config.min_durable_prob,
@@ -500,7 +508,7 @@ class FactoryPipeline:
             }
 
         for spike in spikes:
-            # 1. Universal Idempotency: sha256(tenant + spike_id + query)
+            # 1. Universal Idempotency: sha256(tenant + normalized_query)
             tenant_hint = "unassigned"
             raw_payload = spike.raw_payload or {}
             if "tenant" in raw_payload:
@@ -509,9 +517,9 @@ class FactoryPipeline:
                 assigned = self.determine_property_assignment(spike.query)
                 tenant_hint = assigned["property_id"]
 
-            spike_id = getattr(spike, "id", getattr(spike, "spike_id", "spike"))
+            norm_query = " ".join(spike.query.lower().split())
             idempotency_key = hashlib.sha256(
-                f"{tenant_hint}:{spike_id}:{spike.query}".encode("utf-8")
+                f"{tenant_hint}:{norm_query}".encode("utf-8")
             ).hexdigest()
 
             if idempotency_key in seen_idempotency_keys:
@@ -587,17 +595,8 @@ class FactoryPipeline:
                 })
                 continue
 
-            # 3. Treg demand and competition cross-referencing
-            mock_treg = None
+            # 3. Search intent cannibalization check upfront
             raw_meta = cand.metadata or {}
-            if "treg_mock" in raw_meta:
-                mock_treg = raw_meta["treg_mock"]
-            elif spike.raw_payload and "treg_mock" in spike.raw_payload:
-                mock_treg = spike.raw_payload["treg_mock"]
-
-            treg_res = self.treg_checker.check_query(cand.query, mock_override=mock_treg)
-
-            # 4. Search intent cannibalization check
             cannibal_info = check_search_intent_cannibalization(
                 cand.query,
                 existing_tools=existing_tools,
@@ -611,6 +610,9 @@ class FactoryPipeline:
             if cannibal_info.get("is_cannibalizing"):
                 cann_score = 0.85
                 matching_tool = cannibal_info.get("parent_slug")
+                if "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
+                    if "position" in cannibal_info["matched_tool"]:
+                        pos = float(cannibal_info["matched_tool"]["position"])
 
             if "cannibalization_context" in raw_meta:
                 cc = raw_meta["cannibalization_context"]
@@ -625,11 +627,55 @@ class FactoryPipeline:
                     matching_tool = str(cc["matches_existing_slug"])
                 pos = float(cc.get("current_position", pos))
 
+            if matching_tool and existing_tools and pos == 100.0:
+                for tool in existing_tools:
+                    if tool.get("slug") == matching_tool and "position" in tool:
+                        pos = float(tool["position"])
+                        break
+
             cann_ctx = {
                 "cannibalization_score": cann_score,
                 "matches_existing_slug": matching_tool,
                 "current_position": pos,
             }
+
+            is_striking = (4.0 <= pos <= 20.0)
+            is_collision = (cann_score >= 0.50 or cannibal_info.get("is_cannibalizing", False))
+
+            # Upfront triage: if catalog collision outside striking distance, abort without Treg lookup
+            if is_collision and not is_striking:
+                tool_slug = matching_tool or "existing-tool"
+                aborted_opportunities.append(
+                    AbortedOpportunity(
+                        query=cand.query,
+                        slug=cand.slug,
+                        reason="HIGH_TREG_COMPETITION",
+                        jev_score=0.10,
+                        durable_prob=0.05,
+                        search_volume=0,
+                        keyword_difficulty=0.0,
+                        foreign_tokens=[],
+                        action="MONITOR",
+                    )
+                )
+                rankings.append({
+                    "query": cand.query,
+                    "slug": cand.slug,
+                    "action": "MONITOR",
+                    "composite_profit_yield": 0.0,
+                    "decision_reason": f"Position {pos:.1f} matches existing tool '{tool_slug}'; preserve existing authority and prevent URL bloat",
+                })
+                continue
+
+            # 4. Treg demand and competition cross-referencing (surviving or striking candidates)
+            mock_treg = None
+            raw_meta = cand.metadata or {}
+            if "treg_mock" in raw_meta:
+                mock_treg = raw_meta["treg_mock"]
+            elif spike.raw_payload and "treg_mock" in spike.raw_payload:
+                mock_treg = spike.raw_payload["treg_mock"]
+
+            treg_res = self.treg_checker.check_query(cand.query, mock_override=mock_treg)
 
             # 5. Jev durability gating and profit yield ranking
             mock_jev = raw_meta.get("jev_mock") or (
