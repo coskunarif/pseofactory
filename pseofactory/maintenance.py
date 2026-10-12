@@ -253,6 +253,7 @@ class CrossPropertyContaminationScanner:
             "exchange1031",
             "exchange 1031",
             "profithelm",
+            "143884102",
         },
         "profithelm": {
             "title iv",
@@ -261,6 +262,7 @@ class CrossPropertyContaminationScanner:
             "pslf",
             "prexvo.com",
             "prexvo",
+            "106482194",
         },
     }
 
@@ -361,6 +363,12 @@ class CrossPropertyContaminationScanner:
                 )
 
 
+DEFAULT_TENANT_LINKEDIN_IDS: Dict[str, str] = {
+    "profithelm": "143884102",
+    "prexvo": "106482194",
+}
+
+
 class PropertyAdapter(ABC):
     """
     Abstract Base Protocol encapsulating multi-tenant property operations and boundaries.
@@ -403,6 +411,18 @@ class PropertyAdapter(ABC):
         return None
 
     @property
+    def linkedin_company_id(self) -> str:
+        """Official LinkedIn Company Page ID for headless brand syndication."""
+        tenant_env = os.environ.get(f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID")
+        if tenant_env:
+            return tenant_env
+        default_id = DEFAULT_TENANT_LINKEDIN_IDS.get(self.property_id.lower(), "")
+        global_env = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID")
+        if global_env and not default_id:
+            return global_env
+        return default_id
+
+    @property
     def base_dirs(self) -> Optional[List[Path]]:
         if self.repo_path and self.property_id:
             prop_pkg = self.repo_path / self.property_id
@@ -442,12 +462,14 @@ class PropertyAdapter(ABC):
             "FACTORY_DOMAIN",
             "FACTORY_BRAND_NAME",
             "FACTORY_DIST_DIR",
+            "FACTORY_LINKEDIN_COMPANY_ID",
         ]
         saved: Dict[str, Optional[str]] = {k: os.environ.get(k) for k in keys}
         os.environ["FACTORY_CANONICAL_BASE"] = self.canonical_base
         os.environ["FACTORY_DOMAIN"] = self.domain
         os.environ["FACTORY_BRAND_NAME"] = self.brand_name
         os.environ["FACTORY_DIST_DIR"] = str(self.dist_dir)
+        os.environ["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
         try:
             yield
         finally:
@@ -600,6 +622,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         statutory_tokens: Optional[Set[str]] = None,
         build_command: Optional[Union[str, List[str]]] = None,
         build_asset_command: Optional[Union[str, List[str]]] = None,
+        linkedin_company_id: Optional[str] = None,
     ):
         self._property_id = property_id.lower()
         self._brand_name = brand_name
@@ -612,6 +635,14 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         self._statutory_tokens = set(statutory_tokens) if statutory_tokens else set()
         self._build_command = build_command
         self._build_asset_command = build_asset_command
+        self._linkedin_company_id = linkedin_company_id
+
+    @property
+    def linkedin_company_id(self) -> str:
+        """Official LinkedIn Company Page ID for headless brand syndication."""
+        if self._linkedin_company_id:
+            return self._linkedin_company_id
+        return super().linkedin_company_id
 
     @property
     def property_id(self) -> str:
@@ -2841,6 +2872,7 @@ __all__ = [
     "PropertyContaminationError",
     "LockContentionError",
     "CrossPropertyContaminationScanner",
+    "DEFAULT_TENANT_LINKEDIN_IDS",
     "PropertyAdapter",
     "SubprocessPropertyAdapter",
     "WorkspacePropertyScanner",

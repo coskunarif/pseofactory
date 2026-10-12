@@ -155,6 +155,37 @@ def assert_no_prompt_leakage(text: str, context: str = "") -> None:
             raise ValueError(f"Prompt leakage detected{ctx}: contains forbidden phrase '{term}'")
 
 
+PERSONAL_ATTRIBUTION_FORBIDDEN_TERMS: List[str] = [
+    "arif",
+    "coskun",
+    "arif coskun",
+    "linkedin.com/in/",
+    "my profile",
+    "my personal",
+    "connect with me",
+    "follow me",
+]
+
+
+def assert_no_personal_attribution(text: str, context: str = "") -> bool:
+    """
+    Enforces day-job moonlighting policy: zero personal author attribution,
+    zero personal profile links, and zero personal identifiers.
+    Syndication must remain 100% headless corporate brand entity copy.
+    """
+    if not text:
+        return True
+    text_lower = text.lower()
+    for term in PERSONAL_ATTRIBUTION_FORBIDDEN_TERMS:
+        if term in text_lower:
+            ctx = f" in {context}" if context else ""
+            raise ValueError(
+                f"Personal attribution forbidden{ctx}: contains '{term}'. "
+                f"Day-job moonlighting policy mandates 100% headless brand attribution."
+            )
+    return True
+
+
 def assert_linkedin(text: str) -> bool:
     """
     Validates LinkedIn copy (Company updates per HWL-1065):
@@ -162,6 +193,7 @@ def assert_linkedin(text: str) -> bool:
     2. Minimum 20 characters.
     3. Zero forbidden dashes (em-dash or en-dash).
     4. Zero prompt leakage.
+    5. Zero personal attribution.
     """
     if not text or len(text) < 20:
         raise ValueError(f"LinkedIn text too short ({len(text) if text else 0} chars, min 20)")
@@ -169,6 +201,7 @@ def assert_linkedin(text: str) -> bool:
         raise ValueError(f"LinkedIn text exceeds 2800 characters ({len(text)} chars per HWL-1065)")
     assert_no_forbidden_dashes(text, context="LinkedIn post")
     assert_no_prompt_leakage(text, context="LinkedIn post")
+    assert_no_personal_attribution(text, context="LinkedIn post")
     return True
 
 
@@ -7970,6 +8003,8 @@ __all__ = [
     "assert_no_forbidden_dashes",
     "assert_no_prompt_leakage",
     "assert_linkedin",
+    "PERSONAL_ATTRIBUTION_FORBIDDEN_TERMS",
+    "assert_no_personal_attribution",
     "assert_x_post",
     "assert_youtube_pinned_comment",
     "assert_youtube_description",

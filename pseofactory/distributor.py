@@ -762,9 +762,10 @@ def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     return {k: _sanitize_distribution_text(v) for k, v in raw_res.items()}
 
 
-def generate_linkedin_company_post(tool_slug: str) -> Dict[str, Any]:
-    """Generates authoritative, technical LinkedIn post for Company Page 143884102."""
+def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = None) -> Dict[str, Any]:
+    """Generates authoritative, technical LinkedIn post for Company Page."""
     from pseofactory.contracts import assert_linkedin
+    from pseofactory.maintenance import TenantRegistry, DEFAULT_TENANT_LINKEDIN_IDS
     tool = _resolve_tool(tool_slug)
     slug = tool["slug"]
 
@@ -897,15 +898,24 @@ def generate_linkedin_company_post(tool_slug: str) -> Dict[str, Any]:
     econ_cite = citations["economic_source"]
     first_comment = f"Model your exact scenario live on ProfitHelm: {url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
 
+    cid = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID")
+    if not cid:
+        prop = (property_id or ("prexvo" if any(k in slug for k in ["rap", "ibr", "icr", "pslf", "paye"]) else "profithelm")).lower()
+        try:
+            adapter = TenantRegistry.default().get_adapter(prop)
+            cid = adapter.linkedin_company_id
+        except Exception:
+            cid = DEFAULT_TENANT_LINKEDIN_IDS.get(prop, LINKEDIN_COMPANY_ID)
+
     assert_linkedin(text)
     return {
         "platform": "linkedin",
         "entity_type": "company",
-        "company_id": LINKEDIN_COMPANY_ID,
+        "company_id": cid,
         "target_url": url,
         "content": text,
         "first_comment": first_comment,
-        "command_hint": f'linkedin-cli post "{text[:80]}..." --company-id {LINKEDIN_COMPANY_ID}',
+        "command_hint": f'linkedin-cli post "{text[:80]}..." --company-id {cid}',
     }
 
 
@@ -1660,6 +1670,184 @@ def generate_linkedin_pulse_article(tool_slug: str) -> Dict[str, Any]:
     Enforces HWL-1065 (strictly <= 2800 characters to prevent disabled Post button).
     """
     return generate_parasite_linkedin_pulse(tool_slug)
+
+
+def generate_headless_brand_article_from_transcript(
+    transcript_data: Dict[str, Any],
+    property_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Ingests structured founder interview transcripts into headless brand LinkedIn Pulse articles.
+    Enforces:
+    - Princeton GEO 40-60 word statutory definition
+    - Dual-dataset statutory and economic citations
+    - 3 distilled key findings/takeaways
+    - Canonical model links with UTM attribution
+    - HWL-1065 assert_linkedin (strictly 20 <= len <= 2800 chars)
+    - HWL-1261 zero forbidden dashes (em-dashes and en-dashes)
+    - Zero prompt leakage
+    - Day-job moonlighting policy: assert_no_personal_attribution and is_headless=True
+    """
+    if not isinstance(transcript_data, dict):
+        raise ValueError("transcript_data must be a dictionary")
+
+    interviewee = transcript_data.get("interviewee")
+    if not isinstance(interviewee, dict) or not interviewee.get("is_headless", False):
+        raise ValueError(
+            "Non-headless transcript rejected: day-job moonlighting policy mandates is_headless=True"
+        )
+
+    from pseofactory.contracts import (
+        assert_linkedin,
+        assert_no_forbidden_dashes,
+        assert_no_prompt_leakage,
+        assert_no_personal_attribution,
+    )
+    from pseofactory.maintenance import TenantRegistry, DEFAULT_TENANT_LINKEDIN_IDS
+
+    # Enforce zero personal attribution across input metadata
+    for val in [
+        interviewee.get("attribution", ""),
+        interviewee.get("role", ""),
+        transcript_data.get("topic", ""),
+    ]:
+        if val:
+            assert_no_personal_attribution(str(val), context="interview transcript metadata")
+    for f in transcript_data.get("key_findings", []):
+        assert_no_personal_attribution(str(f), context="interview transcript key findings")
+    for s in transcript_data.get("segments", []):
+        if isinstance(s, dict):
+            for sv in [s.get("question", ""), s.get("raw_answer", ""), s.get("distilled_answer", "")]:
+                if sv:
+                    assert_no_personal_attribution(str(sv), context="interview transcript segment")
+
+    prop_id = (property_id or transcript_data.get("tenant_id") or "profithelm").lower()
+    try:
+        adapter = TenantRegistry.default().get_adapter(prop_id)
+        brand_name = adapter.brand_name
+        canonical_base = adapter.canonical_base.rstrip("/")
+        company_id = adapter.linkedin_company_id
+    except Exception:
+        if prop_id == "prexvo":
+            brand_name = "Prexvo"
+            canonical_base = "https://prexvo.com"
+            company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("prexvo", "106482194")
+        else:
+            brand_name = "ProfitHelm"
+            canonical_base = "https://profithelm.com"
+            company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("profithelm", "143884102")
+
+    tool_slug = str(transcript_data.get("tool_slug", "overview")).strip()
+    topic = _sanitize_distribution_text(str(transcript_data.get("topic", f"{brand_name} Statutory Modeling")).strip())
+    canonical_url = f"{canonical_base}/tools/{tool_slug}/"
+    utm_url = f"{canonical_url}?utm_source=linkedin_pulse&utm_medium=article&utm_campaign={tool_slug}&utm_content=model_access"
+
+    # Dual-dataset citations
+    stat_cites = transcript_data.get("statutory_citations", [])
+    if stat_cites and isinstance(stat_cites, list):
+        stat_cite = ", ".join(stat_cites)
+    else:
+        stat_cite = "Title IV Higher Education Act (34 CFR Part 685)" if prop_id == "prexvo" else "Internal Revenue Code Section 1 (26 U.S.C. Section 1)"
+    stat_cite = _sanitize_distribution_text(stat_cite)
+
+    econ_cite = transcript_data.get("economic_source")
+    if not econ_cite:
+        econ_cite = "HHS Federal Poverty Guidelines and Federal Student Aid Data" if prop_id == "prexvo" else "Federal Reserve FRED Economic Data"
+    econ_cite = _sanitize_distribution_text(str(econ_cite))
+
+    # Princeton GEO 40-60 word definition core
+    distilled_answers = []
+    for s in transcript_data.get("segments", []):
+        if isinstance(s, dict) and s.get("distilled_answer"):
+            distilled_answers.append(_sanitize_distribution_text(str(s["distilled_answer"])))
+
+    core_answer = distilled_answers[0].strip() if distilled_answers else f"Statutory rules under {stat_cite} define mandatory calculation baselines."
+    if not core_answer.endswith("."):
+        core_answer += "."
+
+    geo_lead = f"Under statutory regulations governing {topic}, deterministic modeling establishes core baselines across applicable jurisdictions."
+    geo_tail = "Operators and filers evaluating regulatory transitions must analyze statutory formula differences to project obligations accurately rather than relying on informal heuristics."
+    geo_def = f"{geo_lead} {core_answer} {geo_tail}"
+    def_words = geo_def.split()
+    if len(def_words) < 40:
+        geo_def = f"{geo_def} Deterministic calculation models verify precise parameter adjustments and ensure statutory compliance."
+        def_words = geo_def.split()
+    if len(def_words) > 60:
+        geo_def = " ".join(def_words[:55]).rstrip(",;:- ") + "."
+
+    # 3 distilled takeaways
+    raw_findings = transcript_data.get("key_findings", [])
+    takeaways = []
+    if isinstance(raw_findings, list):
+        takeaways = [_sanitize_distribution_text(str(f)) for f in raw_findings[:3]]
+    if len(takeaways) < 3:
+        if prop_id == "prexvo":
+            defaults = [
+                "RAP protects income up to 225% of HHS Poverty Guidelines.",
+                "100% unpaid interest subsidy stops negative loan amortization.",
+                "IBR retains statutory standard payment caps while RAP calculates payments without an upper ceiling.",
+            ]
+        else:
+            defaults = [
+                "Statutory rate schedules revert upon sunset to pre-2018 marginal brackets.",
+                "Standard deduction contractions accelerate bracket creep for professional earners.",
+                "Deterministic modeling isolates non-linear tax liabilities across state conformity rules.",
+            ]
+        for d in defaults:
+            if len(takeaways) < 3:
+                takeaways.append(d)
+
+    hashtags = (
+        "#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt #PublicPolicy"
+        if prop_id == "prexvo"
+        else "#TaxPlanning #TCJASunset #WealthManagement #QuantitativeFinance #FinancialPlanning"
+    )
+
+    article_md = (
+        f"# {topic}: Quantitative Analysis and Statutory Framework\n\n"
+        f"{geo_def}\n\n"
+        f"Originally published as an interactive deterministic model on {brand_name} ({canonical_url}).\n\n"
+        f"### Executive Analysis and Statutory Framework\n\n"
+        f"Structured analysis of interview findings identifies three decisive statutory and economic dynamics:\n\n"
+        f"1. {takeaways[0]}\n"
+        f"2. {takeaways[1]}\n"
+        f"3. {takeaways[2]}\n\n"
+        f"### Regulatory and Empirical Dataset Citations\n\n"
+        f"To maintain institutional modeling rigor, all calculations cross-reference two independent benchmark authorities:\n"
+        f"- Statutory Authority: {stat_cite}\n"
+        f"- Macroeconomic Reference: {econ_cite}\n\n"
+        f"### Interactive Decision Engine\n\n"
+        f"We have deployed an open deterministic calculator that allows operators to stress-test scenarios:\n\n"
+        f"{utm_url}\n\n"
+        f"{hashtags}"
+    )
+
+    article_md = _sanitize_distribution_text(article_md)
+    if len(article_md) > 2780:
+        excess = len(article_md) - 2780
+        parts = article_md.rsplit("\n\n", 1)
+        if len(parts) > 1 and len(parts[0]) > 2000:
+            article_md = parts[0][:len(parts[0]) - excess].rstrip() + "\n\n" + parts[1]
+
+    assert_linkedin(article_md)
+    assert_no_forbidden_dashes(article_md, context="Pulse transcript article")
+    assert_no_prompt_leakage(article_md, context="Pulse transcript article")
+    assert_no_personal_attribution(article_md, context="Pulse transcript article")
+
+    return {
+        "title": f"{topic}: Quantitative Analysis and Statutory Framework",
+        "content": article_md,
+        "article_markdown": article_md,
+        "char_count": len(article_md),
+        "word_count": len(article_md.split()),
+        "property_id": prop_id,
+        "company_id": company_id,
+        "canonical_url": canonical_url,
+        "target_url": utm_url,
+        "statutory_source": stat_cite,
+        "economic_source": econ_cite,
+        "key_findings": takeaways,
+    }
 
 
 def generate_parasite_substack_teardown(tool_or_slug: Any) -> Dict[str, Any]:
@@ -4256,6 +4444,14 @@ def _generate_prexvo_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 
 
 def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.maintenance import TenantRegistry, DEFAULT_TENANT_LINKEDIN_IDS
+    company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("prexvo", "106482194")
+    try:
+        adapter = TenantRegistry.default().get_adapter("prexvo")
+        if adapter and hasattr(adapter, "linkedin_company_id") and adapter.linkedin_company_id:
+            company_id = adapter.linkedin_company_id
+    except Exception:
+        pass
     slug = tool["slug"]
     raw_text = (
         f"Federal student loan borrowers face significant statutory changes under the 2026 Title IV overhaul.\n\n"
@@ -4275,7 +4471,7 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     assert_linkedin(clean_content)
     return {
         "platform": "linkedin",
-        "company_id": "143884102",
+        "company_id": company_id,
         "target_url": url,
         "content": clean_content,
         "first_comment": f"Model your numbers on Prexvo:\n{url}",
@@ -4542,7 +4738,13 @@ def export_all_syndication_files(
     """
     from pathlib import Path
     import time
-    from pseofactory.contracts import assert_x_post, assert_linkedin, assert_no_forbidden_dashes, assert_no_prompt_leakage
+    from pseofactory.contracts import (
+        assert_x_post,
+        assert_linkedin,
+        assert_no_forbidden_dashes,
+        assert_no_prompt_leakage,
+        assert_no_personal_attribution,
+    )
     if dry_run:
         eff_run = run_id or f"dryrun-{int(time.time())}"
         output_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run / "syndication_dry_run"
@@ -4596,6 +4798,9 @@ def export_all_syndication_files(
         assert_x_post(pack["x"]["content"])
         assert_linkedin(pack["linkedin"]["content"])
         assert_linkedin(pack["linkedin_pulse"]["article_markdown"])
+        assert_no_personal_attribution(pack["linkedin"]["content"], context=f"{slug} linkedin_company")
+        assert_no_personal_attribution(pack["linkedin_pulse"]["article_markdown"], context=f"{slug} linkedin_pulse")
+        assert_no_personal_attribution(pack["x"]["content"], context=f"{slug} x")
         assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
         assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
         assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")
