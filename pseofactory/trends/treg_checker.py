@@ -30,7 +30,7 @@ class TregChecker:
         self,
         mock_data: Optional[Dict[str, Dict[str, Any]]] = None,
         max_cost: str = MAX_ROUTE_COST,
-        timeout: float = 10.0,
+        timeout: float = 5.0,
     ):
         self.mock_registry: Dict[str, Dict[str, Any]] = {}
         if mock_data:
@@ -44,10 +44,36 @@ class TregChecker:
         """Registers mock metrics for a specific query for fixture testing."""
         self.mock_registry[query.lower().strip()] = metrics
 
+    def _offline_heuristic(self, query: str, reason: str = "offline_fallback") -> TregDurabilityResult:
+        """
+        Deterministic offline fallback heuristic when treg fails, is unconfigured, or budget is low.
+        Zero em-dashes. Zero en-dashes.
+        """
+        clean_q = query.strip()
+        q_key = clean_q.lower()
+        est_volume = 1200
+        est_cpc = 2.0
+        est_kd = 20.0
+        result = TregDurabilityResult(
+            query=clean_q,
+            endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",
+            search_volume=est_volume,
+            cpc_usd=est_cpc,
+            competition_index=0.25,
+            keyword_difficulty=est_kd,
+            position_zero_vacant=True,
+            historical_stability=0.85,
+            checked_at=datetime.now(timezone.utc).isoformat(),
+            raw_ideas=[],
+        )
+        self.cache[q_key] = result
+        return result
+
     def check_query(
         self,
         query: str,
         mock_override: Optional[Dict[str, Any]] = None,
+        remaining_budget: Optional[float] = None,
     ) -> TregDurabilityResult:
         """
         Cross-checks search demand for candidate query.
@@ -61,6 +87,10 @@ class TregChecker:
         # Cache lookup
         if q_key in self.cache and mock_override is None:
             return self.cache[q_key]
+
+        # Deadline budget degradation: if remaining budget < 15.0s, return offline fallback immediately
+        if remaining_budget is not None and remaining_budget < 15.0:
+            return self._offline_heuristic(clean_q, reason="deadline_budget_fallback")
 
         # 1. Direct mock override or pre-registered mock fixture
         m_data = mock_override or self.mock_registry.get(q_key)
@@ -92,6 +122,11 @@ class TregChecker:
         live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
 
         if treg_bin and (not is_test_env or is_mocked or live_opt_in):
+            call_timeout = (
+                min(self.timeout, max(1.0, remaining_budget - 2.0))
+                if remaining_budget is not None
+                else self.timeout
+            )
             try:
                 cmd = [
                     treg_bin,
@@ -109,7 +144,7 @@ class TregChecker:
                     stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
-                    timeout=self.timeout,
+                    timeout=call_timeout,
                 )
                 if proc.returncode == 0 and proc.stdout.strip():
                     payload = json.loads(proc.stdout.strip())
@@ -135,25 +170,8 @@ class TregChecker:
                     )
                     self.cache[q_key] = result
                     return result
-            except Exception:
-                pass
+            except (subprocess.TimeoutExpired, Exception):
+                return self._offline_heuristic(clean_q, reason="subprocess_fallback")
 
         # 3. Deterministic offline fallback heuristic
-        # If treg call fails or is unconfigured, estimate safe defaults based on query tokens
-        est_volume = 1200
-        est_cpc = 2.0
-        est_kd = 20.0
-        result = TregDurabilityResult(
-            query=clean_q,
-            endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",
-            search_volume=est_volume,
-            cpc_usd=est_cpc,
-            competition_index=0.25,
-            keyword_difficulty=est_kd,
-            position_zero_vacant=True,
-            historical_stability=0.85,
-            checked_at=datetime.now(timezone.utc).isoformat(),
-            raw_ideas=[],
-        )
-        self.cache[q_key] = result
-        return result
+        return self._offline_heuristic(clean_q, reason="offline_fallback")

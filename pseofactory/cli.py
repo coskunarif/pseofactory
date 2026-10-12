@@ -445,12 +445,12 @@ def cmd_trend_intake(args: argparse.Namespace) -> int:
             if "treg_mock" in item:
                 mock_registry[sp.query.lower().strip()] = item["treg_mock"]
 
-        treg_checker = TregChecker(mock_data=mock_registry)
+        treg_checker = TregChecker(mock_data=mock_registry, timeout=args.per_item_timeout)
     else:
         seeds = [s.strip() for s in (args.seeds or "calculator,tax deduction,compliance").split(",") if s.strip()]
         collector = MultiSourceCollector()
         spikes = collector.harvest(seeds)
-        treg_checker = TregChecker()
+        treg_checker = TregChecker(timeout=args.per_item_timeout)
 
     if args.source:
         spikes = [s for s in spikes if s.source == args.source]
@@ -461,6 +461,8 @@ def cmd_trend_intake(args: argparse.Namespace) -> int:
         sink_path=args.sink,
         treg_checker=treg_checker,
         jev_engine=jev_engine,
+        batch_size=args.batch_size,
+        cycle_budget=args.cycle_budget,
     )
 
     if args.json:
@@ -1272,6 +1274,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_intake.add_argument("--source", type=str, default=None, help="Optional feed source filter (e.g. google_suggest)")
     p_intake.add_argument("--sink", type=str, default="void_candidates.jsonl", help="Output path for JSONL candidates sink (default: void_candidates.jsonl)")
     p_intake.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold (default: 60.0)")
+    p_intake.add_argument("--batch-size", type=int, default=15, help="Maximum candidate spikes to evaluate per cycle (default: 15, ceiling: 25)")
+    p_intake.add_argument("--cycle-budget", type=float, default=240.0, help="Cycle execution deadline budget in seconds before degradation (default: 240.0s)")
+    p_intake.add_argument("--per-item-timeout", type=float, default=5.0, help="Per-candidate external network check timeout in seconds (default: 5.0s)")
     p_intake.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # factory-run

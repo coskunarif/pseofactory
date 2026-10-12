@@ -6,6 +6,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import os
+import time
 import json
 import fcntl
 from pathlib import Path
@@ -40,10 +41,14 @@ class TrendPipeline:
         noise_filter: Optional[NoiseFilter] = None,
         treg_checker: Optional[TregChecker] = None,
         jev_engine: Optional[JevEngine] = None,
+        batch_size: int = 15,
+        cycle_budget: float = 240.0,
     ):
         self.noise_filter = noise_filter or NoiseFilter()
         self.treg_checker = treg_checker or TregChecker()
         self.jev_engine = jev_engine or JevEngine()
+        self.batch_size = batch_size
+        self.cycle_budget = cycle_budget
 
     def process_spikes(
         self,
@@ -57,6 +62,7 @@ class TrendPipeline:
         Executes end-to-end processing across raw breakout spikes.
         Zero em-dashes. Zero en-dashes.
         """
+        start_time = time.monotonic()
         spikes: List[FeedSpike] = []
         for s in raw_spikes:
             if isinstance(s, FeedSpike):
@@ -97,15 +103,23 @@ class TrendPipeline:
             else:
                 candidates_to_eval.append(cand)
 
-        # 2. Process viable candidates surviving noise filter
-        for cand in candidates_to_eval:
+        # 2. Process viable candidates surviving noise filter bounded by batch_size and cycle_budget
+        eval_batch = candidates_to_eval[: self.batch_size]
+        for cand in eval_batch:
+            elapsed = time.monotonic() - start_time
+            remaining_budget = max(0.0, self.cycle_budget - elapsed)
+
             # Treg demand cross-check
             mock_treg = None
             raw_meta = cand.metadata or {}
             if "treg_mock" in raw_meta:
                 mock_treg = raw_meta["treg_mock"]
 
-            treg_res = self.treg_checker.check_query(cand.query, mock_override=mock_treg)
+            treg_res = self.treg_checker.check_query(
+                cand.query,
+                mock_override=mock_treg,
+                remaining_budget=remaining_budget,
+            )
 
             # Check search intent cannibalization against existing catalog
             cannibal_info = check_search_intent_cannibalization(
@@ -184,7 +198,7 @@ class TrendPipeline:
         return {
             "total_spikes": total_spikes,
             "filtered_noise_count": len(filtered_noise),
-            "evaluated_candidates_count": len(candidates_to_eval),
+            "evaluated_candidates_count": len(eval_batch),
             "approved_build": [d.to_dict() for d in approved_build],
             "refactor_pages": [d.to_dict() for d in refactor_pages],
             "monitored": [d.to_dict() for d in monitored],
@@ -202,12 +216,16 @@ def run_trend_pipeline(
     noise_filter: Optional[NoiseFilter] = None,
     treg_checker: Optional[TregChecker] = None,
     jev_engine: Optional[JevEngine] = None,
+    batch_size: int = 15,
+    cycle_budget: float = 240.0,
 ) -> Dict[str, Any]:
     """Convenience helper to run the complete trend pipeline."""
     pipe = TrendPipeline(
         noise_filter=noise_filter,
         treg_checker=treg_checker,
         jev_engine=jev_engine,
+        batch_size=batch_size,
+        cycle_budget=cycle_budget,
     )
     return pipe.process_spikes(
         raw_spikes=spikes,
