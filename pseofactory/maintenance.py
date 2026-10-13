@@ -248,19 +248,27 @@ class CrossPropertyContaminationScanner:
     DEFAULT_FOREIGN_TOKENS: Dict[str, Set[str]] = {
         "prexvo": {
             "section 1031",
+            "1031 exchange",
+            "exchange 1031",
+            "exchange1031",
             "section 179",
+            "qsbs",
+            "section 1202",
+            "corporate tax",
+            "pass-through entity",
             "tcja",
             "profithelm.com",
-            "exchange1031",
-            "exchange 1031",
             "profithelm",
             "143884102",
         },
         "profithelm": {
             "title iv",
             "34 cfr",
-            "repayment assistance plan",
             "pslf",
+            "paye sunset",
+            "student loan",
+            "repayment assistance plan",
+            "income-contingent repayment",
             "prexvo.com",
             "prexvo",
             "106482194",
@@ -269,8 +277,18 @@ class CrossPropertyContaminationScanner:
 
     def __init__(self, custom_foreign_tokens: Optional[Dict[str, Set[str]]] = None):
         self._tokens: Dict[str, Set[str]] = {}
-        for k, v in self.DEFAULT_FOREIGN_TOKENS.items():
-            self._tokens[k.lower()] = {t.lower() for t in v}
+        try:
+            from pseofactory.tenant_facts import TenantFactStore
+            fact_store = TenantFactStore.get_instance()
+            for prop in ["profithelm", "prexvo"]:
+                prof = fact_store.get_profile(prop)
+                if prof and prof.cross_tenant_forbidden_tokens:
+                    self._tokens[prop] = {t.lower() for t in prof.cross_tenant_forbidden_tokens}
+        except Exception:
+            pass
+        if not self._tokens:
+            for k, v in self.DEFAULT_FOREIGN_TOKENS.items():
+                self._tokens[k.lower()] = {t.lower() for t in v}
         if custom_foreign_tokens:
             for k, v in custom_foreign_tokens.items():
                 k_norm = k.lower()
@@ -1486,15 +1504,7 @@ class TenantRegistry:
         try:
             ph_adapter = reg.get_adapter("profithelm")
             if not ph_adapter.tools:
-                ph_tools = None
-                try:
-                    import importlib
-                    cfg = importlib.import_module("profithelm.config")
-                    ph_tools = getattr(cfg, "TOOLS", None)
-                except Exception:
-                    pass
-                if not ph_tools:
-                    ph_tools = PROFITHELM_DEFAULT_TOOLS
+                ph_tools = PROFITHELM_DEFAULT_TOOLS
                 if hasattr(ph_adapter, "_tools"):
                     ph_adapter._tools = list(ph_tools)
                 elif hasattr(ph_adapter, "tools") and isinstance(ph_adapter.tools, list):
@@ -1533,50 +1543,21 @@ class LiveTruthAuditEngine:
     ) -> List[str]:
         """
         Audits raw HTML content for truth contradictions against tenant facts.
+        Delegates directly to TenantFactStore.verify_claim.
         Returns a list of violation detail strings.
         Zero em-dashes. Zero en-dashes.
         """
-        profile = self.fact_store.get_profile(property_id)
-        if not profile:
+        if not self.fact_store.get_profile(property_id):
             return []
-
-        violations: List[str] = []
-        html_lower = html_content.lower()
-
-        # 1. Banned claims
-        for banned in profile.claims_banned:
-            if banned.lower() in html_lower:
-                violations.append(
-                    f"Banned claim detected for {profile.brand_name}: '{banned}' in {context or 'asset'}"
-                )
-
-        # 2. Pricing contradictions
-        pricing_matches = re.findall(
-            r'\$(\d+(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
-            html_content,
-            re.IGNORECASE,
-        )
-        valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
-        for price_str in pricing_matches:
-            price_val = float(price_str)
-            if price_val not in valid_prices:
-                violations.append(
-                    f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
-                )
-
-        # 3. Mandatory disclosures
-        prop_norm = str(property_id).lower().strip()
-        if prop_norm == "prexvo" and ("refinance" in html_lower or "refinancing" in html_lower):
-            has_ymyl = (
-                "waives federal protections" in html_lower
-                or "eliminates federal protections" in html_lower
+        try:
+            is_valid, violations = self.fact_store.verify_claim(
+                tenant=property_id,
+                text=html_content,
+                context=context or "LiveTruthAuditEngine.audit_html",
             )
-            if not has_ymyl:
-                violations.append(
-                    "Missing mandatory YMYL forfeiture disclaimer on student loan refinance asset"
-                )
-
-        return violations
+            return violations
+        except ValueError:
+            return []
 
     def audit_file(
         self,
@@ -3014,6 +2995,8 @@ def run_fleet_maintenance(
 def audit_property_assets(
     property_id: Optional[str] = None,
     adapter: Optional[PropertyAdapter] = None,
+    check_engine_drift: bool = False,
+    check_ledger: Optional[bool] = False,
 ) -> AssetIntegrityReport:
     """
     Convenience function to execute read-only audit across property static assets.
@@ -3030,7 +3013,11 @@ def audit_property_assets(
             raise ValueError("No registered property adapters found in TenantRegistry")
         target_adapter = next(iter(adapters.values()))
     evaluator = AssetIntegrityEvaluator()
-    return evaluator.audit_all(target_adapter)
+    return evaluator.audit_all(
+        target_adapter,
+        check_engine_drift=check_engine_drift,
+        check_ledger=check_ledger,
+    )
 
 
 def replay_dlq(

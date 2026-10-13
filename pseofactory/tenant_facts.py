@@ -102,6 +102,7 @@ class TenantTruthProfile:
     claims_allowlist: List[str] = field(default_factory=list)
     claims_banned: List[str] = field(default_factory=list)
     mandatory_disclosures: List[str] = field(default_factory=list)
+    cross_tenant_forbidden_tokens: Set[str] = field(default_factory=set)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -114,6 +115,7 @@ class TenantTruthProfile:
             "claims_allowlist": list(self.claims_allowlist),
             "claims_banned": list(self.claims_banned),
             "mandatory_disclosures": list(self.mandatory_disclosures),
+            "cross_tenant_forbidden_tokens": list(sorted(self.cross_tenant_forbidden_tokens)),
         }
 
 
@@ -234,6 +236,19 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         "Circular 230 tax modeling disclaimer",
     ]
 
+    cross_tenant_forbidden_tokens = {
+        "title iv",
+        "34 cfr",
+        "pslf",
+        "paye sunset",
+        "student loan",
+        "repayment assistance plan",
+        "income-contingent repayment",
+        "prexvo.com",
+        "prexvo",
+        "106482194",
+    }
+
     return TenantTruthProfile(
         tenant_id="profithelm",
         brand_name="ProfitHelm",
@@ -244,6 +259,7 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         claims_allowlist=claims_allowlist,
         claims_banned=claims_banned,
         mandatory_disclosures=mandatory_disclosures,
+        cross_tenant_forbidden_tokens=cross_tenant_forbidden_tokens,
     )
 
 
@@ -364,6 +380,22 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "Independent Publisher Disclaimer",
     ]
 
+    cross_tenant_forbidden_tokens = {
+        "section 1031",
+        "1031 exchange",
+        "exchange 1031",
+        "exchange1031",
+        "section 179",
+        "qsbs",
+        "section 1202",
+        "corporate tax",
+        "pass-through entity",
+        "tcja",
+        "profithelm.com",
+        "profithelm",
+        "143884102",
+    }
+
     return TenantTruthProfile(
         tenant_id="prexvo",
         brand_name="Prexvo",
@@ -374,6 +406,7 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         claims_allowlist=claims_allowlist,
         claims_banned=claims_banned,
         mandatory_disclosures=mandatory_disclosures,
+        cross_tenant_forbidden_tokens=cross_tenant_forbidden_tokens,
     )
 
 
@@ -439,13 +472,15 @@ class TenantFactStore:
         tenant: str,
         text: str,
         context: Optional[str] = None,
+        spec_disclosures: Optional[List[str]] = None,
     ) -> Tuple[bool, List[str]]:
         """
         Inspects text against tenant truth profile:
         1. Banned marketing claims
         2. Unverified pricing numbers ($XX/mo)
-        3. Tenant boundary contamination
-        4. Mandatory disclosures if triggered by context
+        3. Cross-tenant boundary contamination
+        4. Mandatory regulatory disclosures
+        5. Statutory threshold limit boundaries
         Returns (is_valid, violations_list).
         Zero em-dashes. Zero en-dashes.
         """
@@ -480,37 +515,103 @@ class TenantFactStore:
                 )
 
         # 3. Cross-tenant boundary isolation
+        for token in sorted(profile.cross_tenant_forbidden_tokens):
+            if token.lower() in text_lower:
+                violations.append(
+                    f"Cross-tenant contamination on {profile.brand_name}: found forbidden boundary token '{token}'"
+                )
+
+        # 4. Mandatory regulatory disclosures
         if tenant_norm == "profithelm":
-            foreign_student_loan_terms = [
-                "title iv", "34 cfr", "pslf", "paye sunset", "student loan",
-                "income-contingent repayment", "repayment assistance plan",
-            ]
-            for term in foreign_student_loan_terms:
-                if term in text_lower:
+            has_tax_modeling = (
+                "tax scenario modeling" in text_lower
+                or "entity tax modeling" in text_lower
+                or "tax modeling scenarios" in text_lower
+            )
+            if has_tax_modeling:
+                has_c230 = (
+                    "circular 230" in text_lower
+                    or "treasury department circular no. 230" in text_lower
+                )
+                if not has_c230:
                     violations.append(
-                        f"Cross-tenant contamination on ProfitHelm: found student loan term '{term}'"
+                        "Missing mandatory Circular 230 regulatory disclosure: 'Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.'"
                     )
         elif tenant_norm == "prexvo":
-            foreign_tax_terms = [
-                "section 1031", "1031 exchange", "section 179", "qsbs",
-                "section 1202", "corporate tax", "pass-through entity",
-            ]
-            for term in foreign_tax_terms:
-                if term in text_lower:
+            if "refinance" in text_lower or "refinancing" in text_lower:
+                has_ymyl = (
+                    "waives federal protections" in text_lower
+                    or "eliminates federal protections" in text_lower
+                    or "waive federal protections" in text_lower
+                )
+                if not has_ymyl:
                     violations.append(
-                        f"Cross-tenant contamination on Prexvo: found B2B tax term '{term}'"
+                        "Missing mandatory YMYL forfeiture disclaimer: 'Refinancing federal student loans permanently waives federal protections'"
                     )
 
-        # 4. Mandatory disclosures check (when triggered)
-        if tenant_norm == "prexvo" and ("refinance" in text_lower or "refinancing" in text_lower):
-            has_ymyl = (
-                "waives federal protections" in text_lower
-                or "eliminates federal protections" in text_lower
-            )
-            if not has_ymyl:
-                violations.append(
-                    "Missing mandatory YMYL forfeiture disclaimer: 'Refinancing federal student loans permanently waives federal protections'"
+        if spec_disclosures:
+            for disclosure_phrase in spec_disclosures:
+                if disclosure_phrase and disclosure_phrase.lower() not in text_lower:
+                    violations.append(
+                        f"Missing mandatory disclosure containing '{disclosure_phrase}'"
+                    )
+
+        # 5. Statutory threshold limit boundaries
+        if tenant_norm == "profithelm":
+            # Section 179 SUV / heavy vehicle cap ($30,500 for 2024 / $31,300 for 2025)
+            if "suv" in text_lower or "heavy vehicle" in text_lower:
+                suv_matches = re.findall(
+                    r'(?:(?:suv|heavy\s*vehicle)[^\.\n]*?(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)[^\.\n]*?(?:suv|heavy\s*vehicle))',
+                    text,
+                    re.IGNORECASE,
                 )
+                for m in suv_matches:
+                    raw_val = m[0] or m[1]
+                    try:
+                        val = float(raw_val.replace(",", ""))
+                        suv_cap = 31300.0 if "2025" in text_lower else 30500.0
+                        if val > suv_cap:
+                            violations.append(
+                                f"Section 179 heavy vehicle/SUV limit contradiction: claimed ${val:,.0f} exceeds statutory cap of $30,500 for 2024 ($31,300 for 2025)"
+                            )
+                    except ValueError:
+                        pass
+
+            # Section 179 overall expense limit ($1,220,000 for 2024 / $1,250,000 for 2025)
+            s179_matches = re.findall(
+                r'(?:section\s*179[^\.\n]*?(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)[^\.\n]*?section\s*179)',
+                text,
+                re.IGNORECASE,
+            )
+            for m in s179_matches:
+                raw_val = m[0] or m[1]
+                try:
+                    val = float(raw_val.replace(",", ""))
+                    s179_cap = 1250000.0 if "2025" in text_lower else 1220000.0
+                    if val > s179_cap:
+                        violations.append(
+                            f"Section 179 expense limit contradiction: claimed ${val:,.0f} exceeds statutory limit of $1,220,000 for 2024 ($1,250,000 for 2025)"
+                        )
+                except ValueError:
+                    pass
+
+        elif tenant_norm == "prexvo":
+            # PSLF qualifying payments: strictly 120 payments
+            pslf_matches = re.findall(
+                r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]*?(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?|(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?[^\.\n]*?(?:pslf|public\s+service\s+loan\s+forgiveness))',
+                text,
+                re.IGNORECASE,
+            )
+            for m in pslf_matches:
+                p_str = m[0] or m[1]
+                try:
+                    payments = int(p_str)
+                    if payments != 120:
+                        violations.append(
+                            f"PSLF payment requirement contradiction: claimed {payments} payments contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
+                        )
+                except ValueError:
+                    pass
 
         is_valid = len(violations) == 0
         return is_valid, violations

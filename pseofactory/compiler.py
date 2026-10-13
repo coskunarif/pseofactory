@@ -510,6 +510,33 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     calc_js_body = f"""      {dynamic_return_js}"""
 
+    regulatory_disclosures_html = []
+    if not is_prexvo:
+        if cluster == PROFITHELM_TAX_CLUSTER or "tax" in slug.lower() or "tax" in query.lower() or "179" in slug:
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                '        Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.\n'
+                '      </p>'
+            )
+    else:
+        if "refinance" in slug.lower() or "refinance" in query.lower() or "refinancing" in slug.lower() or "refinancing" in query.lower():
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                '        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685.\n'
+                '      </p>'
+            )
+
+    spec_disclosures = candidate_spec.get("mandatory_disclosures") or []
+    for disc in spec_disclosures:
+        if not any(disc.lower() in d.lower() for d in regulatory_disclosures_html):
+            regulatory_disclosures_html.append(
+                f'      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                f'        {disc}\n'
+                f'      </p>'
+            )
+
+    disclosures_html_block = ("\n" + "\n".join(regulatory_disclosures_html)) if regulatory_disclosures_html else ""
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -880,7 +907,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     <footer class="card" style="text-align: center;">
       <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
         Launch Full {title} Engine
-      </a>
+      </a>{disclosures_html_block}
     </footer>
   </div>
 

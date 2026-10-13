@@ -95,7 +95,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             dist_dir=dist_path,
         )
         evaluator = AssetIntegrityEvaluator()
-        report = evaluator.audit_all(adapter)
+        report = evaluator.audit_all(adapter, check_engine_drift=getattr(args, "check_engine_drift", False))
         if args.json:
             print(json.dumps(report.to_dict(), indent=2))
         else:
@@ -111,7 +111,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
         print(f"Error: Property '{property_id}' not found in registry", file=sys.stderr)
         return 1
 
-    report = audit_property_assets(property_id=property_id, adapter=adapter)
+    report = audit_property_assets(
+        property_id=property_id,
+        adapter=adapter,
+        check_engine_drift=getattr(args, "check_engine_drift", False),
+    )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))
     else:
@@ -1309,6 +1313,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--sample", type=int, default=None, help="Sample N routes for fast browser audit")
     p_audit.add_argument("--cdp-port", type=int, default=9222, help="Chrome DevTools Protocol port (default: 9222)")
     p_audit.add_argument("--fail-closed", action="store_true", help="Fail closed if Chrome CDP port is unreachable")
+    p_audit.add_argument("--check-engine-drift", action="store_true", help="Audit engine hash drift against state file")
     p_audit.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # maintain
