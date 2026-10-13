@@ -250,11 +250,14 @@ class AsyncFleetCoordinator:
         enable_gitops: bool,
         run_id: Optional[str],
         skip_ci: bool,
+        enable_distribution: Optional[bool] = None,
     ) -> MaintenanceResult:
         """
         Runs tenant lifecycle synchronously with isolation guards.
         Zero em-dashes. Zero en-dashes.
         """
+        if enable_distribution is None:
+            enable_distribution = enable_gitops
         try:
             return self.lifecycle.run(
                 adapter,
@@ -263,6 +266,7 @@ class AsyncFleetCoordinator:
                 run_id=run_id,
                 dry_run=dry_run,
                 skip_ci=skip_ci,
+                enable_distribution=enable_distribution,
             )
         except SubprocessCrashError as sce:
             logger = AtomicTelemetryLogger()
@@ -367,6 +371,7 @@ class AsyncFleetCoordinator:
         run_id: Optional[str] = None,
         skip_ci: bool = False,
         on_tenant_start: Optional[Callable[[str], None]] = None,
+        enable_distribution: Optional[bool] = None,
     ) -> MaintenanceResult:
         """
         Executes single tenant under semaphore ceiling with timeout budget.
@@ -392,6 +397,7 @@ class AsyncFleetCoordinator:
                             enable_gitops=enable_gitops,
                             run_id=run_id,
                             skip_ci=skip_ci,
+                            enable_distribution=enable_distribution,
                         ),
                     ),
                     timeout=tenant_budget,
@@ -448,6 +454,7 @@ class AsyncFleetCoordinator:
         run_id: Optional[str] = None,
         skip_ci: bool = False,
         on_tenant_start: Optional[Callable[[str], None]] = None,
+        enable_distribution: Optional[bool] = None,
     ) -> Dict[str, MaintenanceResult]:
         """
         Executes bounded asynchronous maintenance across registered tenants.
@@ -490,6 +497,7 @@ class AsyncFleetCoordinator:
                             run_id=run_id,
                             skip_ci=skip_ci,
                             on_tenant_start=on_tenant_start,
+                            enable_distribution=enable_distribution,
                         )
                     )
 
@@ -524,6 +532,7 @@ class AsyncFleetCoordinator:
         run_id: Optional[str] = None,
         skip_ci: bool = False,
         on_tenant_start: Optional[Callable[[str], None]] = None,
+        enable_distribution: Optional[bool] = None,
     ) -> Dict[str, MaintenanceResult]:
         """
         Synchronous entrypoint executing asynchronous fleet coordination.
@@ -543,6 +552,7 @@ class AsyncFleetCoordinator:
                                 run_id=run_id,
                                 skip_ci=skip_ci,
                                 on_tenant_start=on_tenant_start,
+                                enable_distribution=enable_distribution,
                             )
                         )
                     ).result()
@@ -556,6 +566,7 @@ class AsyncFleetCoordinator:
                         run_id=run_id,
                         skip_ci=skip_ci,
                         on_tenant_start=on_tenant_start,
+                        enable_distribution=enable_distribution,
                     )
                 )
         finally:
@@ -651,6 +662,7 @@ class AutonomousLifecycleSupervisor:
         enable_gitops: bool = True,
         property_ids: Optional[List[str]] = None,
         skip_ci: bool = False,
+        enable_distribution: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Executes single autonomous lifecycle cycle.
@@ -750,6 +762,7 @@ class AutonomousLifecycleSupervisor:
                 run_id=cycle_id,
                 skip_ci=skip_ci,
                 on_tenant_start=on_tenant_start,
+                enable_distribution=enable_distribution,
             )
 
             all_passed = (len(fleet_results) > 0) and all(

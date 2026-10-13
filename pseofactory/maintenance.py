@@ -696,6 +696,9 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
                 env["FACTORY_ASSET_SLUG"] = slug
+                env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
                 if target_file:
@@ -772,6 +775,9 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
                 env["FACTORY_ASSET_SLUG"] = slug
+                env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
@@ -824,7 +830,17 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
             f"try:\n"
             f"    import importlib\n"
+            f"    try:\n"
+            f"        cfg = importlib.import_module('{self._property_id}.config')\n"
+            f"        if hasattr(cfg, 'LINKEDIN_COMPANY_ID'):\n"
+            f"            cfg.LINKEDIN_COMPANY_ID = {repr(self.linkedin_company_id)}\n"
+            f"        if hasattr(cfg, 'LINKEDIN_COMPANY_URL'):\n"
+            f"            cfg.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
+            f"    except Exception:\n"
+            f"        pass\n"
             f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"    if hasattr(mod, 'LINKEDIN_COMPANY_URL'):\n"
+            f"        mod.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
             f"except ModuleNotFoundError:\n"
             f"    sys.exit(127)\n"
             f"try:\n"
@@ -845,6 +861,14 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         )
         try:
             env = os.environ.copy()
+            env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+            env["FACTORY_DOMAIN"] = self.domain
+            env["FACTORY_BRAND_NAME"] = self.brand_name
+            env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+            env["FACTORY_ASSET_SLUG"] = slug
+            env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+            env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+            env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
             env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
             if res.returncode == 0:
@@ -901,6 +925,9 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_DOMAIN"] = self.domain
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+                env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
 
                 cmd = self._build_command
                 if isinstance(cmd, str):
@@ -956,7 +983,17 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
             f"try:\n"
             f"    import importlib\n"
+            f"    try:\n"
+            f"        cfg = importlib.import_module('{self._property_id}.config')\n"
+            f"        if hasattr(cfg, 'LINKEDIN_COMPANY_ID'):\n"
+            f"            cfg.LINKEDIN_COMPANY_ID = {repr(self.linkedin_company_id)}\n"
+            f"        if hasattr(cfg, 'LINKEDIN_COMPANY_URL'):\n"
+            f"            cfg.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
+            f"    except Exception:\n"
+            f"        pass\n"
             f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+            f"    if hasattr(mod, 'LINKEDIN_COMPANY_URL'):\n"
+            f"        mod.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
             f"except ModuleNotFoundError:\n"
             f"    sys.exit(127)\n"
             f"try:\n"
@@ -975,6 +1012,13 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         last_error = None
         try:
             env = os.environ.copy()
+            env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+            env["FACTORY_DOMAIN"] = self.domain
+            env["FACTORY_BRAND_NAME"] = self.brand_name
+            env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+            env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+            env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+            env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
             env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
             if res.returncode == 0:
@@ -1024,6 +1068,9 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_DOMAIN"] = self.domain
                 env["FACTORY_BRAND_NAME"] = self.brand_name
                 env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+                env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["FACTORY_DRY_RUN"] = "1"
                 env["PREXVO_AUTO_LIVE"] = "0"
                 env["PREXVO_CHECK_QUEUE"] = "0"
@@ -1819,15 +1866,37 @@ class AssetIntegrityEvaluator:
             if ledger_path:
                 ledger = load_asset_ledger(ledger_path)
             else:
-                default_ledger = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
-                if default_ledger.exists():
-                    ledger = load_asset_ledger(default_ledger)
+                candidate_ledgers = [
+                    adapter.dist_dir.parent / ".agy" / "asset_ledger.json",
+                ]
+                if getattr(adapter, "repo_path", None):
+                    candidate_ledgers.append(adapter.repo_path / ".agy" / "asset_ledger.json")
+                if adapter.dist_dir.parent.parent.is_dir():
+                    candidate_ledgers.append(adapter.dist_dir.parent.parent / ".agy" / "asset_ledger.json")
+                for cl in candidate_ledgers:
+                    if cl.is_file():
+                        ledger = load_asset_ledger(cl)
+                        break
 
         engine_drifted = False
         if check_engine_drift:
             b_dirs = getattr(adapter, "base_dirs", None)
-            s_file = state_file or (adapter.dist_dir.parent / ".agy" / "engine_hash.json")
-            if Path(s_file).exists():
+            s_file = None
+            if state_file:
+                s_file = Path(state_file)
+            else:
+                candidate_paths = [
+                    adapter.dist_dir.parent / ".agy" / "engine_hash.json",
+                ]
+                if getattr(adapter, "repo_path", None):
+                    candidate_paths.append(adapter.repo_path / ".agy" / "engine_hash.json")
+                if adapter.dist_dir.parent.parent.is_dir():
+                    candidate_paths.append(adapter.dist_dir.parent.parent / ".agy" / "engine_hash.json")
+                for cp in candidate_paths:
+                    if cp.is_file():
+                        s_file = cp
+                        break
+            if s_file is not None and (state_file is not None or s_file.exists()):
                 drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
 
@@ -2402,10 +2471,12 @@ class MaintenanceLifecycle:
 
         with adapter.scoped_environment():
             # Stage 1: Preflight Asset Integrity Audit
+            passed_s_file = Path(state_file).resolve() if state_file else None
+            passed_l_file = Path(ledger_file).resolve() if ledger_file else None
             report = self.evaluator.audit_all(
                 adapter=adapter,
-                ledger_path=l_file if l_file.exists() else None,
-                state_file=s_file if s_file.exists() else None,
+                ledger_path=passed_l_file if passed_l_file else (l_file if l_file.exists() else None),
+                state_file=passed_s_file if passed_s_file else (s_file if s_file.exists() else None),
             )
 
             print(
@@ -2666,7 +2737,7 @@ class MaintenanceLifecycle:
                     dry_run=dry_run,
                     workflow=workflow,
                 )
-                target_edge = edge_url
+                target_edge = edge_url or (getattr(adapter, "canonical_base", None) if getattr(adapter, "repo_path", None) else None)
                 gitops_res = coordinator.dispatch_to_shipper(
                     run_id=run_id,
                     property_id=adapter.property_id,
@@ -3064,6 +3135,12 @@ def reflect_and_recompile_all_assets(
                     for a in adapter.list_assets()
                 }
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                if adapter.dist_dir.parent != scanner.workspace_root:
+                    root_s_file = scanner.workspace_root / ".agy" / "engine_hash.json"
+                    root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
+                    root_s_file.parent.mkdir(parents=True, exist_ok=True)
+                    record_engine_hash(root_s_file, hash_value=cur_engine_hash)
+                    record_asset_ledger(root_l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
             except Exception as l_err:
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")

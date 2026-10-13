@@ -123,6 +123,20 @@ def cmd_reflect(args: argparse.Namespace) -> int:
         force=getattr(args, "force", False),
         verbose=getattr(args, "verbose", False),
     )
+    no_gitops = getattr(args, "no_gitops", False)
+    if res.get("total_recompiled", 0) > 0 and not no_gitops:
+        reg = TenantRegistry.default()
+        for p_id, r_info in res.get("property_reports", {}).items():
+            if r_info.get("recompiled", 0) > 0:
+                try:
+                    adapter = reg.get_adapter(p_id)
+                    repo_path = adapter.repo_path or adapter.dist_dir.parent
+                    if (repo_path / ".git").exists():
+                        run_maintenance_lifecycle(property_id=p_id, force=True)
+                except Exception as g_err:
+                    if getattr(args, "verbose", False):
+                        print(f"Warning: GitOps auto-chain failed for '{p_id}': {g_err}")
+
     if getattr(args, "json", False):
         print(json.dumps(res, indent=2))
     else:
@@ -1498,6 +1512,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ref.add_argument("--force", action="store_true", help="Force recompilation regardless of drift")
     p_ref.add_argument("--verbose", action="store_true", help="Verbose log output")
     p_ref.add_argument("--json", action="store_true", help="Output summary as JSON")
+    p_ref.add_argument("--no-gitops", action="store_true", help="Bypass automated gitops staging and verification")
 
     return parser
 
