@@ -2380,20 +2380,24 @@ class RefactorCascadeEngine:
             post_audit_map = {
                 rec.slug: self.evaluator.audit_asset(Path(rec.asset_path).resolve(), adapter)
                 for rec in actionable_records
-                if rec.slug is not None
+                if rec.slug is not None and Path(rec.asset_path).resolve().is_file()
             }
             for rec in actionable_records:
                 target_path = Path(rec.asset_path).resolve()
-                audit_record = (
-                    post_audit_map.get(rec.slug)
-                    if rec.slug is not None
-                    else self.evaluator.audit_asset(target_path, adapter)
-                )
-                verify_dict = (
-                    adapter.verify_asset(target_path)
-                    if hasattr(adapter, "verify_asset")
-                    else {"status": "PASS"}
-                )
+                if target_path.is_dir():
+                    audit_record = None
+                    verify_dict = {"status": "PASS"}
+                else:
+                    audit_record = (
+                        post_audit_map.get(rec.slug)
+                        if rec.slug is not None
+                        else self.evaluator.audit_asset(target_path, adapter)
+                    )
+                    verify_dict = (
+                        adapter.verify_asset(target_path)
+                        if hasattr(adapter, "verify_asset")
+                        else {"status": "PASS"}
+                    )
                 if (
                     build_ok
                     and audit_record is None
@@ -2525,6 +2529,9 @@ class MaintenanceLifecycle:
                 f"[DISPATCH:GROWTH_SEO] Preflight asset audit -> property={adapter.property_id}, "
                 f"audited={report.total_assets_checked} assets, drifted={report.drifted_assets_count}"
             )
+
+            if report.drifted_assets_count == 0 and not dry_run:
+                self.cascade_engine.replay_quarantine(property_id=adapter.property_id)
 
             # Stage 2: Universal Idempotency & DLQ Filter (HWL-1231)
             actionable_drifted = []

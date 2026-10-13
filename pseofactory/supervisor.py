@@ -712,14 +712,17 @@ class AutonomousLifecycleSupervisor:
             }
 
         if not force and not drift_detected:
-            from pseofactory.maintenance import AssetIntegrityEvaluator
+            from pseofactory.maintenance import AssetIntegrityEvaluator, RefactorCascadeEngine
             evaluator = AssetIntegrityEvaluator()
+            cascade_engine = RefactorCascadeEngine(evaluator=evaluator)
             any_drift = False
-            for a in adapters.values():
+            for pid, a in adapters.items():
                 rep = evaluator.audit_all(a, check_engine_drift=False, check_ledger=False)
                 if rep.drifted_assets_count > 0:
                     any_drift = True
                     break
+                if not dry_run:
+                    cascade_engine.replay_quarantine(property_id=pid)
             if not any_drift:
                 duration = time.time() - start_time
                 self.consecutive_failures = 0
