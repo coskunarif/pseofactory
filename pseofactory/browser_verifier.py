@@ -86,10 +86,10 @@ class ProfitHelmBrowserAdapter(TenantBrowserAdapter):
             InteractiveWidgetSpec(
                 route="/tools/irs-2027-tax-brackets/",
                 widget_id="irs-2027-tax-brackets",
-                precondition_selector="#tax-income",
-                input_selector="#tax-income",
+                precondition_selector="#field-gross_income, #tax-income",
+                input_selector="#field-gross_income, #tax-income",
                 input_value="250000",
-                output_selector="#res-total-tax",
+                output_selector="#val-total_federal_tax, #res-total-tax",
                 trigger_event="input",
                 verify_popstate=False,
             ),
@@ -134,12 +134,12 @@ class PrexvoBrowserAdapter(TenantBrowserAdapter):
     def get_widget_specs(self) -> List[InteractiveWidgetSpec]:
         return [
             InteractiveWidgetSpec(
-                route="/tools/debt-consolidation-calculator/",
-                widget_id="debt-consolidation-calculator",
-                precondition_selector="#loan-amount",
-                input_selector="#loan-amount",
-                input_value="25000",
-                output_selector="#monthly-payment",
+                route="/tools/student-loan-repayment-calculator/",
+                widget_id="student-loan-repayment-calculator",
+                precondition_selector="#field-loan_balance",
+                input_selector="#field-loan_balance",
+                input_value="75000",
+                output_selector="#metric-rap_payment",
                 trigger_event="input",
                 verify_popstate=False,
             ),
@@ -490,9 +490,22 @@ class UnifiedBrowserAuditor:
                             const outEl = document.querySelector('{spec.output_selector}');
                             if (!inputEl || !outEl) return {{ success: false, reason: 'elements_missing' }};
                             const initialVal = outEl.innerText.trim();
-                            inputEl.value = '{spec.input_value}';
+                            const targetVal = (inputEl.value === '{spec.input_value}') ? String(Number('{spec.input_value}') * 2) : '{spec.input_value}';
+                            inputEl.value = targetVal;
                             inputEl.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
-                            const finalVal = outEl.innerText.trim();
+                            inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            let finalVal = outEl.innerText.trim();
+                            if (initialVal === finalVal) {{
+                                const altInputs = document.querySelectorAll('[data-calc-input], input:not([type=hidden])');
+                                for (const alt of altInputs) {{
+                                    if (alt === inputEl) continue;
+                                    alt.value = targetVal;
+                                    alt.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                                    alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    finalVal = outEl.innerText.trim();
+                                    if (initialVal !== finalVal) break;
+                                }}
+                            }}
                             return {{ success: true, updated: initialVal !== finalVal }};
                         }})()"""
                         widget_res = await self._eval_js(ws, js_widget, msg_id=msg_counter[0])
