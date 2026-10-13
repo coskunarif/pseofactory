@@ -531,6 +531,10 @@ from pseofactory.pipeline import (
     run_factory_pipeline,
     RejectionReason,
 )
+from pseofactory.competitor import (
+    CompetitorGapEngine,
+    GapCandidateSpec,
+)
 from pseofactory.audit import (
     ContentAccuracyAuditStage,
     ContentAccuracyAuditReport,
@@ -1026,4 +1030,6 @@ __all__ = [
     "is_pid_alive",
     "DEFAULT_UI_PORT",
     "DEFAULT_UI_HOST",
+    "CompetitorGapEngine",
+    "GapCandidateSpec",
 ]

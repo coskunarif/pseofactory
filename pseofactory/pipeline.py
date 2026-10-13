@@ -58,6 +58,8 @@ from pseofactory.content_angles import (
     IncumbentSummary,
 )
 from pseofactory.compiler import compile_high_effort_page
+from pseofactory.competitor import CompetitorGapEngine, GapCandidateSpec
+from pseofactory.tenant_facts import TenantFactStore
 from pseofactory.audit import (
     ContentAccuracyAuditStage,
     ContentAccuracyAuditReport,
@@ -861,6 +863,16 @@ class FactoryPipeline:
             tenant = assignment["property_id"]
 
             # 7. Live SERP competitor intelligence and underdog angle extraction
+            fact_store = TenantFactStore.get_instance()
+            tenant_profile = fact_store.get_profile(tenant)
+            competitor_gap_engine = CompetitorGapEngine(tenant_profile=tenant_profile)
+            gap_candidates = competitor_gap_engine.diff_competitor_serp(
+                query=decision.query,
+                competitor_results=raw_meta.get("incumbents")
+                or (spike.raw_payload.get("incumbents") if spike.raw_payload else None)
+                or [],
+            )
+
             incumbents = (
                 raw_meta.get("incumbents")
                 or (spike.raw_payload.get("incumbents") if spike.raw_payload else None)
@@ -952,52 +964,10 @@ class FactoryPipeline:
                 elif spike.raw_payload and k in spike.raw_payload and k not in candidate_spec:
                     candidate_spec[k] = spike.raw_payload[k]
 
-            # Primary statutory legal provenance and empirical economic dataset enrichment
-            if tenant == "profithelm":
-                if "1031" in decision.query.lower():
-                    candidate_spec.setdefault("statutory_authority", "IRC Section 1031(a)(1)")
-                    candidate_spec.setdefault("economic_dataset", "FRED CPILFESL Series")
-                    candidate_spec.setdefault(
-                        "model_name", "Section 1031 Like-Kind Exchange Model"
-                    )
-                    candidate_spec.setdefault(
-                        "formula", "relinquished_basis + recognized_gain"
-                    )
-                    candidate_spec.setdefault(
-                        "inputs", {"relinquished_basis": 450000, "recognized_gain": 0}
-                    )
-                    candidate_spec.setdefault("published_output", 450000.0)
-                    candidate_spec.setdefault(
-                        "sample_calculation",
-                        "Relinquished basis 450,000 with zero recognized gain yields replacement basis 450,000",
-                    )
-                else:
-                    candidate_spec.setdefault("statutory_authority", "IRC Section 179(b)(1)")
-                    candidate_spec.setdefault("economic_dataset", "FRED CPILFESL Series")
-                    candidate_spec.setdefault("model_name", "Section 179 Grounded Model")
-                    candidate_spec.setdefault("formula", "min(cost, cap)")
-                    candidate_spec.setdefault("inputs", {"cost": 400000, "cap": 1220000})
-                    candidate_spec.setdefault("published_output", 400000.0)
-                    candidate_spec.setdefault(
-                        "sample_calculation",
-                        "Cost 400,000 under cap 1,220,000 gives 400,000 deduction",
-                    )
-            elif tenant == "prexvo":
-                candidate_spec.setdefault("statutory_authority", "34 CFR Part 685")
-                candidate_spec.setdefault("economic_dataset", "FRED SLSTTOTAL Series")
-                candidate_spec.setdefault(
-                    "model_name", "Direct Consolidation Loan Weighted Model"
-                )
-                candidate_spec.setdefault("formula", "balance * (weighted_rate / 100.0)")
-                candidate_spec.setdefault("inputs", {"balance": 45000, "weighted_rate": 6.5})
-                candidate_spec.setdefault("published_output", 2925.0)
-                candidate_spec.setdefault(
-                    "sample_calculation",
-                    "Balance 45,000 at 6.5 percent weighted rate yields 2,925 annual interest",
-                )
-
+            # Primary statutory legal provenance and empirical economic dataset enrichment via CompetitorGapEngine
             candidate_spec.setdefault("query", decision.query)
             candidate_spec.setdefault("slug", decision.slug)
+            candidate_spec = competitor_gap_engine.enrich_candidate_spec(candidate_spec)
 
             # Pre-compilation and compilation execution with fault isolation
             try:

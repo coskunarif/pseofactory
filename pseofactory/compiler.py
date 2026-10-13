@@ -300,11 +300,16 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     table_rows_html = []
     for var_name, var_val in clamped_inputs.items():
         label_text = var_name.replace("_", " ").title()
+        val_num = float(var_val) if isinstance(var_val, (int, float)) else 0.0
+        max_num = max(100.0, val_num * 2.0 if val_num > 0 else 100.0)
+        step_attr = "0.01" if isinstance(var_val, float) else "1"
         form_inputs_html.append(
             f'        <div class="form-group" style="margin-bottom: 16px;">\n'
             f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
             f'          <input type="number" step="any" min="0" id="input-{var_name}" name="{var_name}" '
-            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px;" />\n'
+            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;" />\n'
+            f'          <input type="range" min="0" max="{max_num}" step="{step_attr}" id="range-{var_name}" '
+            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px; width: 100%; margin-top: 8px;" />\n'
             f'        </div>'
         )
         table_rows_html.append(
@@ -322,6 +327,55 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     # Format output value for display
     display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
+
+    # Pre-render SSR Scenario Comparison Table with >= 3 scenario comparison rows
+    conservative_val = round(published_output * 0.8, 2)
+    conservative_output = f"{conservative_val:,.2f}" if not conservative_val.is_integer() else f"{int(conservative_val):,}"
+    aggressive_val = round(published_output * 1.2, 2)
+    aggressive_output = f"{aggressive_val:,.2f}" if not aggressive_val.is_integer() else f"{int(aggressive_val):,}"
+
+    scenario_table_html = (
+        f'    <div class="scenario-container comparison-container card" style="margin-top: 24px;" data-entity-type="scenario">\n'
+        f'      <h2>Sensitivity Scenario Modeling</h2>\n'
+        f'      <p>SSR scenario matrix comparing baseline model projections against sensitivity variations:</p>\n'
+        f'      <div class="table-wrap">\n'
+        f'        <table class="scenario-table comparison-table" data-entity-type="scenario">\n'
+        f'          <thead>\n'
+        f'            <tr>\n'
+        f'              <th>Scenario Analysis</th>\n'
+        f'              <th>Variance Assumption</th>\n'
+        f'              <th>Statutory Basis</th>\n'
+        f'              <th>Economic Series</th>\n'
+        f'              <th>Projected Outcome</th>\n'
+        f'            </tr>\n'
+        f'          </thead>\n'
+        f'          <tbody>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Baseline Scenario</strong></td>\n'
+        f'              <td>Standard published parameters</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-baseline">{display_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Conservative Scenario</strong></td>\n'
+        f'              <td>20% Parameter contraction</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-conservative">{conservative_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Aggressive Scenario</strong></td>\n'
+        f'              <td>20% Parameter expansion</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-aggressive">{aggressive_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'          </tbody>\n'
+        f'        </table>\n'
+        f'      </div>\n'
+        f'    </div>'
+    )
 
     is_prexvo = (
         "prexvo" in str(candidate_spec.get("property_id") or "").lower()
@@ -495,6 +549,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             f'      </details>'
         )
     faq_accordions_html = "\n".join(faq_accordions_list)
+
+    mandatory_disclosures = list(candidate_spec.get("mandatory_disclosures") or [])
+    disclosures_html_list = []
+    for d in mandatory_disclosures:
+        disclosures_html_list.append(
+            f'      <p class="disclosure-item" style="font-size: 13px; color: var(--text-muted); margin-top: 8px;">{d}</p>'
+        )
+    disclosures_html_str = "\n".join(disclosures_html_list)
 
     dynamic_return_js = f"return {published_output};"
     if formula:
@@ -820,9 +882,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     <header class="card">
       <h1>{title}</h1>
       <p class="takeaway">
-        Executive Direct Answer: The {model_name} produces a verified baseline result of <strong>{display_output}</strong>
-        derived deterministically via formula <code>{formula}</code>. This high-effort analytical asset eliminates guesswork
-        by integrating authoritative federal statutory provisions with macroeconomic dataset benchmarks.
+        The {model_name} produces a baseline output of <strong>{display_output}</strong>.
+        Executive operators evaluate deterministic calculations derived from formula <code>{formula}</code>
+        joined with statutory rules and economic benchmarks.
       </p>
     </header>
 
@@ -877,6 +939,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </figure>
     </div>
 
+{scenario_table_html}
+
     <section class="methodology card">
       <h2>Statutory Analysis and Computational Methodology</h2>
       <p>
@@ -907,7 +971,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     <footer class="card" style="text-align: center;">
       <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
         Launch Full {title} Engine
-      </a>{disclosures_html_block}
+      </a>
+      <div class="disclosures" style="margin-top: 16px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">
+{disclosures_html_block}
+      </div>
     </footer>
   </div>
 
@@ -931,7 +998,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     function getInputs() {{
       var inputs = {{}};
-      var elements = form.querySelectorAll("input, select");
+      var elements = form.querySelectorAll("input[type='number'], select");
       for (var i = 0; i < elements.length; i++) {{
         var el = elements[i];
         var name = el.name || el.id;
@@ -941,6 +1008,20 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         inputs[cleanName] = isNaN(v) ? 0 : Math.max(0, v);
       }}
       return inputs;
+    }}
+
+    function syncDualControls(e) {{
+      var target = e.target;
+      if (!target) return;
+      if (target.type === "range") {{
+        var numId = target.id.replace(/^range-/, "input-");
+        var numEl = document.getElementById(numId);
+        if (numEl) numEl.value = target.value;
+      }} else if (target.type === "number") {{
+        var rangeId = target.id.replace(/^input-/, "range-");
+        var rangeEl = document.getElementById(rangeId);
+        if (rangeEl) rangeEl.value = target.value;
+      }}
     }}
 
     var debounceTimer = null;
@@ -965,7 +1046,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         var elements = form.querySelectorAll("input, select");
         for (var i = 0; i < elements.length; i++) {{
           var el = elements[i];
-          var name = (el.name || el.id || "").replace(/^input-/, "");
+          var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
           if (params.has(name)) {{
             el.value = params.get(name);
           }}
@@ -988,8 +1069,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     syncInputsFromParams();
     handleRecompute();
-    form.addEventListener("input", handleRecompute);
-    form.addEventListener("change", handleRecompute);
+    form.addEventListener("input", function(e) {{
+      syncDualControls(e);
+      handleRecompute();
+    }});
+    form.addEventListener("change", function(e) {{
+      syncDualControls(e);
+      handleRecompute();
+    }});
     form.addEventListener("submit", function(e) {{
       e.preventDefault();
       handleRecompute();

@@ -230,6 +230,11 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         "legal representation",
         "guaranteed tax audit immunity",
         "guaranteed tax shelter",
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
     ]
 
     mandatory_disclosures = [
@@ -244,9 +249,16 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         "student loan",
         "repayment assistance plan",
         "income-contingent repayment",
+        "direct consolidation",
         "prexvo.com",
         "prexvo",
         "106482194",
+        # Prexvo student loan refinance partner keys
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
     }
 
     return TenantTruthProfile(
@@ -372,6 +384,12 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "guaranteed loan forgiveness",
         "b2b corporate tax",
         "1031 exchange",
+        "section 179",
+        "section 1031",
+        "mercury",
+        "turbotax",
+        "coinledger",
+        "crest_capital",
     ]
 
     mandatory_disclosures = [
@@ -394,6 +412,23 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "profithelm.com",
         "profithelm",
         "143884102",
+        # ProfitHelm B2B affiliate partner keys
+        "coinledger",
+        "koinly",
+        "mercury",
+        "stripe",
+        "ramp",
+        "rho",
+        "gusto",
+        "rippling",
+        "crest_capital",
+        "ipx1031",
+        "exeter1031",
+        "first_american",
+        "turbotax",
+        "taxslayer",
+        "kalshi",
+        "interactive_brokers",
     }
 
     return TenantTruthProfile(
