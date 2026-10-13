@@ -69,9 +69,54 @@ class PartnerEmailClassification:
     raw_subject: str = ""
     sender_email: str = ""
     date: str = ""
+    candidate_url: str = ""
+    network: str = "In-House Direct"
+    action_required: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.action_required and self.summary:
+            self.action_required = self.summary
+        elif self.action_required and not self.summary:
+            self.summary = self.action_required
+
+    @property
+    def property_target(self) -> str:
+        return self.property_id
+
+    @property
+    def subject(self) -> str:
+        return self.raw_subject
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+PartnerEmailSignal = PartnerEmailClassification
+
+
+def _extract_candidate_url(text: str) -> str:
+    """Extracts candidate tracking URL (https://...) excluding generic unsubscribe/privacy/support links."""
+    if not text:
+        return ""
+    matches = re.findall(r"https://[^\s\"'<>)\]]+", text)
+    ignore_tokens = (
+        "unsubscribe",
+        "privacy",
+        "support",
+        "help.",
+        "preferences",
+        "optout",
+        "opt-out",
+        "manage-preferences",
+        "terms-of-service",
+    )
+    for raw in matches:
+        cleaned = raw.rstrip(".,;:!?)")
+        low = cleaned.lower()
+        if any(tok in low for tok in ignore_tokens):
+            continue
+        return cleaned
+    return ""
 
 
 class EmailIngestionEngine:
@@ -426,6 +471,7 @@ class EmailIngestionEngine:
             sender_lower = f"{msg.sender_name} {msg.sender_email}".lower()
             body_lower = msg.body_snippet.lower()
             combined_text = f"{subj_lower} {sender_lower} {body_lower}"
+            cand_url = _extract_candidate_url(f"{msg.subject} {msg.body_snippet}")
 
             # 1. Gusto Affiliate Application (Impact.com)
             if "gusto" in combined_text and ("impact.com" in sender_lower or "affiliate" in combined_text):
@@ -447,6 +493,8 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
+                        network="Impact.com",
                     )
                 )
 
@@ -472,6 +520,7 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
                     )
                 )
 
@@ -512,6 +561,7 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
                     )
                 )
 
@@ -534,10 +584,41 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
                     )
                 )
 
-            # 5. Stripe Legal Terms & Services Agreement Update
+            # 5a. Stripe Partner Ecosystem Application Update
+            elif "partner-ecosystem@stripe.com" in sender_lower or "stripe partner ecosystem" in combined_text:
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="stripe",
+                        partner_name="Stripe Partner Ecosystem",
+                        category="TERMS_UPDATE",
+                        classification_type="TERMS_UPDATE",
+                        requires_operator_decision=True,
+                        summary="Complete Stripe Partner Ecosystem technical checklist ($1M volume / Stripe Connect integration) and confirm readiness via confirm-action before activating live tier",
+                        urgency="HIGH",
+                        deadline=None,
+                        missing_requirements=[
+                            "Integrate Stripe Connect and Connect webhooks",
+                            "Reach $1M USD annual processed volume threshold",
+                            "Pass technical integration review (Payment Intents or Checkout Sessions with idempotency keys)",
+                            "Publish partner landing page and verify business domain",
+                        ],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url,
+                        network="In-House Direct",
+                        action_required="Complete Stripe Partner Ecosystem technical checklist ($1M volume / Stripe Connect integration) and confirm readiness via confirm-action before activating live tier",
+                    )
+                )
+
+            # 5b. Stripe Legal Terms & Services Agreement Update
             elif "stripe" in combined_text and ("legal terms" in combined_text or "services agreement" in combined_text):
                 classifications.append(
                     PartnerEmailClassification(
@@ -556,6 +637,42 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
+                        network="In-House Direct",
+                    )
+                )
+
+            # 5c. Startup Ecosystem / Credit Programs (Google for Startups / Claude Startups)
+            elif (
+                "google for startups" in combined_text
+                or "googlecloud@google.com" in sender_lower
+                or "claude startups" in combined_text
+                or "claudestartups@mail.anthropic.com" in sender_lower
+            ):
+                is_claude = "claude" in combined_text or "anthropic" in sender_lower
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="claude_startups" if is_claude else "google_for_startups",
+                        partner_name="Claude Startups Program" if is_claude else "Google for Startups Cloud Program",
+                        category="TERMS_UPDATE",
+                        classification_type="TERMS_UPDATE",
+                        requires_operator_decision=True,
+                        summary="Review startup program application and verify corporate domain email credentials",
+                        urgency="MEDIUM",
+                        deadline=None,
+                        missing_requirements=[
+                            "Verify corporate domain email credentials",
+                            "Complete startup program onboarding application",
+                        ],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url,
+                        network="In-House Direct",
+                        action_required="Review startup program application and verify corporate domain email credentials",
                     )
                 )
 
@@ -578,6 +695,7 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
                     )
                 )
 
@@ -600,6 +718,7 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
                     )
                 )
 
@@ -625,6 +744,7 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
+                        candidate_url=cand_url,
                     )
                 )
 
@@ -661,6 +781,8 @@ class EmailIngestionEngine:
                             raw_subject=msg.subject,
                             sender_email=msg.sender_email,
                             date=msg.date,
+                            candidate_url=cand_url,
+                            network=matched_partner.network,
                         )
                     )
 

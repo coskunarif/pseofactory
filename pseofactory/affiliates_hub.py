@@ -24,16 +24,27 @@ from pseofactory.affiliates import (
     AFFILIATE_REGISTRY,
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
+    PROFITHELM_DISCLOSURES,
+    PREXVO_DISCLOSURES,
     PREXVO_STANDING_RESTRICTION,
     B2B_PARTNER_KEYS,
     STUDENT_LOAN_PARTNER_KEYS,
     PROFITHELM_TOOL_PATTERNS,
     PREXVO_TOOL_PATTERNS,
+    ENTERPRISE_B2B_PARTNERS,
+    RETAIL_TAX_PARTNERS,
+    RETAIL_TAX_SLUGS,
+    COMMERCIAL_B2B_SLUGS,
+    INTENT_ROUTING_TABLE,
     validate_affiliate_url,
     resolve_partner_url,
     get_affiliates_for_property,
     get_affiliate_route,
     _select_partner_for_slug,
+    score_partner_yield,
+    parse_bounty_estimate,
+    is_commercial_b2b_slug,
+    resolve_optimal_partner_for_slug,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -70,6 +81,8 @@ PROFITHELM_DIRECT_SLUGS: Set[str] = {
     "section-1031-calculator",
     "irs-2027-tax-brackets",
     "tcja-sunset-bracket-calculator",
+    "tcja-sunset-capital-gains",
+    "ca-tax-brackets-2026",
     "prediction-market-odds",
     "prediction-market-ev",
     "prediction-market-kelly-criterion",
@@ -108,8 +121,36 @@ class MonetizationHub:
         self._init_sovrn_api_key = sovrn_api_key
         self._init_partnerstack_api_key = partnerstack_api_key
         self._init_stripe_account_id = stripe_account_id
+        self._vault: Dict[str, Dict[str, Any]] = {"profithelm": {}, "prexvo": {}}
 
         self.vault_data = self._load_vault()
+        self._rebuild_partner_vault_index()
+
+    def _rebuild_partner_vault_index(self) -> None:
+        """Populates self._vault[property_id][partner_key] from self.vault_data."""
+        props = self.vault_data.get("properties", {}) if isinstance(self.vault_data, dict) else {}
+        for prop_id in ("profithelm", "prexvo"):
+            prop_map = self._vault.setdefault(prop_id, {})
+            prop_data = props.get(prop_id, {})
+            if not isinstance(prop_data, dict):
+                continue
+            categories = prop_data.get("categories", {})
+            if isinstance(categories, dict):
+                for cat_k, cat_v in categories.items():
+                    if isinstance(cat_v, dict):
+                        pk = cat_v.get("primary_partner")
+                        if pk:
+                            prop_map[pk] = {
+                                "status": cat_v.get("status", ""),
+                                "url": cat_v.get("direct_url", ""),
+                                "direct_url": cat_v.get("direct_url", ""),
+                                "category": cat_k,
+                            }
+            partners = prop_data.get("partners", {})
+            if isinstance(partners, dict):
+                for pk, pv in partners.items():
+                    if isinstance(pv, dict):
+                        prop_map[pk] = dict(pv)
 
     def _load_vault(self) -> Dict[str, Any]:
         """Loads vault JSON or provides fallback defaults."""
@@ -355,10 +396,15 @@ class MonetizationHub:
 
     def sync_partner_program(
         self,
-        network: str,
-        program_data: Dict[str, Any],
+        network: Optional[str] = None,
+        program_data: Optional[Dict[str, Any]] = None,
         property_id: str = "profithelm",
         save: bool = True,
+        *,
+        partner_key: Optional[str] = None,
+        status: Optional[str] = None,
+        url: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Ingests, validates, and records a single partner program in the monetization vault.
@@ -368,6 +414,28 @@ class MonetizationHub:
         prop_clean = (property_id or "").strip().lower()
         if prop_clean not in ("profithelm", "prexvo", "exchange1031"):
             raise ValueError(f"Unknown or unsupported property: '{property_id}'")
+
+        if program_data is None and partner_key is not None:
+            pk_clean = partner_key.strip().lower()
+            p_obj = AFFILIATE_REGISTRY.get(pk_clean)
+            if not category:
+                if prop_clean == "prexvo":
+                    category = "STUDENT_LOAN_REFINANCE"
+                elif pk_clean == "ipx1031":
+                    category = "SECTION_1031_EXCHANGE"
+                elif p_obj:
+                    category = p_obj.category.upper().replace(" ", "_").replace("&", "AND").replace("/", "_")
+                else:
+                    category = "DIRECT_PARTNER"
+            network = network or (p_obj.network if p_obj else "in_house")
+            program_data = {
+                "program_key": pk_clean,
+                "category": category,
+                "direct_url": url or (p_obj.default_url if p_obj else ""),
+                "status": status or "live",
+            }
+
+        network = network or "in_house"
 
         if not isinstance(program_data, dict):
             raise ValueError("program_data must be a dictionary.")
@@ -494,6 +562,14 @@ class MonetizationHub:
         if badge:
             cat_entry["badge"] = badge
 
+        target_vault_prop = "profithelm" if prop_clean == "exchange1031" else prop_clean
+        self._vault.setdefault(target_vault_prop, {})[program_key] = {
+            "status": normalized_status,
+            "url": direct_url,
+            "direct_url": direct_url,
+            "category": category,
+        }
+
         if save:
             self.save_vault()
 
@@ -599,7 +675,12 @@ class MonetizationHub:
         s = (tool_slug or "").strip().lower()
         if not s:
             return False
-        if s in PROFITHELM_DIRECT_SLUGS:
+        if (
+            s in PROFITHELM_DIRECT_SLUGS
+            or s in COMMERCIAL_B2B_SLUGS
+            or s in RETAIL_TAX_SLUGS
+            or is_commercial_b2b_slug(s)
+        ):
             return True
         for p in PROFITHELM_AFFILIATES.values():
             if s in p.target_tools:
@@ -614,6 +695,11 @@ class MonetizationHub:
             "qsbs-section-1202",
             "tcja-sunset",
             "irs-2027",
+            "ca-tax-brackets",
+            "corporate-amt",
+            "r-and-d",
+            "capital-gains",
+            "payroll",
         ):
             if pattern in s:
                 return True
@@ -641,6 +727,7 @@ class MonetizationHub:
         partner_key: Optional[str] = None,
         value_tier: str = "starter",
         fallback_url: Optional[str] = None,
+        calculator_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Resolves affiliate route contract with guaranteed link attributes.
@@ -652,7 +739,9 @@ class MonetizationHub:
             raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
         key_clean = (partner_key or "").strip().lower()
-        slug_clean = (tool_slug or "").strip().lower()
+        slug_clean = (calculator_slug or tool_slug or "").strip().lower()
+        vault_prop_key = "profithelm" if prop_clean == "exchange1031" else prop_clean
+        prop_vault_overrides = dict(self._vault.get(vault_prop_key, {}))
 
         # Strict isolation check for Prexvo
         if prop_clean == "prexvo":
@@ -676,22 +765,35 @@ class MonetizationHub:
                 route = get_affiliate_route(
                     "prexvo", tool_slug=slug_clean, partner_key=key_clean, value_tier=value_tier
                 )
+                partner_obj = PREXVO_AFFILIATES.get(route["partner"])
             else:
                 for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202"):
                     if b2b_token in slug_clean:
                         raise ValueError(
-                            f"Strict isolation violation: Commercial tool '{tool_slug}' is prohibited on Prexvo."
+                            f"Strict isolation violation: Commercial tool '{slug_clean}' is prohibited on Prexvo."
                         )
                 if not self._is_direct_prexvo_tool(slug_clean):
                     raise ValueError(
-                        f"Strict isolation violation: Sub-affiliate fallback is prohibited on Prexvo for unmapped tool '{tool_slug}'. "
+                        f"Strict isolation violation: Sub-affiliate fallback is prohibited on Prexvo for unmapped tool '{slug_clean}'. "
                         f"{PREXVO_STANDING_RESTRICTION}"
                     )
+                partner_obj = resolve_optimal_partner_for_slug(
+                    "prexvo", slug_clean, vault_overrides=prop_vault_overrides
+                )
                 route = get_affiliate_route(
-                    "prexvo", tool_slug=slug_clean, value_tier=value_tier
+                    "prexvo",
+                    tool_slug=slug_clean,
+                    partner_key=partner_obj.key if partner_obj else None,
+                    value_tier=value_tier,
                 )
 
             # Check if vault has active update for Prexvo partner
+            px_override = prop_vault_overrides.get(route["partner"])
+            if isinstance(px_override, dict) and px_override.get("status") in ("active_direct", "live"):
+                ov_url = px_override.get("url") or px_override.get("direct_url")
+                if ov_url:
+                    route["url"] = ov_url
+                    route["status"] = px_override["status"]
             px_categories = self.vault_data.get("properties", {}).get("prexvo", {}).get("categories", {})
             for cat_k, cat_v in px_categories.items():
                 if cat_v.get("primary_partner") == route["partner"]:
@@ -700,8 +802,18 @@ class MonetizationHub:
                         route["status"] = cat_v["status"]
                     break
 
-            assert_no_forbidden_dashes(route["cta_text"], context=f"CTA text for Prexvo route")
-            assert_no_forbidden_dashes(route["name"], context=f"Name for Prexvo route")
+            if partner_obj:
+                route["bounty_est"] = partner_obj.bounty_est
+                route["bounty_score"] = score_partner_yield(partner_obj, route["status"])
+            route["is_live"] = route.get("status") in ("live", "active_direct")
+            route["calculator_slug"] = slug_clean
+            route["partner_name"] = route["name"]
+            route["is_fallback"] = False
+            route["disclosure"] = PREXVO_DISCLOSURES.get("ftc_disclosure", "")
+            route["ymyl_warning"] = PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
+
+            assert_no_forbidden_dashes(route["cta_text"], context="CTA text for Prexvo route")
+            assert_no_forbidden_dashes(route["name"], context="Name for Prexvo route")
             return route
 
         # ProfitHelm / Exchange1031 routing
@@ -714,7 +826,7 @@ class MonetizationHub:
         for sl_token in ("student-loan", "rap-vs-ibr", "pslf"):
             if sl_token in slug_clean:
                 raise ValueError(
-                    f"Strict isolation violation: Student loan tool '{tool_slug}' is prohibited on ProfitHelm."
+                    f"Strict isolation violation: Student loan tool '{slug_clean}' is prohibited on ProfitHelm."
                 )
 
         # Explicit fallback request or unmapped / long-tail tool on ProfitHelm
@@ -735,6 +847,7 @@ class MonetizationHub:
             )
 
         matched_vault_cat = None
+        resolved_optimal_partner: Optional[AffiliatePartner] = None
         if not is_explicit_fallback:
             if key_clean:
                 for cat_k, cat_v in prop_categories.items():
@@ -745,8 +858,11 @@ class MonetizationHub:
                     ):
                         matched_vault_cat = cat_v
                         break
-            elif slug_clean:
-                slug_partner = _select_partner_for_slug(prop_clean, slug_clean)
+            elif slug_clean and self._is_direct_profithelm_tool(slug_clean):
+                resolved_optimal_partner = resolve_optimal_partner_for_slug(
+                    prop_clean, slug_clean, vault_overrides=prop_vault_overrides
+                )
+                slug_partner = resolved_optimal_partner.key if resolved_optimal_partner else _select_partner_for_slug(prop_clean, slug_clean)
                 if slug_partner:
                     for cat_k, cat_v in prop_categories.items():
                         if cat_v.get("primary_partner") == slug_partner:
@@ -770,7 +886,9 @@ class MonetizationHub:
         if is_direct_tool:
             # Direct high-bounty partner resolution
             target_key = key_clean
-            if not target_key and matched_vault_cat and vault_is_active:
+            if not target_key and resolved_optimal_partner:
+                target_key = resolved_optimal_partner.key
+            elif not target_key and matched_vault_cat and vault_is_active:
                 target_key = matched_vault_cat.get("primary_partner")
 
             if target_key and target_key in PROFITHELM_AFFILIATES:
@@ -791,17 +909,24 @@ class MonetizationHub:
                 partner_name = matched_vault_cat.get("name") or (target_key or "Partner").replace("_", " ").title()
                 route = {
                     "property_id": prop_clean,
+                    "calculator_slug": slug_clean,
                     "partner": target_key or "partner",
                     "partner_key": target_key or "partner",
                     "name": partner_name,
+                    "partner_name": partner_name,
                     "url": matched_vault_cat["direct_url"],
                     "cta_text": matched_vault_cat.get("cta_text") or f"Explore {partner_name} Solutions",
                     "rel": "noopener sponsored nofollow",
                     "target": "_blank",
                     "badge": matched_vault_cat.get("badge") or "Verified Partner",
                     "status": matched_vault_cat.get("status", "active_direct"),
+                    "bounty_est": matched_vault_cat.get("bounty", "$100-$300"),
+                    "bounty_score": 200.0,
+                    "is_fallback": False,
                     "tier": value_tier,
                     "disclosure_required": True,
+                    "disclosure": PROFITHELM_DISCLOSURES.get("ftc_disclosure", ""),
+                    "ymyl_warning": "",
                 }
             else:
                 route = get_affiliate_route(
@@ -811,6 +936,14 @@ class MonetizationHub:
                     value_tier=value_tier,
                 )
 
+            # Check direct _vault partner override
+            ov_entry = prop_vault_overrides.get(route["partner"])
+            if isinstance(ov_entry, dict) and ov_entry.get("status") in ("active_direct", "live"):
+                ov_url = ov_entry.get("url") or ov_entry.get("direct_url")
+                if ov_url:
+                    route["url"] = ov_url
+                    route["status"] = ov_entry["status"]
+
             # If matched_vault_cat is active in vault, override url and status
             if vault_is_active and matched_vault_cat:
                 route["url"] = matched_vault_cat["direct_url"]
@@ -819,8 +952,20 @@ class MonetizationHub:
                     route["cta_text"] = matched_vault_cat["cta_text"]
                 if matched_vault_cat.get("name"):
                     route["name"] = matched_vault_cat["name"]
+                    route["partner_name"] = matched_vault_cat["name"]
                 if matched_vault_cat.get("badge"):
                     route["badge"] = matched_vault_cat["badge"]
+
+            partner_obj = PROFITHELM_AFFILIATES.get(route["partner"])
+            if partner_obj:
+                route["bounty_est"] = partner_obj.bounty_est
+                route["bounty_score"] = score_partner_yield(partner_obj, route["status"])
+            route["is_live"] = route.get("status") in ("live", "active_direct")
+            route["calculator_slug"] = slug_clean
+            route["partner_name"] = route["name"]
+            route["is_fallback"] = False
+            route["disclosure"] = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+            route["ymyl_warning"] = ""
 
             assert_no_forbidden_dashes(route["cta_text"], context=f"CTA text for {route['partner']}")
             assert_no_forbidden_dashes(route["name"], context=f"Name for {route['partner']}")
@@ -850,9 +995,11 @@ class MonetizationHub:
 
         return {
             "property_id": prop_clean,
+            "calculator_slug": slug_clean,
             "partner": "sovrn_commerce",
             "partner_key": "sovrn_commerce",
             "name": partner_name,
+            "partner_name": partner_name,
             "url": wrapped_url,
             "target_url": target_destination,
             "cta_text": cta_text,
@@ -860,7 +1007,75 @@ class MonetizationHub:
             "target": "_blank",
             "badge": badge_text,
             "status": "wrapped_fallback",
+            "is_live": False,
+            "bounty_est": "$0",
+            "bounty_score": 0.0,
+            "is_fallback": True,
             "tier": value_tier,
             "provider": "sovrn_commerce",
             "disclosure_required": True,
+            "disclosure": PROFITHELM_DISCLOSURES.get("ftc_disclosure", ""),
+            "ymyl_warning": "",
+        }
+
+    def audit_domain_boundaries(self) -> Dict[str, Any]:
+        """
+        Audits all COMMERCIAL_B2B_SLUGS, RETAIL_TAX_SLUGS, and Prexvo borrower slugs
+        through get_route and verifies strict domain boundary isolation and zero sub-affiliate aggregators.
+        Zero em-dashes. Zero en-dashes.
+        """
+        violations: List[str] = []
+        aggregators = ("sovrn", "viglink", "skimlinks")
+
+        for slug in sorted(COMMERCIAL_B2B_SLUGS):
+            route = self.get_route("profithelm", slug)
+            partner = route.get("partner", "")
+            url_lower = (route.get("url") or "").lower()
+            if partner in RETAIL_TAX_PARTNERS:
+                violations.append(
+                    f"Retail tax partner '{partner}' routed to commercial B2B slug '{slug}'"
+                )
+            if any(agg in url_lower for agg in aggregators):
+                violations.append(
+                    f"Sub-affiliate aggregator detected in commercial B2B route URL for '{slug}': '{route.get('url')}'"
+                )
+
+        for slug in sorted(RETAIL_TAX_SLUGS):
+            route = self.get_route("profithelm", slug)
+            partner = route.get("partner", "")
+            url_lower = (route.get("url") or "").lower()
+            if partner in ENTERPRISE_B2B_PARTNERS:
+                violations.append(
+                    f"Enterprise B2B partner '{partner}' routed to retail tax slug '{slug}'"
+                )
+            if any(agg in url_lower for agg in aggregators):
+                violations.append(
+                    f"Sub-affiliate aggregator detected in retail tax route URL for '{slug}': '{route.get('url')}'"
+                )
+
+        for slug in sorted(PREXVO_DIRECT_SLUGS):
+            route = self.get_route("prexvo", slug)
+            partner = route.get("partner", "")
+            url_lower = (route.get("url") or "").lower()
+            if partner in ENTERPRISE_B2B_PARTNERS or partner in B2B_PARTNER_KEYS:
+                violations.append(
+                    f"Enterprise B2B partner '{partner}' routed to Prexvo borrower slug '{slug}'"
+                )
+            if any(agg in url_lower for agg in aggregators):
+                violations.append(
+                    f"Sub-affiliate aggregator detected in Prexvo route URL for '{slug}': '{route.get('url')}'"
+                )
+
+        for p_key, p_obj in AFFILIATE_REGISTRY.items():
+            url_lower = (p_obj.default_url or "").lower()
+            if any(agg in url_lower for agg in aggregators):
+                violations.append(
+                    f"Sub-affiliate aggregator detected in default URL for partner '{p_key}': '{p_obj.default_url}'"
+                )
+
+        return {
+            "status": "PASS" if not violations else "FAIL",
+            "passed": not violations,
+            "is_clean": not violations,
+            "violations": violations,
         }

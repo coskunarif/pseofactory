@@ -26,6 +26,7 @@ from pseofactory.affiliates import (
     STUDENT_LOAN_PARTNER_KEYS,
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
+    validate_affiliate_url,
 )
 from pseofactory.email_ingest import PartnerEmailClassification
 
@@ -51,9 +52,55 @@ class ActionItem:
     resolved_by: Optional[str] = None
     operator_notes: str = ""
     source_email_id: Optional[str] = None
+    candidate_url: str = ""
+    vault_synced: bool = False
+
+    @property
+    def operator_note(self) -> str:
+        return self.operator_notes
+
+    @property
+    def property(self) -> str:
+        return self.property_id
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    def __getitem__(self, item: str) -> Any:
+        if item == "property":
+            return self.property_id
+        if item == "operator_note":
+            return self.operator_notes
+        return getattr(self, item)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key == "property":
+            self.property_id = value
+        elif key == "operator_note":
+            self.operator_notes = value
+        else:
+            setattr(self, key, value)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        if item == "property":
+            return self.property_id
+        if item == "operator_note":
+            return self.operator_notes
+        return getattr(self, item, default)
+
+    def __contains__(self, item: str) -> bool:
+        if item in ("property", "operator_note"):
+            return True
+        return hasattr(self, item)
+
+    def keys(self):
+        return self.to_dict().keys()
+
+    def values(self):
+        return self.to_dict().values()
+
+    def items(self):
+        return self.to_dict().items()
 
 
 class HumanActionBus:
@@ -62,10 +109,11 @@ class HumanActionBus:
     compliance warnings, and integration readiness gaps.
     """
 
-    def __init__(self, bus_path: Optional[str] = None):
+    def __init__(self, bus_path: Optional[str] = None, hub: Optional[Any] = None):
         self.bus_path = bus_path or os.path.join(
             os.path.dirname(__file__), "..", ".agy", "human_action_bus.json"
         )
+        self.hub = hub
         self._ensure_dir()
         self.items: Dict[str, ActionItem] = self._load()
 
@@ -80,8 +128,10 @@ class HumanActionBus:
                 with open(self.bus_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 items_dict = {}
+                valid_fields = set(ActionItem.__dataclass_fields__.keys())
                 for k, v in data.get("actions", {}).items():
-                    item = ActionItem(**v)
+                    filtered_v = {fk: fv for fk, fv in v.items() if fk in valid_fields}
+                    item = ActionItem(**filtered_v)
                     self._assert_item_invariants(item)
                     items_dict[k] = item
                 return items_dict
@@ -160,12 +210,16 @@ class HumanActionBus:
         safe_type = re.sub(r"[^a-z0-9]+", "-", c.classification_type.lower()).strip("-")
         action_id = f"act-{c.property_id}-{safe_key}-{safe_type}"
 
+        cand_url = getattr(c, "candidate_url", "") or ""
+
         # If already exists, don't revert if resolved, but update email id/date
         if action_id in self.items:
             existing = self.items[action_id]
             existing.updated_at = datetime.now(timezone.utc).isoformat()
             if c.deadline and not existing.deadline:
                 existing.deadline = c.deadline
+            if cand_url and not existing.candidate_url:
+                existing.candidate_url = cand_url
             return existing
 
         title = f"{c.partner_name}: {c.classification_type.replace('_', ' ').title()}"
@@ -186,6 +240,7 @@ class HumanActionBus:
             deadline=c.deadline,
             missing_requirements=list(c.missing_requirements),
             source_email_id=c.email_id,
+            candidate_url=cand_url,
         )
 
         self._assert_item_invariants(item)
@@ -204,6 +259,7 @@ class HumanActionBus:
         severity: str = "MEDIUM",
         deadline: Optional[str] = None,
         missing_requirements: Optional[List[str]] = None,
+        candidate_url: str = "",
     ) -> ActionItem:
         """Creates or updates a manual operator requirement on the action bus."""
         title_clean = title.replace("\u2014", "-").replace("\u2013", "-")
@@ -219,6 +275,8 @@ class HumanActionBus:
             existing.updated_at = datetime.now(timezone.utc).isoformat()
             if deadline and not existing.deadline:
                 existing.deadline = deadline
+            if candidate_url and not existing.candidate_url:
+                existing.candidate_url = candidate_url
             return existing
 
         item = ActionItem(
@@ -234,6 +292,7 @@ class HumanActionBus:
             requires_operator_confirmation=True,
             deadline=deadline,
             missing_requirements=missing_requirements or [],
+            candidate_url=candidate_url,
         )
 
         self._assert_item_invariants(item)
@@ -257,6 +316,8 @@ class HumanActionBus:
         decision: str,
         operator: str = "operator",
         notes: str = "",
+        operator_note: str = "",
+        approved_url: Optional[str] = None,
     ) -> ActionItem:
         """
         Records human operator confirmation on a pending action bus item.
@@ -272,14 +333,31 @@ class HumanActionBus:
                 f"Invalid decision '{decision}'. Must be one of: APPROVE, REJECT, RESOLVE."
             )
 
+        effective_notes = notes or operator_note
         operator_clean = (operator or "operator").strip().replace("\u2014", "-").replace("\u2013", "-")
-        notes_clean = (notes or "").strip().replace("\u2014", "-").replace("\u2013", "-")
+        notes_clean = (effective_notes or "").strip().replace("\u2014", "-").replace("\u2013", "-")
 
         assert_no_forbidden_dashes(operator_clean, context="operator name")
         assert_no_forbidden_dashes(notes_clean, context="operator notes")
 
         if decision_upper == "APPROVE":
             item.status = "APPROVED"
+            url_to_sync = approved_url or item.candidate_url
+            prop_target = (item.property_id or "").strip().lower()
+            p_key = (item.partner_key or "").strip().lower()
+            if url_to_sync and prop_target in ("profithelm", "prexvo"):
+                registry = PROFITHELM_AFFILIATES if prop_target == "profithelm" else PREXVO_AFFILIATES
+                if p_key in registry and validate_affiliate_url(url_to_sync):
+                    from pseofactory.affiliates_hub import MonetizationHub
+                    hub = self.hub or MonetizationHub()
+                    hub.sync_partner_program(
+                        property_id=prop_target,
+                        partner_key=p_key,
+                        status="live",
+                        url=url_to_sync,
+                    )
+                    item.vault_synced = True
+                    item.candidate_url = url_to_sync
         elif decision_upper == "REJECT":
             item.status = "REJECTED"
         elif decision_upper == "RESOLVE":

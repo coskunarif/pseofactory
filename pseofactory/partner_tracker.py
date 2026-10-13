@@ -61,6 +61,19 @@ class PartnerStatusSummary:
     action_bus_title: Optional[str] = None
     last_email_date: Optional[str] = None
     target_tools: List[str] = field(default_factory=list)
+    next_action: str = ""
+
+    @property
+    def partner_key(self) -> str:
+        return self.key
+
+    @property
+    def lifecycle_state(self) -> str:
+        return self.operational_status
+
+    @property
+    def is_live(self) -> bool:
+        return self.is_live_link
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -127,6 +140,7 @@ class PartnerTrackingEngine:
         self.email_engine = email_engine or EmailIngestionEngine()
         self.action_bus = action_bus or HumanActionBus()
         self.monetization_hub = monetization_hub or MonetizationHub()
+        self.hub = self.monetization_hub
 
     def sync_and_evaluate(
         self,
@@ -250,19 +264,42 @@ class PartnerTrackingEngine:
                 class_map[c.partner_key] = c
 
         for p_key, p_obj in affiliates_dict.items():
+            if p_key != p_obj.key:
+                continue
+
             # Check corresponding action item
             act_item = action_map.get(p_key)
             class_item = class_map.get(p_key)
 
             missing_reqs = []
+            effective_status = p_obj.status
             dest_url = p_obj.default_url
+            vault_entry = (
+                self.hub._vault.get(prop_clean, {}).get(p_key)
+                if hasattr(self, "hub") and hasattr(self.hub, "_vault")
+                else None
+            )
+            vault_overridden_live = False
+            if (
+                vault_entry
+                and vault_entry.get("status") in ("live", "active_direct")
+                and validate_affiliate_url(vault_entry.get("url", ""))
+            ):
+                effective_status = "live"
+                dest_url = vault_entry["url"]
+                vault_overridden_live = True
 
-            if act_item and act_item.status == "PENDING_OPERATOR" and getattr(act_item, "severity", "") in ("CRITICAL", "HIGH"):
+            if (
+                not vault_overridden_live
+                and act_item
+                and act_item.status == "PENDING_OPERATOR"
+                and getattr(act_item, "severity", "") in ("CRITICAL", "HIGH")
+            ):
                 op_status = "REQUIRES_FOLLOWUP"
                 followup_count += 1
                 is_live = False
                 missing_reqs.extend(act_item.missing_requirements)
-            elif p_obj.status == "live":
+            elif effective_status == "live":
                 op_status = "LIVE_ACTIVE"
                 live_count += 1
                 is_live = True
@@ -276,7 +313,7 @@ class PartnerTrackingEngine:
                 followup_count += 1
                 is_live = False
                 missing_reqs.extend(act_item.missing_requirements)
-            elif p_obj.status == "pending_p2":
+            elif effective_status == "pending_p2":
                 op_status = "PENDING_P2"
                 pending_exp_count += 1
                 is_live = False
@@ -288,13 +325,19 @@ class PartnerTrackingEngine:
                 is_live = False
                 missing_reqs.append("Approved partner affiliate link and tracking ID")
 
+            next_act = (
+                ""
+                if is_live
+                else f"Run: pseofactory partner-sync --property {prop_clean} --partner {p_obj.key} --status live --url <tracking_url> (after human approval)"
+            )
+
             summary = PartnerStatusSummary(
                 key=p_obj.key,
                 name=p_obj.name,
                 property_id=prop_clean,
                 category=p_obj.category,
                 operational_status=op_status,
-                registry_status=p_obj.status,
+                registry_status=effective_status,
                 network=p_obj.network,
                 bounty_est=p_obj.bounty_est,
                 destination_url=dest_url,
@@ -306,16 +349,28 @@ class PartnerTrackingEngine:
                 action_bus_title=act_item.title if act_item else None,
                 last_email_date=class_item.date if class_item else None,
                 target_tools=list(p_obj.target_tools),
+                next_action=next_act,
             )
             self._assert_summary_invariants(summary)
             partner_summaries.append(summary)
 
         # Include additional partner action items that may not be in initial dictionary (e.g. shopify_partner_account)
+        seen_governance: Set[tuple] = set()
         for act in action_items:
             if act.partner_key not in affiliates_dict:
+                dedup_key = (act.partner_key, act.action_type, act.title)
+                if dedup_key in seen_governance:
+                    continue
+                seen_governance.add(dedup_key)
+
                 op_status = "REQUIRES_FOLLOWUP" if act.status == "PENDING_OPERATOR" else "RESOLVED"
                 if act.status == "PENDING_OPERATOR":
                     followup_count += 1
+                next_act = (
+                    f"Run: pseofactory partner-sync --property {prop_clean} --partner {act.partner_key} --status live --url <tracking_url> (after human approval)"
+                    if act.status == "PENDING_OPERATOR"
+                    else ""
+                )
                 summary = PartnerStatusSummary(
                     key=act.partner_key,
                     name=act.partner_name,
@@ -334,6 +389,7 @@ class PartnerTrackingEngine:
                     action_bus_title=act.title,
                     last_email_date=None,
                     target_tools=[],
+                    next_action=next_act,
                 )
                 self._assert_summary_invariants(summary)
                 partner_summaries.append(summary)

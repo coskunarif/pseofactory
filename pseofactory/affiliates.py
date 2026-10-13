@@ -17,6 +17,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from dataclasses import dataclass, asdict
 import os
+import re
 from typing import Dict, Any, List, Optional, Set, Tuple
 import urllib.parse
 
@@ -48,6 +49,10 @@ class AffiliatePartner:
     @property
     def url(self) -> str:
         return resolve_partner_url(self)
+
+    @property
+    def estimated_bounty(self) -> str:
+        return self.bounty_est
 
     def __getitem__(self, item: str) -> Any:
         if not isinstance(item, str):
@@ -588,6 +593,74 @@ PREXVO_TOOL_PATTERNS: List[str] = [
     "repayment",
 ]
 
+ENTERPRISE_B2B_PARTNERS: Set[str] = {
+    "mercury",
+    "ramp",
+    "rho",
+    "gusto",
+    "rippling",
+    "stripe",
+    "crest_capital",
+    "ipx1031",
+    "exeter1031",
+    "first_american",
+    "equipment_macrs",
+    "first_american_1031",
+}
+
+RETAIL_TAX_PARTNERS: Set[str] = {
+    "turbotax",
+    "taxslayer",
+    "freetaxusa",
+}
+
+RETAIL_TAX_SLUGS: Set[str] = {
+    "irs-2027-tax-brackets",
+    "tcja-sunset-capital-gains",
+    "crypto-tax-calculator",
+    "tcja-sunset-bracket-calculator",
+    "ca-tax-brackets-2026",
+    "prediction-market-tax",
+    "prediction-market-odds",
+}
+
+COMMERCIAL_B2B_SLUGS: Set[str] = {
+    "section-179-calculator",
+    "section-1031-calculator",
+    "saas-runway-calculator",
+    "qsbs-section-1202-tax-calculator",
+    "treasury-yield-calculator",
+}
+
+INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
+    "section-1031": ["ipx1031", "exeter1031", "first_american", "mercury"],
+    "1031": ["ipx1031", "exeter1031", "first_american", "mercury"],
+    "section-179": ["crest_capital", "ramp", "mercury"],
+    "179": ["crest_capital", "ramp", "mercury"],
+    "macrs": ["crest_capital", "ramp", "mercury"],
+    "depreciation": ["crest_capital", "ramp", "mercury"],
+    "equipment": ["crest_capital", "ramp", "mercury"],
+    "treasury": ["interactive_brokers", "public_com", "wealthfront", "mercury"],
+    "yield": ["interactive_brokers", "public_com", "wealthfront", "mercury"],
+    "tbill": ["interactive_brokers", "public_com", "wealthfront"],
+    "qsbs": ["mercury", "interactive_brokers", "wealthfront", "stripe"],
+    "1202": ["mercury", "interactive_brokers", "wealthfront", "stripe"],
+    "corporate-amt": ["mercury", "ramp", "rho", "stripe"],
+    "r-and-d": ["mercury", "ramp", "gusto", "rippling", "stripe"],
+    "runway": ["mercury", "ramp", "rho", "gusto", "rippling", "stripe"],
+    "burn": ["mercury", "ramp", "rho", "stripe"],
+    "saas": ["mercury", "ramp", "rho", "gusto", "rippling", "stripe"],
+    "payroll": ["gusto", "rippling", "mercury", "ramp"],
+    "crypto": ["coinledger", "koinly", "turbotax", "taxslayer"],
+    "capital-gains": ["wealthfront", "interactive_brokers", "turbotax", "taxslayer"],
+    "tax": ["turbotax", "taxslayer", "freetaxusa"],
+    "bracket": ["turbotax", "taxslayer", "freetaxusa"],
+    "tcja": ["turbotax", "taxslayer", "freetaxusa"],
+    "irs": ["turbotax", "taxslayer", "freetaxusa"],
+    "prediction": ["turbotax", "taxslayer", "freetaxusa"],
+    "student-loan": ["splash_financial", "sofi_refi", "earnest", "credible", "laurel_road", "juno"],
+}
+
 
 # ---------------------------------------------------------------------------
 # URL Validation & Parameter Encoding Engine
@@ -746,42 +819,261 @@ def get_affiliates_for_property(property_id: str) -> Dict[str, AffiliatePartner]
 
 
 # ---------------------------------------------------------------------------
-# Dynamic Route Resolver
+# Yield Scoring & Dynamic Route Resolver
 # ---------------------------------------------------------------------------
+
+def parse_bounty_estimate(bounty_str: str) -> Dict[str, float]:
+    """
+    Parses a bounty estimate string into numeric min, max, midpoint, and revshare flag.
+    If dollar amounts ($) are present, extracts numeric dollar values.
+    If only percentage numbers (%) are present, computes expected dollar value by multiplying percentage points by 2.0.
+    Zero em-dashes. Zero en-dashes.
+    """
+    s = str(bounty_str or "").strip()
+    is_revshare = 1.0 if "revshare" in s.lower() else 0.0
+
+    dollar_matches = [
+        float(m.replace(",", ""))
+        for m in re.findall(r"\$\s*([\d,]+(?:\.\d+)?)", s)
+    ]
+    if dollar_matches:
+        min_val = float(min(dollar_matches))
+        max_val = float(max(dollar_matches))
+        midpoint = (min_val + max_val) / 2.0
+        return {
+            "min": min_val,
+            "max": max_val,
+            "midpoint": midpoint,
+            "is_revshare": is_revshare,
+        }
+
+    pct_matches = [
+        float(m.replace(",", ""))
+        for m in re.findall(r"([\d,]+(?:\.\d+)?)\s*%", s)
+    ]
+    if pct_matches:
+        min_val = float(min(pct_matches)) * 2.0
+        max_val = float(max(pct_matches)) * 2.0
+        midpoint = (min_val + max_val) / 2.0
+        return {
+            "min": min_val,
+            "max": max_val,
+            "midpoint": midpoint,
+            "is_revshare": is_revshare,
+        }
+
+    plain_matches = [
+        float(m.replace(",", ""))
+        for m in re.findall(r"([\d,]+(?:\.\d+)?)", s)
+    ]
+    if plain_matches:
+        min_val = float(min(plain_matches))
+        max_val = float(max(plain_matches))
+        midpoint = (min_val + max_val) / 2.0
+        return {
+            "min": min_val,
+            "max": max_val,
+            "midpoint": midpoint,
+            "is_revshare": is_revshare,
+        }
+
+    return {
+        "min": 0.0,
+        "max": 0.0,
+        "midpoint": 0.0,
+        "is_revshare": is_revshare,
+    }
+
+
+def score_partner_yield(partner: AffiliatePartner, vault_status: Optional[str] = None) -> float:
+    """
+    Scores expected yield of an affiliate partner weighted by operational status.
+    Zero em-dashes. Zero en-dashes.
+    """
+    effective_status = (vault_status or partner.status or "").strip().lower()
+    if effective_status in ("live", "active_direct"):
+        weight = 1.0
+    elif effective_status == "pending":
+        weight = 0.35
+    elif effective_status == "pending_expansion":
+        weight = 0.25
+    elif effective_status == "pending_p2":
+        weight = 0.15
+    else:
+        weight = 0.0
+    midpoint = parse_bounty_estimate(partner.bounty_est)["midpoint"]
+    return round(midpoint * weight, 4)
+
+
+def is_commercial_b2b_slug(slug: str) -> bool:
+    """Determines whether a calculator slug belongs to the commercial B2B cluster."""
+    s = (slug or "").strip().lower()
+    if not s:
+        return False
+    if s in COMMERCIAL_B2B_SLUGS:
+        return True
+    if s in RETAIL_TAX_SLUGS:
+        return False
+    b2b_tokens = (
+        "section-1031",
+        "1031",
+        "section-179",
+        "179",
+        "macrs",
+        "depreciation",
+        "equipment",
+        "treasury",
+        "yield",
+        "tbill",
+        "qsbs",
+        "1202",
+        "corporate-amt",
+        "r-and-d",
+        "runway",
+        "burn",
+        "saas",
+        "payroll",
+    )
+    return any(tok in s for tok in b2b_tokens)
+
+
+def _extract_partner_vault_status(
+    partner_key: str,
+    vault_overrides: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    if not vault_overrides or not isinstance(vault_overrides, dict):
+        return None
+    direct_entry = vault_overrides.get(partner_key)
+    if isinstance(direct_entry, dict):
+        st = direct_entry.get("status") or direct_entry.get("state")
+        if st:
+            return str(st).strip().lower()
+    categories = vault_overrides.get("categories")
+    if isinstance(categories, dict):
+        for cat_v in categories.values():
+            if isinstance(cat_v, dict) and cat_v.get("primary_partner") == partner_key:
+                st = cat_v.get("status") or cat_v.get("state")
+                if st:
+                    return str(st).strip().lower()
+    for val in vault_overrides.values():
+        if isinstance(val, dict) and val.get("primary_partner") == partner_key:
+            st = val.get("status") or val.get("state")
+            if st:
+                return str(st).strip().lower()
+    return None
+
+
+def resolve_optimal_partner_for_slug(
+    property_id: str,
+    slug: str,
+    vault_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[AffiliatePartner]:
+    """
+    Resolves the optimal affiliate partner for a property and calculator slug,
+    enforcing domain boundaries and prioritizing highest-yielding live partners.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "").strip().lower()
+    s = (slug or "").strip().lower()
+
+    if prop == "prexvo":
+        candidates: List[AffiliatePartner] = []
+        for k, p in PREXVO_AFFILIATES.items():
+            if k == p.key and k not in ENTERPRISE_B2B_PARTNERS and k not in B2B_PARTNER_KEYS:
+                candidates.append(p)
+        live_candidates: List[Tuple[AffiliatePartner, str]] = []
+        for p in candidates:
+            ov_status = _extract_partner_vault_status(p.key, vault_overrides)
+            eff_status = (ov_status or p.status or "").strip().lower()
+            if eff_status in ("live", "active_direct"):
+                live_candidates.append((p, eff_status))
+        if live_candidates:
+            best = max(live_candidates, key=lambda item: score_partner_yield(item[0], item[1]))
+            return best[0]
+        return PREXVO_AFFILIATES.get("splash_financial")
+
+    if prop in ("profithelm", "exchange1031"):
+        matched_bucket_name = "tax"
+        if "section-1031" in s or "1031" in s:
+            matched_bucket_name = "section-1031"
+        elif any(t in s for t in ("section-179", "179", "macrs", "depreciation", "equipment")):
+            matched_bucket_name = "section-179"
+        elif any(t in s for t in ("treasury", "yield", "tbill")):
+            matched_bucket_name = "treasury"
+        elif any(t in s for t in ("qsbs", "1202")):
+            matched_bucket_name = "qsbs"
+        elif "corporate-amt" in s:
+            matched_bucket_name = "corporate-amt"
+        elif "r-and-d" in s:
+            matched_bucket_name = "r-and-d"
+        elif any(t in s for t in ("runway", "burn", "saas")):
+            matched_bucket_name = "runway"
+        elif "payroll" in s:
+            matched_bucket_name = "payroll"
+        elif any(t in s for t in ("crypto", "token", "staking")):
+            matched_bucket_name = "crypto"
+        elif "capital-gains" in s:
+            matched_bucket_name = "capital-gains"
+        elif any(t in s for t in ("tax", "bracket", "tcja", "irs", "prediction")):
+            matched_bucket_name = "tax"
+        elif any(t in s for t in ("odds", "arbitrage", "kalshi", "kelly", "ev", "vig", "break-even")):
+            matched_bucket_name = "prediction"
+
+        raw_keys = INTENT_ROUTING_TABLE.get(matched_bucket_name, ["turbotax", "taxslayer", "freetaxusa"])
+        is_b2b = is_commercial_b2b_slug(s)
+        is_retail = (s in RETAIL_TAX_SLUGS) or (not is_b2b)
+
+        candidates = []
+        seen_keys: Set[str] = set()
+        for k in raw_keys:
+            if k not in PROFITHELM_AFFILIATES:
+                continue
+            p = PROFITHELM_AFFILIATES[k]
+            if p.key in seen_keys:
+                continue
+            if is_b2b and p.key in RETAIL_TAX_PARTNERS:
+                continue
+            if is_retail and p.key in ENTERPRISE_B2B_PARTNERS:
+                continue
+            seen_keys.add(p.key)
+            candidates.append(p)
+
+        if not candidates:
+            fallback_key = "mercury" if is_b2b else "turbotax"
+            return PROFITHELM_AFFILIATES.get(fallback_key)
+
+        live_candidates = []
+        explicit_vault_live_keys: Set[str] = set()
+        for p in candidates:
+            ov_status = _extract_partner_vault_status(p.key, vault_overrides)
+            if ov_status in ("live", "active_direct"):
+                explicit_vault_live_keys.add(p.key)
+            eff_status = (ov_status or p.status or "").strip().lower()
+            if eff_status in ("live", "active_direct"):
+                live_candidates.append((p, eff_status))
+
+        if live_candidates:
+            if matched_bucket_name == "crypto":
+                for p, eff_st in live_candidates:
+                    if p.key == "coinledger" and not (explicit_vault_live_keys - {"coinledger"}):
+                        return p
+            best = max(live_candidates, key=lambda item: score_partner_yield(item[0], item[1]))
+            return best[0]
+
+        return candidates[0]
+
+    return None
+
+
+def get_profithelm_partner_for_slug(slug: str) -> Optional[AffiliatePartner]:
+    """Resolves the optimal ProfitHelm AffiliatePartner for a calculator slug."""
+    return resolve_optimal_partner_for_slug("profithelm", slug)
+
 
 def _select_partner_for_slug(property_id: str, slug: str) -> str:
     """Internal helper to match a tool slug to default partner key."""
-    s = (slug or "").lower().strip()
-    if property_id in ("profithelm", "exchange1031"):
-        if "179" in s or "macrs" in s:
-            return "crest_capital"
-        if "crypto" in s or "token" in s or "staking" in s:
-            return "coinledger"
-        if "saas" in s or "runway" in s:
-            return "mercury"
-        if "1031" in s:
-            return "ipx1031"
-        if (
-            "arbitrage" in s
-            or "prediction" in s
-            or "odds" in s
-            or "kalshi" in s
-            or "kelly" in s
-            or "ev" in s
-            or "vig" in s
-            or "break-even" in s
-        ):
-            return "kalshi"
-        if "treasury" in s or "yield" in s:
-            return "interactive_brokers"
-        if "qsbs" in s or "1202" in s:
-            return "rho"
-        if "tax" in s or "tcja" in s or "bracket" in s:
-            return "turbotax"
-        return "turbotax"
-    elif property_id == "prexvo":
-        return "splash_financial"
-    return ""
+    partner = resolve_optimal_partner_for_slug(property_id, slug)
+    return partner.key if partner else ""
 
 
 def get_affiliate_route(
@@ -802,6 +1094,7 @@ def get_affiliate_route(
         raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
     selected_key = (partner_key or "").strip().lower()
+    slug_clean = (tool_slug or "").strip().lower()
 
     # Property boundary checks when partner_key is provided
     if selected_key:
@@ -825,7 +1118,6 @@ def get_affiliate_route(
                 )
     else:
         # Slug boundary validation and auto-selection
-        slug_clean = (tool_slug or "").strip().lower()
         if prop_clean == "prexvo":
             for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202"):
                 if b2b_token in slug_clean:
@@ -901,19 +1193,37 @@ def get_affiliate_route(
     assert_no_forbidden_dashes(partner_obj.name, context=f"Partner name for {partner_obj.key}")
     assert_no_forbidden_dashes(partner_obj.badge, context=f"Badge for {partner_obj.key}")
 
+    disclosure_text = (
+        PREXVO_DISCLOSURES.get("ftc_disclosure", "")
+        if prop_clean == "prexvo"
+        else PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+    )
+    ymyl_warning = (
+        PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
+        if prop_clean == "prexvo"
+        else ""
+    )
+
     return {
         "property_id": prop_clean,
+        "calculator_slug": slug_clean,
         "partner": partner_obj.key,
         "partner_key": partner_obj.key,
         "name": partner_obj.name,
+        "partner_name": partner_obj.name,
         "url": resolved_url,
         "cta_text": cta_text,
         "rel": "noopener sponsored nofollow",
         "target": "_blank",
         "badge": partner_obj.badge,
         "status": partner_obj.status,
+        "bounty_est": partner_obj.bounty_est,
+        "bounty_score": score_partner_yield(partner_obj, partner_obj.status),
+        "is_fallback": False,
         "tier": value_tier,
         "disclosure_required": True,
+        "disclosure": disclosure_text,
+        "ymyl_warning": ymyl_warning,
     }
 
 
