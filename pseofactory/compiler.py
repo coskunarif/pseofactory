@@ -484,6 +484,18 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     faq_json_str = json.dumps(faq_entities, ensure_ascii=False, indent=6)
 
+    faq_accordions_list = []
+    for faq_item in faq_entities:
+        q_text = faq_item.get("name", "")
+        a_text = faq_item.get("acceptedAnswer", {}).get("text", "")
+        faq_accordions_list.append(
+            f'      <details class="faq-accordion">\n'
+            f'        <summary>{q_text}</summary>\n'
+            f'        <p>{a_text}</p>\n'
+            f'      </details>'
+        )
+    faq_accordions_html = "\n".join(faq_accordions_list)
+
     dynamic_return_js = f"return {published_output};"
     if formula:
         try:
@@ -496,103 +508,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             dynamic_return_js = f"return {published_output};"
 
-    if is_prexvo:
-        calc_js_body = f"""      var balance = inputs.balance || inputs.principal || inputs.loan_amount || 35000;
-      var rate = (inputs.rate || inputs.interest_rate || 6.5) / 100;
-      var income = inputs.income || inputs.agi || 55000;
-      var povertyLine = inputs.poverty_line || 15060;
-
-      if (slug.indexOf("rap") !== -1) {{
-        var discretionary = Math.max(0, income - (2.25 * povertyLine));
-        return Math.round(((discretionary * 0.05) / 12) * 100) / 100;
-      }}
-      if (slug.indexOf("ibr") !== -1) {{
-        var discIbr = Math.max(0, income - (1.50 * povertyLine));
-        return Math.round(((discIbr * 0.10) / 12) * 100) / 100;
-      }}
-      if (slug.indexOf("forgiveness") !== -1 || slug.indexOf("qualifying") !== -1) {{
-        return inputs.qualifying_payments ? Math.max(0, 120 - inputs.qualifying_payments) : 120;
-      }}
-      if (slug.indexOf("interest-subsidy") !== -1) {{
-        var monthlyInterest = (balance * rate) / 12;
-        var monthlyPay = Math.max(0, (Math.max(0, income - 2.25 * povertyLine) * 0.05) / 12);
-        return Math.max(0, Math.round((monthlyInterest - monthlyPay) * 100) / 100);
-      }}
-      if (slug.indexOf("loan") === -1 && slug.indexOf("student") === -1 && slug.indexOf("repayment") === -1) {{
-        {dynamic_return_js}
-      }}
-      var monthlyRate = rate / 12;
-      var nMonths = 120;
-      if (monthlyRate === 0) return balance / nMonths;
-      var monthlyPmt = (balance * monthlyRate * Math.pow(1 + monthlyRate, nMonths)) / (Math.pow(1 + monthlyRate, nMonths) - 1);
-      return Math.round(monthlyPmt * 100) / 100;"""
-    else:
-      calc_js_body = f"""      if (slug === "prediction-market-kalshi-fees" || slug.indexOf("kalshi-fee") !== -1) {{
-        var contracts = inputs.contracts || inputs.volume || 100;
-        var p = inputs.probability || inputs.price || inputs.p || 0.5;
-        if (p > 1) p = p / 100;
-        return Math.ceil(0.07 * contracts * p * (1 - p) * 100) / 100;
-      }}
-      if (slug === "prediction-market-ev" || slug.indexOf("ev-") !== -1 || slug.indexOf("-ev") !== -1) {{
-        var pWin = inputs.prob_win || inputs.probability || inputs.p || 0.5;
-        if (pWin > 1) pWin = pWin / 100;
-        var stake = inputs.stake || inputs.capital || 100;
-        var payout = inputs.payout || inputs.win_payout || 100;
-        return (pWin * payout) - ((1 - pWin) * stake);
-      }}
-      if (slug === "prediction-market-kelly-criterion" || slug.indexOf("kelly") !== -1) {{
-        var p = inputs.probability || inputs.prob_win || 0.55;
-        if (p > 1) p = p / 100;
-        var b = inputs.odds || inputs.net_odds || 1.0;
-        var q = 1 - p;
-        var f = b > 0 ? (b * p - q) / b : 0;
-        return Math.max(0, Math.round(f * 10000) / 100);
-      }}
-      if (slug === "prediction-market-implied-probability" || slug.indexOf("implied-prob") !== -1) {{
-        var price = inputs.price || inputs.cents || 50;
-        if (price > 1) return Math.min(100, Math.max(0, price));
-        return Math.min(100, Math.max(0, price * 100));
-      }}
-      if (slug === "prediction-market-arbitrage" || slug.indexOf("arbitrage") !== -1) {{
-        var yesPrice = inputs.yes_price || inputs.yes || 52;
-        var noPrice = inputs.no_price || inputs.no || 44;
-        if (yesPrice > 1) yesPrice = yesPrice / 100;
-        if (noPrice > 1) noPrice = noPrice / 100;
-        var spread = 1.0 - (yesPrice + noPrice);
-        return Math.round(spread * 10000) / 100;
-      }}
-      if (slug === "prediction-market-vig-spread" || slug.indexOf("vig-spread") !== -1) {{
-        var y = inputs.yes || inputs.yes_price || 53;
-        var n = inputs.no || inputs.no_price || 51;
-        if (y > 1) y = y / 100;
-        if (n > 1) n = n / 100;
-        var totalImplied = y + n;
-        var vig = totalImplied > 1 ? (totalImplied - 1) * 100 : 0;
-        return Math.round(vig * 100) / 100;
-      }}
-      if (slug === "prediction-market-break-even" || slug.indexOf("break-even") !== -1) {{
-        var cost = inputs.cost || inputs.price || 55;
-        var fee = inputs.fee || 2;
-        return cost + fee;
-      }}
-      if (slug === "prediction-market-tax" || slug.indexOf("sec1256") !== -1) {{
-        var gain = inputs.pmgain || inputs.gain || inputs.capital_gain || 10000;
-        var rate60 = inputs.rate_lt || 0.20;
-        var rate40 = inputs.rate_st || 0.37;
-        return (gain * 0.60 * rate60) + (gain * 0.40 * rate40);
-      }}
-      if (slug.indexOf("179") !== -1) {{
-        var cost = inputs.cost || inputs.investment || 0;
-        var cap = inputs.cap || 1220000;
-        var phaseout = inputs.phaseout || 3050000;
-        return Math.max(0, Math.min(cost, cap) - Math.max(0, cost - phaseout));
-      }}
-      if (slug.indexOf("runway") !== -1) {{
-        var cash = inputs.cash || inputs.capital || 100000;
-        var burn = inputs.burn || inputs.monthly_burn || 10000;
-        return burn > 0 ? Math.round((cash / burn) * 10) / 10 : 0;
-      }}
-      {dynamic_return_js}"""
+    calc_js_body = f"""      {dynamic_return_js}"""
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -946,6 +862,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </p>
     </section>
 
+    <section class="faq-section card">
+      <h2>Frequently Asked Questions</h2>
+{faq_accordions_html}
+    </section>
+
     <nav class="cluster-nav card" aria-label="{cluster_title}">
       <h2>{cluster_title}</h2>
       <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
@@ -1039,6 +960,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     }}
 
     syncInputsFromParams();
+    handleRecompute();
     form.addEventListener("input", handleRecompute);
     form.addEventListener("change", handleRecompute);
     form.addEventListener("submit", function(e) {{

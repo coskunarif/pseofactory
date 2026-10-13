@@ -51,6 +51,7 @@ class PreflightURLRecord:
     robots_allowed: bool = True
     word_count: int = 0
     has_early_answer: bool = False
+    has_viewport: bool = True
     issues: List[str] = field(default_factory=list)
     content_sha256: Optional[str] = None
 
@@ -107,6 +108,8 @@ class IndexingPreflightEngine:
         min_words: int = 150,
         tier1_cap: int = 150,
         live: bool = False,
+        require_viewport: bool = False,
+        fail_closed: bool = False,
     ):
         self.domain = domain.lower().strip()
         self.property_id = property_id.lower().strip()
@@ -114,6 +117,8 @@ class IndexingPreflightEngine:
         self.min_words = min_words
         self.tier1_cap = tier1_cap
         self.live = live
+        self.require_viewport = require_viewport
+        self.fail_closed = fail_closed
 
         self._memo_cache = IndexingPreflightEngine._memo_cache
         self._file_cache = self._memo_cache
@@ -319,6 +324,7 @@ class IndexingPreflightEngine:
         robots_allowed = True
         word_count = 0
         has_early_answer = False
+        has_viewport = True
         content_hash: Optional[str] = None
 
         # ---------------------------------------------------------
@@ -398,6 +404,24 @@ class IndexingPreflightEngine:
                 else:
                     return self.inspect_file(found_file, url=url)
 
+        # Soft 404 detection: HTTP 200 responses with body text indicating 'not found' or 'discontinued'
+        if status == PreflightStatus.PASS and http_status_code == 200:
+            body_check = ""
+            if html_content:
+                body_check = html_content
+            elif fixture_record:
+                body_check = str(
+                    fixture_record.get("body")
+                    or fixture_record.get("body_text")
+                    or fixture_record.get("html")
+                    or fixture_record.get("content")
+                    or ""
+                )
+            if body_check:
+                if re.search(r'\b(not found|discontinued|404 not found|page not found)\b', body_check, re.IGNORECASE):
+                    status = PreflightStatus.BLOCKED_404
+                    issues.append("Soft 404 detected: HTTP 200 response contains 'not found' or 'discontinued' text")
+
         # ---------------------------------------------------------
         # Stage 3: Canonical & Edge Directives
         # ---------------------------------------------------------
@@ -434,36 +458,45 @@ class IndexingPreflightEngine:
 
             elif html_content:
                 soup = BeautifulSoup(html_content, "html.parser")
-                c_tag = soup.find("link", rel=lambda r: r and "canonical" in r)
-                tag_canonical = c_tag.get("href").strip() if c_tag and c_tag.get("href") else None
-                canonical_url = tag_canonical
-
-                # Edge header Link check
-                link_hdr = edge_headers.get("link", "")
-                header_canonical = None
-                if link_hdr:
-                    m = re.search(r'<([^>]+)>;\s*rel="canonical"', link_hdr, re.I)
-                    if m:
-                        header_canonical = m.group(1).strip()
-
-                if not tag_canonical:
+                canonical_tags = soup.find_all("link", rel=lambda r: r and "canonical" in r)
+                if len(canonical_tags) != 1:
                     status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
                     canonical_match = False
-                    issues.append("Missing <link rel=\"canonical\"> tag in HTML")
-                elif not tag_canonical.startswith("https://"):
-                    status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
-                    canonical_match = False
-                    issues.append(f"Canonical URL is not absolute HTTPS: {tag_canonical}")
-                elif tag_canonical != url:
-                    status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
-                    canonical_match = False
-                    issues.append(f"Canonical tag points to {tag_canonical} (expected {url})")
-                elif header_canonical and header_canonical != tag_canonical:
-                    status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
-                    canonical_match = False
-                    issues.append(f"Edge Link canonical header divergence: {header_canonical} != {tag_canonical}")
+                    if len(canonical_tags) == 0:
+                        issues.append('Missing <link rel="canonical"> tag in HTML')
+                    else:
+                        issues.append(f"Multiple canonical tags detected: {len(canonical_tags)} tags found (expected exactly 1)")
                 else:
-                    canonical_match = True
+                    c_tag = canonical_tags[0]
+                    tag_canonical = c_tag.get("href").strip() if c_tag and c_tag.get("href") else None
+                    canonical_url = tag_canonical
+
+                    # Edge header Link check
+                    link_hdr = edge_headers.get("link", "")
+                    header_canonical = None
+                    if link_hdr:
+                        m = re.search(r'<([^>]+)>;\s*rel="canonical"', link_hdr, re.I)
+                        if m:
+                            header_canonical = m.group(1).strip()
+
+                    if not tag_canonical:
+                        status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
+                        canonical_match = False
+                        issues.append('Missing <link rel="canonical"> tag in HTML')
+                    elif not tag_canonical.startswith("https://"):
+                        status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
+                        canonical_match = False
+                        issues.append(f"Canonical URL is not absolute HTTPS: {tag_canonical}")
+                    elif tag_canonical != url:
+                        status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
+                        canonical_match = False
+                        issues.append(f"Canonical tag points to {tag_canonical} (expected {url})")
+                    elif header_canonical and header_canonical != tag_canonical:
+                        status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
+                        canonical_match = False
+                        issues.append(f"Edge Link canonical header divergence: {header_canonical} != {tag_canonical}")
+                    else:
+                        canonical_match = True
 
             else:
                 canonical_url = url
@@ -588,9 +621,24 @@ class IndexingPreflightEngine:
                         status = PreflightStatus.BLOCKED_THIN_CONTENT
                         issues.append("Missing early direct answer block (.quick-answer or .answer-box)")
 
+                # Viewport meta tag verification
+                viewport_tag = soup.find("meta", attrs={"name": re.compile(r"^viewport$", re.I)})
+                has_viewport = bool(
+                    viewport_tag
+                    and "width=device-width" in viewport_tag.get("content", "").lower()
+                )
+                if not has_viewport:
+                    issues.append('Missing or invalid mobile viewport meta tag: expected <meta name="viewport" content="width=device-width, initial-scale=1.0">')
+                    if self.require_viewport:
+                        status = PreflightStatus.BLOCKED_THIN_CONTENT
+
             else:
-                word_count = 300
-                has_early_answer = True
+                word_count = 0
+                has_early_answer = False
+                has_viewport = False
+                if self.fail_closed:
+                    status = PreflightStatus.BLOCKED_THIN_CONTENT
+                    issues.append("Missing HTML content for content quality verification; fail-closed without mock fallbacks")
 
         # ---------------------------------------------------------
         # Stage 6: Multi-tier Partitioning
@@ -608,6 +656,7 @@ class IndexingPreflightEngine:
             robots_allowed=robots_allowed,
             word_count=word_count,
             has_early_answer=has_early_answer,
+            has_viewport=has_viewport,
             issues=issues,
             content_sha256=content_hash,
         )

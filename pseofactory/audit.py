@@ -458,7 +458,7 @@ def audit_rendered_asset(
     # -------------------------------------------------------------
     g7_ok = True
     # Format strings {[a-zA-Z0-9_]+}
-    fmt_matches = re.findall(r'\{[a-zA-Z0-9_]+\}', html_content)
+    fmt_matches = re.findall(r'\{\s*[a-zA-Z0-9_]+\s*\}', html_content)
     if fmt_matches:
         g7_ok = False
         violations.append(f"Gate 7 (Template Leakage): Unrendered format strings detected: {fmt_matches}")
@@ -482,6 +482,9 @@ def audit_rendered_asset(
     if re.search(r'\bnull\b', no_scripts_text):
         g7_ok = False
         violations.append("Gate 7 (Template Leakage): Rendered HTML contains uninitialized null text")
+    if re.search(r'\bNaN\b', no_scripts_text):
+        g7_ok = False
+        violations.append("Gate 7 (Template Leakage): Rendered HTML contains uninitialized NaN text outside script tags")
     gate_results["template_leakage_free"] = g7_ok
 
     # -------------------------------------------------------------
@@ -551,6 +554,21 @@ def audit_rendered_asset(
                     violations.append(
                         f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote formula '{formula}'"
                     )
+                for q_item in main_entity:
+                    if isinstance(q_item, dict):
+                        q_name = q_item.get("name", "").strip()
+                        ans_obj = q_item.get("acceptedAnswer", {})
+                        a_ans = ans_obj.get("text", "").strip() if isinstance(ans_obj, dict) else ""
+                        if q_name and q_name not in no_scripts_text:
+                            g9_ok = False
+                            violations.append(
+                                f"Gate 9 (Schema.org): FAQPage question '{q_name}' not found in visible HTML body"
+                            )
+                        if a_ans and a_ans not in no_scripts_text:
+                            g9_ok = False
+                            violations.append(
+                                "Gate 9 (Schema.org): FAQPage acceptedAnswer text not found in visible HTML body"
+                            )
         if not has_app:
             g9_ok = False
             violations.append("Gate 9 (Schema.org): Missing SoftwareApplication JSON-LD block")
