@@ -287,21 +287,51 @@ CONVERSATIONAL_FILLER_TERMS: List[str] = [
 
 def assert_youtube_transcript(
     text_or_data: Union[str, Dict[str, Any]],
-    brand_name: str = "ProfitHelm",
+    brand_name: Optional[str] = None,
+    property_id: Optional[str] = None,
 ) -> bool:
     """
     Validates YouTube video transcript for SEO syndication and AI citation:
     1. Bounds: 300 to 8000 characters.
-    2. Zero forbidden dashes (\\u2014, \\u2013).
-    3. Zero angle brackets (<, >) preventing API parsing errors.
-    4. Zero prompt leakage phrases.
-    5. Zero conversational filler terms.
-    6. Speaker attribution tags (e.g. [Narrator] or [Host]).
-    7. Timestamp markers (e.g. [00:00]).
-    8. Brand entity reference (dynamic brand_name).
+    2. Zero forbidden dashes (\u2014, \u2013).
+    3. Zero personal attribution.
+    4. Zero angle brackets (<, >) preventing API parsing errors.
+    5. Zero prompt leakage phrases.
+    6. Zero conversational filler terms.
+    7. Speaker attribution tags (e.g. [Narrator] or [Host]).
+    8. Timestamp markers (e.g. [00:00]).
+    9. Brand entity reference (dynamic brand_name/property_id).
+    10. 40-60 word extractable passage constraints for structured segment data.
     """
+    if property_id and not brand_name:
+        brand_name = "Prexvo" if property_id.lower() == "prexvo" else "ProfitHelm"
+    if not brand_name:
+        brand_name = "ProfitHelm"
+    elif brand_name.lower() == "prexvo":
+        brand_name = "Prexvo"
+    elif brand_name.lower() == "profithelm":
+        brand_name = "ProfitHelm"
+
     if isinstance(text_or_data, dict):
         text = text_or_data.get("full_text") or text_or_data.get("transcript") or ""
+        segments = text_or_data.get("segments") or (text_or_data.get("transcript_data") or {}).get("segments")
+        if isinstance(segments, list) and segments:
+            for i, seg in enumerate(segments):
+                candidates = [
+                    seg.get("extractable_passage"),
+                    seg.get("spoken_script"),
+                    seg.get("citable_passage"),
+                ]
+                valid_passage = None
+                for cand in candidates:
+                    if cand and isinstance(cand, str) and 40 <= len(cand.split()) <= 60:
+                        valid_passage = cand
+                        break
+                if not valid_passage:
+                    valid_passage = seg.get("spoken_script") or seg.get("citable_passage") or seg.get("extractable_passage") or ""
+                assert_quick_answer_passage_relevance(valid_passage, context=f"transcript segment {i}")
+                assert_no_forbidden_dashes(valid_passage, context=f"transcript segment {i}")
+                assert_no_personal_attribution(valid_passage, context=f"transcript segment {i}")
     elif isinstance(text_or_data, str):
         text = text_or_data
     else:
@@ -313,6 +343,7 @@ def assert_youtube_transcript(
         raise ValueError(f"YouTube transcript exceeds 8000 characters ({len(text)} chars, max 8000)")
 
     assert_no_forbidden_dashes(text, context="YouTube transcript")
+    assert_no_personal_attribution(text, context="YouTube transcript")
 
     if "<" in text or ">" in text:
         raise ValueError("Angle brackets (< or >) are forbidden in YouTube transcript")

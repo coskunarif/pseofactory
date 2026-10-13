@@ -1305,6 +1305,82 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
 ]
 
 
+PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
+    {
+        "slug": "irs-2027-tax-brackets",
+        "title": "IRS 2027 Tax Brackets & TCJA Sunset Calculator 2027",
+        "short_title": "IRS 2027 Tax Brackets",
+        "description": "Calculate your federal income tax bracket, statutory marginal rates (10% to 37%), and compare against post-TCJA sunset scenarios.",
+        "primary_keyword": "irs 2027 tax bracket projections",
+        "category": "Tax Intelligence",
+    },
+    {
+        "slug": "crypto-tax-calculator",
+        "title": "Crypto Tax Liability & Capital Gains Calculator 2027",
+        "short_title": "Crypto Tax Calculator",
+        "description": "Compute estimated federal and state capital gains liabilities on crypto trades, staking yield, and DeFi transfers.",
+        "primary_keyword": "crypto tax calculator 2027",
+        "category": "Digital Assets",
+    },
+    {
+        "slug": "saas-runway-calculator",
+        "title": "SaaS Cash Runway & Net Burn Rate Calculator Engine",
+        "short_title": "SaaS Runway Calculator",
+        "description": "Interactive runway projection model for tech startups, factoring net monthly burn, revenue CAGR, and hiring cohorts.",
+        "primary_keyword": "saas burn rate runway calculator",
+        "category": "Corporate Finance",
+    },
+    {
+        "slug": "prediction-market-odds",
+        "title": "Prediction Market Implied Probability & Arbitrage Calculator",
+        "short_title": "Prediction Market Arbitrage",
+        "description": "Calculate true implied probabilities, contract spreads, and Kelly Criterion bet sizing across Kalshi and Polymarket.",
+        "primary_keyword": "prediction market arbitrage calculator",
+        "category": "Market Arbitrage",
+    },
+    {
+        "slug": "tcja-sunset-capital-gains",
+        "title": "TCJA Sunset Capital Gains & NIIT Tax Simulator 2027",
+        "short_title": "Capital Gains Sunset",
+        "description": "Project long-term and short-term capital gains taxes, Section 1411 NIIT surtax thresholds, and state additions following the 2025 TCJA sunset.",
+        "primary_keyword": "tcja sunset capital gains rates",
+        "category": "Tax Intelligence",
+    },
+    {
+        "slug": "section-179-calculator",
+        "title": "Section 179 Equipment & Software Deduction Calculator",
+        "short_title": "Section 179 Deduction",
+        "description": "Calculate immediate equipment expensing, bonus depreciation phase-down, and tax savings under IRC Section 179.",
+        "primary_keyword": "section 179 deduction calculator",
+        "category": "Tax Intelligence",
+    },
+    {
+        "slug": "treasury-yield-calculator",
+        "title": "Treasury Bill Yield vs HYSA Tax-Equivalent Yield Calculator",
+        "short_title": "Treasury Yield vs HYSA",
+        "description": "Calculate after-tax interest and Tax-Equivalent Yield (TEY) between state-tax-exempt US Treasury Bills and taxable HYSAs.",
+        "primary_keyword": "treasury bill yield vs hysa calculator",
+        "category": "Yield Arbitrage",
+    },
+    {
+        "slug": "section-1031-calculator",
+        "title": "Section 1031 Exchange & Capital Gains Tax Calculator",
+        "short_title": "Section 1031 Exchange",
+        "description": "Calculate capital gains tax deferral, Section 1250 depreciation recapture, and 45-day/180-day deadlines under IRC Section 1031 for 2026-2027.",
+        "primary_keyword": "section 1031 exchange calculator",
+        "category": "Commercial Real Estate",
+    },
+    {
+        "slug": "prediction-market-tax",
+        "title": "Prediction Market Tax Calculator: Section 1256 Contracts",
+        "short_title": "Prediction Market Tax",
+        "description": "Compare statutory tax liabilities between CFTC-regulated event contracts under IRC Section 1256 (60/40 rate) and unregulated decentralized markets.",
+        "primary_keyword": "prediction market tax calculator",
+        "category": "Tax Intelligence",
+    },
+]
+
+
 class TenantRegistry:
     """
     Registry for tenant property adapters.
@@ -1357,6 +1433,25 @@ class TenantRegistry:
                     px_adapter._tools = list(PREXVO_DEFAULT_TOOLS)
                 elif hasattr(px_adapter, "tools") and isinstance(px_adapter.tools, list):
                     px_adapter.tools.extend(PREXVO_DEFAULT_TOOLS)
+        except KeyError:
+            pass
+
+        try:
+            ph_adapter = reg.get_adapter("profithelm")
+            if not ph_adapter.tools:
+                ph_tools = None
+                try:
+                    import importlib
+                    cfg = importlib.import_module("profithelm.config")
+                    ph_tools = getattr(cfg, "TOOLS", None)
+                except Exception:
+                    pass
+                if not ph_tools:
+                    ph_tools = PROFITHELM_DEFAULT_TOOLS
+                if hasattr(ph_adapter, "_tools"):
+                    ph_adapter._tools = list(ph_tools)
+                elif hasattr(ph_adapter, "tools") and isinstance(ph_adapter.tools, list):
+                    ph_adapter.tools.extend(ph_tools)
         except KeyError:
             pass
 
