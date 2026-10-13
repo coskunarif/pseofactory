@@ -4396,6 +4396,19 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     else:
         target_tools = tools
 
+    normalized_tools = []
+    for t in (target_tools or []):
+        if isinstance(t, str):
+            normalized_tools.append({"slug": t, "title": t.replace("-", " ").title()})
+        elif isinstance(t, dict):
+            item = dict(t)
+            if "slug" in item and "title" not in item:
+                item["title"] = str(item["slug"]).replace("-", " ").title()
+            normalized_tools.append(item)
+        else:
+            normalized_tools.append(t)
+    target_tools = normalized_tools
+
     if property_id == "prexvo":
         distribution_pack = {}
         for t in target_tools:
@@ -4516,8 +4529,32 @@ def export_all_syndication_files(
                 target_tools = PROFITHELM_DEFAULT_TOOLS
             else:
                 target_tools = TOOLS
+
+        target_tools = list(target_tools or [])
+        known_slugs = {
+            t["slug"] if isinstance(t, dict) else str(t)
+            for t in target_tools
+            if isinstance(t, (dict, str))
+        }
+
+        # Dynamically discover existing tool directories in target_dir
+        # (excluding hidden folders, files, and 'ai_benchmarks')
+        if output_dir.exists():
+            for item in sorted(output_dir.iterdir()):
+                if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
+                    if item.name not in known_slugs:
+                        target_tools.append({
+                            "slug": item.name,
+                            "title": item.name.replace("-", " ").title(),
+                        })
+                        known_slugs.add(item.name)
     else:
         target_tools = tools
+
+    target_tools = [
+        {"slug": t, "title": t.replace("-", " ").title()} if isinstance(t, str) else t
+        for t in (target_tools or [])
+    ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
