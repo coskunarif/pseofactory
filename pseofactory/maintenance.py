@@ -2677,19 +2677,24 @@ class MaintenanceLifecycle:
                 r_slug = item.get("slug") if isinstance(item, dict) else str(item)
                 if not dry_run:
                     try:
+                        from pseofactory.gsc_remediation import compile_remediation_overlay_spec
                         base_dir = getattr(adapter, "base_dir", None) or adapter.dist_dir.parent
                         overlay_dir = base_dir / "content" / "overlays"
                         overlay_dir.mkdir(parents=True, exist_ok=True)
                         overlay_file = overlay_dir / f"{r_slug}.json"
-                        now = datetime.now(timezone.utc)
-                        locked_until = (now + timedelta(days=28)).isoformat()
-                        overlay_payload = {
-                            "slug": r_slug,
-                            "property_id": adapter.property_id,
-                            "locked_until": locked_until,
-                            "created_at": now.isoformat(),
-                            "action": "REFACTOR_PAGE",
-                        }
+                        cand_dict = dict(item) if isinstance(item, dict) else {"slug": r_slug}
+                        cand_dict.setdefault("slug", r_slug)
+                        cand_dict.setdefault("property_id", adapter.property_id)
+                        overlay_payload = compile_remediation_overlay_spec(
+                            cand_dict,
+                            tenant_id=adapter.property_id,
+                            lock_days=28,
+                        )
+                        if isinstance(item, dict) and isinstance(item.get("overlay_spec"), dict):
+                            for k, v in item["overlay_spec"].items():
+                                if v and k not in overlay_payload:
+                                    overlay_payload[k] = v
+                        overlay_payload["action"] = "REFACTOR_PAGE"
                         overlay_file.write_text(json.dumps(overlay_payload, indent=2), encoding="utf-8")
                     except Exception as o_err:
                         print(f"Warning: Failed to persist overlay for slug '{r_slug}': {o_err}")

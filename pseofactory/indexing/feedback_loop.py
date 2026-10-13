@@ -478,11 +478,19 @@ class IndexingFeedbackLoop:
         diagnoses: List[DiagnosisResult],
         force: bool = False,
         dry_run: bool = False,
+        prioritized_candidates: Optional[List[Dict[str, Any]]] = None,
+        skip_recompile: bool = False,
     ) -> Dict[str, Any]:
         """
-        Executes engine repairs and reflects changes across child products.
-        Triggers reflect_and_recompile_all_assets and handles dead route quarantines.
+        Executes engine repairs, writes rich remediation overlays to content/overlays/,
+        handles CRAWL_BUDGET_SIGNAL_LAG, quarantines dead routes, and reflects changes
+        across child products.
         """
+        from pseofactory.gsc_remediation import (
+            _slug_from_url_or_query,
+            compile_remediation_overlay_spec,
+        )
+
         needs_recompile = force or any(
             d.classification in (
                 RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value,
@@ -496,6 +504,10 @@ class IndexingFeedbackLoop:
             d.url for d in diagnoses
             if d.classification == RootCauseClassification.DEAD_ROUTE_IN_SITEMAP.value
         ]
+        crawl_lag_urls = [
+            d.url for d in diagnoses
+            if d.classification == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
+        ]
 
         if dead_routes and not dry_run:
             try:
@@ -507,10 +519,65 @@ class IndexingFeedbackLoop:
             except Exception as q_err:
                 logger.warning("Failed quarantining dead routes: %s", q_err)
 
+        overlays_written: List[str] = []
+        if not dry_run and self.base_dir:
+            overlays_dir = self.base_dir / "content" / "overlays"
+            overlays_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write overlays for prioritized candidates if provided
+            for cand in (prioritized_candidates or []):
+                if not isinstance(cand, dict):
+                    continue
+                anom = str(cand.get("anomaly_type") or "").upper()
+                if "DEAD_ROUTE" in anom:
+                    continue
+                c_slug = str(cand.get("slug") or "") or _slug_from_url_or_query(
+                    target_url=str(cand.get("target_url") or ""),
+                    query=str(cand.get("query") or ""),
+                )
+                spec = cand.get("overlay_spec")
+                if not isinstance(spec, dict) or "title_rewrite" not in spec:
+                    spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
+                overlay_file = overlays_dir / f"{c_slug}.json"
+                overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+                if c_slug not in overlays_written:
+                    overlays_written.append(c_slug)
+                if "CRAWL_BUDGET" in anom and cand.get("target_url") and cand["target_url"] not in crawl_lag_urls:
+                    crawl_lag_urls.append(str(cand["target_url"]))
+
+            # Also ensure any direct diagnoses have rich overlay files written
+            for d in diagnoses:
+                if d.classification == RootCauseClassification.DEAD_ROUTE_IN_SITEMAP.value:
+                    continue
+                d_slug = _slug_from_url_or_query(target_url=d.url)
+                overlay_file = overlays_dir / f"{d_slug}.json"
+                if not overlay_file.exists():
+                    spec = compile_remediation_overlay_spec(
+                        {
+                            "tenant_id": self.property_id,
+                            "slug": d_slug,
+                            "target_url": d.url,
+                            "anomaly_type": d.classification,
+                            "action_type": (
+                                "HUB_LINK_INJECTION"
+                                if d.classification == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
+                                else "REFACTOR_PAGE"
+                            ),
+                        },
+                        tenant_id=self.property_id,
+                    )
+                    overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+                    if d_slug not in overlays_written:
+                        overlays_written.append(d_slug)
+
+        crawl_lag_dispatched = len(crawl_lag_urls) > 0
+
         reflection_res: Dict[str, Any] = {"status": "SKIPPED", "total_recompiled": 0}
-        if needs_recompile:
+        if needs_recompile or (overlays_written and not skip_recompile):
             if dry_run:
                 reflection_res = {"status": "DRY_RUN", "total_recompiled": 0}
+            elif skip_recompile:
+                reflection_res = {"status": "SKIPPED_FAST_PATH", "total_recompiled": len(overlays_written)}
             else:
                 try:
                     reflection_res = reflect_and_recompile_all_assets(
@@ -525,6 +592,9 @@ class IndexingFeedbackLoop:
         return {
             "reflection": reflection_res,
             "dead_routes_quarantined": len(dead_routes),
+            "overlays_written": overlays_written,
+            "crawl_lag_dispatched": crawl_lag_dispatched,
+            "crawl_lag_urls": crawl_lag_urls,
             "recompiled_assets_count": reflection_res.get("total_recompiled", 0),
         }
 
@@ -619,16 +689,26 @@ class IndexingFeedbackLoop:
         dry_run: bool = False,
         live: bool = False,
         unindexed_urls: Optional[List[Any]] = None,
+        query_records: Optional[List[Dict[str, Any]]] = None,
+        remediation_queue: Optional[Any] = None,
+        execution_budget_seconds: float = 300.0,
+        skip_recompile: bool = False,
     ) -> Dict[str, Any]:
         """
         Executes a complete closed-loop feedback cycle:
         1. Audits unindexed pages from GSC feeds and quarantine records.
         2. Diagnoses root causes via GSCRootCauseClassifier.
-        3. Executes engine repairs and reflects changes across child products.
-        4. Enforces preflight airlock (6 stages, Tier-1 Hub cap <= 150).
-        5. Dispatches multi-engine push indexing enforcing composite idempotency.
-        6. Updates milestone states in MilestoneTracker.
+        3. Prioritizes across query records and unindexed diagnoses via ROI engine.
+        4. Enqueues and executes engine repairs via AsyncRemediationQueue.
+        5. Enforces preflight airlock (6 stages, Tier-1 Hub cap <= 150).
+        6. Dispatches multi-engine push indexing enforcing composite idempotency.
+        7. Updates milestone states in MilestoneTracker.
         """
+        from pseofactory.gsc_remediation import (
+            AsyncRemediationQueue,
+            prioritize_gsc_signals,
+        )
+
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # Step 1: Audit
@@ -641,13 +721,41 @@ class IndexingFeedbackLoop:
         # Step 2: Diagnose
         diagnoses = self.diagnose_unindexed_pages(raw_unindexed)
 
-        # Step 3: Repair & Reflect
-        repair_summary = self.execute_engine_repairs(diagnoses, force=False, dry_run=dry_run)
+        # Step 3: ROI-Driven Prioritization across queries and unindexed diagnoses
+        prioritized_candidates = prioritize_gsc_signals(
+            tenant_id=self.property_id,
+            query_records=query_records or [],
+            unindexed_diagnoses=diagnoses,
+        )
 
-        # Step 4: Preflight Airlock
+        # Step 4: Repair & Reflect + AsyncRemediationQueue persistence
+        repair_summary = self.execute_engine_repairs(
+            diagnoses,
+            force=False,
+            dry_run=dry_run,
+            prioritized_candidates=prioritized_candidates,
+            skip_recompile=skip_recompile,
+        )
+
+        queue_obj = remediation_queue
+        if queue_obj is None and self.base_dir:
+            queue_obj = AsyncRemediationQueue(
+                queue_path=self.base_dir / ".agy" / "gsc_remediation_queue.json"
+            )
+
+        queue_summary: Dict[str, Any] = {}
+        if queue_obj is not None and prioritized_candidates and not dry_run:
+            queue_obj.enqueue_batch(prioritized_candidates, tenant_id=self.property_id)
+            queue_summary = queue_obj.process_tenant_batch(
+                tenant_id=self.property_id,
+                worker_fn=lambda task: {"status": "COMPLETED", "slug": task.get("slug")},
+                execution_budget_seconds=execution_budget_seconds,
+            )
+
+        # Step 5: Preflight Airlock
         preflight_report = self.enforce_preflight_airlock()
 
-        # Step 5: Multi-Engine Push
+        # Step 6: Multi-Engine Push
         eligible_urls = preflight_report.push_eligible_urls
         push_summary = self.dispatch_multi_engine_push(
             urls=eligible_urls,
@@ -655,7 +763,7 @@ class IndexingFeedbackLoop:
             hubs_only=True,
         )
 
-        # Step 6: Milestones Persistence
+        # Step 7: Milestones Persistence
         try:
             self.milestone_tracker.save_ledger()
         except Exception as m_err:
@@ -673,7 +781,10 @@ class IndexingFeedbackLoop:
             "live": live,
             "unindexed_audited": len(raw_unindexed),
             "diagnosed_defects": [d.to_dict() for d in diagnoses],
+            "prioritized_candidates": prioritized_candidates,
+            "crawl_lag_dispatched": bool(repair_summary.get("crawl_lag_dispatched")),
             "repair_summary": repair_summary,
+            "queue_summary": queue_summary,
             "preflight_summary": {
                 "total_inspected": preflight_report.total_inspected,
                 "passed": preflight_report.passed_count,

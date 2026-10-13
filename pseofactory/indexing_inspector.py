@@ -14,6 +14,7 @@ import sys
 import json
 import time
 import argparse
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
@@ -61,6 +62,33 @@ class DailyIndexingInspector:
         self.rollover_queue_path = Path(rollover_queue_path).resolve() if rollover_queue_path else DEFAULT_GSC_ROLLOVER_QUEUE
         self.telemetry_logger = telemetry_logger or AtomicTelemetryLogger()
 
+    def _url_belongs_to_tenant(self, url: str, record: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Determines whether a URL or ledger record belongs to self.tenant_id.
+        Strictly rejects URLs or records explicitly bound to a foreign tenant domain.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if isinstance(record, dict):
+            rec_tenant = str(record.get("tenant_id") or record.get("property_id") or "").strip().lower()
+            if rec_tenant:
+                return rec_tenant == self.tenant_id
+
+        url_str = str(url or "").strip().lower()
+        if not url_str:
+            return True
+
+        parsed = urllib.parse.urlparse(url_str)
+        netloc = parsed.netloc.lower()
+        if netloc:
+            if self.tenant_id in netloc:
+                return True
+            for other in ("profithelm", "prexvo"):
+                if other != self.tenant_id and other in netloc:
+                    return False
+        return self.tenant_id in url_str or not any(
+            other in url_str for other in ("profithelm", "prexvo") if other != self.tenant_id
+        )
+
     def audit_gsc_rollover_queue(self) -> Dict[str, Any]:
         """
         Audits Google Search Console rollover queue for backlog overflow (>200 URLs)
@@ -79,14 +107,21 @@ class DailyIndexingInspector:
                 with open(queue_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        queue_urls = data
+                        queue_urls = [str(u) for u in data]
                     elif isinstance(data, dict):
-                        queue_urls = data.get("urls", [])
+                        if "tenants" in data and isinstance(data["tenants"], dict):
+                            t_entry = data["tenants"].get(self.tenant_id, {})
+                            if isinstance(t_entry, dict):
+                                queue_urls = [str(u) for u in t_entry.get("urls", [])]
+                            elif isinstance(t_entry, list):
+                                queue_urls = [str(u) for u in t_entry]
+                        else:
+                            queue_urls = [str(u) for u in data.get("urls", [])]
             except Exception:
                 queue_urls = []
 
-        tenant_urls = [u for u in queue_urls if self.tenant_id in u.lower()] if queue_urls else []
-        queue_size = len(tenant_urls) if tenant_urls else len(queue_urls)
+        tenant_urls = [u for u in queue_urls if self._url_belongs_to_tenant(u)] if queue_urls else []
+        queue_size = len(tenant_urls)
         backlog_exceeded = queue_size > 200
 
         # Scan recent telemetry events for 429 quota exhaustion
@@ -111,7 +146,7 @@ class DailyIndexingInspector:
             "backlog_exceeded": backlog_exceeded,
             "quota_exhausted": quota_exhausted,
             "quota_reasons": quota_reasons,
-            "sample_urls": (tenant_urls or queue_urls)[:5],
+            "sample_urls": tenant_urls[:5],
             "queue_path": str(queue_path),
         }
 
@@ -147,12 +182,9 @@ class DailyIndexingInspector:
         for url, details in quarantined_records.items():
             if not isinstance(details, dict):
                 continue
-            # If multi-tenant ledger, filter to tenant domain/id if present
             url_str = details.get("url", url)
-            if self.tenant_id not in url_str.lower() and "http" in url_str:
-                # If neither url nor details match tenant and ledger is heterogeneous, skip
-                if self.tenant_id not in str(details).lower():
-                    continue
+            if not self._url_belongs_to_tenant(url_str, details):
+                continue
 
             tenant_count += 1
             code = str(details.get("code") or details.get("quarantine_code") or "").upper()
@@ -192,7 +224,7 @@ class DailyIndexingInspector:
 
     def get_quarantined_urls(self) -> List[str]:
         """
-        Returns list of quarantined URLs from airlock quarantine ledger.
+        Returns list of quarantined URLs from airlock quarantine ledger for self.tenant_id.
         Zero em-dashes. Zero en-dashes.
         """
         q_path = self.quarantine_ledger_path
@@ -210,13 +242,12 @@ class DailyIndexingInspector:
                 if isinstance(data, dict):
                     urls = []
                     for url, details in data.items():
-                        if isinstance(details, dict):
-                            urls.append(details.get("url", url))
-                        else:
-                            urls.append(url)
+                        u_str = details.get("url", url) if isinstance(details, dict) else str(url)
+                        if self._url_belongs_to_tenant(u_str, details if isinstance(details, dict) else None):
+                            urls.append(u_str)
                     return urls
                 elif isinstance(data, list):
-                    return [str(u) for u in data]
+                    return [str(u) for u in data if self._url_belongs_to_tenant(str(u))]
         except Exception:
             return []
         return []
@@ -242,14 +273,17 @@ class DailyIndexingInspector:
             except Exception:
                 routes = []
 
+        tenant_routes: List[Dict[str, Any]] = []
         stalled_routes: List[Dict[str, Any]] = []
         for r in routes:
+            if not isinstance(r, dict):
+                continue
             slug = r.get("slug", "")
             domain_url = r.get("domain_url", "")
-            if self.tenant_id not in domain_url.lower() and self.tenant_id not in slug.lower():
-                if routes and len(routes) > 1 and "http" in domain_url:
-                    continue
+            if not self._url_belongs_to_tenant(domain_url, r):
+                continue
 
+            tenant_routes.append(r)
             ttfc_domain = float(r.get("ttfc_domain_hours", 0.0) or 0.0)
             diff_hours = float(r.get("differential_hours", 0.0) or 0.0)
             is_stalled = bool(r.get("stalled", False))
@@ -266,7 +300,7 @@ class DailyIndexingInspector:
         status = "WARN" if stalled_routes else "PASS"
         return {
             "status": status,
-            "routes_monitored": len(routes),
+            "routes_monitored": len(tenant_routes),
             "stalled_routes_count": len(stalled_routes),
             "stalled_routes": stalled_routes,
             "stagnation_threshold_hours": stagnation_threshold_hours,
