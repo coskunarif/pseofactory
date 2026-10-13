@@ -724,6 +724,8 @@ class AutonomousLifecycleSupervisor:
                 if not dry_run:
                     cascade_engine.replay_quarantine(property_id=pid)
             if not any_drift:
+                if not dry_run and not property_ids:
+                    cascade_engine.replay_quarantine()
                 duration = time.time() - start_time
                 self.consecutive_failures = 0
                 self.heartbeat_tracker.emit(
@@ -782,6 +784,9 @@ class AutonomousLifecycleSupervisor:
                 if not any_deferred:
                     self.consecutive_failures = 0
                 if not dry_run and not any_deferred:
+                    if not property_ids:
+                        from pseofactory.maintenance import RefactorCascadeEngine
+                        RefactorCascadeEngine().replay_quarantine()
                     record_engine_hash(self.state_file, hash_value=current_engine_hash)
                     all_asset_hashes: Dict[str, str] = {}
                     for pid, adapter in adapters.items():

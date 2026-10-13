@@ -1987,11 +1987,14 @@ class RefactorCascadeEngine:
         self.max_retries = max_retries
         self.initial_backoff = initial_backoff
         self.backoff_multiplier = backoff_multiplier
-        self.dlq_path = (
-            Path(dlq_path).resolve()
-            if dlq_path
-            else Path(".agy/maintenance_dlq.json").resolve()
-        )
+        if dlq_path:
+            self.dlq_path = Path(dlq_path).resolve()
+        elif os.getenv("PYTEST_CURRENT_TEST"):
+            self.dlq_path = (
+                Path(tempfile.gettempdir()) / f"pseofactory_pytest_dlq_{os.getpid()}.json"
+            ).resolve()
+        else:
+            self.dlq_path = Path(".agy/maintenance_dlq.json").resolve()
 
     def map_dependencies(self, asset_path: Union[str, Path], adapter: PropertyAdapter) -> List[Path]:
         """
