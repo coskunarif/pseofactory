@@ -333,13 +333,6 @@ def _classify_tool_domain(tool_or_slug: Any) -> str:
     # Look up slug in TOOLS catalog if category wasn't provided
     if not category and slug:
         match = next((t for t in TOOLS if t.get("slug") == slug), None)
-        if not match:
-            try:
-                from profithelm.config import load_dynamic_tools
-                load_dynamic_tools()
-                match = next((t for t in TOOLS if t.get("slug") == slug), None)
-            except Exception:
-                pass
         if match:
             category = str(match.get("category", "") or "").strip()
             if category:
