@@ -228,6 +228,11 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         "legal representation",
         "guaranteed tax audit immunity",
         "guaranteed tax shelter",
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
     ]
 
     mandatory_disclosures = [
@@ -356,6 +361,12 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "guaranteed loan forgiveness",
         "b2b corporate tax",
         "1031 exchange",
+        "section 179",
+        "section 1031",
+        "mercury",
+        "turbotax",
+        "coinledger",
+        "crest_capital",
     ]
 
     mandatory_disclosures = [
@@ -484,6 +495,7 @@ class TenantFactStore:
             foreign_student_loan_terms = [
                 "title iv", "34 cfr", "pslf", "paye sunset", "student loan",
                 "income-contingent repayment", "repayment assistance plan",
+                "splash_financial", "sofi", "credible", "earnest", "lendkey",
             ]
             for term in foreign_student_loan_terms:
                 if term in text_lower:
@@ -494,6 +506,10 @@ class TenantFactStore:
             foreign_tax_terms = [
                 "section 1031", "1031 exchange", "section 179", "qsbs",
                 "section 1202", "corporate tax", "pass-through entity",
+                "mercury", "turbotax", "coinledger", "crest_capital",
+                "koinly", "stripe", "ramp", "rho", "gusto", "rippling",
+                "ipx1031", "exeter1031", "first_american", "taxslayer",
+                "kalshi", "interactive_brokers",
             ]
             for term in foreign_tax_terms:
                 if term in text_lower:
