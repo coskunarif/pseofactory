@@ -414,6 +414,8 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
             if "properties" in res and isinstance(res["properties"], dict):
                 for p, p_res in res["properties"].items():
                     print(f"  - [{p}] status={p_res.get('status')}")
+        if res.get("status") == "DEFERRED":
+            return 75
         return 0 if res.get("status") in ("SUCCESS", "SKIPPED_ALIGNED", "SKIPPED_NO_CHANGES", "DRY_RUN", "NO_PROPERTIES") else 1
     else:
         try:

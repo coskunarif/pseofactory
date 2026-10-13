@@ -766,17 +766,19 @@ class AutonomousLifecycleSupervisor:
             )
 
             all_passed = (len(fleet_results) > 0) and all(
-                res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED")
+                res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED", "DEFERRED")
                 for res in fleet_results.values()
             )
+            any_deferred = any(res.status == "DEFERRED" for res in fleet_results.values())
 
             duration = time.time() - start_time
             if duration > self.execution_budget_seconds:
                 all_passed = False
 
             if all_passed:
-                self.consecutive_failures = 0
-                if not dry_run:
+                if not any_deferred:
+                    self.consecutive_failures = 0
+                if not dry_run and not any_deferred:
                     record_engine_hash(self.state_file, hash_value=current_engine_hash)
                     all_asset_hashes: Dict[str, str] = {}
                     for pid, adapter in adapters.items():
@@ -795,15 +797,15 @@ class AutonomousLifecycleSupervisor:
                     cycle_id=cycle_id,
                     current_tenant=None,
                     engine_hash=current_engine_hash,
-                    consecutive_failures=0,
+                    consecutive_failures=self.consecutive_failures,
                     last_cycle_duration_seconds=duration,
                 )
                 return {
-                    "status": "SUCCESS",
+                    "status": "DEFERRED" if any_deferred else "SUCCESS",
                     "cycle_id": cycle_id,
                     "drift_detected": drift_detected,
                     "properties": {k: v.to_dict() for k, v in fleet_results.items()},
-                    "engine_hash": current_engine_hash,
+                    "engine_hash": None if any_deferred else current_engine_hash,
                     "duration_seconds": duration,
                     "consecutive_failures": self.consecutive_failures,
                 }

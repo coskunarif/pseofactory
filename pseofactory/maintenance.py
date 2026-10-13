@@ -2151,6 +2151,7 @@ class RefactorCascadeEngine:
         self,
         property_id: Optional[str] = None,
         slug: Optional[str] = None,
+        asset_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Replays quarantined entries by removing them from DLQ.
@@ -2168,10 +2169,24 @@ class RefactorCascadeEngine:
 
         replayed = []
         remaining = []
+        resolved_target = Path(asset_path).resolve() if asset_path else None
         for entry in data:
             match_prop = not property_id or entry.get("property_id") == property_id
-            match_slug = not slug or entry.get("slug") == slug
-            if match_prop and match_slug:
+            if slug is None and asset_path is None:
+                match_target = True
+            else:
+                match_slug = bool(slug is not None and entry.get("slug") == slug)
+                entry_path = entry.get("asset_path")
+                match_path = bool(
+                    asset_path is not None
+                    and entry_path
+                    and (
+                        entry_path == str(asset_path)
+                        or Path(entry_path).resolve() == resolved_target
+                    )
+                )
+                match_target = match_slug or match_path
+            if match_prop and match_target:
                 replayed.append(entry)
             else:
                 remaining.append(entry)
@@ -2187,12 +2202,13 @@ class RefactorCascadeEngine:
         self,
         property_id: Optional[str] = None,
         slug: Optional[str] = None,
+        asset_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Replays quarantined entries by removing them from DLQ.
         Zero em-dashes. Zero en-dashes.
         """
-        return self.replay_dlq(property_id=property_id, slug=slug)
+        return self.replay_dlq(property_id=property_id, slug=slug, asset_path=asset_path)
 
     def refactor_asset(
         self,
@@ -2273,7 +2289,11 @@ class RefactorCascadeEngine:
                 # 4. Atomic Commit: Clean up backup
                 if backup_path and backup_path.exists():
                     backup_path.unlink(missing_ok=True)
-                self.replay_quarantine(property_id=adapter.property_id, slug=slug)
+                self.replay_quarantine(
+                    property_id=adapter.property_id,
+                    slug=slug,
+                    asset_path=str(target_path),
+                )
                 return True
 
             except LockContentionError as lce:
@@ -2357,9 +2377,18 @@ class RefactorCascadeEngine:
                     "lock_contention": True,
                 }
 
+            post_audit_map = {
+                rec.slug: self.evaluator.audit_asset(Path(rec.asset_path).resolve(), adapter)
+                for rec in actionable_records
+                if rec.slug is not None
+            }
             for rec in actionable_records:
                 target_path = Path(rec.asset_path).resolve()
-                audit_record = self.evaluator.audit_asset(target_path, adapter)
+                audit_record = (
+                    post_audit_map.get(rec.slug)
+                    if rec.slug is not None
+                    else self.evaluator.audit_asset(target_path, adapter)
+                )
                 verify_dict = (
                     adapter.verify_asset(target_path)
                     if hasattr(adapter, "verify_asset")
@@ -2371,6 +2400,11 @@ class RefactorCascadeEngine:
                     and verify_dict.get("status") != "FAIL"
                 ):
                     refactored_count += 1
+                    self.replay_quarantine(
+                        property_id=adapter.property_id,
+                        slug=rec.slug,
+                        asset_path=rec.asset_path,
+                    )
                     deps = self.map_dependencies(rec.asset_path, adapter)
                     for d in deps:
                         all_dependencies.add(str(d))
@@ -2386,6 +2420,9 @@ class RefactorCascadeEngine:
                     )
                     self.route_to_dlq(adapter.property_id, rec, err_msg)
                     failed_count += 1
+
+            if build_ok and failed_count == 0:
+                self.replay_quarantine(property_id=adapter.property_id)
         else:
             for rec in actionable_records:
                 try:
@@ -2520,6 +2557,17 @@ class MaintenanceLifecycle:
                 cascade_res = self.cascade_engine.refactor_all(
                     actionable_drifted, adapter, force=force, dry_run=dry_run
                 )
+                if cascade_res.get("lock_contention"):
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="DEFERRED",
+                        assets_audited=report.total_assets_checked,
+                        assets_drifted=report.drifted_assets_count,
+                        assets_refactored=cascade_res.get("refactored", 0),
+                        assets_failed=0,
+                        engine_hash=None,
+                        duration_seconds=time.time() - start_time,
+                    )
                 retrofit_report = self.evaluator.audit_all(
                     adapter=adapter,
                     check_engine_drift=False,
