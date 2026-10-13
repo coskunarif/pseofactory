@@ -46,6 +46,43 @@ def cmd_audit(args: argparse.Namespace) -> int:
     Returns 0 if all assets are compliant (status PASS), 1 if drift detected or error.
     Zero em-dashes. Zero en-dashes.
     """
+    if getattr(args, "browser", False):
+        from pseofactory.browser_verifier import (
+            UnifiedBrowserAuditor,
+            ProfitHelmBrowserAdapter,
+            PrexvoBrowserAdapter,
+        )
+        browser_adapter = None
+        prop = (args.property or "").lower()
+        if prop == "profithelm":
+            browser_adapter = ProfitHelmBrowserAdapter()
+        elif prop == "prexvo":
+            browser_adapter = PrexvoBrowserAdapter()
+
+        auditor = UnifiedBrowserAuditor(
+            adapter=browser_adapter,
+            dist_dir=args.dist_dir,
+            cdp_port=getattr(args, "cdp_port", 9222),
+            fail_closed=getattr(args, "fail_closed", False),
+        )
+        report = auditor.run_audit(sample_size=getattr(args, "sample", None))
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            status = report.get("status", "UNKNOWN")
+            print(f"[{status}] Browser CDP Audit for '{args.property or 'dist'}': Total: {report.get('total_routes', 0)} | Audited: {report.get('routes_audited', 0)} | Failed: {report.get('failed_count', 0)}")
+            for f in report.get("findings", []):
+                route = f.get("route")
+                if f.get("targets_under_44"):
+                    print(f"  - {route}: {len(f['targets_under_44'])} undersized touch targets")
+                if f.get("cls_value", 0.0) > 0.0:
+                    print(f"  - {route}: CLS {f['cls_value']}")
+                if f.get("overflow_375") or f.get("overflow_1280"):
+                    print(f"  - {route}: horizontal overflow detected")
+                if f.get("dashes"):
+                    print(f"  - {route}: forbidden dashes detected")
+        return 0 if report.get("status") in ("PASS", "SKIPPED_CDP_OFFLINE") else 1
+
     reg = TenantRegistry.default()
     if args.dist_dir:
         dist_path = Path(args.dist_dir).resolve()
@@ -1268,6 +1305,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit = subparsers.add_parser("audit", help="Audit static assets against engine baselines")
     p_audit.add_argument("--property", type=str, default=None, help="Property ID (e.g. prexvo, profithelm)")
     p_audit.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory to audit")
+    p_audit.add_argument("--browser", action="store_true", help="Audit static distribution using live Chrome DevTools Protocol (CDP)")
+    p_audit.add_argument("--sample", type=int, default=None, help="Sample N routes for fast browser audit")
+    p_audit.add_argument("--cdp-port", type=int, default=9222, help="Chrome DevTools Protocol port (default: 9222)")
+    p_audit.add_argument("--fail-closed", action="store_true", help="Fail closed if Chrome CDP port is unreachable")
     p_audit.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # maintain
