@@ -3358,6 +3358,17 @@ def reflect_and_recompile_all_assets(
                     root_s_file.parent.mkdir(parents=True, exist_ok=True)
                     record_engine_hash(root_s_file, hash_value=cur_engine_hash)
                     record_asset_ledger(root_l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                    pf_dir = scanner.workspace_root / "pseofactory"
+                    if pf_dir.is_dir():
+                        record_engine_hash(pf_dir / ".agy" / "engine_hash.json", hash_value=cur_engine_hash)
+                        from pseofactory.supervisor import HeartbeatTracker
+                        HeartbeatTracker(heartbeat_path=pf_dir / ".agy" / "supervisor_heartbeat.json").emit(
+                            status="HEALTHY",
+                            cycle_id="reflect_sync",
+                            current_tenant=None,
+                            engine_hash=cur_engine_hash,
+                            consecutive_failures=0,
+                        )
             except Exception as l_err:
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
