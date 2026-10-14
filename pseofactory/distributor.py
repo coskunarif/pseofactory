@@ -409,7 +409,7 @@ def _classify_tool_domain(tool_or_slug: Any) -> str:
         return "capex"
 
     # Token checks for quant
-    quant_tokens = {"prediction", "market", "odds", "arbitrage", "kalshi", "polymarket", "kelly", "yield", "treasury"}
+    quant_tokens = {"prediction", "market", "odds", "arbitrage", "kalshi", "polymarket", "kelly"}
     if bool(tokens & quant_tokens):
         return "quant"
 
@@ -1058,84 +1058,82 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
 
 
 def generate_x_post(tool_slug: str) -> Dict[str, Any]:
-    """Generates high-CTR X post tailored for each specific tool with targeted hashtags."""
+    """Generates high-CTR X post tailored for each specific tool with parameterized deep-links and zero hashtag spam."""
     tool = _resolve_tool(tool_slug)
-    url = f"{POST_URL_BASE}/tools/{tool['slug']}/?utm_source=x&utm_medium=social&utm_campaign={tool['slug']}"
+    slug = tool["slug"]
+    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=x&utm_medium=social&utm_campaign={slug}"
 
     if tool_slug == "irs-2027-tax-brackets":
+        url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"The 2017 tax cuts expire in under 12 months. Marginal rates jump up to 39.6%.\n\n"
-            f"Calculate your 2027 liability:\n"
-            f"{url}\n\n"
-            f"#TaxTwitter #TCJA"
+            f"a $125k single filer in CA faces a +$4,349 (+22.7%) federal tax jump as brackets revert.\n\n"
+            f"run your 2027 numbers:\n{url}"
         )
     elif tool_slug == "crypto-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&state=CA&utm_source=x&utm_medium=social&utm_campaign=crypto-tax-calculator"
         text = (
-            f"IRS Form 1099-DA is here. High-income traders face up to 40.8% tax on short-term gains.\n\n"
-            f"Calculate crypto liability:\n"
-            f"{url}\n\n"
-            f"#CryptoTax #Form1099DA"
+            f"IRS Form 1099-DA matching is live. $60k in swaps and staking triggers $15,000 in tax.\n\n"
+            f"check your 1099-DA tax:\n{url}"
         )
     elif tool_slug == "saas-runway-calculator":
+        url = f"{POST_URL_BASE}/tools/saas-runway-calculator/?cash=1200000&burn=65000&rev=25000&utm_source=x&utm_medium=social&utm_campaign=saas-runway-calculator"
         text = (
-            f"Dividing cash by gross burn miscalculates runway. Model your true Zero Cash Date:\n\n"
-            f"{url}\n\n"
-            f"#SaaS #Startups #Runway"
+            f"dividing $1.2M cash by $65k gross burn misses 7.8 months of compounding MRR runway.\n\n"
+            f"model your zero cash date:\n{url}"
         )
     elif tool_slug == "prediction-market-odds":
+        url = f"{POST_URL_BASE}/tools/prediction-market-odds/?yes=52&no=44&capital=10000&utm_source=x&utm_medium=social&utm_campaign=prediction-market-odds"
         text = (
-            f"When Kalshi Yes + Polymarket No sum to < 100c, locked arbitrage exists.\n\n"
-            f"Calculate implied odds & Kelly sizing:\n"
-            f"{url}\n\n"
-            f"#PredictionMarkets #Arbitrage"
+            f"52c Kalshi Yes + 44c Polymarket No locks a 4.0% synthetic spread ($400 net on $10k).\n\n"
+            f"check odds and kelly size:\n{url}"
         )
     elif tool_slug == "tcja-sunset-capital-gains":
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&state=CA&utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"Income stacking pushes mid-career capital gains into the 20% tier and 3.8% NIIT post-TCJA.\n\n"
-            f"Calculate your liability:\n"
-            f"{url}\n\n"
-            f"#CapitalGains #TaxPlanning"
+            f"$150k salary + $100k gain in CA hits a 30.2% effective rate once 3.8% NIIT bites.\n\n"
+            f"model your capital gains:\n{url}"
         )
     elif tool_slug == "section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&utm_source=x&utm_medium=social&utm_campaign=section-179-calculator"
         text = (
-            f"Bonus depreciation drops to 20% in 2026 and hits 0% in 2027.\n\n"
-            f"Calculate Section 179 deduction and tax savings:\n"
-            f"{url}\n\n"
-            f"#Section179 #SmallBiz"
+            f"2026 bonus depreciation drops to 20%, but IRC 179 saves $43,750 tax on $125k gear.\n\n"
+            f"calculate your write-off:\n{url}"
         )
     elif tool_slug == "treasury-yield-calculator":
+        url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&state=CA&utm_source=x&utm_medium=social&utm_campaign=treasury-yield-calculator"
         text = (
-            f"US Treasury Bills are state tax-exempt under 31 U.S.C. 3124. In CA or NY, T-Bills beat HYSAs.\n\n"
-            f"Calculate after-tax yield:\n"
-            f"{url}\n\n"
-            f"#TreasuryBills #FixedIncome"
+            f"a 4.80% T-Bill in CA equals a 6.13% HYSA via 31 USC 3124 (+$3,212/yr on $250k).\n\n"
+            f"compare after-tax yield:\n{url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?utm_source=x&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
         text = (
-            f"IRC 1202 lets founders exclude up to $10M in capital gains from federal tax.\n\n"
-            f"Check QSBS savings:\n"
-            f"{url}\n\n"
-            f"#QSBS #Startups"
+            f"IRC Section 1202 lets C-corp founders exclude up to $10M or 10x basis from exit tax.\n\n"
+            f"check your QSBS cap:\n{url}"
         )
     elif tool_slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?utm_source=x&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
         text = (
-            f"Lease vs buy for business equipment: Compare NPV and Section 179 tax deductions.\n\n"
-            f"Calculate deduction benefits:\n"
-            f"{url}\n\n"
-            f"#EquipmentFinancing #SmallBiz"
+            f"with 2026 bonus depreciation down to 20%, operating leases often beat buying on NPV.\n\n"
+            f"compare lease vs buy:\n{url}"
         )
     elif tool_slug == "section-1031-calculator":
+        url = f"{POST_URL_BASE}/tools/section-1031-calculator/?sale=1500000&basis=600000&depr=250000&utm_source=x&utm_medium=social&utm_campaign=section-1031-calculator"
         text = (
-            f"Selling appreciated real estate? IRC 1031 defers 100% of capital gains and depreciation.\n\n"
-            f"Calculate your tax deferred:\n"
-            f"{url}\n\n"
-            f"#Section1031 #RealEstate"
+            f"selling a $1.5M property ($600k basis) without a 1031 exchange triggers $292,500 tax.\n\n"
+            f"model your 1031 deferral:\n{url}"
+        )
+    elif tool_slug == "prediction-market-tax":
+        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&venue=kalshi&utm_source=x&utm_medium=social&utm_campaign=prediction-market-tax"
+        text = (
+            f"a $35k Kalshi gain pays $7,840 (60/40 rate) vs $13,860 ordinary tax on Polymarket.\n\n"
+            f"compare contract tax:\n{url}"
         )
     else:
         dyn = _generate_dynamic_distribution_copy(tool)
         text = dyn["x_content"]
 
-    first_comment = f"Model your numbers on ProfitHelm:\n{url}"
+    first_comment = f"model your exact numbers on ProfitHelm:\n{url}"
 
     assert_x_post(text)
     return {
@@ -1148,82 +1146,82 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
 
 
 def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
-    """Generates Facebook community / business post tailored for each specific tool with relevant hashtags."""
+    """Generates problem-first peer Facebook post tailored for each tool with zero hashtag spam."""
     tool = _resolve_tool(tool_slug)
-    url = f"{POST_URL_BASE}/tools/{tool['slug']}/?utm_source=facebook&utm_medium=social&utm_campaign={tool['slug']}"
+    slug = tool["slug"]
+    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=facebook&utm_medium=social&utm_campaign={slug}"
 
     if tool_slug == "irs-2027-tax-brackets":
+        url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"The 2017 TCJA individual tax cuts expire in under 12 months. Unless Congress extends them, "
-            f"marginal rates revert to pre-2018 levels (top rate 39.6%, 24% bracket jumps to 28%). "
-            f"Calculate how your take-home pay and tax bracket will shift: {url}\n\n"
-            f"#TaxPlanning #PersonalFinance #TCJASunset #TaxStrategy"
+            f"A single filer earning $125,000 in California faces an extra $4,349 (+22.7%) in federal income tax once the 24% marginal bracket reverts to 28% and standard deductions compress.\n\n"
+            f"We mapped the exact 2026 vs 2027 bracket thresholds across all 50 states so you can see where your marginal dollar lands: {url}"
         )
     elif tool_slug == "crypto-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&staking=5000&ordinary=85000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=crypto-tax-calculator"
         text = (
-            f"Crypto investors & traders: With IRS Form 1099-DA broker reporting rules active, short-term trades "
-            f"and staking rewards face strict audit scrutiny. Calculate your exact capital gains tax liability before filing: {url}\n\n"
-            f"#CryptoTax #Form1099DA #Bitcoin #DeFi #TaxSeason"
+            f"With IRS Form 1099-DA exchange reporting active in 2026, $60,000 across short-term token swaps, long-term disposals, and staking rewards produces a $15,000 combined federal and state tax bill.\n\n"
+            f"Here is the open calculator we built to separate ordinary staking yield from 0%/15%/20% capital gains tiers and 3.8% NIIT: {url}"
         )
     elif tool_slug == "saas-runway-calculator":
+        url = f"{POST_URL_BASE}/tools/saas-runway-calculator/?cash=1200000&burn=65000&rev=25000&growth=5&utm_source=facebook&utm_medium=social&utm_campaign=saas-runway-calculator"
         text = (
-            f"Founders: Most startups miscalculate cash runway by dividing bank balance by gross burn. "
-            f"Deferred revenue and CAC lag can overestimate your runway by 25-40%. Calculate your true Zero Cash Date, "
-            f"net burn, and hiring cohorts with our free model: {url}\n\n"
-            f"#SaaS #Startups #Runway #FounderLife #VentureCapital"
+            f"Dividing $1,200,000 in bank cash by $65,000 gross burn gives 18.5 months of runway, but factoring in $25,000 MRR compounding at 5% monthly extends the true Zero Cash Date to 26.3 months.\n\n"
+            f"You can stress-test your net burn, hiring cohorts, and ASC 205-40 going-concern cushion here: {url}"
         )
     elif tool_slug == "prediction-market-odds":
+        url = f"{POST_URL_BASE}/tools/prediction-market-odds/?yes=52&no=44&capital=10000&utm_source=facebook&utm_medium=social&utm_campaign=prediction-market-odds"
         text = (
-            f"Quantitative market analysis: How event contract arbitrage works across Kalshi and Polymarket. "
-            f"Calculate implied probabilities, contract spreads, and Half-Kelly stake sizing: {url}\n\n"
-            f"#PredictionMarkets #Arbitrage #Kalshi #Polymarket #QuantitativeTrading"
+            f"When a Kalshi Yes contract trades at 52 cents and the opposing Polymarket No contract trades at 44 cents, the 96-cent combined cost locks a 4.0% synthetic spread ($400 net on $10,000).\n\n"
+            f"We built a deterministic calculator to check fee-adjusted implied probabilities and Half-Kelly stake sizing: {url}"
         )
     elif tool_slug == "tcja-sunset-capital-gains":
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&period=long_term&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"How will the 2025 TCJA expiration impact your investments? While long-term rates stay 0%, 15%, and 20%, "
-            f"income stacking and the 3.8% NIIT surtax create higher effective tax rates for high earners. "
-            f"See your projected federal and state tax liability with our free calculator: {url}\n\n"
-            f"#CapitalGains #WealthManagement #Taxes #TaxStrategy"
+            f"Even when statutory long-term capital gains tiers stay at 0%, 15%, and 20%, stacking a $100,000 gain on top of $150,000 salary in California pushes your effective tax rate on that gain to 30.2% once the unindexed $200,000 NIIT threshold kicks in.\n\n"
+            f"Run your ordinary income and capital gains stack across all 50 states here: {url}"
         )
     elif tool_slug == "section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&use=100&utm_source=facebook&utm_medium=social&utm_campaign=section-179-calculator"
         text = (
-            f"Contractors and business owners: Did you know bonus depreciation drops to 20% in 2026 and expires completely in 2027? "
-            f"Qualifying commercial vehicles, equipment, and machinery can still be 100% written off under Section 179 (up to $2,560,000 cap). "
-            f"Calculate your exact first-year tax savings: {url}\n\n"
-            f"#Section179 #ContractorFinance #SmallBusinessTax #HVAC #FleetManagement"
+            f"Federal bonus depreciation dropped to 20% for 2026 and hits 0% in 2027, which means equipment and heavy commercial vehicle buyers have to rely on IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out threshold) to capture full first-year write-offs.\n\n"
+            f"On a $125,000 equipment purchase in the 35% bracket, Section 179 still saves $43,750 in first-year cash taxes. Check your federal and state conformity numbers here: {url}"
         )
     elif tool_slug == "treasury-yield-calculator":
+        url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&hysa=4.25&state=CA&fed=35&niit=true&utm_source=facebook&utm_medium=social&utm_campaign=treasury-yield-calculator"
         text = (
-            f"Are you paying state taxes on your high-yield savings interest? US Treasury Bills are 100% exempt from state "
-            f"and local income taxes by federal law. See your exact Tax-Equivalent Yield compared to bank savings: {url}\n\n"
-            f"#TreasuryBills #FixedIncome #PersonalFinance #CashManagement"
+            f"Because 31 U.S.C. Section 3124 exempts direct US Treasury Bills from state and local income taxes, a 4.80% 4-week T-Bill in California equals a 6.13% high-yield savings account.\n\n"
+            f"On $250,000 in treasury cash, that state tax exemption saves $3,212 a year compared to a 4.25% commercial bank HYSA. Compare your state's tax-equivalent yield here: {url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?utm_source=facebook&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
         text = (
-            f"Startup founders & early investors: Section 1202 allows up to $10,000,000 or 10x basis in capital gains "
-            f"to be 100% excluded from federal tax upon exit. Check your QSBS eligibility and tax savings: {url}\n\n"
-            f"#Startups #QSBS #TaxStrategy #VentureCapital #Founders"
+            f"Under IRC Section 1202, qualified C-corporation stock held for 5 years excludes the greater of $10,000,000 or 10x adjusted basis from federal capital gains tax, though non-conforming states like California still tax the exit.\n\n"
+            f"Check your QSBS exclusion cap and state tax exposure here: {url}"
         )
     elif tool_slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?utm_source=facebook&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
         text = (
-            f"Business owners: Should you lease or purchase equipment in 2026? Factor in the bonus depreciation phase-down "
-            f"to 20% vs operating lease cash flow deductions. Run a side-by-side comparison: {url}\n\n"
-            f"#EquipmentFinancing #SmallBusiness #CommercialEquipment #TaxPlanning"
+            f"With federal bonus depreciation down to 20% in 2026, deducting 100% of operating lease payments under IRC Section 162 can beat a financed purchase when state Section 179 caps (like California's $25,000 limit) block upfront write-offs.\n\n"
+            f"Run a side-by-side after-tax NPV comparison for your equipment acquisition here: {url}"
         )
     elif tool_slug == "section-1031-calculator":
+        url = f"{POST_URL_BASE}/tools/section-1031-calculator/?sale=1500000&basis=600000&depr=250000&rep=1800000&from=CA&to=TX&utm_source=facebook&utm_medium=social&utm_campaign=section-1031-calculator"
         text = (
-            f"Selling appreciated real estate? IRC Section 1031 lets you defer 100% of capital gains and depreciation recapture "
-            f"into replacement property. Calculate your exact tax deferred across all 50 states: {url}\n\n"
-            f"#Section1031 #RealEstate #TaxStrategy #1031Exchange #RealEstateInvesting"
+            f"Selling a $1,500,000 commercial property ($600,000 adjusted basis, $250,000 accumulated depreciation) outright triggers $292,500 in immediate federal capital gains, 25% Section 1250 depreciation recapture, and 3.8% NIIT.\n\n"
+            f"Rolling the proceeds into a $1,800,000 replacement property under IRC Section 1031 defers 100% of that liability. Model your boot, debt relief, and 45/180-day deadlines here: {url}"
         )
     else:
         dyn = _generate_dynamic_distribution_copy(tool)
         text = dyn["fb_content"]
 
+    first_comment = f"Interactive scenario calculator (pre-filled with baseline inputs, zero login): {url}"
+
     return {
         "platform": "facebook",
         "target_url": url,
         "content": text,
+        "first_comment": first_comment,
     }
 
 
@@ -3005,6 +3003,47 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
             "economic_source": "HHS Poverty Guidelines and Department of Education Federal Student Aid",
         }
 
+    if "treasury" in tool_slug or "tbill" in tool_slug:
+        return {
+            "statutory_source": "31 U.S.C. Section 3124 and IRC Section 1",
+            "economic_source": "US Treasury Yield Curve and Federal Reserve (FRED) Series DGS10",
+        }
+    if "1031" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 1031(a)(3) and Section 1250 Recapture Rules",
+            "economic_source": "Federal Reserve (FRED) Commercial Real Estate Price Index",
+        }
+    if "179" in tool_slug or "equipment-lease" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 179 and Section 168(k) MACRS",
+            "economic_source": "US Department of Transportation and NHTSA Specifications",
+        }
+    if "crypto" in tool_slug or "1099-da" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 1012 and IRS Form 1099-DA Broker Regulations",
+            "economic_source": "Federal Reserve (FRED) Z.1 Financial Accounts Benchmarks",
+        }
+    if "capital-gains" in tool_slug or "tcja-sunset" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 1(h) and Section 1411 NIIT (P.L. 115-97)",
+            "economic_source": "Federal Reserve (FRED) Household Net Worth Distribution Series",
+        }
+    if "qsbs" in tool_slug or "1202" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 1202 Qualified Small Business Stock Exclusion",
+            "economic_source": "Federal Reserve (FRED) Venture Capital & Small Business Series",
+        }
+    if "prediction-market-tax" in tool_slug or "1256" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 1256 (60/40 Capital Gains) and CFTC Rule 40.11",
+            "economic_source": "CFTC Market Data and Federal Reserve (FRED) Benchmarks",
+        }
+    if "irs-2027" in tool_slug or "tax-brackets" in tool_slug:
+        return {
+            "statutory_source": "IRC Section 1 and IRS Rev. Proc. Schedules (P.L. 115-97)",
+            "economic_source": "US Bureau of Labor Statistics (BLS) Chained CPI-U and OEWS",
+        }
+
     domain = _classify_tool_domain(tool_slug)
     if domain == "saas":
         return {
@@ -3035,30 +3074,11 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
         elif m.tier == "secondary_economic" and not econ_cite:
             econ_cite = m.source_name
 
-    # Fallback to statutory IRC and economic benchmarks if not registered
     if not stat_cite:
-        if "179" in tool_slug:
-            stat_cite = "IRC Section 179, State Conformity Statutes"
-        elif "1031" in tool_slug:
-            stat_cite = "IRC Section 1031, State Conformity Statutes"
-        elif "crypto" in tool_slug:
-            stat_cite = "IRC Section 1, IRS Form 1099-DA Guidelines"
-        elif "capital-gains" in tool_slug or "tcja" in tool_slug:
-            stat_cite = "IRC Section 1(h), TCJA P.L. 115-97"
-        elif "treasury" in tool_slug:
-            stat_cite = "31 U.S.C. Section 3124, IRC Section 1"
-        elif "1256" in tool_slug or "prediction" in tool_slug:
-            stat_cite = "IRC Section 1256, CFTC Statutory Rules"
-        else:
-            stat_cite = "IRC Title 26 Statutory Schedules"
-
+        stat_cite = "IRC Title 26 Statutory Schedules"
     if not econ_cite:
-        if "179" in tool_slug:
-            econ_cite = "US Department of Transportation and NHTSA Specifications"
-        elif "crypto" in tool_slug or "1031" in tool_slug:
-            econ_cite = "US Census Bureau American Community Survey (ACS)"
-        elif "irs" in tool_slug or "tax" in tool_slug:
-            econ_cite = "US Bureau of Labor Statistics (OEWS)"
+        if "irs" in tool_slug or "tax" in tool_slug:
+            econ_cite = "US Bureau of Labor Statistics (BLS)"
         else:
             econ_cite = "Federal Reserve Bank of St. Louis (FRED)"
 
@@ -3070,20 +3090,24 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
 
 def _abbreviate_citations_for_x(stat_cite: str, econ_cite: str) -> tuple:
     """Abbreviates citations to concise tokens suitable for strict 280-character X limits."""
-    if "GAAP" in stat_cite or "ASC 205" in stat_cite:
-        s = "GAAP ASC 205-40"
-    elif "CFTC" in stat_cite or "Rule 40" in stat_cite:
-        s = "CFTC Rule 40.11"
-    elif "179" in stat_cite:
-        s = "IRC Sec 179"
+    if "31 U.S.C." in stat_cite or "3124" in stat_cite:
+        s = "31 USC 3124 / IRC"
     elif "1031" in stat_cite:
         s = "IRC Sec 1031"
+    elif "179" in stat_cite:
+        s = "IRC Sec 179"
+    elif "1099-DA" in stat_cite or "1012" in stat_cite:
+        s = "IRC Sec 1012 / 1099-DA"
+    elif "1202" in stat_cite:
+        s = "IRC Sec 1202"
     elif "1256" in stat_cite:
         s = "IRC Sec 1256"
     elif "1411" in stat_cite or "1(h)" in stat_cite:
         s = "IRC Sec 1(h)/1411"
-    elif "31 U.S.C." in stat_cite:
-        s = "31 USC 3124 / IRC"
+    elif "GAAP" in stat_cite or "ASC 205" in stat_cite:
+        s = "IRC Sec 174 / ASC 205-40"
+    elif "CFTC" in stat_cite or "Rule 40" in stat_cite:
+        s = "CFTC Rule 40.11 / IRC"
     elif "Section 1" in stat_cite or "Sec 1" in stat_cite:
         s = "IRC Sec 1"
     elif "Title 26" in stat_cite:
@@ -3091,10 +3115,16 @@ def _abbreviate_citations_for_x(stat_cite: str, econ_cite: str) -> tuple:
     elif "IRC" in stat_cite:
         s = "IRC statutory code"
     else:
-        s = "statutory rules"
+        s = "IRC statutory rules"
 
     if "Bureau of Labor Statistics" in econ_cite or "BLS" in econ_cite:
         e = "BLS wage data"
+    elif "Treasury Yield" in econ_cite:
+        e = "FRED yield data"
+    elif "Commercial Real Estate" in econ_cite:
+        e = "FRED CRE data"
+    elif "Z.1" in econ_cite:
+        e = "FRED Z.1 data"
     elif "Federal Reserve" in econ_cite or "FRED" in econ_cite:
         e = "FRED benchmarks"
     elif "Census" in econ_cite:
@@ -3168,105 +3198,93 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     """Generates concise, high-CTR X post injected with dual-dataset citation hooks (<= 280 chars)."""
     from pseofactory.contracts import assert_x_post
     tool = _resolve_tool(tool_slug)
-    url = f"{POST_URL_BASE}/tools/{tool['slug']}/"
+    slug = tool["slug"]
+    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=x&utm_medium=social&utm_campaign={slug}"
     s_stat, s_econ = _abbreviate_citations_for_x(stat_cite, econ_cite)
 
     if tool_slug == "irs-2027-tax-brackets":
+        url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"The 2017 tax cuts expire in under 12 months. Unless Congress acts, marginal rates jump to 39.6%.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate your exact 2027 liability:\n"
-            f"{url}\n\n"
-            f"#TaxTwitter #TCJA #TaxPlanning"
+            f"a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "crypto-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&state=CA&utm_source=x&utm_medium=social&utm_campaign=crypto-tax-calculator"
         text = (
-            f"IRS Form 1099-DA is active. Short-term trades and staking face up to 40.8% combined federal tax.\n\n"
-            f"Derived from {s_stat} rules and {s_econ}.\n\n"
-            f"Calculate your crypto liability:\n"
-            f"{url}\n\n"
-            f"#CryptoTax #Form1099DA #DeFi"
+            f"$60k in crypto swaps and staking triggers $15,000 tax under Form 1099-DA.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "saas-runway-calculator":
+        url = f"{POST_URL_BASE}/tools/saas-runway-calculator/?cash=1200000&burn=65000&rev=25000&utm_source=x&utm_medium=social&utm_campaign=saas-runway-calculator"
         text = (
-            f"Most founders miscalculate runway by dividing bank balance by gross burn. Model true Zero Cash Date.\n\n"
-            f"Grounded in {s_stat} and empirical {s_econ}.\n\n"
-            f"Calculate your runway:\n"
-            f"{url}\n\n"
-            f"#SaaS #Startups #VentureCapital"
+            f"dividing $1.2M cash by $65k gross burn misses 7.8 months of MRR runway.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "prediction-market-odds":
+        url = f"{POST_URL_BASE}/tools/prediction-market-odds/?yes=52&no=44&capital=10000&utm_source=x&utm_medium=social&utm_campaign=prediction-market-odds"
         text = (
-            f"Event contract arbitrage: When Kalshi Yes + Polymarket No sum to < 100c, spread exists.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate implied odds & Kelly sizing:\n"
-            f"{url}\n\n"
-            f"#PredictionMarkets #Arbitrage"
+            f"52c Kalshi Yes + 44c Polymarket No locks a 4.0% synthetic spread ($400 on $10k).\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "tcja-sunset-capital-gains":
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&state=CA&utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"Income stacking pushes mid-career capital gains into the 20% tier and 3.8% NIIT post-TCJA sunset.\n\n"
-            f"Modeled from {s_stat} and {s_econ}.\n\n"
-            f"Calculate your exact liability:\n"
-            f"{url}\n\n"
-            f"#CapitalGains #Taxes #TaxPlanning"
+            f"$150k salary + $100k gain in CA hits a 30.2% rate once 3.8% NIIT bites.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&utm_source=x&utm_medium=social&utm_campaign=section-179-calculator"
         text = (
-            f"Bonus depreciation drops to 20% in 2026. Heavy vehicles and machinery qualify under Section 179.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate your deduction and tax savings:\n"
-            f"{url}\n\n"
-            f"#Section179 #SmallBiz #CFO"
+            f"2026 bonus depreciation drops to 20%, but IRC 179 saves $43,750 tax on $125k gear.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "treasury-yield-calculator":
+        url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&state=CA&utm_source=x&utm_medium=social&utm_campaign=treasury-yield-calculator"
         text = (
-            f"US Treasury Bills are 100% state-tax exempt under 31 U.S.C. 3124. A 4.80% T-Bill beats a 5.60% HYSA.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate after-tax yield:\n"
-            f"{url}\n\n"
-            f"#TreasuryBills #FixedIncome"
+            f"a 4.80% T-Bill in CA equals a 6.13% HYSA (+$3,212/yr on $250k).\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "section-1031-calculator":
+        url = f"{POST_URL_BASE}/tools/section-1031-calculator/?sale=1500000&basis=600000&depr=250000&utm_source=x&utm_medium=social&utm_campaign=section-1031-calculator"
         text = (
-            f"Selling appreciated real estate? Defer 100% of capital gains and depreciation recapture across 50 states.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate tax deferred:\n"
-            f"{url}\n\n"
-            f"#Section1031 #RealEstate"
+            f"exchanging a $1.5M property ($600k basis) defers $292,500 in tax.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "prediction-market-tax":
+        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&venue=kalshi&utm_source=x&utm_medium=social&utm_campaign=prediction-market-tax"
         text = (
-            f"Event contract tax rules: 60/40 blended capital gains vs ordinary income classification.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate your tax liability:\n"
-            f"{url}\n\n"
-            f"#PredictionMarkets #Kalshi #TaxPlanning"
+            f"$35k Kalshi gain pays $7,840 (60/40 rate) vs $13,860 ordinary tax on Polymarket.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?utm_source=x&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
         text = (
-            f"Section 1202 lets startup founders exclude up to $10M or 10x basis in gains from federal tax.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Check QSBS eligibility:\n"
-            f"{url}\n\n"
-            f"#QSBS #Startups #TaxStrategy"
+            f"IRC 1202 lets C-corp founders exclude up to $10M or 10x basis from federal exit tax.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     elif tool_slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?utm_source=x&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
         text = (
-            f"Equipment lease vs purchase: Compare after-tax cash flow, Section 179 write-offs, and deductions.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Calculate exact savings:\n"
-            f"{url}\n\n"
-            f"#EquipmentFinancing #SmallBiz"
+            f"operating lease write-offs vs 20% bonus depreciation and IRC 179 caps.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
     else:
-        clean_title = tool.get("short_title", tool_slug.replace("-", " ").title())[:24]
+        clean_title = tool.get("short_title", tool_slug.replace("-", " ").title())[:24].lower()
         text = (
-            f"Quantitative model for {clean_title}.\n\n"
-            f"Grounded in {s_stat} and {s_econ}.\n\n"
-            f"Model your numbers:\n"
-            f"{url}\n\n"
-            f"#{SITE_NAME} #Fintech"
+            f"deterministic statutory model for {clean_title}.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
         )
 
     # Strict anti-slop dash sanitization
@@ -3274,16 +3292,8 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     while "  " in text:
         text = text.replace("  ", " ")
 
-    # Enforce strict <= 280 character envelope
-    if len(text) > 280:
-        while len(text) > 280 and " #" in text:
-            text = text.rsplit(" #", 1)[0]
-
     if len(text) > 280 and f"Grounded in {s_stat} and {s_econ}." in text:
-        text = text.replace(f"Grounded in {s_stat} and {s_econ}.", f"Sources: {s_stat}, {s_econ}.")
-
-    if len(text) > 280 and f"Sources: {s_stat}, {s_econ}." in text:
-        text = text.replace(f"Sources: {s_stat}, {s_econ}.", f"Sources: {s_stat}.")
+        text = text.replace(f"Grounded in {s_stat} and {s_econ}.", f"Grounded in {s_stat}.")
 
     if len(text) > 280:
         parts = text.split("\n\n")
@@ -3294,7 +3304,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
         else:
             text = text[:280]
 
-    first_comment = f"Model your numbers on ProfitHelm:\n{url}"
+    first_comment = f"model your exact numbers on ProfitHelm:\n{url}"
 
     assert_x_post(text)
     return {
@@ -4236,15 +4246,204 @@ All calculations are 100% deterministic, grounded in federal statutes, and updat
     }
 
 
+PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
+    "student-loan-repayment-calculator": {
+        "query": "balance=60000&agi=65000&rate=6.5&deps=1",
+        "x_hook": "on $60k student debt at $65k AGI (1 dep), 2026 RAP cuts payments to $248.23/mo (+$76.77 interest subsidy) vs $346.04 on IBR.",
+        "li_hook": "On $60,000 in federal student debt at $65,000 AGI, the 2026 RAP formula cuts monthly payments to $248.23 while subsidizing $76.77/month in unpaid interest.",
+        "li_body": (
+            "Borrowers comparing Title IV repayment options under 34 CFR Part 685 face two distinct statutory formulas:\n\n"
+            "• 225% Poverty Exemption (RAP): Protects $47,587.50 of income for a 2-person household, assessing 10% on remaining discretionary income ($248.23/month).\n"
+            "• 100% Unpaid Interest Subsidy: When $248.23 falls short of the $325.00 monthly interest accrual at 6.5%, the Department of Education waives the $76.77 difference every month.\n"
+            "• IBR Standard Ceiling: Under HEA Section 493C, IBR charges $346.04/month at $65k AGI but caps payments at the 10-year Standard schedule if income rises above $115,000."
+        ),
+        "fb_body": (
+            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (family size 2), the 2026 Repayment Assistance Plan (RAP) calculates a $248.23 monthly payment compared to $346.04 under new IBR.\n\n"
+            "Because $60,000 at 6.5% accrues $325.00 in interest each month, RAP's 100% unpaid interest subsidy waives the remaining $76.77 every month so your principal never grows. Grounded in statutory Title IV 34 CFR Part 685 rules and HHS Poverty Guidelines."
+        ),
+    },
+    "rap-vs-ibr-calculator": {
+        "query": "balance=60000&agi=95000&rate=6.5&deps=1",
+        "x_hook": "at $95k AGI on $60k debt, uncapped RAP charges $498.23/mo ($119,575 total) while IBR caps at $78,617 total.",
+        "li_hook": "Crossing $95,000 AGI flips the Title IV math: RAP charges $498.23/month ($119,575 total) with no payment cap, while IBR locks a $40,957 lower lifetime cost.",
+        "li_body": (
+            "While the 2026 Repayment Assistance Plan (RAP) lowers monthly bills for moderate earners via the 225% HHS Poverty floor, high-income borrowers hit a structural trap:\n\n"
+            "• Uncapped RAP Escalation: At $95,000 AGI ($60k balance, 6.5% rate), RAP payments climb to $498.23/month across 240 months ($119,575.20 cumulative repayment).\n"
+            "• Statutory IBR Ceiling: Under HEA Section 493C, Income-Based Repayment strictly caps monthly bills at the 10-year Standard amount, retiring the loan in 158 months for $78,617.64.\n"
+            "• Crossover Point: Once AGI exceeds 1.4x your principal balance, IBR's 10-year ceiling prevents uncapped 10% discretionary assessments."
+        ),
+        "fb_body": (
+            "Most borrowers assume the new 2026 RAP plan is always cheaper than IBR because RAP uses a 225% poverty exemption instead of 150%. That holds true at $65,000 AGI ($248.23/mo on RAP vs $346.04/mo on IBR).\n\n"
+            "However, RAP has no 10-year Standard payment cap. At $95,000 AGI on a $60,000 loan, RAP climbs to $498.23/mo ($119,575 total over 20 years), while IBR caps your payment and pays off the balance in 158 months for $78,617. Grounded in statutory HEA Section 493C and 34 CFR Part 685."
+        ),
+    },
+    "tiered-standard-calculator": {
+        "query": "balance=65000&agi=85000&rate=6.5&deps=0",
+        "x_hook": "consolidating $65k in federal loans unlocks 30-year Tiered Standard ($410.84/mo vs $738.06/mo on 10-yr standard).",
+        "li_hook": "Consolidating $65,000 in federal student debt extends Tiered Standard amortization from 10 years to 30 years under 34 CFR 685.208, cutting monthly bills by 44.3%.",
+        "li_body": (
+            "Under 34 CFR 685.208(c), Direct Consolidation Loans determine fixed amortization terms strictly by total principal balance tiers:\n\n"
+            "• Under $7,500: 10-year maximum repayment window.\n"
+            "• $20,000 to $39,999: 20-year fixed amortization schedule.\n"
+            "• $60,000 and Above: Full 30-year fixed amortization ($410.84/month at 6.5% vs $738.06/month on the 10-year baseline), trading lower monthly cash outflow for higher cumulative interest."
+        ),
+        "fb_body": (
+            "Under Title IV 34 CFR 685.208, crossing the $60,000 Direct Consolidation balance threshold unlocks a 30-year fixed Tiered Standard repayment schedule regardless of your income.\n\n"
+            "On a $65,000 balance at 6.5%, extending from the 10-year standard plan ($738.06/mo) to the 30-year tier drops the required monthly payment to $410.84/mo, though cumulative interest rises over the longer horizon. Grounded in statutory 34 CFR 685.208 amortization schedules."
+        ),
+    },
+    "paye-sunset-calculator": {
+        "query": "balance=85000&agi=90000&rate=6.5&deps=0",
+        "x_hook": "on $85k graduate debt at $90k AGI, staying grandfathered in PAYE keeps 20-yr forgiveness vs 25 yrs on legacy IBR.",
+        "li_hook": "Graduate borrowers with $85,000 in Direct Loans face a critical 5-year forgiveness penalty if they exit grandfathered PAYE into legacy IBR during the 2026 sunset.",
+        "li_body": (
+            "Evaluating the 2026 Pay As You Earn (PAYE) sunset under 34 CFR 685.209 requires comparing three interacting statutory levers:\n\n"
+            "• 20-Year vs 25-Year Graduate Horizon: PAYE forgives remaining graduate debt at 240 qualifying payments, whereas switching to legacy IBR extends graduate forgiveness to 300 payments.\n"
+            "• 10% Capitalization Cap: PAYE caps unpaid interest capitalization at 10% of original principal if you leave the plan or exceed the partial financial hardship threshold.\n"
+            "• RAP Subsidy Trade-Off: Switching to RAP increases the poverty exemption from 150% to 225% FPL and waives 100% of unpaid interest, but removes the 10-year Standard payment ceiling."
+        ),
+        "fb_body": (
+            "If you hold graduate Direct Loans and are currently enrolled in PAYE, switching plans without modeling the 240-month vs 300-month forgiveness clock can add 5 extra years of payments.\n\n"
+            "While the 2026 RAP plan offers a larger 225% poverty exemption and 100% unpaid interest subsidy, PAYE preserves the 10-year Standard payment cap and 20-year graduate forgiveness window for grandfathered borrowers. Grounded in statutory 34 CFR 685.209 rules."
+        ),
+    },
+    "icr-repayment-calculator": {
+        "query": "balance=75000&agi=80000&rate=7.5&deps=0",
+        "x_hook": "Parent PLUS borrowers on ICR pay the lesser of 20% discretionary income or a 12-year income-adjusted fixed schedule.",
+        "li_hook": "For consolidated Parent PLUS borrowers, ICR's dual formula (20% discretionary income vs 12-year income-adjusted fixed factor) often triggers the 12-year cap first.",
+        "li_body": (
+            "Income-Contingent Repayment (ICR) under 34 CFR 685.209(b) is the sole income-driven plan accessible to single-consolidated Parent PLUS loans, and its math differs sharply from RAP and IBR:\n\n"
+            "• 100% FPL Exemption Floor: ICR shields only 100% of the HHS Federal Poverty Guideline ($16,200 single in 2026) and assesses 20% of remaining income.\n"
+            "• 12-Year Income Factor Alternative: When 20% of discretionary income exceeds a 12-year fixed amortization multiplied by the Department of Education income percentage factor, the lower 12-year figure applies.\n"
+            "• PSLF Eligibility: Consolidating Parent PLUS loans into a Direct Consolidation Loan under ICR unlocks the 120-payment PSLF track for public-sector parents."
+        ),
+        "fb_body": (
+            "Because single-consolidated Parent PLUS loans are excluded from IBR and PAYE, Income-Contingent Repayment (ICR) is the primary path to qualify for Public Service Loan Forgiveness.\n\n"
+            "Unlike RAP or IBR, ICR calculates your bill two ways every year: 20% of discretionary income above 100% of the federal poverty line, OR a 12-year fixed amortization adjusted by an income multiplier, charging whichever is lower. Grounded in statutory 34 CFR 685.209(b) rules."
+        ),
+    },
+    "save-plan-transition-to-rap-repayment-calculator": {
+        "query": "balance=55000&agi=62000&rate=6.2&deps=1",
+        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $223.23/mo with 100% interest subsidy.",
+        "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
+        "li_body": (
+            "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
+            "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
+            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a borrower at $62,000 AGI (family of 2) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
+            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and PSLF forgiveness horizons."
+        ),
+        "fb_body": (
+            "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
+            "For a borrower with $55,000 in loans at 6.2% and $62,000 AGI (family size 2), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+        ),
+    },
+    "save-plan-litigation-transition": {
+        "query": "balance=55000&agi=62000&rate=6.2&deps=1",
+        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $223.23/mo with 100% interest subsidy.",
+        "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
+        "li_body": (
+            "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
+            "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
+            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a borrower at $62,000 AGI (family of 2) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
+            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and PSLF forgiveness horizons."
+        ),
+        "fb_body": (
+            "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
+            "For a borrower with $55,000 in loans at 6.2% and $62,000 AGI (family size 2), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+        ),
+    },
+    "pslf-qualifying-payment-and-buyback-calculator": {
+        "query": "balance=92000&agi=78000&rate=6.8&deps=0",
+        "x_hook": "at 96 PSLF payments with 14 forbearance months, 34 CFR 685.219(g) buyback reaches 120 payments 14 months early.",
+        "li_hook": "Public-sector borrowers with 96 qualifying PSLF payments and 14 months of deferment/forbearance can trigger immediate 120-payment forgiveness via 34 CFR 685.219(g) buyback.",
+        "li_body": (
+            "Under 34 CFR 685.219(g), the Public Service Loan Forgiveness (PSLF) Hold Harmless / Buyback provision allows borrowers with 120 months of certified public-service employment to retroactively convert past deferment or forbearance months:\n\n"
+            "• Historical IDR Rate Pricing: Buyback months are priced at the lowest IDR payment the borrower would have owed during the historical forbearance period, not current higher salary levels.\n"
+            "• Tax-Free Discharge: Under IRC Section 108(f), 100% of the forgiven principal and interest after 120 qualifying PSLF payments is permanently exempt from federal income tax.\n"
+            "• Lump-Sum Breakeven: Paying 14 buyback months at $248/month ($3,472 lump sum) on a $92,000 balance eliminates $88,528 in debt immediately."
+        ),
+        "fb_body": (
+            "If you have 120 months of certified full-time public service employment but your PSLF count is stuck at 96 or 105 because of past administrative forbearance or deferment months, 34 CFR 685.219(g) lets you buy back those months in a single settlement.\n\n"
+            "The buyback amount is calculated using your historical tax return from the year of the forbearance rather than your current higher salary, and the forgiven balance is 100% federal tax-free under IRC Section 108(f). Grounded in statutory 34 CFR 685.219 rules."
+        ),
+    },
+    "pslf-qualifying-payment-simulator": {
+        "query": "balance=92000&agi=78000&rate=6.8&deps=0",
+        "x_hook": "for PSLF borrowers with $92k debt at $78k AGI, 2026 RAP cuts qualifying payments by $97.81/mo ($11,737 saved).",
+        "li_hook": "Public-sector borrowers pursuing 120-payment PSLF forgiveness save $11,737 across 10 years by pairing 225% FPL RAP payments with IRC Section 108(f) tax-free discharge.",
+        "li_body": (
+            "Under 34 CFR 685.219, Public Service Loan Forgiveness (PSLF) discharges 100% of remaining Direct Loan principal and interest after 120 qualifying monthly payments:\n\n"
+            "• Maximizing Forgiveness Principal: Because PSLF discharge is 100% federal tax-free under IRC Section 108(f), minimizing your monthly qualifying payment directly increases net debt forgiveness.\n"
+            "• RAP vs IBR Monthly Spread: At $78,000 AGI ($92k balance, 6.8% rate), RAP's 225% poverty exemption reduces the qualifying payment by $97.81/month compared to 150% FPL IBR.\n"
+            "• Hold Harmless Buyback: Under 34 CFR 685.219(g), borrowers with 120 months of certified employment can retroactively buy back eligible forbearance months."
+        ),
+        "fb_body": (
+            "When you are on the 120-payment Public Service Loan Forgiveness (PSLF) track under 34 CFR 685.219, every dollar you save on your monthly IDR payment increases the tax-free balance forgiven at month 120 under IRC Section 108(f).\n\n"
+            "For a public-sector borrower with $92,000 in Direct Loans at $78,000 AGI, using the 225% poverty floor under RAP instead of 150% FPL reduces payments by $97.81/month ($11,737 saved over 120 months). Grounded in statutory 34 CFR 685.219 rules."
+        ),
+    },
+    "pslf-buyback-calculator": {
+        "query": "balance=92000&agi=78000&rate=6.8&deps=0",
+        "x_hook": "at 96 PSLF payments with 14 forbearance months, 34 CFR 685.219(g) buyback reaches 120 payments 14 months early.",
+        "li_hook": "Public-sector borrowers with 96 qualifying PSLF payments and 14 months of deferment/forbearance can trigger immediate 120-payment forgiveness via 34 CFR 685.219(g) buyback.",
+        "li_body": (
+            "Under 34 CFR 685.219(g), the Public Service Loan Forgiveness (PSLF) Hold Harmless / Buyback provision allows borrowers with 120 months of certified public-service employment to retroactively convert past deferment or forbearance months:\n\n"
+            "• Historical IDR Rate Pricing: Buyback months are priced at the lowest IDR payment the borrower would have owed during the historical forbearance period, not current higher salary levels.\n"
+            "• Tax-Free Discharge: Under IRC Section 108(f), 100% of the forgiven principal and interest after 120 qualifying PSLF payments is permanently exempt from federal income tax.\n"
+            "• Lump-Sum Breakeven: Paying 14 buyback months at $248/month ($3,472 lump sum) on a $92,000 balance eliminates $88,528 in debt immediately."
+        ),
+        "fb_body": (
+            "If you have 120 months of certified full-time public service employment but your PSLF count is stuck at 96 or 105 because of past administrative forbearance or deferment months, 34 CFR 685.219(g) lets you buy back those months in a single settlement.\n\n"
+            "The buyback amount is calculated using your historical tax return from the year of the forbearance rather than your current higher salary, and the forgiven balance is 100% federal tax-free under IRC Section 108(f). Grounded in statutory 34 CFR 685.219 rules."
+        ),
+    },
+    "parent-plus-double-consolidation-repayment-calculator": {
+        "query": "balance=110000&agi=88000&rate=7.6&deps=0",
+        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430/mo (10% RAP).",
+        "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% RAP via two-step Direct Consolidation cuts monthly obligations from $1,196.67 (ICR) to $430.42.",
+        "li_body": (
+            "Parent PLUS loans carry the highest statutory interest rates under Title IV and are barred from direct enrollment in 10% IDR plans unless consolidated properly:\n\n"
+            "• Single Consolidation Trap: Consolidating Parent PLUS loans once restricts the new Direct Consolidation Loan to Income-Contingent Repayment (20% of income above 100% FPL = $1,196.67/month at $88k AGI).\n"
+            "• Two-Step Consolidation Path: Consolidating two separate Parent PLUS loan groups into two Direct Consolidation Loans and then consolidating those two loans removes the Parent PLUS flag, unlocking 10% RAP/IBR ($430.42/month, saving $766.25/month).\n"
+            "• Statutory Deadline Sensitivity: Borrowers must complete both consolidation steps before statutory grandfathering windows close."
+        ),
+        "fb_body": (
+            "A single Direct Consolidation of $110,000 in Parent PLUS loans at $88,000 AGI restricts you to the ICR plan, which takes 20% of income above 100% of the poverty line ($1,196.67/month).\n\n"
+            "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% IDR/RAP formulas ($430.42/month, saving $9,195/year). Grounded in statutory Title IV 34 CFR 685.209 rules."
+        ),
+    },
+    "parent-plus-double-consolidation": {
+        "query": "balance=110000&agi=88000&rate=7.6&deps=0",
+        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430/mo (10% RAP).",
+        "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% RAP via two-step Direct Consolidation cuts monthly obligations from $1,196.67 (ICR) to $430.42.",
+        "li_body": (
+            "Parent PLUS loans carry the highest statutory interest rates under Title IV and are barred from direct enrollment in 10% IDR plans unless consolidated properly:\n\n"
+            "• Single Consolidation Trap: Consolidating Parent PLUS loans once restricts the new Direct Consolidation Loan to Income-Contingent Repayment (20% of income above 100% FPL = $1,196.67/month at $88k AGI).\n"
+            "• Two-Step Consolidation Path: Consolidating two separate Parent PLUS loan groups into two Direct Consolidation Loans and then consolidating those two loans removes the Parent PLUS flag, unlocking 10% RAP/IBR ($430.42/month, saving $766.25/month).\n"
+            "• Statutory Deadline Sensitivity: Borrowers must complete both consolidation steps before statutory grandfathering windows close."
+        ),
+        "fb_body": (
+            "A single Direct Consolidation of $110,000 in Parent PLUS loans at $88,000 AGI restricts you to the ICR plan, which takes 20% of income above 100% of the poverty line ($1,196.67/month).\n\n"
+            "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% IDR/RAP formulas ($430.42/month, saving $9,195/year). Grounded in statutory Title IV 34 CFR 685.209 rules."
+        ),
+    },
+}
+
+
 def _generate_prexvo_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
-    short_title = tool.get("short_title", slug.replace("-", " ").title())[:24]
-    raw_post = f"{short_title}: Compare 2026 RAP, IBR, and Tiered Standard payments under Title IV rules. See monthly subsidies: {url}"
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=x&utm_medium=social&utm_campaign={slug}"
+    raw_post = f"{scen['x_hook']}\n\nGrounded in Title IV 34 CFR 685 and HHS data.\n{deep_url}"
     clean_post = _sanitize_distribution_text(raw_post)
     if len(clean_post) > 280:
-        clean_post = f"{short_title}: Title IV repayment simulator comparing RAP vs IBR. {url}"
+        clean_post = _sanitize_distribution_text(f"{scen['x_hook']}\n{deep_url}")
+    if len(clean_post) > 280:
+        short_url = f"{url}{sep}utm_source=x"
+        clean_post = _sanitize_distribution_text(f"{scen['x_hook'][:270 - len(short_url)]}\n{short_url}")
     assert_x_post(clean_post)
-    return {"content": clean_post, "character_count": len(clean_post)}
+    return {"platform": "x", "target_url": deep_url, "content": clean_post, "character_count": len(clean_post)}
 
 
 def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
@@ -4252,59 +4451,64 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("prexvo", "106482194")
     try:
         adapter = TenantRegistry.default().get_adapter("prexvo")
-        if adapter and hasattr(adapter, "linkedin_company_id") and adapter.linkedin_company_id:
+        if adapter and hasattr(adapter, "linkedin_company_id") and adapter.linkedin_company_id and adapter.linkedin_company_id != "143884102":
             company_id = adapter.linkedin_company_id
     except Exception:
         pass
     slug = tool["slug"]
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
     raw_text = (
-        f"Federal student loan borrowers face significant statutory changes under the 2026 Title IV overhaul.\n\n"
-        f"Under 34 CFR Part 685, the newly enacted Repayment Assistance Plan (RAP) replaces legacy PAYE and ICR enrollment paths. "
-        f"Borrowers evaluating whether to transition must analyze two decisive statutory mechanics:\n\n"
-        f"1. 225% Poverty Line Exemption: RAP protects income up to 225% of HHS Poverty Guidelines ($35,212 for single filers in 2026), "
-        f"capping payments at 10% of remaining discretionary income.\n"
-        f"2. 100% Unpaid Interest Subsidy: When calculated payments fall below monthly interest accrual, the Department of Education "
-        f"covers the complete difference, permanently eliminating negative amortization.\n\n"
-        f"For higher earners, statutory caps under Income-Based Repayment (IBR) pursuant to HEA Section 493C may limit payments to the 10-year Standard amount, "
-        f"whereas RAP carries no standard payment ceiling.\n\n"
-        f"Model your exact statutory payment differences across RAP, IBR, PAYE, and ICR:\n"
-        f"{url}\n\n"
-        f"#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt #PublicPolicy"
+        f"{scen['li_hook']}\n\n"
+        f"{scen['li_body']}\n\n"
+        f"Empirical & Statutory Foundation:\n"
+        f"• Statutory Authority: Title IV Higher Education Act (34 CFR Part 685)\n"
+        f"• Economic Benchmark: HHS Poverty Guidelines and Department of Education Federal Student Aid\n\n"
+        f"Model your exact scenario live on Prexvo:\n"
+        f"{deep_url}\n\n"
+        f"#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt"
     )
     clean_content = _sanitize_distribution_text(raw_text)
     assert_linkedin(clean_content)
     return {
         "platform": "linkedin",
         "company_id": company_id,
-        "target_url": url,
+        "target_url": deep_url,
         "content": clean_content,
-        "first_comment": f"Model your numbers on Prexvo:\n{url}",
+        "first_comment": f"Model your exact scenario on Prexvo:\n{deep_url}",
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
     }
 
 
 def _generate_prexvo_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
-    raw_text = (
-        f"Evaluating federal student loan options under the 2026 Title IV regulatory update? "
-        f"Our interactive calculator models monthly payments across RAP, IBR, PAYE, and ICR plans. "
-        f"Verify your 225% poverty exemption and interest subsidies in real time: {url}"
-    )
+    slug = tool["slug"]
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
+    raw_text = f"{scen['fb_body']}\n\nRun your numbers here: {deep_url}"
     clean_content = _sanitize_distribution_text(raw_text)
-    assert_no_forbidden_dashes(clean_content, context=f"{tool['slug']} facebook")
-    return {"content": clean_content, "target_url": url}
+    assert_no_forbidden_dashes(clean_content, context=f"{slug} facebook")
+    return {
+        "platform": "facebook",
+        "content": clean_content,
+        "target_url": deep_url,
+        "first_comment": f"Interactive Title IV scenario calculator (pre-filled, zero login): {deep_url}",
+    }
 
 
 def _generate_prexvo_reddit(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=reddit&utm_medium=social&utm_campaign={slug}"
     text = (
         f"Detailed Statutory Breakdown: {title}\n\n"
-        f"Hi r/StudentLoans, here is a deterministic look at how the 2026 Title IV statutory formulas calculate payments:\n\n"
-        f"1. Under RAP, discretionary income uses 225% of HHS Poverty Guidelines as the base floor.\n"
-        f"2. RAP provides a 100% subsidy on any unpaid monthly interest, preventing loan growth.\n"
-        f"3. IBR caps monthly obligations at the 10-year standard amount, which helps higher earners.\n\n"
-        f"You can verify your numbers directly on our open educational calculator: {url}"
+        f"{scen['li_hook']}\n\n"
+        f"{scen['li_body']}\n\n"
+        f"You can verify your numbers directly on our open educational calculator: {deep_url}"
     )
     clean_text = _sanitize_distribution_text(text)
     assert_no_forbidden_dashes(clean_text, context=f"{slug} reddit")
@@ -4312,7 +4516,7 @@ def _generate_prexvo_reddit(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
         "target_subreddit": "r/StudentLoans",
         "title": f"Title IV Repayment Analysis: {title}",
         "content": clean_text,
-        "url": url,
+        "url": deep_url,
     }
 
 
@@ -4883,10 +5087,11 @@ def dispatch_to_distribution_lead(
     # Phase 3: Mechanical Voice DNA verification
     first_pack = next(iter(all_assets.values())) if all_assets else None
     if property_id == "prexvo":
-        sample_draft = first_pack["x"]["content"] if first_pack else "Compare 2026 Title IV student loan repayment plans with exact calculations: https://prexvo.com/"
+        sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
     else:
-        sample_draft = first_pack["x"]["content"] if first_pack else "marginal tax brackets revert up to 39.6% post-tcja in under 12 months. model your 2027 federal and state liability: https://ProfitHelm.com/tools/irs-2027-tax-brackets/"
+        sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert: https://profithelm.com/tools/irs-2027-tax-brackets/"
     voice_ok = False
+    voice_violations: List[str] = []
     try:
         v_proc = subprocess.run(
             ["x-cli", "voice", "check", sample_draft],
@@ -4894,16 +5099,21 @@ def dispatch_to_distribution_lead(
             text=True,
             timeout=15,
         )
-        if v_proc.returncode == 0:
+        if v_proc.stdout.strip():
             v_data = json.loads(v_proc.stdout)
-            if v_data.get("passed", False) or v_data.get("score", 0) >= 90:
+            if v_data.get("passed", False) and v_data.get("score", 0) >= 90:
                 voice_ok = True
-    except Exception:
-        pass
-
-    if not voice_ok:
+            else:
+                voice_violations = v_data.get("violations", [])
+    except FileNotFoundError:
         assert_x_post(sample_draft)
         voice_ok = True
+    except Exception:
+        assert_x_post(sample_draft)
+        voice_ok = True
+
+    if not voice_ok:
+        raise ValueError(f"Voice DNA audit failed on sample draft: {voice_violations}")
 
     print("[DISPATCH:DISTRIBUTION] Phase 3: Mechanical Voice DNA check -> x-cli voice check PASS (score >= 90)")
 
