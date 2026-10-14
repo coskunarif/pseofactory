@@ -855,7 +855,6 @@ class MonetizationHub:
                 for cat_k, cat_v in prop_categories.items():
                     if (
                         cat_v.get("primary_partner") == key_clean
-                        or cat_v.get("fallback_partner") == key_clean
                         or cat_k.lower() == key_clean
                     ):
                         matched_vault_cat = cat_v

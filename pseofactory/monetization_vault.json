@@ -24,6 +24,13 @@
       "name": "Stripe",
       "account_id": "acct_1T6fSTIq0ckFsf5j",
       "enabled": true
+    },
+    "impact": {
+      "name": "Impact.com",
+      "account_id": "7932737",
+      "account_user": "Arif COSKUN",
+      "marketplace_status": "pending_approval",
+      "enabled": true
     }
   },
   "sub_affiliate_master": {
@@ -42,8 +49,8 @@
         "STARTUP_BANKING": {
           "primary_partner": "mercury",
           "fallback_partner": "rho",
-          "direct_url": "https://mercury.com/",
-          "status": "pending",
+          "direct_url": "https://mercury.com/r/profithelm-llc",
+          "status": "live",
           "bounty": "$250"
         },
         "PAYROLL_HR": {
@@ -98,6 +105,295 @@
           "status": "pending",
           "bounty": "$80-$150"
         }
+      },
+      "roster_tiers": {
+        "live_revenue_ready": [
+          "coinledger",
+          "koinly",
+          "rippling",
+          "ipx1031",
+          "mercury"
+        ],
+        "answered_action_required": [
+          "rho",
+          "stripe"
+        ],
+        "awaiting_vendor_response": [
+          "gusto",
+          "ramp",
+          "crest_capital",
+          "exeter1031",
+          "first_american",
+          "otr_solutions_factoring"
+        ],
+        "unapplied_expansion_queue": [
+          "turbotax",
+          "taxslayer",
+          "kalshi",
+          "interactive_brokers",
+          "simply_business",
+          "suretybonds_direct",
+          "next_insurance_b2b",
+          "national_funding_med",
+          "freightos_marketplace"
+        ]
+      },
+      "partners": {
+        "coinledger": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://coinledger.io/?fpr=arif-554004",
+          "direct_url": "https://coinledger.io/?fpr=arif-554004",
+          "edge_route": "/r/coinledger",
+          "category": "DIGITAL_ASSETS",
+          "network": "FirstPromoter",
+          "bounty": "$35-$90",
+          "correspondence_status": "Approved & Live"
+        },
+        "koinly": {
+          "status": "live",
+          "is_fallback_partner": true,
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://koinly.io/?via=A4FABF09&utm_source=affiliate",
+          "direct_url": "https://koinly.io/?via=A4FABF09&utm_source=affiliate",
+          "edge_route": "/r/koinly",
+          "category": "DIGITAL_ASSETS",
+          "network": "FirstPromoter",
+          "bounty": "$40-$100",
+          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner)"
+        },
+        "rippling": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://try.rippling.com/mcfo1m09qiwt",
+          "direct_url": "https://try.rippling.com/mcfo1m09qiwt",
+          "edge_route": "/r/rippling",
+          "category": "PAYROLL_HR",
+          "network": "PartnerStack",
+          "bounty": "$600-$1600",
+          "partnership_key": "part_jp9R0iYpPGriHu",
+          "stack_key": "stck_lZgJHub85wwvkX",
+          "tos_status": "active",
+          "correspondence_status": "Approved & Live (Newsletter #1552 Welcome & #1562 October Newsletter from Erica Grodin; $600 SQO + $1,000 Closed Won)"
+        },
+        "ipx1031": {
+          "status": "active_direct",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
+          "direct_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
+          "edge_route": "/r/ipx1031",
+          "category": "SECTION_1031_EXCHANGE",
+          "network": "In-House Direct",
+          "bounty": "$250-$750",
+          "correspondence_status": "Active Direct Referral Route"
+        },
+        "mercury": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://mercury.com/r/profithelm-llc",
+          "direct_url": "https://mercury.com/r/profithelm-llc",
+          "edge_route": "/r/mercury",
+          "category": "STARTUP_BANKING",
+          "network": "PartnerStack / In-House",
+          "bounty": "$250",
+          "correspondence_status": "Approved & Live (Customer referral link https://mercury.com/r/profithelm-llc extracted from app.mercury.com + Mercury Partnerships form submitted 2026-10-14; $250 bonus on $10K deposit within 90 days)"
+        },
+        "rho": {
+          "status": "awaiting_response",
+          "pipeline_tier": "answered_action_required",
+          "url": "https://rho.co/",
+          "direct_url": "https://rho.co/",
+          "edge_route": "/r/rho",
+          "category": "CORPORATE_SPEND",
+          "network": "In-House Direct",
+          "bounty": "$500-$1000",
+          "correspondence_status": "Answered (Inbox #974 from clientservice@rho.co on 2026-10-14): Directed to Rho Partner Portal form; form submitted 2026-10-14T08:37Z, awaiting partner link"
+        },
+        "stripe": {
+          "status": "requires_followup",
+          "pipeline_tier": "answered_action_required",
+          "url": "https://stripe.com/",
+          "direct_url": "https://stripe.com/",
+          "edge_route": "/r/stripe",
+          "category": "B2B_PAYMENTS",
+          "network": "In-House Direct",
+          "bounty": "$150-$300",
+          "correspondence_status": "Answered / Gated (Inbox #971 from partner-ecosystem@stripe.com on 2026-10-12): Requires $1M+ USD annual volume and Stripe Connect integration"
+        },
+        "gusto": {
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://gusto.com/",
+          "direct_url": "https://gusto.com/",
+          "edge_route": "/r/gusto",
+          "category": "PAYROLL_HR",
+          "network": "Impact.com",
+          "campaign_id": "15154",
+          "bounty": "$300",
+          "correspondence_status": "Application Submitted (Impact.com Account 7932737, Campaign #15154; In Review; Verified Insertion Order Payout: $300.00 USD per Sale)"
+        },
+        "ramp": {
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://ramp.com/",
+          "direct_url": "https://ramp.com/",
+          "edge_route": "/r/ramp",
+          "category": "CORPORATE_SPEND",
+          "network": "In-House / PartnerStack",
+          "bounty": "$500",
+          "correspondence_status": "Application Submitted (Sent #237 to hi@ramp.com on 2026-10-13 + Ramp Referral Partner portal form at ramp.com/technology-partnerships on 2026-10-14T22:04Z): Awaiting vendor reply"
+        },
+        "crest_capital": {
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.crestcapital.com/",
+          "direct_url": "https://www.crestcapital.com/",
+          "edge_route": "/r/crest_capital",
+          "category": "COMMERCIAL_REAL_ESTATE",
+          "network": "In-House Direct",
+          "bounty": "$100-$300",
+          "correspondence_status": "Application Submitted (Sent #241 to info@crestcapital.com on 2026-10-13): Awaiting vendor reply"
+        },
+        "exeter1031": {
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.exeterco.com/",
+          "direct_url": "https://www.exeterco.com/",
+          "edge_route": "/r/exeter1031",
+          "category": "SECTION_1031_EXCHANGE",
+          "network": "In-House Direct",
+          "bounty": "$300-$800",
+          "correspondence_status": "Application Submitted (Sent #243 to ask@exeterco.com on 2026-10-13): Awaiting vendor reply"
+        },
+        "first_american": {
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.firstexchange.com/",
+          "direct_url": "https://www.firstexchange.com/",
+          "edge_route": "/r/first_american",
+          "category": "SECTION_1031_EXCHANGE",
+          "network": "In-House Direct",
+          "bounty": "$300-$800",
+          "correspondence_status": "Application Submitted (Sent #244 to 1031@firstam.com on 2026-10-13): Awaiting vendor reply"
+        },
+        "turbotax": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://turbotax.intuit.com/",
+          "direct_url": "https://turbotax.intuit.com/",
+          "edge_route": "/r/turbotax",
+          "category": "TAX_INTELLIGENCE",
+          "network": "CJ Affiliate",
+          "bounty": "$45-$120",
+          "correspondence_status": "Not Yet Applied (Wrapped via Sovrn Commerce fallback until CJ direct approval)"
+        },
+        "taxslayer": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.taxslayer.com/",
+          "direct_url": "https://www.taxslayer.com/",
+          "edge_route": "/r/taxslayer",
+          "category": "TAX_INTELLIGENCE",
+          "network": "CJ Affiliate",
+          "bounty": "$30-$60",
+          "correspondence_status": "Not Yet Applied (Wrapped via Sovrn Commerce fallback until CJ direct approval)"
+        },
+        "kalshi": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://kalshi.com/",
+          "direct_url": "https://kalshi.com/",
+          "edge_route": "/r/kalshi",
+          "category": "MARKET_ARBITRAGE",
+          "network": "Impact.com",
+          "campaign_id": "37770",
+          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Kalshi.brand",
+          "bounty": "$40-$150",
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #37770 Kalshi verified Insertion Order payout: $40.00 USD per Trade)"
+        },
+        "interactive_brokers": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.interactivebrokers.com/",
+          "direct_url": "https://www.interactivebrokers.com/",
+          "edge_route": "/r/interactive_brokers",
+          "category": "MARKET_ARBITRAGE",
+          "network": "In-House Direct",
+          "bounty": "$100-$200",
+          "correspondence_status": "Not Yet Applied (Requires IBKR Affiliate application)"
+        },
+        "simply_business": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.simplybusiness.com/",
+          "direct_url": "https://www.simplybusiness.com/",
+          "edge_route": "/r/simply_business",
+          "category": "COMMERCIAL_INSURANCE",
+          "network": "Impact.com",
+          "campaign_id": "49719",
+          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Simply-Business.brand",
+          "bounty": "$30-$100",
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #49719 Simply Business verified Insertion Order payout: $30.00 USD per RFQ Quoted)"
+        },
+        "suretybonds_direct": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.suretybonds.com/",
+          "direct_url": "https://www.suretybonds.com/",
+          "edge_route": "/r/suretybonds_direct",
+          "category": "COMMERCIAL_SURETY",
+          "network": "In-House Direct",
+          "bounty": "$75-$300",
+          "correspondence_status": "Not Yet Applied (No public web form; /affiliate-program returns 404; requires email inquiry to customercare@suretybonds.com)"
+        },
+        "next_insurance_b2b": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.nextinsurance.com/",
+          "direct_url": "https://www.nextinsurance.com/",
+          "edge_route": "/r/next_insurance_b2b",
+          "category": "COMMERCIAL_INSURANCE",
+          "network": "Impact.com",
+          "campaign_id": "14516",
+          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Next-Insurance.brand",
+          "bounty": "$25-$150",
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #14516 Next Insurance verified Insertion Order payout: $25.00 USD per Quote)"
+        },
+        "national_funding_med": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.nationalfunding.com/",
+          "direct_url": "https://www.nationalfunding.com/",
+          "edge_route": "/r/national_funding_med",
+          "category": "COMMERCIAL_REAL_ESTATE",
+          "network": "Impact.com",
+          "campaign_id": "15709",
+          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/National-Funding.brand",
+          "bounty": "5% of loan amount",
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #15709 National Funding verified Insertion Order payout: 5% of Loan Amount per Loan Received)"
+        },
+        "otr_solutions_factoring": {
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.otrsolutions.com/",
+          "direct_url": "https://www.otrsolutions.com/",
+          "edge_route": "/r/otr_solutions_factoring",
+          "category": "CORPORATE_FINANCE",
+          "network": "In-House Direct",
+          "bounty": "$150-$450",
+          "correspondence_status": "Application Submitted (Partner web form at otrsolutions.com/become-a-partner on 2026-10-14T22:04Z): Awaiting vendor reply"
+        },
+        "freightos_marketplace": {
+          "status": "pending",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.freightos.com/",
+          "direct_url": "https://www.freightos.com/",
+          "edge_route": "/r/freightos_marketplace",
+          "category": "CUSTOMS_TRADE_FINANCE",
+          "network": "Impact.com",
+          "bounty": "$50-$200",
+          "correspondence_status": "Not Yet Applied (Not listed in Impact public directory; requires direct Freightos partner inquiry)"
+        }
       }
     },
     "prexvo": {
@@ -111,14 +407,85 @@
           "fallback_partner": "sofi",
           "direct_url": "https://www.splashfinancial.com/",
           "status": "pending_p2",
-          "bounty": "$200-$240"
+          "bounty": "$300"
         },
         "STUDENT_LOAN_COMPARISON": {
           "primary_partner": "credible",
           "fallback_partner": "earnest",
           "direct_url": "https://www.credible.com/",
           "status": "pending_p2",
-          "bounty": "$100-$150"
+          "bounty": "$75-$150"
+        }
+      },
+      "roster_tiers": {
+        "live_revenue_ready": [],
+        "answered_action_required": [],
+        "awaiting_vendor_response": [
+          "splash_financial"
+        ],
+        "unapplied_expansion_queue": [
+          "sofi",
+          "credible",
+          "earnest",
+          "lendkey"
+        ]
+      },
+      "partners": {
+        "splash_financial": {
+          "status": "pending_p2",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.splashfinancial.com/",
+          "direct_url": "https://www.splashfinancial.com/",
+          "category": "STUDENT_LOAN_REFINANCE",
+          "network": "Impact.com",
+          "campaign_id": "9516",
+          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Splash-Financial.brand",
+          "bounty": "$300",
+          "gate_1_verified_payout": "$300.00 USD per SLR Closed Loan",
+          "correspondence_status": "Application Submitted (Sent #247 + Impact Account 7932737 Marketplace applied; Campaign #9516 verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45)"
+        },
+        "sofi": {
+          "status": "pending_p2",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.sofi.com/",
+          "direct_url": "https://www.sofi.com/",
+          "category": "STUDENT_LOAN_REFINANCE",
+          "network": "In-House Direct",
+          "bounty": "$120",
+          "correspondence_status": "Held in P2 Queue pending Prexvo Gate 1 validation"
+        },
+        "credible": {
+          "status": "pending_p2",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.credible.com/",
+          "direct_url": "https://www.credible.com/",
+          "category": "STUDENT_LOAN_COMPARISON",
+          "network": "Impact.com",
+          "campaign_id": "3874",
+          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Credible.brand",
+          "bounty": "$75-$150",
+          "gate_1_verified_payout": "$75.00 USD per Closed Loan - Refinancing",
+          "correspondence_status": "Held in P2 Queue (Impact Campaign #3874 verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; awaiting Impact Marketplace Account 7932737 approval)"
+        },
+        "earnest": {
+          "status": "pending_p2",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.earnest.com/",
+          "direct_url": "https://www.earnest.com/",
+          "category": "STUDENT_LOAN_REFINANCE",
+          "network": "In-House Direct",
+          "bounty": "$150-$200",
+          "correspondence_status": "Held in P2 Queue pending Prexvo Gate 1 validation"
+        },
+        "lendkey": {
+          "status": "pending_p2",
+          "pipeline_tier": "unapplied_expansion_queue",
+          "url": "https://www.lendkey.com/",
+          "direct_url": "https://www.lendkey.com/",
+          "category": "STUDENT_LOAN_REFINANCE",
+          "network": "In-House Direct",
+          "bounty": "$100-$150",
+          "correspondence_status": "Held in P2 Queue pending Prexvo Gate 1 validation"
         }
       }
     }

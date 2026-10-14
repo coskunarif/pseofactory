@@ -276,10 +276,15 @@ class PartnerTrackingEngine:
         assert_no_forbidden_dashes(disclosure_text, context=f"Disclosure for {prop_clean}")
 
         action_items = self.action_bus.get_all_items(property_id=prop_clean)
-        # Prioritize PENDING_OPERATOR over resolved items so pending operator intervention is never masked
+        # Prioritize PENDING_OPERATOR over resolved items; among resolved items, prefer the most recent
         action_map = {}
         for it in action_items:
-            if it.partner_key not in action_map or it.status == "PENDING_OPERATOR":
+            existing = action_map.get(it.partner_key)
+            if existing is None:
+                action_map[it.partner_key] = it
+            elif it.status == "PENDING_OPERATOR" and existing.status != "PENDING_OPERATOR":
+                action_map[it.partner_key] = it
+            elif existing.status != "PENDING_OPERATOR" and it.created_at > existing.created_at:
                 action_map[it.partner_key] = it
 
         partner_summaries: List[PartnerStatusSummary] = []
@@ -346,12 +351,15 @@ class PartnerTrackingEngine:
                     and act_item.status in ("RESOLVED", "APPROVED")
                     and act_item.action_type == "ONBOARDING_ACTION_REQUIRED"
                 )
+                or (vault_entry and vault_entry.get("status") == "awaiting_response")
             ):
                 op_status = "AWAITING_RESPONSE"
                 awaiting_count += 1
                 is_live = False
                 if class_item and class_item.classification_type == "APPLICATION_SUBMITTED":
                     missing_reqs.extend(class_item.missing_requirements)
+                elif vault_entry and vault_entry.get("correspondence_status"):
+                    missing_reqs.append(vault_entry["correspondence_status"])
                 else:
                     missing_reqs.append("Awaiting vendor partnership team response and tracking URL")
             elif act_item and act_item.status == "PENDING_OPERATOR":

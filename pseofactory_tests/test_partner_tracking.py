@@ -774,5 +774,86 @@ def test_svg_traffic_ceiling_chart_aspect_ratio_cls_zero():
     assert 'preserveAspectRatio="xMidYMid meet"' in page_html
 
 
+def test_mercury_inbound_reply_and_rippling_newsletter_approval_classification():
+    """
+    Asserts that inbound replies from partnerships@mercury.com (Inbox #978) are classified
+    as ONBOARDING_ACTION_REQUIRED rather than swallowed by outbound_partner_map, and that
+    Rippling PartnerStack welcome/newsletter emails from erica.grodin@rippling.com classify
+    as APPLICATION_APPROVED.
+    """
+    engine = EmailIngestionEngine()
+    messages = [
+        EmailMessage(
+            id="978",
+            message_id="msg-978",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-14T15:48:26Z",
+            subject="Mercury Inquiry",
+            sender_name="Mercury Partnerships",
+            sender_email="partnerships@mercury.com",
+            body_snippet="If you are looking to explore a potential partnership, please head to our Mercury Partnerships page here ( https://mercury.com/partnerships ) and fill out the form.",
+        ),
+        EmailMessage(
+            id="news-1552",
+            message_id="msg-1552",
+            account="zoho",
+            mailbox="Newsletter",
+            date="2026-10-12T15:56:45Z",
+            subject="Welcome to the Rippling Affiliate Program",
+            sender_name="Erica Grodin",
+            sender_email="erica.grodin@rippling.com",
+            body_snippet="Welcome to the Rippling Affiliate Program",
+        ),
+    ]
+
+    classifications = engine.classify_partner_emails(messages)
+    assert len(classifications) == 2
+
+    mercury_c = next(c for c in classifications if c.partner_key == "mercury")
+    assert mercury_c.classification_type == "ONBOARDING_ACTION_REQUIRED"
+    assert mercury_c.requires_operator_decision is True
+    assert "mercury.com/partnerships" in mercury_c.candidate_url
+
+    rippling_c = next(c for c in classifications if c.partner_key == "rippling")
+    assert rippling_c.classification_type == "APPLICATION_APPROVED"
+    assert rippling_c.requires_operator_decision is False
+    assert rippling_c.candidate_url == "https://try.rippling.com/mcfo1m09qiwt"
+
+
+def test_unified_vault_roster_tiers_completeness():
+    """
+    Asserts that monetization_vault.json organizes all 22 ProfitHelm partners and 5 Prexvo
+    partners into cohesive roster_tiers separating live_revenue_ready links from pending/awaiting items.
+    """
+    from pseofactory.affiliates_hub import MonetizationHub
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
+
+    hub = MonetizationHub()
+    ph_prop = hub.vault_data["properties"]["profithelm"]
+    px_prop = hub.vault_data["properties"]["prexvo"]
+
+    canonical_ph_keys = {k for k, v in PROFITHELM_AFFILIATES.items() if k == v.key}
+    canonical_px_keys = {k for k, v in PREXVO_AFFILIATES.items() if k == v.key}
+
+    assert set(ph_prop["partners"].keys()) == canonical_ph_keys
+    assert set(px_prop["partners"].keys()) == canonical_px_keys
+
+    ph_tiers = ph_prop["roster_tiers"]
+    assert set(ph_tiers["live_revenue_ready"]) == {"coinledger", "koinly", "rippling", "ipx1031", "mercury"}
+    all_ph_tiered = (
+        set(ph_tiers["live_revenue_ready"])
+        | set(ph_tiers["answered_action_required"])
+        | set(ph_tiers["awaiting_vendor_response"])
+        | set(ph_tiers["unapplied_expansion_queue"])
+    )
+    assert all_ph_tiered == canonical_ph_keys
+
+    px_tiers = px_prop["roster_tiers"]
+    assert px_tiers["live_revenue_ready"] == []
+    assert set(px_tiers["awaiting_vendor_response"]) == {"splash_financial"}
+    assert set(px_tiers["unapplied_expansion_queue"]) == {"sofi", "credible", "earnest", "lendkey"}
+
+
 
 

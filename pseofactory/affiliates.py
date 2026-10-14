@@ -138,15 +138,15 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         cta_text="Track Crypto Portfolios with Koinly",
     ),
 
-    # Pending Business Banking Slots
+    # Live Business Banking Slots
     "mercury": AffiliatePartner(
         key="mercury",
         name="Mercury Startup Banking",
         category="Business Banking",
         property_id="profithelm",
-        status="pending",
+        status="live",
         env_var="AFFILIATE_MERCURY_URL",
-        default_url="https://mercury.com/",
+        default_url="https://mercury.com/r/profithelm-llc",
         badge="Built for High-Growth Startups",
         commission_est="$150-$300/approval",
         bounty_est="$250 bonus / $150-$300",
@@ -1276,7 +1276,10 @@ def resolve_optimal_partner_for_slug(
         explicit_vault_live_keys: Set[str] = set()
         for p in candidates:
             ov_status = _extract_partner_vault_status(p.key, vault_overrides)
-            if ov_status in ("live", "active_direct"):
+            ov_entry = vault_overrides.get(p.key) if isinstance(vault_overrides, dict) else None
+            if ov_status in ("live", "active_direct") and not (
+                isinstance(ov_entry, dict) and ov_entry.get("is_fallback_partner")
+            ):
                 explicit_vault_live_keys.add(p.key)
             eff_status = (ov_status or p.status or "").strip().lower()
             if eff_status in ("live", "active_direct"):

@@ -446,6 +446,46 @@ class EmailIngestionEngine:
                 cached_dict[mid] = msg.to_dict()
                 ingested.append(msg)
 
+            news_envelopes = self.fetch_zoho_envelopes(mailbox="Newsletter", page_size=25, force=True)
+            for env in news_envelopes:
+                date_str = env.get("date") or ""
+                if not date_str:
+                    continue
+                from_arr = env.get("from") or []
+                sender_name = (from_arr[0].get("name") or "") if from_arr else ""
+                sender_email = (from_arr[0].get("email") or "") if from_arr else ""
+                subject = env.get("subject") or ""
+                news_check = f"{subject} {sender_name} {sender_email}".lower()
+                if not (
+                    "rippling.com" in news_check
+                    or "partnerstack" in news_check
+                    or any(tok in news_check for tok in sent_partner_domains)
+                ):
+                    continue
+
+                mid = f"news-{env.get('id', '')}"
+                msg_id_hdr = env.get("message-id") or mid
+                subject_clean = subject.replace("\u2014", "-").replace("\u2013", "-")
+                sender_name_clean = sender_name.replace("\u2014", "-").replace("\u2013", "-")
+                assert_no_forbidden_dashes(subject_clean, context=f"Email subject {mid}")
+                assert_no_forbidden_dashes(sender_name_clean, context=f"Sender name {mid}")
+
+                msg = EmailMessage(
+                    id=mid,
+                    message_id=msg_id_hdr,
+                    account="zoho",
+                    mailbox="Newsletter",
+                    date=date_str,
+                    subject=subject_clean,
+                    sender_name=sender_name_clean,
+                    sender_email=sender_email,
+                    body_snippet=subject_clean,
+                    raw_headers={"size": env.get("size")},
+                    flags=[f.get("iana", "") for f in (env.get("flags") or []) if isinstance(f, dict)],
+                )
+                cached_dict[mid] = msg.to_dict()
+                ingested.append(msg)
+
         self.save_cache(cache)
         return ingested
 
@@ -623,6 +663,70 @@ class EmailIngestionEngine:
                         date=msg.date,
                         candidate_url=cand_url,
                         network="In-House Direct",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and "mercury.com" in sender_lower and (
+                "mercury.com/partnerships" in body_lower
+                or "fill out the form" in body_lower
+                or "mercury partnerships page" in body_lower
+                or "mercury inquiry" in subj_lower
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="mercury",
+                        partner_name="Mercury Startup Banking",
+                        category="STARTUP_BANKING",
+                        classification_type="ONBOARDING_ACTION_REQUIRED",
+                        requires_operator_decision=True,
+                        summary="Mercury Partnerships team replied to email inquiry and requested submission of the official partnership form at https://mercury.com/partnerships (or extraction of ProfitHelm LLC customer referral link from app.mercury.com).",
+                        urgency="HIGH",
+                        deadline=None,
+                        missing_requirements=[
+                            "Submit official partnership form at https://mercury.com/partnerships or extract active customer referral link from app.mercury.com"
+                        ],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url or "https://mercury.com/partnerships",
+                        network="In-House Direct",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "erica.grodin@rippling.com" in sender_lower
+                or (
+                    "rippling" in combined_text
+                    and (
+                        "welcome to the rippling affiliate program" in combined_text
+                        or "rippling affiliate" in subj_lower
+                    )
+                )
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="rippling",
+                        partner_name="Rippling Unified Workforce Platform",
+                        category="PAYROLL_HR",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="Rippling Affiliate Program approved and active on PartnerStack under Erica Grodin ($600 per SQO demo + $1,000 per Closed Won deal, $1,600 total).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://try.rippling.com/mcfo1m09qiwt",
+                        network="PartnerStack",
                     )
                 )
                 continue

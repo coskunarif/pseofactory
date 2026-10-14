@@ -88,8 +88,8 @@ def test_direct_high_bounty_partner_resolution():
     route_mercury = hub.get_route("profithelm", partner_key="mercury")
     assert route_mercury["property_id"] == "profithelm"
     assert route_mercury["partner"] == "mercury"
-    assert route_mercury["status"] == "pending"
-    assert "mercury.com" in route_mercury["url"]
+    assert route_mercury["status"] == "live"
+    assert route_mercury["url"] == "https://mercury.com/r/profithelm-llc"
 
     route_ramp = hub.get_route("profithelm", partner_key="ramp")
     assert route_ramp["property_id"] == "profithelm"
