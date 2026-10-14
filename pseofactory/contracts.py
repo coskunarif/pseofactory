@@ -177,7 +177,11 @@ def assert_no_personal_attribution(text: str, context: str = "") -> bool:
         return True
     text_lower = text.lower()
     for term in PERSONAL_ATTRIBUTION_FORBIDDEN_TERMS:
-        if term in text_lower:
+        if term in ("arif", "coskun"):
+            matched = bool(re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", text_lower))
+        else:
+            matched = term in text_lower
+        if matched:
             ctx = f" in {context}" if context else ""
             raise ValueError(
                 f"Personal attribution forbidden{ctx}: contains '{term}'. "
