@@ -839,7 +839,9 @@ def cmd_partner_status(args: argparse.Namespace) -> int:
 
     engine = PartnerTrackingEngine()
     try:
-        dashboard = engine.sync_and_evaluate(force_mail_poll=False)
+        dashboard = engine.sync_and_evaluate(
+            force_mail_poll=getattr(args, "force_poll", False)
+        )
 
         if getattr(args, "html", None):
             html_content = render_light_interface(dashboard)
@@ -1461,6 +1463,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pstat.add_argument("--property", type=str, default=None, help="Optional property filter (profithelm, prexvo, all)")
     p_pstat.add_argument("--html", type=str, default=None, help="Export minimal modern light interface to specified HTML path")
+    p_pstat.add_argument("--force-poll", "--force", dest="force_poll", action="store_true", help="Bypass poll rate-limit interval to query mail server directly")
     p_pstat.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # partner-action

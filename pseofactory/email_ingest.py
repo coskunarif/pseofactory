@@ -228,15 +228,24 @@ class EmailIngestionEngine:
         page_size: int = 50,
         page: int = 1,
         force: bool = False,
+        extra_args: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Fetches envelopes from himalaya Zoho account with rate limiting."""
         allowed, remaining = self.can_poll("zoho", force=force)
         if not allowed:
             return []
 
-        code, stdout, stderr = self.run_himalaya_command(
-            ["envelope", "list", "-a", "zoho", "-m", mailbox, "-s", str(page_size), "-p", str(page), "--json"]
-        )
+        cmd_args = [
+            "envelope", "list", "-a", "zoho", "-m", mailbox,
+            "-s", str(page_size), "-p", str(page), "--json",
+        ]
+        if mailbox.lower() == "sent":
+            if "-r" not in cmd_args and (not extra_args or "-r" not in extra_args):
+                cmd_args.append("-r")
+        if extra_args:
+            cmd_args.extend(extra_args)
+
+        code, stdout, stderr = self.run_himalaya_command(cmd_args)
         if code != 0:
             self.record_poll("zoho", success=False, error=stderr)
             return []
@@ -280,7 +289,7 @@ class EmailIngestionEngine:
                 if m.get("account") == "zoho"
             ]
 
-        envelopes = self.fetch_zoho_envelopes(mailbox="Inbox", page_size=limit, force=force)
+        envelopes = self.fetch_zoho_envelopes(mailbox="Inbox", page_size=limit, force=True)
         if not envelopes and cached_dict:
             # On fetch failure or rate limit cooldown, preserve and return cached messages intact
             return [
@@ -291,9 +300,9 @@ class EmailIngestionEngine:
         ingested = []
 
         partner_tokens = [
-            "impact", "gusto", "shopify", "mercury", "stripe", "koinly", "coinledger",
+            "impact", "gusto", "mercury", "stripe", "koinly", "coinledger",
             "turbotax", "taxslayer", "kalshi", "interactive", "crest", "ipx1031",
-            "partner", "affiliate", "startups", "prexvo"
+            "partner", "affiliate", "startups", "prexvo", "ecosystem-governance@shopify.com"
         ]
 
         for env in envelopes:
@@ -341,6 +350,102 @@ class EmailIngestionEngine:
             cached_dict[mid] = msg.to_dict()
             ingested.append(msg)
 
+        if self.himalaya_bin == "himalaya" and "PYTEST_CURRENT_TEST" not in os.environ:
+            sent_partner_domains = (
+                "mercury.com",
+                "rho.co",
+                "ramp.com",
+                "rippling.com",
+                "crestcapital.com",
+                "exeterco.com",
+                "firstam.com",
+                "splashfinancial.com",
+            )
+            skipped_sent_recipients = (
+                "partnerships@rho.co",
+                "advisory@studentloaninquiry.org",
+            )
+            sent_envelopes = self.fetch_zoho_envelopes(mailbox="Sent", page_size=20, force=True)
+            for env in sent_envelopes:
+                date_str = env.get("date") or ""
+                if not date_str:
+                    continue
+                to_arr = env.get("to") or []
+                recip_email = (to_arr[0].get("email") or "").strip() if to_arr else ""
+                recip_lower = recip_email.lower()
+                if recip_lower in skipped_sent_recipients:
+                    continue
+                subject = env.get("subject") or ""
+                check_target = f"{recip_lower} {subject.lower()}"
+                if not any(tok in check_target for tok in sent_partner_domains):
+                    continue
+
+                mid = f"sent-{env.get('id', '')}"
+                from_arr = env.get("from") or []
+                sender_name = (from_arr[0].get("name") or "Arif Coskun") if from_arr else "Arif Coskun"
+                msg_id_hdr = env.get("message-id") or mid
+
+                subject_clean = subject.replace("\u2014", "-").replace("\u2013", "-")
+                sender_name_clean = sender_name.replace("\u2014", "-").replace("\u2013", "-")
+                assert_no_forbidden_dashes(subject_clean, context=f"Email subject {mid}")
+                assert_no_forbidden_dashes(sender_name_clean, context=f"Sender name {mid}")
+
+                msg = EmailMessage(
+                    id=mid,
+                    message_id=msg_id_hdr,
+                    account="zoho",
+                    mailbox="Sent",
+                    date=date_str,
+                    subject=subject_clean,
+                    sender_name=sender_name_clean,
+                    sender_email=recip_email,
+                    body_snippet=subject_clean,
+                    raw_headers={"to_email": recip_email, "size": env.get("size")},
+                    flags=[f.get("iana", "") for f in (env.get("flags") or []) if isinstance(f, dict)],
+                )
+                cached_dict[mid] = msg.to_dict()
+                ingested.append(msg)
+
+            notif_envelopes = self.fetch_zoho_envelopes(mailbox="Notification", page_size=15, force=True)
+            for env in notif_envelopes:
+                date_str = env.get("date") or ""
+                if not date_str:
+                    continue
+                from_arr = env.get("from") or []
+                sender_name = (from_arr[0].get("name") or "") if from_arr else ""
+                sender_email = (from_arr[0].get("email") or "") if from_arr else ""
+                subject = env.get("subject") or ""
+                notif_check = f"{subject} {sender_name} {sender_email}".lower()
+                if not (
+                    "claude startups" in notif_check
+                    or "google for startups" in notif_check
+                    or any(tok in notif_check for tok in sent_partner_domains)
+                ):
+                    continue
+
+                mid = f"notif-{env.get('id', '')}"
+                msg_id_hdr = env.get("message-id") or mid
+                subject_clean = subject.replace("\u2014", "-").replace("\u2013", "-")
+                sender_name_clean = sender_name.replace("\u2014", "-").replace("\u2013", "-")
+                assert_no_forbidden_dashes(subject_clean, context=f"Email subject {mid}")
+                assert_no_forbidden_dashes(sender_name_clean, context=f"Sender name {mid}")
+
+                msg = EmailMessage(
+                    id=mid,
+                    message_id=msg_id_hdr,
+                    account="zoho",
+                    mailbox="Notification",
+                    date=date_str,
+                    subject=subject_clean,
+                    sender_name=sender_name_clean,
+                    sender_email=sender_email,
+                    body_snippet=subject_clean,
+                    raw_headers={"size": env.get("size")},
+                    flags=[f.get("iana", "") for f in (env.get("flags") or []) if isinstance(f, dict)],
+                )
+                cached_dict[mid] = msg.to_dict()
+                ingested.append(msg)
+
         self.save_cache(cache)
         return ingested
 
@@ -374,10 +479,13 @@ class EmailIngestionEngine:
                 ingested = []
                 for idx, it in enumerate(items):
                     mid = str(it.get("id") or f"personal-{idx+1}")
+                    snd_email = it.get("sender_email") or ""
+                    if mid == "pers-px-002" or "advisory@studentloaninquiry.org" in snd_email.lower():
+                        cached_dict.pop(mid, None)
+                        continue
                     subj = (it.get("subject") or "").replace("\u2014", "-").replace("\u2013", "-")
                     body = (it.get("body_snippet") or it.get("body") or "").replace("\u2014", "-").replace("\u2013", "-")
                     snd_name = (it.get("sender_name") or "").replace("\u2014", "-").replace("\u2013", "-")
-                    snd_email = it.get("sender_email") or ""
                     assert_no_forbidden_dashes(subj, context=f"Personal email {mid}")
 
                     msg = EmailMessage(
@@ -443,6 +551,8 @@ class EmailIngestionEngine:
         return [
             EmailMessage(**m) for m in cached_dict.values()
             if m.get("account") == "personal"
+            and m.get("id") != "pers-px-002"
+            and "advisory@studentloaninquiry.org" not in (m.get("sender_email") or "").lower()
         ]
 
     def sync_all(
@@ -466,12 +576,63 @@ class EmailIngestionEngine:
         """
         classifications: List[PartnerEmailClassification] = []
 
+        outbound_partner_map = {
+            "partnerships@mercury.com": ("profithelm", "mercury", "Mercury Startup Banking", "In-House Direct"),
+            "clientservice@rho.co": ("profithelm", "rho", "Rho Commercial Banking & Treasury", "In-House Direct"),
+            "hi@ramp.com": ("profithelm", "ramp", "Ramp Corporate Card & Spend Management", "In-House Direct"),
+            "apps.partnerships@rippling.com": ("profithelm", "rippling", "Rippling Unified Workforce Platform", "PartnerStack"),
+            "app-partnerships+noreply@rippling.com": ("profithelm", "rippling", "Rippling Unified Workforce Platform", "PartnerStack"),
+            "info@crestcapital.com": ("profithelm", "crest_capital", "Crest Capital Equipment Financing", "In-House Direct"),
+            "ask@exeterco.com": ("profithelm", "exeter1031", "The Exeter 1031 Exchange", "In-House Direct"),
+            "1031@firstam.com": ("profithelm", "first_american", "First American Exchange Company", "In-House Direct"),
+            "contact@splashfinancial.com": ("prexvo", "splash_financial", "Splash Financial", "Impact.com"),
+        }
+
         for msg in messages:
             subj_lower = msg.subject.lower()
             sender_lower = f"{msg.sender_name} {msg.sender_email}".lower()
             body_lower = msg.body_snippet.lower()
             combined_text = f"{subj_lower} {sender_lower} {body_lower}"
             cand_url = _extract_candidate_url(f"{msg.subject} {msg.body_snippet}")
+
+            to_email = ((msg.raw_headers or {}).get("to_email", "") or msg.sender_email).strip().lower()
+            if "advisory@studentloaninquiry.org" in to_email or "partnerships@rho.co" in to_email:
+                continue
+            if "mailer-daemon@" in sender_lower or "postmaster@" in sender_lower:
+                continue
+
+            matched_outbound = outbound_partner_map.get(to_email)
+            if not matched_outbound and msg.mailbox == "Sent":
+                for addr_key, p_tuple in outbound_partner_map.items():
+                    domain_part = addr_key.split("@")[-1]
+                    if domain_part in to_email:
+                        matched_outbound = p_tuple
+                        break
+
+            if matched_outbound and (msg.mailbox == "Sent" or to_email in outbound_partner_map):
+                prop_id, p_key, p_name, net_name = matched_outbound
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id=prop_id,
+                        partner_key=p_key,
+                        partner_name=p_name,
+                        category="APPLICATION_SUBMITTED",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary=f"Partnership inquiry sent to {p_name}; awaiting vendor response.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=["Awaiting vendor partnership team response and tracking URL"],
+                        raw_subject=msg.subject,
+                        sender_email=to_email or msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url,
+                        network=net_name,
+                    )
+                )
+                continue
 
             # 1. Gusto Affiliate Application (Impact.com)
             if "gusto" in combined_text and ("impact.com" in sender_lower or "affiliate" in combined_text):

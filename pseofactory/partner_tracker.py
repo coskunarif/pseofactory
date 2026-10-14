@@ -299,6 +299,10 @@ class PartnerTrackingEngine:
                 followup_count += 1
                 is_live = False
                 missing_reqs.extend(act_item.missing_requirements)
+                if class_item and class_item.classification_type == "APPLICATION_SUBMITTED":
+                    for req in class_item.missing_requirements:
+                        if req not in missing_reqs:
+                            missing_reqs.append(req)
             elif effective_status == "live":
                 op_status = "LIVE_ACTIVE"
                 live_count += 1
