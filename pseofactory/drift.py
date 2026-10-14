@@ -47,8 +47,10 @@ def compute_engine_hash(
                     mtimes.append(bpath.stat().st_mtime)
                 except OSError:
                     pass
-                for p in bpath.glob("**/*.py"):
-                    if "__pycache__" not in p.parts and not p.name.endswith(".pyc"):
+                for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json"):
+                    for p in bpath.glob(pattern):
+                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules")) or p.name.endswith(".pyc"):
+                            continue
                         try:
                             mtimes.append(p.stat().st_mtime)
                         except OSError:
@@ -101,14 +103,15 @@ def compute_engine_hash(
         for bdir in base_dirs:
             bpath = Path(bdir).resolve()
             if bpath.is_dir():
-                for p in bpath.glob("**/*.py"):
-                    if "__pycache__" in p.parts or p.name.endswith(".pyc") or ".git" in p.parts or ".pytest_cache" in p.parts:
-                        continue
-                    rel = f"{bpath.name}/{p.relative_to(bpath).as_posix()}"
-                    try:
-                        files_to_hash[rel] = p.read_bytes()
-                    except Exception:
-                        pass
+                for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json"):
+                    for p in bpath.glob(pattern):
+                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules")) or p.name.endswith(".pyc"):
+                            continue
+                        rel = f"{bpath.name}/{p.relative_to(bpath).as_posix()}"
+                        try:
+                            files_to_hash[rel] = p.read_bytes()
+                        except Exception:
+                            pass
 
     # 3. Add explicit include paths if provided
     if include_paths:
@@ -138,6 +141,74 @@ def compute_engine_hash(
     final_hash = master.hexdigest()
     _ENGINE_HASH_CACHE[cache_key] = (composite_mtime, final_hash)
     return final_hash
+
+
+def compute_two_tier_merkle_hash(
+    tenant_dir: Optional[Any] = None,
+    tenant_paths: Optional[Any] = None,
+    base_dirs: Optional[Any] = None,
+    include_paths: Optional[Any] = None,
+    **kwargs: Any,
+) -> Dict[str, str]:
+    """
+    Computes a two-tier Merkle hash separating the shared pseofactory substrate
+    from tenant-specific code, CSS, JS, and dataset JSON files.
+    Returns {"substrate_hash": ..., "tenant_asset_hash": ..., "composite_hash": ..., "merkle_root": ...}.
+    Zero em-dashes. Zero en-dashes.
+    """
+    substrate_hash = compute_engine_hash()
+    tenant_hasher = hashlib.sha256()
+
+    raw_candidates: List[Union[str, Path]] = []
+    for source in (tenant_dir, tenant_paths, base_dirs, include_paths):
+        if source is None:
+            continue
+        if isinstance(source, (str, Path)):
+            raw_candidates.append(source)
+        elif isinstance(source, (list, tuple, set)):
+            for item in source:
+                if item is not None and isinstance(item, (str, Path)):
+                    raw_candidates.append(item)
+
+    tenant_files: Dict[str, bytes] = {}
+    for idx, candidate in enumerate(raw_candidates):
+        tpath = Path(candidate).resolve()
+        if tpath.is_dir():
+            for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json", "*.json"):
+                for p in tpath.glob(pattern):
+                    if not p.is_file():
+                        continue
+                    rel_parts = p.relative_to(tpath).parts
+                    if any(ex in rel_parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", ".agy")) or p.name.endswith(".pyc"):
+                        continue
+                    rel = p.relative_to(tpath).as_posix()
+                    key = f"{idx}:{rel}" if len(raw_candidates) > 1 else rel
+                    try:
+                        tenant_files[key] = p.read_bytes()
+                    except Exception:
+                        pass
+        elif tpath.is_file():
+            key = f"{idx}:{tpath.name}" if len(raw_candidates) > 1 else tpath.name
+            try:
+                tenant_files[key] = tpath.read_bytes()
+            except Exception:
+                pass
+
+    for rel_path in sorted(tenant_files.keys()):
+        f_sha = hashlib.sha256(tenant_files[rel_path]).hexdigest()
+        tenant_hasher.update(f"{rel_path}:{f_sha}\n".encode("utf-8"))
+
+    tenant_asset_hash = tenant_hasher.hexdigest()
+    composite_hash = hashlib.sha256(
+        f"{substrate_hash}:{tenant_asset_hash}".encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "substrate_hash": substrate_hash,
+        "tenant_asset_hash": tenant_asset_hash,
+        "composite_hash": composite_hash,
+        "merkle_root": composite_hash,
+    }
 
 
 def detect_engine_drift(

@@ -582,6 +582,72 @@ def assert_touch_targets(css_or_html: str, is_css: bool = False, context: str = 
     return True
 
 
+def detect_interactive_touch_target_gaps(html_content: str) -> List[str]:
+    """
+    Parses <button>, <input>, <select>, and <summary> tags and checks whether
+    the document or element defines min-height: 44px / min-height: 48px or recognized
+    touch-target classes (.touch-target, .btn, .form-input, .preset-btn, .calc-switcher-btn).
+    Returns list of detected touch-target gap strings.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not html_content or not isinstance(html_content, str):
+        return []
+
+    gaps: List[str] = []
+    undersized_h = re.findall(r'min-height:\s*(?:[0-9]|[1-3][0-9]|4[0-3])px', html_content)
+    undersized_w = re.findall(r'min-width:\s*(?:[0-9]|[1-3][0-9]|4[0-3])px', html_content)
+    if undersized_h:
+        gaps.append(f"Explicit min-height < 44px detected: {undersized_h[0]}")
+    if undersized_w:
+        gaps.append(f"Explicit min-width < 44px detected: {undersized_w[0]}")
+
+    has_global_touch_css = bool(
+        re.search(r'min-height:\s*(?:4[4-9]|[5-9]\d|\d{3,})px', html_content, re.IGNORECASE)
+        or re.search(r'\.(?:touch-target|btn|form-input|preset-btn|calc-switcher-btn)\b', html_content)
+    )
+    recognized_classes = {
+        "touch-target",
+        "btn",
+        "form-input",
+        "preset-btn",
+        "calc-switcher-btn",
+    }
+
+    for match in re.finditer(r'<(button|input|select|summary)\b([^>]*)>', html_content, re.IGNORECASE):
+        tag = match.group(1).lower()
+        attrs = match.group(2) or ""
+        if tag == "input" and re.search(r'\btype\s*=\s*["\']hidden["\']', attrs, re.IGNORECASE):
+            continue
+
+        style_m = re.search(r'\bstyle\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        style_str = style_m.group(1) if style_m else ""
+        if re.search(r'(?:min-height|height):\s*(?:[0-9]|[1-3][0-9]|4[0-3])px', style_str, re.IGNORECASE):
+            gaps.append(f"<{tag}> element specifies inline height < 44px: '{style_str}'")
+            continue
+
+        has_inline_44 = bool(
+            re.search(r'(?:min-height|height):\s*(?:4[4-9]|[5-9]\d|\d{3,})px', style_str, re.IGNORECASE)
+        )
+        cls_m = re.search(r'\bclass\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        cls_tokens = set((cls_m.group(1) if cls_m else "").split())
+        has_touch_cls = bool(cls_tokens & recognized_classes)
+
+        has_tag_css_rule = bool(
+            re.search(
+                rf'(?:^|[}}\s,]){re.escape(tag)}[^{{]*\{{[^}}]*min-height:\s*(?:4[4-9]|[5-9]\d|\d{{3,}})px',
+                html_content,
+                re.IGNORECASE | re.DOTALL,
+            )
+        )
+
+        if not (has_inline_44 or has_touch_cls or has_tag_css_rule or (tag == "summary" and has_global_touch_css)):
+            gaps.append(
+                f"<{tag}> element lacks >= 44px touch-target sizing or class (.touch-target / .btn / .form-input)"
+            )
+
+    return gaps
+
+
 def assert_valid_jsonld(html_content: str, context: str = "") -> List[Dict[str, Any]]:
     """
     Extracts and parses all application/ld+json script blocks in HTML content.
@@ -3514,12 +3580,31 @@ SAFE_OPERATORS: Dict[Any, Callable] = {
     ast.UAdd: operator.pos,
 }
 
+def _safe_clamp(x: float, low: float, high: float) -> float:
+    return float(min(max(float(x), float(low)), float(high)))
+
+
+def _safe_phaseout(base_cap: float, amount: float, threshold: float, rate: float = 1.0) -> float:
+    return float(max(0.0, float(base_cap) - max(0.0, float(amount) - float(threshold)) * float(rate)))
+
+
+def _safe_lookup_bracket(amount: float, floor_val: float, rate: float, base_tax: float = 0.0) -> float:
+    amt = float(amount)
+    flr = float(floor_val)
+    rt = float(rate)
+    bt = float(base_tax)
+    return float(bt + (amt - flr) * rt) if amt > flr else bt
+
+
 SAFE_FUNCTIONS: Dict[str, Callable] = {
     "min": min,
     "max": max,
     "round": round,
     "abs": abs,
     "sum": sum,
+    "clamp": _safe_clamp,
+    "phaseout": _safe_phaseout,
+    "lookup_bracket": _safe_lookup_bracket,
 }
 
 
@@ -3583,10 +3668,11 @@ def safe_eval_mathematical_formula(formula: str, inputs: Dict[str, Any]) -> floa
             operand_val = _eval_node(node.operand)
             return float(SAFE_OPERATORS[op_type](operand_val))
         elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in SAFE_FUNCTIONS:
-                func = SAFE_FUNCTIONS[node.func.id]
+            if isinstance(node.func, ast.Name) and node.func.id.lower() in SAFE_FUNCTIONS:
+                fn_key = node.func.id.lower()
+                func = SAFE_FUNCTIONS[fn_key]
                 args = [_eval_node(arg) for arg in node.args]
-                if node.func.id == "round" and len(args) == 2:
+                if fn_key == "round" and len(args) == 2:
                     return float(round(args[0], int(args[1])))
                 return float(func(*args))
             raise ValueError(f"Unsupported function call in formula: {ast.dump(node.func)}")
@@ -8203,8 +8289,80 @@ __all__ = [
     "assert_free_web_application_schema",
     "detect_rate_limit_and_bot_shield_issues",
     "assert_rate_limit_and_bot_shield",
+    "detect_interactive_touch_target_gaps",
+    "DatasetManifest",
+    "compute_file_sha256",
 ]
 
+import hashlib
+from dataclasses import dataclass, asdict
+from pathlib import Path
 
 
+@dataclass(frozen=True)
+class DatasetManifest:
+    dataset_id: str
+    tier: str
+    source_name: str
+    source_url: str
+    series_ids: List[str]
+    vintage: str
+    fetched_at: str
+    row_count: int
+    sha256: str
+    max_age_days: int = 365
+    statutory_authority: str = ""
 
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DatasetManifest":
+        return cls(
+            dataset_id=data["dataset_id"],
+            tier=data["tier"],
+            source_name=data["source_name"],
+            source_url=data["source_url"],
+            series_ids=list(data.get("series_ids", [])),
+            vintage=data["vintage"],
+            fetched_at=data["fetched_at"],
+            row_count=int(data["row_count"]),
+            sha256=data["sha256"],
+            max_age_days=int(data.get("max_age_days", 365)),
+            statutory_authority=data.get("statutory_authority", ""),
+        )
+
+    def verify_checksum(self, payload_bytes: Union[bytes, str, Path]) -> bool:
+        """Verifies that the given bytes or file match the manifest sha256 hash."""
+        if isinstance(payload_bytes, Path):
+            raw_bytes = payload_bytes.read_bytes()
+        elif isinstance(payload_bytes, str):
+            p = Path(payload_bytes)
+            if p.exists() and p.is_file():
+                raw_bytes = p.read_bytes()
+            else:
+                raw_bytes = payload_bytes.encode("utf-8")
+        else:
+            raw_bytes = payload_bytes
+        computed = hashlib.sha256(raw_bytes).hexdigest()
+        return computed.lower() == self.sha256.lower()
+
+    def is_stale(self, as_of: Optional[datetime] = None) -> bool:
+        """Determines if the dataset has passed its max_age_days budget."""
+        try:
+            clean_ts = self.fetched_at.replace("Z", "+00:00")
+            fetched = datetime.fromisoformat(clean_ts)
+            if fetched.tzinfo is not None:
+                ref = as_of or datetime.now(timezone.utc)
+                age = (ref - fetched).days
+            else:
+                ref = as_of or datetime.now(timezone.utc).replace(tzinfo=None)
+                age = (ref - fetched).days
+            return age > self.max_age_days
+        except Exception:
+            return False
+
+
+def compute_file_sha256(path: Union[str, Path]) -> str:
+    """Computes SHA-256 hash of a file."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()

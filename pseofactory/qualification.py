@@ -39,19 +39,63 @@ STATUTORY_PROVENANCE_PATTERNS: List[str] = [
 ]
 
 
+def _extract_spec_signature_parts(spec: Optional[Dict[str, Any]]) -> tuple:
+    """Extracts normalized (authority, input_keys_set, normalized_formula) from a tool or candidate spec."""
+    if not isinstance(spec, dict):
+        return "", set(), ""
+    manifest = spec.get("calculation_manifest") if isinstance(spec.get("calculation_manifest"), dict) else {}
+    raw_auth = (
+        spec.get("statutory_authority")
+        or spec.get("statutory_provenance")
+        or spec.get("authority")
+        or manifest.get("statutory_authority")
+        or manifest.get("statutory_provenance")
+        or manifest.get("authority")
+        or ""
+    )
+    auth_norm = re.sub(r"\s+", " ", str(raw_auth).strip().lower())
+
+    raw_inputs = spec.get("inputs") if spec.get("inputs") is not None else manifest.get("inputs")
+    input_keys: set = set()
+    if isinstance(raw_inputs, dict):
+        input_keys = {re.sub(r"[^a-z0-9_]", "_", str(k).strip().lower()).strip("_") for k in raw_inputs.keys() if str(k).strip()}
+    elif isinstance(raw_inputs, (list, tuple, set)):
+        input_keys = {re.sub(r"[^a-z0-9_]", "_", str(k).strip().lower()).strip("_") for k in raw_inputs if str(k).strip()}
+
+    raw_formula = spec.get("formula") or manifest.get("formula") or ""
+    formula_norm = re.sub(r"\s+", "", str(raw_formula).strip().lower())
+    return auth_norm, input_keys, formula_norm
+
+
+def compute_statutory_signature(spec: Dict[str, Any]) -> str:
+    """
+    Normalizes (statutory_authority, sorted(input_keys), formula) into a canonical signature string.
+    Returns empty string when spec is empty or lacks both statutory authority and formula.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(spec, dict) or not spec:
+        return ""
+    auth_norm, input_keys, formula_norm = _extract_spec_signature_parts(spec)
+    if (not auth_norm and not input_keys and not formula_norm) or (not auth_norm and not formula_norm):
+        return ""
+    sorted_keys = ",".join(sorted(input_keys))
+    return f"authority={auth_norm}|inputs={sorted_keys}|formula={formula_norm}"
+
+
 def check_search_intent_cannibalization(
     query: str,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     token_overlap_threshold: float = 0.50,
     sitemap_urls: Optional[List[str]] = None,
+    candidate_spec: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates whether a candidate query cannibalizes existing tool catalog intent,
-    secondary keywords, slug tokens, or indexed sitemap URLs.
+    statutory parameter signatures, secondary keywords, slug tokens, or indexed sitemap URLs.
     Zero em-dashes. Zero en-dashes.
     """
     clean_q = str(query or "").lower().strip()
-    if not clean_q:
+    if not clean_q and not candidate_spec:
         return {
             "cannibalized": False,
             "is_cannibalizing": False,
@@ -61,11 +105,50 @@ def check_search_intent_cannibalization(
         }
 
     query_words = set(re.findall(r"\b[a-z0-9]+\b", clean_q))
+    cand_sig = compute_statutory_signature(candidate_spec) if isinstance(candidate_spec, dict) else ""
+    cand_auth, cand_keys, cand_formula = _extract_spec_signature_parts(candidate_spec)
 
     # 1. Deterministic evaluation against existing tools catalog
     if existing_tools:
         for tool in existing_tools:
+            if not isinstance(tool, dict):
+                continue
             tool_slug = str(tool.get("slug", "")).strip()
+
+            # Statutory parameter signature check when candidate_spec has a valid signature
+            if cand_sig:
+                tool_sig = compute_statutory_signature(tool)
+                if tool_sig:
+                    if cand_sig == tool_sig:
+                        return {
+                            "cannibalized": True,
+                            "is_cannibalized": True,
+                            "is_cannibalizing": True,
+                            "parent_slug": tool_slug or "none",
+                            "reason": "matches_statutory_parameter_signature",
+                            "matched_tool": tool,
+                        }
+                    tool_auth, tool_keys, tool_formula = _extract_spec_signature_parts(tool)
+                    if cand_auth and tool_auth and cand_auth == tool_auth:
+                        formula_match = bool(cand_formula and tool_formula and cand_formula == tool_formula)
+                        key_overlap_ratio = 0.0
+                        if cand_keys and tool_keys:
+                            overlap_count = len(cand_keys & tool_keys)
+                            denom = max(len(cand_keys), len(tool_keys))
+                            key_overlap_ratio = (overlap_count / denom) if denom > 0 else 0.0
+                        if formula_match or key_overlap_ratio >= 0.80:
+                            return {
+                                "cannibalized": True,
+                                "is_cannibalized": True,
+                                "is_cannibalizing": True,
+                                "parent_slug": tool_slug or "none",
+                                "reason": "matches_statutory_parameter_signature",
+                                "matched_tool": tool,
+                            }
+
+            if not clean_q:
+                continue
+
             pk = str(tool.get("primary_keyword", "")).lower().strip()
             sec_kws = [str(k).lower().strip() for k in tool.get("secondary_keywords", []) if k]
 
@@ -75,6 +158,7 @@ def check_search_intent_cannibalization(
                 if clean_q == pk or clean_q in pk or pk in clean_q or (pk_words and pk_words.issubset(query_words)):
                     return {
                         "cannibalized": True,
+                        "is_cannibalized": True,
                         "is_cannibalizing": True,
                         "parent_slug": tool_slug or "none",
                         "reason": "matches_primary_keyword",
@@ -85,6 +169,7 @@ def check_search_intent_cannibalization(
             if clean_q in sec_kws:
                 return {
                     "cannibalized": True,
+                    "is_cannibalized": True,
                     "is_cannibalizing": True,
                     "parent_slug": tool_slug or "none",
                     "reason": "matches_secondary_keyword",
@@ -95,6 +180,7 @@ def check_search_intent_cannibalization(
                 if sec and (sec in clean_q or (len(clean_q) >= 4 and clean_q in sec)):
                     return {
                         "cannibalized": True,
+                        "is_cannibalized": True,
                         "is_cannibalizing": True,
                         "parent_slug": tool_slug or "none",
                         "reason": "matches_secondary_keyword",
@@ -116,6 +202,7 @@ def check_search_intent_cannibalization(
                     ):
                         return {
                             "cannibalized": True,
+                            "is_cannibalized": True,
                             "is_cannibalizing": True,
                             "parent_slug": tool_slug or "none",
                             "reason": "high_slug_token_overlap",
@@ -134,6 +221,7 @@ def check_search_intent_cannibalization(
                     if (len(overlap) >= 3 and len(query_words) <= 4) or jaccard >= token_overlap_threshold:
                         return {
                             "cannibalized": True,
+                            "is_cannibalized": True,
                             "is_cannibalizing": True,
                             "parent_slug": tool_slug or slug_part.replace(" ", "-"),
                             "reason": "matches_tool_url",
@@ -141,7 +229,7 @@ def check_search_intent_cannibalization(
                         }
 
     # 2. Check against sitemap URLs if provided
-    if sitemap_urls:
+    if sitemap_urls and clean_q:
         for u in sitemap_urls:
             slug_part = str(u).rstrip("/").split("/")[-1].replace("-", " ").lower()
             u_words = set(re.findall(r"\b[a-z0-9]+\b", slug_part))
@@ -156,6 +244,7 @@ def check_search_intent_cannibalization(
                 ):
                     return {
                         "cannibalized": True,
+                        "is_cannibalized": True,
                         "is_cannibalizing": True,
                         "parent_slug": slug_part.replace(" ", "-"),
                         "reason": "matches_sitemap_url",
@@ -164,6 +253,7 @@ def check_search_intent_cannibalization(
 
     return {
         "cannibalized": False,
+        "is_cannibalized": False,
         "is_cannibalizing": False,
         "parent_slug": "none",
         "reason": "distinct_asset",
@@ -228,6 +318,7 @@ def qualify_search_intent(
         q_text,
         existing_tools=existing_tools,
         sitemap_urls=sitemap_urls,
+        candidate_spec=query_data,
     )
 
     if matching_tool is None and cannibal.get("is_cannibalizing") and cannibal.get("parent_slug") != "none":
@@ -582,13 +673,17 @@ def assert_search_intent_qualified(
     if not query:
         raise ValueError("Candidate spec missing query, primary_keyword, or slug")
 
-    cannibal = check_search_intent_cannibalization(query, existing_tools=existing_tools)
+    cannibal = check_search_intent_cannibalization(
+        query, existing_tools=existing_tools, candidate_spec=candidate_spec
+    )
 
     if not cannibal.get("is_cannibalizing"):
         cand_slug = str(candidate_spec.get("slug", "")).strip()
         if cand_slug:
             cand_slug_clean = cand_slug.replace("-", " ")
-            cannibal_slug = check_search_intent_cannibalization(cand_slug_clean, existing_tools=existing_tools)
+            cannibal_slug = check_search_intent_cannibalization(
+                cand_slug_clean, existing_tools=existing_tools, candidate_spec=candidate_spec
+            )
             if cannibal_slug.get("is_cannibalizing"):
                 cannibal = cannibal_slug
 

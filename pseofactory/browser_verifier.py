@@ -91,7 +91,7 @@ class ProfitHelmBrowserAdapter(TenantBrowserAdapter):
                 input_value="250000",
                 output_selector="#val-total_federal_tax, #res-total-tax",
                 trigger_event="input",
-                verify_popstate=False,
+                verify_popstate=True,
             ),
             InteractiveWidgetSpec(
                 route="/tools/crypto-tax-calculator/",
@@ -140,6 +140,26 @@ class PrexvoBrowserAdapter(TenantBrowserAdapter):
                 input_selector="#field-loan_balance",
                 input_value="75000",
                 output_selector="#metric-rap_payment",
+                trigger_event="input",
+                verify_popstate=True,
+            ),
+            InteractiveWidgetSpec(
+                route="/tools/rap-vs-ibr-calculator/",
+                widget_id="rap-vs-ibr-calculator",
+                precondition_selector="#field-loan_balance, #field-agi",
+                input_selector="#field-loan_balance, #field-agi",
+                input_value="85000",
+                output_selector="#metric-rap_payment, #val-monthly_payment",
+                trigger_event="input",
+                verify_popstate=False,
+            ),
+            InteractiveWidgetSpec(
+                route="/tools/pslf-qualifying-payment-calculator/",
+                widget_id="pslf-qualifying-payment-calculator",
+                precondition_selector="#field-qualifying_payments, #field-loan_balance",
+                input_selector="#field-qualifying_payments, #field-loan_balance",
+                input_value="60",
+                output_selector="#metric-forgiven_balance, #val-remaining_payments",
                 trigger_event="input",
                 verify_popstate=False,
             ),
@@ -323,12 +343,35 @@ class UnifiedBrowserAuditor:
         return broken;
     })()"""
 
+    JS_CHECK_RESIZE_AND_INTERACTION_CLS = """new Promise(resolve => {
+        let cls = 0.0;
+        const observer = new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) {
+                if (!entry.hadRecentInput) cls += entry.value;
+            }
+        });
+        try {
+            observer.observe({ type: 'layout-shift', buffered: false });
+        } catch(e) {}
+        const inputs = Array.from(document.querySelectorAll('[data-calc-input], input:not([type=hidden]), select'));
+        inputs.slice(0, 3).forEach(el => {
+            try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch(e) {}
+        });
+        setTimeout(() => {
+            try { observer.disconnect(); } catch(e) {}
+            resolve(Math.round(cls * 1000) / 1000);
+        }, 120);
+    })"""
+
     def __init__(
         self,
         adapter: Optional[TenantBrowserAdapter] = None,
         dist_dir: Optional[Union[str, Path]] = None,
         cdp_port: int = 9222,
-        fail_closed: bool = False,
+        fail_closed: Optional[bool] = None,
     ):
         self.adapter = adapter
         if adapter is not None:
@@ -342,7 +385,10 @@ class UnifiedBrowserAuditor:
 
         self.cdp_port = cdp_port
         self.cdp_base = f"http://127.0.0.1:{cdp_port}"
-        self.fail_closed = fail_closed
+        if fail_closed is None:
+            self.fail_closed = os.environ.get("PSEOFACTORY_BROWSER_FAIL_CLOSED") == "1"
+        else:
+            self.fail_closed = bool(fail_closed)
 
     def check_cdp_reachability(self) -> Tuple[bool, str]:
         """Checks if host Chrome CDP endpoint is responding on configured port."""
@@ -376,11 +422,11 @@ class UnifiedBrowserAuditor:
         Navigates a dedicated Chrome CDP tab to target route and validates layout contracts.
         Measures:
         - 1280px desktop viewport horizontal overflow
-        - 375px mobile viewport horizontal overflow
+        - 768px tablet, 375px mobile, and 320px narrow viewport transitions
         - 43.5px touch targets
-        - 0.0 CLS layout-shift
+        - 0.0 CLS layout-shift (initial, resize transitions, and widget interaction)
         - zero forbidden dashes
-        - interactive calculator input reactivity
+        - interactive calculator input reactivity and popstate state hydration
         """
         import websockets
 
@@ -421,7 +467,7 @@ class UnifiedBrowserAuditor:
 
                 await asyncio.sleep(0.3)
 
-                # 1. Desktop Viewport (1280x800)
+                # 1. Desktop Viewport (1280x800) -> Tablet (768x1024) -> Mobile (375x812) -> Narrow (320x568)
                 msg_counter[0] += 1
                 await self._send_cdp(
                     ws,
@@ -438,6 +484,26 @@ class UnifiedBrowserAuditor:
                 )
                 if desktop_overflow:
                     defects["overflow_1280"] = True
+
+                # Tablet viewport transition (768x1024)
+                msg_counter[0] += 1
+                await self._send_cdp(
+                    ws,
+                    "Emulation.setDeviceMetricsOverride",
+                    {"width": 768, "height": 1024, "deviceScaleFactor": 2, "mobile": True},
+                    msg_id=msg_counter[0],
+                )
+                await asyncio.sleep(0.03)
+
+                # Narrow viewport transition (320x568)
+                msg_counter[0] += 1
+                await self._send_cdp(
+                    ws,
+                    "Emulation.setDeviceMetricsOverride",
+                    {"width": 320, "height": 568, "deviceScaleFactor": 2, "mobile": True},
+                    msg_id=msg_counter[0],
+                )
+                await asyncio.sleep(0.03)
 
                 # 2. Mobile Viewport (375x812)
                 msg_counter[0] += 1
@@ -469,6 +535,11 @@ class UnifiedBrowserAuditor:
                 if cls_val and cls_val > 0.0:
                     defects["cls_value"] = cls_val
 
+                msg_counter[0] += 1
+                interaction_cls = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
+                if interaction_cls and interaction_cls > defects["cls_value"]:
+                    defects["cls_value"] = interaction_cls
+
                 # 5. Dashes check (zero forbidden em/en dashes and spaced hyphens)
                 msg_counter[0] += 1
                 dashes = await self._eval_js(ws, self.JS_CHECK_DASHES, msg_id=msg_counter[0])
@@ -481,7 +552,7 @@ class UnifiedBrowserAuditor:
                 if broken_assets:
                     defects["broken_assets"] = broken_assets
 
-                # 7. Reactive widget updates
+                # 7. Reactive widget updates and popstate hydration
                 for spec in self.widget_specs:
                     if spec.route == route:
                         msg_counter[0] += 1
@@ -506,10 +577,18 @@ class UnifiedBrowserAuditor:
                                     if (initialVal !== finalVal) break;
                                 }}
                             }}
-                            return {{ success: true, updated: initialVal !== finalVal }};
+                            let popstateOk = true;
+                            if ({'true' if spec.verify_popstate else 'false'}) {{
+                                try {{
+                                    window.dispatchEvent(new PopStateEvent('popstate'));
+                                }} catch(e) {{
+                                    popstateOk = false;
+                                }}
+                            }}
+                            return {{ success: true, updated: initialVal !== finalVal, popstate_ok: popstateOk }};
                         }})()"""
                         widget_res = await self._eval_js(ws, js_widget, msg_id=msg_counter[0])
-                        if not (widget_res and widget_res.get("success") and widget_res.get("updated")):
+                        if not (widget_res and widget_res.get("success") and widget_res.get("updated") and widget_res.get("popstate_ok", True)):
                             defects["widget_failures"].append({
                                 "widget_id": spec.widget_id,
                                 "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
