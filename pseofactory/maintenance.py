@@ -2673,6 +2673,12 @@ class RefactorCascadeEngine:
             try:
                 with adapter.scoped_environment():
                     build_ok = adapter.build_all()
+                    if build_ok:
+                        RetroReflectionEngine.retrofit_estate(
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                            canonical_base=adapter.canonical_base,
+                        )
             except LockContentionError as lce:
                 print(f"Lock contention on property '{adapter.property_id}': deferring bulk rebuild without DLQ routing.")
                 return {
@@ -2934,6 +2940,11 @@ class MaintenanceLifecycle:
             elif force and not dry_run and hasattr(adapter, "build_all"):
                 try:
                     if adapter.build_all():
+                        RetroReflectionEngine.retrofit_estate(
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                            canonical_base=adapter.canonical_base,
+                        )
                         cascade_res["refactored"] = report.total_assets_checked
                 except Exception as f_err:
                     print(f"Warning: Forced full rebuild error for '{adapter.property_id}': {f_err}")

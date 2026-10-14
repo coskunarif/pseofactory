@@ -164,7 +164,7 @@ def cmd_reflect(args: argparse.Namespace) -> int:
         properties=props,
         force=getattr(args, "force", False),
         verbose=getattr(args, "verbose", False),
-        latch_state=no_gitops,
+        latch_state=True,
     )
     if res.get("total_recompiled", 0) > 0 and not no_gitops:
         reg = TenantRegistry.default()
