@@ -1178,7 +1178,8 @@ class MonetizationHub:
         if use_live:
             def _fetch_json(url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
                 try:
-                    req = urllib.request.Request(url, headers=headers, method="GET")
+                    req_headers = {"User-Agent": "pseofactory/1.0", **headers}
+                    req = urllib.request.Request(url, headers=req_headers, method="GET")
                     with urllib.request.urlopen(req, timeout=timeout) as resp:
                         return json.loads(resp.read().decode("utf-8", errors="replace"))
                 except Exception:
@@ -1188,6 +1189,7 @@ class MonetizationHub:
                 ps_headers = {
                     "Authorization": f"Bearer {self.partnerstack_api_key}",
                     "Accept": "application/json",
+                    "User-Agent": "pseofactory/1.0",
                 }
                 p_resp = _fetch_json("https://api.partnerstack.com/api/v2/partnerships", ps_headers)
                 if isinstance(p_resp, dict):
@@ -1204,6 +1206,15 @@ class MonetizationHub:
                                 live_urls.append(l_url)
                             st = str(item.get("status") or "").strip().lower()
                             comp_name = str(((item.get("company") or {}).get("name") or "")).strip().lower()
+                            if (
+                                isinstance(payroll_cat, dict)
+                                and (
+                                    comp_name == "rippling"
+                                    or str(item.get("key") or "") == str(payroll_cat.get("partnership_key") or "")
+                                )
+                                and st
+                            ):
+                                payroll_cat["tos_status"] = st
                             if "tos" in st or "pending" in st:
                                 live_tos.append(comp_name or str(item.get("key") or "unknown"))
                         if live_urls:
@@ -1238,6 +1249,7 @@ class MonetizationHub:
                 sovrn_headers = {
                     "Authorization": f"secret {self.sovrn_api_key}",
                     "Accept": "application/json",
+                    "User-Agent": "pseofactory/1.0",
                 }
                 s_resp = _fetch_json("https://publishers.viglink.com/api/account", sovrn_headers)
                 if isinstance(s_resp, dict) and s_resp.get("accountId"):

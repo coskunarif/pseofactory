@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-08T15:50:00Z",
+    "updated_at": "2026-10-14T08:37:39.628910+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -54,7 +54,7 @@
           "bounty": "$600-$1600",
           "partnership_key": "part_jp9R0iYpPGriHu",
           "stack_key": "stck_lZgJHub85wwvkX",
-          "tos_status": "tos-acceptance-pending"
+          "tos_status": "active"
         },
         "CORPORATE_SPEND": {
           "primary_partner": "ramp",

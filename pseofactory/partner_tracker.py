@@ -242,6 +242,15 @@ class PartnerTrackingEngine:
                 missing_requirements=["Accept Rippling Terms of Service in PartnerStack dashboard"],
                 candidate_url="https://try.rippling.com/mcfo1m09qiwt",
             )
+        elif isinstance(payroll_cat, dict) and payroll_cat.get("tos_status") == "active":
+            act_id = "act-profithelm-rippling-partner-approval"
+            if act_id in self.action_bus.items and self.action_bus.items[act_id].status == "PENDING_OPERATOR":
+                self.action_bus.confirm_decision(
+                    act_id,
+                    decision="RESOLVE",
+                    operator="partnerstack_api",
+                    notes="PartnerStack ToS accepted; partnership part_jp9R0iYpPGriHu is active.",
+                )
 
     def _evaluate_property(
         self,
@@ -330,11 +339,21 @@ class PartnerTrackingEngine:
                 op_status = "LIVE_ACTIVE"
                 live_count += 1
                 is_live = True
-            elif class_item and class_item.classification_type == "APPLICATION_SUBMITTED":
+            elif (
+                (class_item and class_item.classification_type == "APPLICATION_SUBMITTED")
+                or (
+                    act_item
+                    and act_item.status in ("RESOLVED", "APPROVED")
+                    and act_item.action_type == "ONBOARDING_ACTION_REQUIRED"
+                )
+            ):
                 op_status = "AWAITING_RESPONSE"
                 awaiting_count += 1
                 is_live = False
-                missing_reqs.extend(class_item.missing_requirements)
+                if class_item and class_item.classification_type == "APPLICATION_SUBMITTED":
+                    missing_reqs.extend(class_item.missing_requirements)
+                else:
+                    missing_reqs.append("Awaiting vendor partnership team response and tracking URL")
             elif act_item and act_item.status == "PENDING_OPERATOR":
                 op_status = "REQUIRES_FOLLOWUP"
                 followup_count += 1
