@@ -1466,13 +1466,6 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "primary_keyword": "icr vs ibr",
     },
     {
-        "slug": "pslf-buyback-calculator",
-        "title": "PSLF Buyback & Statutory Credit Assessment Engine",
-        "short_title": "PSLF Buyback",
-        "description": "Calculate qualifying Public Service Loan Forgiveness payments and evaluate buyback eligibility under 34 CFR 685.219 statutory regulations.",
-        "primary_keyword": "pslf buyback calculator",
-    },
-    {
         "slug": "pslf-qualifying-payment-simulator",
         "title": "PSLF Qualifying Payment & Buyback Simulator (2026) | Prexvo",
         "short_title": "PSLF Simulator",
@@ -3268,6 +3261,12 @@ def reflect_and_recompile_all_assets(
     scanner = WorkspacePropertyScanner()
     discovered = scanner.discover_properties()
     by_id = {p.property_id.lower(): p for p in discovered}
+    for _pid, _adp in by_id.items():
+        if not _adp.tools and hasattr(_adp, "_tools"):
+            if _pid == "prexvo":
+                _adp._tools = list(PREXVO_DEFAULT_TOOLS)
+            elif _pid == "profithelm":
+                _adp._tools = list(PROFITHELM_DEFAULT_TOOLS)
 
     target_ids = (
         [p.lower() for p in properties]
@@ -3357,10 +3356,24 @@ def reflect_and_recompile_all_assets(
                     root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
                     root_s_file.parent.mkdir(parents=True, exist_ok=True)
                     record_engine_hash(root_s_file, hash_value=cur_engine_hash)
-                    record_asset_ledger(root_l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                    merged_root_hashes: Dict[str, str] = {}
+                    try:
+                        prev_root = load_asset_ledger(root_l_file)
+                        if isinstance(prev_root, dict) and isinstance(prev_root.get("assets"), dict):
+                            merged_root_hashes.update(prev_root["assets"])
+                    except Exception:
+                        pass
+                    merged_root_hashes.update(asset_hashes)
+                    merged_root_hashes.update({f"{p_id}/{k}": v for k, v in asset_hashes.items()})
+                    record_asset_ledger(root_l_file, asset_hashes=merged_root_hashes, engine_hash=cur_engine_hash)
                     pf_dir = scanner.workspace_root / "pseofactory"
                     if pf_dir.is_dir():
                         record_engine_hash(pf_dir / ".agy" / "engine_hash.json", hash_value=cur_engine_hash)
+                        record_asset_ledger(
+                            pf_dir / ".agy" / "asset_ledger.json",
+                            asset_hashes=merged_root_hashes,
+                            engine_hash=cur_engine_hash,
+                        )
                         from pseofactory.supervisor import HeartbeatTracker
                         HeartbeatTracker(heartbeat_path=pf_dir / ".agy" / "supervisor_heartbeat.json").emit(
                             status="HEALTHY",
