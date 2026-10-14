@@ -26,6 +26,57 @@ TOOLS: List[Dict[str, Any]] = []
 
 DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/distribution_idempotency.json")
 
+TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = {
+    "profithelm": "143884102",
+    "prexvo": "106482194",
+}
+
+
+def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[str, str]:
+    """
+    Resolves tenant-scoped distribution configuration backed by TenantFactStore
+    so Prexvo callers never inherit ProfitHelm module-level defaults.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.tenant_facts import TenantFactStore
+
+    eff_tenant = (
+        tenant_id
+        or os.environ.get("FACTORY_TENANT_ID")
+        or ("prexvo" if "prexvo" in os.environ.get("FACTORY_DOMAIN", "").lower() else "profithelm")
+    ).strip().lower()
+
+    store = TenantFactStore.get_instance()
+    profile = store.get_profile(eff_tenant)
+
+    if profile is not None:
+        brand_name = profile.brand_name
+        raw_domain = str(profile.canonical_domain or f"{eff_tenant}.com").strip()
+    else:
+        brand_name = "Prexvo" if eff_tenant == "prexvo" else ("ProfitHelm" if eff_tenant == "profithelm" else eff_tenant.capitalize())
+        raw_domain = f"{eff_tenant}.com"
+
+    domain = re.sub(r"^https?://", "", raw_domain, flags=re.IGNORECASE).rstrip("/")
+    canonical_base = f"https://{domain}"
+    linkedin_company_id = (
+        os.environ.get(f"FACTORY_{eff_tenant.upper()}_LINKEDIN_COMPANY_ID")
+        or TENANT_LINKEDIN_COMPANY_IDS.get(eff_tenant, "143884102")
+    )
+
+    return {
+        "tenant_id": eff_tenant,
+        "brand_name": brand_name,
+        "site_name": brand_name,
+        "SITE_NAME": brand_name,
+        "domain": domain,
+        "canonical_base": canonical_base,
+        "CANONICAL_BASE": canonical_base,
+        "post_url_base": canonical_base,
+        "POST_URL_BASE": canonical_base,
+        "linkedin_company_id": linkedin_company_id,
+        "LINKEDIN_COMPANY_ID": linkedin_company_id,
+    }
+
 
 class DistributionIdempotencyLedger:
     """

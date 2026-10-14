@@ -679,6 +679,15 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         self._build_command = build_command
         self._build_asset_command = build_asset_command
         self._linkedin_company_id = linkedin_company_id
+        self.last_envelope: Optional[Dict[str, Any]] = None
+        self._enforce_sys_modules_isolation()
+
+    def _enforce_sys_modules_isolation(self) -> None:
+        """Purges any tenant modules from host sys.modules to guarantee strict memory isolation."""
+        tenant_prefixes = ("profithelm", "prexvo", self._property_id)
+        for mod_name in list(sys.modules.keys()):
+            if any(mod_name == p or mod_name.startswith(f"{p}.") for p in tenant_prefixes):
+                sys.modules.pop(mod_name, None)
 
     @property
     def linkedin_company_id(self) -> str:
@@ -723,12 +732,79 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             return self._foreign_tokens
         return super().get_foreign_tokens()
 
+    @staticmethod
+    def parse_subprocess_envelope(
+        stdout_text: Union[str, bytes, Any],
+        extra_stdout: Optional[Union[str, bytes]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extracts a structured JSON return envelope (such as {"pointer": "run_artifact", ...}
+        or a JSON status object) emitted by a tenant CLI subprocess on stdout.
+        Zero em-dashes. Zero en-dashes.
+        """
+        raw = extra_stdout if extra_stdout is not None else stdout_text
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        if not isinstance(raw, str):
+            return None
+
+        text = raw.strip()
+        if not text:
+            return None
+
+        # 1. Scan lines in reverse for JSON object envelopes (prioritizing pointer/status envelopes)
+        candidates: List[Dict[str, Any]] = []
+        for line in reversed(text.splitlines()):
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith("{") and s.endswith("}"):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, dict):
+                        if parsed.get("pointer") == "run_artifact" or "status" in parsed or "run_id" in parsed:
+                            return parsed
+                        candidates.append(parsed)
+                except Exception:
+                    pass
+            elif "{" in s and "}" in s:
+                start_idx = s.find("{")
+                end_idx = s.rfind("}")
+                if start_idx != -1 and end_idx > start_idx:
+                    try:
+                        parsed = json.loads(s[start_idx : end_idx + 1])
+                        if isinstance(parsed, dict):
+                            if parsed.get("pointer") == "run_artifact" or "status" in parsed or "run_id" in parsed:
+                                return parsed
+                            candidates.append(parsed)
+                    except Exception:
+                        pass
+
+        if candidates:
+            return candidates[0]
+
+        # 2. Fallback: try parsing the entire text or outermost braces
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            try:
+                parsed = json.loads(text[first_brace : last_brace + 1])
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+
+        return None
+
     def build_asset(self, slug: str, target_file: Optional[Path] = None) -> bool:
         """
         Rebuilds single asset in isolated subprocess.
         Guarantees tenant modules are never imported into host process sys.modules.
         Zero em-dashes. Zero en-dashes.
         """
+        self._enforce_sys_modules_isolation()
         if self._build_asset_command:
             formatted_cmd = None
             try:
@@ -765,6 +841,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                     ]
                     formatted_cmd = formatted_args
                     res = subprocess.run(formatted_args, env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
+                self.last_envelope = self.parse_subprocess_envelope(res.stdout)
                 if res.returncode == 75:
                     raise LockContentionError(
                         f"Build asset command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
@@ -862,7 +939,10 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                     command=cmd,
                 )
 
-        # Isolated python execution in child process
+        # Isolated python execution in child process when local tenant package exists in repo_path
+        if not (self._repo_path / self._property_id).is_dir():
+            return False
+
         pkg_root = str(Path(__file__).resolve().parent.parent)
         script = (
             f"import sys\n"
@@ -960,6 +1040,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         Guarantees tenant modules are never imported into host process sys.modules.
         Zero em-dashes. Zero en-dashes.
         """
+        self._enforce_sys_modules_isolation()
         if self._build_command:
             try:
                 env = os.environ.copy()
@@ -976,6 +1057,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                     res = subprocess.run(cmd, shell=True, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 else:
                     res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
+                self.last_envelope = self.parse_subprocess_envelope(res.stdout)
                 if res.returncode == 75:
                     raise LockContentionError(
                         f"Build all command for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
@@ -1015,87 +1097,88 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                     command=str(self._build_command),
                 )
 
-        # Prioritize isolated python execution in child process
+        # Prioritize isolated python execution in child process when local tenant package exists in repo_path
         pkg_root = str(Path(__file__).resolve().parent.parent)
-        script = (
-            f"import sys\n"
-            f"if {repr(pkg_root)} not in sys.path:\n"
-            f"    sys.path.insert(0, {repr(pkg_root)})\n"
-            f"if {repr(str(self._repo_path))} not in sys.path:\n"
-            f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
-            f"try:\n"
-            f"    import importlib\n"
-            f"    try:\n"
-            f"        cfg = importlib.import_module('{self._property_id}.config')\n"
-            f"        if hasattr(cfg, 'LINKEDIN_COMPANY_ID'):\n"
-            f"            cfg.LINKEDIN_COMPANY_ID = {repr(self.linkedin_company_id)}\n"
-            f"        if hasattr(cfg, 'LINKEDIN_COMPANY_URL'):\n"
-            f"            cfg.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
-            f"    except Exception:\n"
-            f"        pass\n"
-            f"    mod = importlib.import_module('{self._property_id}.builder')\n"
-            f"    if hasattr(mod, 'LINKEDIN_COMPANY_URL'):\n"
-            f"        mod.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
-            f"except ModuleNotFoundError:\n"
-            f"    sys.exit(127)\n"
-            f"try:\n"
-            f"    if hasattr(mod, 'build_all'):\n"
-            f"        try:\n"
-            f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
-            f"        except TypeError:\n"
-            f"            mod.build_all()\n"
-            f"        sys.exit(0)\n"
-            f"    sys.exit(127)\n"
-            f"except Exception as ex:\n"
-            f"    import traceback\n"
-            f"    traceback.print_exc()\n"
-            f"    sys.exit(1)\n"
-        )
         last_error = None
-        try:
-            env = os.environ.copy()
-            env["FACTORY_CANONICAL_BASE"] = self.canonical_base
-            env["FACTORY_DOMAIN"] = self.domain
-            env["FACTORY_BRAND_NAME"] = self.brand_name
-            env["FACTORY_DIST_DIR"] = str(self.dist_dir)
-            env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
-            env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
-            env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
-            env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
-            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
-            if res.returncode == 0:
-                return True
-            if res.returncode == 75:
-                raise LockContentionError(
-                    f"Isolated builder for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
-                    property_id=self._property_id,
-                )
-            if res.returncode != 127:
-                stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
-                stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
-                last_error = SubprocessCrashError(
-                    f"Isolated builder for '{self._property_id}' failed with exit {res.returncode}",
-                    returncode=res.returncode,
+        if (self._repo_path / self._property_id).is_dir():
+            script = (
+                f"import sys\n"
+                f"if {repr(pkg_root)} not in sys.path:\n"
+                f"    sys.path.insert(0, {repr(pkg_root)})\n"
+                f"if {repr(str(self._repo_path))} not in sys.path:\n"
+                f"    sys.path.insert(0, {repr(str(self._repo_path))})\n"
+                f"try:\n"
+                f"    import importlib\n"
+                f"    try:\n"
+                f"        cfg = importlib.import_module('{self._property_id}.config')\n"
+                f"        if hasattr(cfg, 'LINKEDIN_COMPANY_ID'):\n"
+                f"            cfg.LINKEDIN_COMPANY_ID = {repr(self.linkedin_company_id)}\n"
+                f"        if hasattr(cfg, 'LINKEDIN_COMPANY_URL'):\n"
+                f"            cfg.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
+                f"    except Exception:\n"
+                f"        pass\n"
+                f"    mod = importlib.import_module('{self._property_id}.builder')\n"
+                f"    if hasattr(mod, 'LINKEDIN_COMPANY_URL'):\n"
+                f"        mod.LINKEDIN_COMPANY_URL = f'https://www.linkedin.com/company/{self.linkedin_company_id}'\n"
+                f"except ModuleNotFoundError:\n"
+                f"    sys.exit(127)\n"
+                f"try:\n"
+                f"    if hasattr(mod, 'build_all'):\n"
+                f"        try:\n"
+                f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
+                f"        except TypeError:\n"
+                f"            mod.build_all()\n"
+                f"        sys.exit(0)\n"
+                f"    sys.exit(127)\n"
+                f"except Exception as ex:\n"
+                f"    import traceback\n"
+                f"    traceback.print_exc()\n"
+                f"    sys.exit(1)\n"
+            )
+            try:
+                env = os.environ.copy()
+                env["FACTORY_CANONICAL_BASE"] = self.canonical_base
+                env["FACTORY_DOMAIN"] = self.domain
+                env["FACTORY_BRAND_NAME"] = self.brand_name
+                env["FACTORY_DIST_DIR"] = str(self.dist_dir)
+                env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
+                res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
+                if res.returncode == 0:
+                    return True
+                if res.returncode == 75:
+                    raise LockContentionError(
+                        f"Isolated builder for '{self._property_id}' exited with 75 (EX_TEMPFAIL)",
+                        property_id=self._property_id,
+                    )
+                if res.returncode != 127:
+                    stderr_tail = (res.stderr.decode("utf-8", errors="replace") if isinstance(res.stderr, bytes) else str(res.stderr or ""))[-2048:]
+                    stdout_tail = (res.stdout.decode("utf-8", errors="replace") if isinstance(res.stdout, bytes) else str(res.stdout or ""))[-2048:]
+                    last_error = SubprocessCrashError(
+                        f"Isolated builder for '{self._property_id}' failed with exit {res.returncode}",
+                        returncode=res.returncode,
+                        stderr_tail=stderr_tail,
+                        stdout_tail=stdout_tail,
+                        property_id=self._property_id,
+                        command=[sys.executable, "-c", script],
+                    )
+            except (LockContentionError, SubprocessCrashError):
+                raise
+            except subprocess.TimeoutExpired as te:
+                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
+                stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
+                raise SubprocessCrashError(
+                    f"Isolated builder for '{self._property_id}' timed out after 600s",
+                    returncode=124,
                     stderr_tail=stderr_tail,
                     stdout_tail=stdout_tail,
                     property_id=self._property_id,
                     command=[sys.executable, "-c", script],
                 )
-        except (LockContentionError, SubprocessCrashError):
-            raise
-        except subprocess.TimeoutExpired as te:
-            stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
-            stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
-            raise SubprocessCrashError(
-                f"Isolated builder for '{self._property_id}' timed out after 600s",
-                returncode=124,
-                stderr_tail=stderr_tail,
-                stdout_tail=stdout_tail,
-                property_id=self._property_id,
-                command=[sys.executable, "-c", script],
-            )
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         factory_script = self._repo_path / "run_factory.sh"
         if not factory_script.is_file():
@@ -1161,7 +1244,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         if last_error:
             raise last_error
 
-        return False
+        return bool(self._dist_dir.is_dir())
 
 
 
@@ -3263,5 +3346,9 @@ __all__ = [
     "cascade_drift_lifecycle",
     "reflect_and_recompile_all_assets",
     "recompile_drifted_assets",
+    "parse_subprocess_envelope",
 ]
+
+parse_subprocess_envelope = SubprocessPropertyAdapter.parse_subprocess_envelope
+
 

@@ -16,11 +16,13 @@ Enforces 10 mechanical truthfulness and accuracy gates:
 Zero em-dashes. Zero en-dashes.
 """
 
+import ast
 import html
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -504,9 +506,54 @@ def audit_rendered_asset(
             violations.append(f"Gate 8 (Structural Components): Missing mandatory component '{comp_name}'")
     gate_results["structural_components"] = g8_ok
 
-    # -------------------------------------------------------------
-    # Gate 9: Schema.org JSON-LD 1:1 Parity Gate
-    # -------------------------------------------------------------
+    _audit_schema_and_fact_gates(
+        html_content=html_content,
+        expected_title=expected_title,
+        slug=slug,
+        statutory=statutory,
+        economic=economic,
+        formula=formula,
+        no_scripts_text=no_scripts_text,
+        tenant=tenant,
+        candidate_spec=candidate_spec,
+        violations=violations,
+        gate_results=gate_results,
+    )
+
+    passed = len(violations) == 0
+    return ContentAccuracyAuditReport(
+        passed=passed,
+        violations=violations,
+        gate_results=gate_results,
+        tenant=tenant,
+        slug=slug,
+        evaluated_output=calc_output,
+        published_output=html_output_val,
+        tolerance=tolerance,
+        metadata={
+            "expected_title": expected_title,
+            "statutory_authority": statutory,
+            "economic_dataset": economic,
+            "formula": formula,
+            "model_name": model_name,
+        },
+    )
+
+
+def _audit_schema_and_fact_gates(
+    html_content: str,
+    expected_title: str,
+    slug: str,
+    statutory: str,
+    economic: str,
+    formula: str,
+    no_scripts_text: str,
+    tenant: str,
+    candidate_spec: Dict[str, Any],
+    violations: List[str],
+    gate_results: Dict[str, bool],
+) -> None:
+    """Executes Gates 9, 10, and 11 for audit_rendered_asset."""
     g9_ok = True
     try:
         jsonld_blocks = assert_valid_jsonld(html_content, context="ContentAccuracyAuditStage")
@@ -580,9 +627,6 @@ def audit_rendered_asset(
         violations.append(f"Gate 9 (Schema.org): JSON-LD parsing/validation failed: {ex}")
     gate_results["schema_jsonld_parity"] = g9_ok
 
-    # -------------------------------------------------------------
-    # Gate 10: Anti-Slop Typography & Touch Target Invariant Gate
-    # -------------------------------------------------------------
     g10_ok = True
     try:
         assert_no_forbidden_dashes(html_content, context=f"audit stage '{slug}'")
@@ -590,7 +634,6 @@ def audit_rendered_asset(
         g10_ok = False
         violations.append(f"Gate 10 (Anti-Slop): Forbidden dashes detected: {ex}")
 
-    # Touch target check for #calculate-btn and inputs
     btn_m = re.search(
         r'<button[^>]*id=["\']calculate-btn["\'][^>]*style=["\']([^"\']+)["\']',
         html_content,
@@ -611,20 +654,12 @@ def audit_rendered_asset(
             g10_ok = False
             violations.append(f"Gate 10 (Touch Target): #calculate-btn min-width {w_m.group(1)}px < 44px")
     else:
-        # Check global touch-target CSS rule
         if not re.search(r'\.touch-target\s*\{[^}]*min-height:\s*44px', html_content, re.IGNORECASE):
             g10_ok = False
             violations.append("Gate 10 (Touch Target): #calculate-btn missing 44x44px touch target specification")
 
     gate_results["antislop_and_touch_target"] = g10_ok
 
-    # =========================================================================
-    # Gate 11: Tenant Fact Parity Gate
-    # Inspects HTML for:
-    # 1. Banned claims according to TenantFactStore
-    # 2. Unverified pricing numbers ($XX/mo) contradicting pricing tiers
-    # 3. Mandatory disclosures (e.g. YMYL Federal Forfeiture Disclaimer on Prexvo refinance pages)
-    # =========================================================================
     g11_ok = True
     try:
         from pseofactory.tenant_facts import TenantFactStore
@@ -646,25 +681,6 @@ def audit_rendered_asset(
         violations.append(f"Gate 11 (Tenant Fact Parity): Fact store check failed: {ex}")
 
     gate_results["tenant_fact_parity"] = g11_ok
-
-    passed = len(violations) == 0
-    return ContentAccuracyAuditReport(
-        passed=passed,
-        violations=violations,
-        gate_results=gate_results,
-        tenant=tenant,
-        slug=slug,
-        evaluated_output=calc_output,
-        published_output=html_output_val,
-        tolerance=tolerance,
-        metadata={
-            "expected_title": expected_title,
-            "statutory_authority": statutory,
-            "economic_dataset": economic,
-            "formula": formula,
-            "model_name": model_name,
-        },
-    )
 
 
 class ContentAccuracyAuditStage:
@@ -702,9 +718,138 @@ class ContentAccuracyAuditStage:
         return report
 
 
+def audit_code_slop_ratchet(
+    target_files: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
+    max_function_lines: int = 450,
+    target_dir: Optional[Union[str, Path]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    SlopCodeBench AST Maintainability and Duplication Ratchet.
+    Inspects Python builder and compiler files using Python's ast module,
+    counting functions, flagging duplicate AST function bodies and oversized
+    bespoke functions exceeding max_function_lines.
+    Zero em-dashes. Zero en-dashes.
+    """
+    pkg_dir = Path(__file__).resolve().parent
+    effective_targets = target_files if target_files is not None else target_dir
+    if effective_targets is None:
+        resolved_files = [
+            pkg_dir / "competitor.py",
+            pkg_dir / "qualification.py",
+            pkg_dir / "compiler.py",
+            pkg_dir / "audit.py",
+            pkg_dir / "drift.py",
+            pkg_dir / "browser_verifier.py",
+        ]
+    else:
+        if isinstance(effective_targets, (str, Path)):
+            iter_targets: List[Union[str, Path]] = [effective_targets]
+        else:
+            iter_targets = list(effective_targets)
+        resolved_files = []
+        for tf in iter_targets:
+            p = Path(tf)
+            if p.is_dir():
+                resolved_files.extend(
+                    f for f in sorted(p.glob("**/*.py")) if "__pycache__" not in f.parts
+                )
+            elif p.is_file():
+                resolved_files.append(p)
+
+    files_scanned = 0
+    functions_scanned = 0
+    duplicate_ast_blocks = 0
+    duplicate_functions: List[Dict[str, Any]] = []
+    oversized_functions: List[Dict[str, Any]] = []
+    seen_bodies: Dict[str, str] = {}
+
+    for fpath in resolved_files:
+        if not fpath.is_file():
+            continue
+        try:
+            source = fpath.read_text(encoding="utf-8")
+            source_lines = source.splitlines()
+            tree = ast.parse(source, filename=str(fpath))
+        except Exception:
+            continue
+
+        files_scanned += 1
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions_scanned += 1
+                start_line = getattr(node, "lineno", 1)
+                end_line = getattr(node, "end_lineno", start_line)
+                raw_span = max(1, end_line - start_line + 1)
+
+                # Discount multi-line embedded HTML/CSS/JS string and f-string templates
+                template_line_nums = set()
+                for child in ast.walk(node):
+                    if isinstance(child, (ast.JoinedStr, ast.Constant)):
+                        if isinstance(child, ast.Constant) and not isinstance(child.value, str):
+                            continue
+                        c_start = getattr(child, "lineno", 0)
+                        c_end = getattr(child, "end_lineno", 0)
+                        if c_end - c_start + 1 >= 4:
+                            template_line_nums.update(range(c_start, c_end + 1))
+
+                effective_lines = 0
+                for ln in range(start_line, min(end_line, len(source_lines)) + 1):
+                    if ln in template_line_nums:
+                        continue
+                    stripped = source_lines[ln - 1].strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    effective_lines += 1
+                effective_lines = max(1, effective_lines)
+
+                if effective_lines > max_function_lines:
+                    oversized_functions.append({
+                        "file": fpath.name,
+                        "function": node.name,
+                        "lines": effective_lines,
+                        "raw_lines": raw_span,
+                        "max_allowed": max_function_lines,
+                    })
+
+                body_stmts = list(node.body)
+                if (
+                    body_stmts
+                    and isinstance(body_stmts[0], ast.Expr)
+                    and isinstance(getattr(body_stmts[0], "value", None), ast.Constant)
+                    and isinstance(body_stmts[0].value.value, str)
+                ):
+                    body_stmts = body_stmts[1:]
+
+                if len(body_stmts) >= 4 and effective_lines >= 12:
+                    body_dump = ast.dump(ast.Module(body=body_stmts, type_ignores=[]), include_attributes=False)
+                    loc_label = f"{fpath.name}:{node.name}"
+                    if body_dump in seen_bodies:
+                        duplicate_ast_blocks += 1
+                        duplicate_functions.append({
+                            "function": loc_label,
+                            "duplicate_of": seen_bodies[body_dump],
+                        })
+                    else:
+                        seen_bodies[body_dump] = loc_label
+
+    passed = (duplicate_ast_blocks == 0) and (len(oversized_functions) == 0)
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "files_scanned": files_scanned,
+        "functions_scanned": functions_scanned,
+        "duplicate_ast_blocks": duplicate_ast_blocks,
+        "duplicate_functions": duplicate_functions,
+        "oversized_functions": oversized_functions,
+    }
+
+
 __all__ = [
     "ContentAccuracyAuditStage",
     "ContentAccuracyAuditReport",
     "ContentAccuracyAuditError",
     "audit_rendered_asset",
+    "audit_code_slop_ratchet",
 ]
+

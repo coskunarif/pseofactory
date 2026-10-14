@@ -76,6 +76,196 @@ class AirlockResult(tuple):
         return super().__getitem__(item)
 
 
+class GraduatedExposureResult(list):
+    """
+    Dual list/dict result for SitemapGovernor.govern_graduated_exposure.
+    List protocol: iterates over allowed_urls.
+    Dict protocol: result.get("allowed_urls"), result.get("deferred_urls"), result.get("batch_cap").
+    """
+    def __init__(
+        self,
+        allowed_urls: List[str],
+        deferred_urls: List[str],
+        batch_cap: int,
+        indexed_ratio: float,
+    ):
+        super().__init__(allowed_urls)
+        self.allowed_urls = list(allowed_urls)
+        self.deferred_urls = list(deferred_urls)
+        self.batch_cap = batch_cap
+        self.indexed_ratio = indexed_ratio
+
+    def get(self, key: str, default: Any = None) -> Any:
+        mapping = {
+            "allowed_urls": self.allowed_urls,
+            "exposed_urls": self.allowed_urls,
+            "allowed": self.allowed_urls,
+            "urls": self.allowed_urls,
+            "deferred_urls": self.deferred_urls,
+            "deferred": self.deferred_urls,
+            "batch_cap": self.batch_cap,
+            "indexed_ratio": self.indexed_ratio,
+            "capped": len(self.deferred_urls) > 0,
+        }
+        return mapping.get(key, default)
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, str):
+            val = self.get(item)
+            if val is not None:
+                return val
+            raise KeyError(item)
+        return super().__getitem__(item)
+
+    def keys(self):
+        return ["allowed_urls", "exposed_urls", "deferred_urls", "batch_cap", "indexed_ratio", "capped"]
+
+
+class SitemapGovernor:
+    """
+    Enforces strict crawl budget restraint and indexing velocity caps across the
+    programmatic SEO substrate:
+    - MAX_BATCH_SIZE: 2,000 URLs per sitemap generation pass.
+    - TIER1_HUB_CAP: 150 Tier-1 Hub URLs for active IndexNow / GSC API push.
+    - Graduated batch exposure based on observed indexation ratio.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    MAX_BATCH_SIZE = 2000
+    TIER1_HUB_CAP = 150
+
+    @classmethod
+    def validate_batch(
+        cls,
+        urls: List[str],
+        max_batch_size: int = 2000,
+        raise_on_exceed: bool = True,
+        **kwargs: Any,
+    ) -> bool:
+        """Validates that the candidate URL list does not exceed max_batch_size."""
+        eff_max = int(max_batch_size) if max_batch_size is not None else cls.MAX_BATCH_SIZE
+        if len(urls) > eff_max:
+            if raise_on_exceed:
+                raise ValueError(
+                    f"SitemapGovernor violation: batch size ({len(urls)}) exceeds "
+                    f"maximum allowed cap ({eff_max})."
+                )
+            return False
+        return True
+
+    @classmethod
+    def govern_batch(
+        cls,
+        urls: List[str],
+        max_batch_size: int = 2000,
+        **kwargs: Any,
+    ) -> List[str]:
+        """Deduplicates and caps URL list at max_batch_size."""
+        eff_max = int(max_batch_size) if max_batch_size is not None else cls.MAX_BATCH_SIZE
+        seen = set()
+        deduped: List[str] = []
+        for u in urls:
+            if not u or not isinstance(u, str):
+                continue
+            clean = u.strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                deduped.append(clean)
+        return deduped[:eff_max]
+
+    @classmethod
+    def partition_batch(
+        cls,
+        urls: List[str],
+        max_hub_cap: int = 150,
+        max_batch_size: int = 2000,
+        **kwargs: Any,
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Governs total batch size to max_batch_size URLs and partitions into:
+        - tier1_hubs (capped at max_hub_cap for active push)
+        - tier2_leaves (natural crawl via XML sitemap and internal links)
+        """
+        governed = cls.govern_batch(urls, max_batch_size=max_batch_size, **kwargs)
+        hubs, leaves = partition_indexing_urls(governed)
+        eff_hub_cap = int(max_hub_cap) if max_hub_cap is not None else cls.TIER1_HUB_CAP
+        if len(hubs) > eff_hub_cap:
+            leaves = hubs[eff_hub_cap:] + leaves
+            hubs = hubs[:eff_hub_cap]
+        return hubs, leaves
+
+    @classmethod
+    def govern_graduated_exposure(
+        cls,
+        urls: List[str],
+        indexed_ratio: float = 1.0,
+        initial_batch_size: int = 50,
+        max_batch_size: int = 2000,
+        **kwargs: Any,
+    ) -> GraduatedExposureResult:
+        """
+        Governs sitemap / indexing exposure using graduated batch sizing based on
+        observed indexation ratio:
+        - indexed_ratio < 0.70 -> capped at initial_batch_size (default 50)
+        - 0.70 <= indexed_ratio < 0.90 -> capped at min(max_batch_size, initial_batch_size * 4)
+        - indexed_ratio >= 0.90 -> capped at max_batch_size (2000)
+        """
+        eff_max = int(max_batch_size) if max_batch_size is not None else cls.MAX_BATCH_SIZE
+        seen = set()
+        deduped: List[str] = []
+        for u in urls:
+            if not u or not isinstance(u, str):
+                continue
+            clean = u.strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                deduped.append(clean)
+
+        eff_init = max(1, int(initial_batch_size))
+        ratio = float(indexed_ratio)
+        if ratio < 0.70:
+            cap = min(eff_max, eff_init)
+        elif ratio < 0.90:
+            cap = min(eff_max, eff_init * 4)
+        else:
+            cap = eff_max
+
+        allowed = deduped[:cap]
+        deferred = deduped[cap:]
+        return GraduatedExposureResult(
+            allowed_urls=allowed,
+            deferred_urls=deferred,
+            batch_cap=cap,
+            indexed_ratio=ratio,
+        )
+
+
+def govern_sitemap_batch(
+    urls: List[str],
+    max_batch_size: int = 2000,
+    **kwargs: Any,
+) -> List[str]:
+    """Convenience function to deduplicate and govern a sitemap URL batch."""
+    return SitemapGovernor.govern_batch(urls, max_batch_size=max_batch_size, **kwargs)
+
+
+def govern_graduated_exposure(
+    urls: List[str],
+    indexed_ratio: float = 1.0,
+    initial_batch_size: int = 50,
+    max_batch_size: int = 2000,
+    **kwargs: Any,
+) -> GraduatedExposureResult:
+    """Module-level convenience wrapper for SitemapGovernor.govern_graduated_exposure."""
+    return SitemapGovernor.govern_graduated_exposure(
+        urls=urls,
+        indexed_ratio=indexed_ratio,
+        initial_batch_size=initial_batch_size,
+        max_batch_size=max_batch_size,
+        **kwargs,
+    )
+
+
 class PushIndexer:
     """
     Parametric Instant Indexer & Discovery Dispatcher for Software Factories.
@@ -572,15 +762,74 @@ class PushIndexer:
 
         return tier1_hubs[:150], tier2_leaves
 
+    def _record_push_intent(self, urls: List[str], channel: str) -> str:
+        """
+        Records a pre-push Write-Ahead Log (WAL) intent entry in .indexing_intent_wal.jsonl
+        before invoking external indexing APIs (Effect Sandwich Part 1).
+        """
+        seed = f"{channel}:{datetime.now(timezone.utc).isoformat()}:{','.join(urls[:20])}"
+        intent_id = f"intent_{channel}_{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:12]}"
+        record = {
+            "intent_id": intent_id,
+            "channel": channel,
+            "tenant_id": getattr(self, "tenant_id", "profithelm"),
+            "urls": list(urls),
+            "status": "PENDING_INTENT",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        line = json.dumps(record) + "\n"
+        wal_paths = [
+            self.base_dir / ".indexing_intent_wal.jsonl",
+            self.base_dir / ".agy" / ".indexing_intent_wal.jsonl",
+        ]
+        for wp in wal_paths:
+            try:
+                wp.parent.mkdir(parents=True, exist_ok=True)
+                with open(wp, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+            except Exception:
+                pass
+        return intent_id
+
+    def _commit_push_result(self, intent_id: str, urls: List[str], status: str) -> Dict[str, Any]:
+        """
+        Commits the post-push outcome to .indexing_intent_wal.jsonl (Effect Sandwich Part 2).
+        """
+        record = {
+            "intent_id": intent_id,
+            "tenant_id": getattr(self, "tenant_id", "profithelm"),
+            "urls": list(urls),
+            "status": status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        line = json.dumps(record) + "\n"
+        wal_paths = [
+            self.base_dir / ".indexing_intent_wal.jsonl",
+            self.base_dir / ".agy" / ".indexing_intent_wal.jsonl",
+        ]
+        for wp in wal_paths:
+            try:
+                wp.parent.mkdir(parents=True, exist_ok=True)
+                with open(wp, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+            except Exception:
+                pass
+        return record
+
     def calculate_indexing_velocity(
         self,
         ledger_path: Optional[Path] = None,
         live: bool = False,
         routes: Optional[List[Dict[str, Any]]] = None,
+        access_logs: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Computes search crawler indexing velocity and differential telemetry comparing
         external high-DR authority pages against fresh domain routes.
+        Computes empirical TTFC from CrawlerTelemetryListener access logs or ledger crawl
+        timestamps when available before falling back to baseline priors (4.0 / 72.0).
         """
         target_ledger = Path(ledger_path) if ledger_path else self.velocity_ledger_path
 
@@ -595,6 +844,52 @@ class PushIndexer:
         ttfc_dom_hours = 72.0
         tti_ext_hours = 18.0
         tti_dom_hours = 168.0
+        telemetry_source = "SIMULATED_PRIOR"
+
+        # Check for empirical crawl logs via CrawlerTelemetryListener or ledger timestamps
+        log_source = access_logs
+        if log_source is None:
+            for cand_log in (
+                self.base_dir / ".agy" / "crawler_access.log",
+                self.base_dir / "access.log",
+            ):
+                if cand_log.exists():
+                    log_source = cand_log
+                    break
+
+        if log_source is not None:
+            try:
+                listener = CrawlerTelemetryListener(ledger_path=self.ledger_path)
+                parsed_logs = listener.parse_access_logs(log_source)
+                pushed_ledger = self.load_pushed_ledger()
+                dom_deltas: List[float] = []
+                for rec in parsed_logs:
+                    if not rec.get("is_dom_fetch"):
+                        continue
+                    crawl_ts_str = rec.get("timestamp", "")
+                    path = rec.get("path", "")
+                    full_url = f"{self.canonical_base}{path}"
+                    push_entry = pushed_ledger.get(full_url) or pushed_ledger.get(full_url.rstrip("/") + "/")
+                    if push_entry and push_entry.get("last_pushed") and crawl_ts_str:
+                        try:
+                            t_push = datetime.fromisoformat(str(push_entry["last_pushed"]).replace("Z", "+00:00"))
+                            t_crawl = datetime.fromisoformat(str(crawl_ts_str).replace("Z", "+00:00"))
+                            delta_h = max(0.01, (t_crawl - t_push).total_seconds() / 3600.0)
+                            dom_deltas.append(delta_h)
+                        except Exception:
+                            pass
+                if dom_deltas:
+                    ttfc_dom_hours = round(sum(dom_deltas) / len(dom_deltas), 2)
+                    telemetry_source = "EMPIRICAL_CRAWLER_TELEMETRY"
+            except Exception:
+                pass
+        elif isinstance(existing_ledger, dict):
+            emp_ttfc = existing_ledger.get("time_to_first_crawl_ttfc", {})
+            if isinstance(emp_ttfc, dict):
+                if "fresh_domain_hours" in emp_ttfc:
+                    ttfc_dom_hours = float(emp_ttfc["fresh_domain_hours"])
+                if "external_authority_hours" in emp_ttfc:
+                    ttfc_ext_hours = float(emp_ttfc["external_authority_hours"])
 
         velocity_diff_hours = round(ttfc_dom_hours - ttfc_ext_hours, 2)
         velocity_ratio = round(ttfc_dom_hours / max(ttfc_ext_hours, 0.1), 2)
@@ -639,6 +934,7 @@ class PushIndexer:
             "timestamp": datetime.now().isoformat(),
             "ledger_path": str(target_ledger),
             "mode": "LIVE" if live else "SIMULATED",
+            "telemetry_source": telemetry_source,
             "time_to_first_crawl_ttfc": {
                 "external_authority_hours": ttfc_ext_hours,
                 "fresh_domain_hours": ttfc_dom_hours,
@@ -737,6 +1033,8 @@ class PushIndexer:
             "https://www.bing.com/indexnow",
         ]
 
+        intent_id = self._record_push_intent(urls, channel="indexnow")
+
         if dry_run:
             dispatch_results = [
                 {
@@ -747,6 +1045,7 @@ class PushIndexer:
                 }
                 for ep in endpoints
             ]
+            self._commit_push_result(intent_id, urls, status="SIMULATED")
             return {
                 "host": self.domain,
                 "urls_submitted": len(urls),
@@ -754,6 +1053,7 @@ class PushIndexer:
                 "urls_skipped_unchanged": 0,
                 "results": dispatch_results,
                 "status": "SIMULATED",
+                "intent_id": intent_id,
             }
 
         to_push, skipped = self.filter_unchanged_push_urls(urls, force=force, engine="indexnow")
@@ -768,6 +1068,7 @@ class PushIndexer:
                 }
                 for ep in endpoints
             ]
+            self._commit_push_result(intent_id, [], status="IDEMPOTENT_NO_OP")
             return {
                 "host": self.domain,
                 "urls_submitted": len(urls),
@@ -775,6 +1076,7 @@ class PushIndexer:
                 "urls_skipped_unchanged": len(skipped),
                 "results": dispatch_results,
                 "status": "IDEMPOTENT_NO_OP",
+                "intent_id": intent_id,
             }
 
         payload = {
@@ -828,6 +1130,8 @@ class PushIndexer:
             all_failed = all(r.get("status") in ["FAIL", "ERROR"] for r in dispatch_results)
             overall_status = "FAILED" if all_failed else "PARTIAL"
 
+        self._commit_push_result(intent_id, to_push, status=overall_status)
+
         return {
             "host": self.domain,
             "urls_submitted": len(urls),
@@ -835,15 +1139,18 @@ class PushIndexer:
             "urls_skipped_unchanged": len(skipped),
             "results": dispatch_results,
             "status": overall_status,
+            "intent_id": intent_id,
         }
 
     def ping_websub_hub(self, dry_run: bool = False) -> Dict[str, Any]:
         """Pings Google's PubSubHubbub to trigger immediate Googlebot crawler passes on updated RSS."""
         feed_url = f"{self.canonical_base}/feed.xml"
         hub_url = "https://pubsubhubbub.appspot.com/"
+        intent_id = self._record_push_intent([feed_url], channel="websub")
 
         if dry_run:
-            return {"hub": hub_url, "status": "SIMULATED", "message": "Dry-run verified (simulated WebSub ping)"}
+            self._commit_push_result(intent_id, [feed_url], status="SIMULATED")
+            return {"hub": hub_url, "status": "SIMULATED", "message": "Dry-run verified (simulated WebSub ping)", "intent_id": intent_id}
 
         data = urllib.parse.urlencode({
             "hub.mode": "publish",
@@ -854,16 +1161,22 @@ class PushIndexer:
             req = urllib.request.Request(hub_url, data=data, method="POST")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 is_success = 200 <= resp.status < 300
+                self._commit_push_result(intent_id, [feed_url], status="DISPATCHED" if is_success else "FAILED")
                 return {
                     "hub": hub_url,
                     "status": resp.status,
                     "success": is_success,
                     "message": "Feed pinged" if is_success else f"HTTP {resp.status}",
+                    "intent_id": intent_id,
                 }
         except urllib.error.HTTPError as e:
-            return {"hub": hub_url, "status": e.code, "success": False, "note": f"HTTPError {e.code}: {e.reason}"}
+            self._commit_push_result(intent_id, [feed_url], status="FAILED")
+            return {"hub": hub_url, "status": e.code, "success": False, "note": f"HTTPError {e.code}: {e.reason}", "intent_id": intent_id}
         except Exception as e:
-            return {"hub": hub_url, "status": "ERROR", "success": False, "note": str(e)}
+            self._commit_push_result(intent_id, [feed_url], status="ERROR")
+            return {"hub": hub_url, "status": "ERROR", "success": False, "note": str(e), "intent_id": intent_id}
+
+    ping_websub = ping_websub_hub
 
     def ping_pingomatic(self, dry_run: bool = False) -> Dict[str, Any]:
         """Pings Ping-O-Matic XML-RPC aggregator for broad crawler signaling."""
@@ -1228,6 +1541,8 @@ class PushIndexer:
             if live:
                 self.save_gsc_rollover_queue(rollover_spillover)
 
+        intent_id = self._record_push_intent(urls, channel="google_indexing_api")
+
         fast_res = self.submit_fast_index(urls=urls, dry_run=not live)
         gsc_results = [
             {
@@ -1370,6 +1685,9 @@ class PushIndexer:
         if not interrupted:
             inspection_oracle = self.verify_gsc_indexation_loop(urls=urls, site=self.gsc_site, max_urls=5, live=live)
 
+        commit_status = "SIMULATED" if not live else ("INTERRUPTED" if interrupted else "DISPATCHED")
+        self._commit_push_result(intent_id, to_push if live else urls, status=commit_status)
+
         return {
             "site": self.gsc_site,
             "urls_targeted": len(urls),
@@ -1377,7 +1695,10 @@ class PushIndexer:
             "inspection_oracle": inspection_oracle,
             "rollover_queue_drained": len(rollover_loaded),
             "rollover_queue_pending": len(self.load_gsc_rollover_queue()),
+            "intent_id": intent_id,
         }
+
+    submit_google_indexing_api = submit_gsc_indexing
 
     def submit_indexmysite(
         self,
@@ -2220,6 +2541,7 @@ partition_indexing_urls = _default_indexer.partition_indexing_urls
 ensure_indexnow_key_file = _default_indexer.ensure_indexnow_key_file
 submit_indexnow_batch = _default_indexer.submit_indexnow_batch
 ping_websub_hub = _default_indexer.ping_websub_hub
+ping_websub = _default_indexer.ping_websub
 ping_pingomatic = _default_indexer.ping_pingomatic
 submit_fast_index = _default_indexer.submit_fast_index
 fetch_gsc_sitemaps = _default_indexer.fetch_gsc_sitemaps
@@ -2228,6 +2550,7 @@ verify_gsc_indexation_loop = _default_indexer.verify_gsc_indexation_loop
 load_gsc_rollover_queue = _default_indexer.load_gsc_rollover_queue
 save_gsc_rollover_queue = _default_indexer.save_gsc_rollover_queue
 submit_gsc_indexing = _default_indexer.submit_gsc_indexing
+submit_google_indexing_api = _default_indexer.submit_google_indexing_api
 submit_indexmysite = _default_indexer.submit_indexmysite
 submit_bing_webmaster = _default_indexer.submit_bing_webmaster
 inspect_platform_assets = _default_indexer.inspect_platform_assets

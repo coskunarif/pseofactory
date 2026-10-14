@@ -215,6 +215,9 @@ from pseofactory.contracts import (
     assert_free_web_application_schema,
     detect_rate_limit_and_bot_shield_issues,
     assert_rate_limit_and_bot_shield,
+    detect_interactive_touch_target_gaps,
+    DatasetManifest,
+    compute_file_sha256,
 )
 
 
@@ -222,6 +225,7 @@ from pseofactory.qualification import (
     qualify_search_intent,
     check_search_intent_cannibalization,
     assert_search_intent_qualified,
+    compute_statutory_signature,
 )
 
 from pseofactory.content_angles import (
@@ -374,6 +378,9 @@ from pseofactory.verifier import (
 from pseofactory.indexer import (
     PushIndexer,
     CrawlerTelemetryListener,
+    SitemapGovernor,
+    govern_sitemap_batch,
+    govern_graduated_exposure,
     calculate_indexing_velocity,
     audit_indexing_velocity,
     record_indexing_velocity,
@@ -392,6 +399,7 @@ from pseofactory.indexer import (
 )
 
 from pseofactory.distributor import (
+    resolve_tenant_distribution_config,
     generate_linkedin_company_post,
     generate_x_post,
     generate_facebook_post,
@@ -414,6 +422,7 @@ from pseofactory.distributor import (
 
 from pseofactory.drift import (
     compute_engine_hash,
+    compute_two_tier_merkle_hash,
     detect_engine_drift,
     record_engine_hash,
     compute_asset_fingerprint,
@@ -445,6 +454,7 @@ from pseofactory.maintenance import (
     audit_property_assets,
     reflect_and_recompile_all_assets,
     recompile_drifted_assets,
+    parse_subprocess_envelope,
 )
 from pseofactory.supervisor import (
     AutonomousLifecycleSupervisor,
@@ -534,12 +544,17 @@ from pseofactory.pipeline import (
 from pseofactory.competitor import (
     CompetitorGapEngine,
     GapCandidateSpec,
+    run_blind_spot_pass,
 )
 from pseofactory.audit import (
     ContentAccuracyAuditStage,
     ContentAccuracyAuditReport,
     ContentAccuracyAuditError,
     audit_rendered_asset,
+    audit_code_slop_ratchet,
+)
+from pseofactory.compiler import (
+    verify_formula_boundary_fuzzing,
 )
 
 __version__ = "0.1.0"
@@ -1032,4 +1047,17 @@ __all__ = [
     "DEFAULT_UI_HOST",
     "CompetitorGapEngine",
     "GapCandidateSpec",
+    "run_blind_spot_pass",
+    "compute_statutory_signature",
+    "verify_formula_boundary_fuzzing",
+    "DatasetManifest",
+    "compute_file_sha256",
+    "audit_code_slop_ratchet",
+    "detect_interactive_touch_target_gaps",
+    "compute_two_tier_merkle_hash",
+    "SitemapGovernor",
+    "govern_sitemap_batch",
+    "govern_graduated_exposure",
+    "resolve_tenant_distribution_config",
+    "parse_subprocess_envelope",
 ]

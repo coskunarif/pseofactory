@@ -820,7 +820,12 @@ class GitOpsCoordinator:
         idempotency_token = hashlib.sha256(token_str.encode("utf-8")).hexdigest()
 
         # Persistent idempotency ledger rejection (HWL-1212/HWL-1231)
-        ledger = IdempotencyLedger()
+        scoped_ledger_path = (
+            self.repo_path / ".agy" / "gitops_idempotency_ledger.json"
+            if str(self.repo_path).startswith(tempfile.gettempdir())
+            else None
+        )
+        ledger = IdempotencyLedger(ledger_path=scoped_ledger_path)
         if ledger.has_token(idempotency_token):
             print(f"[DISPATCH:SHIPPER] Stage 3: Duplicate release token detected -> token={idempotency_token[:16]}... (SKIPPED_NO_CHANGES HWL-1212/HWL-1231)")
             return GitOpsResult(

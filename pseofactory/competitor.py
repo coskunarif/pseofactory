@@ -437,10 +437,211 @@ class CompetitorGapEngine:
             ])
 
         # Enforce tenant isolation check on text attributes
-        text_to_check = f"{spec.get('title', '')} {spec.get('description', '')} {spec.get('quick_answer', '')} {spec.get('statutory_authority', '')}"
+        disclosures_text = " ".join(str(d) for d in spec.get("mandatory_disclosures", []))
+        text_to_check = f"{spec.get('title', '')} {spec.get('description', '')} {spec.get('quick_answer', '')} {spec.get('statutory_authority', '')} {disclosures_text}"
         self.fact_store.assert_tenant_isolation(tenant_id, text_to_check)
 
         return spec
+
+    def run_blind_spot_pass(
+        self,
+        competitor_htmls: Optional[List[str]] = None,
+        competitor_results: Optional[List[Dict[str, Any]]] = None,
+        existing_tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Executes a blind-spot discovery pass over raw competitor HTML documents and SERP results.
+        Parses <form>, <input>, <select>, <output>, and JSON-LD @type schemas from competitor_htmls
+        plus competitor_results, cross-references against TenantFactStore statutory authorities and
+        datasets, and returns unknown-unknown interactive features, statutory blind spots, and
+        tenant-isolated candidate specs.
+        Zero em-dashes. Zero en-dashes.
+        """
+        profile = self.fact_store.get_profile(self.tenant_id) or self.tenant_profile
+        existing_list = list(existing_tools or [])
+
+        known_features: Set[str] = set()
+        covered_citations: Set[str] = set()
+        existing_corpus_parts: List[str] = []
+
+        for tool in existing_list:
+            if not isinstance(tool, dict):
+                continue
+            for feat in tool.get("interactive_features", []):
+                if isinstance(feat, str) and feat.strip():
+                    known_features.add(_normalize_feature_name(feat))
+            inputs_dict = tool.get("inputs")
+            if isinstance(inputs_dict, dict):
+                for k in inputs_dict.keys():
+                    known_features.add(_normalize_feature_name(str(k)))
+            for field_name in ("slug", "title", "description", "statutory_authority", "primary_keyword"):
+                val = str(tool.get(field_name, "") or "").strip()
+                if val:
+                    existing_corpus_parts.append(val.lower())
+
+        existing_corpus = " ".join(existing_corpus_parts)
+
+        discovered_features: List[str] = []
+        discovered_set: Set[str] = set()
+
+        def _register_feature(raw_feat: str) -> None:
+            norm = _normalize_feature_name(raw_feat)
+            if not norm or len(norm) < 3:
+                return
+            if self.scanner.scan_text(norm.replace("_", " "), self.tenant_id):
+                return
+            if norm not in known_features and norm not in discovered_set:
+                discovered_set.add(norm)
+                discovered_features.append(norm)
+
+        # 1. Parse competitor HTML documents for <form>, <input>, <select>, <output>, and JSON-LD @type
+        for raw_html in (competitor_htmls or []):
+            if not isinstance(raw_html, str) or not raw_html.strip():
+                continue
+            # Extract form, input, select, output attributes
+            for tag_match in re.finditer(
+                r"<(form|input|select|output)\b([^>]*)>",
+                raw_html,
+                re.IGNORECASE,
+            ):
+                tag_name = tag_match.group(1).lower()
+                attrs_str = tag_match.group(2)
+                for attr_name in ("name", "id", "aria-label", "placeholder", "data-feature", "data-field"):
+                    attr_m = re.search(
+                        rf'\b{re.escape(attr_name)}\s*=\s*["\']([^"\']+)["\']',
+                        attrs_str,
+                        re.IGNORECASE,
+                    )
+                    if attr_m:
+                        attr_val = attr_m.group(1).strip()
+                        if attr_val and attr_val.lower() not in ("hidden", "submit", "button", "text", "number"):
+                            _register_feature(f"{tag_name}_{attr_val}" if tag_name == "output" else attr_val)
+
+            # Extract JSON-LD @type schemas
+            for ld_match in re.finditer(
+                r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                raw_html,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                ld_raw = ld_match.group(1).strip()
+                try:
+                    ld_data = json.loads(ld_raw)
+                    ld_items = ld_data if isinstance(ld_data, list) else [ld_data]
+                    for ld_item in ld_items:
+                        if isinstance(ld_item, dict):
+                            ld_type = ld_item.get("@type")
+                            if isinstance(ld_type, str):
+                                _register_feature(f"schema_{ld_type}")
+                            elif isinstance(ld_type, list):
+                                for t_item in ld_type:
+                                    if isinstance(t_item, str):
+                                        _register_feature(f"schema_{t_item}")
+                except Exception:
+                    pass
+
+            for pat_feat in _extract_patterns(raw_html, INTERACTIVE_PATTERNS):
+                _register_feature(pat_feat)
+
+        # 2. Parse competitor SERP results
+        for item in (competitor_results or []):
+            if not isinstance(item, dict):
+                continue
+            for feat in item.get("interactive_features", []):
+                if isinstance(feat, str) and feat.strip():
+                    _register_feature(feat)
+            combined_text = f"{item.get('title', '')} {item.get('snippet', '')} {item.get('description', '')}"
+            for pat_feat in _extract_patterns(combined_text, INTERACTIVE_PATTERNS):
+                _register_feature(pat_feat)
+
+        # 3. Cross-reference against tenant statutory citations & features for statutory blind spots
+        statutory_blind_spots: List[str] = []
+        if profile and profile.statutory_truth and profile.statutory_truth.statutory_citations:
+            for cit_key, cit_val in profile.statutory_truth.statutory_citations.items():
+                cit_clean = str(cit_val).strip()
+                if not cit_clean:
+                    continue
+                if self.scanner.scan_text(cit_clean, self.tenant_id):
+                    continue
+                if cit_clean.lower() not in existing_corpus and cit_key.lower().replace("_", " ") not in existing_corpus:
+                    statutory_blind_spots.append(cit_clean)
+                else:
+                    covered_citations.add(cit_clean)
+
+        if profile and profile.features:
+            for feat_key, feat_contract in profile.features.items():
+                if not feat_contract.enabled:
+                    continue
+                norm_fk = _normalize_feature_name(feat_key)
+                if norm_fk not in known_features and feat_key.lower() not in existing_corpus:
+                    _register_feature(norm_fk)
+
+        # 4. Synthesize candidate specifications for discovered gaps
+        candidate_specs: List[Dict[str, Any]] = []
+        seed_features = discovered_features[:5]
+        if not seed_features and statutory_blind_spots:
+            seed_features = [_normalize_feature_name(s) for s in statutory_blind_spots[:3]]
+
+        base_query = (
+            "student loan repayment calculator"
+            if self.tenant_id == "prexvo"
+            else "section 179 tax deduction calculator"
+        )
+        for idx, feat in enumerate(seed_features):
+            authority_override = (
+                statutory_blind_spots[idx % len(statutory_blind_spots)]
+                if statutory_blind_spots
+                else None
+            )
+            serp_diffs = self.diff_competitor_serp(
+                query=f"{base_query} {feat.replace('_', ' ')}",
+                competitor_results=[{"interactive_features": [feat]}],
+                existing_tool=existing_list[0] if existing_list else None,
+            )
+            for gap_spec in serp_diffs:
+                enriched = self.enrich_candidate_spec(gap_spec)
+                if authority_override:
+                    enriched["statutory_authority"] = authority_override
+                disclosures_str = " ".join(str(d) for d in enriched.get("mandatory_disclosures", []))
+                text_to_check = (
+                    f"{enriched.get('title', '')} {enriched.get('description', '')} "
+                    f"{enriched.get('quick_answer', '')} {enriched.get('statutory_authority', '')} "
+                    f"{disclosures_str}"
+                )
+                self.fact_store.assert_tenant_isolation(self.tenant_id, text_to_check)
+                assert_no_forbidden_dashes(json.dumps(enriched), context="blind_spot_candidate_spec")
+                candidate_specs.append(enriched)
+
+        return {
+            "tenant_id": self.tenant_id,
+            "unknown_unknown_features": discovered_features,
+            "statutory_blind_spots": statutory_blind_spots,
+            "candidate_specs": candidate_specs,
+        }
+
+
+def run_blind_spot_pass(
+    tenant_id: Union[str, TenantTruthProfile] = "profithelm",
+    competitor_htmls: Optional[List[str]] = None,
+    competitor_results: Optional[List[Dict[str, Any]]] = None,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Module-level helper to execute CompetitorGapEngine.run_blind_spot_pass for a given tenant.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(tenant_id, TenantTruthProfile):
+        profile = tenant_id
+    else:
+        store = TenantFactStore.get_instance()
+        profile = store.get_profile(str(tenant_id))
+        if profile is None:
+            raise ValueError(f"Unknown tenant_id '{tenant_id}' for run_blind_spot_pass")
+    engine = CompetitorGapEngine(profile)
+    return engine.run_blind_spot_pass(
+        competitor_htmls=competitor_htmls,
+        competitor_results=competitor_results,
+        existing_tools=existing_tools,
+    )
 
 
 __all__ = [
@@ -449,4 +650,6 @@ __all__ = [
     "CONVERSION_HOOK_PATTERNS",
     "GapCandidateSpec",
     "CompetitorGapEngine",
+    "run_blind_spot_pass",
 ]
+

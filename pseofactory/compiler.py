@@ -19,7 +19,7 @@ import os
 import json
 import re
 import ast
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from pseofactory.qualification import assert_high_effort_content_qualified
 from pseofactory.contracts import (
@@ -148,6 +148,14 @@ def compile_ast_to_js(
                         raise ValueError(f"round() expects 1 or 2 arguments, got {len(args_js)}")
                 elif func_name == "pow" and len(args_js) == 2:
                     return f"Math.pow({args_js[0]}, {args_js[1]})"
+                elif func_name == "clamp" and len(args_js) == 3:
+                    return f"Math.min(Math.max({args_js[0]}, {args_js[1]}), {args_js[2]})"
+                elif func_name == "phaseout" and len(args_js) in (3, 4):
+                    rate_js = args_js[3] if len(args_js) == 4 else "1.0"
+                    return f"Math.max(0.0, {args_js[0]} - Math.max(0.0, {args_js[1]} - {args_js[2]}) * {rate_js})"
+                elif func_name == "lookup_bracket" and len(args_js) in (3, 4):
+                    base_tax_js = args_js[3] if len(args_js) == 4 else "0.0"
+                    return f"({base_tax_js} + Math.max(0.0, {args_js[0]} - {args_js[1]}) * {args_js[2]})"
                 else:
                     raise ValueError(f"Unsupported function call in formula: {node.func.id}")
             else:
@@ -159,6 +167,98 @@ def compile_ast_to_js(
 
 
 compile_formula_to_js = compile_ast_to_js
+
+
+def _eval_compiled_js_expr(js_expr: str, clamped_inputs: Dict[str, float]) -> float:
+    """Evaluates a compiled JS arithmetic/piecewise expression in Python to verify parity."""
+    import math
+    from types import SimpleNamespace
+
+    py_expr = js_expr
+    # Convert JS ternary (cond ? a : b) into Python conditional ((a) if (cond) else (b))
+    while "?" in py_expr and ":" in py_expr:
+        m = re.search(r"\(([^()?]+)\?\s*([^():?]+):\s*([^():?]+)\)", py_expr)
+        if not m:
+            break
+        cond_part, true_part, false_part = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+        py_expr = py_expr[: m.start()] + f"(({true_part}) if ({cond_part}) else ({false_part}))" + py_expr[m.end() :]
+
+    ns_inputs = SimpleNamespace(**{str(k).strip(): float(v) for k, v in clamped_inputs.items()})
+    math_ns = SimpleNamespace(
+        min=min,
+        max=max,
+        abs=abs,
+        floor=math.floor,
+        ceil=math.ceil,
+        round=lambda x: round(x),
+        pow=pow,
+        PI=math.pi,
+        E=math.e,
+    )
+    return float(eval(py_expr, {"__builtins__": {}}, {"Math": math_ns, "inputs": ns_inputs}))
+
+
+def verify_formula_boundary_fuzzing(
+    formula_str: str,
+    inputs: Dict[str, Any],
+    tolerance: float = 0.01,
+) -> Dict[str, Any]:
+    """
+    Fuzz-tests formula evaluation across 4 boundary vectors (zero, negative clamped to 0,
+    10x cap, and fractional inputs) comparing Python safe_eval_mathematical_formula
+    against JS AST compilation (compile_ast_to_js).
+    Zero em-dashes. Zero en-dashes.
+    """
+    js_expr = compile_ast_to_js(formula_str, list(inputs.keys()) if isinstance(inputs, dict) else None)
+
+    base_clean: Dict[str, float] = {}
+    for k, v in (inputs or {}).items():
+        if isinstance(v, (int, float)):
+            base_clean[str(k)] = max(0.0, float(v))
+        elif isinstance(v, str):
+            try:
+                base_clean[str(k)] = max(0.0, float(v.replace("$", "").replace(",", "").replace("%", "").strip()))
+            except ValueError:
+                base_clean[str(k)] = 0.0
+        else:
+            base_clean[str(k)] = 0.0
+
+    vectors = [
+        ("zero", {k: 0.0 for k in base_clean}),
+        ("negative_clamped", {k: max(0.0, -abs(val if val != 0.0 else 100.0)) for k, val in base_clean.items()}),
+        ("ten_x_cap", {k: (val * 10.0 if val > 0.0 else 1000.0) for k, val in base_clean.items()}),
+        ("fractional", {k: (val * 0.3333 + 0.125 if val > 0.0 else 0.125) for k, val in base_clean.items()}),
+    ]
+
+    discrepancies: List[str] = []
+    for vec_name, vec_inputs in vectors:
+        try:
+            py_val = safe_eval_mathematical_formula(formula_str, vec_inputs)
+        except ZeroDivisionError:
+            continue
+        except Exception as ex:
+            discrepancies.append(f"Vector '{vec_name}' Python eval error: {ex}")
+            continue
+
+        try:
+            js_val = _eval_compiled_js_expr(js_expr, vec_inputs)
+        except ZeroDivisionError:
+            continue
+        except Exception as ex:
+            discrepancies.append(f"Vector '{vec_name}' JS eval error: {ex}")
+            continue
+
+        if abs(py_val - js_val) > tolerance:
+            discrepancies.append(
+                f"Vector '{vec_name}' parity mismatch: Python={py_val} vs JS={js_val}"
+            )
+
+    return {
+        "passed": len(discrepancies) == 0,
+        "vectors_tested": len(vectors),
+        "discrepancies": discrepancies,
+        "js_expression": js_expr,
+    }
 
 
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -377,23 +477,29 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         f'    </div>'
     )
 
-    is_prexvo = (
-        "prexvo" in str(candidate_spec.get("property_id") or "").lower()
-        or "prexvo" in str(candidate_spec.get("property") or "").lower()
-        or "prexvo" in str(candidate_spec.get("tenant") or "").lower()
-        or "prexvo" in str(candidate_spec.get("domain") or "").lower()
-        or "prexvo" in str(candidate_spec.get("brand_name") or "").lower()
-        or "prexvo" in os.environ.get("FACTORY_PROPERTY_ID", "").lower()
-        or "prexvo" in os.environ.get("FACTORY_BRAND_NAME", "").lower()
-        or "prexvo" in os.environ.get("FACTORY_DOMAIN", "").lower()
-        or any(
-            t in str(candidate_spec.get("statutory_authority") or "").lower()
-            for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
+    spec_tenant_signals = " ".join(
+        str(candidate_spec.get(k) or "")
+        for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
+    ).lower()
+    if "profithelm" in spec_tenant_signals and "prexvo" not in spec_tenant_signals:
+        is_prexvo = False
+    elif "prexvo" in spec_tenant_signals:
+        is_prexvo = True
+    else:
+        is_prexvo = (
+            "prexvo" in os.environ.get("FACTORY_PROPERTY_ID", "").lower()
+            or "prexvo" in os.environ.get("FACTORY_BRAND_NAME", "").lower()
+            or "prexvo" in os.environ.get("FACTORY_DOMAIN", "").lower()
+            or any(
+                t in str(candidate_spec.get("statutory_authority") or "").lower()
+                for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
+            )
         )
-    )
     default_base = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
     env_base = os.environ.get("FACTORY_CANONICAL_BASE", "").strip()
     if is_prexvo and "profithelm.com" in env_base.lower():
+        env_base = ""
+    elif not is_prexvo and "prexvo.com" in env_base.lower():
         env_base = ""
     canonical_base = (
         str(candidate_spec.get("canonical_base") or "").strip()
@@ -621,6 +727,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       --card-bg: #0f172a;
       --bg-elevated: #151f38;
       --bg-inset: #0b1329;
+      --bg-canvas: #fbfcfd;
+      --bg-surface: #ffffff;
+      --text-primary: #0f172a;
+      --brand-primary: #1d4ed8;
 
       /* Borders & Separation */
       --border: rgba(255, 255, 255, 0.08);
@@ -640,6 +750,20 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
       --shadow-elevated: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
       --card-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+    }}
+    [data-theme="porcelain"] {{
+      --bg: var(--bg-canvas);
+      --card-bg: var(--bg-surface);
+      --bg-elevated: #f1f5f9;
+      --bg-inset: #f8fafc;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text: var(--text-primary);
+      --text-muted: #475569;
+      --text-dim: #64748b;
+      --accent: var(--brand-primary);
+      --accent-hover: #1e40af;
+      --accent-subtle: rgba(29, 78, 216, 0.08);
     }}
     * {{
       box-sizing: border-box;
@@ -759,6 +883,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       border: 1px solid var(--border);
       padding: 12px;
       text-align: left;
+      min-width: 110px;
     }}
     .calculation-table th {{
       background-color: var(--bg-elevated);
@@ -1069,6 +1194,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     syncInputsFromParams();
     handleRecompute();
+    window.addEventListener("popstate", function() {{
+      syncInputsFromParams();
+      handleRecompute();
+    }});
     form.addEventListener("input", function(e) {{
       syncDualControls(e);
       handleRecompute();
@@ -1092,6 +1221,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     assert_no_forbidden_dashes(html_content, context=f"compiled page '{slug}'")
     assert_touch_targets(html_content, context=f"compiled page '{slug}'")
 
+    fuzz_res = verify_formula_boundary_fuzzing(formula, clamped_inputs)
+
     # 8. Self-verify using verify_html_unique_first_party_information
     audit_res = verify_html_unique_first_party_information(
         html_content,
@@ -1109,4 +1240,6 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         "manifest": manifest,
         "published_output": published_output,
         "verified": True,
+        "boundary_fuzz_verified": bool(fuzz_res.get("passed", True)),
     }
+
