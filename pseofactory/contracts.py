@@ -675,12 +675,16 @@ def assert_valid_jsonld(html_content: str, context: str = "") -> List[Dict[str, 
     return parsed_blocks
 
 
-def assert_sitemap_parses(xml_content: str) -> bool:
+def assert_sitemap_parses(xml_content: str, allow_index: bool = False) -> bool:
     """
     Parses XML content and verifies valid XML schema and single <urlset> root with <loc> tags.
-    Enforces sitemap URL count strictly under 10000, rejects sitemapindex, and limits clusters to 2000 pages (HWL-1076).
-    Zero em-dashes.
+    Enforces sitemap URL count strictly under 10000, rejects sitemapindex by default (unless
+    allow_index=True for explicit sitemap-index.xml validation), bans em-dashes and en-dashes,
+    and limits clusters to 2000 pages (HWL-1076).
+    Zero em-dashes. Zero en-dashes.
     """
+    assert_no_forbidden_dashes(xml_content, context="sitemap XML")
+
     try:
         root = ET.fromstring(xml_content)
     except ET.ParseError as ex:
@@ -688,7 +692,26 @@ def assert_sitemap_parses(xml_content: str) -> bool:
 
     tag = root.tag.lower()
     if "sitemapindex" in tag:
-        raise ValueError("Single XML sitemaps strictly required; <sitemapindex> is rejected (HWL-1076)")
+        if not allow_index:
+            raise ValueError("Single XML sitemaps strictly required; <sitemapindex> is rejected (HWL-1076)")
+        locs = root.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+        if not locs:
+            locs = root.findall(".//loc")
+        if not locs:
+            raise ValueError("Sitemap index XML contains zero <loc> entries")
+        if len(locs) >= 10000:
+            raise ValueError(f"Sitemap index exceeds 10000 entries limit: {len(locs)} found")
+        seen_index_locs = set()
+        for loc in locs:
+            url = (loc.text or "").strip()
+            if not url.startswith("http://") and not url.startswith("https://"):
+                raise ValueError(f"Invalid <loc> URL in sitemap index: '{url}'")
+            if not url.lower().endswith(".xml"):
+                raise ValueError(f"Sitemap index <loc> must reference an XML sitemap file: '{url}'")
+            if url in seen_index_locs:
+                raise ValueError(f"Duplicate child sitemap <loc> in sitemap index: '{url}'")
+            seen_index_locs.add(url)
+        return True
     if "urlset" not in tag:
         raise ValueError(f"Expected single <urlset> root, got <{root.tag}>")
 
@@ -709,13 +732,29 @@ def assert_sitemap_parses(xml_content: str) -> bool:
 
         parsed = urllib.parse.urlsplit(url)
         parts = [p for p in parsed.path.strip("/").split("/") if p]
-        if len(parts) >= 2 and parts[0] == "tools":
+        if len(parts) >= 2 and parts[0] in ("tools", "products", "categories", "articles", "guides"):
             cluster = parts[1]
             cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
             if cluster_counts[cluster] > 2000:
                 raise ValueError(f"Topical cluster '{cluster}' exceeds 2000 pages limit: {cluster_counts[cluster]} (HWL-1076)")
 
     return True
+
+
+def assert_sitemap_index_parses(xml_content: str) -> bool:
+    """
+    Parses XML content and verifies a valid <sitemapindex> root with child sitemap <loc> tags.
+    Zero em-dashes. Zero en-dashes.
+    """
+    assert_no_forbidden_dashes(xml_content, context="sitemap index XML")
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError as ex:
+        raise ValueError(f"Sitemap index XML parsing failure: {ex}") from ex
+    if "sitemapindex" not in root.tag.lower():
+        raise ValueError(f"Expected <sitemapindex> root, got <{root.tag}>")
+    return assert_sitemap_parses(xml_content, allow_index=True)
+
 
 
 class StageResult:

@@ -601,6 +601,32 @@ class EmailIngestionEngine:
             if "mailer-daemon@" in sender_lower or "postmaster@" in sender_lower:
                 continue
 
+            if msg.mailbox != "Sent" and "rho.co" in sender_lower and (
+                "become a partner" in body_lower or "rho partner portal" in body_lower
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="rho",
+                        partner_name="Rho Commercial Banking & Treasury",
+                        category="CORPORATE_SPEND",
+                        classification_type="ONBOARDING_ACTION_REQUIRED",
+                        requires_operator_decision=True,
+                        summary="Rho Client Service requested submission of the Become a Partner form on the Rho Partner Portal to activate referral tracking.",
+                        urgency="HIGH",
+                        deadline=None,
+                        missing_requirements=["Submit Become a Partner form on the Rho Partner Portal (rho.co/partners)"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url,
+                        network="In-House Direct",
+                    )
+                )
+                continue
+
             matched_outbound = outbound_partner_map.get(to_email)
             if not matched_outbound and msg.mailbox == "Sent":
                 for addr_key, p_tuple in outbound_partner_map.items():

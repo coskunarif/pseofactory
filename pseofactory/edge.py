@@ -985,3 +985,299 @@ export default {{
     assert_no_forbidden_dashes(script, "generate_edge_worker_script")
     return script
 
+
+def generate_edge_redirect_function(
+    property_id: str = "profithelm",
+    hub: Optional[Any] = None,
+) -> str:
+    """
+    Generates the deterministic Cloudflare Pages Function (functions/r/[partner].js)
+    for ProfitHelm outbound affiliate redirects from the canonical affiliate registry
+    and monetization vault.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES
+    from pseofactory.affiliates_hub import MonetizationHub
+
+    prop_clean = (property_id or "").strip().lower()
+    if prop_clean != "profithelm":
+        raise ValueError(
+            f"Edge redirect function generation is only supported for profithelm (got '{property_id}')."
+        )
+
+    active_hub = hub if hub is not None else MonetizationHub()
+    prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
+    sovrn_key = getattr(active_hub, "sovrn_domain_key", "0a5ac1bfe04034bff021b394f5e71d90")
+
+    preferred_order = [
+        "coinledger",
+        "koinly",
+        "ipx1031",
+        "mercury",
+        "stripe",
+        "ramp",
+        "rho",
+        "gusto",
+        "rippling",
+        "crest_capital",
+        "equipment_macrs",
+        "turbotax",
+        "taxslayer",
+        "kalshi",
+        "interactive_brokers",
+        "exeter1031",
+        "first_american",
+        "first_american_1031",
+    ]
+    ordered_keys = [k for k in preferred_order if k in PROFITHELM_AFFILIATES]
+    for k in PROFITHELM_AFFILIATES:
+        if k not in ordered_keys:
+            ordered_keys.append(k)
+
+    catalog_entries: List[str] = []
+    for k in ordered_keys:
+        p_obj = PROFITHELM_AFFILIATES[k]
+        v_entry = prop_vault.get(p_obj.key, {}) if isinstance(prop_vault, dict) else {}
+        v_status = str(v_entry.get("status") or "").strip().lower()
+        is_direct = bool(p_obj.status == "live" or v_status in ("live", "active_direct"))
+        v_url = str(v_entry.get("url") or v_entry.get("direct_url") or "").strip()
+        default_url = v_url if (is_direct and v_url) else p_obj.default_url
+        is_direct_js = "true" if is_direct else "false"
+        catalog_entries.append(
+            f'  {k}: {{\n'
+            f'    defaultUrl: "{default_url}",\n'
+            f'    envVar: "{p_obj.env_var}",\n'
+            f'    isDirect: {is_direct_js},\n'
+            f'  }},'
+        )
+
+    catalog_block = "\n".join(catalog_entries)
+
+    js_code = f"""/**
+ * Cloudflare Pages Function: Outbound Affiliate Edge Redirect Handler
+ * Intercepts /r/:partner requests and executes low-latency server-side redirects (<15ms TTFB).
+ * Enforces partner whitelist, tracking parameter propagation, SSRF / open-redirect guards,
+ * and Sovrn Commerce fallback wrapping.
+ *
+ * Zero AI slop. 100% mechanical verification.
+ */
+
+const PARTNER_CATALOG = {{
+{catalog_block}
+}};
+
+const TRACKING_PARAMS = [
+  "subid",
+  "click_id",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "gclid",
+  "ph_tier",
+  "source_tool",
+];
+
+const DEFAULT_SOVRN_KEY = "{sovrn_key}";
+const SOVRN_REDIRECT_BASE = "https://redirect.viglink.com";
+
+/**
+ * Validates that a destination URL is strictly safe against SSRF and open redirect attacks.
+ */
+function isSsrfSafe(urlStr) {{
+  try {{
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
+      return false;
+    }}
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Loopback, cloud metadata hostnames
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "169.254.169.254" ||
+      hostname === "metadata.google.internal" ||
+      hostname === "instance-data"
+    ) {{
+      return false;
+    }}
+
+    // Decimal or hex encoded single-integer hostnames
+    if (/^\\d+$/.test(hostname) || /^0x[0-9a-f]+$/i.test(hostname)) {{
+      return false;
+    }}
+
+    // IPv4 private, loopback, link-local CIDRs
+    const ipv4Regex = /^(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})$/;
+    const match = hostname.match(ipv4Regex);
+    if (match) {{
+      const [_, o1, o2, o3, o4] = match.map(Number);
+      if (o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255) return false;
+      if (o1 === 0) return false; // 0.0.0.0/8
+      if (o1 === 127) return false; // 127.0.0.0/8 Loopback
+      if (o1 === 10) return false; // 10.0.0.0/8 Private
+      if (o1 === 172 && o2 >= 16 && o2 <= 31) return false; // 172.16.0.0/12 Private
+      if (o1 === 192 && o2 === 168) return false; // 192.168.0.0/16 Private
+      if (o1 === 169 && o2 === 254) return false; // 169.254.0.0/16 Link-local / Metadata
+    }}
+
+    // IPv6 private, loopback, link-local
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {{
+      const ipv6 = hostname.slice(1, -1).toLowerCase();
+      if (
+        ipv6 === "::1" ||
+        ipv6 === "::" ||
+        ipv6.startsWith("fc") ||
+        ipv6.startsWith("fd") ||
+        ipv6.startsWith("fe80")
+      ) {{
+        return false;
+      }}
+    }}
+
+    return true;
+  }} catch {{
+    return false;
+  }}
+}}
+
+export async function onRequest(context) {{
+  const {{ request, env, params }} = context;
+  const rawPartner = (params.partner || "").trim().toLowerCase();
+
+  // Whitelist check
+  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  if (!partnerConfig) {{
+    return new Response("Partner not found", {{
+      status: 404,
+      headers: {{
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+
+  // Resolve target URL and determine if active direct or fallback
+  const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
+  const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
+  const isDirect = partnerConfig.isDirect || hasDirectConfig;
+  const rawTargetUrl = (hasDirectConfig ? envUrl : partnerConfig.defaultUrl).trim();
+
+  // Validate raw target URL against SSRF
+  if (!isSsrfSafe(rawTargetUrl)) {{
+    return new Response("Invalid partner destination URL", {{
+      status: 400,
+      headers: {{
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+
+  // Propagate tracking parameters
+  const reqUrl = new URL(request.url);
+  const targetObj = new URL(rawTargetUrl);
+  for (const param of TRACKING_PARAMS) {{
+    const val = reqUrl.searchParams.get(param);
+    if (val !== null && val !== "") {{
+      targetObj.searchParams.set(param, val);
+    }}
+  }}
+  const populatedTargetUrl = targetObj.toString();
+
+  // Route directly or wrap with Sovrn Commerce fallback
+  let finalRedirectUrl;
+  if (isDirect) {{
+    finalRedirectUrl = populatedTargetUrl;
+  }} else {{
+    const sovrnKey = (env && env.SOVRN_COMMERCE_DOMAIN_KEY) || DEFAULT_SOVRN_KEY;
+    finalRedirectUrl = `${{SOVRN_REDIRECT_BASE}}?key=${{sovrnKey}}&u=${{encodeURIComponent(populatedTargetUrl)}}`;
+  }}
+
+  // Final SSRF validation of redirect destination
+  if (!isSsrfSafe(finalRedirectUrl)) {{
+    return new Response("Invalid redirect destination", {{
+      status: 400,
+      headers: {{
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+
+  return new Response(null, {{
+    status: 302,
+    headers: {{
+      Location: finalRedirectUrl,
+      "Cache-Control": "private, no-cache, no-store, must-revalidate",
+      "X-Robots-Tag": "noindex, nofollow",
+    }},
+  }});
+}}
+"""
+    assert_no_forbidden_dashes(js_code, "generate_edge_redirect_function")
+    return js_code
+
+
+def sync_tenant_edge_redirect_function(
+    repo_path: Union[str, Path],
+    property_id: str = "profithelm",
+    hub: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Synchronizes the tenant Cloudflare Pages edge redirect handler (functions/r/[partner].js)
+    when repo_path contains a functions/r directory and property_id is profithelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES
+    from pseofactory.affiliates_hub import MonetizationHub
+
+    prop_clean = (property_id or "").strip().lower()
+    repo = Path(repo_path)
+    r_dir = repo / "functions" / "r"
+    target_file = r_dir / "[partner].js"
+
+    if prop_clean != "profithelm" or not r_dir.is_dir():
+        return {
+            "status": "SKIPPED",
+            "path": str(target_file),
+            "live_direct_partners": [],
+        }
+
+    active_hub = hub if hub is not None else MonetizationHub()
+    js_code = generate_edge_redirect_function(property_id="profithelm", hub=active_hub)
+
+    prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
+    live_direct_partners: List[str] = []
+    for k, p_obj in PROFITHELM_AFFILIATES.items():
+        if k != p_obj.key:
+            continue
+        v_entry = prop_vault.get(k, {}) if isinstance(prop_vault, dict) else {}
+        v_status = str(v_entry.get("status") or "").strip().lower()
+        if p_obj.status == "live" or v_status in ("live", "active_direct"):
+            live_direct_partners.append(k)
+
+    if target_file.is_file():
+        try:
+            existing = target_file.read_text(encoding="utf-8")
+            if existing == js_code:
+                return {
+                    "status": "UNCHANGED",
+                    "path": str(target_file),
+                    "live_direct_partners": live_direct_partners,
+                }
+        except Exception:
+            pass
+
+    target_file.write_text(js_code, encoding="utf-8")
+    return {
+        "status": "UPDATED",
+        "path": str(target_file),
+        "live_direct_partners": live_direct_partners,
+    }
+
+

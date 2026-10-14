@@ -9,6 +9,7 @@ import os
 import time
 import json
 import fcntl
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union, Set
 
@@ -28,6 +29,30 @@ from pseofactory.trends.models import (
 from pseofactory.trends.filters import NoiseFilter
 from pseofactory.trends.treg_checker import TregChecker
 from pseofactory.trends.jev_engine import JevEngine
+
+
+def compute_trend_idempotency_key(record: Dict[str, Any]) -> str:
+    """
+    Computes composite idempotency key (tenant_id:slug:action:payload_hash)
+    to prevent duplicate delivery churn in void_candidates.jsonl across cron cycles.
+    Zero em-dashes. Zero en-dashes.
+    """
+    existing = str(record.get("idempotency_key") or "").strip()
+    if existing:
+        return existing
+    cand_spec = record.get("candidate_spec") if isinstance(record.get("candidate_spec"), dict) else {}
+    tenant_id = str(
+        record.get("tenant_id")
+        or record.get("property_id")
+        or cand_spec.get("property_id")
+        or "unassigned"
+    ).strip().lower()
+    slug = str(record.get("slug") or "").strip().lower()
+    action = str(record.get("action") or "").strip().upper()
+    query = " ".join(str(record.get("query") or "").strip().lower().split())
+    target_asset = str(record.get("target_asset_type") or "none").strip().lower()
+    payload_hash = hashlib.sha256(f"{query}:{action}:{target_asset}".encode("utf-8")).hexdigest()[:16]
+    return f"{tenant_id}:{slug}:{action}:{payload_hash}"
 
 
 class TrendPipeline:
@@ -76,6 +101,20 @@ class TrendPipeline:
                 spikes.append(FeedSpike.from_dict(s))
 
         total_spikes = len(spikes)
+        if total_spikes == 0:
+            return {
+                "status": "NO_OP_EMPTY_QUEUE",
+                "total_spikes": 0,
+                "filtered_noise_count": 0,
+                "evaluated_candidates_count": 0,
+                "deduplicated_sink_count": 0,
+                "approved_build": [],
+                "refactor_pages": [],
+                "monitored": [],
+                "rejected": [],
+                "rankings": [],
+            }
+
         filtered_noise: List[TrendCandidate] = []
         candidates_to_eval: List[TrendCandidate] = []
         results: List[JevDecisionResult] = []
@@ -257,29 +296,56 @@ class TrendPipeline:
         # Sort all results by composite profit yield descending
         rankings = sorted(results, key=lambda d: d.composite_profit_yield, reverse=True)
 
-        # 5. HWL-1253: Atomic file sink persistence under flock lock
+        def _enrich_record(dec: JevDecisionResult) -> Dict[str, Any]:
+            rec = dec.to_dict()
+            rec["idempotency_key"] = compute_trend_idempotency_key(rec)
+            return rec
+
+        deduplicated_sink_count = 0
+
+        # 5. HWL-1253: Atomic file sink persistence under flock lock with composite idempotency deduplication
         if sink_path:
             sink_file = Path(sink_path).resolve()
             sink_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(sink_file, "a", encoding="utf-8") as f:
+            with open(sink_file, "a+", encoding="utf-8") as f:
                 fcntl.flock(f, fcntl.LOCK_EX)
                 try:
+                    f.seek(0)
+                    existing_keys: Set[str] = set()
+                    for raw_line in f:
+                        line_str = raw_line.strip()
+                        if not line_str:
+                            continue
+                        try:
+                            existing_rec = json.loads(line_str)
+                            if isinstance(existing_rec, dict):
+                                existing_keys.add(compute_trend_idempotency_key(existing_rec))
+                        except Exception:
+                            continue
+                    f.seek(0, os.SEEK_END)
                     for d in rankings:
-                        record = d.to_dict()
+                        record = _enrich_record(d)
+                        idem_key = record["idempotency_key"]
+                        if idem_key in existing_keys:
+                            deduplicated_sink_count += 1
+                            continue
+                        existing_keys.add(idem_key)
                         f.write(json.dumps(record) + "\n")
                     f.flush()
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
 
         return {
+            "status": "COMPLETED",
             "total_spikes": total_spikes,
             "filtered_noise_count": len(filtered_noise),
             "evaluated_candidates_count": len(eval_batch),
-            "approved_build": [d.to_dict() for d in approved_build],
-            "refactor_pages": [d.to_dict() for d in refactor_pages],
-            "monitored": [d.to_dict() for d in monitored],
-            "rejected": [d.to_dict() for d in rejected],
-            "rankings": [d.to_dict() for d in rankings],
+            "deduplicated_sink_count": deduplicated_sink_count,
+            "approved_build": [_enrich_record(d) for d in approved_build],
+            "refactor_pages": [_enrich_record(d) for d in refactor_pages],
+            "monitored": [_enrich_record(d) for d in monitored],
+            "rejected": [_enrich_record(d) for d in rejected],
+            "rankings": [_enrich_record(d) for d in rankings],
         }
 
 

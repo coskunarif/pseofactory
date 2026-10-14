@@ -41,7 +41,11 @@ DEFAULT_INDEXING_VELOCITY_LEDGER = (
     else (DEFAULT_BASE_DIR / ".agy" / "indexing_velocity_ledger.json")
 )
 
-from pseofactory.indexing_inspector import DailyIndexingInspector
+def __getattr__(name: str):
+    if name == "DailyIndexingInspector":
+        from pseofactory.indexing_inspector import DailyIndexingInspector
+        return DailyIndexingInspector
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class AirlockResult(tuple):
@@ -239,12 +243,58 @@ class SitemapGovernor:
             indexed_ratio=ratio,
         )
 
+    @classmethod
+    def partition_by_template_section(
+        cls,
+        urls_or_records: List[Union[str, Dict[str, Any]]],
+        canonical_base: str = "",
+        section_rules: Optional[Dict[str, Any]] = None,
+        default_article_date: Optional[str] = None,
+        max_batch_size: int = 2000,
+    ) -> Dict[str, Any]:
+        """
+        Partitions URLs or route records by template/content type (products, categories,
+        articles by date, and guides) while honoring SitemapGovernor batch caps.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return partition_urls_by_template_section(
+            urls_or_records=urls_or_records,
+            canonical_base=canonical_base,
+            section_rules=section_rules,
+            default_article_date=default_article_date,
+            max_batch_size=max_batch_size,
+        )
+
+    @classmethod
+    def build_multi_tenant_sitemaps(
+        cls,
+        urls_or_records: List[Union[str, Dict[str, Any]]],
+        canonical_base: str,
+        domain: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        dist_dir: Optional[Union[str, Path]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Generates master sitemap.xml, sitemap-index.xml, and individual child sitemaps
+        by template/content type (products, categories, articles by date, guides) and tier.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return build_multi_tenant_sitemaps(
+            urls_or_records=urls_or_records,
+            canonical_base=canonical_base,
+            domain=domain,
+            tenant_id=tenant_id,
+            dist_dir=dist_dir,
+            **kwargs,
+        )
+
 
 def govern_sitemap_batch(
     urls: List[str],
     max_batch_size: int = 2000,
     **kwargs: Any,
-) -> List[str]:
+ ) -> List[str]:
     """Convenience function to deduplicate and govern a sitemap URL batch."""
     return SitemapGovernor.govern_batch(urls, max_batch_size=max_batch_size, **kwargs)
 
@@ -264,6 +314,980 @@ def govern_graduated_exposure(
         max_batch_size=max_batch_size,
         **kwargs,
     )
+
+
+TEMPLATE_SITEMAP_SECTIONS: Tuple[str, ...] = (
+    "products",
+    "categories",
+    "articles",
+    "guides",
+)
+
+
+def _sanitize_sitemap_text(value: str) -> str:
+    """Strips forbidden em-dashes and en-dashes from sitemap strings."""
+    if not value:
+        return ""
+    return str(value).replace("\u2014", "-").replace("\u2013", "-")
+
+
+def _extract_article_date_bucket(
+    url: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    default_article_date: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Extracts a deterministic YYYY-MM date bucket from article metadata or URL path.
+    Zero em-dashes. Zero en-dashes.
+    """
+    meta = metadata or {}
+    for key in ("date_bucket", "period", "published_at", "date", "lastmod", "updated_at", "created_at"):
+        val = str(meta.get(key) or "").strip()
+        if not val:
+            continue
+        m_ym = re.search(r"(20\d{2})[-/](0[1-9]|1[0-2])", val)
+        if m_ym:
+            return f"{m_ym.group(1)}-{m_ym.group(2)}"
+        m_y = re.fullmatch(r"(20\d{2})", val)
+        if m_y:
+            return f"{m_y.group(1)}-01"
+
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    path_str = parsed.path or ""
+    m_path_ym = re.search(r"(?:^|/|-)(20\d{2})[-/](0[1-9]|1[0-2])(?:/|-|$)", path_str)
+    if m_path_ym:
+        return f"{m_path_ym.group(1)}-{m_path_ym.group(2)}"
+
+    if default_article_date:
+        clean_def = _sanitize_sitemap_text(str(default_article_date)).strip()
+        m_def = re.search(r"(20\d{2})[-/](0[1-9]|1[0-2])", clean_def)
+        if m_def:
+            return f"{m_def.group(1)}-{m_def.group(2)}"
+        if re.fullmatch(r"20\d{2}", clean_def):
+            return f"{clean_def}-01"
+
+    return None
+
+
+def classify_url_template_section(
+    item: Union[str, Dict[str, Any]],
+    canonical_base: str = "",
+    section_rules: Optional[Dict[str, Any]] = None,
+    default_article_date: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministically classifies a URL or route dictionary into its canonical
+    template/content-type section (products, categories, articles, guides) and
+    resolves its target child sitemap filename without hardcoding tenant-specific slugs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(item, dict):
+        meta = dict(item)
+        if isinstance(metadata, dict):
+            for k, v in metadata.items():
+                if k not in meta or meta[k] is None or meta[k] == "":
+                    meta[k] = v
+        raw_url = str(
+            meta.get("url")
+            or meta.get("loc")
+            or meta.get("target_url")
+            or meta.get("page")
+            or meta.get("path")
+            or ""
+        ).strip()
+        if not raw_url and meta.get("slug"):
+            slug_clean = str(meta["slug"]).strip("/")
+            raw_url = f"/{slug_clean}/"
+    else:
+        meta = dict(metadata) if isinstance(metadata, dict) else {}
+        raw_url = str(item or "").strip()
+
+    raw_url = _sanitize_sitemap_text(raw_url)
+    base_clean = _sanitize_sitemap_text(canonical_base).rstrip("/")
+    if raw_url.startswith("/") and base_clean:
+        clean_url = f"{base_clean}{raw_url}"
+    elif raw_url and not raw_url.startswith(("http://", "https://")) and base_clean:
+        clean_url = f"{base_clean}/{raw_url.lstrip('/')}"
+    else:
+        clean_url = raw_url
+
+    parsed = urllib.parse.urlsplit(clean_url)
+    if not base_clean and parsed.scheme and parsed.netloc:
+        base_clean = f"{parsed.scheme}://{parsed.netloc}"
+
+    path = parsed.path.strip("/")
+    parts = [p.lower() for p in path.split("/") if p]
+    last_segment = parts[-1] if parts else ""
+
+    explicit_raw = str(
+        meta.get("template_type")
+        or meta.get("content_type")
+        or meta.get("template")
+        or meta.get("section")
+        or meta.get("page_type")
+        or meta.get("category_type")
+        or ""
+    ).strip().lower()
+
+    section: Optional[str] = None
+
+    # 1. Explicit metadata classification
+    if explicit_raw:
+        if explicit_raw in (
+            "product",
+            "products",
+            "tool",
+            "tools",
+            "calculator",
+            "calculators",
+            "simulator",
+            "simulators",
+            "app",
+            "apps",
+            "application",
+            "model",
+            "models",
+            "widget",
+        ):
+            section = "products"
+        elif explicit_raw in (
+            "category",
+            "categories",
+            "taxonomy",
+            "taxonomies",
+            "topic",
+            "topics",
+            "cluster",
+            "clusters",
+            "directory",
+            "collection",
+            "collections",
+            "hub_taxonomy",
+            "index",
+            "homepage",
+        ):
+            section = "categories"
+        elif explicit_raw in (
+            "article",
+            "articles",
+            "post",
+            "posts",
+            "blog",
+            "news",
+            "editorial",
+            "insights",
+            "update",
+            "updates",
+            "press",
+            "release",
+        ):
+            section = "articles"
+        elif explicit_raw in (
+            "guide",
+            "guides",
+            "playbook",
+            "playbooks",
+            "manual",
+            "manuals",
+            "handbook",
+            "handbooks",
+            "methodology",
+            "documentation",
+            "docs",
+            "how-to",
+            "howto",
+            "reference",
+            "tutorial",
+        ):
+            section = "guides"
+
+    # 2. Caller-provided configurable section_rules
+    if section is None and isinstance(section_rules, dict):
+        norm_path = "/" + path + ("/" if path else "")
+        for rule_sec, patterns in section_rules.items():
+            sec_norm = str(rule_sec).strip().lower()
+            if sec_norm in ("product", "tools", "calculators"):
+                sec_norm = "products"
+            elif sec_norm in ("category", "taxonomy", "taxonomies"):
+                sec_norm = "categories"
+            elif sec_norm in ("article", "blog", "news"):
+                sec_norm = "articles"
+            elif sec_norm in ("guide", "methodology", "docs"):
+                sec_norm = "guides"
+            if sec_norm not in TEMPLATE_SITEMAP_SECTIONS:
+                continue
+            pat_list = patterns if isinstance(patterns, (list, tuple, set)) else [patterns]
+            for pat in pat_list:
+                pat_str = str(pat or "").strip()
+                if not pat_str:
+                    continue
+                if pat_str in norm_path or re.search(pat_str, norm_path, flags=re.IGNORECASE):
+                    section = sec_norm
+                    break
+            if section is not None:
+                break
+
+    # 3. Structural URL path conventions (completely tenant-route agnostic)
+    if section is None:
+        category_tokens = {
+            "categories",
+            "category",
+            "taxonomy",
+            "taxonomies",
+            "topics",
+            "topic",
+            "clusters",
+            "cluster",
+            "collections",
+            "collection",
+            "directory",
+            "directories",
+            "verticals",
+            "sectors",
+        }
+        article_tokens = {
+            "articles",
+            "article",
+            "blog",
+            "blogs",
+            "news",
+            "insights",
+            "posts",
+            "post",
+            "updates",
+            "press",
+            "releases",
+            "briefings",
+            "journal",
+        }
+        guide_tokens = {
+            "guides",
+            "guide",
+            "playbooks",
+            "playbook",
+            "methodology",
+            "handbook",
+            "handbooks",
+            "manuals",
+            "manual",
+            "how-to",
+            "howto",
+            "docs",
+            "documentation",
+            "reference",
+            "references",
+            "tutorials",
+            "tutorial",
+            "editorial-policy",
+            "about",
+        }
+        product_tokens = {
+            "products",
+            "product",
+            "tools",
+            "tool",
+            "calculators",
+            "calculator",
+            "simulators",
+            "simulator",
+            "apps",
+            "app",
+            "models",
+            "model",
+            "widgets",
+            "engines",
+        }
+
+        if not parts:
+            section = "categories"
+        elif any(p in category_tokens for p in parts):
+            section = "categories"
+        elif len(parts) == 1 and parts[0] in (
+            category_tokens | product_tokens | {"guides", "articles", "blog", "news", "resources"}
+        ):
+            # Single-segment section root index (e.g. /tools/, /products/, /categories/) acts as taxonomy hub
+            section = "categories"
+        elif any(p in article_tokens for p in parts):
+            section = "articles"
+        elif any(p in guide_tokens for p in parts):
+            section = "guides"
+        elif re.search(r"(?:^|/)(20\d{2})/(0[1-9]|1[0-2])/", "/" + path + "/"):
+            section = "articles"
+        elif last_segment.startswith(("how-to-", "guide-to-", "ultimate-guide-", "complete-guide-")) or last_segment.endswith(
+            ("-guide", "-guides", "-playbook", "-handbook", "-manual", "-methodology", "-reference", "-walkthrough")
+        ):
+            section = "guides"
+        elif last_segment.endswith(("-category", "-categories", "-taxonomy", "-directory", "-hub", "-index")):
+            section = "categories"
+        elif any(p in product_tokens for p in parts):
+            section = "products"
+        elif re.search(r"20\d{2}-(0[1-9]|1[0-2])(?:-\d{2})?", last_segment) and not last_segment.endswith(
+            ("-calculator", "-simulator", "-tool", "-estimator")
+        ):
+            section = "articles"
+        else:
+            section = "products"
+
+    date_bucket: Optional[str] = None
+    if section == "articles":
+        date_bucket = _extract_article_date_bucket(
+            clean_url,
+            metadata=meta,
+            default_article_date=default_article_date,
+        )
+        if date_bucket:
+            child_sitemap = f"sitemap-articles-{date_bucket}.xml"
+        else:
+            child_sitemap = "sitemap-articles.xml"
+    elif section == "categories":
+        child_sitemap = "sitemap-categories.xml"
+    elif section == "guides":
+        child_sitemap = "sitemap-guides.xml"
+    else:
+        section = "products"
+        child_sitemap = "sitemap-products.xml"
+
+    lastmod_val = _sanitize_sitemap_text(
+        str(meta.get("lastmod") or meta.get("updated_at") or meta.get("published_at") or meta.get("date") or "")
+    ).strip()
+    if lastmod_val and len(lastmod_val) >= 10 and re.match(r"^\d{4}-\d{2}-\d{2}", lastmod_val):
+        lastmod_val = lastmod_val[:10]
+    elif date_bucket:
+        lastmod_val = f"{date_bucket}-01"
+    else:
+        lastmod_val = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    default_priority = {
+        "products": "0.9",
+        "categories": "0.8",
+        "guides": "0.8",
+        "articles": "0.7",
+    }.get(section, "0.8")
+    priority_val = _sanitize_sitemap_text(str(meta.get("priority") or default_priority)).strip()
+    changefreq_val = _sanitize_sitemap_text(str(meta.get("changefreq") or "weekly")).strip()
+
+    child_sitemap_url = f"{base_clean}/{child_sitemap}" if base_clean else child_sitemap
+
+    return {
+        "url": clean_url,
+        "section": section,
+        "template_type": section,
+        "date_bucket": date_bucket,
+        "child_sitemap": child_sitemap,
+        "child_sitemap_url": child_sitemap_url,
+        "lastmod": lastmod_val,
+        "changefreq": changefreq_val,
+        "priority": priority_val,
+    }
+
+
+def partition_urls_by_template_section(
+    urls_or_records: List[Union[str, Dict[str, Any]]],
+    canonical_base: str = "",
+    section_rules: Optional[Dict[str, Any]] = None,
+    default_article_date: Optional[str] = None,
+    max_batch_size: int = 2000,
+) -> Dict[str, Any]:
+    """
+    Partitions candidate URLs or route records into template/content-type sections
+    (products, categories, articles by date, guides) and child sitemaps while
+    enforcing SitemapGovernor batch caps.
+    Zero em-dashes. Zero en-dashes.
+    """
+    eff_max = int(max_batch_size) if max_batch_size is not None else SitemapGovernor.MAX_BATCH_SIZE
+    sections: Dict[str, List[Dict[str, Any]]] = {sec: [] for sec in TEMPLATE_SITEMAP_SECTIONS}
+    child_sitemaps: Dict[str, List[Dict[str, Any]]] = {}
+    articles_by_date: Dict[str, List[Dict[str, Any]]] = {}
+    url_to_sitemap: Dict[str, Dict[str, Any]] = {}
+    seen_urls = set()
+    classified_records: List[Dict[str, Any]] = []
+
+    for item in urls_or_records or []:
+        info = classify_url_template_section(
+            item,
+            canonical_base=canonical_base,
+            section_rules=section_rules,
+            default_article_date=default_article_date,
+        )
+        u = info["url"]
+        if not u or u in seen_urls:
+            continue
+        seen_urls.add(u)
+        classified_records.append(info)
+        if len(classified_records) >= eff_max:
+            break
+
+    for rec in classified_records:
+        sec = rec["section"]
+        sm_name = rec["child_sitemap"]
+        u = rec["url"]
+        if len(sections[sec]) < eff_max:
+            sections[sec].append(rec)
+        sm_bucket = child_sitemaps.setdefault(sm_name, [])
+        if len(sm_bucket) < eff_max:
+            sm_bucket.append(rec)
+        if sec == "articles":
+            d_key = rec.get("date_bucket") or "undated"
+            articles_by_date.setdefault(d_key, []).append(rec)
+        url_to_sitemap[u] = {
+            "section": sec,
+            "template_type": sec,
+            "date_bucket": rec.get("date_bucket"),
+            "child_sitemap": sm_name,
+            "child_sitemap_url": rec.get("child_sitemap_url", sm_name),
+        }
+
+    return {
+        "total_governed": len(classified_records),
+        "max_batch_size": eff_max,
+        "sections": {k: [r["url"] for r in v] for k, v in sections.items()},
+        "section_records": sections,
+        "articles_by_date": {k: [r["url"] for r in v] for k, v in sorted(articles_by_date.items())},
+        "child_sitemaps": {k: [r["url"] for r in v] for k, v in child_sitemaps.items()},
+        "child_sitemap_records": child_sitemaps,
+        "url_to_sitemap": url_to_sitemap,
+    }
+
+
+def _render_urlset_xml(records: List[Dict[str, Any]], default_lastmod: str) -> str:
+    """Renders a compliant <urlset> XML string with zero forbidden dashes."""
+    from pseofactory.contracts import assert_no_forbidden_dashes, assert_sitemap_parses
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for rec in records:
+        loc = _sanitize_sitemap_text(str(rec.get("url") or "")).strip()
+        if not loc:
+            continue
+        lastmod = _sanitize_sitemap_text(str(rec.get("lastmod") or default_lastmod)).strip()
+        changefreq = _sanitize_sitemap_text(str(rec.get("changefreq") or "weekly")).strip()
+        priority = _sanitize_sitemap_text(str(rec.get("priority") or "0.8")).strip()
+        lines.append("  <url>")
+        lines.append(f"    <loc>{loc}</loc>")
+        lines.append(f"    <lastmod>{lastmod}</lastmod>")
+        lines.append(f"    <changefreq>{changefreq}</changefreq>")
+        lines.append(f"    <priority>{priority}</priority>")
+        lines.append("  </url>")
+    lines.append("</urlset>")
+    xml_str = "\n".join(lines) + "\n"
+    assert_no_forbidden_dashes(xml_str, context="generated child sitemap XML")
+    if records:
+        assert_sitemap_parses(xml_str)
+    return xml_str
+
+
+def _render_sitemap_index_xml(sitemap_entries: List[Dict[str, Any]], default_lastmod: str) -> str:
+    """Renders a compliant <sitemapindex> XML string referencing child sitemaps."""
+    from pseofactory.contracts import assert_no_forbidden_dashes, assert_sitemap_index_parses
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for entry in sitemap_entries:
+        sm_url = _sanitize_sitemap_text(str(entry.get("url") or "")).strip()
+        if not sm_url:
+            continue
+        lastmod = _sanitize_sitemap_text(str(entry.get("lastmod") or default_lastmod)).strip()
+        lines.append("  <sitemap>")
+        lines.append(f"    <loc>{sm_url}</loc>")
+        lines.append(f"    <lastmod>{lastmod}</lastmod>")
+        lines.append("  </sitemap>")
+    lines.append("</sitemapindex>")
+    xml_str = "\n".join(lines) + "\n"
+    assert_no_forbidden_dashes(xml_str, context="generated sitemap index XML")
+    if sitemap_entries:
+        assert_sitemap_index_parses(xml_str)
+    return xml_str
+
+
+def build_multi_tenant_sitemaps(
+    urls_or_records: List[Union[str, Dict[str, Any]]],
+    canonical_base: str,
+    domain: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
+    section_rules: Optional[Dict[str, Any]] = None,
+    default_article_date: Optional[str] = None,
+    max_batch_size: int = 2000,
+    max_hub_cap: int = 150,
+    lastmod: Optional[str] = None,
+    write_files: bool = True,
+    include_tier_sitemaps: bool = True,
+    include_sitemap_index: bool = True,
+    update_robots_txt: bool = True,
+    strict_isolation: bool = True,
+) -> Dict[str, Any]:
+    """
+    Multi-tenant sitemap generator breaking out individual child sitemaps by template/content
+    type (products, category taxonomy pages, articles by date, and guides) alongside the
+    master sitemap (sitemap.xml) and master sitemap index (sitemap-index.xml).
+    Preserves strict multi-tenant isolation, honors SitemapGovernor velocity and hub caps,
+    and bans em-dashes and en-dashes across all outputs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes
+
+    base_clean = _sanitize_sitemap_text(str(canonical_base or "")).rstrip("/")
+    parsed_base = urllib.parse.urlsplit(base_clean)
+    eff_domain = _sanitize_sitemap_text(str(domain or parsed_base.netloc or "")).strip().lower()
+    if not base_clean and eff_domain:
+        base_clean = f"https://{eff_domain}"
+    eff_tenant = _sanitize_sitemap_text(
+        str(tenant_id or (eff_domain.split(".")[0] if eff_domain else "tenant"))
+    ).strip().lower()
+    eff_lastmod = _sanitize_sitemap_text(
+        str(lastmod or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    ).strip()
+
+    # Enforce strict multi-tenant domain & statutory isolation across inputs
+    validated_items: List[Union[str, Dict[str, Any]]] = []
+    for item in urls_or_records or []:
+        if isinstance(item, dict):
+            item_tenant = str(item.get("tenant_id") or item.get("property_id") or "").strip().lower()
+            if item_tenant and item_tenant != eff_tenant:
+                if strict_isolation:
+                    raise ValueError(
+                        f"Cross-tenant record '{item_tenant}' rejected in '{eff_tenant}' sitemap build"
+                    )
+                continue
+            u_str = str(
+                item.get("url")
+                or item.get("loc")
+                or item.get("target_url")
+                or item.get("page")
+                or item.get("path")
+                or ""
+            ).strip()
+        else:
+            u_str = str(item or "").strip()
+
+        assert_no_forbidden_dashes(u_str, context="sitemap candidate URL")
+        if u_str.startswith(("http://", "https://")) and eff_domain:
+            u_host = urllib.parse.urlsplit(u_str).netloc.lower()
+            if u_host and u_host != eff_domain:
+                if strict_isolation:
+                    raise ValueError(
+                        f"Cross-tenant URL '{u_str}' (host '{u_host}') violates isolation for domain '{eff_domain}'"
+                    )
+                continue
+        validated_items.append(item)
+
+    partitioned = partition_urls_by_template_section(
+        urls_or_records=validated_items,
+        canonical_base=base_clean,
+        section_rules=section_rules,
+        default_article_date=default_article_date,
+        max_batch_size=max_batch_size,
+    )
+
+    all_records: List[Dict[str, Any]] = []
+    for sm_recs in partitioned["child_sitemap_records"].values():
+        all_records.extend(sm_recs)
+    # Preserve original input order for master sitemap.xml while capped at max_batch_size
+    ordered_urls_seen = set()
+    ordered_all_records: List[Dict[str, Any]] = []
+    rec_by_url = {r["url"]: r for r in all_records}
+    for item in validated_items:
+        info = classify_url_template_section(
+            item,
+            canonical_base=base_clean,
+            section_rules=section_rules,
+            default_article_date=default_article_date,
+        )
+        u = info["url"]
+        if u in rec_by_url and u not in ordered_urls_seen:
+            ordered_urls_seen.add(u)
+            ordered_all_records.append(rec_by_url[u])
+
+    eff_max_batch = int(max_batch_size) if max_batch_size is not None else SitemapGovernor.MAX_BATCH_SIZE
+    ordered_all_records = ordered_all_records[:eff_max_batch]
+    all_governed_urls = [r["url"] for r in ordered_all_records]
+
+    hub_urls, leaf_urls = SitemapGovernor.partition_batch(
+        all_governed_urls,
+        max_hub_cap=max_hub_cap,
+        max_batch_size=eff_max_batch,
+    )
+
+    child_sitemaps_out: Dict[str, Dict[str, Any]] = {}
+    section_to_sitemap: Dict[str, str] = {}
+
+    # 1. Template / Content-Type Child Sitemaps (products, categories, articles by date, guides)
+    # Deterministic ordering: products, categories, articles (sorted), guides
+    ordered_sm_names: List[str] = []
+    for fixed_name in ("sitemap-products.xml", "sitemap-categories.xml"):
+        if fixed_name in partitioned["child_sitemap_records"]:
+            ordered_sm_names.append(fixed_name)
+    for art_name in sorted(
+        k for k in partitioned["child_sitemap_records"].keys() if k.startswith("sitemap-articles")
+    ):
+        ordered_sm_names.append(art_name)
+    if "sitemap-guides.xml" in partitioned["child_sitemap_records"]:
+        ordered_sm_names.append("sitemap-guides.xml")
+    for extra_name in sorted(partitioned["child_sitemap_records"].keys()):
+        if extra_name not in ordered_sm_names:
+            ordered_sm_names.append(extra_name)
+
+    for sm_name in ordered_sm_names:
+        recs = partitioned["child_sitemap_records"].get(sm_name, [])
+        if not recs:
+            continue
+        xml_content = _render_urlset_xml(recs, default_lastmod=eff_lastmod)
+        xml_sha256 = hashlib.sha256(xml_content.encode("utf-8")).hexdigest()
+        sm_url = f"{base_clean}/{sm_name}"
+        sec_name = recs[0]["section"]
+        d_bucket = recs[0].get("date_bucket")
+        child_sitemaps_out[sm_name] = {
+            "sitemap_name": sm_name,
+            "url": sm_url,
+            "section": sec_name,
+            "template_type": sec_name,
+            "date_bucket": d_bucket,
+            "is_template_child": True,
+            "is_tier_child": False,
+            "url_count": len(recs),
+            "urls": [r["url"] for r in recs],
+            "sha256": xml_sha256,
+            "lastmod": eff_lastmod,
+            "xml_content": xml_content,
+        }
+        if sec_name not in section_to_sitemap:
+            section_to_sitemap[sec_name] = sm_url
+        if d_bucket:
+            section_to_sitemap[f"{sec_name}:{d_bucket}"] = sm_url
+
+    # 2. Tier Child Sitemaps (sitemap-hubs.xml, sitemap-leaves.xml)
+    if include_tier_sitemaps:
+        if hub_urls:
+            hub_recs = [rec_by_url[u] for u in hub_urls if u in rec_by_url]
+            hub_xml = _render_urlset_xml(hub_recs, default_lastmod=eff_lastmod)
+            hub_sha = hashlib.sha256(hub_xml.encode("utf-8")).hexdigest()
+            hub_sm_url = f"{base_clean}/sitemap-hubs.xml"
+            child_sitemaps_out["sitemap-hubs.xml"] = {
+                "sitemap_name": "sitemap-hubs.xml",
+                "url": hub_sm_url,
+                "section": "hubs",
+                "template_type": "hubs",
+                "date_bucket": None,
+                "is_template_child": False,
+                "is_tier_child": True,
+                "url_count": len(hub_recs),
+                "urls": list(hub_urls),
+                "sha256": hub_sha,
+                "lastmod": eff_lastmod,
+                "xml_content": hub_xml,
+            }
+            section_to_sitemap["hubs"] = hub_sm_url
+
+        if leaf_urls:
+            leaf_recs = [rec_by_url[u] for u in leaf_urls if u in rec_by_url]
+            leaf_xml = _render_urlset_xml(leaf_recs, default_lastmod=eff_lastmod)
+            leaf_sha = hashlib.sha256(leaf_xml.encode("utf-8")).hexdigest()
+            leaf_sm_url = f"{base_clean}/sitemap-leaves.xml"
+            child_sitemaps_out["sitemap-leaves.xml"] = {
+                "sitemap_name": "sitemap-leaves.xml",
+                "url": leaf_sm_url,
+                "section": "leaves",
+                "template_type": "leaves",
+                "date_bucket": None,
+                "is_template_child": False,
+                "is_tier_child": True,
+                "url_count": len(leaf_recs),
+                "urls": list(leaf_urls),
+                "sha256": leaf_sha,
+                "lastmod": eff_lastmod,
+                "xml_content": leaf_xml,
+            }
+            section_to_sitemap["leaves"] = leaf_sm_url
+
+    # 3. Master Sitemap (sitemap.xml <urlset>) & Master Sitemap Index (sitemap-index.xml <sitemapindex>)
+    master_sitemap_url = f"{base_clean}/sitemap.xml"
+    master_xml = _render_urlset_xml(ordered_all_records, default_lastmod=eff_lastmod) if ordered_all_records else ""
+    master_sha = hashlib.sha256(master_xml.encode("utf-8")).hexdigest() if master_xml else ""
+
+    index_entries: List[Dict[str, Any]] = []
+    if ordered_all_records:
+        index_entries.append({"url": master_sitemap_url, "lastmod": eff_lastmod})
+    for sm_name, sm_meta in child_sitemaps_out.items():
+        index_entries.append({"url": sm_meta["url"], "lastmod": sm_meta["lastmod"]})
+
+    master_index_url = f"{base_clean}/sitemap-index.xml"
+    master_index_xml = (
+        _render_sitemap_index_xml(index_entries, default_lastmod=eff_lastmod)
+        if (include_sitemap_index and index_entries)
+        else ""
+    )
+    master_index_sha = hashlib.sha256(master_index_xml.encode("utf-8")).hexdigest() if master_index_xml else ""
+
+    written_files: List[str] = []
+    if write_files and dist_dir is not None:
+        target_dist = Path(dist_dir).resolve()
+        target_dist.mkdir(parents=True, exist_ok=True)
+        if master_xml:
+            p_master = target_dist / "sitemap.xml"
+            p_master.write_text(master_xml, encoding="utf-8")
+            written_files.append(str(p_master))
+        if include_sitemap_index and master_index_xml:
+            p_idx = target_dist / "sitemap-index.xml"
+            p_idx.write_text(master_index_xml, encoding="utf-8")
+            written_files.append(str(p_idx))
+        for sm_name, sm_meta in child_sitemaps_out.items():
+            p_child = target_dist / sm_name
+            p_child.write_text(sm_meta["xml_content"], encoding="utf-8")
+            sm_meta["path"] = str(p_child)
+            written_files.append(str(p_child))
+
+        if update_robots_txt:
+            robots_path = target_dist / "robots.txt"
+            sitemap_directives = [f"Sitemap: {master_sitemap_url}"]
+            if include_sitemap_index and master_index_xml:
+                sitemap_directives.append(f"Sitemap: {master_index_url}")
+            for sm_meta in child_sitemaps_out.values():
+                sitemap_directives.append(f"Sitemap: {sm_meta['url']}")
+            if robots_path.exists():
+                try:
+                    existing_lines = robots_path.read_text(encoding="utf-8").splitlines()
+                    existing_lower = {l.strip().lower() for l in existing_lines}
+                    appended = False
+                    for directive in sitemap_directives:
+                        if directive.lower() not in existing_lower:
+                            existing_lines.append(directive)
+                            existing_lower.add(directive.lower())
+                            appended = True
+                    if appended:
+                        robots_txt_out = _sanitize_sitemap_text("\n".join(existing_lines) + "\n")
+                        assert_no_forbidden_dashes(robots_txt_out, context="robots.txt")
+                        robots_path.write_text(robots_txt_out, encoding="utf-8")
+                except Exception:
+                    pass
+
+    explicit_gsc_targets: List[str] = []
+    if master_xml:
+        explicit_gsc_targets.append(master_sitemap_url)
+    if include_sitemap_index and master_index_xml:
+        explicit_gsc_targets.append(master_index_url)
+    for sm_meta in child_sitemaps_out.values():
+        if sm_meta["url"] not in explicit_gsc_targets:
+            explicit_gsc_targets.append(sm_meta["url"])
+
+    return {
+        "tenant_id": eff_tenant,
+        "domain": eff_domain,
+        "canonical_base": base_clean,
+        "master_sitemap": {
+            "sitemap_name": "sitemap.xml",
+            "url": master_sitemap_url,
+            "url_count": len(ordered_all_records),
+            "sha256": master_sha,
+            "xml_content": master_xml,
+        },
+        "master_sitemap_index": {
+            "sitemap_name": "sitemap-index.xml",
+            "url": master_index_url,
+            "child_count": len(index_entries),
+            "sha256": master_index_sha,
+            "xml_content": master_index_xml,
+        } if (include_sitemap_index and master_index_xml) else None,
+        "child_sitemaps": child_sitemaps_out,
+        "template_child_sitemaps": {
+            k: v for k, v in child_sitemaps_out.items() if v.get("is_template_child")
+        },
+        "tier_child_sitemaps": {
+            k: v for k, v in child_sitemaps_out.items() if v.get("is_tier_child")
+        },
+        "section_to_sitemap": section_to_sitemap,
+        "url_to_sitemap": partitioned["url_to_sitemap"],
+        "sections": partitioned["sections"],
+        "articles_by_date": partitioned["articles_by_date"],
+        "tier1_hubs": hub_urls,
+        "tier2_leaves": leaf_urls,
+        "explicit_gsc_submission_targets": explicit_gsc_targets,
+        "written_files": written_files,
+    }
+
+
+class ChildSitemapPushLedger:
+    """
+    Idempotent multi-tenant push ledger tracking individual child-sitemap and master-sitemap
+    submissions to Google Search Console.
+    Guarantees every child sitemap (products, categories, articles by date, guides, hubs, leaves)
+    is explicitly submitted for isolated 'Submitted pages only' GSC coverage filtering,
+    never relying on GSC auto-detection from a master sitemap index.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
+        self.ledger_path = Path(
+            ledger_path or (DEFAULT_BASE_DIR / ".agy" / "child_sitemap_push_ledger.json")
+        )
+
+    def _load_state(self) -> Dict[str, Any]:
+        try:
+            from pseofactory.supervisor import AtomicStateLedger
+            if self.ledger_path.exists():
+                data = AtomicStateLedger.load_json(self.ledger_path)
+                if isinstance(data, dict) and "tenants" in data:
+                    return data
+        except Exception:
+            pass
+        if self.ledger_path.exists():
+            try:
+                data = json.loads(self.ledger_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and "tenants" in data:
+                    return data
+            except Exception:
+                pass
+        return {"version": 1, "tenants": {}}
+
+    def _save_state(self, state: Dict[str, Any]) -> None:
+        try:
+            from pseofactory.supervisor import AtomicStateLedger
+            AtomicStateLedger.save_json(self.ledger_path, state)
+            return
+        except Exception:
+            pass
+        try:
+            self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            self.ledger_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    @staticmethod
+    def compute_composite_key(tenant_id: str, sitemap_url: str, xml_sha256: str) -> str:
+        t_clean = str(tenant_id or "profithelm").strip().lower()
+        u_clean = str(sitemap_url or "").strip()
+        h_clean = str(xml_sha256 or "").strip()
+        raw = f"{t_clean}:{u_clean}:GSC_SITEMAP_SUBMIT:{h_clean}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def should_submit(
+        self,
+        tenant_id: str,
+        sitemap_url: str,
+        xml_sha256: str,
+        force: bool = False,
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """
+        Determines whether sitemap_url needs to be submitted to GSC for tenant_id.
+        Returns (False, existing_entry) when the exact xml_sha256 was already explicitly submitted.
+        """
+        if force:
+            return True, None
+        eff_tenant = str(tenant_id or "profithelm").strip().lower()
+        state = self._load_state()
+        t_sitemaps = state.get("tenants", {}).get(eff_tenant, {}).get("sitemaps", {})
+        existing = t_sitemaps.get(sitemap_url)
+        if not isinstance(existing, dict):
+            return True, None
+        if existing.get("tenant_id", "").lower() != eff_tenant:
+            return True, None
+        if (
+            existing.get("xml_sha256") == xml_sha256
+            and existing.get("explicitly_submitted") is True
+            and existing.get("status") in ("ACCEPTED", "SUBMITTED", "SIMULATED")
+        ):
+            return False, existing
+        return True, existing
+
+    def record_submission(
+        self,
+        tenant_id: str,
+        sitemap_url: str,
+        xml_sha256: str,
+        section: str = "master",
+        url_count: int = 0,
+        status: str = "ACCEPTED",
+        site: str = "",
+        command: str = "",
+        date_bucket: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Records an explicit GSC sitemap submission in the tenant-isolated ledger."""
+        eff_tenant = str(tenant_id or "profithelm").strip().lower()
+        state = self._load_state()
+        t_bucket = state.setdefault("tenants", {}).setdefault(eff_tenant, {"sitemaps": {}})
+        sitemaps_map = t_bucket.setdefault("sitemaps", {})
+        prev = sitemaps_map.get(sitemap_url, {})
+        now_iso = datetime.now(timezone.utc).isoformat()
+        sm_name = urllib.parse.urlsplit(sitemap_url).path.strip("/").split("/")[-1] or "sitemap.xml"
+        is_child = sm_name not in ("sitemap.xml", "sitemap-index.xml")
+        idemp_key = self.compute_composite_key(eff_tenant, sitemap_url, xml_sha256)
+
+        entry = {
+            "tenant_id": eff_tenant,
+            "site": site or f"sc-domain:{eff_tenant}.com",
+            "sitemap_url": sitemap_url,
+            "sitemap_name": sm_name,
+            "section": section,
+            "date_bucket": date_bucket,
+            "is_child_sitemap": is_child,
+            "xml_sha256": xml_sha256,
+            "url_count": int(url_count),
+            "idempotency_key": idemp_key,
+            "status": status,
+            "explicitly_submitted": True,
+            "auto_detected_only": False,
+            "submitted_pages_only_filter": True,
+            "command": command,
+            "submission_count": int(prev.get("submission_count", 0) or 0) + 1,
+            "last_submitted_at": now_iso,
+        }
+        sitemaps_map[sitemap_url] = entry
+        t_bucket["updated_at"] = now_iso
+        self._save_state(state)
+        return entry
+
+    def get_tenant_sitemaps(self, tenant_id: str) -> Dict[str, Dict[str, Any]]:
+        """Returns all recorded sitemap submissions for tenant_id."""
+        eff_tenant = str(tenant_id or "profithelm").strip().lower()
+        state = self._load_state()
+        sitemaps = state.get("tenants", {}).get(eff_tenant, {}).get("sitemaps", {})
+        return {
+            k: dict(v)
+            for k, v in sitemaps.items()
+            if isinstance(v, dict) and v.get("tenant_id", "").lower() == eff_tenant
+        }
+
+    def verify_isolated_registration(
+        self,
+        tenant_id: str,
+        expected_sitemaps: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Verifies that every child sitemap for tenant_id is explicitly registered in GSC
+        for isolated 'Submitted pages only' filtering (never relying on master index auto-detect).
+        """
+        eff_tenant = str(tenant_id or "profithelm").strip().lower()
+        recorded = self.get_tenant_sitemaps(eff_tenant)
+        by_name = {v.get("sitemap_name"): v for v in recorded.values()}
+        missing: List[str] = []
+        auto_detect_violations: List[str] = []
+
+        targets = list(expected_sitemaps) if expected_sitemaps else list(recorded.keys())
+        for t in targets:
+            t_str = str(t).strip()
+            rec = recorded.get(t_str) or by_name.get(t_str.split("/")[-1])
+            if not rec:
+                missing.append(t_str)
+            elif not rec.get("explicitly_submitted") or rec.get("auto_detected_only"):
+                auto_detect_violations.append(t_str)
+
+        child_records = [v for v in recorded.values() if v.get("is_child_sitemap")]
+        is_valid = len(missing) == 0 and len(auto_detect_violations) == 0 and len(recorded) > 0
+        return {
+            "tenant_id": eff_tenant,
+            "status": "PASS" if is_valid else "FAIL",
+            "total_registered": len(recorded),
+            "child_sitemaps_registered": len(child_records),
+            "explicitly_submitted_all": len(missing) == 0 and len(auto_detect_violations) == 0,
+            "submitted_pages_only_filter_ready": is_valid,
+            "missing_sitemaps": missing,
+            "auto_detect_violations": auto_detect_violations,
+            "registered_sitemaps": list(recorded.keys()),
+        }
 
 
 class PushIndexer:
@@ -286,7 +1310,9 @@ class PushIndexer:
         rollover_queue_path: Optional[Path] = None,
         velocity_ledger_path: Optional[Path] = None,
         quarantine_ledger_path: Optional[Path] = None,
+        child_sitemap_ledger_path: Optional[Path] = None,
         tenant_id: Optional[str] = None,
+        section_rules: Optional[Dict[str, Any]] = None,
     ):
         self.domain = domain
         self.canonical_base = canonical_base.rstrip("/")
@@ -304,7 +1330,15 @@ class PushIndexer:
             if quarantine_ledger_path
             else (self.base_dir / ".agy" / "indexing_quarantine_ledger.json")
         )
-        self.tenant_id = (tenant_id or "profithelm").lower()
+        self.child_sitemap_ledger_path = (
+            Path(child_sitemap_ledger_path)
+            if child_sitemap_ledger_path
+            else (self.base_dir / ".agy" / "child_sitemap_push_ledger.json")
+        )
+        self.child_sitemap_ledger = ChildSitemapPushLedger(ledger_path=self.child_sitemap_ledger_path)
+        self.section_rules = dict(section_rules) if isinstance(section_rules, dict) else None
+        inferred_tenant = (tenant_id or (self.domain.split(".")[0] if self.domain else "profithelm")).lower()
+        self.tenant_id = inferred_tenant
         self.gsc_site = f"sc-domain:{self.domain}"
 
     def preflight_airlock(
@@ -392,12 +1426,9 @@ class PushIndexer:
             "/cart",
             "/checkout",
             "/checkouts",
-            "/products",
-            "/collections",
             "/policies",
-            "/blogs",
-            "/pages",
         ]
+
 
         redirects_map: Dict[str, str] = {}
         red_candidates = [
@@ -1345,6 +2376,20 @@ class PushIndexer:
 
     def inspect_gsc_url(self, url: str, site: Optional[str] = None, timeout: int = 15) -> Dict[str, Any]:
         target_site = site or self.gsc_site
+        parsed_u = urllib.parse.urlparse(str(url or ""))
+        netloc = parsed_u.netloc.split(":")[0].lower()
+        expected_dom = (self.domain or "").lower().strip()
+        if expected_dom and netloc and netloc != expected_dom and netloc != f"www.{expected_dom}":
+            return {
+                "url": url,
+                "site": target_site,
+                "status": "BLOCKED_UNVERIFIED_DOMAIN",
+                "is_indexed": False,
+                "verdict": "FAIL",
+                "coverage_state": f"Blocked unverified domain {netloc} (expected {expected_dom})",
+                "last_crawl_time": datetime.now().isoformat(),
+            }
+
         gsccli_candidates = [
             shutil.which("gsccli"),
             "/home/ubuntuadmin/.npm-global/bin/gsccli",
@@ -1381,6 +2426,10 @@ class PushIndexer:
                 except Exception:
                     pass
 
+            raw_out_str = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+            is_429 = proc.returncode != 0 and any(
+                tok in raw_out_str.lower() for tok in ("429", "quota", "rate limit")
+            )
             index_status = parsed.get("inspectionResult", {}).get("indexStatusResult", {})
             verdict = index_status.get("verdict", parsed.get("verdict", "PASS" if proc.returncode == 0 else "FAIL"))
             coverage_state = index_status.get("coverageState", parsed.get("coverageState", "Submitted and indexed" if proc.returncode == 0 else "Pending"))
@@ -1390,12 +2439,13 @@ class PushIndexer:
             return {
                 "url": url,
                 "site": target_site,
-                "status": "INSPECTED" if proc.returncode == 0 else "FAIL",
+                "status": "QUOTA_EXHAUSTED" if is_429 else ("INSPECTED" if proc.returncode == 0 else "FAIL"),
+                "quota_exhausted": is_429,
                 "is_indexed": is_indexed,
                 "verdict": verdict,
                 "coverage_state": coverage_state,
                 "last_crawl_time": last_crawl,
-                "raw_output": parsed or (proc.stdout.strip() or proc.stderr.strip()),
+                "raw_output": parsed or raw_out_str,
             }
         except Exception as ex:
             return {
@@ -1426,10 +2476,19 @@ class PushIndexer:
 
         target_batch = urls[:max_urls]
         inspections = []
+        quota_circuit_breaker_tripped = False
 
         for u in target_batch:
             if live:
                 insp = self.inspect_gsc_url(u, site=target_site, timeout=timeout)
+                inspections.append(insp)
+                if (
+                    insp.get("quota_exhausted")
+                    or insp.get("quota_exceeded")
+                    or insp.get("status") == "QUOTA_EXHAUSTED"
+                ):
+                    quota_circuit_breaker_tripped = True
+                    break
             else:
                 insp = {
                     "url": u,
@@ -1440,7 +2499,7 @@ class PushIndexer:
                     "coverage_state": "Submitted and indexed",
                     "last_crawl_time": datetime.now().isoformat(),
                 }
-            inspections.append(insp)
+                inspections.append(insp)
 
         indexed_count = sum(1 for item in inspections if item.get("is_indexed", False))
         total = len(inspections)
@@ -1452,6 +2511,7 @@ class PushIndexer:
             "total_inspected": total,
             "indexed_count": indexed_count,
             "indexation_rate_pct": round(pct, 2),
+            "quota_circuit_breaker_tripped": quota_circuit_breaker_tripped,
             "oracle_verdict": "CERTIFIED_INDEXED" if (indexed_count == total or not live) else "PENDING_INDEXATION",
             "inspections": inspections,
         }
@@ -1483,6 +2543,409 @@ class PushIndexer:
                 self.rollover_queue_path.write_text(json.dumps(urls, indent=2), encoding="utf-8")
             except Exception as ex:
                 print(f"Warning: Failed to persist GSC rollover queue: {ex}")
+
+    def generate_multi_tenant_sitemaps(
+        self,
+        urls: Optional[List[Any]] = None,
+        section_rules: Optional[Dict[str, Any]] = None,
+        lastmod: Optional[str] = None,
+        write_files: bool = True,
+        include_tier_sitemaps: bool = True,
+        include_sitemap_index: bool = True,
+        update_robots_txt: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Generates multi-tenant child sitemaps by template/content type (products, categories,
+        articles by date, guides), tier sitemaps (hubs, leaves), master sitemap.xml, and
+        master sitemap-index.xml for this tenant.
+        """
+        candidate_urls: List[Any] = list(urls) if urls else []
+        if not candidate_urls:
+            sitemap_file = self.dist_dir / "sitemap.xml"
+            if sitemap_file.exists():
+                try:
+                    import re
+                    extracted = re.findall(r"<loc>(.*?)</loc>", sitemap_file.read_text(encoding="utf-8"))
+                    if extracted:
+                        candidate_urls = [u.strip() for u in extracted if u.strip()]
+                except Exception:
+                    pass
+            if not candidate_urls:
+                candidate_urls = [f"{self.canonical_base}/"] + [
+                    f"{self.canonical_base}/tools/{t['slug']}/" for t in self.tools
+                ]
+
+        rules = section_rules if section_rules is not None else self.section_rules
+        return build_multi_tenant_sitemaps(
+            urls_or_records=candidate_urls,
+            canonical_base=self.canonical_base,
+            tenant_id=getattr(self, "tenant_id", "profithelm"),
+            domain=self.domain,
+            dist_dir=self.dist_dir,
+            section_rules=rules,
+            lastmod=lastmod,
+            include_tier_sitemaps=include_tier_sitemaps,
+            include_sitemap_index=include_sitemap_index,
+            write_files=write_files,
+            update_robots_txt=update_robots_txt,
+        )
+
+    def discover_tenant_sitemaps(
+        self,
+        urls: Optional[List[Any]] = None,
+        section_rules: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Discovers all master and child sitemaps for this tenant from dist_dir and/or candidate URLs,
+        computing deterministic XML SHA-256 digests and section mappings without relying on GSC
+        master-index auto-detection.
+        """
+        import re
+
+        discovered: Dict[str, Dict[str, Any]] = {}
+        base_clean = self.canonical_base.rstrip("/")
+
+        def _infer_section_and_bucket(sm_name: str) -> Tuple[str, Optional[str], bool]:
+            if sm_name == "sitemap.xml":
+                return "master", None, False
+            if sm_name == "sitemap-index.xml":
+                return "sitemap_index", None, False
+            if sm_name == "sitemap-hubs.xml":
+                return "hubs", None, True
+            if sm_name == "sitemap-leaves.xml":
+                return "leaves", None, True
+            if sm_name == "sitemap-products.xml":
+                return "products", None, True
+            if sm_name == "sitemap-categories.xml":
+                return "categories", None, True
+            if sm_name == "sitemap-guides.xml":
+                return "guides", None, True
+            m_art = re.match(r"^sitemap-articles(?:-(\d{4}-\d{2}))?\.xml$", sm_name)
+            if m_art:
+                return "articles", m_art.group(1), True
+            m_other = re.match(r"^sitemap-([a-z0-9_-]+)\.xml$", sm_name)
+            if m_other:
+                return m_other.group(1), None, True
+            return "master", None, False
+
+        # 1. Inspect existing sitemaps in self.dist_dir if present on disk
+        try:
+            if self.dist_dir.exists() and self.dist_dir.is_dir():
+                for sm_path in sorted(self.dist_dir.glob("sitemap*.xml")):
+                    if not sm_path.exists():
+                        continue
+                    try:
+                        xml_text = sm_path.read_text(encoding="utf-8")
+                    except Exception:
+                        continue
+                    sm_name = sm_path.name
+                    sec_name, d_bucket, is_child = _infer_section_and_bucket(sm_name)
+                    locs = [u.strip() for u in re.findall(r"<loc>(.*?)</loc>", xml_text) if u.strip()]
+                    xml_sha = hashlib.sha256(xml_text.encode("utf-8")).hexdigest()
+                    sm_url = f"{base_clean}/{sm_name}"
+                    discovered[sm_name] = {
+                        "sitemap_name": sm_name,
+                        "sitemap_url": sm_url,
+                        "section": sec_name,
+                        "date_bucket": d_bucket,
+                        "is_child_sitemap": is_child,
+                        "url_count": len(locs),
+                        "urls": locs,
+                        "xml_sha256": xml_sha,
+                    }
+        except Exception:
+            pass
+
+        # 2. Synthesize template child sitemaps from candidate URLs if not already discovered on disk
+        candidate_urls: List[Any] = list(urls) if urls else []
+        if not candidate_urls and "sitemap.xml" in discovered:
+            candidate_urls = list(discovered["sitemap.xml"].get("urls", []))
+        if candidate_urls:
+            try:
+                built = build_multi_tenant_sitemaps(
+                    urls_or_records=candidate_urls,
+                    canonical_base=base_clean,
+                    tenant_id=getattr(self, "tenant_id", "profithelm"),
+                    domain=self.domain,
+                    dist_dir=None,
+                    section_rules=section_rules if section_rules is not None else self.section_rules,
+                    include_tier_sitemaps=True,
+                    include_sitemap_index=True,
+                    write_files=False,
+                    update_robots_txt=False,
+                    strict_isolation=False,
+                )
+                master_meta = built.get("master_sitemap")
+                if master_meta and master_meta.get("url_count", 0) > 0 and "sitemap.xml" not in discovered:
+                    discovered["sitemap.xml"] = {
+                        "sitemap_name": "sitemap.xml",
+                        "sitemap_url": master_meta["url"],
+                        "section": "master",
+                        "date_bucket": None,
+                        "is_child_sitemap": False,
+                        "url_count": master_meta["url_count"],
+                        "urls": list(candidate_urls),
+                        "xml_sha256": master_meta["sha256"],
+                    }
+                idx_meta = built.get("master_sitemap_index")
+                if idx_meta and idx_meta.get("child_count", 0) > 0 and "sitemap-index.xml" not in discovered:
+                    discovered["sitemap-index.xml"] = {
+                        "sitemap_name": "sitemap-index.xml",
+                        "sitemap_url": idx_meta["url"],
+                        "section": "sitemap_index",
+                        "date_bucket": None,
+                        "is_child_sitemap": False,
+                        "url_count": idx_meta["child_count"],
+                        "urls": [],
+                        "xml_sha256": idx_meta["sha256"],
+                    }
+                for sm_name, sm_meta in built.get("child_sitemaps", {}).items():
+                    if sm_name not in discovered and sm_meta.get("url_count", 0) > 0:
+                        discovered[sm_name] = {
+                            "sitemap_name": sm_name,
+                            "sitemap_url": sm_meta["url"],
+                            "section": sm_meta["section"],
+                            "date_bucket": sm_meta.get("date_bucket"),
+                            "is_child_sitemap": True,
+                            "url_count": sm_meta["url_count"],
+                            "urls": sm_meta.get("urls", []),
+                            "xml_sha256": sm_meta["sha256"],
+                        }
+            except Exception:
+                pass
+
+        if "sitemap.xml" not in discovered:
+            master_url = f"{base_clean}/sitemap.xml"
+            fallback_sha = hashlib.sha256(master_url.encode("utf-8")).hexdigest()
+            discovered["sitemap.xml"] = {
+                "sitemap_name": "sitemap.xml",
+                "sitemap_url": master_url,
+                "section": "master",
+                "date_bucket": None,
+                "is_child_sitemap": False,
+                "url_count": len(candidate_urls),
+                "urls": [str(u) for u in candidate_urls],
+                "xml_sha256": fallback_sha,
+            }
+
+        return discovered
+
+    def submit_gsc_sitemaps(
+        self,
+        sitemaps: Optional[List[str]] = None,
+        urls: Optional[List[Any]] = None,
+        live: bool = False,
+        force: bool = False,
+        site: Optional[str] = None,
+        gsccli_bin: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Explicitly submits the master sitemap, sitemap-index, and every individual child sitemap
+        (products, categories, articles by date, guides, hubs, leaves) to Google Search Console.
+        Never relies on GSC auto-detecting child sitemaps from a master index, ensuring isolated
+        'Submitted pages only' coverage diagnostics per template section.
+        """
+        target_site = site or self.gsc_site
+        eff_tenant = getattr(self, "tenant_id", "profithelm")
+        base_clean = self.canonical_base.rstrip("/")
+
+        discovered = self.discover_tenant_sitemaps(urls=urls)
+
+        # Build ordered target list: master sitemap.xml, sitemap-index.xml, then child sitemaps
+        target_meta_list: List[Dict[str, Any]] = []
+        if sitemaps:
+            by_url = {v["sitemap_url"]: v for v in discovered.values()}
+            for sm in sitemaps:
+                sm_str = str(sm).strip()
+                if not sm_str:
+                    continue
+                if not sm_str.startswith(("http://", "https://")):
+                    sm_name = sm_str.lstrip("/")
+                    sm_url = f"{base_clean}/{sm_name}"
+                else:
+                    sm_url = sm_str
+                    sm_name = urllib.parse.urlsplit(sm_url).path.strip("/").split("/")[-1] or "sitemap.xml"
+                meta = by_url.get(sm_url) or discovered.get(sm_name)
+                if meta:
+                    target_meta_list.append(meta)
+                else:
+                    is_child = sm_name not in ("sitemap.xml", "sitemap-index.xml")
+                    sec_name = "master"
+                    d_bucket = None
+                    if sm_name.startswith("sitemap-articles"):
+                        sec_name = "articles"
+                        import re
+                        m_b = re.match(r"^sitemap-articles-(\d{4}-\d{2})\.xml$", sm_name)
+                        if m_b:
+                            d_bucket = m_b.group(1)
+                    elif sm_name.startswith("sitemap-") and sm_name.endswith(".xml"):
+                        sec_name = sm_name[len("sitemap-") : -len(".xml")]
+                    target_meta_list.append({
+                        "sitemap_name": sm_name,
+                        "sitemap_url": sm_url,
+                        "section": sec_name,
+                        "date_bucket": d_bucket,
+                        "is_child_sitemap": is_child,
+                        "url_count": 0,
+                        "urls": [],
+                        "xml_sha256": hashlib.sha256(sm_url.encode("utf-8")).hexdigest(),
+                    })
+        else:
+            for master_key in ("sitemap.xml", "sitemap-index.xml"):
+                if master_key in discovered:
+                    target_meta_list.append(discovered[master_key])
+            for fixed_child in ("sitemap-products.xml", "sitemap-categories.xml"):
+                if fixed_child in discovered:
+                    target_meta_list.append(discovered[fixed_child])
+            for art_child in sorted(k for k in discovered.keys() if k.startswith("sitemap-articles")):
+                target_meta_list.append(discovered[art_child])
+            if "sitemap-guides.xml" in discovered:
+                target_meta_list.append(discovered["sitemap-guides.xml"])
+            for tier_child in ("sitemap-hubs.xml", "sitemap-leaves.xml"):
+                if tier_child in discovered:
+                    target_meta_list.append(discovered[tier_child])
+            seen_names = {m["sitemap_name"] for m in target_meta_list}
+            for extra_name in sorted(discovered.keys()):
+                if extra_name not in seen_names:
+                    target_meta_list.append(discovered[extra_name])
+
+        if gsccli_bin is None:
+            gsccli_candidates = [
+                shutil.which("gsccli"),
+                "/home/ubuntuadmin/.npm-global/bin/gsccli",
+                str(Path.home() / ".npm-global" / "bin" / "gsccli"),
+            ]
+            for cand in gsccli_candidates:
+                if cand and (Path(cand).is_file() or shutil.which(cand)):
+                    gsccli_bin = str(cand)
+                    break
+
+        submissions: List[Dict[str, Any]] = []
+        submitted_count = 0
+        child_submitted_count = 0
+        skipped_count = 0
+
+        for meta in target_meta_list:
+            sm_url = meta["sitemap_url"]
+            sm_name = meta["sitemap_name"]
+            sec_name = meta["section"]
+            d_bucket = meta.get("date_bucket")
+            is_child = bool(meta.get("is_child_sitemap"))
+            xml_sha = meta["xml_sha256"]
+            url_count = int(meta.get("url_count", 0))
+
+            needs_submit, prev_entry = self.child_sitemap_ledger.should_submit(
+                tenant_id=eff_tenant,
+                sitemap_url=sm_url,
+                xml_sha256=xml_sha,
+                force=force,
+            )
+            # Upgrade a previously SIMULATED ledger entry if now running in live mode
+            if not needs_submit and live and isinstance(prev_entry, dict) and prev_entry.get("status") == "SIMULATED":
+                needs_submit = True
+
+            sm_cmd = [gsccli_bin or "gsccli", "sitemaps", "submit", sm_url, "-s", target_site]
+            cmd_str = " ".join(sm_cmd)
+
+            if not needs_submit and prev_entry is not None:
+                skipped_count += 1
+                submissions.append({
+                    "engine": "gsc_sitemaps",
+                    "tenant_id": eff_tenant,
+                    "site": target_site,
+                    "sitemap": sm_url,
+                    "sitemap_url": sm_url,
+                    "sitemap_name": sm_name,
+                    "section": sec_name,
+                    "date_bucket": d_bucket,
+                    "is_child_sitemap": is_child,
+                    "url_count": url_count,
+                    "xml_sha256": xml_sha,
+                    "status": "IDEMPOTENT_SKIP",
+                    "explicitly_submitted": True,
+                    "auto_detected_only": False,
+                    "submitted_pages_only_filter": True,
+                    "command": cmd_str,
+                    "output": "Unchanged XML SHA-256 in child_sitemap_push_ledger",
+                })
+                continue
+
+            if live and gsccli_bin:
+                try:
+                    sm_proc = subprocess.run(sm_cmd, capture_output=True, text=True, timeout=15)
+                    status = "ACCEPTED" if sm_proc.returncode == 0 else "FAIL"
+                    output_text = (sm_proc.stdout or "").strip() or (sm_proc.stderr or "").strip()
+                except Exception as ex:
+                    status = "ERROR"
+                    output_text = str(ex)
+            else:
+                status = "SIMULATED"
+                output_text = "Simulated explicit GSC sitemap submission"
+
+            if status in ("ACCEPTED", "SIMULATED"):
+                submitted_count += 1
+                if is_child:
+                    child_submitted_count += 1
+                self.child_sitemap_ledger.record_submission(
+                    tenant_id=eff_tenant,
+                    sitemap_url=sm_url,
+                    xml_sha256=xml_sha,
+                    section=sec_name,
+                    url_count=url_count,
+                    status=status,
+                    site=target_site,
+                    command=cmd_str,
+                    date_bucket=d_bucket,
+                )
+
+            submissions.append({
+                "engine": "gsc_sitemaps",
+                "tenant_id": eff_tenant,
+                "site": target_site,
+                "sitemap": sm_url,
+                "sitemap_url": sm_url,
+                "sitemap_name": sm_name,
+                "section": sec_name,
+                "date_bucket": d_bucket,
+                "is_child_sitemap": is_child,
+                "url_count": url_count,
+                "xml_sha256": xml_sha,
+                "status": status,
+                "explicitly_submitted": status in ("ACCEPTED", "SIMULATED"),
+                "auto_detected_only": False,
+                "submitted_pages_only_filter": status in ("ACCEPTED", "SIMULATED"),
+                "command": cmd_str,
+                "output": output_text,
+            })
+
+        expected_urls = [m["sitemap_url"] for m in target_meta_list]
+        verification = self.child_sitemap_ledger.verify_isolated_registration(
+            tenant_id=eff_tenant,
+            expected_sitemaps=expected_urls,
+        )
+
+        if submitted_count == 0 and skipped_count > 0:
+            overall_status = "IDEMPOTENT_NO_OP"
+        elif all(s["status"] in ("ACCEPTED", "SIMULATED", "IDEMPOTENT_SKIP") for s in submissions):
+            overall_status = "ACCEPTED" if live else "SIMULATED"
+        elif any(s["status"] in ("ACCEPTED", "SIMULATED") for s in submissions):
+            overall_status = "PARTIAL"
+        else:
+            overall_status = "FAIL"
+
+        return {
+            "tenant_id": eff_tenant,
+            "site": target_site,
+            "mode": "LIVE" if live else "SIMULATED",
+            "status": overall_status,
+            "total_sitemaps_targeted": len(target_meta_list),
+            "sitemaps_submitted_count": submitted_count,
+            "child_sitemaps_submitted_count": child_submitted_count,
+            "sitemaps_skipped_unchanged": skipped_count,
+            "submissions": submissions,
+            "child_submissions": [s for s in submissions if s.get("is_child_sitemap")],
+            "verification": verification,
+        }
 
     def submit_gsc_indexing(
         self,
@@ -1527,6 +2990,8 @@ class PushIndexer:
                         }
                     ],
                     "inspection_oracle": [],
+                    "child_sitemap_submissions": [],
+                    "sitemap_registration": {"status": "QUARANTINED_ALL", "submissions": []},
                 }
 
         if hubs_only:
@@ -1565,6 +3030,7 @@ class PushIndexer:
         to_push = []
         skipped = []
         interrupted = False
+        sitemap_registration: Dict[str, Any] = {"status": "SKIPPED_INTERRUPTED", "submissions": []}
         if live and gsccli_bin:
             to_push, skipped = self.filter_unchanged_push_urls(
                 urls, force=False, engine="google", tenant_id=getattr(self, "tenant_id", None)
@@ -1666,18 +3132,22 @@ class PushIndexer:
                 "rollover_queue_spillover": len(remaining_rollover),
             })
             if not interrupted:
-                try:
-                    sitemap_url = f"{self.canonical_base}/sitemap.xml"
-                    sm_cmd = [gsccli_bin, "sitemaps", "submit", sitemap_url, "-s", self.gsc_site]
-                    sm_proc = subprocess.run(sm_cmd, capture_output=True, text=True, timeout=15)
-                    gsc_results.append({
-                        "engine": "gsc_sitemaps",
-                        "sitemap": sitemap_url,
-                        "status": "ACCEPTED" if sm_proc.returncode == 0 else "FAIL",
-                        "output": sm_proc.stdout.strip() or sm_proc.stderr.strip(),
-                    })
-                except Exception as e:
-                    gsc_results.append({"engine": "gsc_sitemaps", "status": "ERROR", "note": str(e)})
+                sitemap_registration = self.submit_gsc_sitemaps(
+                    urls=urls,
+                    live=True,
+                    site=self.gsc_site,
+                    gsccli_bin=gsccli_bin,
+                )
+                for sm_item in sitemap_registration.get("submissions", []):
+                    gsc_results.append(sm_item)
+        elif not interrupted:
+            sitemap_registration = self.submit_gsc_sitemaps(
+                urls=urls,
+                live=False,
+                site=self.gsc_site,
+            )
+            for sm_item in sitemap_registration.get("submissions", []):
+                gsc_results.append(sm_item)
 
         inspection_oracle = []
         if not interrupted:
@@ -1691,6 +3161,8 @@ class PushIndexer:
             "urls_targeted": len(urls),
             "results": gsc_results,
             "inspection_oracle": inspection_oracle,
+            "child_sitemap_submissions": sitemap_registration.get("submissions", []),
+            "sitemap_registration": sitemap_registration,
             "rollover_queue_drained": len(rollover_loaded),
             "rollover_queue_pending": len(self.load_gsc_rollover_queue()),
             "intent_id": intent_id,
@@ -1850,11 +3322,16 @@ class PushIndexer:
                 "llms.txt",
                 "llms-full.txt",
                 "sitemap.xml",
+                "sitemap-index.xml",
                 "sitemap-hubs.xml",
                 "sitemap-leaves.xml",
+                "sitemap-products.xml",
+                "sitemap-categories.xml",
+                "sitemap-guides.xml",
+                "sitemap-articles.xml",
                 "feed.xml",
                 "robots.txt",
-            ]:
+            ] or (clean_path.startswith("sitemap-") and clean_path.endswith(".xml")):
                 asset_type = "machine_endpoint"
             elif clean_path.startswith("tools/"):
                 parts = [p for p in clean_path.split("/") if p]
@@ -2107,6 +3584,7 @@ class PushIndexer:
                 urls=candidate_urls,
                 dist_dir=dist_to_check,
                 domain=self.domain,
+                property_id=getattr(self, "tenant_id", None) or self.domain.split(".")[0].lower(),
             )
             urls_to_submit = preflight_report.push_eligible_urls
             for bu in preflight_report.blocked_urls:
@@ -2198,6 +3676,8 @@ class PushIndexer:
                     "inspection_oracle": [],
                 },
                 "gsc_inspection_oracle": [],
+                "child_sitemap_submissions": [],
+                "sitemap_registration": {"status": "QUARANTINED_ALL", "submissions": []},
                 "indexmysite": {
                     "engine": "indexmysite",
                     "status": "QUARANTINED_ALL",
@@ -2225,9 +3705,19 @@ class PushIndexer:
             fast_idx_res = self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
             if live:
                 self.record_pushed_urls(urls_to_submit)
+            sitemap_reg = gsc_res.get("sitemap_registration") or self.submit_gsc_sitemaps(
+                urls=urls_to_submit,
+                live=live,
+                force=force,
+            )
         else:
             airlock_all, _ = self.preflight_airlock(all_urls) if all_urls else ([], [])
             safe_all_urls = list(airlock_all)
+            sitemap_reg = self.submit_gsc_sitemaps(
+                urls=safe_all_urls,
+                live=live,
+                force=force,
+            )
             indexnow_res = {
                 "host": self.domain,
                 "urls_submitted": len(safe_all_urls),
@@ -2244,6 +3734,8 @@ class PushIndexer:
                 "urls_targeted": len(safe_all_urls),
                 "results": [{"engine": "gsc_idempotent", "status": "IDEMPOTENT_NO_OP", "message": "All assets already pushed"}],
                 "inspection_oracle": self.verify_gsc_indexation_loop(urls=oracle_sample, live=live) if oracle_sample else [],
+                "child_sitemap_submissions": sitemap_reg.get("submissions", []),
+                "sitemap_registration": sitemap_reg,
             }
             indexmysite_res = {"engine": "indexmysite", "status": "IDEMPOTENT_NO_OP", "urls_submitted": 0, "urls_targeted": len(safe_all_urls)}
             if oracle_sample:
@@ -2280,6 +3772,8 @@ class PushIndexer:
             "fast_index": fast_idx_res,
             "google_indexing_api": gsc_res,
             "gsc_inspection_oracle": gsc_res.get("inspection_oracle"),
+            "child_sitemap_submissions": sitemap_reg.get("submissions", []),
+            "sitemap_registration": sitemap_reg,
             "indexmysite": indexmysite_res,
             "audit": audit,
             "preflight": preflight_report.to_dict() if preflight_report else None,
@@ -2318,6 +3812,8 @@ class PushIndexer:
             "pingomatic": pingomatic_res,
             "gsc": gsc_res,
             "gsc_inspection_oracle": gsc_res.get("inspection_oracle"),
+            "child_sitemap_submissions": gsc_res.get("child_sitemap_submissions", []),
+            "sitemap_registration": gsc_res.get("sitemap_registration"),
             "indexmysite": indexmysite_res,
             "automated_audit": auto_audit,
         }
@@ -2353,10 +3849,22 @@ class CrawlerTelemetryListener:
         "/llms.txt",
         "/llms-full.txt",
         "/sitemap.xml",
+        "/sitemap-index.xml",
         "/sitemap-hubs.xml",
         "/sitemap-leaves.xml",
+        "/sitemap-products.xml",
+        "/sitemap-categories.xml",
+        "/sitemap-guides.xml",
+        "/sitemap-articles.xml",
         "/favicon.ico",
     }
+
+    @classmethod
+    def _is_static_probe_path(cls, path: str) -> bool:
+        if path in cls.STATIC_PROBE_PATHS:
+            return True
+        clean = (path or "").strip("/")
+        return clean.startswith("sitemap-") and clean.endswith(".xml")
 
     def __init__(self, ledger_path: Optional[Path] = None):
         self.ledger_path = Path(ledger_path) if ledger_path else DEFAULT_INDEX_PUSH_LEDGER_PATH
@@ -2380,6 +3888,7 @@ class CrawlerTelemetryListener:
                 crawler = self.identify_crawler(ua)
                 path = data.get("path") or data.get("uri") or data.get("url") or "/"
                 parsed_url = urllib.parse.urlsplit(path)
+                is_static = self._is_static_probe_path(parsed_url.path)
                 return {
                     "ip": data.get("ip") or data.get("client_ip", "127.0.0.1"),
                     "timestamp": data.get("timestamp") or data.get("time", ""),
@@ -2390,8 +3899,8 @@ class CrawlerTelemetryListener:
                     "user_agent": ua,
                     "crawler": crawler,
                     "is_ai_crawler": crawler is not None,
-                    "is_static_probe": parsed_url.path in self.STATIC_PROBE_PATHS,
-                    "is_dom_fetch": parsed_url.path not in self.STATIC_PROBE_PATHS and (parsed_url.path.endswith("/") or parsed_url.path.endswith(".html")),
+                    "is_static_probe": is_static,
+                    "is_dom_fetch": not is_static and (parsed_url.path.endswith("/") or parsed_url.path.endswith(".html")),
                 }
             except Exception:
                 pass
@@ -2407,6 +3916,7 @@ class CrawlerTelemetryListener:
             crawler = self.identify_crawler(ua)
             parsed_url = urllib.parse.urlsplit(raw_path)
             clean_path = parsed_url.path
+            is_static = self._is_static_probe_path(clean_path)
             return {
                 "ip": ip,
                 "timestamp": ts,
@@ -2417,8 +3927,8 @@ class CrawlerTelemetryListener:
                 "user_agent": ua,
                 "crawler": crawler,
                 "is_ai_crawler": crawler is not None,
-                "is_static_probe": clean_path in self.STATIC_PROBE_PATHS,
-                "is_dom_fetch": clean_path not in self.STATIC_PROBE_PATHS and (clean_path.endswith("/") or clean_path.endswith(".html") or "/tools/" in clean_path),
+                "is_static_probe": is_static,
+                "is_dom_fetch": not is_static and (clean_path.endswith("/") or clean_path.endswith(".html") or "/tools/" in clean_path),
             }
 
         return None
@@ -2547,6 +4057,9 @@ inspect_gsc_url = _default_indexer.inspect_gsc_url
 verify_gsc_indexation_loop = _default_indexer.verify_gsc_indexation_loop
 load_gsc_rollover_queue = _default_indexer.load_gsc_rollover_queue
 save_gsc_rollover_queue = _default_indexer.save_gsc_rollover_queue
+generate_multi_tenant_sitemaps = _default_indexer.generate_multi_tenant_sitemaps
+discover_tenant_sitemaps = _default_indexer.discover_tenant_sitemaps
+submit_gsc_sitemaps = _default_indexer.submit_gsc_sitemaps
 submit_gsc_indexing = _default_indexer.submit_gsc_indexing
 submit_google_indexing_api = _default_indexer.submit_google_indexing_api
 submit_indexmysite = _default_indexer.submit_indexmysite
@@ -2556,3 +4069,4 @@ audit_asset_submission_status = _default_indexer.audit_asset_submission_status
 dispatch_automated_indexing = _default_indexer.dispatch_automated_indexing
 get_latest_indexing_audit_log = _default_indexer.get_latest_indexing_audit_log
 run_full_indexing_sweep = _default_indexer.run_full_indexing_sweep
+

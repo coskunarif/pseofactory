@@ -332,3 +332,290 @@ def test_indexing_feedback_loop_cli(capsys):
     assert "preflight_summary" in parsed
     assert "push_summary" in parsed
     assert "diagnosed_defects" in parsed
+
+
+def test_autonomous_closed_loop_defect_to_html_reflection_preflight_gitops_and_republication(tmp_path):
+    """
+    End-to-end closed-loop validation:
+    1. Unindexed page defects (wrong canonical, accidental noindex, missing answer box, 404 dead route in sitemap)
+       are diagnosed automatically.
+    2. Dead 404 URLs are pruned from sitemap.xml and quarantined.
+    3. Defective HTML asset in dist/ is automatically reflected with corrected canonical, removed noindex,
+       injected <aside id="quick-answer"> and #gsc-striking-overlay, plus persisted overlay JSON.
+    4. Repaired asset passes IndexingPreflightEngine 6-stage gate.
+    5. GitOpsCoordinator ships before PushIndexer dispatches multi-engine republication.
+    """
+    from pseofactory.indexing.preflight import IndexingPreflightEngine
+
+    dist_dir = tmp_path / "dist"
+    tool_dir = dist_dir / "tools" / "burn-rate-calculator"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    html_file = tool_dir / "index.html"
+
+    body_words = " ".join(["Statutory financial burn rate analysis and runway modeling metric."] * 35)
+    defective_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Burn Rate Calculator</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="canonical" href="https://wrong-domain.example.com/tools/burn-rate-calculator/">
+  <script type="application/ld+json">{{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Burn Rate Calculator"}}</script>
+</head>
+<body>
+  <main>
+    <p>{body_words}</p>
+    <form><input type="number" name="cash" value="100000"></form>
+    <a href="https://profithelm.com/">Home</a>
+  </main>
+</body>
+</html>"""
+    html_file.write_text(defective_html, encoding="utf-8")
+
+    sitemap_path = dist_dir / "sitemap.xml"
+    sitemap_path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://profithelm.com/tools/burn-rate-calculator/</loc></url>
+  <url><loc>https://profithelm.com/tools/deleted-404-tool/</loc></url>
+</urlset>""",
+        encoding="utf-8",
+    )
+
+    indexer = PushIndexer(
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        ledger_path=tmp_path / ".agy" / "index_push_ledger.json",
+        rollover_queue_path=tmp_path / ".agy" / "gsc_rollover_queue.json",
+        tenant_id="profithelm",
+    )
+    preflight = IndexingPreflightEngine(
+        property_id="profithelm",
+        domain="profithelm.com",
+        dist_dir=dist_dir,
+    )
+    mock_gitops = MagicMock()
+    mock_gitops.commit_and_push_atomic.return_value = {
+        "status": "COMMITTED_AND_PUSHED",
+        "commit_sha": "abc1234",
+    }
+
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        indexer=indexer,
+        preflight_engine=preflight,
+        gitops_coordinator=mock_gitops,
+    )
+
+    unindexed_records = [
+        {
+            "url": "https://profithelm.com/tools/burn-rate-calculator/",
+            "coverageState": "Crawled - currently not indexed",
+            "slug": "burn-rate-calculator",
+        },
+        {
+            "url": "https://profithelm.com/tools/deleted-404-tool/",
+            "status_code": 404,
+            "error": "quarantine_http_error",
+        },
+    ]
+
+    with patch.object(indexer, "submit_indexnow_batch", return_value={"status": "ACCEPTED"}), \
+         patch.object(indexer, "submit_gsc_indexing", return_value={"status": "ACCEPTED"}), \
+         patch.object(indexer, "ping_websub_hub", return_value={"status": "ACCEPTED"}), \
+         patch.object(indexer, "ping_pingomatic", return_value={"status": "ACCEPTED"}):
+        report = loop.run_feedback_cycle(
+            unindexed_records=unindexed_records,
+            force=False,
+            dry_run=False,
+            skip_recompile=True,
+        )
+
+    # 1. Verify sitemap pruned 404 dead route but kept valid route
+    updated_sitemap = sitemap_path.read_text(encoding="utf-8")
+    assert "deleted-404-tool" not in updated_sitemap
+    assert "burn-rate-calculator" in updated_sitemap
+
+    # 2. Verify HTML asset was reflected & repaired automatically
+    repaired_html = html_file.read_text(encoding="utf-8")
+    assert 'href="https://profithelm.com/tools/burn-rate-calculator/' in repaired_html
+    assert "noindex" not in repaired_html.lower()
+    assert 'id="quick-answer"' in repaired_html
+    assert 'id="gsc-striking-overlay"' in repaired_html
+    assert "<h1>" in repaired_html.lower()
+    assert (tmp_path / "content" / "overlays" / "burn-rate-calculator.json").is_file()
+
+    # 3. Verify preflight passed after reflection repair
+    assert report["preflight_summary"]["status"] == "READY_FOR_INDEXING"
+    assert any("burn-rate-calculator" in u for u in report["preflight_summary"]["eligible_urls"])
+
+    # 4. Verify GitOps shipping executed before search dispatch
+    assert mock_gitops.commit_and_push_atomic.called
+    assert report["gitops_summary"]["status"] == "COMMITTED_AND_PUSHED"
+    assert report["push_summary"]["status"] in ("SUCCESS", "DISPATCHED")
+    assert report["push_summary"]["urls_pushed"] >= 1
+
+
+def test_feedback_loop_blocks_search_dispatch_when_gitops_fails(tmp_path):
+    """
+    Verifies that if GitOps release shipping fails after preflight, search engine
+    dispatch is aborted (status='SKIPPED_GITOPS_FAILED') so unshipped local repairs
+    are never pushed to search engines.
+    """
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    mock_indexer = MagicMock()
+    mock_indexer.load_gsc_rollover_queue.return_value = []
+    mock_preflight = MagicMock()
+    mock_preflight.inspect_dist.return_value = MagicMock(
+        total_inspected=1,
+        passed_count=1,
+        blocked_count=0,
+        push_eligible_urls=["https://profithelm.com/tools/calc/"],
+        sitemap_eligible_urls=["https://profithelm.com/tools/calc/"],
+        blocked_urls={},
+    )
+    mock_gitops = MagicMock()
+    mock_gitops.commit_and_push_atomic.return_value = {
+        "status": "FAILED",
+        "reason": "git_push_failed",
+    }
+
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        indexer=mock_indexer,
+        preflight_engine=mock_preflight,
+        gitops_coordinator=mock_gitops,
+    )
+
+    with patch.object(loop, "execute_engine_repairs", return_value={
+        "recompiled_assets_count": 1,
+        "html_files_repaired": 1,
+        "dead_routes_quarantined": 0,
+        "sitemaps_pruned": 0,
+        "overlays_written": ["calc"],
+    }):
+        report = loop.run_feedback_cycle(
+            unindexed_records=[{
+                "url": "https://profithelm.com/tools/calc/",
+                "coverageState": "Crawled - currently not indexed",
+            }],
+            dry_run=False,
+        )
+
+    assert report["gitops_summary"]["status"] == "FAILED"
+    assert report["push_summary"]["status"] == "SKIPPED_GITOPS_FAILED"
+    assert report["status"] == "PARTIAL"
+    assert not mock_indexer.submit_indexnow_batch.called
+
+
+def test_unverified_foreign_domain_quota_guard_and_429_circuit_breaker(tmp_path):
+    """
+    Verifies PushIndexer blocks unverified foreign domains before calling gsccli
+    and trips the 429 quota circuit breaker during inspection loops.
+    """
+    indexer = PushIndexer(
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=tmp_path / "dist",
+        tenant_id="profithelm",
+    )
+
+    with patch("subprocess.run") as mock_subproc:
+        foreign_res = indexer.inspect_gsc_url("https://unverified-competitor.example.org/tool")
+        assert foreign_res["status"] == "BLOCKED_UNVERIFIED_DOMAIN"
+        assert not mock_subproc.called
+
+    # Verify 429 circuit breaker halts verify_gsc_indexation_loop immediately
+    inspect_calls = []
+
+    def fake_inspect(url, site=None, timeout=15):
+        inspect_calls.append(url)
+        return {
+            "url": url,
+            "status": "QUOTA_EXHAUSTED",
+            "quota_exhausted": True,
+            "stderr": "HTTP 429 Too Many Requests",
+        }
+
+    with patch.object(indexer, "preflight_airlock", side_effect=lambda urls: (list(urls), [])), \
+         patch.object(indexer, "inspect_gsc_url", side_effect=fake_inspect):
+        loop_res = indexer.verify_gsc_indexation_loop(
+            urls=[
+                "https://profithelm.com/tools/one/",
+                "https://profithelm.com/tools/two/",
+                "https://profithelm.com/tools/three/",
+            ],
+            live=True,
+        )
+        assert len(inspect_calls) == 1
+        assert loop_res["quota_circuit_breaker_tripped"] is True
+
+
+def test_refactor_cascade_preserves_active_remediation_overlay(tmp_path):
+    """
+    Verifies RefactorCascadeEngine._reapply_active_overlay preserves active
+    content/overlays/{slug}.json overlays when an asset is rebuilt from template.
+    """
+    from pseofactory.maintenance import AssetDriftRecord, DriftReason, RefactorCascadeEngine
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    asset_file = dist_dir / "tax-calc.html"
+    asset_file.write_text("<html><body><main><h1>Tax Calc</h1></main></body></html>", encoding="utf-8")
+
+    overlay_dir = tmp_path / "content" / "overlays"
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+    overlay_file = overlay_dir / "tax-calc.json"
+    overlay_file.write_text(
+        json.dumps({
+            "slug": "tax-calc",
+            "status": "ACTIVE_MEASUREMENT_LOCK",
+            "h2_blocks": [{"heading": "2026 Tax Deduction Rules", "intent": "explain deduction rules"}],
+            "faq_items": [{"question": "How is it calculated?", "answer": "Using IRS statutory brackets."}],
+        }),
+        encoding="utf-8",
+    )
+
+    def rebuild_fn(slug, target_file=None):
+        out = target_file or asset_file
+        out.write_text("<html><body><main><h1>Tax Calc Rebuilt</h1></main></body></html>", encoding="utf-8")
+        return True
+
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+        repo_path=tmp_path,
+        build_asset_fn=rebuild_fn,
+    )
+    evaluator = MagicMock()
+    evaluator.audit_asset.return_value = None
+    engine = RefactorCascadeEngine(evaluator=evaluator, dlq_path=tmp_path / ".agy" / "dlq.json")
+
+    record = AssetDriftRecord(
+        asset_path=str(asset_file),
+        slug="tax-calc",
+        reasons=[DriftReason.ENGINE_HASH_DRIFT],
+    )
+    ok = engine.refactor_asset(record, adapter, force=True, dry_run=False)
+    assert ok is True
+    final_html = asset_file.read_text(encoding="utf-8")
+    assert "Tax Calc Rebuilt" in final_html
+    assert 'id="gsc-striking-overlay"' in final_html
+    assert "2026 Tax Deduction Rules" in final_html
+

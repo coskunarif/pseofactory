@@ -37,7 +37,19 @@ def calculate_intent_weight(intent_cluster: str, query: str) -> float:
     q_low = query.lower()
     if any(w in q_low for w in ["meme", "remix", "soundboard", "dress", "gossip", "scrubbed", "leak"]):
         return 0.05
-    if intent_cluster in ("calculator", "statutory_compliance") or "calculator" in q_low or "estimator" in q_low or "matrix" in q_low:
+    if intent_cluster in ("calculator", "statutory_compliance") or any(
+        w in q_low
+        for w in (
+            "calculator",
+            "estimator",
+            "matrix",
+            "amortization",
+            "deduction",
+            "compliance",
+            "forgiveness",
+            "repayment",
+        )
+    ):
         return 1.0
     if intent_cluster == "comparison" or "vs" in q_low or "versus" in q_low or "compare" in q_low:
         return 0.7
@@ -103,7 +115,25 @@ class JevEngine:
         if candidate.is_transient_noise:
             return {"jev_score": 0.15, "durable_prob": 0.05}
 
-        if any(w in q_low for w in ["form", "section", "deduction", "calculator", "matrix", "estimator"]):
+        if any(
+            w in q_low
+            for w in [
+                "form",
+                "section",
+                "deduction",
+                "calculator",
+                "matrix",
+                "estimator",
+                "amortization",
+                "compliance",
+                "forgiveness",
+                "1031",
+                "179",
+                "depreciation",
+                "pslf",
+                "repayment",
+            ]
+        ):
             return {"jev_score": 1.80, "durable_prob": 0.92}
 
         return {"jev_score": 1.25, "durable_prob": 0.55}

@@ -1869,9 +1869,9 @@ class AssetIntegrityEvaluator:
                 details.append(f"JSON-LD schema violation: {ex}")
 
         # 8. Sitemap validation (XML)
-        if p.suffix == ".xml" and ("sitemap" in p.name.lower() or "<urlset" in content):
+        if p.suffix == ".xml" and ("sitemap" in p.name.lower() or "<urlset" in content or "<sitemapindex" in content):
             try:
-                assert_sitemap_parses(content)
+                assert_sitemap_parses(content, allow_index=(p.name.lower() == "sitemap-index.xml"))
             except ValueError as ex:
                 reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
                 details.append(f"Sitemap XML violation: {ex}")
@@ -2088,10 +2088,18 @@ class RefactorCascadeEngine:
         if not d_dir.exists():
             return deps
 
-        for name in ("sitemap.xml", "sitemap-leaves.xml", "sitemap-hubs.xml", "llms.txt", "llms-full.txt"):
+        seen_paths = set()
+        for name in ("sitemap.xml", "sitemap-index.xml", "sitemap-leaves.xml", "sitemap-hubs.xml", "llms.txt", "llms-full.txt"):
             p = d_dir / name
-            if p.exists() and p != target:
+            rp = p.resolve()
+            if p.exists() and rp != target and rp not in seen_paths:
                 deps.append(p)
+                seen_paths.add(rp)
+        for p in sorted(d_dir.glob("sitemap-*.xml")):
+            rp = p.resolve()
+            if p.exists() and rp != target and rp not in seen_paths:
+                deps.append(p)
+                seen_paths.add(rp)
         return deps
 
     def route_to_dlq(
@@ -2356,6 +2364,9 @@ class RefactorCascadeEngine:
                     if not build_ok and not target_path.exists():
                         raise RuntimeError(f"Builder failed to generate asset for slug '{slug}'")
 
+                # 2b. Reapply active GSC remediation overlay if present
+                self._reapply_active_overlay(slug, target_path, adapter)
+
                 # 3. Fail-Closed Verification Gate
                 audit_record = self.evaluator.audit_asset(target_path, adapter)
                 if audit_record is not None:
@@ -2407,6 +2418,36 @@ class RefactorCascadeEngine:
         # All retries exhausted: Route to DLQ
         self.route_to_dlq(adapter.property_id, record, last_error)
         return False
+
+    def _reapply_active_overlay(
+        self,
+        slug: Optional[str],
+        target_path: Path,
+        adapter: PropertyAdapter,
+    ) -> None:
+        """
+        Preserves active GSC remediation overlays across template/asset rebuilds.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not slug or not target_path.is_file() or target_path.suffix.lower() != ".html":
+            return
+        repo_root = getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
+        if not repo_root:
+            return
+        overlay_path = Path(repo_root) / "content" / "overlays" / f"{slug}.json"
+        if not overlay_path.is_file():
+            return
+        try:
+            overlay_data = json.loads(overlay_path.read_text(encoding="utf-8"))
+            if overlay_data.get("status") == "DEGRADED_ROLLED_BACK":
+                return
+            from pseofactory.gsc_remediation import inject_overlay_into_html
+            html_content = target_path.read_text(encoding="utf-8")
+            updated_html = inject_overlay_into_html(html_content, overlay_data)
+            if updated_html != html_content:
+                target_path.write_text(updated_html, encoding="utf-8")
+        except Exception:
+            pass
 
     def refactor_all(
         self,
@@ -2460,6 +2501,10 @@ class RefactorCascadeEngine:
                     "dependencies": [],
                     "lock_contention": True,
                 }
+
+            for rec in actionable_records:
+                if rec.slug is not None and Path(rec.asset_path).resolve().is_file():
+                    self._reapply_active_overlay(rec.slug, Path(rec.asset_path).resolve(), adapter)
 
             post_audit_map = {
                 rec.slug: self.evaluator.audit_asset(Path(rec.asset_path).resolve(), adapter)
@@ -2600,6 +2645,22 @@ class MaintenanceLifecycle:
         )
 
         with adapter.scoped_environment():
+            if (
+                not dry_run
+                and getattr(adapter, "repo_path", None)
+                and adapter.property_id == "profithelm"
+                and (Path(adapter.repo_path) / "functions" / "r").is_dir()
+                and not (
+                    "PYTEST_CURRENT_TEST" in os.environ
+                    and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
+                )
+            ):
+                try:
+                    from pseofactory.edge import sync_tenant_edge_redirect_function
+                    sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
+                except Exception as edge_err:
+                    print(f"Warning: Edge redirect sync error for '{adapter.property_id}': {edge_err}")
+
             # Stage 1: Preflight Asset Integrity Audit
             passed_s_file = Path(state_file).resolve() if state_file else None
             passed_l_file = Path(ledger_file).resolve() if ledger_file else None
@@ -3294,6 +3355,22 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Property adapter '{p_id}' not found.")
                 continue
+
+        if (
+            getattr(adapter, "repo_path", None)
+            and adapter.property_id == "profithelm"
+            and (Path(adapter.repo_path) / "functions" / "r").is_dir()
+            and not (
+                "PYTEST_CURRENT_TEST" in os.environ
+                and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
+            )
+        ):
+            try:
+                from pseofactory.edge import sync_tenant_edge_redirect_function
+                sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
+            except Exception as edge_err:
+                if verbose:
+                    print(f"Warning: Edge redirect sync error for '{p_id}': {edge_err}")
 
         report = evaluator.audit_all(adapter)
         drifted_records = report.drifted_assets

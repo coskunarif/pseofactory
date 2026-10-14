@@ -53,9 +53,30 @@ class TregChecker:
         """
         clean_q = query.strip()
         q_key = clean_q.lower()
-        est_volume = 1200
-        est_cpc = 2.0
-        est_kd = 20.0
+        high_intent_tokens = (
+            "calculator",
+            "estimator",
+            "deduction",
+            "compliance",
+            "amortization",
+            "1031",
+            "179",
+            "loan",
+            "tax",
+            "pslf",
+            "depreciation",
+            "forgiveness",
+            "matrix",
+            "schedule",
+        )
+        if any(tok in q_key for tok in high_intent_tokens):
+            est_volume = 2800
+            est_cpc = 4.20
+            est_kd = 16.0
+        else:
+            est_volume = 1200
+            est_cpc = 2.0
+            est_kd = 20.0
         result = TregDurabilityResult(
             query=clean_q,
             endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",

@@ -337,3 +337,64 @@ def test_run_trend_pipeline_convenience_helper(tmp_path):
     assert res["total_spikes"] == 1
     assert len(res["approved_build"]) == 1
     assert res["approved_build"][0]["action"] == "BUILD_PAGE"
+
+
+def test_trend_pipeline_empty_queue_short_circuit_and_duplicate_idempotency(tmp_path):
+    """
+    Verifies:
+    1. Empty spike list short-circuits with status='NO_OP_EMPTY_QUEUE' without creating sink file.
+    2. Duplicate spike deliveries into sink_path are deduplicated via composite idempotency_key.
+    """
+    sink_file = tmp_path / "void_candidates.jsonl"
+    pipeline = TrendPipeline()
+
+    empty_res = pipeline.process_spikes(raw_spikes=[], sink_path=sink_file)
+    assert empty_res["status"] == "NO_OP_EMPTY_QUEUE"
+    assert empty_res["total_spikes"] == 0
+    assert not sink_file.exists()
+
+    # First delivery of 8 spikes
+    first_res = pipeline.process_spikes(raw_spikes=EVALUATION_RECORDS, sink_path=sink_file)
+    assert first_res["status"] == "COMPLETED"
+    assert first_res["deduplicated_sink_count"] == 0
+    lines_after_first = sink_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines_after_first) == 8
+    first_record = json.loads(lines_after_first[0])
+    assert "idempotency_key" in first_record
+    assert first_record["idempotency_key"].count(":") == 3
+
+    # Duplicate delivery of the exact same 8 spikes
+    second_res = pipeline.process_spikes(raw_spikes=EVALUATION_RECORDS, sink_path=sink_file)
+    assert second_res["status"] == "COMPLETED"
+    assert second_res["deduplicated_sink_count"] == 8
+    lines_after_second = sink_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines_after_second) == 8
+
+
+def test_harvested_statutory_suggest_spikes_qualify_for_build(tmp_path):
+    """
+    Verifies that top-ranked suggest completions for high-intent statutory/calculator queries
+    pass noise filtering, offline treg heuristics, and Jev scoring to reach BUILD_PAGE.
+    """
+    from unittest.mock import patch
+    from pseofactory.trends.collectors import GoogleSuggestCollector
+
+    collector = GoogleSuggestCollector()
+    with patch.object(
+        collector,
+        "fetch_suggestions",
+        return_value=[
+            "section 179 deduction calculator 2026",
+            "celebrity gossip oscars dress",
+        ],
+    ):
+        harvested = collector.harvest_spikes(seed_query="section 179")
+    assert len(harvested) == 2
+
+    pipeline = TrendPipeline()
+    res = pipeline.process_spikes(raw_spikes=harvested, sink_path=tmp_path / "harvested.jsonl")
+    approved_queries = [r["query"] for r in res["approved_build"]]
+    rejected_queries = [r["query"] for r in res["rejected"]]
+    assert "section 179 deduction calculator 2026" in approved_queries
+    assert "celebrity gossip oscars dress" in rejected_queries
+

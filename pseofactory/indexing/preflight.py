@@ -907,7 +907,7 @@ def run_indexing_preflight(
     sitemap_path: Optional[Union[str, Path]] = None,
     fixture_path: Optional[Union[str, Path]] = None,
     domain: str = "profithelm.com",
-    property_id: str = "profithelm",
+    property_id: Optional[str] = None,
     min_words: int = 150,
     tier1_cap: int = 150,
     live: bool = False,
@@ -915,9 +915,10 @@ def run_indexing_preflight(
     """
     Top-level functional interface to execute indexing preflight inspection.
     """
+    resolved_property_id = property_id or (domain.split(".")[0].lower() if domain else "profithelm")
     engine = IndexingPreflightEngine(
         domain=domain,
-        property_id=property_id,
+        property_id=resolved_property_id,
         dist_dir=dist_dir,
         min_words=min_words,
         tier1_cap=tier1_cap,

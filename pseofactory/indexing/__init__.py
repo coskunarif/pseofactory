@@ -1,6 +1,14 @@
 from pseofactory.indexer import (
     PushIndexer,
     CrawlerTelemetryListener,
+    ChildSitemapPushLedger,
+    TEMPLATE_SITEMAP_SECTIONS,
+    classify_url_template_section,
+    partition_urls_by_template_section,
+    build_multi_tenant_sitemaps,
+    generate_multi_tenant_sitemaps,
+    discover_tenant_sitemaps,
+    submit_gsc_sitemaps,
     calculate_indexing_velocity,
     audit_indexing_velocity,
     record_indexing_velocity,
@@ -68,6 +76,14 @@ from pseofactory.indexing.milestones import (
 __all__ = [
     "PushIndexer",
     "CrawlerTelemetryListener",
+    "ChildSitemapPushLedger",
+    "TEMPLATE_SITEMAP_SECTIONS",
+    "classify_url_template_section",
+    "partition_urls_by_template_section",
+    "build_multi_tenant_sitemaps",
+    "generate_multi_tenant_sitemaps",
+    "discover_tenant_sitemaps",
+    "submit_gsc_sitemaps",
     "calculate_indexing_velocity",
     "audit_indexing_velocity",
     "record_indexing_velocity",
@@ -129,6 +145,7 @@ __all__ = [
     "RootCauseClassification",
     "DiagnosisResult",
     "GSCRootCauseClassifier",
+    "SectionExclusionClassifier",
     "IndexingFeedbackLoop",
     "THIN_OR_ANSWER_DEFICIENCY",
     "CONTENT_QUALITY_OR_ANSWER_DEFICIENCY",
@@ -144,6 +161,7 @@ from pseofactory.indexing.feedback_loop import (
     RootCauseClassification,
     DiagnosisResult,
     GSCRootCauseClassifier,
+    SectionExclusionClassifier,
     IndexingFeedbackLoop,
     THIN_OR_ANSWER_DEFICIENCY,
     CONTENT_QUALITY_OR_ANSWER_DEFICIENCY,
@@ -154,6 +172,3 @@ from pseofactory.indexing.feedback_loop import (
     ALGORITHMIC_EXPANSION_FREEZE,
     UNKNOWN_OR_UNCLASSIFIED,
 )
-
-
-

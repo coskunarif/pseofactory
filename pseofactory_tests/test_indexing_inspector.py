@@ -214,3 +214,66 @@ def test_recovery_ledger_atomic_persistence(tmp_path):
     assert "profithelm" in saved_data
     assert saved_data["profithelm"]["audit_status"] == "PASS"
     assert "last_inspected" in saved_data
+
+
+def test_inspector_auto_remediate_triggers_closed_loop_feedback(tmp_path):
+    """
+    Verifies DailyIndexingInspector.run_inspection(auto_remediate=True) automatically
+    synthesizes unindexed candidate records from quarantine/velocity/coverage anomalies
+    and triggers IndexingFeedbackLoop.run_feedback_cycle with zero human intervention.
+    """
+    from unittest.mock import patch
+
+    recovery_path = tmp_path / "metric_recovery_ledger.json"
+    telemetry_path = tmp_path / "telemetry.jsonl"
+    rollover_path = tmp_path / "rollover.json"
+    quarantine_path = tmp_path / "quarantine.json"
+    velocity_path = tmp_path / "velocity.json"
+
+    rollover_path.write_text(json.dumps([]), encoding="utf-8")
+    quarantine_path.write_text(
+        json.dumps({
+            "https://profithelm.com/tools/broken-canonical/": {
+                "stage": "CANONICAL_ALIGNMENT",
+                "error": "canonical_mismatch: points to wrong domain",
+            }
+        }),
+        encoding="utf-8",
+    )
+    velocity_path.write_text(json.dumps({"routes": []}), encoding="utf-8")
+
+    inspector = DailyIndexingInspector(
+        tenant_id="profithelm",
+        base_dir=tmp_path,
+        recovery_ledger_path=recovery_path,
+        quarantine_ledger_path=quarantine_path,
+        velocity_ledger_path=velocity_path,
+        rollover_queue_path=rollover_path,
+        telemetry_logger=AtomicTelemetryLogger(log_path=telemetry_path),
+    )
+
+    with patch(
+        "pseofactory.indexing.feedback_loop.IndexingFeedbackLoop.run_feedback_cycle",
+        return_value={"status": "SUCCESS", "repaired": 1},
+    ) as mock_cycle:
+        report = inspector.run_inspection(
+            dry_run=False,
+            auto_remediate=True,
+            coverage_records=[
+                {
+                    "url": "https://profithelm.com/tools/unindexed-calc/",
+                    "coverageState": "Crawled - currently not indexed",
+                    "is_indexed": False,
+                }
+            ],
+        )
+
+    assert mock_cycle.called
+    call_kwargs = mock_cycle.call_args.kwargs
+    unindexed_passed = call_kwargs.get("unindexed_urls") or []
+    passed_urls = [u["url"] for u in unindexed_passed]
+    assert "https://profithelm.com/tools/broken-canonical/" in passed_urls
+    assert "https://profithelm.com/tools/unindexed-calc/" in passed_urls
+    assert "auto_remediation" in report
+    assert report["auto_remediation"]["status"] == "SUCCESS"
+

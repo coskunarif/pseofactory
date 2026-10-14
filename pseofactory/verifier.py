@@ -1543,14 +1543,14 @@ class MasterSEOVerifier:
         issues = []
         sitemap = target / "sitemap.xml"
         urls_checked = 0
+        sitemaps_checked: List[str] = []
 
         if not sitemap.is_file():
             issues.append(f"Missing sitemap.xml at {sitemap}")
         else:
             sitemap_files = [sitemap]
-            for extra_sm in ("sitemap-hubs.xml", "sitemap-leaves.xml"):
-                extra_path = target / extra_sm
-                if extra_path.is_file():
+            for extra_path in sorted(target.glob("sitemap-*.xml")):
+                if extra_path.is_file() and extra_path not in sitemap_files:
                     sitemap_files.append(extra_path)
 
             domain_prefix = f"https://{self.domain}" if self.domain else ""
@@ -1558,9 +1558,13 @@ class MasterSEOVerifier:
 
             for sm_path in sitemap_files:
                 sm_name = sm_path.name
+                sitemaps_checked.append(sm_name)
                 try:
-                    tree = ET.parse(sm_path)
-                    root = tree.getroot()
+                    raw_xml = sm_path.read_text(encoding="utf-8")
+                    if "\u2014" in raw_xml or "\u2013" in raw_xml:
+                        issues.append(f"Forbidden em-dash or en-dash detected in {sm_name}")
+                    tree = ET.fromstring(raw_xml)
+                    root = tree
                     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
                     locs = [elem.text.strip() for elem in root.findall(".//sm:loc", ns) if elem.text]
                     if not locs:
@@ -1591,9 +1595,11 @@ class MasterSEOVerifier:
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_sitemap_gate",
             "urls_checked": urls_checked,
+            "sitemaps_checked": sitemaps_checked,
             "violations_count": len(issues),
             "issues": issues,
         }
+
 
     # 3. Page Titles Gate
     def check_page_titles_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -2301,7 +2307,11 @@ class MasterSEOVerifier:
                                     f"Test fixture tool page 'tools/{child.name}/index.html' leaked into public build without noindex"
                                 )
 
-            for endpoint_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml", "llms.txt", "llms-full.txt", "feed.xml"):
+            endpoint_names = ["sitemap.xml", "llms.txt", "llms-full.txt", "feed.xml"]
+            for sm_f in sorted(target.glob("sitemap-*.xml")):
+                if sm_f.name not in endpoint_names:
+                    endpoint_names.append(sm_f.name)
+            for endpoint_name in endpoint_names:
                 ep_file = target / endpoint_name
                 if ep_file.is_file():
                     ep_text = ep_file.read_text(encoding="utf-8", errors="ignore").lower()
@@ -2311,6 +2321,7 @@ class MasterSEOVerifier:
                     for bad_slug in leaked_test_slugs:
                         if f"/tools/{bad_slug}/" in ep_text or f"/tools/{bad_slug}" in ep_text:
                             issues.append(f"Test fixture tool '{bad_slug}' leaked into public machine endpoint {endpoint_name}")
+
 
         return {
             "status": "PASS" if not issues else "FAIL",

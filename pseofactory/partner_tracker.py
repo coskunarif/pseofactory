@@ -219,6 +219,29 @@ class PartnerTrackingEngine:
                 "Mandatory Title IV statutory forfeiture YMYL disclaimer review",
             ],
         )
+        payroll_cat = (
+            self.monetization_hub.vault_data.get("properties", {})
+            .get("profithelm", {})
+            .get("categories", {})
+            .get("PAYROLL_HR", {})
+        )
+        if isinstance(payroll_cat, dict) and payroll_cat.get("tos_status") == "tos-acceptance-pending":
+            self.action_bus.route_manual_requirement(
+                property_id="profithelm",
+                partner_key="rippling",
+                partner_name="Rippling Unified Workforce Platform",
+                title="PartnerStack ToS Acceptance: Rippling Referral Payouts",
+                description=(
+                    "Rippling PartnerStack tracking link (https://try.rippling.com/mcfo1m09qiwt) is live, "
+                    "but partnership part_jp9R0iYpPGriHu has status tos-acceptance-pending. "
+                    "Accept Terms of Service in PartnerStack dashboard to unlock commission payouts."
+                ),
+                action_type="PARTNER_APPROVAL",
+                severity="MEDIUM",
+                deadline=None,
+                missing_requirements=["Accept Rippling Terms of Service in PartnerStack dashboard"],
+                candidate_url="https://try.rippling.com/mcfo1m09qiwt",
+            )
 
     def _evaluate_property(
         self,

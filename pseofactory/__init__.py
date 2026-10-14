@@ -1072,8 +1072,32 @@ __all__ = [
     "detect_interactive_touch_target_gaps",
     "compute_two_tier_merkle_hash",
     "SitemapGovernor",
+    "ChildSitemapPushLedger",
+    "TEMPLATE_SITEMAP_SECTIONS",
+    "classify_url_template_section",
+    "partition_urls_by_template_section",
+    "build_multi_tenant_sitemaps",
+    "generate_multi_tenant_sitemaps",
+    "discover_tenant_sitemaps",
+    "submit_gsc_sitemaps",
+    "SectionExclusionClassifier",
+    "assert_sitemap_index_parses",
     "govern_sitemap_batch",
     "govern_graduated_exposure",
     "resolve_tenant_distribution_config",
     "parse_subprocess_envelope",
 ]
+
+from pseofactory.contracts import assert_sitemap_index_parses
+from pseofactory.indexer import (
+    ChildSitemapPushLedger,
+    TEMPLATE_SITEMAP_SECTIONS,
+    classify_url_template_section,
+    partition_urls_by_template_section,
+    build_multi_tenant_sitemaps,
+    generate_multi_tenant_sitemaps,
+    discover_tenant_sitemaps,
+    submit_gsc_sitemaps,
+)
+from pseofactory.indexing.feedback_loop import SectionExclusionClassifier
+

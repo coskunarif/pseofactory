@@ -8,6 +8,8 @@ between profithelm and prexvo, and compliant high-effort programmatic page compi
 Zero em-dashes. Zero en-dashes.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import json
@@ -65,7 +67,13 @@ from pseofactory.audit import (
     ContentAccuracyAuditReport,
     ContentAccuracyAuditError,
 )
-from pseofactory.indexing_inspector import DailyIndexingInspector
+
+
+def __getattr__(name: str) -> Any:
+    if name == "DailyIndexingInspector":
+        from pseofactory.indexing_inspector import DailyIndexingInspector
+        return DailyIndexingInspector
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 logger = logging.getLogger("pseofactory.pipeline")
@@ -266,7 +274,7 @@ class FactoryPipeline:
         jev_engine: Optional[JevEngine] = None,
         scanner: Optional[CrossPropertyContaminationScanner] = None,
         tenant_registry: Optional[TenantRegistry] = None,
-        indexing_inspector: Optional[DailyIndexingInspector] = None,
+        indexing_inspector: Optional["DailyIndexingInspector"] = None,
         db: Optional[Any] = None,
     ):
         self.config = config or PipelineConfig()
@@ -291,6 +299,7 @@ class FactoryPipeline:
         self.tenant_registry = tenant_registry or TenantRegistry.default()
         self.indexing_inspector = indexing_inspector
         if self.config.enable_indexing_feedback and self.indexing_inspector is None:
+            from pseofactory.indexing_inspector import DailyIndexingInspector
             self.indexing_inspector = DailyIndexingInspector()
 
     def arbitrate_actions(

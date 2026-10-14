@@ -49,9 +49,12 @@
         "PAYROLL_HR": {
           "primary_partner": "rippling",
           "fallback_partner": "gusto",
-          "direct_url": "https://rippling.com/",
-          "status": "pending",
-          "bounty": "$600-$1600"
+          "direct_url": "https://try.rippling.com/mcfo1m09qiwt",
+          "status": "live",
+          "bounty": "$600-$1600",
+          "partnership_key": "part_jp9R0iYpPGriHu",
+          "stack_key": "stck_lZgJHub85wwvkX",
+          "tos_status": "tos-acceptance-pending"
         },
         "CORPORATE_SPEND": {
           "primary_partner": "ramp",

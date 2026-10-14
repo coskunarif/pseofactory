@@ -600,12 +600,28 @@ def compile_remediation_overlay_spec(
     now = datetime.now(timezone.utc)
     locked_until = (now + timedelta(days=int(lock_days))).isoformat()
 
+    from pseofactory.indexer import classify_url_template_section
+    sec_info = classify_url_template_section(
+        target_url,
+        metadata=candidate,
+        canonical_base=f"https://{domain}",
+    )
+    sec_name = str(candidate.get("section") or candidate.get("template_section") or sec_info["section"])
+    child_sm = str(candidate.get("child_sitemap") or sec_info["child_sitemap"])
+    child_sm_url = str(candidate.get("child_sitemap_url") or f"https://{domain}/{child_sm}")
+    submitted_scope = f"Submitted pages only ({child_sm})"
+
     return {
         "slug": slug,
         "property_id": resolved_tenant,
         "tenant_id": resolved_tenant,
         "target_url": target_url,
         "query": query_clean,
+        "section": sec_name,
+        "template_section": sec_name,
+        "child_sitemap": child_sm,
+        "child_sitemap_url": child_sm_url,
+        "submitted_pages_only_scope": submitted_scope,
         "anomaly_type": anomaly_type,
         "action": action_type,
         "action_type": action_type,
@@ -713,6 +729,11 @@ def prioritize_gsc_signals(
             "query": query,
         }
         overlay_spec = compile_remediation_overlay_spec(merged_cand, tenant_id=item_tenant)
+        merged_cand["section"] = overlay_spec["section"]
+        merged_cand["template_section"] = overlay_spec["template_section"]
+        merged_cand["child_sitemap"] = overlay_spec["child_sitemap"]
+        merged_cand["child_sitemap_url"] = overlay_spec["child_sitemap_url"]
+        merged_cand["submitted_pages_only_scope"] = overlay_spec["submitted_pages_only_scope"]
         spec_bytes = json.dumps(overlay_spec, sort_keys=True).encode("utf-8")
         content_sha256 = hashlib.sha256(spec_bytes).hexdigest()
         idemp_key = compute_composite_idempotency_key(
@@ -728,6 +749,7 @@ def prioritize_gsc_signals(
 
     prioritized.sort(key=lambda x: (-float(x.get("roi_score", 0.0)), str(x.get("target_url", ""))))
     return prioritized
+
 
 
 def evaluate_variance_threshold(
@@ -1155,7 +1177,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             flags=re.IGNORECASE,
         )
 
-    # 3. Upgrade .quick-answer if quick_answer is present
+    injected_sections: List[str] = []
+
+    # 3. Upgrade .quick-answer if quick_answer is present (or inject one if missing)
     quick_answer = _strip_forbidden_dashes(str(overlay_data.get("quick_answer") or "")).strip()
     if quick_answer:
         escaped_qa = html_lib.escape(quick_answer)
@@ -1169,15 +1193,20 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 html,
                 count=1,
             )
-
-    injected_sections: List[str] = []
+        elif 'class="quick-answer' not in html and 'id="quick-answer"' not in html:
+            injected_sections.append(
+                f'<aside id="quick-answer" class="quick-answer answer-box">\n'
+                f'  <div class="quick-answer-body"><p>{escaped_qa}</p></div>\n'
+                f'</aside>'
+            )
 
     # 4a. Injected H2 Headings
-    h2_headings = overlay_data.get("h2_headings", [])
+    h2_headings = overlay_data.get("h2_headings") or overlay_data.get("h2_blocks") or []
     if h2_headings:
         h2_parts = ['<section class="overlay-section overlay-headings" style="margin-top: 2rem; margin-bottom: 2rem;">']
         for h2 in h2_headings:
-            clean_h2 = html_lib.escape(_strip_forbidden_dashes(str(h2)))
+            h2_val = h2.get("heading", "") if isinstance(h2, dict) else str(h2)
+            clean_h2 = html_lib.escape(_strip_forbidden_dashes(str(h2_val)))
             h2_parts.append(f'  <h2 class="section-title" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem;">{clean_h2}</h2>')
             h2_parts.append(f'  <p class="section-desc" style="color: var(--text-secondary, #64748b); margin-bottom: 1.5rem;">Statutory analysis and compliance guidelines for {clean_h2}.</p>')
         h2_parts.append("</section>")
@@ -1274,7 +1303,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         injected_sections.append("\n".join(hl_parts))
 
     # 5. Injected FAQ Additions & FAQPage Schema
-    raw_faqs = overlay_data.get("faq_entries") or overlay_data.get("faq_additions") or overlay_data.get("faq_schema") or []
+    raw_faqs = (
+        overlay_data.get("faq_entries")
+        or overlay_data.get("faq_additions")
+        or overlay_data.get("faq_items")
+        or overlay_data.get("faq_schema")
+        or []
+    )
     faq_items: List[Dict[str, str]] = []
     if isinstance(raw_faqs, list):
         for f in raw_faqs:
@@ -1376,12 +1411,19 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             + "\n".join(injected_sections)
             + "\n</div>"
         )
-        if "</main>" in html:
+        if 'id="gsc-striking-overlay"' in html:
+            pass
+        elif "</main>" in html:
             html = html.replace("</main>", f"{overlay_markup}\n</main>", 1)
+        elif "</body>" in html:
+            html = html.replace("</body>", f"{overlay_markup}\n</body>", 1)
         else:
             html = f"{html}\n{overlay_markup}"
 
     return _strip_forbidden_dashes(html)
+
+
+apply_remediation_overlay_to_html = inject_overlay_into_html
 
 
 class AsyncRemediationQueue:

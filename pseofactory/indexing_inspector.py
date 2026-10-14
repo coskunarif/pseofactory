@@ -29,11 +29,13 @@ DEFAULT_METRIC_RECOVERY_LEDGER = DEFAULT_AGY_DIR / "metric_recovery_ledger.json"
 DEFAULT_QUARANTINE_LEDGER = DEFAULT_AGY_DIR / "indexing_quarantine_ledger.json"
 DEFAULT_VELOCITY_LEDGER = DEFAULT_AGY_DIR / "indexing_velocity_ledger.json"
 DEFAULT_GSC_ROLLOVER_QUEUE = DEFAULT_AGY_DIR / "gsc_rollover_queue.json"
+DEFAULT_CHILD_SITEMAP_LEDGER = DEFAULT_AGY_DIR / "child_sitemap_push_ledger.json"
 
 
 class DailyIndexingInspector:
     """
-    Automated inspector auditing search console indexing pipelines and route health.
+    Automated inspector auditing search console indexing pipelines, child-sitemap registration,
+    per-section coverage attribution, and route health.
     Zero em-dashes. Zero en-dashes.
     """
 
@@ -46,6 +48,7 @@ class DailyIndexingInspector:
         quarantine_ledger_path: Optional[Union[str, Path]] = None,
         velocity_ledger_path: Optional[Union[str, Path]] = None,
         rollover_queue_path: Optional[Union[str, Path]] = None,
+        child_sitemap_ledger_path: Optional[Union[str, Path]] = None,
         telemetry_logger: Optional[AtomicTelemetryLogger] = None,
     ):
         self.tenant_id = tenant_id.lower()
@@ -60,7 +63,13 @@ class DailyIndexingInspector:
         self.quarantine_ledger_path = Path(quarantine_ledger_path).resolve() if quarantine_ledger_path else DEFAULT_QUARANTINE_LEDGER
         self.velocity_ledger_path = Path(velocity_ledger_path).resolve() if velocity_ledger_path else DEFAULT_VELOCITY_LEDGER
         self.rollover_queue_path = Path(rollover_queue_path).resolve() if rollover_queue_path else DEFAULT_GSC_ROLLOVER_QUEUE
+        self.child_sitemap_ledger_path = (
+            Path(child_sitemap_ledger_path).resolve()
+            if child_sitemap_ledger_path
+            else (self.base_dir / ".agy" / "child_sitemap_push_ledger.json")
+        )
         self.telemetry_logger = telemetry_logger or AtomicTelemetryLogger()
+
 
     def _url_belongs_to_tenant(self, url: str, record: Optional[Dict[str, Any]] = None) -> bool:
         """
@@ -406,22 +415,86 @@ class DailyIndexingInspector:
 
         return prompts
 
+    def audit_child_sitemaps_and_section_coverage(
+        self,
+        coverage_records: Optional[List[Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Audits registered child sitemaps in ChildSitemapPushLedger and attributes
+        unindexed drops and quarantine records across template sections (products,
+        categories, articles by date, guides) for isolated 'Submitted pages only' filtering.
+        """
+        from pseofactory.indexer import ChildSitemapPushLedger
+        from pseofactory.indexing.feedback_loop import SectionExclusionClassifier
+
+        l_path = self.child_sitemap_ledger_path
+        if not l_path.exists():
+            alt_l = DEFAULT_CHILD_SITEMAP_LEDGER
+            if alt_l.exists():
+                l_path = alt_l
+
+        ledger = ChildSitemapPushLedger(ledger_path=l_path)
+        registered = ledger.get_tenant_sitemaps(self.tenant_id)
+        verification = ledger.verify_isolated_registration(self.tenant_id)
+
+        records_to_attribute: List[Any] = list(coverage_records) if coverage_records else []
+        if not records_to_attribute:
+            q_audit = self.audit_airlock_quarantine()
+            for cat, items in q_audit.get("details", {}).items():
+                for it in items:
+                    records_to_attribute.append({
+                        "url": it.get("url"),
+                        "error": it.get("reason") or it.get("code") or cat,
+                        "status": "QUARANTINED",
+                    })
+            r_audit = self.audit_gsc_rollover_queue()
+            for u in r_audit.get("sample_urls", []):
+                records_to_attribute.append({
+                    "url": u,
+                    "coverage_state": "Discovered - currently not indexed",
+                    "status": "ROLLOVER_PENDING",
+                })
+
+        canonical_base = f"https://{self.tenant_id}.com"
+        section_cov = SectionExclusionClassifier.attribute_coverage_by_section(
+            records=records_to_attribute,
+            canonical_base=canonical_base,
+            tenant_id=self.tenant_id,
+            registered_sitemaps=registered,
+        )
+
+        return {
+            "status": "PASS",
+            "tenant_id": self.tenant_id,
+            "ledger_path": str(l_path),
+            "registered_sitemaps": registered,
+            "registration_verification": verification,
+            "section_coverage": section_cov,
+        }
+
     def run_inspection(
         self,
         strict: bool = False,
         dry_run: bool = False,
         sample: bool = False,
         gsc_records: Optional[List[GSCDailyMetricRecord]] = None,
+        coverage_records: Optional[List[Any]] = None,
+        auto_remediate: bool = False,
     ) -> Dict[str, Any]:
         """
         Executes complete Loop 3 inspection cycle across GSC rollover queue,
-        airlock quarantine, velocity ledger, and search traffic trajectory.
+        airlock quarantine, velocity ledger, child-sitemap section coverage,
+        and search traffic trajectory.
+        When auto_remediate=True and anomalies or unindexed pages exist,
+        connects diagnosis directly to IndexingFeedbackLoop for closed-loop
+        template reflection and republication.
         Persists findings to metric recovery ledger and emits telemetry.
         """
         rollover_report = self.audit_gsc_rollover_queue()
         quarantine_report = self.audit_airlock_quarantine()
         velocity_report = self.audit_velocity_stagnation()
         traffic_report = self.audit_search_traffic(gsc_records=gsc_records)
+        child_sitemaps_report = self.audit_child_sitemaps_and_section_coverage(coverage_records=coverage_records)
 
         # Overall status determination
         statuses = [
@@ -442,10 +515,11 @@ class DailyIndexingInspector:
             "quarantine": quarantine_report,
             "velocity": velocity_report,
             "traffic": traffic_report,
+            "child_sitemaps": child_sitemaps_report,
         }
         remediation_prompts = self.synthesize_remediation_prompts(audit_summary)
 
-        report = {
+        report: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "tenant_id": self.tenant_id,
             "audit_status": overall_status,
@@ -453,12 +527,74 @@ class DailyIndexingInspector:
             "airlock_quarantine": quarantine_report,
             "velocity_stagnation": velocity_report,
             "search_traffic": traffic_report,
+            "child_sitemaps": child_sitemaps_report,
+            "section_coverage": child_sitemaps_report.get("section_coverage", {}),
             "remediation_prompts": remediation_prompts,
         }
 
+        # Closed-loop autonomous remediation bridge when auto_remediate=True
+        if auto_remediate and (overall_status in ("WARN", "FAIL") or coverage_records):
+            try:
+                from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop, SectionExclusionClassifier
+
+                synthesized_unindexed: List[Dict[str, Any]] = []
+                seen_u: set = set()
+                for c_rec in (coverage_records or []):
+                    if not SectionExclusionClassifier._is_record_indexed(c_rec):
+                        u_val = c_rec.get("url") if isinstance(c_rec, dict) else str(c_rec)
+                        if u_val and u_val not in seen_u:
+                            seen_u.add(u_val)
+                            synthesized_unindexed.append(
+                                c_rec if isinstance(c_rec, dict) else {"url": str(c_rec), "coverage_state": "Crawled - currently not indexed"}
+                            )
+
+                q_details = quarantine_report.get("details", {})
+                for cat, items in (q_details.items() if isinstance(q_details, dict) else []):
+                    for it in items:
+                        u_val = it.get("url")
+                        if u_val and u_val not in seen_u:
+                            seen_u.add(u_val)
+                            synthesized_unindexed.append({
+                                "url": u_val,
+                                "error": it.get("reason") or it.get("code") or cat,
+                                "code": it.get("code") or cat,
+                                "status": "QUARANTINED",
+                            })
+
+                for stalled in velocity_report.get("stalled_routes", []):
+                    if isinstance(stalled, dict):
+                        u_val = stalled.get("domain_url")
+                        if u_val and u_val not in seen_u:
+                            seen_u.add(u_val)
+                            synthesized_unindexed.append({
+                                "url": u_val,
+                                "coverage_state": "Discovered - currently not indexed",
+                                "status": "VELOCITY_STALLED",
+                            })
+
+                loop = IndexingFeedbackLoop(
+                    property_id=self.tenant_id,
+                    base_dir=self.base_dir,
+                    dist_dir=self.base_dir / "dist",
+                    inspector=self,
+                    telemetry_logger=self.telemetry_logger,
+                )
+                auto_rem_res = loop.run_feedback_cycle(
+                    dry_run=dry_run,
+                    live=not dry_run,
+                    unindexed_urls=synthesized_unindexed if synthesized_unindexed else None,
+                    skip_recompile=False,
+                )
+                report["auto_remediation"] = auto_rem_res
+            except Exception as rem_err:
+                report["auto_remediation"] = {
+                    "status": "FAILED",
+                    "error": str(rem_err),
+                }
+
         # Telemetry emission on anomalies
         if overall_status in ("WARN", "FAIL"):
-            action = "ESCALATED" if strict else "RECORDED"
+            action = "AUTO_REMEDIATED" if (auto_remediate and report.get("auto_remediation", {}).get("status") == "SUCCESS") else ("ESCALATED" if strict else "RECORDED")
             err_msg = (
                 f"Daily indexing inspection detected {overall_status} status: "
                 f"rollover={rollover_report.get('status')}, "
@@ -479,6 +615,7 @@ class DailyIndexingInspector:
             self._persist_recovery_ledger(report)
 
         return report
+
 
     def _persist_recovery_ledger(self, report: Dict[str, Any]) -> None:
         """Atomically persists inspection findings into metric_recovery_ledger.json."""
@@ -503,6 +640,7 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
         p.add_argument("--dry-run", action="store_true", help="Perform inspection without writing to recovery ledger")
         p.add_argument("--strict", action="store_true", help="Fail with non-zero exit code on WARN or FAIL status")
         p.add_argument("--sample", action="store_true", help="Inspect small sample of URLs")
+        p.add_argument("--auto-remediate", action="store_true", help="Automatically trigger closed-loop remediation when anomalies are detected")
         p.add_argument("--json", action="store_true", help="Output results as JSON")
         p.add_argument("--recovery-ledger", type=str, default=None, help="Custom metric recovery ledger path")
         p.add_argument("--quarantine-ledger", type=str, default=None, help="Custom quarantine ledger path")
@@ -523,6 +661,7 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
         strict=getattr(args, "strict", False),
         dry_run=getattr(args, "dry_run", False),
         sample=getattr(args, "sample", False),
+        auto_remediate=getattr(args, "auto_remediate", False),
     )
 
     if getattr(args, "json", False):
@@ -533,6 +672,9 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
         print(f"  - Rollover Queue: size={report['gsc_rollover']['queue_size']}, quota_exhausted={report['gsc_rollover']['quota_exhausted']}")
         print(f"  - Quarantine: total={report['airlock_quarantine']['total_quarantined']}, 404s={report['airlock_quarantine']['breakdown'].get('HTTP_404', 0)}")
         print(f"  - Velocity: stalled={report['velocity_stagnation']['stalled_routes_count']}/{report['velocity_stagnation']['routes_monitored']}")
+        if "auto_remediation" in report:
+            ar = report["auto_remediation"]
+            print(f"  - Auto-Remediation: status={ar.get('status')}, recompiled={ar.get('repair_summary', {}).get('recompiled_assets_count', 0)}")
         if report.get("remediation_prompts"):
             print("  Suggested Remediation Prompts:")
             for prompt in report["remediation_prompts"]:
