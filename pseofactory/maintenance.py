@@ -2953,9 +2953,16 @@ class MaintenanceLifecycle:
 
                 if runner is not None:
                     try:
-                        trend_res = runner.run_cron_cycle(property_filter=adapter.property_id, dry_run=dry_run)
+                        trend_res = runner.run_cron_cycle(
+                            property_filter=adapter.property_id,
+                            dry_run=dry_run,
+                            include_unassigned=True,
+                        )
                     except TypeError:
-                        trend_res = runner.run_cron_cycle(dry_run=dry_run)
+                        try:
+                            trend_res = runner.run_cron_cycle(property_filter=adapter.property_id, dry_run=dry_run)
+                        except TypeError:
+                            trend_res = runner.run_cron_cycle(dry_run=dry_run)
 
                     trend_status_val = trend_res.get("status", "SUCCESS") if isinstance(trend_res, dict) else "SUCCESS"
                     if isinstance(trend_res, dict):

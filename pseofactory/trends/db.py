@@ -362,6 +362,42 @@ class TrendHistoryDB:
                 "CREATE INDEX IF NOT EXISTS idx_ceiling_snapshots_prop_time ON gsc_ceiling_snapshots(property_id, computed_at DESC);"
             )
 
+            # 11. market_intel_candidates
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS market_intel_candidates (
+                    tenant_id TEXT PRIMARY KEY,
+                    brand_name TEXT NOT NULL,
+                    recommended_domain TEXT NOT NULL,
+                    vertical_id TEXT NOT NULL,
+                    vertical_name TEXT NOT NULL,
+                    domain_archetype TEXT NOT NULL,
+                    rank INTEGER NOT NULL,
+                    fast_money_score REAL NOT NULL,
+                    composite_profit_yield REAL NOT NULL,
+                    buyer_intent_score REAL NOT NULL,
+                    ease_of_ranking_score REAL NOT NULL,
+                    mean_keyword_difficulty REAL NOT NULL,
+                    position_zero_vacant_ratio REAL NOT NULL,
+                    commission_offer_score REAL NOT NULL,
+                    aggregate_search_volume INTEGER NOT NULL,
+                    mean_cpc_usd REAL NOT NULL,
+                    expected_bounty_usd REAL NOT NULL,
+                    effective_partner_yield REAL NOT NULL,
+                    projected_monthly_revenue_usd REAL NOT NULL,
+                    estimated_days_to_first_dollar INTEGER NOT NULL,
+                    estimated_days_to_top_10 INTEGER NOT NULL,
+                    min_approval_friction_days INTEGER NOT NULL,
+                    isolation_boundary_verified INTEGER NOT NULL CHECK(isolation_boundary_verified IN (0, 1)),
+                    candidate_payload TEXT NOT NULL,
+                    evaluated_at TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_market_intel_candidates_score ON market_intel_candidates(fast_money_score DESC, rank ASC);"
+            )
+
     # -------------------------------------------------------------------------
     # Crawl Cycle Operations
     # -------------------------------------------------------------------------
@@ -1117,3 +1153,80 @@ class TrendHistoryDB:
                 ),
             )
         return snapshot_id
+
+    # -------------------------------------------------------------------------
+    # Market Intelligence Tenant Candidate Operations
+    # -------------------------------------------------------------------------
+
+    def upsert_market_intel_candidate(
+        self,
+        candidate: Dict[str, Any],
+        evaluated_at: Optional[str] = None,
+    ) -> None:
+        """Idempotently upserts a ranked greenfield tenant candidate into market_intel_candidates."""
+        now_iso = evaluated_at or datetime.now(timezone.utc).isoformat()
+        payload_json = json.dumps(candidate)
+        assert_no_forbidden_dashes(payload_json, "upsert_market_intel_candidate.payload")
+        conn = self.get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO market_intel_candidates (
+                tenant_id, brand_name, recommended_domain, vertical_id,
+                vertical_name, domain_archetype, rank, fast_money_score,
+                composite_profit_yield, buyer_intent_score, ease_of_ranking_score,
+                mean_keyword_difficulty, position_zero_vacant_ratio,
+                commission_offer_score, aggregate_search_volume, mean_cpc_usd,
+                expected_bounty_usd, effective_partner_yield,
+                projected_monthly_revenue_usd, estimated_days_to_first_dollar,
+                estimated_days_to_top_10, min_approval_friction_days,
+                isolation_boundary_verified, candidate_payload, evaluated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                str(candidate["tenant_id"]),
+                str(candidate["brand_name"]),
+                str(candidate["recommended_domain"]),
+                str(candidate["vertical_id"]),
+                str(candidate["vertical_name"]),
+                str(candidate["domain_archetype"]),
+                int(candidate.get("rank", 1)),
+                float(candidate["fast_money_score"]),
+                float(candidate["composite_profit_yield"]),
+                float(candidate["buyer_intent_score"]),
+                float(candidate["ease_of_ranking_score"]),
+                float(candidate["mean_keyword_difficulty"]),
+                float(candidate["position_zero_vacant_ratio"]),
+                float(candidate["commission_offer_score"]),
+                int(candidate["aggregate_search_volume"]),
+                float(candidate["mean_cpc_usd"]),
+                float(candidate["expected_bounty_usd"]),
+                float(candidate["effective_partner_yield"]),
+                float(candidate["projected_monthly_revenue_usd"]),
+                int(candidate["estimated_days_to_first_dollar"]),
+                int(candidate["estimated_days_to_top_10"]),
+                int(candidate["min_approval_friction_days"]),
+                1 if candidate.get("isolation_boundary_verified", True) else 0,
+                payload_json,
+                now_iso,
+            ),
+        )
+
+    def get_market_intel_candidates(self, min_fast_money_score: float = 0.0) -> List[Dict[str, Any]]:
+        """Retrieves persisted market intelligence tenant candidates ordered by rank ASC."""
+        conn = self.get_connection()
+        rows = conn.execute(
+            """
+            SELECT candidate_payload, evaluated_at
+            FROM market_intel_candidates
+            WHERE fast_money_score >= ?
+            ORDER BY rank ASC, fast_money_score DESC;
+            """,
+            (float(min_fast_money_score),),
+        ).fetchall()
+        results: List[Dict[str, Any]] = []
+        for r in rows:
+            item = json.loads(r["candidate_payload"])
+            item["evaluated_at"] = r["evaluated_at"]
+            results.append(item)
+        return results
+

@@ -49,10 +49,34 @@ class TregChecker:
     def _offline_heuristic(self, query: str, reason: str = "offline_fallback") -> TregDurabilityResult:
         """
         Deterministic offline fallback heuristic when treg fails, is unconfigured, or budget is low.
+        Supports both existing tenant statutory queries and greenfield market-intelligence verticals.
         Zero em-dashes. Zero en-dashes.
         """
         clean_q = query.strip()
         q_key = clean_q.lower()
+
+        try:
+            from pseofactory.market_intel import GREENFIELD_HIGH_INTENT_TOKENS, match_greenfield_vertical
+            v_match = match_greenfield_vertical(q_key)
+            if v_match is not None:
+                for tool in v_match.get("anchor_tools", []):
+                    if q_key == tool["query"].lower():
+                        return TregDurabilityResult(
+                            query=clean_q,
+                            endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",
+                            search_volume=int(tool["search_volume"]),
+                            cpc_usd=float(tool["cpc_usd"]),
+                            competition_index=0.35,
+                            keyword_difficulty=float(tool["keyword_difficulty"]),
+                            position_zero_vacant=bool(tool["position_zero_vacant"]),
+                            historical_stability=float(tool.get("historical_stability", 0.90)),
+                            checked_at=datetime.now(timezone.utc).isoformat(),
+                            raw_ideas=[],
+                        )
+            is_greenfield_high_intent = any(tok in q_key for tok in GREENFIELD_HIGH_INTENT_TOKENS)
+        except Exception:
+            is_greenfield_high_intent = False
+
         high_intent_tokens = (
             "calculator",
             "estimator",
@@ -69,14 +93,21 @@ class TregChecker:
             "matrix",
             "schedule",
         )
-        if any(tok in q_key for tok in high_intent_tokens):
+        if is_greenfield_high_intent:
+            est_volume = 3800
+            est_cpc = 14.20
+            est_kd = 16.0
+            est_stability = 0.89
+        elif any(tok in q_key for tok in high_intent_tokens):
             est_volume = 2800
             est_cpc = 4.20
             est_kd = 16.0
+            est_stability = 0.85
         else:
             est_volume = 1200
             est_cpc = 2.0
             est_kd = 20.0
+            est_stability = 0.85
         result = TregDurabilityResult(
             query=clean_q,
             endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",
@@ -85,7 +116,7 @@ class TregChecker:
             competition_index=0.25,
             keyword_difficulty=est_kd,
             position_zero_vacant=True,
-            historical_stability=0.85,
+            historical_stability=est_stability,
             checked_at=datetime.now(timezone.utc).isoformat(),
             raw_ideas=[],
         )

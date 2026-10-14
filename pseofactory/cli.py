@@ -589,6 +589,7 @@ def cmd_trend_cron(args: argparse.Namespace) -> int:
             seeds=args.seeds,
             property_filter=args.property,
             dry_run=args.dry_run,
+            include_unassigned=getattr(args, "include_unassigned", False),
         )
         if args.json:
             print(json.dumps(result, indent=2))
@@ -1296,6 +1297,84 @@ def cmd_indexing_feedback_loop(args: argparse.Namespace) -> int:
     return 0 if result.get("status") in ("SUCCESS", "PARTIAL") else 1
 
 
+def cmd_market_intel(args: argparse.Namespace) -> int:
+    """
+    Executes the Market Intelligence Workflow measuring buyer intent, organic ranking difficulty,
+    and active commission offers to rank the fastest-monetizing new programmatic tenant candidates.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.market_intel import MarketIntelligenceEngine
+
+    db_path = getattr(args, "db_path", "pseofactory/trends/data/trend_history.db")
+    engine = MarketIntelligenceEngine(db_path=db_path)
+
+    query_arg = getattr(args, "query", None)
+    if query_arg:
+        q_res = engine.evaluate_query_opportunity(query=query_arg)
+        if getattr(args, "json", False):
+            print(json.dumps(q_res, indent=2))
+        else:
+            print(
+                f"[MARKET INTEL QUERY] {q_res['query']} -> Tenant: {q_res['recommended_brand_name']} ({q_res['recommended_domain']})"
+            )
+            print(
+                f"  Fast-Money Score: {q_res['fast_money_score']:.2f} | "
+                f"Buyer Intent: {q_res['buyer_intent']['buyer_intent_score']:.2f} | "
+                f"Ease of Ranking: {q_res['ranking_difficulty']['ease_of_ranking_score']:.2f} (KD {q_res['keyword_difficulty']:.1f}) | "
+                f"Commission Score: {q_res['active_commission_offers']['commission_offer_score']:.2f}"
+            )
+            print(
+                f"  Expected Bounty: ${q_res['active_commission_offers']['expected_bounty_usd']:.2f} | "
+                f"Projected Monthly Rev: ${q_res['projected_monthly_revenue_usd']:.2f} | "
+                f"Est. Days to First Dollar: {q_res['estimated_days_to_first_dollar']}d"
+            )
+        return 0
+
+    sync_db = getattr(args, "sync_db", False)
+    confirm_cycles = getattr(args, "confirm_three_cycles", False)
+    output_path = getattr(args, "output", None)
+    top_k = getattr(args, "top", None)
+
+    report = engine.run_workflow(
+        sync_db=sync_db,
+        simulate_three_cycle_confirmation=confirm_cycles,
+        output_path=output_path,
+        top_k=top_k,
+    )
+
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2))
+    else:
+        print("=" * 88)
+        print("PSEOFACTORY MARKET INTELLIGENCE: TOP NEW TENANT CANDIDATES (FASTEST REAL MONEY)")
+        print("=" * 88)
+        for cand in report["top_new_tenant_candidates"]:
+            primary_offer = cand["active_commission_offers"][0] if cand["active_commission_offers"] else {}
+            print(
+                f"#{cand['rank']} {cand['brand_name']} ({cand['recommended_domain']}) | "
+                f"Fast-Money Score: {cand['fast_money_score']:.2f}/100 | "
+                f"Yield: {cand['composite_profit_yield']:.2f}"
+            )
+            print(
+                f"   Vertical: {cand['vertical_name']}"
+            )
+            print(
+                f"   Buyer Intent: {cand['buyer_intent_score']:.1f}/100 (Mean CPC ${cand['mean_cpc_usd']:.2f}, Vol {cand['aggregate_search_volume']:,}/mo) | "
+                f"Ranking Ease: {cand['ease_of_ranking_score']:.1f}/100 (Mean KD {cand['mean_keyword_difficulty']:.1f})"
+            )
+            print(
+                f"   Commission Score: {cand['commission_offer_score']:.1f}/100 | "
+                f"Lead Offer: {primary_offer.get('partner_name', 'N/A')} (${cand['expected_bounty_usd']:.0f} bounty via {primary_offer.get('network', 'N/A')})"
+            )
+            print(
+                f"   Projected Monthly Revenue: ${cand['projected_monthly_revenue_usd']:,.2f}/mo | "
+                f"Est. Days to First Dollar: {cand['estimated_days_to_first_dollar']} days | "
+                f"Isolation Verified: {cand['isolation_boundary_verified']}"
+            )
+            print("-" * 88)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
@@ -1398,8 +1477,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_cron.add_argument("--cycle-id", type=str, default=None, help="Explicit cycle identifier (default: auto-generated UTC timestamp/hash)")
     p_cron.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold for asset build/refactor")
     p_cron.add_argument("--property", type=str, default=None, help="Optional tenant filter (prexvo, profithelm, unassigned)")
+    p_cron.add_argument("--include-unassigned", action="store_true", help="Also evaluate unassigned greenfield clusters when --property is set")
     p_cron.add_argument("--json", action="store_true", help="Output machine-readable JSON cycle summary")
     p_cron.add_argument("--dry-run", action="store_true", help="Evaluate cycle without committing mutations to SQLite history")
+
+    # market-intel
+    p_mi = subparsers.add_parser(
+        "market-intel",
+        help="Evaluate buyer intent, organic ranking difficulty, and active commission offers for new tenant launches",
+    )
+    p_mi.add_argument("--db-path", type=str, default="pseofactory/trends/data/trend_history.db", help="Path to persistent SQLite trend history database")
+    p_mi.add_argument("--query", type=str, default=None, help="Evaluate a single search query across all 3 market-intelligence pillars")
+    p_mi.add_argument("--top", type=int, default=None, help="Limit output to top N ranked tenant candidates")
+    p_mi.add_argument("--sync-db", action="store_true", help="Persist ranked tenant candidates into market_intel_candidates table")
+    p_mi.add_argument("--confirm-three-cycles", action="store_true", help="Run 3-cycle longitudinal confirmation for greenfield anchor tools in DB")
+    p_mi.add_argument("--output", type=str, default=None, help="Optional JSON file path to write the market intelligence report")
+    p_mi.add_argument("--json", action="store_true", help="Output machine-readable JSON market intelligence report")
 
     # trend-backfill
     p_backfill = subparsers.add_parser("trend-backfill", help="Execute historical session crawl and idempotent bulk insert into trend history DB")
@@ -1607,6 +1700,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_trend_monitor(args)
     elif args.command == "trend-cron":
         return cmd_trend_cron(args)
+    elif args.command == "market-intel":
+        return cmd_market_intel(args)
     elif args.command == "trend-backfill":
         return cmd_trend_backfill(args)
     elif args.command == "sync-monetization":
@@ -1636,4 +1731,5 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 

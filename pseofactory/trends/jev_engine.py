@@ -132,6 +132,27 @@ class JevEngine:
                 "depreciation",
                 "pslf",
                 "repayment",
+                "tariff",
+                "hts",
+                "nmfc",
+                "surety",
+                "bond",
+                "workers comp",
+                "lien",
+                "retainage",
+                "davis bacon",
+                "cmmc",
+                "sprs",
+                "soc 2",
+                "soc2",
+                "hipaa",
+                "nem 3.0",
+                "demand charge",
+                "srec",
+                "wrvu",
+                "rvu",
+                "cpt",
+                "cbct",
             ]
         ):
             return {"jev_score": 1.80, "durable_prob": 0.92}
@@ -204,7 +225,10 @@ class JevEngine:
         elif intent_tier == "student_loan_ymyl":
             tier_multiplier = 1.08
         elif intent_tier == "prospective_niche_expansion":
-            tier_multiplier = 1.02
+            if int(monetization.get("active_offers_count", 0)) >= 2:
+                tier_multiplier = 1.08
+            else:
+                tier_multiplier = 1.02
         elif intent_tier == "unmonetizable_noise":
             tier_multiplier = 0.15
 

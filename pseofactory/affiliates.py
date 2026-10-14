@@ -1434,6 +1434,7 @@ PROSPECTIVE_NICHE_TOOL_TOKENS: Tuple[str, ...] = (
     "estimator",
     "matrix",
     "modeler",
+    "simulator",
     "projection",
     "penalty",
     "compliance",
@@ -1441,6 +1442,7 @@ PROSPECTIVE_NICHE_TOOL_TOKENS: Tuple[str, ...] = (
     "roi",
     "yield",
     "margin",
+    "markup",
     "premium",
     "insurance",
     "financing",
@@ -1456,10 +1458,28 @@ PROSPECTIVE_NICHE_TOOL_TOKENS: Tuple[str, ...] = (
     "lease",
     "buyout",
     "surety",
+    "bond",
     "malpractice",
     "solar itc",
+    "nem 3.0",
+    "demand charge",
+    "srec",
     "hipaa",
     "soc2",
+    "soc 2",
+    "cmmc",
+    "sprs",
+    "nmfc",
+    "hts",
+    "demurrage",
+    "retainage",
+    "lien",
+    "wrvu",
+    "rvu",
+    "rate",
+    "cost",
+    "fee",
+    "payback",
 )
 
 
@@ -1635,6 +1655,7 @@ def qualify_monetization_opportunity(
 
     is_restricted_ps = False
     commercial_offers_allowed = True
+    greenfield_meta: Dict[str, Any] = {}
 
     # 3. Route to canonical intent tier and property
     if is_student_loan or prop_explicit == "prexvo":
@@ -1674,19 +1695,42 @@ def qualify_monetization_opportunity(
     elif prop_explicit == "unassigned" or (not prop_explicit and not is_b2b and not is_consumer_fin and has_tool_signal):
         resolved_prop = "unassigned"
         intent_tier = "prospective_niche_expansion"
-        is_comm_niche = any(
+        from pseofactory.market_intel import (
+            match_greenfield_vertical,
+            score_active_commission_offers,
+            score_buyer_intent,
+        )
+        v_match = match_greenfield_vertical(combined)
+        comm_eval = score_active_commission_offers(
+            v_match["vertical_id"] if v_match else combined,
+            cpc_usd=cpc,
+        )
+        buyer_eval = score_buyer_intent(q_clean or s_clean, cpc_usd=cpc)
+
+        is_comm_niche = bool(v_match is not None) or any(
             t in combined
             for t in (
                 "commercial", "enterprise", "corporate", "b2b", "compliance",
-                "hipaa", "soc2", "freight", "factoring", "solar itc",
-                "surety", "malpractice", "equipment", "lease", "buyout", "tariff",
+                "hipaa", "soc2", "soc 2", "cmmc", "sprs", "freight", "factoring",
+                "solar itc", "nem 3.0", "demand charge", "srec", "surety", "bond",
+                "workers comp", "malpractice", "equipment", "lease", "buyout",
+                "tariff", "hts", "nmfc", "lien", "retainage", "wrvu", "rvu",
             )
         )
-        bounty_usd = round(max(120.0, cpc * 28.0) if (is_comm_niche or cpc >= 4.0) else max(45.0, cpc * 18.0), 2)
-        eff_yield = round(bounty_usd * 0.35, 2)
-        intent_weight = 1.20 if (is_comm_niche or cpc >= 4.0) else 0.95
-        y_asset = round(min(1.60, max(0.55, (bounty_usd / 200.0) * 0.55 + (cpc / 4.5) * 0.45)), 4)
-        rec_partners = ["direct_cpa_lead_gen"] if (is_comm_niche or cpc >= 4.0) else ["programmatic_affiliate_cpa"]
+        synth_bounty = round(max(120.0, cpc * 28.0) if (is_comm_niche or cpc >= 4.0) else max(45.0, cpc * 18.0), 2)
+        if v_match is not None and comm_eval.primary_offer is not None:
+            bounty_usd = round(max(synth_bounty, comm_eval.expected_bounty_usd), 2)
+            eff_yield = round(max(bounty_usd * 0.38, comm_eval.effective_partner_yield), 2)
+            all_offers = [comm_eval.primary_offer] + list(comm_eval.backup_offers)
+            rec_partners = [o.partner_key for o in all_offers]
+            intent_weight = round(1.25 + min(0.15, (comm_eval.commission_offer_score / 100.0) * 0.15), 4)
+        else:
+            bounty_usd = synth_bounty
+            eff_yield = round(bounty_usd * 0.35, 2)
+            rec_partners = ["direct_cpa_lead_gen"] if (is_comm_niche or cpc >= 4.0) else ["programmatic_affiliate_cpa"]
+            intent_weight = 1.20 if (is_comm_niche or cpc >= 4.0) else 0.95
+
+        y_asset = round(min(1.75, max(0.55, (bounty_usd / 200.0) * 0.55 + (cpc / 4.5) * 0.45)), 4)
         disclosures = dict(PROFITHELM_DISCLOSURES)
         alignment = {"aligned": True, "violations": []}
         qualified = bool(
@@ -1698,6 +1742,21 @@ def qualify_monetization_opportunity(
         )
         rejection_reason = "" if qualified else "Prospective niche below minimum CPC/volume/durability monetization bar"
         primary_obj = None
+        greenfield_meta = {
+            "vertical_id": comm_eval.vertical_id,
+            "recommended_tenant_id": v_match["tenant_id"] if v_match else "unassigned",
+            "recommended_domain": v_match["recommended_domain"] if v_match else "",
+            "buyer_intent_score": buyer_eval.buyer_intent_score,
+            "commission_offer_score": comm_eval.commission_offer_score,
+            "active_offers_count": comm_eval.active_offers_count,
+            "instant_active_offers_count": comm_eval.instant_active_offers_count,
+            "networks_represented": comm_eval.networks_represented,
+            "min_approval_friction_days": comm_eval.min_approval_friction_days,
+            "active_commission_offers": (
+                ([comm_eval.primary_offer.to_dict()] if comm_eval.primary_offer else [])
+                + [o.to_dict() for o in comm_eval.backup_offers]
+            ),
+        }
 
     elif is_b2b or is_consumer_fin or prop_explicit in ("profithelm", "exchange1031"):
         resolved_prop = "exchange1031" if (prop_explicit == "exchange1031" or "1031" in s_clean) and prop_explicit == "exchange1031" else "profithelm"
@@ -1795,7 +1854,7 @@ def qualify_monetization_opportunity(
         else (rec_partners[0] if rec_partners else "")
     )
 
-    return {
+    result_payload: Dict[str, Any] = {
         "query": q_clean,
         "slug": s_clean,
         "property_id": resolved_prop,
@@ -1815,6 +1874,9 @@ def qualify_monetization_opportunity(
         "alignment_violations": alignment.get("violations", []),
         "disclosures_required": disclosures,
     }
+    if greenfield_meta:
+        result_payload.update(greenfield_meta)
+    return result_payload
 
 
 # Self-attestation on module import

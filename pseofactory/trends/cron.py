@@ -91,7 +91,21 @@ PROFITHELM_STATUTORY_TOKENS: List[str] = [
     "financial simulation",
 ]
 
-DEFAULT_CRON_SEEDS = "calculator,tax deduction,compliance,student loan,amortization"
+GREENFIELD_DISCOVERY_SEEDS: List[str] = [
+    "workers comp calculator",
+    "surety bond cost calculator",
+    "tariff landed cost calculator",
+    "freight factoring fee calculator",
+    "contractor lien deadline by state",
+    "soc 2 compliance cost calculator",
+    "commercial solar itc calculator",
+    "medical equipment lease calculator",
+]
+
+DEFAULT_CRON_SEEDS = (
+    "calculator,tax deduction,compliance,student loan,amortization,"
+    + ",".join(GREENFIELD_DISCOVERY_SEEDS)
+)
 
 
 class TrendCronRunner:
@@ -253,6 +267,7 @@ class TrendCronRunner:
         property_filter: Optional[str] = None,
         dry_run: bool = False,
         total_site_impressions: int = 500,
+        include_unassigned: bool = False,
     ) -> Dict[str, Any]:
         """
         Public entrypoint for executing autonomous trend cron cycle.
@@ -265,6 +280,7 @@ class TrendCronRunner:
             property_filter=property_filter,
             dry_run=dry_run,
             total_site_impressions=total_site_impressions,
+            include_unassigned=include_unassigned,
         )
 
     def run_cycle(
@@ -275,6 +291,7 @@ class TrendCronRunner:
         property_filter: Optional[str] = None,
         dry_run: bool = False,
         total_site_impressions: int = 500,
+        include_unassigned: bool = False,
     ) -> Dict[str, Any]:
         """
         Executes complete daily cron monitoring cycle.
@@ -431,9 +448,10 @@ class TrendCronRunner:
                 assign_basis = prop_info["basis"]
                 scan_passed = prop_info["contamination_scan_passed"]
 
-                # Apply CLI property filter if configured
+                # Apply CLI property filter if configured (allow unassigned greenfield clusters when include_unassigned is True)
                 if property_filter and assigned_property != property_filter:
-                    continue
+                    if not (include_unassigned and assigned_property == "unassigned"):
+                        continue
 
                 assign_rec = PropertyAssignmentRecord(
                     assignment_id=f"asgn_{slug}_{cycle_id}",
@@ -757,6 +775,23 @@ class TrendCronRunner:
                             proposal_id = f"prop_{slug}_{cycle_id}"
                             cluster_title = clean_q.title()
 
+                            from pseofactory.market_intel import MarketIntelligenceEngine
+                            mi_engine = MarketIntelligenceEngine(db_path=self.db_path)
+                            mi_enrichment = mi_engine.enrich_niche_proposal(
+                                query=clean_q,
+                                slug=slug,
+                                search_volume=treg_res.search_volume,
+                                cpc_usd=treg_res.cpc_usd,
+                                keyword_difficulty=treg_res.keyword_difficulty,
+                                position_zero_vacant=treg_res.position_zero_vacant,
+                                jev_score=decision.jev_score,
+                                durable_prob=decision.durable_prob,
+                                composite_profit_yield=decision.composite_profit_yield,
+                                consecutive_streak=consecutive_streak,
+                                monetization_qual=monetization_qual,
+                                now_iso=now_iso,
+                            )
+
                             proposal_spec = {
                                 "cluster_slug": slug,
                                 "cluster_title": cluster_title,
@@ -774,16 +809,13 @@ class TrendCronRunner:
                                 "affiliate_fit": cand.intent_cluster,
                                 "intent_tier": monetization_qual.get("intent_tier", "prospective_niche_expansion"),
                                 "monetization_qualified": True,
-                                "recommended_partners": monetization_qual.get("recommended_partners", []),
-                                "expected_bounty_usd": monetization_qual.get("expected_bounty_usd", 0.0),
-                                "effective_partner_yield": monetization_qual.get("effective_partner_yield", 0.0),
-                                "estimated_monthly_revenue_usd": monetization_qual.get("estimated_monthly_revenue_usd", 0.0),
+                                "recommended_partners": mi_enrichment["recommended_partners"],
+                                "expected_bounty_usd": mi_enrichment["expected_bounty_usd"],
+                                "effective_partner_yield": mi_enrichment["effective_partner_yield"],
+                                "estimated_monthly_revenue_usd": mi_enrichment["estimated_monthly_revenue_usd"],
                                 "monetization_qualification": monetization_qual,
-                                "blueprint": {
-                                    "archetype": "standalone_factory",
-                                    "scaffold_recommended": True,
-                                    "proposed_at": now_iso,
-                                },
+                                "market_intelligence": mi_enrichment,
+                                "blueprint": mi_enrichment["blueprint"],
                             }
 
                             proposal = NicheClusterProposal(
