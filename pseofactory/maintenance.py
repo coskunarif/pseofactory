@@ -467,15 +467,6 @@ class PropertyAdapter(ABC):
 
     @property
     def base_dirs(self) -> Optional[List[Path]]:
-        if self.repo_path and self.property_id:
-            prop_pkg = self.repo_path / self.property_id
-            if prop_pkg.is_dir() and (prop_pkg / "builder.py").is_file():
-                try:
-                    content = (prop_pkg / "builder.py").read_text(encoding="utf-8", errors="ignore")
-                    if "base_dirs" in content:
-                        return [prop_pkg]
-                except Exception:
-                    pass
         return None
 
     @property
@@ -2691,6 +2682,12 @@ class MaintenanceLifecycle:
                         duration_seconds=duration,
                         trend_status="SKIPPED_UNVERIFIED_FLEET",
                     )
+            elif force and not dry_run and hasattr(adapter, "build_all"):
+                try:
+                    if adapter.build_all():
+                        cascade_res["refactored"] = report.total_assets_checked
+                except Exception as f_err:
+                    print(f"Warning: Forced full rebuild error for '{adapter.property_id}': {f_err}")
 
             # Stage 4: Opportunity Discovery (TrendCronRunner)
             trend_status_val: Optional[str] = None
@@ -2877,6 +2874,25 @@ class MaintenanceLifecycle:
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
 
+            # Write tracked substrate_lock.json on real tenant repositories before GitOps stage
+            if not dry_run and getattr(adapter, "repo_path", None):
+                t_repo = Path(adapter.repo_path)
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                    try:
+                        cur_sub_hash = compute_engine_hash()
+                        lock_payload = {
+                            "property_id": adapter.property_id,
+                            "engine_hash": cur_sub_hash,
+                            "substrate_hash": cur_sub_hash,
+                            "total_assets": post_report.total_assets_checked,
+                        }
+                        (t_repo / "substrate_lock.json").write_text(
+                            json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8",
+                        )
+                    except Exception as sl_err:
+                        print(f"Warning: Failed to update substrate_lock.json for '{adapter.property_id}': {sl_err}")
+
             # Stage 8: GitOps Worktree Commit & Edge Verification Latch
             if enable_gitops:
                 from pseofactory.gitops import GitOpsCoordinator
@@ -2986,6 +3002,10 @@ class MaintenanceLifecycle:
             if not dry_run:
                 current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+                if getattr(adapter, "repo_path", None) and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/"):
+                    ws_root = Path("/home/ubuntuadmin/projects")
+                    record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+                    record_engine_hash(ws_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
             else:
                 current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
@@ -3222,6 +3242,7 @@ def reflect_and_recompile_all_assets(
     properties: Optional[List[str]] = None,
     force: bool = False,
     verbose: bool = False,
+    latch_state: bool = True,
 ) -> Dict[str, Any]:
     """
     Scans workspace properties and audits existing static assets using
@@ -3280,7 +3301,32 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Error rebuilding assets for '{p_id}': {b_err}")
 
-        if recompiled_count > 0:
+        build_verified = (
+            evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+            if recompiled_count > 0
+            else report
+        )
+
+        if recompiled_count > 0 and build_verified.status == "PASS":
+            if getattr(adapter, "repo_path", None):
+                t_repo = Path(adapter.repo_path)
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                    try:
+                        cur_sub_hash = compute_engine_hash()
+                        lock_payload = {
+                            "property_id": adapter.property_id,
+                            "engine_hash": cur_sub_hash,
+                            "substrate_hash": cur_sub_hash,
+                            "total_assets": build_verified.total_assets_checked,
+                        }
+                        (t_repo / "substrate_lock.json").write_text(
+                            json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        pass
+
+        if recompiled_count > 0 and latch_state and build_verified.status == "PASS":
             try:
                 s_file = adapter.dist_dir.parent / ".agy" / "engine_hash.json"
                 l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
@@ -3302,7 +3348,9 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
 
-        post_report = evaluator.audit_all(adapter) if recompiled_count > 0 else report
+        post_report = (
+            evaluator.audit_all(adapter) if (recompiled_count > 0 and latch_state) else build_verified
+        )
 
         results["total_assets_checked"] += report.total_assets_checked
         results["total_drifted"] += len(drifted_records)

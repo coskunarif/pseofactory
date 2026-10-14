@@ -18,3 +18,4 @@ trends/data/*.db*
 run_manifest.json
 **/.tgrep/
 syndication/
+.indexing_intent_wal.jsonl

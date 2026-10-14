@@ -778,10 +778,9 @@ class PushIndexer:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         line = json.dumps(record) + "\n"
-        wal_paths = [
-            self.base_dir / ".indexing_intent_wal.jsonl",
-            self.base_dir / ".agy" / ".indexing_intent_wal.jsonl",
-        ]
+        wal_paths = [self.base_dir / ".agy" / ".indexing_intent_wal.jsonl"]
+        if not (self.base_dir / ".git").exists():
+            wal_paths.insert(0, self.base_dir / ".indexing_intent_wal.jsonl")
         for wp in wal_paths:
             try:
                 wp.parent.mkdir(parents=True, exist_ok=True)
@@ -804,10 +803,9 @@ class PushIndexer:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         line = json.dumps(record) + "\n"
-        wal_paths = [
-            self.base_dir / ".indexing_intent_wal.jsonl",
-            self.base_dir / ".agy" / ".indexing_intent_wal.jsonl",
-        ]
+        wal_paths = [self.base_dir / ".agy" / ".indexing_intent_wal.jsonl"]
+        if not (self.base_dir / ".git").exists():
+            wal_paths.insert(0, self.base_dir / ".indexing_intent_wal.jsonl")
         for wp in wal_paths:
             try:
                 wp.parent.mkdir(parents=True, exist_ok=True)

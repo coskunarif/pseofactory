@@ -264,10 +264,12 @@ def record_engine_hash(
 
     s_path = Path(state_file)
     final_hash = hash_value or compute_engine_hash(include_paths=include_paths, base_dirs=base_dirs)
+    substrate_hash = compute_engine_hash()
     _ENGINE_HASH_CACHE.clear()
     try:
         payload = {
             "engine_hash": final_hash,
+            "substrate_hash": substrate_hash,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         AtomicStateLedger.save_json(s_path, payload)
@@ -303,8 +305,10 @@ def record_asset_ledger(
     from pseofactory.supervisor import AtomicStateLedger
 
     l_path = Path(ledger_file).resolve()
+    substrate_hash = compute_engine_hash()
     payload: Dict[str, Any] = {
-        "engine_hash": engine_hash or compute_engine_hash(),
+        "engine_hash": engine_hash or substrate_hash,
+        "substrate_hash": substrate_hash,
         "total_assets": len(asset_hashes),
         "assets": dict(sorted(asset_hashes.items())),
         "updated_at": datetime.now(timezone.utc).isoformat(),

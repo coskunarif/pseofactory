@@ -172,6 +172,16 @@ class HeartbeatTracker:
         if extra:
             payload.update(extra)
         self.ledger.save_json(self.heartbeat_path, payload)
+        if str(self.heartbeat_path).startswith("/home/ubuntuadmin/projects/"):
+            for mirror_hb in (
+                Path("/home/ubuntuadmin/projects/.agy/supervisor_heartbeat.json"),
+                Path("/home/ubuntuadmin/projects/pseofactory/.agy/supervisor_heartbeat.json"),
+            ):
+                if mirror_hb.resolve() != self.heartbeat_path:
+                    try:
+                        self.ledger.save_json(mirror_hb, payload)
+                    except Exception:
+                        pass
         return payload
 
     def emit_heartbeat(
@@ -788,17 +798,39 @@ class AutonomousLifecycleSupervisor:
                         from pseofactory.maintenance import RefactorCascadeEngine
                         RefactorCascadeEngine().replay_quarantine()
                     record_engine_hash(self.state_file, hash_value=current_engine_hash)
+                    if str(self.workspace_root) == "/home/ubuntuadmin/projects":
+                        record_engine_hash(
+                            self.workspace_root / "pseofactory" / ".agy" / "engine_hash.json",
+                            hash_value=current_engine_hash,
+                        )
                     all_asset_hashes: Dict[str, str] = {}
                     for pid, adapter in adapters.items():
                         if adapter.dist_dir and adapter.dist_dir.is_dir():
+                            t_hashes: Dict[str, str] = {}
                             for a in adapter.list_assets():
                                 rel = a.relative_to(adapter.dist_dir).as_posix()
-                                all_asset_hashes[f"{pid}/{rel}"] = compute_asset_fingerprint(a)
+                                fp = compute_asset_fingerprint(a)
+                                all_asset_hashes[f"{pid}/{rel}"] = fp
+                                t_hashes[rel] = fp
+                            if str(self.workspace_root) == "/home/ubuntuadmin/projects":
+                                t_root = adapter.repo_path or adapter.dist_dir.parent
+                                record_engine_hash(t_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+                                record_asset_ledger(
+                                    t_root / ".agy" / "asset_ledger.json",
+                                    asset_hashes=t_hashes,
+                                    engine_hash=current_engine_hash,
+                                )
                     record_asset_ledger(
                         self.ledger_file,
                         asset_hashes=all_asset_hashes,
                         engine_hash=current_engine_hash,
                     )
+                    if str(self.workspace_root) == "/home/ubuntuadmin/projects":
+                        record_asset_ledger(
+                            self.workspace_root / "pseofactory" / ".agy" / "asset_ledger.json",
+                            asset_hashes=all_asset_hashes,
+                            engine_hash=current_engine_hash,
+                        )
 
                 self.heartbeat_tracker.emit(
                     status="HEALTHY",

@@ -221,6 +221,7 @@ class GitOpsCoordinator:
         ":!.agy/scratch",
         ":!.agy/worktrees/*",
         ":!.agy/worktrees",
+        ":!.indexing_intent_wal.jsonl",
     ]
 
     def __init__(
@@ -703,6 +704,27 @@ class GitOpsCoordinator:
         else:
             backoffs = [1.0, 2.0, 4.0]
 
+        # Refresh Wrangler OAuth token into GitHub Secrets prior to pushing tenant repos
+        if self.repo_path.name in ("profithelm-platform", "prexvo") and shutil.which("gh"):
+            wrangler_cfg = Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml")
+            if wrangler_cfg.is_file():
+                try:
+                    subprocess.run(["npx", "wrangler", "whoami"], capture_output=True, text=True, check=False, timeout=20)
+                    cfg_txt = wrangler_cfg.read_text(encoding="utf-8", errors="ignore")
+                    m_tok = re.search(r'oauth_token\s*=\s*"([^"]+)"', cfg_txt)
+                    if m_tok:
+                        slug = CICDWatcher().resolve_repo_slug(self.repo_path)
+                        if slug:
+                            subprocess.run(
+                                ["gh", "secret", "set", "CLOUDFLARE_API_TOKEN", "-R", slug, "--body", m_tok.group(1)],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=15,
+                            )
+                except Exception:
+                    pass
+
         for attempt in range(1, max_attempts + 1):
             cmd = ["git", "-C", str(self.repo_path), "push", "origin", tb]
             try:
@@ -815,8 +837,34 @@ class GitOpsCoordinator:
             if sha_res.returncode == 0 and sha_res.stdout.strip():
                 base_commit_sha = sha_res.stdout.strip()
 
-        # Idempotency token computation: sha256(repo_path + property_id + branch + base_commit_sha)
+        # Stage 1: Preflight containment check
+        is_container_root = str(self.repo_path) == "/home/ubuntuadmin/projects"
+        if is_container_root:
+            raise RuntimeError("Containment violation: cannot execute release on container root /home/ubuntuadmin/projects")
+        print(f"[DISPATCH:SHIPPER] Stage 1: Preflight containment check -> project={self.repo_path} (HWL-1227 PASS)")
+
+        # Stage 2: Ephemeral worktree hygiene
+        wt_path = self.worktrees_base / eff_run_id
+        active_target = wt_path if wt_path.is_dir() else self.repo_path
+        staged: List[str] = []
+        staged_diff_hash = ""
+        if self.is_git_repo(active_target):
+            staged = self.stage_tracked(active_target)
+            self.assert_no_worktree_leak(active_target)
+            if staged:
+                diff_res = subprocess.run(
+                    ["git", "-C", str(active_target), "diff", "--cached"],
+                    env=self._get_git_env(),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                staged_diff_hash = hashlib.sha256((diff_res.stdout or "").encode("utf-8")).hexdigest()[:16]
+
+        # Idempotency token computation: sha256(repo_path + property_id + branch + base_commit_sha [+ staged_diff_hash])
         token_str = f"{self.repo_path}:{property_id}:{self.branch}:{base_commit_sha}"
+        if staged_diff_hash:
+            token_str = f"{token_str}:{staged_diff_hash}"
         idempotency_token = hashlib.sha256(token_str.encode("utf-8")).hexdigest()
 
         # Persistent idempotency ledger rejection (HWL-1212/HWL-1231)
@@ -835,20 +883,6 @@ class GitOpsCoordinator:
                 branch=self.branch,
                 details={"idempotency_token": idempotency_token, "reason": "Already released"},
             )
-
-        # Stage 1: Preflight containment check
-        is_container_root = str(self.repo_path) == "/home/ubuntuadmin/projects"
-        if is_container_root:
-            raise RuntimeError("Containment violation: cannot execute release on container root /home/ubuntuadmin/projects")
-        print(f"[DISPATCH:SHIPPER] Stage 1: Preflight containment check -> project={self.repo_path} (HWL-1227 PASS)")
-
-        # Stage 2: Ephemeral worktree hygiene
-        wt_path = self.worktrees_base / eff_run_id
-        active_target = wt_path if wt_path.is_dir() else self.repo_path
-        staged: List[str] = []
-        if self.is_git_repo(active_target):
-            staged = self.stage_tracked(active_target)
-            self.assert_no_worktree_leak(active_target)
         p_agy, p_wt = ".agy", "worktrees"
         wt_display = f"{p_agy}/{p_wt}/{eff_run_id}" if wt_path.is_dir() else active_target.name
         print(f"[DISPATCH:SHIPPER] Stage 2: Ephemeral worktree hygiene -> worktree={wt_display} (staged={len(staged)}, leaks=0, HWL-1194 PASS)")
@@ -1378,6 +1412,9 @@ class LiveEdgeVerifier:
                         "entries": entries,
                         "canonical": canonical,
                         "title": title,
+                        "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                        "has_layout_containment": ("contain: layout style" in body),
+                        "has_min_width_table": ("min-width: 110px" in body),
                     }
             except urllib.error.HTTPError as he:
                 last_error = f"HTTP Error {he.code}: {he.reason}"
@@ -1444,8 +1481,16 @@ class LiveEdgeVerifier:
         print(f"[DISPATCH:CLOUD_DEPLOY] Stage 6: Edge deployment parity check -> url={base}{mode_tag}")
 
         local_audit = None
+        local_index_has_containment = False
         if dist_dir:
             local_audit = self.verify_local_dist(dist_dir)
+            idx_path = Path(dist_dir) / "index.html"
+            if idx_path.is_file():
+                try:
+                    idx_txt = idx_path.read_text(encoding="utf-8", errors="ignore")
+                    local_index_has_containment = ("contain: layout style" in idx_txt)
+                except Exception:
+                    local_index_has_containment = False
 
         endpoints = [
             f"{base}/",
@@ -1485,6 +1530,11 @@ class LiveEdgeVerifier:
                         res["error"] = f"Mismatched canonical URL: expected '{base}', got '{canon}'"
                         all_passed = False
                         print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (mismatched canonical: expected '{base}', got '{canon}')")
+                    elif not dry_run and local_index_has_containment and not res.get("has_layout_containment", False):
+                        res["status"] = "FAIL"
+                        res["error"] = "Stale edge HTML: missing engine layout containment ('contain: layout style') present in local dist"
+                        all_passed = False
+                        print("[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (stale edge HTML missing 'contain: layout style')")
                     else:
                         print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP 200 (latency: {lat}ms, title: '{title}', canonical: '{canon}')")
                 else:

@@ -159,12 +159,13 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     props = [args.property] if getattr(args, "property", None) else None
+    no_gitops = getattr(args, "no_gitops", False)
     res = reflect_and_recompile_all_assets(
         properties=props,
         force=getattr(args, "force", False),
         verbose=getattr(args, "verbose", False),
+        latch_state=no_gitops,
     )
-    no_gitops = getattr(args, "no_gitops", False)
     if res.get("total_recompiled", 0) > 0 and not no_gitops:
         reg = TenantRegistry.default()
         for p_id, r_info in res.get("property_reports", {}).items():
@@ -173,8 +174,11 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                     adapter = reg.get_adapter(p_id)
                     repo_path = adapter.repo_path or adapter.dist_dir.parent
                     if (repo_path / ".git").exists():
-                        run_maintenance_lifecycle(property_id=p_id, force=True)
+                        lc_res = run_maintenance_lifecycle(property_id=p_id, force=True)
+                        if lc_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
+                            res["status"] = "FAIL"
                 except Exception as g_err:
+                    res["status"] = "FAIL"
                     if getattr(args, "verbose", False):
                         print(f"Warning: GitOps auto-chain failed for '{p_id}': {g_err}")
 
