@@ -453,6 +453,38 @@ def audit_rendered_asset(
                     f"Gate 6 (Table Cells): Data table cell contains synthetic claim: '{syn_issues[0]}'"
                 )
                 break
+
+    if g6_ok and calc_output is not None:
+        sensitivity_checks = [
+            ("scenario-baseline", 1.0),
+            ("scenario-conservative", 0.8),
+            ("scenario-moderate-contraction", 0.9),
+            ("scenario-moderate-expansion", 1.1),
+            ("scenario-aggressive", 1.2),
+        ]
+        for cls_name, mult in sensitivity_checks:
+            scen_m = re.search(
+                rf'<strong[^>]*class=["\'][^"\']*\b{re.escape(cls_name)}\b[^"\']*["\'][^>]*>([^<]+)</strong>',
+                html_content,
+                re.IGNORECASE,
+            )
+            if scen_m:
+                raw_scen = scen_m.group(1).replace("$", "").replace(",", "").replace("%", "").strip()
+                try:
+                    scen_val = float(raw_scen)
+                    expected_scen = round(calc_output * mult, 2)
+                    if abs(scen_val - expected_scen) > max(tolerance, 0.02):
+                        g6_ok = False
+                        violations.append(
+                            f"Gate 6 (Table Cells): Sensitivity table cell '{cls_name}' value {scen_val} diverges from expected {expected_scen} ({mult}x of {calc_output})"
+                        )
+                        break
+                except ValueError:
+                    g6_ok = False
+                    violations.append(
+                        f"Gate 6 (Table Cells): Sensitivity table cell '{cls_name}' contains non-numeric value '{scen_m.group(1)}'"
+                    )
+                    break
     gate_results["table_cell_truthfulness"] = g6_ok
 
     # -------------------------------------------------------------
@@ -662,6 +694,7 @@ def _audit_schema_and_fact_gates(
 
     g11_ok = True
     try:
+        from pseofactory.contracts import detect_uncorroborated_statutory_claims
         from pseofactory.tenant_facts import TenantFactStore
         fact_store = TenantFactStore.get_instance()
         if fact_store.get_profile(tenant) is not None:
@@ -676,6 +709,11 @@ def _audit_schema_and_fact_gates(
                 g11_ok = False
                 for fv in fact_violations:
                     violations.append(f"Gate 11 (Tenant Fact Parity): {fv}")
+        stat_issues = detect_uncorroborated_statutory_claims(html_content, rel_path=slug or "index.html")
+        if stat_issues:
+            g11_ok = False
+            for si in stat_issues:
+                violations.append(f"Gate 11 (Tenant Fact Parity): {si}")
     except Exception as ex:
         g11_ok = False
         violations.append(f"Gate 11 (Tenant Fact Parity): Fact store check failed: {ex}")

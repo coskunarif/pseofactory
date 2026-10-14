@@ -201,8 +201,14 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         limits_and_thresholds={
             "section_179_expense_limit_2024": 1220000.0,
             "section_179_expense_limit_2025": 1250000.0,
+            "section_179_expense_limit_2026": 2560000.0,
+            "section_179_phaseout_threshold_2024": 3050000.0,
+            "section_179_phaseout_threshold_2025": 3130000.0,
+            "section_179_phaseout_threshold_2026": 4090000.0,
             "section_179_heavy_vehicle_2024": 30500.0,
             "section_179_heavy_vehicle_2025": 31300.0,
+            "section_179_heavy_vehicle_2026": 30500.0,
+            "bonus_depreciation_pct_2026": 0.20,
             "section_1202_qsbs_asset_ceiling": 50000000.0,
             "section_1202_qsbs_exclusion_cap": 10000000.0,
             "section_1202_qsbs_exclusion_multiple": 10.0,
@@ -213,6 +219,15 @@ def _build_profithelm_profile() -> TenantTruthProfile:
             "hsa_single_2025": 4300.0,
             "hsa_family_2024": 8300.0,
             "hsa_family_2025": 8550.0,
+            "standard_deduction_2026_single": 15000.0,
+            "standard_deduction_2026_mfj": 30000.0,
+            "standard_deduction_2026_hoh": 22500.0,
+            "standard_deduction_2027_sunset_single": 8600.0,
+            "standard_deduction_2027_sunset_mfj": 17200.0,
+            "standard_deduction_2027_sunset_hoh": 12900.0,
+            "tcja_vs_sunset_single_125k_tcja_tax": 19181.0,
+            "tcja_vs_sunset_single_125k_sunset_tax": 23530.0,
+            "tcja_vs_sunset_single_125k_delta": 4349.0,
         },
     )
 
@@ -365,6 +380,15 @@ def _build_prexvo_profile() -> TenantTruthProfile:
                 2025: {"individual": 15650.0, "additional_person": 5440.0},
                 2026: {"individual": 16200.0, "additional_person": 5500.0},
             },
+            "poverty_guidelines_2026_hhs_contiguous": 15650.0,
+            "poverty_guidelines_2026_hhs_per_additional": 5500.0,
+            "rap_exemption_2026_single_contiguous": 35212.50,
+            "ibr_exemption_2026_single_contiguous": 23475.00,
+            "rap_default_60k_loan_65k_agi_monthly": 248.23,
+            "rap_default_60k_loan_65k_agi_subsidy": 76.77,
+            "rap_default_60k_loan_95k_agi_monthly": 498.23,
+            "ibr_new_default_60k_loan_65k_agi_monthly": 346.04,
+            "ibr_legacy_default_60k_loan_65k_agi_monthly": 519.06,
         },
     )
 
@@ -515,7 +539,7 @@ class TenantFactStore:
         2. Unverified pricing numbers ($XX/mo)
         3. Cross-tenant boundary contamination
         4. Mandatory regulatory disclosures
-        5. Statutory threshold limit boundaries
+        5. Statutory threshold limit boundaries & ground-truth benchmark figures
         Returns (is_valid, violations_list).
         Zero em-dashes. Zero en-dashes.
         """
@@ -536,21 +560,22 @@ class TenantFactStore:
                 )
 
         # 2. Pricing verification
-        pricing_matches = re.findall(
-            r'\$(\d+(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
-            text,
-            re.IGNORECASE,
-        )
-        valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
-        for price_str in pricing_matches:
-            price_val = float(price_str)
-            if price_val not in valid_prices:
-                violations.append(
-                    f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
-                )
+        if "$" in text and ("/mo" in text_lower or "per mo" in text_lower):
+            pricing_matches = re.findall(
+                r'\$(\d+(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
+                text,
+                re.IGNORECASE,
+            )
+            valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
+            for price_str in pricing_matches:
+                price_val = float(price_str)
+                if price_val not in valid_prices:
+                    violations.append(
+                        f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
+                    )
 
         # 3. Cross-tenant boundary isolation
-        for token in sorted(profile.cross_tenant_forbidden_tokens):
+        for token in profile.cross_tenant_forbidden_tokens:
             if token.lower() in text_lower:
                 violations.append(
                     f"Cross-tenant contamination on {profile.brand_name}: found forbidden boundary token '{token}'"
@@ -591,12 +616,12 @@ class TenantFactStore:
                         f"Missing mandatory disclosure containing '{disclosure_phrase}'"
                     )
 
-        # 5. Statutory threshold limit boundaries
+        # 5. Statutory threshold limit boundaries & ground-truth benchmark figures
         if tenant_norm == "profithelm":
-            # Section 179 SUV / heavy vehicle cap ($30,500 for 2024 / $31,300 for 2025)
+            # Section 179 SUV / heavy vehicle cap ($30,500 for 2024/2026 / $31,300 for 2025)
             if "suv" in text_lower or "heavy vehicle" in text_lower:
                 suv_matches = re.findall(
-                    r'(?:(?:suv|heavy\s*vehicle)[^\.\n]*?(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)[^\.\n]*?(?:suv|heavy\s*vehicle))',
+                    r'(?:(?:suv|heavy\s*vehicle)[^\.\n]{0,140}?(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?(?:suv|heavy\s*vehicle))',
                     text,
                     re.IGNORECASE,
                 )
@@ -612,41 +637,91 @@ class TenantFactStore:
                     except ValueError:
                         pass
 
-            # Section 179 overall expense limit ($1,220,000 for 2024 / $1,250,000 for 2025)
-            s179_matches = re.findall(
-                r'(?:section\s*179[^\.\n]*?(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)[^\.\n]*?section\s*179)',
-                text,
-                re.IGNORECASE,
-            )
-            for m in s179_matches:
-                raw_val = m[0] or m[1]
-                try:
-                    val = float(raw_val.replace(",", ""))
-                    s179_cap = 1250000.0 if "2025" in text_lower else 1220000.0
-                    if val > s179_cap:
-                        violations.append(
-                            f"Section 179 expense limit contradiction: claimed ${val:,.0f} exceeds statutory limit of $1,220,000 for 2024 ($1,250,000 for 2025)"
-                        )
-                except ValueError:
-                    pass
+            # Section 179 overall expense limit ($1,220,000 for 2024 / $1,250,000 for 2025 / $2,560,000 for 2026 OBBBA)
+            if "section 179" in text_lower or "section179" in text_lower:
+                s179_matches = re.findall(
+                    r'(?:section\s*179[^\.\n]{0,140}?(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?section\s*179)',
+                    text,
+                    re.IGNORECASE,
+                )
+                for m in s179_matches:
+                    raw_val = m[0] or m[1]
+                    try:
+                        val = float(raw_val.replace(",", ""))
+                        if "2026" in text_lower or "obbba" in text_lower:
+                            s179_cap = 2560000.0
+                        elif "2025" in text_lower:
+                            s179_cap = 1250000.0
+                        else:
+                            s179_cap = 1220000.0
+                        if val > s179_cap:
+                            violations.append(
+                                f"Section 179 expense limit contradiction: claimed ${val:,.0f} exceeds statutory limit of $1,220,000 for 2024 ($1,250,000 for 2025, $2,560,000 for 2026)"
+                            )
+                    except ValueError:
+                        pass
+
+            if "full cap ($1.29m)" in text_lower:
+                violations.append(
+                    "Section 179 table header contradiction: 'Full Cap ($1.29M)' contradicts 2026 OBBBA statutory deduction cap of $2,560,000 ($2.56M)"
+                )
+
+            stale_tcja_tokens = ("$18,340", "$22,238", "$3,898", "$29,238")
+            for st_tok in stale_tcja_tokens:
+                if st_tok in text and any(
+                    kw in text_lower
+                    for kw in ("tcja", "2027", "tax bracket", "federal tax", "federal income tax", "sunset")
+                ):
+                    violations.append(
+                        f"Stale TCJA vs 2027 Sunset figure '{st_tok}' detected: contradicts ground-truth statutory engine ($19,181 TCJA tax, $23,530 Sunset tax, +$4,349 delta at $125k Single; $30,416 Sunset tax at $150k Single)"
+                    )
 
         elif tenant_norm == "prexvo":
             # PSLF qualifying payments: strictly 120 payments
-            pslf_matches = re.findall(
-                r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]*?(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?|(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?[^\.\n]*?(?:pslf|public\s+service\s+loan\s+forgiveness))',
+            if "pslf" in text_lower or "public service" in text_lower:
+                pslf_matches = re.findall(
+                    r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]{0,140}?(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?|(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?[^\.\n]{0,140}?(?:pslf|public\s+service\s+loan\s+forgiveness))',
+                    text,
+                    re.IGNORECASE,
+                )
+                for m in pslf_matches:
+                    p_str = m[0] or m[1]
+                    try:
+                        payments = int(p_str)
+                        if payments != 120:
+                            violations.append(
+                                f"PSLF payment requirement contradiction: claimed {payments} payments contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
+                            )
+                    except ValueError:
+                        pass
+
+            # Stale RAP Scenario A ($244.58 / $58,700) and Scenario B ($494.58 / $118,700) detection
+            if "$244.58" in text or "$58,700" in text:
+                violations.append(
+                    "Stale RAP Scenario A calculation detected ($244.58 or $58,700): ground-truth 2026 HHS poverty guideline ($15,650) yields $248.23/mo and $59,575.20 over 240 months"
+                )
+            if "$494.58" in text or "$118,700" in text:
+                violations.append(
+                    "Stale RAP Scenario B calculation detected ($494.58 or $118,700): ground-truth 2026 HHS poverty guideline ($15,650) yields $498.23/mo"
+                )
+
+            # Unhydrated SSR calculator metric placeholders ($0.00 in primary repayment metrics)
+            if "$0.00" in text and re.search(
+                r'id=["\']metric-(?:rap_payment|ibr_payment|standard_10yr|tiered_standard)["\'][^>]*>\s*\$0\.00\s*<',
                 text,
                 re.IGNORECASE,
-            )
-            for m in pslf_matches:
-                p_str = m[0] or m[1]
-                try:
-                    payments = int(p_str)
-                    if payments != 120:
-                        violations.append(
-                            f"PSLF payment requirement contradiction: claimed {payments} payments contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
-                        )
-                except ValueError:
-                    pass
+            ):
+                violations.append(
+                    "Unhydrated SSR calculator placeholder '$0.00' detected in primary repayment metric card; SSR output must reflect ground-truth engine evaluation"
+                )
+
+            # Incomplete IBR statutory payment rate cell in comparison table
+            if "15%" in text and "discretionary" in text_lower and re.search(
+                r'<td[^>]*>\s*15%\s+Discretionary\s*</td>', text, re.IGNORECASE
+            ):
+                violations.append(
+                    "Incomplete IBR statutory rate '15% Discretionary' in comparison table cell: must specify '10% to 15% Discretionary' covering post-2014 new borrowers (10%) and pre-2014 borrowers (15%) under 34 CFR 685.209"
+                )
 
         is_valid = len(violations) == 0
         return is_valid, violations

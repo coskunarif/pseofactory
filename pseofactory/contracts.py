@@ -4358,60 +4358,78 @@ STATUTORY_TAX_BRACKETS: Dict[int, Dict[str, List[Dict[str, Any]]]] = {
     },
     2026: {
         "single": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 11925.0},
-            {"rate": 12.0, "min_income": 11925.0, "max_income": 48475.0},
-            {"rate": 22.0, "min_income": 48475.0, "max_income": 103350.0},
-            {"rate": 24.0, "min_income": 103350.0, "max_income": 197300.0},
-            {"rate": 32.0, "min_income": 197300.0, "max_income": 250525.0},
-            {"rate": 35.0, "min_income": 250525.0, "max_income": 626350.0},
-            {"rate": 37.0, "min_income": 626350.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12050.0},
+            {"rate": 12.0, "min_income": 12050.0, "max_income": 48900.0},
+            {"rate": 22.0, "min_income": 48900.0, "max_income": 104400.0},
+            {"rate": 24.0, "min_income": 104400.0, "max_income": 199300.0},
+            {"rate": 32.0, "min_income": 199300.0, "max_income": 253150.0},
+            {"rate": 35.0, "min_income": 253150.0, "max_income": 633100.0},
+            {"rate": 37.0, "min_income": 633100.0, "max_income": None},
         ],
         "married_filing_jointly": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 23850.0},
-            {"rate": 12.0, "min_income": 23850.0, "max_income": 96950.0},
-            {"rate": 22.0, "min_income": 96950.0, "max_income": 206700.0},
-            {"rate": 24.0, "min_income": 206700.0, "max_income": 394600.0},
-            {"rate": 32.0, "min_income": 394600.0, "max_income": 501050.0},
-            {"rate": 35.0, "min_income": 501050.0, "max_income": 751600.0},
-            {"rate": 37.0, "min_income": 751600.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 24100.0},
+            {"rate": 12.0, "min_income": 24100.0, "max_income": 97800.0},
+            {"rate": 22.0, "min_income": 97800.0, "max_income": 208800.0},
+            {"rate": 24.0, "min_income": 208800.0, "max_income": 398600.0},
+            {"rate": 32.0, "min_income": 398600.0, "max_income": 506300.0},
+            {"rate": 35.0, "min_income": 506300.0, "max_income": 759600.0},
+            {"rate": 37.0, "min_income": 759600.0, "max_income": None},
         ],
         "head_of_household": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 17000.0},
-            {"rate": 12.0, "min_income": 17000.0, "max_income": 64850.0},
-            {"rate": 22.0, "min_income": 64850.0, "max_income": 103350.0},
-            {"rate": 24.0, "min_income": 103350.0, "max_income": 197300.0},
-            {"rate": 32.0, "min_income": 197300.0, "max_income": 250500.0},
-            {"rate": 35.0, "min_income": 250500.0, "max_income": 626350.0},
-            {"rate": 37.0, "min_income": 626350.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 17200.0},
+            {"rate": 12.0, "min_income": 17200.0, "max_income": 65550.0},
+            {"rate": 22.0, "min_income": 65550.0, "max_income": 104400.0},
+            {"rate": 24.0, "min_income": 104400.0, "max_income": 199300.0},
+            {"rate": 32.0, "min_income": 199300.0, "max_income": 253150.0},
+            {"rate": 35.0, "min_income": 253150.0, "max_income": 633100.0},
+            {"rate": 37.0, "min_income": 633100.0, "max_income": None},
         ],
         "married_filing_separately": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 11925.0},
-            {"rate": 12.0, "min_income": 11925.0, "max_income": 48475.0},
-            {"rate": 22.0, "min_income": 48475.0, "max_income": 103350.0},
-            {"rate": 24.0, "min_income": 103350.0, "max_income": 197300.0},
-            {"rate": 32.0, "min_income": 197300.0, "max_income": 250525.0},
-            {"rate": 35.0, "min_income": 250525.0, "max_income": 375800.0},
-            {"rate": 37.0, "min_income": 375800.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12050.0},
+            {"rate": 12.0, "min_income": 12050.0, "max_income": 48900.0},
+            {"rate": 22.0, "min_income": 48900.0, "max_income": 104400.0},
+            {"rate": 24.0, "min_income": 104400.0, "max_income": 199300.0},
+            {"rate": 32.0, "min_income": 199300.0, "max_income": 253150.0},
+            {"rate": 35.0, "min_income": 253150.0, "max_income": 379800.0},
+            {"rate": 37.0, "min_income": 379800.0, "max_income": None},
         ],
     },
     2027: {
         "single": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 11925.0},
-            {"rate": 15.0, "min_income": 11925.0, "max_income": 48475.0},
-            {"rate": 25.0, "min_income": 48475.0, "max_income": 103350.0},
-            {"rate": 28.0, "min_income": 103350.0, "max_income": 197300.0},
-            {"rate": 33.0, "min_income": 197300.0, "max_income": 250525.0},
-            {"rate": 35.0, "min_income": 250525.0, "max_income": 626350.0},
-            {"rate": 39.6, "min_income": 626350.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12200.0},
+            {"rate": 15.0, "min_income": 12200.0, "max_income": 49600.0},
+            {"rate": 25.0, "min_income": 49600.0, "max_income": 120200.0},
+            {"rate": 28.0, "min_income": 120200.0, "max_income": 250800.0},
+            {"rate": 33.0, "min_income": 250800.0, "max_income": 447900.0},
+            {"rate": 35.0, "min_income": 447900.0, "max_income": 506200.0},
+            {"rate": 39.6, "min_income": 506200.0, "max_income": None},
         ],
         "married_filing_jointly": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 23850.0},
-            {"rate": 15.0, "min_income": 23850.0, "max_income": 96950.0},
-            {"rate": 25.0, "min_income": 96950.0, "max_income": 206700.0},
-            {"rate": 28.0, "min_income": 206700.0, "max_income": 394600.0},
-            {"rate": 33.0, "min_income": 394600.0, "max_income": 501050.0},
-            {"rate": 35.0, "min_income": 501050.0, "max_income": 751600.0},
-            {"rate": 39.6, "min_income": 751600.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 24400.0},
+            {"rate": 15.0, "min_income": 24400.0, "max_income": 99200.0},
+            {"rate": 25.0, "min_income": 99200.0, "max_income": 200400.0},
+            {"rate": 28.0, "min_income": 200400.0, "max_income": 305600.0},
+            {"rate": 33.0, "min_income": 305600.0, "max_income": 483100.0},
+            {"rate": 35.0, "min_income": 483100.0, "max_income": 569800.0},
+            {"rate": 39.6, "min_income": 569800.0, "max_income": None},
+        ],
+        "head_of_household": [
+            {"rate": 10.0, "min_income": 0.0, "max_income": 17400.0},
+            {"rate": 15.0, "min_income": 17400.0, "max_income": 66400.0},
+            {"rate": 25.0, "min_income": 66400.0, "max_income": 171600.0},
+            {"rate": 28.0, "min_income": 171600.0, "max_income": 277900.0},
+            {"rate": 33.0, "min_income": 277900.0, "max_income": 465500.0},
+            {"rate": 35.0, "min_income": 465500.0, "max_income": 538000.0},
+            {"rate": 39.6, "min_income": 538000.0, "max_income": None},
+        ],
+        "married_filing_separately": [
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12200.0},
+            {"rate": 15.0, "min_income": 12200.0, "max_income": 49600.0},
+            {"rate": 25.0, "min_income": 49600.0, "max_income": 100200.0},
+            {"rate": 28.0, "min_income": 100200.0, "max_income": 152800.0},
+            {"rate": 33.0, "min_income": 152800.0, "max_income": 241550.0},
+            {"rate": 35.0, "min_income": 241550.0, "max_income": 284900.0},
+            {"rate": 39.6, "min_income": 284900.0, "max_income": None},
         ],
     },
 }
@@ -4469,19 +4487,21 @@ STATUTORY_LIMITS: Dict[str, Any] = {
     "section_179_max_deduction": {
         2024: 1220000.0,
         2025: 1250000.0,
-        2026: 1250000.0,
+        2026: 2560000.0,
+        "2026_obbba": 2560000.0,
         "2026_projected": 1290000.0,
     },
     "section_179_phaseout_threshold": {
         2024: 3050000.0,
         2025: 3130000.0,
-        2026: 3130000.0,
+        2026: 4090000.0,
+        "2026_obbba": 4090000.0,
         "2026_projected": 3220000.0,
     },
     "section_179_heavy_vehicle_suv": {
         2024: 30500.0,
         2025: 31300.0,
-        2026: 31300.0,
+        2026: 30500.0,
         "2026_projected": 32300.0,
     },
     "section_1202_qsbs": {
@@ -4598,6 +4618,46 @@ def get_official_statutory_limit(limit_key: str, tax_year: Optional[int] = None)
     return val
 
 
+def _fast_strip_style_and_js(content: str) -> str:
+    """
+    Strips <style>...</style> and executable JS <script>...</script> blocks
+    in O(N) C-level substring search time while preserving JSON/JSON-LD scripts.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if "<style" not in content and "<script" not in content and "<STYLE" not in content and "<SCRIPT" not in content:
+        return content
+    lower = content.lower()
+    out: List[str] = []
+    pos = 0
+    n = len(content)
+    while pos < n:
+        s_idx = lower.find("<style", pos)
+        j_idx = lower.find("<script", pos)
+        if s_idx == -1 and j_idx == -1:
+            out.append(content[pos:])
+            break
+        if s_idx != -1 and (j_idx == -1 or s_idx < j_idx):
+            out.append(content[pos:s_idx])
+            out.append(" ")
+            end_s = lower.find("</style>", s_idx)
+            if end_s == -1:
+                break
+            pos = end_s + 8
+        else:
+            out.append(content[pos:j_idx])
+            tag_end = lower.find(">", j_idx)
+            end_j = lower.find("</script>", j_idx)
+            if end_j == -1:
+                break
+            open_tag = lower[j_idx:tag_end] if tag_end != -1 and tag_end < end_j else ""
+            if "application/json" in open_tag or "application/ld+json" in open_tag:
+                out.append(content[j_idx:end_j + 9])
+            else:
+                out.append(" ")
+            pos = end_j + 9
+    return "".join(out)
+
+
 def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.html") -> List[str]:
     """
     Detects uncorroborated tax constants, invented statutory limits, orphaned deduction figures,
@@ -4615,210 +4675,217 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
     # Clean text for document prose and structured claims analysis (preserving JSON manifests)
-    clean_text = content
-    if "<" in content and ">" in content:
-        clean_text = re.sub(r'<script\b(?![^>]*type=["\']application/(?:ld\+)?json["\'])[^>]*>.*?</script>', ' ', content, flags=re.IGNORECASE | re.DOTALL)
-        clean_text = re.sub(r'<style\b[^>]*>.*?</style>', ' ', clean_text, flags=re.IGNORECASE | re.DOTALL)
+    clean_text = _fast_strip_style_and_js(content)
+    clean_lower = clean_text.lower()
 
     # 2. Silent fallback defaults check
-    for pat in SILENT_FALLBACK_DEFAULT_PATTERNS:
-        for m in pat.finditer(clean_text):
-            issues.append(
-                f"Page {rel_path}: Silent fallback default detected ('{m.group(0).strip()}'): "
-                f"statutory constants must be explicitly reconciled against official published schedules"
-            )
+    if "default" in clean_lower or "fallback" in clean_lower or "hardcoded" in clean_lower or "unverified" in clean_lower:
+        for pat in SILENT_FALLBACK_DEFAULT_PATTERNS:
+            for m in pat.finditer(clean_text):
+                issues.append(
+                    f"Page {rel_path}: Silent fallback default detected ('{m.group(0).strip()}'): "
+                    f"statutory constants must be explicitly reconciled against official published schedules"
+                )
 
     # 3. Invented federal tax rates check
-    for m in re.finditer(r'\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:federal\s+)?(?:marginal\s+tax\s+rate|marginal\s+rate|tax\s+bracket|bracket)\b', clean_text, re.IGNORECASE):
-        try:
-            rate = float(m.group(1))
-            surrounding = clean_text[max(0, m.start()-40):min(len(clean_text), m.end()+40)].lower()
-            if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding):
-                if rate not in VALID_FEDERAL_TAX_RATES and rate not in {0.0, 15.0, 20.0}:
-                    issues.append(
-                        f"Page {rel_path}: Invented federal tax rate '{rate}%' is not an official IRS statutory marginal bracket"
-                    )
-        except Exception:
-            pass
+    if "%" in clean_text and ("rate" in clean_lower or "bracket" in clean_lower):
+        for m in re.finditer(r'\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:federal\s+)?(?:marginal\s+tax\s+rate|marginal\s+rate|tax\s+bracket|bracket)\b', clean_text, re.IGNORECASE):
+            try:
+                rate = float(m.group(1))
+                surrounding = clean_lower[max(0, m.start()-40):min(len(clean_lower), m.end()+40)]
+                if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding):
+                    if rate not in VALID_FEDERAL_TAX_RATES and rate not in {0.0, 15.0, 20.0}:
+                        issues.append(
+                            f"Page {rel_path}: Invented federal tax rate '{rate}%' is not an official IRS statutory marginal bracket"
+                        )
+            except Exception:
+                pass
 
     # 4. Standard deduction checks
-    std_ded_matches = re.finditer(
-        r'(?:standard\s+deduction(?:\s+(?:is|of|for|amount|value|drops?\s+to))?|deduction\s+of)\s*[:=]?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in std_ded_matches:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            surrounding = clean_text[max(0, m.start()-60):min(len(clean_text), m.end()+60)].lower()
-            if "standard deduction" in surrounding:
-                if val not in ALL_OFFICIAL_STANDARD_DEDUCTIONS:
-                    issues.append(
-                        f"Page {rel_path}: Mismatched standard deduction value '${val:,.0f}': "
-                        f"does not match official published IRS standard deduction schedules"
-                    )
-                else:
-                    if "single" in surrounding and "married" not in surrounding and "mfj" not in surrounding:
-                        if val not in {8600.0, 14600.0, 15000.0, 15350.0}:
-                            issues.append(
-                                f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
-                                f"official published Single standard deduction is $14,600 (2024), $15,000 (2025/2026), or $8,600 (post-TCJA)"
-                            )
-                    elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
-                        if val not in {17200.0, 29200.0, 30000.0, 30700.0}:
-                            issues.append(
-                                f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
-                                f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025/2026), or $17,200 (post-TCJA)"
-                            )
-        except Exception:
-            pass
+    if "deduction" in clean_lower and "$" in clean_text:
+        std_ded_matches = re.finditer(
+            r'(?:standard\s+deduction(?:\s+(?:is|of|for|amount|value|drops?\s+to))?|deduction\s+of)\s*[:=]?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
+            clean_text,
+            re.IGNORECASE
+        )
+        for m in std_ded_matches:
+            raw_val = m.group(1).replace(",", "")
+            try:
+                val = float(raw_val)
+                surrounding = clean_lower[max(0, m.start()-60):min(len(clean_lower), m.end()+60)]
+                if "standard deduction" in surrounding:
+                    if val not in ALL_OFFICIAL_STANDARD_DEDUCTIONS:
+                        issues.append(
+                            f"Page {rel_path}: Mismatched standard deduction value '${val:,.0f}': "
+                            f"does not match official published IRS standard deduction schedules"
+                        )
+                    else:
+                        if "single" in surrounding and "married" not in surrounding and "mfj" not in surrounding:
+                            if val not in {8600.0, 14600.0, 15000.0, 15350.0}:
+                                issues.append(
+                                    f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
+                                    f"official published Single standard deduction is $14,600 (2024), $15,000 (2025/2026), or $8,600 (post-TCJA)"
+                                )
+                        elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
+                            if val not in {17200.0, 29200.0, 30000.0, 30700.0}:
+                                issues.append(
+                                    f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
+                                    f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025/2026), or $17,200 (post-TCJA)"
+                                )
+            except Exception:
+                pass
 
     # 5. Section 179 maximum deduction and phaseout limits
-    sec179_matches = re.finditer(
-        r'(?:Section\s+179|Sec\.?\s*179)\s+(?:max(?:imum)?\s+(?:deduction|expensing)|expensing\s+(?:cap|limit)|deduction\s+(?:cap|limit)|limit|cap)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in sec179_matches:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            if val not in {1220000.0, 1250000.0, 1290000.0}:
-                issues.append(
-                    f"Page {rel_path}: Mismatched Section 179 expensing limit '${val:,.0f}': "
-                    f"does not match official published schedule ($1,220,000 for 2024, $1,250,000 for 2025, $1,290,000 for 2026)"
-                )
-        except Exception:
-            pass
+    if "179" in clean_text and "$" in clean_text:
+        sec179_matches = re.finditer(
+            r'(?:Section\s+179|Sec\.?\s*179)\s+(?:max(?:imum)?\s+(?:deduction|expensing)|expensing\s+(?:cap|limit)|deduction\s+(?:cap|limit)|limit|cap)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
+            clean_text,
+            re.IGNORECASE
+        )
+        for m in sec179_matches:
+            raw_val = m.group(1).replace(",", "")
+            try:
+                val = float(raw_val)
+                if val not in {1220000.0, 1250000.0, 1290000.0, 2560000.0}:
+                    issues.append(
+                        f"Page {rel_path}: Mismatched Section 179 expensing limit '${val:,.0f}': "
+                        f"does not match official published schedule ($1,220,000 for 2024, $1,250,000 for 2025, $2,560,000 for 2026 OBBBA)"
+                    )
+            except Exception:
+                pass
 
-    sec179_phaseout = re.finditer(
-        r'(?:Section\s+179|Sec\.?\s*179).*?phase-?out\s+(?:threshold|limit|begins?|starts?)\s*(?:of|at|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in sec179_phaseout:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            if val not in {3050000.0, 3130000.0, 3220000.0}:
-                issues.append(
-                    f"Page {rel_path}: Mismatched Section 179 phaseout threshold '${val:,.0f}': "
-                    f"does not match official published schedule ($3,050,000 for 2024, $3,130,000 for 2025, $3,220,000 for 2026)"
-                )
-        except Exception:
-            pass
+        if "phase" in clean_lower:
+            sec179_phaseout = re.finditer(
+                r'(?:Section\s+179|Sec\.?\s*179)[^\.\n]{0,140}?phase-?out\s+(?:threshold|limit|begins?|starts?)\s*(?:of|at|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
+                clean_text,
+                re.IGNORECASE
+            )
+            for m in sec179_phaseout:
+                raw_val = m.group(1).replace(",", "")
+                try:
+                    val = float(raw_val)
+                    if val not in {3050000.0, 3130000.0, 3220000.0, 4090000.0}:
+                        issues.append(
+                            f"Page {rel_path}: Mismatched Section 179 phaseout threshold '${val:,.0f}': "
+                            f"does not match official published schedule ($3,050,000 for 2024, $3,130,000 for 2025, $4,090,000 for 2026 OBBBA)"
+                        )
+                except Exception:
+                    pass
 
     # 6. Section 1202 QSBS
-    qsbs_asset = re.finditer(
-        r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock).*?(?:gross\s+assets?|asset\s+(?:ceiling|limit|cap))\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in qsbs_asset:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            if val != 50000000.0:
-                issues.append(
-                    f"Page {rel_path}: Mismatched Section 1202 QSBS asset ceiling '${val:,.0f}': "
-                    f"statutory ceiling under IRC 1202(d)(1) is strictly $50,000,000"
-                )
-        except Exception:
-            pass
+    if ("1202" in clean_text or "qsbs" in clean_lower or "qualified small business" in clean_lower) and "$" in clean_text:
+        qsbs_asset = re.finditer(
+            r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock)[^\.\n]{0,140}?(?:gross\s+assets?|asset\s+(?:ceiling|limit|cap))\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
+            clean_text,
+            re.IGNORECASE
+        )
+        for m in qsbs_asset:
+            raw_val = m.group(1).replace(",", "")
+            try:
+                val = float(raw_val)
+                if val != 50000000.0:
+                    issues.append(
+                        f"Page {rel_path}: Mismatched Section 1202 QSBS asset ceiling '${val:,.0f}': "
+                        f"statutory ceiling under IRC 1202(d)(1) is strictly $50,000,000"
+                    )
+            except Exception:
+                pass
 
-    qsbs_excl = re.finditer(
-        r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock).*?(?:gain\s+exclusion\s+cap|exclusion\s+(?:limit|cap)|maximum\s+exclusion)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in qsbs_excl:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            if val != 10000000.0:
-                issues.append(
-                    f"Page {rel_path}: Mismatched Section 1202 QSBS exclusion cap '${val:,.0f}': "
-                    f"statutory cap under IRC 1202(b)(1) is strictly $10,000,000"
-                )
-        except Exception:
-            pass
+        qsbs_excl = re.finditer(
+            r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock)[^\.\n]{0,140}?(?:gain\s+exclusion\s+cap|exclusion\s+(?:limit|cap)|maximum\s+exclusion)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
+            clean_text,
+            re.IGNORECASE
+        )
+        for m in qsbs_excl:
+            raw_val = m.group(1).replace(",", "")
+            try:
+                val = float(raw_val)
+                if val != 10000000.0:
+                    issues.append(
+                        f"Page {rel_path}: Mismatched Section 1202 QSBS exclusion cap '${val:,.0f}': "
+                        f"statutory cap under IRC 1202(b)(1) is strictly $10,000,000"
+                    )
+            except Exception:
+                pass
 
     # 7. Retirement 401(k) and IRA limits
-    ret_401k = re.finditer(
-        r'(?:401\(?k\)?|403\(?b\)?)\s+(?:elective\s+deferral(?:\s+limit)?|contribution\s+limit|maximum\s+deferral|annual\s+limit|deferral\s+limit|limit)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in ret_401k:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            if val not in {23000.0, 23500.0, 24000.0}:
-                issues.append(
-                    f"Page {rel_path}: Mismatched 401(k) deferral limit '${val:,.0f}': "
-                    f"does not match official published IRS schedule ($23,000 for 2024, $23,500 for 2025, $24,000 for 2026)"
-                )
-        except Exception:
-            pass
+    if ("401" in clean_text or "403" in clean_text) and "$" in clean_text:
+        ret_401k = re.finditer(
+            r'(?:401\(?k\)?|403\(?b\)?)\s+(?:elective\s+deferral(?:\s+limit)?|contribution\s+limit|maximum\s+deferral|annual\s+limit|deferral\s+limit|limit)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
+            clean_text,
+            re.IGNORECASE
+        )
+        for m in ret_401k:
+            raw_val = m.group(1).replace(",", "")
+            try:
+                val = float(raw_val)
+                if val not in {23000.0, 23500.0, 24000.0}:
+                    issues.append(
+                        f"Page {rel_path}: Mismatched 401(k) deferral limit '${val:,.0f}': "
+                        f"does not match official published IRS schedule ($23,000 for 2024, $23,500 for 2025, $24,000 for 2026)"
+                    )
+            except Exception:
+                pass
 
-    ret_ira = re.finditer(
-        r'(?:traditional\s+ira|roth\s+ira|\bira\b)\s+(?:contribution\s+limit|annual\s+limit|maximum\s+contribution)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-        clean_text,
-        re.IGNORECASE
-    )
-    for m in ret_ira:
-        raw_val = m.group(1).replace(",", "")
-        try:
-            val = float(raw_val)
-            if val not in {7000.0, 7500.0}:
-                issues.append(
-                    f"Page {rel_path}: Mismatched IRA contribution limit '${val:,.0f}': "
-                    f"does not match official published IRS schedule ($7,000 for 2024-2025, $7,500 for 2026)"
-                )
-        except Exception:
-            pass
+    if "ira" in clean_lower and "$" in clean_text:
+        ret_ira = re.finditer(
+            r'(?:traditional\s+ira|roth\s+ira|\bira\b)\s+(?:contribution\s+limit|annual\s+limit|maximum\s+contribution)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
+            clean_text,
+            re.IGNORECASE
+        )
+        for m in ret_ira:
+            raw_val = m.group(1).replace(",", "")
+            try:
+                val = float(raw_val)
+                if val not in {7000.0, 7500.0}:
+                    issues.append(
+                        f"Page {rel_path}: Mismatched IRA contribution limit '${val:,.0f}': "
+                        f"does not match official published IRS schedule ($7,000 for 2024-2025, $7,500 for 2026)"
+                    )
+            except Exception:
+                pass
 
     # 8. Structured manifests and scripts
-    for script_match in re.finditer(
-        r'<script[^>]*type=[\'"]application/json[\'"][^>]*id=[\'"]([^\'"]*)[\'"][^>]*>(.*?)</script>',
-        content,
-        re.DOTALL | re.IGNORECASE,
-    ):
-        script_raw = script_match.group(2).strip()
-        try:
-            data = json.loads(script_raw)
-            if isinstance(data, dict):
-                if "brackets" in data and isinstance(data["brackets"], list):
-                    for idx, b in enumerate(data["brackets"]):
-                        if isinstance(b, dict):
-                            crate = b.get("current_rate") or b.get("rate")
-                            if crate is not None and float(crate) not in VALID_FEDERAL_TAX_RATES:
-                                issues.append(
-                                    f"Page {rel_path}: Structured manifest bracket {idx} contains invented rate {crate}%"
-                                )
-                            srate = b.get("sunset_rate")
-                            if srate is not None and float(srate) not in VALID_FEDERAL_TAX_RATES:
-                                issues.append(
-                                    f"Page {rel_path}: Structured manifest bracket {idx} contains invented sunset rate {srate}%"
-                                )
-                if "max_asset_issuance_usd" in data:
-                    if float(data["max_asset_issuance_usd"]) != 50000000.0:
-                        issues.append(
-                            f"Page {rel_path}: Structured manifest contains invalid Section 1202 asset cap: {data['max_asset_issuance_usd']}"
-                        )
-                if "gain_exclusion_cap_usd" in data:
-                    if float(data["gain_exclusion_cap_usd"]) != 10000000.0:
-                        issues.append(
-                            f"Page {rel_path}: Structured manifest contains invalid Section 1202 exclusion cap: {data['gain_exclusion_cap_usd']}"
-                        )
-                if "holding_period_years" in data:
-                    if int(data["holding_period_years"]) != 5:
-                        issues.append(
-                            f"Page {rel_path}: Structured manifest contains invalid Section 1202 holding period: {data['holding_period_years']}"
-                        )
-        except Exception:
-            pass
+    if "application/json" in content:
+        for script_match in re.finditer(
+            r'<script[^>]*type=[\'"]application/json[\'"][^>]*id=[\'"]([^\'"]*)[\'"][^>]*>(.*?)</script>',
+            content,
+            re.DOTALL | re.IGNORECASE,
+        ):
+            script_raw = script_match.group(2).strip()
+            try:
+                data = json.loads(script_raw)
+                if isinstance(data, dict):
+                    if "brackets" in data and isinstance(data["brackets"], list):
+                        for idx, b in enumerate(data["brackets"]):
+                            if isinstance(b, dict):
+                                crate = b.get("current_rate") or b.get("rate")
+                                if crate is not None and float(crate) not in VALID_FEDERAL_TAX_RATES:
+                                    issues.append(
+                                        f"Page {rel_path}: Structured manifest bracket {idx} contains invented rate {crate}%"
+                                    )
+                                srate = b.get("sunset_rate")
+                                if srate is not None and float(srate) not in VALID_FEDERAL_TAX_RATES:
+                                    issues.append(
+                                        f"Page {rel_path}: Structured manifest bracket {idx} contains invented sunset rate {srate}%"
+                                    )
+                    if "max_asset_issuance_usd" in data:
+                        if float(data["max_asset_issuance_usd"]) != 50000000.0:
+                            issues.append(
+                                f"Page {rel_path}: Structured manifest contains invalid Section 1202 asset cap: {data['max_asset_issuance_usd']}"
+                            )
+                    if "gain_exclusion_cap_usd" in data:
+                        if float(data["gain_exclusion_cap_usd"]) != 10000000.0:
+                            issues.append(
+                                f"Page {rel_path}: Structured manifest contains invalid Section 1202 exclusion cap: {data['gain_exclusion_cap_usd']}"
+                            )
+                    if "holding_period_years" in data:
+                        if int(data["holding_period_years"]) != 5:
+                            issues.append(
+                                f"Page {rel_path}: Structured manifest contains invalid Section 1202 holding period: {data['holding_period_years']}"
+                            )
+            except Exception:
+                pass
 
     return issues
 

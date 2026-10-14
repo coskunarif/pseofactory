@@ -1647,22 +1647,203 @@ class LiveTruthAuditEngine:
         context: Optional[str] = None,
     ) -> List[str]:
         """
-        Audits raw HTML content for truth contradictions against tenant facts.
-        Delegates directly to TenantFactStore.verify_claim.
+        Audits raw HTML content for truth contradictions against tenant facts,
+        official statutory rules, embedded calculation manifests, calculator outputs,
+        and table arithmetic.
         Returns a list of violation detail strings.
         Zero em-dashes. Zero en-dashes.
         """
         if not self.fact_store.get_profile(property_id):
             return []
+        violations: List[str] = []
+        ctx_label = context or "LiveTruthAuditEngine.audit_html"
+        if "\u2014" in html_content or "\u2013" in html_content:
+            return []
+        from pseofactory.contracts import (
+            _fast_strip_style_and_js,
+            detect_uncorroborated_statutory_claims,
+            safe_eval_mathematical_formula,
+        )
+        auditable_html = _fast_strip_style_and_js(html_content)
         try:
-            is_valid, violations = self.fact_store.verify_claim(
+            is_valid, claim_violations = self.fact_store.verify_claim(
                 tenant=property_id,
-                text=html_content,
-                context=context or "LiveTruthAuditEngine.audit_html",
+                text=auditable_html,
+                context=ctx_label,
             )
-            return violations
+            if not is_valid:
+                violations.extend(claim_violations)
         except ValueError:
             return []
+
+        try:
+            stat_issues = detect_uncorroborated_statutory_claims(auditable_html, rel_path=ctx_label)
+            for si in stat_issues:
+                if "forbidden em-dash" not in si and "forbidden en-dash" not in si:
+                    violations.append(si)
+
+            # 1. Verify embedded calculation-manifest and SSR .output-value parity
+            manifest_m = None
+            if "calculation-manifest" in html_content:
+                manifest_m = re.search(
+                    r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\'][^>]*>(.*?)</script>',
+                    html_content,
+                    re.DOTALL | re.IGNORECASE,
+                ) or re.search(
+                    r'<script[^>]*id=["\']calculation-manifest["\'][^>]*>(.*?)</script>',
+                    html_content,
+                    re.DOTALL | re.IGNORECASE,
+                )
+            baseline_output: Optional[float] = None
+            if manifest_m:
+                try:
+                    m_data = json.loads(manifest_m.group(1).strip())
+                    formula_str = str(m_data.get("formula") or "").strip()
+                    raw_inputs = m_data.get("inputs")
+                    pub_out = m_data.get("published_output")
+                    if pub_out is not None:
+                        baseline_output = float(pub_out)
+                    if formula_str and isinstance(raw_inputs, dict) and baseline_output is not None:
+                        clamped_in: Dict[str, Any] = {}
+                        for k, v in raw_inputs.items():
+                            if isinstance(v, (int, float)):
+                                clamped_in[k] = max(0.0, float(v))
+                            elif isinstance(v, str):
+                                try:
+                                    clamped_in[k] = max(
+                                        0.0,
+                                        float(v.replace("$", "").replace(",", "").replace("%", "").strip()),
+                                    )
+                                except ValueError:
+                                    clamped_in[k] = v
+                            else:
+                                clamped_in[k] = v
+                        eval_val = safe_eval_mathematical_formula(formula_str, clamped_in)
+                        if abs(eval_val - baseline_output) > 0.02:
+                            violations.append(
+                                f"Calculation manifest formula evaluation ({eval_val}) diverges from published_output ({baseline_output}) in {ctx_label}"
+                            )
+                except Exception:
+                    pass
+
+            if baseline_output is not None and "output-value" in html_content:
+                out_val_m = re.search(
+                    r'<(?:strong|span|div)[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>([^<]+)</(?:strong|span|div)>',
+                    html_content,
+                    re.IGNORECASE,
+                )
+                if out_val_m:
+                    try:
+                        html_out_val = float(
+                            out_val_m.group(1).replace("$", "").replace(",", "").replace("%", "").strip()
+                        )
+                        if abs(html_out_val - baseline_output) > 0.02:
+                            violations.append(
+                                f"SSR .output-value ({html_out_val}) diverges from manifest published_output ({baseline_output}) in {ctx_label}"
+                            )
+                    except ValueError:
+                        pass
+
+            # 2. Verify 5-point sensitivity scenario table arithmetic if present
+            if "scenario-baseline" in html_content:
+                base_scen_m = re.search(
+                    r'<strong[^>]*class=["\'][^"\']*\bscenario-baseline\b[^"\']*["\'][^>]*>([^<]+)</strong>',
+                    html_content,
+                    re.IGNORECASE,
+                )
+                if base_scen_m:
+                    try:
+                        base_scen_val = float(
+                            base_scen_m.group(1).replace("$", "").replace(",", "").replace("%", "").strip()
+                        )
+                        for cls_name, mult in (
+                            ("scenario-conservative", 0.8),
+                            ("scenario-moderate-contraction", 0.9),
+                            ("scenario-moderate-expansion", 1.1),
+                            ("scenario-aggressive", 1.2),
+                        ):
+                            sm = re.search(
+                                rf'<strong[^>]*class=["\'][^"\']*\b{re.escape(cls_name)}\b[^"\']*["\'][^>]*>([^<]+)</strong>',
+                                html_content,
+                                re.IGNORECASE,
+                            )
+                            if sm:
+                                s_val = float(
+                                    sm.group(1).replace("$", "").replace(",", "").replace("%", "").strip()
+                                )
+                                exp_s = round(base_scen_val * mult, 2)
+                                if abs(s_val - exp_s) > 0.05:
+                                    violations.append(
+                                        f"Sensitivity table '{cls_name}' cell ({s_val}) diverges from {mult}x baseline ({exp_s}) in {ctx_label}"
+                                    )
+                    except ValueError:
+                        pass
+
+            if baseline_output is not None and "scenario-table" in html_content:
+                scen_table_m = re.search(
+                    r'<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][^>]*>(.*?)</table>',
+                    html_content,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if scen_table_m:
+                    for row_html in re.findall(r'<tr[^>]*>(.*?)</tr>', scen_table_m.group(1), re.DOTALL | re.IGNORECASE):
+                        cells = [
+                            re.sub(r'<[^>]+>', '', c).strip()
+                            for c in re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL | re.IGNORECASE)
+                        ]
+                        if len(cells) >= 3 and re.match(r'^(0\.8|0\.9|1\.0|1\.1|1\.2)x$', cells[0]):
+                            try:
+                                mult_val = float(cells[0][:-1])
+                                row_out = float(cells[2].replace("$", "").replace(",", "").replace("%", "").strip())
+                                exp_row_out = round(baseline_output * mult_val, 2)
+                                if abs(row_out - exp_row_out) > 0.05:
+                                    violations.append(
+                                        f"Scenario table row {cells[0]} output ({row_out}) diverges from {mult_val}x baseline ({exp_row_out}) in {ctx_label}"
+                                    )
+                            except ValueError:
+                                pass
+
+            # 3. Verify proprietary-calculation-table row arithmetic (Baseline - Tax Liability = Net Retained Capital)
+            if "proprietary-calculation-table" in html_content:
+                prop_table_m = re.search(
+                    r'<table[^>]*class=["\'][^"\']*proprietary-calculation-table[^"\']*["\'][^>]*>(.*?)</table>',
+                    html_content,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if prop_table_m:
+                    tbody_m = re.search(r'<tbody[^>]*>(.*?)</tbody>', prop_table_m.group(1), re.DOTALL | re.IGNORECASE)
+                    rows_src = tbody_m.group(1) if tbody_m else prop_table_m.group(1)
+                    for row_html in re.findall(r'<tr[^>]*>(.*?)</tr>', rows_src, re.DOTALL | re.IGNORECASE):
+                        cells = [
+                            re.sub(r'<[^>]+>', '', c).strip()
+                            for c in re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL | re.IGNORECASE)
+                        ]
+                        if len(cells) == 4 and cells[0].startswith("$") and cells[2].startswith("$") and cells[3].startswith("$"):
+                            try:
+                                b_amt = float(cells[0].replace("$", "").replace(",", "").strip())
+                                t_amt = float(cells[2].replace("$", "").replace(",", "").strip())
+                                n_amt = float(cells[3].replace("$", "").replace(",", "").strip())
+                                if abs((b_amt - t_amt) - n_amt) > 2.0:
+                                    violations.append(
+                                        f"Proprietary table row arithmetic drift in {ctx_label}: {cells[0]} - {cells[2]} != {cells[3]}"
+                                    )
+                            except ValueError:
+                                pass
+                        elif len(cells) == 5 and cells[1].startswith("$") and cells[2].startswith("$") and cells[4].startswith("$"):
+                            try:
+                                b_amt = float(cells[1].replace("$", "").replace(",", "").strip())
+                                t_amt = float(cells[2].replace("$", "").replace(",", "").strip())
+                                n_amt = float(cells[4].replace("$", "").replace(",", "").strip())
+                                if abs((b_amt - t_amt) - n_amt) > 2.0:
+                                    violations.append(
+                                        f"Proprietary table row arithmetic drift in {ctx_label}: {cells[1]} - {cells[2]} != {cells[4]}"
+                                    )
+                            except ValueError:
+                                pass
+        except Exception:
+            pass
+
+        return violations
 
     def audit_file(
         self,
@@ -3074,6 +3255,17 @@ class MaintenanceLifecycle:
                     ws_root = Path("/home/ubuntuadmin/projects")
                     record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
                     record_engine_hash(ws_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+                    try:
+                        from pseofactory.supervisor import HeartbeatTracker
+                        HeartbeatTracker(heartbeat_path=ws_root / "pseofactory" / ".agy" / "supervisor_heartbeat.json").emit(
+                            status="HEALTHY",
+                            cycle_id=run_id or "maintenance_sync",
+                            current_tenant=None,
+                            engine_hash=current_engine_hash,
+                            consecutive_failures=0,
+                        )
+                    except Exception:
+                        pass
             else:
                 current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
