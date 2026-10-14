@@ -45,6 +45,8 @@ from pseofactory.affiliates import (
     parse_bounty_estimate,
     is_commercial_b2b_slug,
     resolve_optimal_partner_for_slug,
+    verify_partner_domain_alignment,
+    qualify_monetization_opportunity,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -1079,3 +1081,43 @@ class MonetizationHub:
             "is_clean": not violations,
             "violations": violations,
         }
+
+    def qualify_opportunity(
+        self,
+        query: str,
+        slug: str = "",
+        property_id: Optional[str] = None,
+        search_volume: int = 0,
+        cpc_usd: float = 0.0,
+        jev_score: float = 1.25,
+        durable_prob: float = 0.55,
+    ) -> Dict[str, Any]:
+        """
+        Delegates to canonical qualify_monetization_opportunity using active vault overrides.
+        """
+        return qualify_monetization_opportunity(
+            query=query,
+            slug=slug,
+            property_id=property_id,
+            search_volume=search_volume,
+            cpc_usd=cpc_usd,
+            jev_score=jev_score,
+            durable_prob=durable_prob,
+            vault_overrides=self.vault_data,
+        )
+
+    def verify_partner_alignment(
+        self,
+        property_id: str,
+        slug: str,
+        partners: List[str],
+    ) -> Dict[str, Any]:
+        """
+        Delegates to canonical verify_partner_domain_alignment.
+        """
+        return verify_partner_domain_alignment(
+            property_id=property_id,
+            slug=slug,
+            partners=partners,
+        )
+

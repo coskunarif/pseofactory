@@ -9,6 +9,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
+from pseofactory.affiliates import qualify_monetization_opportunity
 from pseofactory.contracts import assert_no_forbidden_dashes, assert_url_safe_slug
 from pseofactory.trends.models import TrendCandidate, TregDurabilityResult, JevDecisionResult
 
@@ -120,6 +121,7 @@ class JevEngine:
         Computes composite profit yield score in [0.0, 100.0]:
         CompositeYield = 100.0 * pow(0.35 * V_norm + 0.65 * S_norm, 0.85) * DecelPenalty * D * J_norm * max(0.0, 1.0 - R) * Y_asset
         Discounts risk R when serp_weakness_count >= 1 or position_zero_vacant is True.
+        Untangles commercial B2B, consumer financial, student loan YMYL, and prospective niche expansion yields via qualify_monetization_opportunity.
         """
         v_norm = calculate_normalized_velocity(candidate.z_score)
         s_norm = calculate_normalized_volume(treg_result.search_volume)
@@ -149,9 +151,34 @@ class JevEngine:
             r_discount = max(0.60, 1.0 - 0.10 * min(effective_weakness, 4))
             r = r * r_discount
 
+        monetization = qualify_monetization_opportunity(
+            query=candidate.query,
+            slug=candidate.slug,
+            property_id=(candidate.metadata or {}).get("property_id"),
+            search_volume=treg_result.search_volume,
+            cpc_usd=treg_result.cpc_usd,
+            jev_score=jev_score,
+            durable_prob=durable_prob,
+        )
+        intent_tier = monetization.get("intent_tier", "")
+        if intent_tier in ("cross_tenant_contamination", "out_of_scope_prexvo"):
+            return 0.0
+
         y_intent = calculate_intent_weight(candidate.intent_cluster, candidate.query)
         cpc_norm = min(1.0, max(0.0, treg_result.cpc_usd / 10.0))
-        y_asset = 0.7 * y_intent + 0.3 * cpc_norm
+        base_y_asset = 0.7 * y_intent + 0.3 * cpc_norm
+
+        tier_multiplier = 1.0
+        if intent_tier == "commercial_b2b":
+            tier_multiplier = 1.15
+        elif intent_tier == "student_loan_ymyl":
+            tier_multiplier = 1.08
+        elif intent_tier == "prospective_niche_expansion":
+            tier_multiplier = 1.02
+        elif intent_tier == "unmonetizable_noise":
+            tier_multiplier = 0.15
+
+        y_asset = base_y_asset * tier_multiplier
 
         momentum_core = 0.35 * v_norm + 0.65 * s_norm
         momentum_factor = math.pow(momentum_core, 0.85) if momentum_core > 0.0 else 0.0
@@ -196,6 +223,16 @@ class JevEngine:
             else int((candidate.metadata or {}).get("serp_weakness_count", 0))
         )
 
+        monetization = qualify_monetization_opportunity(
+            query=clean_q,
+            slug=slug,
+            property_id=(candidate.metadata or {}).get("property_id"),
+            search_volume=treg_result.search_volume,
+            cpc_usd=treg_result.cpc_usd,
+            jev_score=jev_score,
+            durable_prob=durable_prob,
+        )
+
         composite_yield = self.compute_composite_yield(
             candidate=candidate,
             treg_result=treg_result,
@@ -207,6 +244,22 @@ class JevEngine:
 
         now_iso = datetime.now(timezone.utc).isoformat()
         target_asset = determine_target_asset_type(clean_q, candidate.intent_cluster)
+
+        # Step 0: Cross-Tenant Isolation & Unmonetizable Signal Gate
+        if monetization.get("intent_tier") in ("cross_tenant_contamination", "out_of_scope_prexvo"):
+            return JevDecisionResult(
+                query=clean_q,
+                slug=slug,
+                action="REJECT",
+                jev_score=jev_score,
+                durable_prob=durable_prob,
+                composite_profit_yield=0.0,
+                cannibalization_risk=c_cannibal,
+                target_asset_type="none",
+                decision_reason=monetization.get("rejection_reason", "Cross-tenant isolation rejection"),
+                passed_thresholds=False,
+                evaluated_at=now_iso,
+            )
 
         # Step 1: Noise and Deceleration Gate
         if candidate.is_transient_noise or (candidate.acceleration <= 0.0 and treg_result.search_volume < 1000) or candidate.z_score < 1.5:
@@ -252,6 +305,9 @@ class JevEngine:
                     "measurement_lock_days": 28,
                     "locked_until": lock_until,
                     "target_injections": [clean_q],
+                    "property_id": monetization.get("property_id", ""),
+                    "intent_tier": monetization.get("intent_tier", ""),
+                    "recommended_partners": monetization.get("recommended_partners", []),
                 }
                 reason = f"Striking distance query (pos {pos:.1f}) matches existing tool '{tool_slug}'; issue overlay spec with 28-day measurement lock per Search Intent Doctrine"
                 return JevDecisionResult(
@@ -286,12 +342,18 @@ class JevEngine:
                     matching_tool=tool_slug,
                 )
 
-        # Step 4: Build Page Qualification Gate
+        # Step 4: Build Page Qualification Gate (with Monetization Qualification)
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
         r_composite = 0.6 * c_cannibal + 0.4 * kd_norm
         p0_or_low_kd = treg_result.position_zero_vacant or treg_result.keyword_difficulty < 25.0
 
-        if composite_yield >= self.min_build_yield and r_composite < 0.40 and c_cannibal < 0.50 and p0_or_low_kd:
+        if (
+            composite_yield >= self.min_build_yield
+            and r_composite < 0.40
+            and c_cannibal < 0.50
+            and p0_or_low_kd
+            and monetization.get("monetization_qualified", False)
+        ):
             reason = f"High-yield durable void (yield {composite_yield:.1f} >= {self.min_build_yield:.1f}) with vacant Position 0 and zero cannibalization"
             candidate_spec = {
                 "query": clean_q,
@@ -305,6 +367,17 @@ class JevEngine:
                 "position_zero_vacant": treg_result.position_zero_vacant,
                 "status": "APPROVED_BUILD",
                 "discovered_at": candidate.discovered_at,
+                "property_id": monetization.get("property_id", ""),
+                "intent_tier": monetization.get("intent_tier", ""),
+                "monetization_qualified": monetization.get("monetization_qualified", False),
+                "primary_partner": monetization.get("primary_partner", ""),
+                "recommended_partners": monetization.get("recommended_partners", []),
+                "expected_bounty_usd": monetization.get("expected_bounty_usd", 0.0),
+                "effective_partner_yield": monetization.get("effective_partner_yield", 0.0),
+                "estimated_monthly_revenue_usd": monetization.get("estimated_monthly_revenue_usd", 0.0),
+                "partner_alignment_verified": monetization.get("partner_alignment_verified", True),
+                "mandatory_disclosures": monetization.get("disclosures_required", {}),
+                "monetization_qualification": monetization,
             }
             return JevDecisionResult(
                 query=clean_q,

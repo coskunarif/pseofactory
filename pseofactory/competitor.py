@@ -14,6 +14,12 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Union
 
+from pseofactory.affiliates import (
+    PREXVO_DISCLOSURES,
+    PROFITHELM_DISCLOSURES,
+    qualify_monetization_opportunity,
+    verify_partner_domain_alignment,
+)
 from pseofactory.contracts import sanitize_url_slug, assert_no_forbidden_dashes
 from pseofactory.tenant_facts import TenantTruthProfile, TenantFactStore
 from pseofactory.maintenance import CrossPropertyContaminationScanner
@@ -366,8 +372,8 @@ class CompetitorGapEngine:
     def enrich_candidate_spec(self, candidate_spec: Union[Dict[str, Any], GapCandidateSpec]) -> Dict[str, Any]:
         """
         Enriches candidate specification with statutory citations, economic datasets,
-        and mathematical parameters derived from the tenant truth profile.
-        Validates against tenant isolation firewall.
+        monetization qualification, and mathematical parameters derived from the tenant truth profile.
+        Validates against tenant isolation and partner alignment firewalls.
         Zero em-dashes. Zero en-dashes.
         """
         if hasattr(candidate_spec, "to_dict"):
@@ -377,6 +383,18 @@ class CompetitorGapEngine:
 
         tenant_id = self.tenant_id
         query = str(spec.get("query", "")).lower()
+        slug = str(spec.get("slug", "") or sanitize_url_slug(query or "tool")).lower()
+        combined = f"{query} {slug}".strip()
+
+        monetization = qualify_monetization_opportunity(
+            query=query or slug,
+            slug=slug,
+            property_id=tenant_id,
+            search_volume=int(spec.get("search_volume", 1500) or 1500),
+            cpc_usd=float(spec.get("cpc_usd", 4.5) or 4.5),
+        )
+        if monetization.get("intent_tier") == "cross_tenant_contamination":
+            raise ValueError(monetization.get("rejection_reason", f"Cross-tenant isolation violation for {tenant_id}"))
 
         if tenant_id == "prexvo":
             spec.setdefault("tenant", "prexvo")
@@ -386,7 +404,7 @@ class CompetitorGapEngine:
             spec.setdefault("statutory_authority", "34 CFR Part 685")
             spec.setdefault("economic_dataset", "FRED SLSTTOTAL Series")
             spec.setdefault("category", "Student Loan Repayment")
-            spec.setdefault("affiliates", ["splash_financial", "sofi"])
+            spec.setdefault("affiliates", monetization.get("recommended_partners") or ["splash_financial", "sofi"])
             spec.setdefault("model_name", "Direct Consolidation Loan Weighted Model")
             spec.setdefault("formula", "balance * (weighted_rate / 100.0)")
             spec.setdefault("inputs", {"balance": 45000, "weighted_rate": 6.5})
@@ -399,13 +417,16 @@ class CompetitorGapEngine:
                 "Refinancing federal student loans permanently waives federal protections",
                 "FTC Partner Compensation Disclosure",
                 "Independent Publisher Disclaimer",
+                PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""),
+                PREXVO_DISCLOSURES.get("ftc_disclosure", ""),
             ])
+            spec.setdefault("ymyl_warning", PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""))
         else:
             spec.setdefault("tenant", "profithelm")
             spec.setdefault("property_id", "profithelm")
             spec.setdefault("domain", "profithelm.com")
             spec.setdefault("canonical_base", "https://profithelm.com")
-            if "1031" in query:
+            if "1031" in combined:
                 spec.setdefault("statutory_authority", "IRC Section 1031(a)(1)")
                 spec.setdefault("economic_dataset", "FRED CPILFESL Series")
                 spec.setdefault("category", "1031 Exchange")
@@ -418,10 +439,49 @@ class CompetitorGapEngine:
                     "sample_calculation",
                     "Relinquished basis 450,000 with zero recognized gain yields replacement basis 450,000",
                 )
+            elif any(t in combined for t in ("crypto", "staking", "airdrop", "8949", "1099-da")):
+                spec.setdefault("statutory_authority", "IRC Section 1001 & IRS Form 8949")
+                spec.setdefault("economic_dataset", "FRED CPILFESL Series")
+                spec.setdefault("category", "Crypto Tax Intelligence")
+                spec.setdefault("affiliates", ["coinledger", "koinly"])
+                spec.setdefault("model_name", "Digital Asset Realized Gain Model")
+                spec.setdefault("formula", "proceeds - cost_basis")
+                spec.setdefault("inputs", {"proceeds": 85000, "cost_basis": 35000})
+                spec.setdefault("published_output", 50000.0)
+                spec.setdefault(
+                    "sample_calculation",
+                    "Proceeds 85,000 minus cost basis 35,000 yields 50,000 net taxable capital gain",
+                )
+            elif any(t in combined for t in ("prediction", "kalshi", "polymarket", "implied-probability", "kelly")):
+                spec.setdefault("statutory_authority", "IRC Section 1256 & Section 165(d)")
+                spec.setdefault("economic_dataset", "FRED DGS10 Series")
+                spec.setdefault("category", "Quantitative Market Analytics")
+                spec.setdefault("affiliates", monetization.get("recommended_partners") or ["coinledger", "kalshi"])
+                spec.setdefault("model_name", "Event Contract Expected Value Model")
+                spec.setdefault("formula", "gross_payout - contract_cost")
+                spec.setdefault("inputs", {"gross_payout": 10000, "contract_cost": 6200})
+                spec.setdefault("published_output", 3800.0)
+                spec.setdefault(
+                    "sample_calculation",
+                    "Gross payout 10,000 minus contract cost 6,200 yields 3,800 net settlement gain",
+                )
+            elif any(t in combined for t in ("bracket", "tcja", "capital-gains", "capital gains", "standard deduction")):
+                spec.setdefault("statutory_authority", "IRC Section 1(j) & Rev. Proc. 2025-32")
+                spec.setdefault("economic_dataset", "FRED CPILFESL Series")
+                spec.setdefault("category", "Tax Intelligence")
+                spec.setdefault("affiliates", monetization.get("recommended_partners") or ["turbotax", "taxslayer"])
+                spec.setdefault("model_name", "Federal Statutory Bracket Liability Model")
+                spec.setdefault("formula", "taxable_income * effective_rate")
+                spec.setdefault("inputs", {"taxable_income": 180000, "effective_rate": 0.22})
+                spec.setdefault("published_output", 39600.0)
+                spec.setdefault(
+                    "sample_calculation",
+                    "Taxable income 180,000 at 22 percent effective rate yields 39,600 liability",
+                )
             else:
                 spec.setdefault("statutory_authority", "IRC Section 179(b)(1)")
                 spec.setdefault("economic_dataset", "FRED CPILFESL Series")
-                spec.setdefault("category", "Tax Intelligence")
+                spec.setdefault("category", "Commercial Tax Intelligence")
                 spec.setdefault("affiliates", ["crest_capital", "mercury"])
                 spec.setdefault("model_name", "Section 179 Grounded Model")
                 spec.setdefault("formula", "min(cost, cap)")
@@ -434,7 +494,24 @@ class CompetitorGapEngine:
             spec.setdefault("mandatory_disclosures", [
                 "Circular 230 Tax Modeling Disclaimer",
                 "FTC Independent Financial Research Publisher Disclosure",
+                PROFITHELM_DISCLOSURES.get("ftc_disclosure", ""),
             ])
+
+        spec.setdefault("intent_tier", monetization.get("intent_tier", ""))
+        spec.setdefault("monetization_qualified", monetization.get("monetization_qualified", True))
+        spec.setdefault("expected_bounty_usd", monetization.get("expected_bounty_usd", 0.0))
+        spec.setdefault("estimated_monthly_revenue_usd", monetization.get("estimated_monthly_revenue_usd", 0.0))
+
+        # Enforce partner alignment across tenant and intent boundaries
+        alignment = verify_partner_domain_alignment(
+            property_id=tenant_id,
+            slug=slug,
+            partners=list(spec.get("affiliates", [])),
+        )
+        if not alignment["aligned"]:
+            raise ValueError(
+                f"Partner alignment violation for {tenant_id} ({slug}): {'; '.join(alignment['violations'])}"
+            )
 
         # Enforce tenant isolation check on text attributes
         disclosures_text = " ".join(str(d) for d in spec.get("mandatory_disclosures", []))

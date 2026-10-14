@@ -1431,6 +1431,13 @@ class WorkspacePropertyScanner:
 
 PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
+        "slug": "student-loan-repayment-calculator",
+        "title": "Federal Student Loan Repayment Calculator (2026) | Prexvo",
+        "short_title": "Repayment Calculator",
+        "description": "Compare 2026 Federal Student Loan Repayment Plans: RAP, IBR, PAYE, ICR, and Tiered Standard under Title IV 34 CFR Part 685 statutory rules.",
+        "primary_keyword": "federal student loan repayment plan comparison",
+    },
+    {
         "slug": "rap-vs-ibr-calculator",
         "title": "RAP vs IBR Student Loan Plan Comparison Engine",
         "short_title": "RAP vs IBR",
@@ -1464,6 +1471,13 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "PSLF Buyback",
         "description": "Calculate qualifying Public Service Loan Forgiveness payments and evaluate buyback eligibility under 34 CFR 685.219 statutory regulations.",
         "primary_keyword": "pslf buyback calculator",
+    },
+    {
+        "slug": "pslf-qualifying-payment-simulator",
+        "title": "PSLF Qualifying Payment & Buyback Simulator (2026) | Prexvo",
+        "short_title": "PSLF Simulator",
+        "description": "Calculate qualifying Public Service Loan Forgiveness payments and evaluate buyback eligibility under 34 CFR 685.219 statutory regulations.",
+        "primary_keyword": "pslf qualifying payment simulator",
     },
 ]
 

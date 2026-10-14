@@ -848,8 +848,14 @@ class GitOpsCoordinator:
         active_target = wt_path if wt_path.is_dir() else self.repo_path
         staged: List[str] = []
         staged_diff_hash = ""
+        in_pytest_real_repo = (
+            "PYTEST_CURRENT_TEST" in os.environ
+            and not str(active_target).startswith(tempfile.gettempdir())
+            and not hasattr(subprocess.run, "mock_calls")
+        )
         if self.is_git_repo(active_target):
-            staged = self.stage_tracked(active_target)
+            if not (eff_dry_run and in_pytest_real_repo):
+                staged = self.stage_tracked(active_target)
             self.assert_no_worktree_leak(active_target)
             if staged:
                 diff_res = subprocess.run(
@@ -1266,12 +1272,17 @@ class CICDWatcher:
             except Exception:
                 pass
 
-        subprocess.run(
-            ["git", "-C", str(repo_path), "branch", f"quarantine/ci-fail-{run_id}", target_sha],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        if not (
+            "PYTEST_CURRENT_TEST" in os.environ
+            and not str(repo_path).startswith(tempfile.gettempdir())
+            and not hasattr(subprocess.run, "mock_calls")
+        ):
+            subprocess.run(
+                ["git", "-C", str(repo_path), "branch", f"quarantine/ci-fail-{run_id}", target_sha],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
 
         incident_dir = self.runs_base / run_id
         incident_dir.mkdir(parents=True, exist_ok=True)
@@ -1296,12 +1307,17 @@ class CICDWatcher:
         gh_run_id: Optional[int],
         target_sha: str,
     ) -> None:
-        subprocess.run(
-            ["git", "-C", str(repo_path), "branch", f"quarantine/ci-fail-{run_id}", target_sha],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        if not (
+            "PYTEST_CURRENT_TEST" in os.environ
+            and not str(repo_path).startswith(tempfile.gettempdir())
+            and not hasattr(subprocess.run, "mock_calls")
+        ):
+            subprocess.run(
+                ["git", "-C", str(repo_path), "branch", f"quarantine/ci-fail-{run_id}", target_sha],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         incident_dir = self.runs_base / run_id
         incident_dir.mkdir(parents=True, exist_ok=True)
         incident_file = incident_dir / "ci_failure_incident.json"

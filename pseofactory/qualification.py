@@ -195,7 +195,7 @@ def check_search_intent_cannibalization(
                     union = tool_slug_words | query_words
                     jaccard = len(overlap) / len(union) if union else 0.0
 
-                    if (
+                    if not (len(query_words) >= 8 and jaccard <= 0.50) and (
                         (len(overlap) >= 3 and len(query_words) <= 4)
                         or jaccard >= token_overlap_threshold
                         or (jaccard >= 0.40 and len(overlap) >= 2)

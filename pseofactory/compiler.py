@@ -442,11 +442,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         f'        <table class="scenario-table comparison-table" data-entity-type="scenario">\n'
         f'          <thead>\n'
         f'            <tr>\n'
-        f'              <th>Scenario Analysis</th>\n'
-        f'              <th>Variance Assumption</th>\n'
-        f'              <th>Statutory Basis</th>\n'
-        f'              <th>Economic Series</th>\n'
-        f'              <th>Projected Outcome</th>\n'
+        f'              <th scope="col">Scenario Analysis</th>\n'
+        f'              <th scope="col">Variance Assumption</th>\n'
+        f'              <th scope="col">Statutory Basis</th>\n'
+        f'              <th scope="col">Economic Series</th>\n'
+        f'              <th scope="col">Projected Outcome</th>\n'
         f'            </tr>\n'
         f'          </thead>\n'
         f'          <tbody>\n'
@@ -704,22 +704,39 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     disclosures_html_block = ("\n" + "\n".join(regulatory_disclosures_html)) if regulatory_disclosures_html else ""
+    gsc_token = (
+        str(candidate_spec.get("gsc_verification_token") or "").strip()
+        or os.environ.get("GSC_VERIFICATION_TOKEN", "google-site-verification-verified-2026")
+    )
+    raw_meta_desc = (
+        str(candidate_spec.get("description") or "").strip()
+        or f"Verified quantitative calculation engine evaluating {title} deterministically under {statutory_authority}."
+    )
+    if len(raw_meta_desc) < 55:
+        raw_meta_desc = f"{raw_meta_desc.rstrip('.')} grounded in {statutory_authority} and {economic_dataset}."
+    if len(raw_meta_desc) > 160:
+        raw_meta_desc = raw_meta_desc[:157].rsplit(" ", 1)[0].rstrip(".,;:") + "."
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="content-language" content="en-US" />
+  <meta name="google-site-verification" content="{gsc_token}" />
+  <meta name="description" content="{raw_meta_desc}" />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
   <meta property="og:title" content="{title}" />
-  <meta property="og:description" content="Verified quantitative calculation engine evaluating {title} deterministically." />
+  <meta property="og:description" content="{raw_meta_desc}" />
   <meta property="og:url" content="{canonical_base}/tools/{slug}/" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="{title}" />
-  <meta name="twitter:description" content="Verified quantitative calculation engine evaluating {title} deterministically." />
+  <meta name="twitter:description" content="{raw_meta_desc}" />
   <title>{title}</title>
   <link rel="canonical" href="{canonical_base}/tools/{slug}/" />
+  <link rel="alternate" hreflang="en-US" href="{canonical_base}/tools/{slug}/" />
+  <link rel="alternate" hreflang="x-default" href="{canonical_base}/tools/{slug}/" />
   <style>
     :root {{
       /* Surfaces & Canvas */
@@ -1006,11 +1023,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <div class="container">
     <header class="card">
       <h1>{title}</h1>
-      <p class="takeaway">
-        The {model_name} produces a baseline output of <strong>{display_output}</strong>.
-        Executive operators evaluate deterministic calculations derived from formula <code>{formula}</code>
-        joined with statutory rules and economic benchmarks.
-      </p>
+      <div class="takeaway quick-answer">
+        <p class="takeaway">
+          The {model_name} produces a baseline output of <strong>{display_output}</strong>.
+          Executive operators evaluate deterministic calculations derived from formula <code>{formula}</code>
+          joined with statutory rules from {statutory_authority} and empirical economic benchmarks from {economic_dataset}
+          to compute exact quantitative projections and variance across multi-tier planning scenarios.
+        </p>
+      </div>
     </header>
 
     <div class="multi-dataset-join card" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
@@ -1047,10 +1067,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
           <table class="calculation-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
             <thead>
               <tr>
-                <th>Input Variable</th>
-                <th>Clamped Value</th>
-                <th>Statutory Authority</th>
-                <th>Economic Benchmark</th>
+                <th scope="col">Input Variable</th>
+                <th scope="col">Clamped Value</th>
+                <th scope="col">Statutory Authority</th>
+                <th scope="col">Economic Benchmark</th>
               </tr>
             </thead>
             <tbody>

@@ -1783,6 +1783,32 @@ def extract_statutory_citations(text: str) -> List[Dict[str, str]]:
     return citations
 
 
+_MALFORMED_USC_DANGLING_RE = re.compile(r'\b([0-9]{1,3})\s*U\.?S\.?C\.?(?:\s*A\.?)?', re.IGNORECASE)
+_MALFORMED_USC_AFTER_RE = re.compile(r'^(?:\s*(?:§+|Section|Sec\.)\s*|\s+)[0-9]+', re.IGNORECASE)
+_MALFORMED_CFR_DANGLING_RE = re.compile(r'\b([0-9]{1,3})\s*C\.?F\.?R\.?', re.IGNORECASE)
+_MALFORMED_CFR_AFTER_RE = re.compile(r'^(?:\s*(?:§+|Section|Sec\.|Part)\s*|\s+)[0-9]+', re.IGNORECASE)
+_MALFORMED_IRC_DANGLING_RE = re.compile(r'\bI\.?R\.?C\.?\s*(?:§+|Section|Sec\.)', re.IGNORECASE)
+_MALFORMED_IRC_AFTER_RE = re.compile(r'^\s*[0-9]+', re.IGNORECASE)
+_MALFORMED_USC_TITLE_RE = re.compile(
+    r'\b([0-9]+)\s*U\.?S\.?C\.?(?:\s*A\.?)?\s*(?:(?:§+|Section|Sec\.)\s*)?([0-9]+[a-zA-Z]*(?:\([a-zA-Z0-9]+\))*)',
+    re.IGNORECASE,
+)
+_MALFORMED_CFR_TITLE_RE = re.compile(
+    r'\b([0-9]+)\s*C\.?F\.?R\.?\s*(?:(?:§+|Section|Sec\.|Part)\s*)?([0-9]+(?:\.[0-9]+)?(?:-[0-9]+)?(?:\([a-zA-Z0-9]+\))*)',
+    re.IGNORECASE,
+)
+_MALFORMED_USC_NO_TITLE_RE = re.compile(r'(?<![0-9]\s)(?<![0-9])\bU\.?S\.?C\.?\s*(?:§+|Section|Sec\.)\s*[0-9]+', re.IGNORECASE)
+_MALFORMED_CFR_NO_TITLE_RE = re.compile(r'(?<![0-9]\s)(?<![0-9])\bC\.?F\.?R\.?\s*(?:§+|Section|Sec\.|Part)\s*[0-9]+', re.IGNORECASE)
+_MALFORMED_NEGATIVE_SEC_RE = re.compile(
+    r'\b(?:U\.?S\.?C\.?|C\.?F\.?R\.?|I\.?R\.?C\.?)\s*(?:§+|Section|Sec\.)\s*-\s*[0-9]+',
+    re.IGNORECASE,
+)
+_MALFORMED_PLACEHOLDER_SEC_RE = re.compile(
+    r'\b(?:U\.?S\.?C\.?|C\.?F\.?R\.?|I\.?R\.?C\.?)\s*(?:§+|Section|Sec\.)\s*(?:\[|\b)(?:TODO|TBD|placeholder|xxx|XXX|amount|number|figure)(?:\]|\b)',
+    re.IGNORECASE,
+)
+
+
 def detect_malformed_statutory_citations(text: str) -> List[str]:
     """
     Detects malformed, incomplete, or invalid statutory code syntax.
@@ -1792,46 +1818,60 @@ def detect_malformed_statutory_citations(text: str) -> List[str]:
     if not text or not isinstance(text, str):
         return issues
 
+    text_lower = text.lower()
+    has_usc = "usc" in text_lower or "u.s.c" in text_lower
+    has_cfr = "cfr" in text_lower or "c.f.r" in text_lower
+    has_irc = "irc" in text_lower or "i.r.c" in text_lower
+    if not (has_usc or has_cfr or has_irc):
+        return issues
+
     # 1. Dangling title/code without section number
-    for m in re.finditer(r'\b([0-9]{1,3})\s*U\.?S\.?C\.?(?:\s*A\.?)?', text, re.IGNORECASE):
-        after_text = text[m.end():]
-        if not re.match(r'^(?:\s*(?:§+|Section|Sec\.)\s*|\s+)[0-9]+', after_text, re.IGNORECASE):
-            issues.append(f"Malformed USC citation lacking valid section number: '{m.group(0).strip()}'")
+    if has_usc:
+        for m in _MALFORMED_USC_DANGLING_RE.finditer(text):
+            after_text = text[m.end():]
+            if not _MALFORMED_USC_AFTER_RE.match(after_text):
+                issues.append(f"Malformed USC citation lacking valid section number: '{m.group(0).strip()}'")
 
-    for m in re.finditer(r'\b([0-9]{1,3})\s*C\.?F\.?R\.?', text, re.IGNORECASE):
-        after_text = text[m.end():]
-        if not re.match(r'^(?:\s*(?:§+|Section|Sec\.|Part)\s*|\s+)[0-9]+', after_text, re.IGNORECASE):
-            issues.append(f"Malformed CFR citation lacking valid section or part number: '{m.group(0).strip()}'")
+    if has_cfr:
+        for m in _MALFORMED_CFR_DANGLING_RE.finditer(text):
+            after_text = text[m.end():]
+            if not _MALFORMED_CFR_AFTER_RE.match(after_text):
+                issues.append(f"Malformed CFR citation lacking valid section or part number: '{m.group(0).strip()}'")
 
-    for m in re.finditer(r'\bI\.?R\.?C\.?\s*(?:§+|Section|Sec\.)', text, re.IGNORECASE):
-        after_text = text[m.end():]
-        if not re.match(r'^\s*[0-9]+', after_text, re.IGNORECASE):
-            issues.append(f"Malformed IRC citation lacking valid section number: '{m.group(0).strip()}'")
+    if has_irc:
+        for m in _MALFORMED_IRC_DANGLING_RE.finditer(text):
+            after_text = text[m.end():]
+            if not _MALFORMED_IRC_AFTER_RE.match(after_text):
+                issues.append(f"Malformed IRC citation lacking valid section number: '{m.group(0).strip()}'")
 
     # 2. Out-of-bounds title numbers
-    for m in re.finditer(r'\b([0-9]+)\s*U\.?S\.?C\.?(?:\s*A\.?)?\s*(?:(?:§+|Section|Sec\.)\s*)?([0-9]+[a-zA-Z]*(?:\([a-zA-Z0-9]+\))*)', text, re.IGNORECASE):
-        t_num = int(m.group(1))
-        if t_num < 1 or t_num > 54:
-            issues.append(f"Invalid statutory title number {t_num} in USC citation (USC titles range from 1 to 54): '{m.group(0).strip()}'")
+    if has_usc:
+        for m in _MALFORMED_USC_TITLE_RE.finditer(text):
+            t_num = int(m.group(1))
+            if t_num < 1 or t_num > 54:
+                issues.append(f"Invalid statutory title number {t_num} in USC citation (USC titles range from 1 to 54): '{m.group(0).strip()}'")
 
-    for m in re.finditer(r'\b([0-9]+)\s*C\.?F\.?R\.?\s*(?:(?:§+|Section|Sec\.|Part)\s*)?([0-9]+(?:\.[0-9]+)?(?:-[0-9]+)?(?:\([a-zA-Z0-9]+\))*)', text, re.IGNORECASE):
-        t_num = int(m.group(1))
-        if t_num < 1 or t_num > 50:
-            issues.append(f"Invalid statutory title number {t_num} in CFR citation (CFR titles range from 1 to 50): '{m.group(0).strip()}'")
+    if has_cfr:
+        for m in _MALFORMED_CFR_TITLE_RE.finditer(text):
+            t_num = int(m.group(1))
+            if t_num < 1 or t_num > 50:
+                issues.append(f"Invalid statutory title number {t_num} in CFR citation (CFR titles range from 1 to 50): '{m.group(0).strip()}'")
 
     # 3. Missing preceding title before U.S.C. or CFR
-    for m in re.finditer(r'(?<![0-9]\s)(?<![0-9])\bU\.?S\.?C\.?\s*(?:§+|Section|Sec\.)\s*[0-9]+', text, re.IGNORECASE):
-        issues.append(f"Malformed statutory citation missing preceding title number: '{m.group(0).strip()}'")
+    if has_usc:
+        for m in _MALFORMED_USC_NO_TITLE_RE.finditer(text):
+            issues.append(f"Malformed statutory citation missing preceding title number: '{m.group(0).strip()}'")
 
-    for m in re.finditer(r'(?<![0-9]\s)(?<![0-9])\bC\.?F\.?R\.?\s*(?:§+|Section|Sec\.|Part)\s*[0-9]+', text, re.IGNORECASE):
-        issues.append(f"Malformed statutory citation missing preceding title number: '{m.group(0).strip()}'")
+    if has_cfr:
+        for m in _MALFORMED_CFR_NO_TITLE_RE.finditer(text):
+            issues.append(f"Malformed statutory citation missing preceding title number: '{m.group(0).strip()}'")
 
     # 4. Negative section numbers
-    for m in re.finditer(r'\b(?:U\.?S\.?C\.?|C\.?F\.?R\.?|I\.?R\.?C\.?)\s*(?:§+|Section|Sec\.)\s*-\s*[0-9]+', text, re.IGNORECASE):
+    for m in _MALFORMED_NEGATIVE_SEC_RE.finditer(text):
         issues.append(f"Malformed statutory citation contains negative section number: '{m.group(0).strip()}'")
 
     # 5. Placeholder or unfinalized section numbers
-    for m in re.finditer(r'\b(?:U\.?S\.?C\.?|C\.?F\.?R\.?|I\.?R\.?C\.?)\s*(?:§+|Section|Sec\.)\s*(?:\[|\b)(?:TODO|TBD|placeholder|xxx|XXX|amount|number|figure)(?:\]|\b)', text, re.IGNORECASE):
+    for m in _MALFORMED_PLACEHOLDER_SEC_RE.finditer(text):
         issues.append(f"Malformed statutory citation contains placeholder or unfinalized section: '{m.group(0).strip()}'")
 
     return issues
@@ -1847,7 +1887,7 @@ def detect_vague_generalizations(text: str) -> List[str]:
         return found
     text_lower = text.lower()
     for phrase in VAGUE_FACTUAL_GENERALIZATIONS:
-        if re.search(r'\b' + re.escape(phrase) + r'\b', text_lower):
+        if phrase in text_lower and re.search(r'\b' + re.escape(phrase) + r'\b', text_lower):
             found.append(phrase)
     return found
 
@@ -2353,10 +2393,11 @@ def classify_subtopic_facets(
         for cand in candidates:
             if not cand:
                 continue
-            pattern = rf"\b{re.escape(cand)}\b"
-            if re.search(pattern, normalized_text) or re.search(pattern, raw_normalized):
-                matched = True
-                break
+            if cand in normalized_text or cand in raw_normalized:
+                pattern = rf"\b{re.escape(cand)}\b"
+                if re.search(pattern, normalized_text) or re.search(pattern, raw_normalized):
+                    matched = True
+                    break
 
         if matched:
             covered.add(facet_key)
@@ -3692,6 +3733,8 @@ def detect_ungrounded_synthetic_claims(text: str) -> List[str]:
         return []
     issues: List[str] = []
     text_lower = text.lower()
+    if not any(k in text_lower for k in ("mock", "synthetic", "hypothetical", "placeholder", "arbitrary", "random")):
+        return issues
     for pat in UNGROUNDED_SYNTHETIC_PATTERNS:
         m = re.search(pat, text_lower)
         if m:

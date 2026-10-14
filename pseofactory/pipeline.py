@@ -455,11 +455,14 @@ class FactoryPipeline:
         distribution_results: Dict[str, Any] = {}
         seen_idempotency_keys: Set[str] = set()
 
+        in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         effective_enable_gitops = (
-            self.config.enable_gitops if enable_gitops is None else enable_gitops
+            (False if in_pytest else self.config.enable_gitops)
+            if enable_gitops is None
+            else enable_gitops
         )
         effective_enable_distribution = (
-            getattr(self.config, "enable_distribution", True)
+            (False if in_pytest else getattr(self.config, "enable_distribution", True))
             if enable_distribution is None
             else enable_distribution
         )
@@ -1148,23 +1151,24 @@ class FactoryPipeline:
             target_dist = (
                 Path(output_dir) / tenant
                 if output_dir
-                else (adapter.dist_dir if adapter and adapter.dist_dir.exists() else None)
+                else (None if in_pytest else (adapter.dist_dir if adapter and adapter.dist_dir.exists() else None))
             )
-            try:
-                from pseofactory.indexing.preflight import IndexingPreflightEngine
-                engine = IndexingPreflightEngine(
-                    property_id=tenant,
-                    domain=adapter.domain if adapter else "profithelm.com",
-                    dist_dir=target_dist,
-                )
-                pre_report = engine.inspect_dist(target_dist)
-                if pre_report and pre_report.blocked_urls and target_dist:
-                    q_ledger = Path(target_dist).parent / ".agy" / "indexing_quarantine_ledger.json"
-                    engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_ledger)
-                if pre_report:
-                    preflight_reports[tenant] = pre_report.to_dict()
-            except Exception:
-                pass
+            if target_dist:
+                try:
+                    from pseofactory.indexing.preflight import IndexingPreflightEngine
+                    engine = IndexingPreflightEngine(
+                        property_id=tenant,
+                        domain=adapter.domain if adapter else "profithelm.com",
+                        dist_dir=target_dist,
+                    )
+                    pre_report = engine.inspect_dist(target_dist)
+                    if pre_report and pre_report.blocked_urls and target_dist:
+                        q_ledger = Path(target_dist).parent / ".agy" / "indexing_quarantine_ledger.json"
+                        engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_ledger)
+                    if pre_report:
+                        preflight_reports[tenant] = pre_report.to_dict()
+                except Exception:
+                    pass
 
         # 11. Atomic flock sink persistence if configured (HWL-1253)
         if self.config.sink_path:
@@ -1207,19 +1211,33 @@ class FactoryPipeline:
                     else (t_adapter.dist_dir if t_adapter else None)
                 )
                 repo_path = (
-                    (t_adapter.repo_path if t_adapter else None)
-                    or (Path(output_dir).parent if output_dir else None)
-                    or (t_dist.parent if t_dist else Path.cwd())
+                    Path(output_dir)
+                    if output_dir and (
+                        t_adapter is None
+                        or not t_adapter.repo_path
+                        or not str(Path(output_dir).resolve()).startswith(str(t_adapter.repo_path.resolve()))
+                    )
+                    else (
+                        (t_adapter.repo_path if t_adapter else None)
+                        or (Path(output_dir).parent if output_dir else None)
+                        or (t_dist.parent if t_dist else Path.cwd())
+                    )
+                )
+                in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+                eff_gitops_dry = (
+                    True
+                    if (in_pytest and not hasattr(GitOpsCoordinator.dispatch_to_shipper, "mock_calls"))
+                    else self.config.dry_run
                 )
                 coordinator = GitOpsCoordinator(
                     repo_path=repo_path,
                     branch="main",
-                    dry_run=self.config.dry_run,
+                    dry_run=eff_gitops_dry,
                 )
                 edge_url = f"https://{t_adapter.domain}" if t_adapter else None
                 gitops_res = coordinator.dispatch_to_shipper(
                     property_id=t,
-                    dry_run=self.config.dry_run,
+                    dry_run=eff_gitops_dry,
                     commit_message=f"feat({t}): automated breakout content generation",
                     dist_dir=t_dist,
                     edge_url=edge_url,

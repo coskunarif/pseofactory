@@ -657,7 +657,8 @@ INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
     "bracket": ["turbotax", "taxslayer", "freetaxusa"],
     "tcja": ["turbotax", "taxslayer", "freetaxusa"],
     "irs": ["turbotax", "taxslayer", "freetaxusa"],
-    "prediction": ["turbotax", "taxslayer", "freetaxusa"],
+    "prediction-market-tax": ["coinledger", "kalshi", "turbotax"],
+    "prediction": ["kalshi", "interactive_brokers", "turbotax"],
     "student-loan": ["splash_financial", "sofi_refi", "earnest", "credible", "laurel_road", "juno"],
 }
 
@@ -1014,10 +1015,12 @@ def resolve_optimal_partner_for_slug(
             matched_bucket_name = "crypto"
         elif "capital-gains" in s:
             matched_bucket_name = "capital-gains"
-        elif any(t in s for t in ("tax", "bracket", "tcja", "irs", "prediction")):
-            matched_bucket_name = "tax"
-        elif any(t in s for t in ("odds", "arbitrage", "kalshi", "kelly", "ev", "vig", "break-even")):
+        elif "prediction" in s and "tax" in s:
+            matched_bucket_name = "prediction-market-tax"
+        elif any(t in s for t in ("prediction", "odds", "arbitrage", "kalshi", "kelly", "ev", "vig", "break-even")):
             matched_bucket_name = "prediction"
+        elif any(t in s for t in ("tax", "bracket", "tcja", "irs")):
+            matched_bucket_name = "tax"
 
         raw_keys = INTENT_ROUTING_TABLE.get(matched_bucket_name, ["turbotax", "taxslayer", "freetaxusa"])
         is_b2b = is_commercial_b2b_slug(s)
@@ -1224,6 +1227,499 @@ def get_affiliate_route(
         "disclosure_required": True,
         "disclosure": disclosure_text,
         "ymyl_warning": ymyl_warning,
+    }
+
+
+UNMONETIZABLE_NOISE_TOKENS: Set[str] = {
+    "celebrity",
+    "gossip",
+    "red carpet",
+    "red-carpet",
+    "concert",
+    "movie trailer",
+    "horoscope",
+    "meme",
+    "tiktok dance",
+    "weather radar",
+    "wordle",
+    "crossword",
+    "login page",
+    "customer service number",
+    "forgot password",
+    "down detector",
+    "box office",
+    "super bowl halftime",
+    "oscars",
+    "grammys",
+    "nfl score",
+    "nba score",
+    "funny video",
+    "viral prank",
+}
+
+STUDENT_LOAN_INTENT_TOKENS: Tuple[str, ...] = (
+    "student loan",
+    "student-loan",
+    "pslf",
+    "ibr",
+    "rap",
+    "save plan",
+    "save-plan",
+    "fafsa",
+    "nelnet",
+    "mohela",
+    "aidvantage",
+    "edfinancial",
+    "title iv",
+    "title-iv",
+    "forbearance",
+    "deferment",
+    "parent plus",
+    "parent-plus",
+    "borrower defense",
+    "consolidation loan",
+    "consolidation-loan",
+    "loan repayment",
+    "loan-repayment",
+    "idr",
+)
+
+COMMERCIAL_B2B_INTENT_TOKENS: Tuple[str, ...] = (
+    "section 179",
+    "section-179",
+    "179d",
+    "cost segregation",
+    "cost-segregation",
+    "1031 exchange",
+    "section 1031",
+    "section-1031",
+    "macrs",
+    "bonus depreciation",
+    "qsbs",
+    "section 1202",
+    "section-1202",
+    "corporate amt",
+    "corporate-amt",
+    "camt",
+    "saas runway",
+    "saas-runway",
+    "burn rate",
+    "burn-rate",
+    "r&d tax",
+    "r-and-d",
+    "section 174",
+    "payroll tax",
+    "equipment financing",
+    "commercial real estate",
+    "working capital",
+    "venture debt",
+    "treasury management",
+    "s-corp payroll",
+    "c-corp",
+    "corporate card",
+)
+
+CONSUMER_FINANCIAL_INTENT_TOKENS: Tuple[str, ...] = (
+    "tax bracket",
+    "tax-bracket",
+    "capital gains",
+    "capital-gains",
+    "crypto tax",
+    "crypto-tax",
+    "staking tax",
+    "airdrop tax",
+    "form 8949",
+    "form 8829",
+    "home office deduction",
+    "1099-da",
+    "tcja",
+    "standard deduction",
+    "child tax credit",
+    "earned income",
+    "marginal tax",
+    "effective tax",
+    "kalshi",
+    "polymarket",
+    "prediction market",
+    "prediction-market",
+    "implied probability",
+    "kelly criterion",
+    "no-vig",
+    "event contract",
+    "treasury bill",
+    "t-bill",
+    "tbill",
+    "high yield savings",
+    "apy calculator",
+    "roth ira",
+    "401k",
+    "self employment tax",
+    "quarterly estimated tax",
+)
+
+PROSPECTIVE_NICHE_TOOL_TOKENS: Tuple[str, ...] = (
+    "calculator",
+    "estimator",
+    "matrix",
+    "modeler",
+    "projection",
+    "penalty",
+    "compliance",
+    "audit",
+    "roi",
+    "yield",
+    "margin",
+    "premium",
+    "insurance",
+    "financing",
+    "factoring",
+    "credit",
+    "deduction",
+    "subsidy",
+    "tariff",
+    "duty",
+    "settlement",
+    "valuation",
+    "amortization",
+    "lease",
+    "buyout",
+    "surety",
+    "malpractice",
+    "solar itc",
+    "hipaa",
+    "soc2",
+)
+
+
+def verify_partner_domain_alignment(
+    property_id: str,
+    slug: str,
+    partners: List[str],
+) -> Dict[str, Any]:
+    """
+    Mechanically verifies that partner keys assigned to a property and slug
+    never mix incompatible offers across domains or between B2B and retail tax tiers.
+    """
+    prop = (property_id or "").strip().lower()
+    s_clean = (slug or "").strip().lower()
+    clean_partners = [str(p).strip().lower() for p in (partners or []) if str(p).strip()]
+    violations: List[str] = []
+
+    if prop == "prexvo":
+        for pk in clean_partners:
+            if pk in B2B_PARTNER_KEYS or pk in PROFITHELM_AFFILIATES or pk == "sovrn_commerce":
+                violations.append(
+                    f"Prexvo isolation violation: prohibited commercial/aggregator partner '{pk}' on '{s_clean}'."
+                )
+            elif pk not in PREXVO_AFFILIATES and pk not in STUDENT_LOAN_PARTNER_KEYS:
+                violations.append(
+                    f"Prexvo registry violation: unapproved partner '{pk}' on '{s_clean}'."
+                )
+    elif prop in ("profithelm", "exchange1031"):
+        is_b2b = is_commercial_b2b_slug(s_clean)
+        is_retail = (s_clean in RETAIL_TAX_SLUGS) or (not is_b2b and any(
+            t in s_clean for t in ("tax-bracket", "capital-gains", "crypto-tax", "tcja", "prediction-market-tax")
+        ))
+        for pk in clean_partners:
+            if pk in STUDENT_LOAN_PARTNER_KEYS or pk in PREXVO_AFFILIATES:
+                violations.append(
+                    f"ProfitHelm isolation violation: student loan partner '{pk}' prohibited on '{s_clean}'."
+                )
+            if is_b2b and pk in RETAIL_TAX_PARTNERS:
+                violations.append(
+                    f"Intent entanglement violation: retail tax partner '{pk}' mixed into commercial B2B slug '{s_clean}'."
+                )
+            if is_retail and pk in ENTERPRISE_B2B_PARTNERS:
+                violations.append(
+                    f"Intent entanglement violation: enterprise B2B partner '{pk}' mixed into consumer/retail slug '{s_clean}'."
+                )
+
+    return {
+        "aligned": len(violations) == 0,
+        "property_id": prop,
+        "slug": s_clean,
+        "partners": clean_partners,
+        "violations": violations,
+    }
+
+
+def qualify_monetization_opportunity(
+    query: str,
+    slug: str = "",
+    property_id: Optional[str] = None,
+    search_volume: int = 0,
+    cpc_usd: float = 0.0,
+    jev_score: float = 1.25,
+    durable_prob: float = 0.55,
+    vault_overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Canonical monetization qualification and niche expansion scoring model.
+    Untangles commercial B2B, consumer financial, Title IV student loan YMYL,
+    and prospective greenfield niche expansions without shadow evaluators.
+    """
+    q_clean = (query or "").strip()
+    q_lower = q_clean.lower()
+    s_clean = (slug or "").strip().lower()
+    if not s_clean and q_lower:
+        s_clean = re.sub(r"[^a-z0-9]+", "-", q_lower).strip("-")
+    combined = f"{q_lower} {s_clean}".strip()
+    prop_explicit = (property_id or "").strip().lower()
+
+    vol = max(0, int(search_volume or 0))
+    cpc = max(0.0, float(cpc_usd or 0.0))
+    jev = max(0.0, float(jev_score or 0.0))
+    dur = max(0.0, min(1.0, float(durable_prob or 0.0)))
+
+    # 1. Reject transient/navigational noise immediately
+    if not combined or any(noise in combined for noise in UNMONETIZABLE_NOISE_TOKENS):
+        return {
+            "query": q_clean,
+            "slug": s_clean,
+            "property_id": prop_explicit or "unassigned",
+            "intent_tier": "unmonetizable_noise",
+            "monetization_qualified": False,
+            "rejection_reason": "Unmonetizable transient or navigational noise signal",
+            "primary_partner": "",
+            "recommended_partners": [],
+            "expected_bounty_usd": 0.0,
+            "effective_partner_yield": 0.0,
+            "intent_weight": 0.0,
+            "y_asset": 0.0,
+            "estimated_monthly_revenue_usd": 0.0,
+            "partner_alignment_verified": True,
+            "disclosures_required": {},
+        }
+
+    is_student_loan = any(tok in combined for tok in STUDENT_LOAN_INTENT_TOKENS)
+    is_b2b = is_commercial_b2b_slug(s_clean) or any(tok in combined for tok in COMMERCIAL_B2B_INTENT_TOKENS)
+    is_consumer_fin = (s_clean in RETAIL_TAX_SLUGS) or any(tok in combined for tok in CONSUMER_FINANCIAL_INTENT_TOKENS)
+    has_tool_signal = any(tok in combined for tok in PROSPECTIVE_NICHE_TOOL_TOKENS)
+
+    # 2. Enforce strict cross-tenant isolation when property_id is explicitly bound
+    if prop_explicit == "prexvo":
+        if is_b2b or any(
+            b2b_kw in combined
+            for b2b_kw in ("section 179", "section-179", "1031", "saas", "runway", "burn rate", "qsbs", "corporate amt", "mercury", "ramp", "rippling", "gusto")
+        ):
+            return {
+                "query": q_clean,
+                "slug": s_clean,
+                "property_id": "prexvo",
+                "intent_tier": "cross_tenant_contamination",
+                "monetization_qualified": False,
+                "rejection_reason": "Strict isolation violation: Commercial B2B intent is prohibited on Prexvo.",
+                "primary_partner": "",
+                "recommended_partners": [],
+                "expected_bounty_usd": 0.0,
+                "effective_partner_yield": 0.0,
+                "intent_weight": 0.0,
+                "y_asset": 0.0,
+                "estimated_monthly_revenue_usd": 0.0,
+                "partner_alignment_verified": False,
+                "disclosures_required": dict(PREXVO_DISCLOSURES),
+            }
+        if not is_student_loan:
+            return {
+                "query": q_clean,
+                "slug": s_clean,
+                "property_id": "prexvo",
+                "intent_tier": "out_of_scope_prexvo",
+                "monetization_qualified": False,
+                "rejection_reason": "Prexvo requires Title IV or student loan repayment/refinance intent.",
+                "primary_partner": "",
+                "recommended_partners": [],
+                "expected_bounty_usd": 0.0,
+                "effective_partner_yield": 0.0,
+                "intent_weight": 0.0,
+                "y_asset": 0.0,
+                "estimated_monthly_revenue_usd": 0.0,
+                "partner_alignment_verified": False,
+                "disclosures_required": dict(PREXVO_DISCLOSURES),
+            }
+
+    if prop_explicit in ("profithelm", "exchange1031") and is_student_loan:
+        return {
+            "query": q_clean,
+            "slug": s_clean,
+            "property_id": prop_explicit,
+            "intent_tier": "cross_tenant_contamination",
+            "monetization_qualified": False,
+            "rejection_reason": "Strict isolation violation: Student loan intent is prohibited on ProfitHelm.",
+            "primary_partner": "",
+            "recommended_partners": [],
+            "expected_bounty_usd": 0.0,
+            "effective_partner_yield": 0.0,
+            "intent_weight": 0.0,
+            "y_asset": 0.0,
+            "estimated_monthly_revenue_usd": 0.0,
+            "partner_alignment_verified": False,
+            "disclosures_required": dict(PROFITHELM_DISCLOSURES),
+        }
+
+    # 3. Route to canonical intent tier and property
+    if is_student_loan or prop_explicit == "prexvo":
+        resolved_prop = "prexvo"
+        intent_tier = "student_loan_ymyl"
+        primary_obj = resolve_optimal_partner_for_slug("prexvo", s_clean, vault_overrides=vault_overrides)
+        rec_partners = [
+            k for k in INTENT_ROUTING_TABLE["student-loan"]
+            if k in PREXVO_AFFILIATES and k not in B2B_PARTNER_KEYS
+        ]
+        if primary_obj and primary_obj.key in rec_partners:
+            rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
+        bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 325.0)) if primary_obj else 325.0
+        eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 113.75
+        intent_weight = 1.15
+        y_asset = round(min(1.45, max(0.75, (bounty_usd / 300.0) * 0.65 + (cpc / 5.0) * 0.35)), 4)
+        gate_1_passed = bounty_usd >= 45.0
+        disclosures = dict(PREXVO_DISCLOSURES)
+        disclosures["standing_restriction"] = PREXVO_STANDING_RESTRICTION
+        alignment = verify_partner_domain_alignment("prexvo", s_clean, rec_partners)
+        qualified = bool(gate_1_passed and alignment["aligned"] and (jev >= 1.0 or cpc >= 1.50 or vol >= 50))
+        rejection_reason = "" if qualified else "Failed Prexvo Gate 1 or demand qualification threshold"
+
+    elif prop_explicit == "unassigned" or (not prop_explicit and not is_b2b and not is_consumer_fin and has_tool_signal):
+        resolved_prop = "unassigned"
+        intent_tier = "prospective_niche_expansion"
+        is_comm_niche = any(
+            t in combined
+            for t in (
+                "commercial", "enterprise", "corporate", "b2b", "compliance",
+                "hipaa", "soc2", "freight", "factoring", "solar itc",
+                "surety", "malpractice", "equipment", "lease", "buyout", "tariff",
+            )
+        )
+        bounty_usd = round(max(120.0, cpc * 28.0) if (is_comm_niche or cpc >= 4.0) else max(45.0, cpc * 18.0), 2)
+        eff_yield = round(bounty_usd * 0.35, 2)
+        intent_weight = 1.20 if (is_comm_niche or cpc >= 4.0) else 0.95
+        y_asset = round(min(1.60, max(0.55, (bounty_usd / 200.0) * 0.55 + (cpc / 4.5) * 0.45)), 4)
+        rec_partners = ["direct_cpa_lead_gen"] if (is_comm_niche or cpc >= 4.0) else ["programmatic_affiliate_cpa"]
+        disclosures = dict(PROFITHELM_DISCLOSURES)
+        alignment = {"aligned": True, "violations": []}
+        qualified = bool(
+            has_tool_signal
+            and (cpc >= 1.50 or bounty_usd >= 75.0)
+            and vol >= 100
+            and jev >= 1.0
+            and dur >= 0.45
+        )
+        rejection_reason = "" if qualified else "Prospective niche below minimum CPC/volume/durability monetization bar"
+        primary_obj = None
+
+    elif is_b2b or is_consumer_fin or prop_explicit in ("profithelm", "exchange1031"):
+        resolved_prop = "exchange1031" if (prop_explicit == "exchange1031" or "1031" in s_clean) and prop_explicit == "exchange1031" else "profithelm"
+        if is_b2b and not (s_clean in RETAIL_TAX_SLUGS):
+            intent_tier = "commercial_b2b"
+            primary_obj = resolve_optimal_partner_for_slug(resolved_prop, s_clean, vault_overrides=vault_overrides)
+            # Determine matching B2B routing bucket
+            bucket = "runway"
+            if "1031" in combined:
+                bucket = "section-1031"
+            elif any(t in combined for t in ("179", "macrs", "depreciation", "equipment")):
+                bucket = "section-179"
+            elif any(t in combined for t in ("qsbs", "1202")):
+                bucket = "qsbs"
+            elif "corporate-amt" in combined or "camt" in combined:
+                bucket = "corporate-amt"
+            elif "r-and-d" in combined or "174" in combined:
+                bucket = "r-and-d"
+            elif "payroll" in combined:
+                bucket = "payroll"
+            elif any(t in combined for t in ("treasury", "tbill", "yield")):
+                bucket = "treasury"
+            raw_partners = INTENT_ROUTING_TABLE.get(bucket, ["mercury", "ramp", "stripe"])
+            rec_partners = [
+                k for k in raw_partners
+                if k in PROFITHELM_AFFILIATES
+                and k not in RETAIL_TAX_PARTNERS
+                and k not in STUDENT_LOAN_PARTNER_KEYS
+            ]
+            if primary_obj and primary_obj.key not in RETAIL_TAX_PARTNERS:
+                rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
+            bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 250.0)) if primary_obj else 250.0
+            eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 87.50
+            intent_weight = 1.35
+            y_asset = round(min(1.85, max(0.85, (bounty_usd / 250.0) * 0.65 + (cpc / 5.0) * 0.35)), 4)
+        else:
+            intent_tier = "consumer_financial"
+            primary_obj = resolve_optimal_partner_for_slug("profithelm", s_clean, vault_overrides=vault_overrides)
+            bucket = "tax"
+            if any(t in combined for t in ("crypto", "token", "staking", "airdrop", "8949", "1099-da")):
+                bucket = "crypto"
+            elif "capital-gains" in combined or "capital gains" in combined:
+                bucket = "capital-gains"
+            elif "prediction" in combined and "tax" in combined:
+                bucket = "prediction-market-tax"
+            elif any(t in combined for t in ("prediction", "kalshi", "polymarket", "odds", "arbitrage", "kelly", "vig")):
+                bucket = "prediction"
+            elif any(t in combined for t in ("treasury", "tbill", "t-bill", "yield", "apy")):
+                bucket = "treasury"
+            raw_partners = INTENT_ROUTING_TABLE.get(bucket, ["turbotax", "taxslayer", "freetaxusa"])
+            rec_partners = [
+                k for k in raw_partners
+                if k in PROFITHELM_AFFILIATES
+                and k not in ENTERPRISE_B2B_PARTNERS
+                and k not in STUDENT_LOAN_PARTNER_KEYS
+            ]
+            if primary_obj and primary_obj.key not in ENTERPRISE_B2B_PARTNERS:
+                rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
+            bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 65.0)) if primary_obj else 65.0
+            eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 22.75
+            intent_weight = 1.05
+            y_asset = round(min(1.35, max(0.60, (bounty_usd / 100.0) * 0.60 + (cpc / 4.0) * 0.40)), 4)
+
+        disclosures = dict(PROFITHELM_DISCLOSURES)
+        alignment = verify_partner_domain_alignment(resolved_prop, s_clean, rec_partners)
+        qualified = bool(alignment["aligned"] and len(rec_partners) > 0 and (jev >= 1.0 or cpc >= 1.0 or bounty_usd >= 40.0))
+        rejection_reason = "" if qualified else "Failed ProfitHelm partner alignment or monetization threshold"
+    else:
+        return {
+            "query": q_clean,
+            "slug": s_clean,
+            "property_id": prop_explicit or "unassigned",
+            "intent_tier": "unmonetizable_noise",
+            "monetization_qualified": False,
+            "rejection_reason": "No commercial, consumer financial, student loan, or quantitative tool intent detected",
+            "primary_partner": "",
+            "recommended_partners": [],
+            "expected_bounty_usd": 0.0,
+            "effective_partner_yield": 0.0,
+            "intent_weight": 0.0,
+            "y_asset": 0.0,
+            "estimated_monthly_revenue_usd": 0.0,
+            "partner_alignment_verified": True,
+            "disclosures_required": {},
+        }
+
+    est_clicks = max(10.0, float(vol)) * 0.12
+    est_conversions = est_clicks * 0.018
+    unit_rev = max(eff_yield, cpc * 2.5)
+    est_monthly_rev = round(est_conversions * unit_rev * max(0.5, dur) * intent_weight, 2) if qualified else 0.0
+
+    primary_partner_key = (
+        primary_obj.key
+        if primary_obj is not None
+        else (rec_partners[0] if rec_partners else "")
+    )
+
+    return {
+        "query": q_clean,
+        "slug": s_clean,
+        "property_id": resolved_prop,
+        "intent_tier": intent_tier,
+        "monetization_qualified": qualified,
+        "rejection_reason": rejection_reason,
+        "primary_partner": primary_partner_key,
+        "recommended_partners": rec_partners[:3],
+        "expected_bounty_usd": round(bounty_usd, 2),
+        "effective_partner_yield": round(eff_yield, 2),
+        "intent_weight": round(intent_weight, 4),
+        "y_asset": y_asset,
+        "estimated_monthly_revenue_usd": est_monthly_rev,
+        "partner_alignment_verified": bool(alignment["aligned"]),
+        "alignment_violations": alignment.get("violations", []),
+        "disclosures_required": disclosures,
     }
 
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Union, Set
 
+from pseofactory.affiliates import qualify_monetization_opportunity
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
     assert_url_safe_slug,
@@ -617,6 +618,9 @@ class TrendCronRunner:
                 }
 
                 # Step 4F: Evaluate Jev decision
+                if cand.metadata is None:
+                    cand.metadata = {}
+                cand.metadata.setdefault("property_id", assigned_property)
                 mock_jev = raw_meta.get("jev_mock")
                 decision = self.jev_engine.evaluate(
                     candidate=cand,
@@ -625,6 +629,15 @@ class TrendCronRunner:
                     jev_mock=mock_jev,
                     position=pos,
                     total_site_impressions=total_site_impressions,
+                )
+                monetization_qual = qualify_monetization_opportunity(
+                    query=clean_q,
+                    slug=slug,
+                    property_id=assigned_property,
+                    search_volume=treg_res.search_volume,
+                    cpc_usd=treg_res.cpc_usd,
+                    jev_score=decision.jev_score,
+                    durable_prob=decision.durable_prob,
                 )
 
                 # Update keyword history rollup to obtain consecutive streak
@@ -658,9 +671,15 @@ class TrendCronRunner:
                             "query": clean_q,
                             "slug": slug,
                             "property_id": assigned_property,
+                            "intent_tier": monetization_qual.get("intent_tier", ""),
                             "composite_profit_yield": decision.composite_profit_yield,
                             "target_asset_type": target_asset,
                             "consecutive_cycles": consecutive_streak,
+                            "recommended_partners": monetization_qual.get("recommended_partners", []),
+                            "expected_bounty_usd": monetization_qual.get("expected_bounty_usd", 0.0),
+                            "estimated_monthly_revenue_usd": monetization_qual.get("estimated_monthly_revenue_usd", 0.0),
+                            "partner_alignment_verified": monetization_qual.get("partner_alignment_verified", True),
+                            "mandatory_disclosures": monetization_qual.get("disclosures_required", {}),
                             "candidate_spec": spec_payload,
                         })
                     elif decision.action == "REFACTOR_PAGE":
@@ -718,14 +737,22 @@ class TrendCronRunner:
                             "reason": gated_reason,
                         })
                     else:
-                        # Consecutive cycles >= 3: verify durability invariants
+                        # Consecutive cycles >= 3: verify durability and monetization invariants
                         yield_qualifies = decision.composite_profit_yield >= 70.0
                         stability_qualifies = treg_res.historical_stability >= 0.80
                         jev_qualifies = decision.jev_score >= MIN_JEV_SCORE and decision.durable_prob >= MIN_DURABLE_PROB
                         volume_qualifies = treg_res.search_volume >= 500
                         pos0_qualifies = treg_res.position_zero_vacant or treg_res.keyword_difficulty <= 35.0
+                        monetization_qualifies = bool(monetization_qual.get("monetization_qualified", False))
 
-                        if yield_qualifies and stability_qualifies and jev_qualifies and volume_qualifies and pos0_qualifies:
+                        if (
+                            yield_qualifies
+                            and stability_qualifies
+                            and jev_qualifies
+                            and volume_qualifies
+                            and pos0_qualifies
+                            and monetization_qualifies
+                        ):
                             action_to_record = "PROPOSE_NEW_APP"
                             proposal_id = f"prop_{slug}_{cycle_id}"
                             cluster_title = clean_q.title()
@@ -745,6 +772,13 @@ class TrendCronRunner:
                                 "durable_prob": decision.durable_prob,
                                 "consecutive_cycles_sustained": consecutive_streak,
                                 "affiliate_fit": cand.intent_cluster,
+                                "intent_tier": monetization_qual.get("intent_tier", "prospective_niche_expansion"),
+                                "monetization_qualified": True,
+                                "recommended_partners": monetization_qual.get("recommended_partners", []),
+                                "expected_bounty_usd": monetization_qual.get("expected_bounty_usd", 0.0),
+                                "effective_partner_yield": monetization_qual.get("effective_partner_yield", 0.0),
+                                "estimated_monthly_revenue_usd": monetization_qual.get("estimated_monthly_revenue_usd", 0.0),
+                                "monetization_qualification": monetization_qual,
                                 "blueprint": {
                                     "archetype": "standalone_factory",
                                     "scaffold_recommended": True,

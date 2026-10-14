@@ -1547,24 +1547,45 @@ class MasterSEOVerifier:
         if not sitemap.is_file():
             issues.append(f"Missing sitemap.xml at {sitemap}")
         else:
-            try:
-                tree = ET.parse(sitemap)
-                root = tree.getroot()
-                ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-                locs = [elem.text.strip() for elem in root.findall(".//sm:loc", ns) if elem.text]
-                if not locs:
-                    locs = [elem.text.strip() for elem in root.findall(".//loc") if elem.text]
+            sitemap_files = [sitemap]
+            for extra_sm in ("sitemap-hubs.xml", "sitemap-leaves.xml"):
+                extra_path = target / extra_sm
+                if extra_path.is_file():
+                    sitemap_files.append(extra_path)
 
-                urls_checked = len(locs)
-                if urls_checked < 3:
-                    issues.append(f"sitemap.xml contains only {urls_checked} URLs (expected >= 3)")
+            domain_prefix = f"https://{self.domain}" if self.domain else ""
+            forbidden_sitemap_segments = ("/signal/", "/test/", "/tests/", "/staging/", "/sandbox/", "/syndication/")
 
-                domain_prefix = f"https://{self.domain}"
-                for loc in locs:
-                    if not loc.startswith(domain_prefix) and not loc.startswith(self.canonical_base):
-                        issues.append(f"Sitemap URL '{loc}' does not match canonical base {domain_prefix}")
-            except Exception as ex:
-                issues.append(f"Malformed XML in sitemap.xml: {ex}")
+            for sm_path in sitemap_files:
+                sm_name = sm_path.name
+                try:
+                    tree = ET.parse(sm_path)
+                    root = tree.getroot()
+                    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+                    locs = [elem.text.strip() for elem in root.findall(".//sm:loc", ns) if elem.text]
+                    if not locs:
+                        locs = [elem.text.strip() for elem in root.findall(".//loc") if elem.text]
+
+                    if sm_name == "sitemap.xml":
+                        urls_checked = len(locs)
+                        if urls_checked < 3:
+                            issues.append(f"sitemap.xml contains only {urls_checked} URLs (expected >= 3)")
+                    elif len(locs) < 1:
+                        issues.append(f"{sm_name} contains 0 URLs (expected >= 1)")
+
+                    seen_locs: Set[str] = set()
+                    for loc in locs:
+                        if loc in seen_locs:
+                            issues.append(f"Duplicate URL '{loc}' in {sm_name}")
+                        seen_locs.add(loc)
+                        if domain_prefix and not loc.startswith(domain_prefix) and not (self.canonical_base and loc.startswith(self.canonical_base)):
+                            issues.append(f"Sitemap URL '{loc}' in {sm_name} does not match canonical base {domain_prefix}")
+                        loc_lower = loc.lower()
+                        for seg in forbidden_sitemap_segments:
+                            if seg in loc_lower:
+                                issues.append(f"Non-public or test route '{loc}' leaked into {sm_name}")
+                except Exception as ex:
+                    issues.append(f"Malformed XML in {sm_name}: {ex}")
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -1597,6 +1618,8 @@ class MasterSEOVerifier:
                     t_len = len(title)
                     if not (50 <= t_len <= 60):
                         issues.append(f"Title length ({t_len} chars) outside 50-60 range in {rel}: '{title}'")
+                    if re.search(r'\s&\s+[A-Za-z](?:\s*\||$)', title):
+                        issues.append(f"Mid-word truncated title suffix detected in {rel}: '{title}'")
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -1941,11 +1964,20 @@ class MasterSEOVerifier:
     def check_readable_urls_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
         target = Path(dist_dir) if dist_dir else self.dist_dir
         issues = []
+        kebab_seg_re = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
         if target.exists():
             for p in target.glob("**/*.html"):
+                rel = p.relative_to(target).as_posix()
                 if p.name not in ["index.html", "404.html"]:
-                    rel = p.relative_to(target).as_posix()
                     issues.append(f"Non-canonical URL path (raw .html file exposed): {rel}")
+                    continue
+                if p.name == "404.html":
+                    continue
+                for seg in p.relative_to(target).parent.parts:
+                    if seg in (".", ""):
+                        continue
+                    if not kebab_seg_re.match(seg):
+                        issues.append(f"Non-readable URL path segment '{seg}' in {rel} (must be lowercase kebab-case)")
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -2101,19 +2133,82 @@ class MasterSEOVerifier:
         target = Path(dist_dir) if dist_dir else self.dist_dir
         issues = []
         redirects_file = target / "_redirects"
+        valid_status_codes = {"301", "302", "307", "308", "410"}
+        rules_checked = 0
+
         if redirects_file.is_file():
             content = redirects_file.read_text(encoding="utf-8", errors="ignore")
+            redirect_sources: Set[str] = set()
+            parsed_rules: List[Tuple[int, str, str, str]] = []
+
             for line_num, line in enumerate(content.splitlines(), start=1):
                 line_clean = line.strip()
                 if not line_clean or line_clean.startswith("#"):
                     continue
+                rules_checked += 1
                 parts = line_clean.split()
-                if len(parts) < 2:
+                if len(parts) < 2 or len(parts) > 3:
                     issues.append(f"Malformed redirect rule at line {line_num}: '{line_clean}'")
+                    continue
+                src_path = parts[0]
+                dst_path = parts[1]
+                status_code = parts[2] if len(parts) == 3 else "301"
+                if status_code not in valid_status_codes:
+                    issues.append(
+                        f"Invalid HTTP redirect status '{status_code}' at line {line_num} (expected 301/302/307/308/410): '{line_clean}'"
+                    )
+                if not src_path.startswith("/"):
+                    issues.append(f"Redirect source '{src_path}' at line {line_num} must start with '/'")
+                if src_path.rstrip("/") == dst_path.rstrip("/") and src_path != "/":
+                    issues.append(f"Self-redirect loop detected at line {line_num}: '{src_path}' -> '{dst_path}'")
+                redirect_sources.add(src_path)
+                parsed_rules.append((line_num, src_path, dst_path, status_code))
+
+            is_full_build = (target / "index.html").is_file() and (target / "tools" / "index.html").is_file()
+            sitemap_locs: Set[str] = set()
+            sm_file = target / "sitemap.xml"
+            if sm_file.is_file():
+                try:
+                    sm_text = sm_file.read_text(encoding="utf-8", errors="ignore")
+                    for m_loc in re.finditer(r'<loc>(.*?)</loc>', sm_text, re.IGNORECASE):
+                        loc_u = urllib.parse.urlsplit(m_loc.group(1).strip())
+                        if loc_u.path:
+                            sitemap_locs.add(loc_u.path)
+                            sitemap_locs.add(loc_u.path.rstrip("/"))
+                except Exception:
+                    pass
+
+            for line_num, src_path, dst_path, status_code in parsed_rules:
+                dst_variants = {dst_path, dst_path.rstrip("/"), dst_path.rstrip("/") + "/"}
+                if dst_path != "/" and (dst_variants & redirect_sources):
+                    issues.append(
+                        f"Multi-hop redirect chain detected at line {line_num}: '{src_path}' -> '{dst_path}' (target is also redirected)"
+                    )
+                if is_full_build and status_code != "410" and dst_path.startswith("/") and "*" not in dst_path and ":" not in dst_path:
+                    dst_rel = dst_path.strip("/")
+                    dst_index = (target / "index.html") if not dst_rel else (target / dst_rel / "index.html")
+                    dst_direct = (target / dst_rel) if dst_rel else (target / "index.html")
+                    if not dst_index.is_file() and not dst_direct.is_file():
+                        issues.append(
+                            f"Redirect target '{dst_path}' at line {line_num} points to non-existent route in dist/"
+                        )
+                if is_full_build and "*" not in src_path and ":" not in src_path:
+                    src_rel = src_path.strip("/")
+                    if src_rel:
+                        src_index = target / src_rel / "index.html"
+                        if src_index.is_file():
+                            issues.append(
+                                f"Redirected source '{src_path}' still exists as live HTML file at {src_index.relative_to(target)}"
+                            )
+                        if src_path in sitemap_locs or src_path.rstrip("/") in sitemap_locs:
+                            issues.append(
+                                f"Redirected source '{src_path}' is still listed in sitemap.xml"
+                            )
 
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_url_redirects_gate",
+            "rules_checked": rules_checked,
             "violations_count": len(issues),
             "issues": issues,
         }
@@ -2168,6 +2263,55 @@ class MasterSEOVerifier:
             if "disallow: /signal/" not in robots_content.lower():
                 issues.append(f"{robots_txt.relative_to(target)} is missing 'Disallow: /signal/'")
 
+        leaked_test_slugs = {
+            "query-two-buildable",
+            "custom-test-calculator",
+            "poison-pill-test",
+            "irs-1031-exchange-tax-deferral-test",
+            "valid-edge-tool-2027",
+            "calculator-near-me",
+        }
+        test_slug_re = re.compile(r'^(?:test[-_].*|.*[-_]test|.*[-_]test[-_].*)$', re.IGNORECASE)
+
+        if target.exists():
+            for test_dir_name in ("test", "tests", "staging", "sandbox"):
+                td = target / test_dir_name
+                if td.is_dir():
+                    for p in td.glob("**/*.html"):
+                        rel = p.relative_to(target).as_posix()
+                        c = self._read_cached_html(p)
+                        has_ni = bool(
+                            re.search(r'<meta[^>]*content=["\'][^"\']*noindex[^"\']*["\']', c, re.IGNORECASE)
+                        )
+                        if not has_ni:
+                            issues.append(f"Unprotected test/staging page exposed without noindex: {rel}")
+
+            tools_dir = target / "tools"
+            if tools_dir.is_dir():
+                for child in tools_dir.iterdir():
+                    if child.is_dir() and (child / "index.html").is_file():
+                        slug = child.name.lower()
+                        if slug in leaked_test_slugs or test_slug_re.match(slug):
+                            c = self._read_cached_html(child / "index.html")
+                            has_ni = bool(
+                                re.search(r'<meta[^>]*content=["\'][^"\']*noindex[^"\']*["\']', c, re.IGNORECASE)
+                            )
+                            if not has_ni:
+                                issues.append(
+                                    f"Test fixture tool page 'tools/{child.name}/index.html' leaked into public build without noindex"
+                                )
+
+            for endpoint_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml", "llms.txt", "llms-full.txt", "feed.xml"):
+                ep_file = target / endpoint_name
+                if ep_file.is_file():
+                    ep_text = ep_file.read_text(encoding="utf-8", errors="ignore").lower()
+                    for seg in ("/signal/", "/test/", "/tests/", "/staging/", "/sandbox/"):
+                        if seg in ep_text:
+                            issues.append(f"Hidden/test route '{seg}' leaked into public machine endpoint {endpoint_name}")
+                    for bad_slug in leaked_test_slugs:
+                        if f"/tools/{bad_slug}/" in ep_text or f"/tools/{bad_slug}" in ep_text:
+                            issues.append(f"Test fixture tool '{bad_slug}' leaked into public machine endpoint {endpoint_name}")
+
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_hide_test_pages_gate",
@@ -2208,6 +2352,8 @@ class MasterSEOVerifier:
                     issues.append(f"Insufficient static content without JavaScript ({len(words)} substantive words) in {rel}")
                 if "<h1" not in content.lower():
                     issues.append(f"Missing <h1> tag in static HTML in {rel}")
+                if re.search(r'\bNaN\b|\[object Object\]', text):
+                    issues.append(f"Unhydrated JavaScript rendering artifact (NaN or [object Object]) in static HTML of {rel}")
 
                 # If quick-answer container is present, verify non-empty text directly in static HTML
                 m_qa = re.search(r'<(?:aside|div)[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>(.*?)</(?:aside|div)>', content, re.IGNORECASE | re.DOTALL)
@@ -4283,6 +4429,11 @@ class MasterSEOVerifier:
             "check_ai_mode_manifest_gate",
             "check_indexing_gate",
         ]
+        try:
+            if dist_dir is None or Path(dist_dir).resolve() == self.dist_dir.resolve():
+                primary_keys.append("existence_gate")
+        except Exception:
+            pass
 
         seen_issues = set()
         for g_key in primary_keys:
