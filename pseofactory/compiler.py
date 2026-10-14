@@ -21,6 +21,12 @@ import re
 import ast
 from typing import Dict, Any, Optional, List
 
+from pseofactory.affiliates import (
+    PREXVO_DISCLOSURES,
+    PROFITHELM_DISCLOSURES,
+    get_affiliate_route,
+    is_restricted_public_service_slug,
+)
 from pseofactory.qualification import assert_high_effort_content_qualified
 from pseofactory.contracts import (
     safe_eval_mathematical_formula,
@@ -261,6 +267,258 @@ def verify_formula_boundary_fuzzing(
     }
 
 
+def _format_scenario_number(val: float) -> str:
+    """Formats a scenario output value deterministically."""
+    rounded = round(float(val), 2)
+    return f"{rounded:,.2f}" if not rounded.is_integer() else f"{int(rounded):,}"
+
+
+def _render_5point_sensitivity_table_html(
+    published_output: float,
+    display_output: str,
+    statutory_authority: str,
+    economic_dataset: str,
+) -> str:
+    """
+    Renders a 5-point server-side sensitivity scenario table (0.8x to 1.2x)
+    so search engine crawlers index multi-row numerical outputs directly in initial HTML.
+    Zero em-dashes. Zero en-dashes.
+    """
+    conservative_output = _format_scenario_number(published_output * 0.8)
+    mod_con_output = _format_scenario_number(published_output * 0.9)
+    mod_exp_output = _format_scenario_number(published_output * 1.1)
+    aggressive_output = _format_scenario_number(published_output * 1.2)
+
+    return (
+        f'    <div class="scenario-container comparison-container card" style="margin-top: 24px;" '
+        f'data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid">\n'
+        f'      <h2>Sensitivity Scenario Modeling</h2>\n'
+        f'      <p>SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>\n'
+        f'      <div class="table-wrap">\n'
+        f'        <table class="scenario-table comparison-table" data-entity-type="scenario">\n'
+        f'          <thead>\n'
+        f'            <tr>\n'
+        f'              <th scope="col">Scenario Analysis</th>\n'
+        f'              <th scope="col">Variance Assumption</th>\n'
+        f'              <th scope="col">Statutory Basis</th>\n'
+        f'              <th scope="col">Economic Series</th>\n'
+        f'              <th scope="col">Projected Outcome</th>\n'
+        f'            </tr>\n'
+        f'          </thead>\n'
+        f'          <tbody>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Baseline Scenario</strong></td>\n'
+        f'              <td>Standard published parameters (1.0x)</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-baseline">{display_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Conservative Scenario</strong></td>\n'
+        f'              <td>20% Parameter contraction (0.8x)</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-conservative">{conservative_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Moderate Contraction Scenario</strong></td>\n'
+        f'              <td>10% Parameter contraction (0.9x)</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-moderate-contraction">{mod_con_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Moderate Expansion Scenario</strong></td>\n'
+        f'              <td>10% Parameter expansion (1.1x)</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-moderate-expansion">{mod_exp_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'            <tr data-entity-type="scenario">\n'
+        f'              <td><strong>Aggressive Scenario</strong></td>\n'
+        f'              <td>20% Parameter expansion (1.2x)</td>\n'
+        f'              <td>{statutory_authority}</td>\n'
+        f'              <td>{economic_dataset}</td>\n'
+        f'              <td><strong class="scenario-aggressive">{aggressive_output}</strong></td>\n'
+        f'            </tr>\n'
+        f'          </tbody>\n'
+        f'        </table>\n'
+        f'      </div>\n'
+        f'    </div>'
+    )
+
+
+def _render_scenario_presets_bar_html(
+    canonical_base: str,
+    slug: str,
+    clamped_inputs: Dict[str, Any],
+) -> str:
+    """
+    Renders URL-parameterized scenario preset links (Conservative, Baseline, Aggressive)
+    for crawlable deep-linking and 1-click user parameter hydration.
+    Zero em-dashes. Zero en-dashes.
+    """
+    presets = [
+        ("Conservative (0.8x)", 0.8, "conservative"),
+        ("Baseline (1.0x)", 1.0, "baseline"),
+        ("Aggressive (1.2x)", 1.2, "aggressive"),
+    ]
+    links_html: List[str] = []
+    for label, mult, preset_key in presets:
+        params: List[str] = []
+        for k, v in clamped_inputs.items():
+            if isinstance(v, (int, float)):
+                scaled = round(float(v) * mult, 2)
+                val_str = str(int(scaled)) if scaled.is_integer() else str(scaled)
+                params.append(f"{k}={val_str}")
+        qs = "&amp;".join(params)
+        href = f"{canonical_base}/tools/{slug}/?{qs}" if qs else f"{canonical_base}/tools/{slug}/"
+        links_html.append(
+            f'          <a href="{href}" data-preset="{preset_key}" '
+            f'class="touch-target scenario-preset-link" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; '
+            f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
+            f'background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600;">'
+            f'{label}</a>'
+        )
+    joined_links = "\n".join(links_html)
+    return (
+        f'        <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" '
+        f'style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;">\n'
+        f'{joined_links}\n'
+        f'        </div>'
+    )
+
+
+def _render_compiler_monetization_and_guardrail_html(
+    slug: str,
+    query: str,
+    is_prexvo: bool,
+    candidate_spec: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Renders domain-isolated affiliate CTAs on profithelm and enforces YMYL statutory
+    guardrails on prexvo (suppressing commercial offers on restricted public-service pages).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not is_prexvo:
+        try:
+            route = get_affiliate_route("profithelm", slug)
+        except ValueError:
+            route = get_affiliate_route("profithelm", "section-179-deduction-calculator", partner_key="crest_capital")
+
+        partner_key = route.get("partner_key", "crest_capital")
+        partner_name = route.get("partner_name", "Crest Capital")
+        cta_text = route.get("cta_text", "Calculate Section 179 Equipment Financing Rates")
+        url = route.get("url", "https://www.crestcapital.com/tax_deduction_calculator")
+        rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
+        ftc_disc = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+
+        block_html = (
+            f'    <section class="affiliate-cta-section card" data-property="profithelm" '
+            f'data-partner="{partner_key}" data-mechanic="compliant_intent_monetization">\n'
+            f'      <h2>Verified Commercial Execution Partner: {partner_name}</h2>\n'
+            f'      <p>Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:</p>\n'
+            f'      <p style="margin-top: 12px;">\n'
+            f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
+            f'class="affiliate-cta-link touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; '
+            f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
+            f'background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none;">'
+            f'{cta_text}</a>\n'
+            f'      </p>\n'
+            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
+            f'        {ftc_disc}\n'
+            f'      </p>\n'
+            f'    </section>'
+        )
+        return {
+            "html": block_html,
+            "affiliate_route": route,
+            "commercial_offers_allowed": True,
+            "restricted_public_service": False,
+        }
+
+    # Prexvo domain: enforce YMYL guardrails and restricted public-service commercial suppression
+    restricted_ps = is_restricted_public_service_slug(slug, query)
+    combined_lower = f"{slug} {query}".lower()
+    is_explicit_refinance = any(tok in combined_lower for tok in ("refinance", "refinancing"))
+
+    if restricted_ps:
+        notice = PREXVO_DISCLOSURES.get(
+            "public_service_non_commercial_notice",
+            "Public Service & Statutory Repayment Notice: Commercial private lender offers are suppressed on public-service and statutory hardship pages.",
+        )
+        block_html = (
+            f'    <section class="ymyl-public-service-guardrail card" data-property="prexvo" '
+            f'data-commercial-offers="none" data-restricted-public-service="true" '
+            f'data-mechanic="compliant_intent_monetization">\n'
+            f'      <h2>Title IV Public Service Statutory Protection Guardrail</h2>\n'
+            f'      <p>{notice}</p>\n'
+            f'    </section>'
+        )
+        return {
+            "html": block_html,
+            "affiliate_route": None,
+            "commercial_offers_allowed": False,
+            "restricted_public_service": True,
+        }
+
+    if is_explicit_refinance:
+        route = get_affiliate_route("prexvo", slug)
+        partner_key = route.get("partner_key", "splash_financial")
+        partner_name = route.get("partner_name", "Splash Financial")
+        cta_text = route.get("cta_text", "Compare Student Loan Refinance Rates")
+        url = route.get("url", "https://www.splashfinancial.com/student-loan-refinance")
+        rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
+        ymyl_disc = PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
+        ftc_disc = PREXVO_DISCLOSURES.get("ftc_disclosure", "")
+
+        block_html = (
+            f'    <section class="affiliate-cta-section ymyl-refinance-guardrail card" data-property="prexvo" '
+            f'data-partner="{partner_key}" data-commercial-offers="compliant-refinance" '
+            f'data-restricted-public-service="false" data-mechanic="compliant_intent_monetization">\n'
+            f'      <h2>Private Student Loan Refinance Comparison: {partner_name}</h2>\n'
+            f'      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted);">\n'
+            f'        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685. {ymyl_disc}\n'
+            f'      </p>\n'
+            f'      <p style="margin-top: 12px;">\n'
+            f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
+            f'class="affiliate-cta-link touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; '
+            f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
+            f'background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none;">'
+            f'{cta_text}</a>\n'
+            f'      </p>\n'
+            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
+            f'        {ftc_disc}\n'
+            f'      </p>\n'
+            f'    </section>'
+        )
+        return {
+            "html": block_html,
+            "affiliate_route": route,
+            "commercial_offers_allowed": True,
+            "restricted_public_service": False,
+        }
+
+    # Standard federal Title IV repayment page without explicit refinance intent
+    block_html = (
+        f'    <section class="ymyl-public-service-guardrail card" data-property="prexvo" '
+        f'data-commercial-offers="suppressed-default" data-restricted-public-service="false" '
+        f'data-mechanic="compliant_intent_monetization">\n'
+        f'      <h2>Title IV Federal Repayment Statutory Guardrail</h2>\n'
+        f'      <p>This deterministic model evaluates federal repayment schedules under Title IV 34 CFR Part 685 statutory guidelines without unsolicited private lender offers.</p>\n'
+        f'    </section>'
+    )
+    return {
+        "html": block_html,
+        "affiliate_route": None,
+        "commercial_offers_allowed": True,
+        "restricted_public_service": False,
+    }
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -428,53 +686,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     # Format output value for display
     display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
 
-    # Pre-render SSR Scenario Comparison Table with >= 3 scenario comparison rows
-    conservative_val = round(published_output * 0.8, 2)
-    conservative_output = f"{conservative_val:,.2f}" if not conservative_val.is_integer() else f"{int(conservative_val):,}"
-    aggressive_val = round(published_output * 1.2, 2)
-    aggressive_output = f"{aggressive_val:,.2f}" if not aggressive_val.is_integer() else f"{int(aggressive_val):,}"
-
-    scenario_table_html = (
-        f'    <div class="scenario-container comparison-container card" style="margin-top: 24px;" data-entity-type="scenario">\n'
-        f'      <h2>Sensitivity Scenario Modeling</h2>\n'
-        f'      <p>SSR scenario matrix comparing baseline model projections against sensitivity variations:</p>\n'
-        f'      <div class="table-wrap">\n'
-        f'        <table class="scenario-table comparison-table" data-entity-type="scenario">\n'
-        f'          <thead>\n'
-        f'            <tr>\n'
-        f'              <th scope="col">Scenario Analysis</th>\n'
-        f'              <th scope="col">Variance Assumption</th>\n'
-        f'              <th scope="col">Statutory Basis</th>\n'
-        f'              <th scope="col">Economic Series</th>\n'
-        f'              <th scope="col">Projected Outcome</th>\n'
-        f'            </tr>\n'
-        f'          </thead>\n'
-        f'          <tbody>\n'
-        f'            <tr data-entity-type="scenario">\n'
-        f'              <td><strong>Baseline Scenario</strong></td>\n'
-        f'              <td>Standard published parameters</td>\n'
-        f'              <td>{statutory_authority}</td>\n'
-        f'              <td>{economic_dataset}</td>\n'
-        f'              <td><strong class="scenario-baseline">{display_output}</strong></td>\n'
-        f'            </tr>\n'
-        f'            <tr data-entity-type="scenario">\n'
-        f'              <td><strong>Conservative Scenario</strong></td>\n'
-        f'              <td>20% Parameter contraction</td>\n'
-        f'              <td>{statutory_authority}</td>\n'
-        f'              <td>{economic_dataset}</td>\n'
-        f'              <td><strong class="scenario-conservative">{conservative_output}</strong></td>\n'
-        f'            </tr>\n'
-        f'            <tr data-entity-type="scenario">\n'
-        f'              <td><strong>Aggressive Scenario</strong></td>\n'
-        f'              <td>20% Parameter expansion</td>\n'
-        f'              <td>{statutory_authority}</td>\n'
-        f'              <td>{economic_dataset}</td>\n'
-        f'              <td><strong class="scenario-aggressive">{aggressive_output}</strong></td>\n'
-        f'            </tr>\n'
-        f'          </tbody>\n'
-        f'        </table>\n'
-        f'      </div>\n'
-        f'    </div>'
+    # Pre-render SSR 5-Point Scenario Comparison Table
+    scenario_table_html = _render_5point_sensitivity_table_html(
+        published_output=published_output,
+        display_output=display_output,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
     )
 
     spec_tenant_signals = " ".join(
@@ -507,9 +724,22 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         or default_base
     ).rstrip("/")
 
+    scenario_presets_bar_html = _render_scenario_presets_bar_html(
+        canonical_base=canonical_base,
+        slug=slug,
+        clamped_inputs=clamped_inputs,
+    )
+    monetization_block = _render_compiler_monetization_and_guardrail_html(
+        slug=slug,
+        query=query,
+        is_prexvo=is_prexvo,
+        candidate_spec=candidate_spec,
+    )
+    monetization_section_html = monetization_block["html"]
+
     is_prexvo_js = "true" if is_prexvo else "false"
 
-    is_prediction_tool = any(
+    is_prediction_tool = (not is_prexvo) and any(
         tok in slug.lower()
         for tok in (
             "prediction",
@@ -1051,6 +1281,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
         (greater than or equal to zero) per HWL-1263 to prevent crawler or user state corruption.
       </p>
+{scenario_presets_bar_html}
       <form class="calculator-form" id="{slug}-calculator" method="post" action="javascript:void(0);">
 {form_inputs_str}
         <button type="submit" class="touch-target" id="calculate-btn" style="min-height: 44px; min-width: 44px;">Recalculate Output</button>
@@ -1085,6 +1316,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     </div>
 
 {scenario_table_html}
+
+{monetization_section_html}
 
     <section class="methodology card">
       <h2>Statutory Analysis and Computational Methodology</h2>
@@ -1256,9 +1489,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "slug": slug,
         "title": title,
+        "tenant": "prexvo" if is_prexvo else "profithelm",
         "html": html_content,
         "manifest": manifest,
         "published_output": published_output,
+        "affiliate_route": monetization_block["affiliate_route"],
+        "commercial_offers_allowed": monetization_block["commercial_offers_allowed"],
+        "restricted_public_service": monetization_block["restricted_public_service"],
         "verified": True,
         "boundary_fuzz_verified": bool(fuzz_res.get("passed", True)),
     }

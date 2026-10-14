@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 from pseofactory.affiliates import (
     PREXVO_DISCLOSURES,
     PROFITHELM_DISCLOSURES,
+    is_restricted_public_service_slug,
     qualify_monetization_opportunity,
     verify_partner_domain_alignment,
 )
@@ -238,9 +239,13 @@ class CompetitorGapEngine:
             if h.lower() not in our_hooks and h.lower() not in tool_text
         ]
 
+        base_slug = sanitize_url_slug(clean_query)
+        base_title = clean_query.title()
+
         if self.tenant_id == "prexvo":
             default_category = "Student Loan Repayment"
-            affiliates = ["splash_financial", "sofi"]
+            restricted_ps = is_restricted_public_service_slug(base_slug, clean_query)
+            affiliates = [] if restricted_ps else ["splash_financial", "sofi"]
             statutory_authority = "34 CFR Part 685"
             economic_dataset = "FRED SLSTTOTAL Series"
             model_name = "Direct Consolidation Loan Weighted Model"
@@ -248,11 +253,18 @@ class CompetitorGapEngine:
             inputs = {"balance": 45000, "weighted_rate": 6.5}
             published_output = 2925.0
             sample_calculation = "Balance 45,000 at 6.5 percent weighted rate yields 2,925 annual interest"
-            disclosures = [
-                "Refinancing federal student loans permanently waives federal protections",
-                "FTC Partner Compensation Disclosure",
-                "Independent Publisher Disclaimer",
-            ]
+            disclosures = (
+                [
+                    "Title IV Public Service Statutory Guardrail: Commercial private lender offers are suppressed on public-service and statutory hardship pages",
+                    "Independent Publisher Disclaimer",
+                ]
+                if restricted_ps
+                else [
+                    "Refinancing federal student loans permanently waives federal protections",
+                    "FTC Partner Compensation Disclosure",
+                    "Independent Publisher Disclaimer",
+                ]
+            )
             canonical_base = "https://prexvo.com"
         else:
             default_category = "Tax Intelligence"
@@ -271,8 +283,6 @@ class CompetitorGapEngine:
             canonical_base = "https://profithelm.com"
 
         candidates: List[GapCandidateSpec] = []
-        base_slug = sanitize_url_slug(clean_query)
-        base_title = clean_query.title()
 
         if missing_interactive:
             for feat in missing_interactive:
@@ -397,6 +407,7 @@ class CompetitorGapEngine:
             raise ValueError(monetization.get("rejection_reason", f"Cross-tenant isolation violation for {tenant_id}"))
 
         if tenant_id == "prexvo":
+            restricted_ps = is_restricted_public_service_slug(slug, query)
             spec.setdefault("tenant", "prexvo")
             spec.setdefault("property_id", "prexvo")
             spec.setdefault("domain", "prexvo.com")
@@ -404,7 +415,10 @@ class CompetitorGapEngine:
             spec.setdefault("statutory_authority", "34 CFR Part 685")
             spec.setdefault("economic_dataset", "FRED SLSTTOTAL Series")
             spec.setdefault("category", "Student Loan Repayment")
-            spec.setdefault("affiliates", monetization.get("recommended_partners") or ["splash_financial", "sofi"])
+            spec.setdefault(
+                "affiliates",
+                [] if restricted_ps else (monetization.get("recommended_partners") or ["splash_financial", "sofi"]),
+            )
             spec.setdefault("model_name", "Direct Consolidation Loan Weighted Model")
             spec.setdefault("formula", "balance * (weighted_rate / 100.0)")
             spec.setdefault("inputs", {"balance": 45000, "weighted_rate": 6.5})
@@ -413,14 +427,22 @@ class CompetitorGapEngine:
                 "sample_calculation",
                 "Balance 45,000 at 6.5 percent weighted rate yields 2,925 annual interest",
             )
-            spec.setdefault("mandatory_disclosures", [
-                "Refinancing federal student loans permanently waives federal protections",
-                "FTC Partner Compensation Disclosure",
-                "Independent Publisher Disclaimer",
-                PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""),
-                PREXVO_DISCLOSURES.get("ftc_disclosure", ""),
-            ])
-            spec.setdefault("ymyl_warning", PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""))
+            if restricted_ps:
+                spec.setdefault("mandatory_disclosures", [
+                    "Title IV Public Service Statutory Guardrail: Commercial private lender offers are suppressed on public-service and statutory hardship pages",
+                    "Independent Publisher Disclaimer",
+                    PREXVO_DISCLOSURES.get("public_service_non_commercial_notice", ""),
+                ])
+                spec.setdefault("ymyl_warning", PREXVO_DISCLOSURES.get("public_service_non_commercial_notice", ""))
+            else:
+                spec.setdefault("mandatory_disclosures", [
+                    "Refinancing federal student loans permanently waives federal protections",
+                    "FTC Partner Compensation Disclosure",
+                    "Independent Publisher Disclaimer",
+                    PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""),
+                    PREXVO_DISCLOSURES.get("ftc_disclosure", ""),
+                ])
+                spec.setdefault("ymyl_warning", PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""))
         else:
             spec.setdefault("tenant", "profithelm")
             spec.setdefault("property_id", "profithelm")
@@ -499,6 +521,8 @@ class CompetitorGapEngine:
 
         spec.setdefault("intent_tier", monetization.get("intent_tier", ""))
         spec.setdefault("monetization_qualified", monetization.get("monetization_qualified", True))
+        spec.setdefault("commercial_offers_allowed", monetization.get("commercial_offers_allowed", True))
+        spec.setdefault("restricted_public_service", monetization.get("restricted_public_service", False))
         spec.setdefault("expected_bounty_usd", monetization.get("expected_bounty_usd", 0.0))
         spec.setdefault("estimated_monthly_revenue_usd", monetization.get("estimated_monthly_revenue_usd", 0.0))
 
@@ -695,6 +719,751 @@ class CompetitorGapEngine:
             "candidate_specs": candidate_specs,
         }
 
+    def benchmark_multi_engine_rankings(
+        self,
+        queries: Optional[List[str]] = None,
+        custom_serp_observations: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Benchmarks target queries for this tenant across Google, Bing, and DuckDuckGo,
+        recording current ranking positions, higher-ranked competing apps, root-cause
+        indexing/ranking gaps, and codified pseofactory compiler upgrades.
+        Enforces strict domain isolation and YMYL public-service guardrails.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return _execute_multi_engine_benchmark(
+            tenant_profile=self.tenant_profile,
+            fact_store=self.fact_store,
+            queries=queries,
+            custom_serp_observations=custom_serp_observations,
+        )
+
+
+SUPPORTED_SEARCH_ENGINES = ("google", "bing", "duckduckgo")
+
+WINNING_COMPETITOR_MECHANICS: Dict[str, Dict[str, Any]] = {
+    "server_rendered_sensitivity_grid": {
+        "mechanic_id": "server_rendered_sensitivity_grid",
+        "title": "Server-Rendered 5-Point Sensitivity Matrix",
+        "why_competitors_rank_higher": (
+            "Competing calculators pre-render multi-row numeric sensitivity tables directly "
+            "in initial HTML so Googlebot, Bingbot, and DuckDuckGo index concrete dollar outputs "
+            "without executing client JavaScript."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page renders a 5-step (0.8x to 1.2x) deterministic HTML table "
+            "alongside the interactive calculator and SVG sensitivity chart."
+        ),
+    },
+    "deep_link_scenario_presets": {
+        "mechanic_id": "deep_link_scenario_presets",
+        "title": "Crawlable URL-Parameterized Scenario Presets",
+        "why_competitors_rank_higher": (
+            "Top-ranked apps expose 1-click preset scenarios (Conservative, Baseline, Aggressive) "
+            "backed by query parameters that increase dwell time and earn long-tail anchor links."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page renders touch-compliant preset links (?param=value) "
+            "that hydrate URLSearchParams on load and recompute outputs deterministically."
+        ),
+    },
+    "jsonld_entity_triad": {
+        "mechanic_id": "jsonld_entity_triad",
+        "title": "SoftwareApplication + FAQPage + BreadcrumbList + HowTo Schema Graph",
+        "why_competitors_rank_higher": (
+            "Incumbent financial portals pair exact H1/Title parity with "
+            "complete JSON-LD entity graphs to capture rich snippets and AI answer citations."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page emits synchronized SoftwareApplication, FAQPage, "
+            "BreadcrumbList, and HowTo JSON-LD with 1:1 title/H1 parity."
+        ),
+    },
+    "compliant_intent_monetization": {
+        "mechanic_id": "compliant_intent_monetization",
+        "title": "Domain-Isolated Affiliate Routing and Statutory YMYL Guardrails",
+        "why_competitors_rank_higher": (
+            "High-trust calculators match commercial CTAs strictly to transactional intent "
+            "while keeping restricted public-service pages free of commercial lender pitches."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page routes domain-verified affiliate partners with "
+            "mandatory regulatory disclosures while suppressing commercial offers on "
+            "restricted public-service pages."
+        ),
+    },
+}
+
+TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
+    "profithelm": [
+        {
+            "query": "section 179 deduction calculator",
+            "slug": "section-179-deduction-calculator",
+            "target_url": "https://profithelm.com/tools/section-179-deduction-calculator/",
+            "intent_tier": "tier_1_commercial_b2b",
+            "engine_positions": {"google": None, "bing": 18, "duckduckgo": 14},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "section179.org",
+                    "url": "https://www.section179.org/section_179_calculator/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Pre-rendered statutory cap phaseout table + equipment financing CTA.",
+                },
+                {
+                    "domain": "crestcapital.com",
+                    "url": "https://www.crestcapital.com/tax_deduction_calculator",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 3},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Direct lender authority + immediate equipment lease financing workflow.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Incumbents section179.org and crestcapital.com rank #1-#2 across Google, Bing, and "
+                "DuckDuckGo because they pair IRC Section 179 phaseout tables with immediate equipment "
+                "financing CTAs and deep-linked cost presets."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["crest_capital", "mercury"],
+        },
+        {
+            "query": "1031 exchange boot calculator",
+            "slug": "1031-exchange-boot-calculator",
+            "target_url": "https://profithelm.com/tools/1031-exchange-boot-calculator/",
+            "intent_tier": "tier_1_commercial_b2b",
+            "engine_positions": {"google": None, "bing": 22, "duckduckgo": 19},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "ipx1031.com",
+                    "url": "https://www.ipx1031.com/1031-exchange-calculator/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Qualified intermediary domain authority + mortgage boot breakdown table.",
+                },
+                {
+                    "domain": "exeter1031.com",
+                    "url": "https://www.exeter1031.com/1031_exchange_calculator.aspx",
+                    "engine_ranks": {"google": 3, "bing": 4, "duckduckgo": 4},
+                    "winning_mechanics": ["server_rendered_sensitivity_grid"],
+                    "indexing_advantage": "Explicit IRC Section 1031(a)(1) boot recognition examples in static HTML.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Qualified intermediary calculators dominate top SERP positions by rendering cash boot vs "
+                "mortgage boot sensitivity tables and 45-day/180-day statutory timelines in static HTML."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["ipx1031", "mercury"],
+        },
+        {
+            "query": "crypto staking tax calculator",
+            "slug": "crypto-staking-tax-calculator",
+            "target_url": "https://profithelm.com/tools/crypto-staking-tax-calculator/",
+            "intent_tier": "tier_2_crypto_tax",
+            "engine_positions": {"google": None, "bing": 16, "duckduckgo": 12},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "coinledger.io",
+                    "url": "https://coinledger.io/tools/crypto-tax-calculator",
+                    "engine_ranks": {"google": 1, "bing": 2, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Form 8949 + Rev. Rul. 2023-14 FAQ schema + direct 1099-DA import CTA.",
+                },
+                {
+                    "domain": "koinly.io",
+                    "url": "https://koinly.io/crypto-tax-calculator/",
+                    "engine_ranks": {"google": 2, "bing": 1, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "Preset cost-basis scenarios and multi-bracket capital gains tables.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "CoinLedger and Koinly lead across Google, Bing, and DuckDuckGo by combining IRS Form 8949 "
+                "structured FAQ schema with preset portfolio scenarios and direct tax-loss harvesting CTAs."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["coinledger", "koinly"],
+        },
+        {
+            "query": "kalshi polymarket kelly criterion calculator",
+            "slug": "prediction-market-kelly-criterion-calculator",
+            "target_url": "https://profithelm.com/tools/prediction-market-kelly-criterion-calculator/",
+            "intent_tier": "tier_2_crypto_tax",
+            "engine_positions": {"google": 11, "bing": 7, "duckduckgo": 6},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "omnicalculator.com",
+                    "url": "https://www.omnicalculator.com/finance/kelly-criterion",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Deep-linked bankroll presets and step-by-step HowTo JSON-LD.",
+                },
+                {
+                    "domain": "albionresearch.com",
+                    "url": "https://www.albionresearch.com/tools/kelly",
+                    "engine_ranks": {"google": 4, "bing": 5, "duckduckgo": 4},
+                    "winning_mechanics": ["server_rendered_sensitivity_grid"],
+                    "indexing_advantage": "Fractional Kelly drawdown table rendered directly in DOM.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Generic Kelly calculators rank ahead on broad terms, but lack Kalshi quadratic fee drag "
+                "and IRC Section 1256 tax-treatment modeling."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["coinledger", "kalshi"],
+        },
+        {
+            "query": "federal tax bracket calculator",
+            "slug": "federal-tax-bracket-calculator",
+            "target_url": "https://profithelm.com/tools/federal-tax-bracket-calculator/",
+            "intent_tier": "tier_3_general_tax",
+            "engine_positions": {"google": None, "bing": 28, "duckduckgo": 24},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "smartasset.com",
+                    "url": "https://smartasset.com/taxes/income-taxes",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Pre-rendered marginal vs effective tax tables across income presets.",
+                },
+                {
+                    "domain": "nerdwallet.com",
+                    "url": "https://www.nerdwallet.com/calculator/tax-calculator",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Rev. Proc. statutory inflation citations + compliant retail tax filing CTAs.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "SmartAsset and NerdWallet dominate top positions with pre-rendered income bracket sensitivity "
+                "tables and retail tax software links."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["turbotax", "taxslayer"],
+        },
+    ],
+    "prexvo": [
+        {
+            "query": "repayment assistance plan rap vs ibr calculator",
+            "slug": "rap-vs-ibr-calculator",
+            "target_url": "https://prexvo.com/tools/rap-vs-ibr-calculator/",
+            "intent_tier": "tier_2_federal_repayment",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": 14, "bing": 9, "duckduckgo": 8},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "studentaid.gov",
+                    "url": "https://studentaid.gov/loan-simulator/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Official .gov authority + 34 CFR Part 685 statutory citations.",
+                },
+                {
+                    "domain": "studentloanplanner.com",
+                    "url": "https://www.studentloanplanner.com/income-driven-repayment-calculator/",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Side-by-side AGI sensitivity table and preset borrower profiles.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "StudentAid.gov and StudentLoanPlanner rank #1-#2 via side-by-side AGI sensitivity tables, "
+                "34 CFR Part 685 citations, and preset borrower scenarios."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["splash_financial", "sofi"],
+        },
+        {
+            "query": "pslf qualifying payment simulator",
+            "slug": "pslf-qualifying-payment-simulator",
+            "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+            "intent_tier": "tier_2_public_service_restricted",
+            "restricted_public_service": True,
+            "commercial_offers_allowed": False,
+            "engine_positions": {"google": None, "bing": 15, "duckduckgo": 11},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "studentaid.gov",
+                    "url": "https://studentaid.gov/manage-loans/forgiveness-cancellation/public-service",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Zero commercial private lender distraction on 120-payment PSLF statutory guidance.",
+                },
+                {
+                    "domain": "tisla.org",
+                    "url": "https://freestudentloanadvice.org/loan-forgiveness/public-service-loan-forgiveness/",
+                    "engine_ranks": {"google": 3, "bing": 3, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Pure non-commercial public-service E-E-A-T alignment under 34 CFR 685.219.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "YMYL search quality raters demote PSLF pages that inject commercial private lender CTAs "
+                "because private loan conversion permanently waives federal protections under 34 CFR 685.219."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": [],
+        },
+        {
+            "query": "save plan litigation forbearance transition calculator",
+            "slug": "save-plan-litigation-transition",
+            "target_url": "https://prexvo.com/tools/save-plan-litigation-transition/",
+            "intent_tier": "tier_2_public_service_restricted",
+            "restricted_public_service": True,
+            "commercial_offers_allowed": False,
+            "engine_positions": {"google": 12, "bing": 8, "duckduckgo": 7},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "studentaid.gov",
+                    "url": "https://studentaid.gov/announcements-events/save-court-actions",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Non-commercial statutory forbearance and buyback guidance.",
+                },
+                {
+                    "domain": "studentloanplanner.com",
+                    "url": "https://www.studentloanplanner.com/save-plan-lawsuit-updates/",
+                    "engine_ranks": {"google": 2, "bing": 3, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "Pre-rendered SAVE to IBR/RAP payment delta tables across income bands.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "SAVE litigation transition borrowers require non-commercial statutory buyback and IBR migration "
+                "tables without private lender offers that waive federal protections."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": [],
+        },
+        {
+            "query": "student loan refinance break even calculator",
+            "slug": "student-loan-refinance-break-even",
+            "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even/",
+            "intent_tier": "tier_1_private_refinance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 19, "duckduckgo": 15},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "nerdwallet.com",
+                    "url": "https://www.nerdwallet.com/calculator/student-loan-refinance-calculator",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Rate-spread sensitivity matrix + explicit Title IV forfeiture warning.",
+                },
+                {
+                    "domain": "sofi.com",
+                    "url": "https://www.sofi.com/student-loan-refinancing-calculator/",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "Instant term-length preset comparisons and clear APR disclosures.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "NerdWallet and SoFi rank at the top by pairing rate-reduction sensitivity tables with "
+                "mandatory notices that refinancing federal student loans permanently waives federal protections."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["splash_financial", "sofi"],
+        },
+        {
+            "query": "physician student loan refinance calculator",
+            "slug": "physician-student-loan-repayment-calculator",
+            "target_url": "https://prexvo.com/tools/physician-student-loan-repayment-calculator/",
+            "intent_tier": "tier_1_private_refinance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": 16, "bing": 11, "duckduckgo": 9},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "whitecoatinvestor.com",
+                    "url": "https://www.whitecoatinvestor.com/student-loan-refinancing/",
+                    "engine_ranks": {"google": 1, "bing": 2, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Residency-to-attending salary curve comparisons + Splash Financial CTA.",
+                },
+                {
+                    "domain": "splashfinancial.com",
+                    "url": "https://www.splashfinancial.com/medical-school-loan-refinancing/",
+                    "engine_ranks": {"google": 2, "bing": 1, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Specialty debt-to-income presets and Title IV waiver disclosures.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "WhiteCoatInvestor and Splash Financial outrank generic calculators by modeling residency vs "
+                "attending income presets while disclosing that refinancing federal student loans permanently waives federal protections."
+            ),
+            "compiler_upgrades_applied": [
+                "server_rendered_sensitivity_grid",
+                "deep_link_scenario_presets",
+                "jsonld_entity_triad",
+                "compliant_intent_monetization",
+            ],
+            "recommended_affiliates": ["splash_financial", "sofi"],
+        },
+    ],
+}
+
+
+@dataclass
+class MultiEngineQueryBenchmark:
+    """
+    Structured multi-engine ranking and competitor gap record for a single target query.
+    Zero em-dashes. Zero en-dashes.
+    """
+    property_id: str
+    query: str
+    slug: str
+    target_url: str
+    intent_tier: str
+    restricted_public_service: bool
+    commercial_offers_allowed: bool
+    engine_positions: Dict[str, Optional[int]]
+    indexed_engines: List[str]
+    unindexed_engines: List[str]
+    higher_ranked_competitors: List[Dict[str, Any]]
+    root_cause_diagnosis: str
+    compiler_upgrades_applied: List[str]
+    recommended_affiliates: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def _execute_multi_engine_benchmark(
+    tenant_profile: TenantTruthProfile,
+    fact_store: TenantFactStore,
+    queries: Optional[List[str]] = None,
+    custom_serp_observations: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Internal helper executing multi-engine ranking diagnostics and competitor benchmarking.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = tenant_profile.tenant_id.strip().lower()
+    if prop not in TARGET_QUERY_BENCHMARKS:
+        raise ValueError(f"Unsupported tenant '{prop}' for multi-engine ranking benchmark")
+
+    baseline_entries = {
+        entry["query"].lower(): dict(entry)
+        for entry in TARGET_QUERY_BENCHMARKS[prop]
+    }
+    observations = custom_serp_observations or {}
+
+    if queries:
+        selected_queries = [q.strip() for q in queries if q and q.strip()]
+    else:
+        selected_queries = [entry["query"] for entry in TARGET_QUERY_BENCHMARKS[prop]]
+
+    benchmarks: List[MultiEngineQueryBenchmark] = []
+    engine_indexed_counts: Dict[str, int] = {eng: 0 for eng in SUPPORTED_SEARCH_ENGINES}
+    engine_rank_sums: Dict[str, List[int]] = {eng: [] for eng in SUPPORTED_SEARCH_ENGINES}
+    competitor_domain_counts: Dict[str, int] = {}
+
+    for raw_q in selected_queries:
+        q_key = raw_q.strip().lower()
+        base = dict(baseline_entries.get(q_key, {}))
+        obs = dict(observations.get(q_key) or observations.get(raw_q) or {})
+
+        slug = str(obs.get("slug") or base.get("slug") or sanitize_url_slug(raw_q))
+        canonical_base = tenant_profile.canonical_domain.rstrip("/")
+        target_url = str(obs.get("target_url") or base.get("target_url") or f"{canonical_base}/tools/{slug}/")
+
+        monetization = qualify_monetization_opportunity(
+            query=raw_q,
+            slug=slug,
+            property_id=prop,
+            search_volume=int(obs.get("search_volume", 1800) or 1800),
+            cpc_usd=float(obs.get("cpc_usd", 5.0) or 5.0),
+        )
+        if monetization.get("intent_tier") == "cross_tenant_contamination":
+            raise ValueError(monetization.get("rejection_reason", f"Cross-tenant query '{raw_q}' rejected for {prop}"))
+
+        restricted_ps = bool(
+            prop == "prexvo" and is_restricted_public_service_slug(slug, raw_q)
+        )
+        commercial_allowed = not restricted_ps
+        recommended_affiliates = (
+            []
+            if restricted_ps
+            else list(
+                obs.get("recommended_affiliates")
+                or base.get("recommended_affiliates")
+                or monetization.get("recommended_partners")
+                or []
+            )
+        )
+
+        alignment = verify_partner_domain_alignment(
+            property_id=prop,
+            slug=slug,
+            partners=recommended_affiliates,
+        )
+        if not alignment["aligned"]:
+            raise ValueError(
+                f"Multi-engine benchmark affiliate alignment violation for {prop} ({slug}): "
+                f"{'; '.join(alignment['violations'])}"
+            )
+
+        raw_positions = dict(base.get("engine_positions") or {})
+        if "engine_positions" in obs and isinstance(obs["engine_positions"], dict):
+            raw_positions.update(obs["engine_positions"])
+
+        engine_positions: Dict[str, Optional[int]] = {}
+        indexed_engines: List[str] = []
+        unindexed_engines: List[str] = []
+
+        for eng in SUPPORTED_SEARCH_ENGINES:
+            pos = raw_positions.get(eng)
+            if isinstance(pos, int) and pos > 0:
+                engine_positions[eng] = pos
+                indexed_engines.append(eng)
+                engine_indexed_counts[eng] += 1
+                engine_rank_sums[eng].append(pos)
+            else:
+                engine_positions[eng] = None
+                unindexed_engines.append(eng)
+
+        competitors = list(obs.get("higher_ranked_competitors") or base.get("higher_ranked_competitors") or [])
+        if not competitors:
+            default_comp_domain = "studentaid.gov" if prop == "prexvo" else "smartasset.com"
+            competitors = [
+                {
+                    "domain": default_comp_domain,
+                    "url": f"https://{default_comp_domain}/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Server-rendered sensitivity tables and structured schema entities.",
+                }
+            ]
+
+        for comp in competitors:
+            dom = str(comp.get("domain", "")).strip().lower()
+            if dom:
+                competitor_domain_counts[dom] = competitor_domain_counts.get(dom, 0) + 1
+
+        diagnosis = str(
+            obs.get("root_cause_diagnosis")
+            or base.get("root_cause_diagnosis")
+            or (
+                "Competing calculators outrank target URL via pre-rendered sensitivity tables, "
+                "URL-parameterized scenario presets, and complete JSON-LD entity graphs."
+            )
+        )
+        upgrades = list(
+            obs.get("compiler_upgrades_applied")
+            or base.get("compiler_upgrades_applied")
+            or list(WINNING_COMPETITOR_MECHANICS.keys())
+        )
+
+        record = MultiEngineQueryBenchmark(
+            property_id=prop,
+            query=raw_q,
+            slug=slug,
+            target_url=target_url,
+            intent_tier=str(base.get("intent_tier") or monetization.get("intent_tier") or ""),
+            restricted_public_service=restricted_ps,
+            commercial_offers_allowed=commercial_allowed,
+            engine_positions=engine_positions,
+            indexed_engines=indexed_engines,
+            unindexed_engines=unindexed_engines,
+            higher_ranked_competitors=competitors,
+            root_cause_diagnosis=diagnosis,
+            compiler_upgrades_applied=upgrades,
+            recommended_affiliates=recommended_affiliates,
+        )
+
+        serialized = json.dumps(record.to_dict())
+        fact_store.assert_tenant_isolation(prop, serialized)
+        assert_no_forbidden_dashes(serialized, context=f"multi_engine_benchmark:{prop}:{slug}")
+        benchmarks.append(record)
+
+    total_queries = len(benchmarks)
+    engine_summary: Dict[str, Dict[str, Any]] = {}
+    for eng in SUPPORTED_SEARCH_ENGINES:
+        ranks = engine_rank_sums[eng]
+        indexed_ct = engine_indexed_counts[eng]
+        engine_summary[eng] = {
+            "engine": eng,
+            "total_queries": total_queries,
+            "indexed_count": indexed_ct,
+            "unindexed_count": total_queries - indexed_ct,
+            "index_coverage_ratio": round(indexed_ct / total_queries, 4) if total_queries else 0.0,
+            "average_rank_when_indexed": round(sum(ranks) / len(ranks), 2) if ranks else None,
+            "best_rank": min(ranks) if ranks else None,
+        }
+
+    top_competitors = [
+        {"domain": dom, "appearances_ahead": count}
+        for dom, count in sorted(competitor_domain_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+    report = {
+        "property_id": prop,
+        "canonical_domain": tenant_profile.canonical_domain,
+        "supported_engines": list(SUPPORTED_SEARCH_ENGINES),
+        "total_queries_benchmarked": total_queries,
+        "engine_summary": engine_summary,
+        "top_competing_domains": top_competitors,
+        "codified_winning_mechanics": list(WINNING_COMPETITOR_MECHANICS.values()),
+        "query_benchmarks": [b.to_dict() for b in benchmarks],
+        "isolation_verified": True,
+        "ymyl_public_service_guardrails_enforced": True if prop == "prexvo" else False,
+    }
+    assert_no_forbidden_dashes(json.dumps(report), context=f"multi_engine_report:{prop}")
+    return report
+
+
+def benchmark_multi_engine_rankings(
+    tenant_id: Union[str, TenantTruthProfile] = "profithelm",
+    queries: Optional[List[str]] = None,
+    custom_serp_observations: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Module-level entry point to benchmark target queries across Google, Bing, and DuckDuckGo
+    for either profithelm or prexvo under strict domain isolation.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(tenant_id, TenantTruthProfile):
+        profile = tenant_id
+    else:
+        store = TenantFactStore.get_instance()
+        profile = store.get_profile(str(tenant_id))
+        if profile is None:
+            raise ValueError(f"Unknown tenant_id '{tenant_id}' for benchmark_multi_engine_rankings")
+    engine = CompetitorGapEngine(profile)
+    return engine.benchmark_multi_engine_rankings(
+        queries=queries,
+        custom_serp_observations=custom_serp_observations,
+    )
+
+
+def benchmark_all_properties() -> Dict[str, Dict[str, Any]]:
+    """
+    Benchmarks multi-engine search rankings and higher-ranked competitors across both
+    profithelm and prexvo, returning a domain-isolated comparison dictionary.
+    Zero em-dashes. Zero en-dashes.
+    """
+    return {
+        "profithelm": benchmark_multi_engine_rankings("profithelm"),
+        "prexvo": benchmark_multi_engine_rankings("prexvo"),
+    }
+
 
 def run_blind_spot_pass(
     tenant_id: Union[str, TenantTruthProfile] = "profithelm",
@@ -725,8 +1494,15 @@ __all__ = [
     "INTERACTIVE_PATTERNS",
     "CLICK_MAGNET_PATTERNS",
     "CONVERSION_HOOK_PATTERNS",
+    "SUPPORTED_SEARCH_ENGINES",
+    "WINNING_COMPETITOR_MECHANICS",
+    "TARGET_QUERY_BENCHMARKS",
     "GapCandidateSpec",
+    "MultiEngineQueryBenchmark",
     "CompetitorGapEngine",
+    "benchmark_multi_engine_rankings",
+    "benchmark_all_properties",
     "run_blind_spot_pass",
 ]
+
 

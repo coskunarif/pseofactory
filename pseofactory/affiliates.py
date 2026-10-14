@@ -427,6 +427,11 @@ PREXVO_DISCLOSURES: Dict[str, str] = {
         "All calculations, comparisons, and schedules are provided strictly for educational "
         "and informational modeling purposes pursuant to Title IV statutory formulas."
     ),
+    "public_service_non_commercial_notice": (
+        "Public Service Protection Notice: Commercial private lender offers are strictly suppressed "
+        "on Public Service Loan Forgiveness (PSLF), statutory hardship, and federal discharge pages "
+        "to protect borrower eligibility under Title IV 34 CFR Part 685."
+    ),
 }
 
 PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
@@ -631,6 +636,46 @@ COMMERCIAL_B2B_SLUGS: Set[str] = {
     "qsbs-section-1202-tax-calculator",
     "treasury-yield-calculator",
 }
+
+PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS: Set[str] = {
+    "pslf-qualifying-payment-calculator",
+    "pslf-qualifying-payment-simulator",
+    "pslf-employer-ein-eligibility",
+    "save-plan-litigation-transition",
+    "save-forbearance-interest-tracker",
+    "borrower-defense-discharge-calculator",
+    "total-permanent-disability-discharge-calculator",
+    "teacher-loan-forgiveness-calculator",
+    "closed-school-discharge-calculator",
+    "federal-poverty-guideline-discretionary-income-calculator",
+}
+
+PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS: Tuple[str, ...] = (
+    "pslf",
+    "public-service",
+    "public service",
+    "save-plan-litigation",
+    "save plan litigation",
+    "save-forbearance",
+    "forbearance",
+    "deferment",
+    "borrower-defense",
+    "borrower defense",
+    "disability-discharge",
+    "disability discharge",
+    "total-and-permanent-disability",
+    "total and permanent disability",
+    "total-permanent-disability",
+    "teacher-loan-forgiveness",
+    "teacher loan forgiveness",
+    "closed-school",
+    "closed school",
+    "low-income",
+    "low income",
+    "poverty-guideline",
+    "poverty guideline",
+    "hardship",
+)
 
 INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
     "section-1031": ["ipx1031", "exeter1031", "first_american", "mercury"],
@@ -938,6 +983,24 @@ def is_commercial_b2b_slug(slug: str) -> bool:
     return any(tok in s for tok in b2b_tokens)
 
 
+def is_restricted_public_service_slug(slug: str, query: str = "") -> bool:
+    """
+    Determines whether a Prexvo slug or query targets a restricted public-service
+    or statutory hardship page (such as PSLF, SAVE litigation/forbearance, disability
+    discharge, borrower defense, teacher loan forgiveness, or poverty-guideline relief)
+    where commercial private refinancing offers must be suppressed to preserve YMYL guardrails.
+    Zero em-dashes. Zero en-dashes.
+    """
+    s = (slug or "").strip().lower()
+    q = (query or "").strip().lower()
+    if s in PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS:
+        return True
+    combined = f"{s} {q}".strip()
+    if not combined:
+        return False
+    return any(tok in combined for tok in PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS)
+
+
 def _extract_partner_vault_status(
     partner_key: str,
     vault_overrides: Optional[Dict[str, Any]],
@@ -972,12 +1035,15 @@ def resolve_optimal_partner_for_slug(
     """
     Resolves the optimal affiliate partner for a property and calculator slug,
     enforcing domain boundaries and prioritizing highest-yielding live partners.
+    Suppresses commercial refinance partners on restricted Prexvo public-service pages.
     Zero em-dashes. Zero en-dashes.
     """
     prop = (property_id or "").strip().lower()
     s = (slug or "").strip().lower()
 
     if prop == "prexvo":
+        if is_restricted_public_service_slug(s):
+            return None
         candidates: List[AffiliatePartner] = []
         for k, p in PREXVO_AFFILIATES.items():
             if k == p.key and k not in ENTERPRISE_B2B_PARTNERS and k not in B2B_PARTNER_KEYS:
@@ -1089,6 +1155,7 @@ def get_affiliate_route(
     Returns programmatic affiliate route contracts with guaranteed link attributes.
     Enforces strict property isolation:
     - Raises ValueError if B2B partner requested for Prexvo.
+    - Raises ValueError if commercial partner requested on a Prexvo restricted public-service page.
     - Raises ValueError if student loan partner requested for ProfitHelm.
     - Guarantees rel='noopener sponsored nofollow' and target='_blank'.
     """
@@ -1098,6 +1165,11 @@ def get_affiliate_route(
 
     selected_key = (partner_key or "").strip().lower()
     slug_clean = (tool_slug or "").strip().lower()
+
+    if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean):
+        raise ValueError(
+            f"Prexvo YMYL guardrail violation: Commercial refinance offers are prohibited on restricted public-service page '{tool_slug}'."
+        )
 
     # Property boundary checks when partner_key is provided
     if selected_key:
@@ -1406,6 +1478,10 @@ def verify_partner_domain_alignment(
     violations: List[str] = []
 
     if prop == "prexvo":
+        if is_restricted_public_service_slug(s_clean) and clean_partners:
+            violations.append(
+                f"Prexvo YMYL public-service guardrail violation: commercial partners {clean_partners} are prohibited on restricted public-service slug '{s_clean}'."
+            )
         for pk in clean_partners:
             if pk in B2B_PARTNER_KEYS or pk in PROFITHELM_AFFILIATES or pk == "sovrn_commerce":
                 violations.append(
@@ -1519,7 +1595,7 @@ def qualify_monetization_opportunity(
                 "partner_alignment_verified": False,
                 "disclosures_required": dict(PREXVO_DISCLOSURES),
             }
-        if not is_student_loan:
+        if not (is_student_loan or is_restricted_public_service_slug(s_clean, q_lower)):
             return {
                 "query": q_clean,
                 "slug": s_clean,
@@ -1557,27 +1633,43 @@ def qualify_monetization_opportunity(
             "disclosures_required": dict(PROFITHELM_DISCLOSURES),
         }
 
+    is_restricted_ps = False
+    commercial_offers_allowed = True
+
     # 3. Route to canonical intent tier and property
     if is_student_loan or prop_explicit == "prexvo":
         resolved_prop = "prexvo"
         intent_tier = "student_loan_ymyl"
-        primary_obj = resolve_optimal_partner_for_slug("prexvo", s_clean, vault_overrides=vault_overrides)
-        rec_partners = [
-            k for k in INTENT_ROUTING_TABLE["student-loan"]
-            if k in PREXVO_AFFILIATES and k not in B2B_PARTNER_KEYS
-        ]
-        if primary_obj and primary_obj.key in rec_partners:
-            rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
-        bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 325.0)) if primary_obj else 325.0
-        eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 113.75
-        intent_weight = 1.15
-        y_asset = round(min(1.45, max(0.75, (bounty_usd / 300.0) * 0.65 + (cpc / 5.0) * 0.35)), 4)
-        gate_1_passed = bounty_usd >= 45.0
+        is_restricted_ps = is_restricted_public_service_slug(s_clean, q_lower)
         disclosures = dict(PREXVO_DISCLOSURES)
         disclosures["standing_restriction"] = PREXVO_STANDING_RESTRICTION
-        alignment = verify_partner_domain_alignment("prexvo", s_clean, rec_partners)
-        qualified = bool(gate_1_passed and alignment["aligned"] and (jev >= 1.0 or cpc >= 1.50 or vol >= 50))
-        rejection_reason = "" if qualified else "Failed Prexvo Gate 1 or demand qualification threshold"
+        if is_restricted_ps:
+            commercial_offers_allowed = False
+            primary_obj = None
+            rec_partners = []
+            bounty_usd = 0.0
+            eff_yield = 0.0
+            intent_weight = 1.05
+            y_asset = round(min(1.25, max(0.70, (cpc / 5.0) * 0.45 + 0.65)), 4)
+            alignment = verify_partner_domain_alignment("prexvo", s_clean, rec_partners)
+            qualified = bool(alignment["aligned"] and (jev >= 1.0 or cpc >= 1.50 or vol >= 50))
+            rejection_reason = "" if qualified else "Failed Prexvo public-service demand qualification threshold"
+        else:
+            primary_obj = resolve_optimal_partner_for_slug("prexvo", s_clean, vault_overrides=vault_overrides)
+            rec_partners = [
+                k for k in INTENT_ROUTING_TABLE["student-loan"]
+                if k in PREXVO_AFFILIATES and k not in B2B_PARTNER_KEYS
+            ]
+            if primary_obj and primary_obj.key in rec_partners:
+                rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
+            bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 325.0)) if primary_obj else 325.0
+            eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 113.75
+            intent_weight = 1.15
+            y_asset = round(min(1.45, max(0.75, (bounty_usd / 300.0) * 0.65 + (cpc / 5.0) * 0.35)), 4)
+            gate_1_passed = bounty_usd >= 45.0
+            alignment = verify_partner_domain_alignment("prexvo", s_clean, rec_partners)
+            qualified = bool(gate_1_passed and alignment["aligned"] and (jev >= 1.0 or cpc >= 1.50 or vol >= 50))
+            rejection_reason = "" if qualified else "Failed Prexvo Gate 1 or demand qualification threshold"
 
     elif prop_explicit == "unassigned" or (not prop_explicit and not is_b2b and not is_consumer_fin and has_tool_signal):
         resolved_prop = "unassigned"
@@ -1694,8 +1786,8 @@ def qualify_monetization_opportunity(
 
     est_clicks = max(10.0, float(vol)) * 0.12
     est_conversions = est_clicks * 0.018
-    unit_rev = max(eff_yield, cpc * 2.5)
-    est_monthly_rev = round(est_conversions * unit_rev * max(0.5, dur) * intent_weight, 2) if qualified else 0.0
+    unit_rev = max(eff_yield, cpc * 2.5) if commercial_offers_allowed else 0.0
+    est_monthly_rev = round(est_conversions * unit_rev * max(0.5, dur) * intent_weight, 2) if (qualified and commercial_offers_allowed) else 0.0
 
     primary_partner_key = (
         primary_obj.key
@@ -1709,6 +1801,8 @@ def qualify_monetization_opportunity(
         "property_id": resolved_prop,
         "intent_tier": intent_tier,
         "monetization_qualified": qualified,
+        "commercial_offers_allowed": commercial_offers_allowed,
+        "restricted_public_service": is_restricted_ps,
         "rejection_reason": rejection_reason,
         "primary_partner": primary_partner_key,
         "recommended_partners": rec_partners[:3],
