@@ -391,6 +391,120 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         supported_params=["ph_tier"],
         cta_text="Initiate Qualified 1031 Exchange",
     ),
+    "simply_business": AffiliatePartner(
+        key="simply_business",
+        name="Simply Business Commercial Insurance",
+        category="Commercial Insurance & Workers Comp",
+        property_id="profithelm",
+        status="pending",
+        env_var="AFFILIATE_SIMPLY_BUSINESS_URL",
+        default_url="https://www.simplybusiness.com/",
+        badge="Instant Multi-Carrier Quotes",
+        commission_est="$35-$100/bound policy",
+        bounty_est="$35-$100",
+        network="CJ Affiliate / Impact",
+        description="Compare instant workers compensation, general liability, and commercial contractor insurance quotes across top carriers.",
+        target_tools=[
+            "workers-comp-and-payroll-burden-calculator",
+            "contractor-surety-bond-cost-calculator",
+        ],
+        supported_params=["ph_tier"],
+        cta_text="Compare Commercial Workers Comp Quotes",
+    ),
+    "suretybonds_direct": AffiliatePartner(
+        key="suretybonds_direct",
+        name="SuretyBonds.com Instant Bond Underwriting",
+        category="Commercial Surety & Bonds",
+        property_id="profithelm",
+        status="pending",
+        env_var="AFFILIATE_SURETYBONDS_DIRECT_URL",
+        default_url="https://www.suretybonds.com/",
+        badge="Nationwide Statutory Bonds",
+        commission_est="20% premium share ($75-$300)",
+        bounty_est="$75-$300",
+        network="In-House Direct",
+        description="Instant online underwriting for contractor license bonds, performance bonds, freight broker BMC-84 bonds, and ERISA fidelity bonds.",
+        target_tools=["contractor-surety-bond-cost-calculator"],
+        supported_params=["ph_tier"],
+        cta_text="Get Instant Contractor Surety Bond Quote",
+    ),
+    "next_insurance_b2b": AffiliatePartner(
+        key="next_insurance_b2b",
+        name="Next Insurance Commercial Coverage",
+        category="Commercial Insurance & Workers Comp",
+        property_id="profithelm",
+        status="pending",
+        env_var="AFFILIATE_NEXT_INSURANCE_B2B_URL",
+        default_url="https://www.nextinsurance.com/",
+        badge="Instant Certificate of Insurance",
+        commission_est="$25-$150/qualified quote",
+        bounty_est="$25-$150",
+        network="Impact.com",
+        description="Digital commercial insurance providing instant certificates of insurance for workers compensation, general liability, and commercial auto.",
+        target_tools=[
+            "workers-comp-and-payroll-burden-calculator",
+            "contractor-surety-bond-cost-calculator",
+        ],
+        supported_params=["ph_tier"],
+        cta_text="Get Instant Commercial Coverage with Next Insurance",
+    ),
+    "national_funding_med": AffiliatePartner(
+        key="national_funding_med",
+        name="National Funding Equipment & Practice Finance",
+        category="Equipment Financing",
+        property_id="profithelm",
+        status="pending",
+        env_var="AFFILIATE_NATIONAL_FUNDING_MED_URL",
+        default_url="https://www.nationalfunding.com/",
+        badge="Up to $500K Equipment Financing",
+        commission_est="$200-$750/funded deal",
+        bounty_est="$200-$750",
+        network="Impact.com",
+        description="Fast equipment leasing and commercial working capital loans for medical practices, dental clinics, and heavy commercial operators.",
+        target_tools=[
+            "medical-and-dental-equipment-section-179-roi-calculator",
+            "equipment-lease-vs-buy-section-179-calculator",
+        ],
+        supported_params=["ph_tier"],
+        cta_text="Check Equipment Financing Rates with National Funding",
+    ),
+    "otr_solutions_factoring": AffiliatePartner(
+        key="otr_solutions_factoring",
+        name="OTR Solutions Commercial Factoring & Working Capital",
+        category="Corporate Finance",
+        property_id="profithelm",
+        status="pending",
+        env_var="AFFILIATE_OTR_SOLUTIONS_FACTORING_URL",
+        default_url="https://www.otrsolutions.com/",
+        badge="Same-Day Non-Recourse Factoring",
+        commission_est="$150-$450/funded client",
+        bounty_est="$150-$450",
+        network="In-House Direct",
+        description="Non-recourse invoice factoring, working capital advances, and customs liquidity solutions for commercial supply chains and fleets.",
+        target_tools=[
+            "invoice-factoring-vs-business-line-of-credit-calculator",
+            "section-301-tariff-landed-cost-calculator",
+        ],
+        supported_params=["ph_tier"],
+        cta_text="Unlock Same-Day Invoice Factoring with OTR Solutions",
+    ),
+    "freightos_marketplace": AffiliatePartner(
+        key="freightos_marketplace",
+        name="Freightos Global Freight & Customs Marketplace",
+        category="Customs & Trade Finance",
+        property_id="profithelm",
+        status="pending",
+        env_var="AFFILIATE_FREIGHTOS_MARKETPLACE_URL",
+        default_url="https://www.freightos.com/",
+        badge="Instant Ocean, Air & Customs Quotes",
+        commission_est="$50-$200/qualified shipper",
+        bounty_est="$50-$200",
+        network="Impact.com",
+        description="Digital international freight marketplace comparing ocean, air, and customs brokerage quotes with Section 301 duty transparency.",
+        target_tools=["section-301-tariff-landed-cost-calculator"],
+        supported_params=["ph_tier"],
+        cta_text="Compare International Freight & Customs Rates on Freightos",
+    ),
 }
 
 # Legacy Aliases
@@ -548,6 +662,12 @@ B2B_PARTNER_KEYS: Set[str] = {
     "taxslayer",
     "kalshi",
     "interactive_brokers",
+    "simply_business",
+    "suretybonds_direct",
+    "next_insurance_b2b",
+    "national_funding_med",
+    "otr_solutions_factoring",
+    "freightos_marketplace",
 }
 
 STUDENT_LOAN_PARTNER_KEYS: Set[str] = {
@@ -583,6 +703,12 @@ PROFITHELM_TOOL_PATTERNS: List[str] = [
     "bracket",
     "tcja",
     "tax",
+    "s-corp",
+    "workers-comp",
+    "surety-bond",
+    "section-301",
+    "invoice-factoring",
+    "section-174",
 ]
 
 PREXVO_TOOL_PATTERNS: List[str] = [
@@ -611,6 +737,12 @@ ENTERPRISE_B2B_PARTNERS: Set[str] = {
     "first_american",
     "equipment_macrs",
     "first_american_1031",
+    "simply_business",
+    "suretybonds_direct",
+    "next_insurance_b2b",
+    "national_funding_med",
+    "otr_solutions_factoring",
+    "freightos_marketplace",
 }
 
 RETAIL_TAX_PARTNERS: Set[str] = {
@@ -635,6 +767,15 @@ COMMERCIAL_B2B_SLUGS: Set[str] = {
     "saas-runway-calculator",
     "qsbs-section-1202-tax-calculator",
     "treasury-yield-calculator",
+    "s-corp-reasonable-salary-tax-calculator",
+    "workers-comp-and-payroll-burden-calculator",
+    "contractor-surety-bond-cost-calculator",
+    "equipment-lease-vs-buy-section-179-calculator",
+    "medical-and-dental-equipment-section-179-roi-calculator",
+    "commercial-heavy-vehicle-section-179-weight-calculator",
+    "section-301-tariff-landed-cost-calculator",
+    "invoice-factoring-vs-business-line-of-credit-calculator",
+    "r-and-d-tax-credit-section-174-amortization-calculator",
 }
 
 PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS: Set[str] = {
@@ -685,6 +826,12 @@ INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
     "macrs": ["crest_capital", "ramp", "mercury"],
     "depreciation": ["crest_capital", "ramp", "mercury"],
     "equipment": ["crest_capital", "ramp", "mercury"],
+    "medical-equipment": ["national_funding_med", "crest_capital", "ramp"],
+    "workers-comp": ["simply_business", "next_insurance_b2b", "suretybonds_direct"],
+    "surety-bond": ["suretybonds_direct", "simply_business", "next_insurance_b2b"],
+    "tariff-landed-cost": ["freightos_marketplace", "otr_solutions_factoring", "mercury", "ramp"],
+    "invoice-factoring": ["otr_solutions_factoring", "mercury", "ramp", "rho"],
+    "s-corp-payroll": ["rippling", "gusto", "mercury", "ramp"],
     "treasury": ["interactive_brokers", "public_com", "wealthfront", "mercury"],
     "yield": ["interactive_brokers", "public_com", "wealthfront", "mercury"],
     "tbill": ["interactive_brokers", "public_com", "wealthfront"],
@@ -1027,6 +1174,47 @@ def _extract_partner_vault_status(
     return None
 
 
+def _resolve_profithelm_bucket(s: str) -> str:
+    """Resolves the INTENT_ROUTING_TABLE bucket name for a ProfitHelm calculator slug."""
+    if "section-1031" in s or "1031" in s:
+        return "section-1031"
+    if ("medical" in s or "dental" in s) and ("179" in s or "equipment" in s):
+        return "medical-equipment"
+    if any(t in s for t in ("section-179", "179", "macrs", "depreciation", "equipment")):
+        return "section-179"
+    if "workers-comp" in s:
+        return "workers-comp"
+    if "surety-bond" in s or ("surety" in s and "bond" in s):
+        return "surety-bond"
+    if "section-301" in s or ("tariff" in s and "landed-cost" in s):
+        return "tariff-landed-cost"
+    if "invoice-factoring" in s or "factoring" in s:
+        return "invoice-factoring"
+    if "s-corp" in s:
+        return "s-corp-payroll"
+    if any(t in s for t in ("treasury", "yield", "tbill")):
+        return "treasury"
+    if any(t in s for t in ("qsbs", "1202")):
+        return "qsbs"
+    if "corporate-amt" in s:
+        return "corporate-amt"
+    if "r-and-d" in s or "section-174" in s:
+        return "r-and-d"
+    if any(t in s for t in ("runway", "burn", "saas")):
+        return "runway"
+    if "payroll" in s:
+        return "payroll"
+    if any(t in s for t in ("crypto", "token", "staking")):
+        return "crypto"
+    if "capital-gains" in s:
+        return "capital-gains"
+    if "prediction" in s and "tax" in s:
+        return "prediction-market-tax"
+    if any(t in s for t in ("prediction", "odds", "arbitrage", "kalshi", "kelly", "ev", "vig", "break-even")):
+        return "prediction"
+    return "tax"
+
+
 def resolve_optimal_partner_for_slug(
     property_id: str,
     slug: str,
@@ -1060,34 +1248,7 @@ def resolve_optimal_partner_for_slug(
         return PREXVO_AFFILIATES.get("splash_financial")
 
     if prop in ("profithelm", "exchange1031"):
-        matched_bucket_name = "tax"
-        if "section-1031" in s or "1031" in s:
-            matched_bucket_name = "section-1031"
-        elif any(t in s for t in ("section-179", "179", "macrs", "depreciation", "equipment")):
-            matched_bucket_name = "section-179"
-        elif any(t in s for t in ("treasury", "yield", "tbill")):
-            matched_bucket_name = "treasury"
-        elif any(t in s for t in ("qsbs", "1202")):
-            matched_bucket_name = "qsbs"
-        elif "corporate-amt" in s:
-            matched_bucket_name = "corporate-amt"
-        elif "r-and-d" in s:
-            matched_bucket_name = "r-and-d"
-        elif any(t in s for t in ("runway", "burn", "saas")):
-            matched_bucket_name = "runway"
-        elif "payroll" in s:
-            matched_bucket_name = "payroll"
-        elif any(t in s for t in ("crypto", "token", "staking")):
-            matched_bucket_name = "crypto"
-        elif "capital-gains" in s:
-            matched_bucket_name = "capital-gains"
-        elif "prediction" in s and "tax" in s:
-            matched_bucket_name = "prediction-market-tax"
-        elif any(t in s for t in ("prediction", "odds", "arbitrage", "kalshi", "kelly", "ev", "vig", "break-even")):
-            matched_bucket_name = "prediction"
-        elif any(t in s for t in ("tax", "bracket", "tcja", "irs")):
-            matched_bucket_name = "tax"
-
+        matched_bucket_name = _resolve_profithelm_bucket(s)
         raw_keys = INTENT_ROUTING_TABLE.get(matched_bucket_name, ["turbotax", "taxslayer", "freetaxusa"])
         is_b2b = is_commercial_b2b_slug(s)
         is_retail = (s in RETAIL_TAX_SLUGS) or (not is_b2b)
@@ -1194,11 +1355,13 @@ def get_affiliate_route(
     else:
         # Slug boundary validation and auto-selection
         if prop_clean == "prexvo":
-            for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202"):
-                if b2b_token in slug_clean:
-                    raise ValueError(
-                        f"Strict isolation violation: Commercial tool '{tool_slug}' is prohibited on Prexvo."
-                    )
+            if slug_clean in COMMERCIAL_B2B_SLUGS or any(
+                b2b_token in slug_clean
+                for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202")
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Commercial tool '{tool_slug}' is prohibited on Prexvo."
+                )
         elif prop_clean in ("profithelm", "exchange1031"):
             for sl_token in ("student-loan", "rap-vs-ibr", "pslf"):
                 if sl_token in slug_clean:
@@ -1764,21 +1927,9 @@ def qualify_monetization_opportunity(
             intent_tier = "commercial_b2b"
             primary_obj = resolve_optimal_partner_for_slug(resolved_prop, s_clean, vault_overrides=vault_overrides)
             # Determine matching B2B routing bucket
-            bucket = "runway"
-            if "1031" in combined:
-                bucket = "section-1031"
-            elif any(t in combined for t in ("179", "macrs", "depreciation", "equipment")):
-                bucket = "section-179"
-            elif any(t in combined for t in ("qsbs", "1202")):
-                bucket = "qsbs"
-            elif "corporate-amt" in combined or "camt" in combined:
-                bucket = "corporate-amt"
-            elif "r-and-d" in combined or "174" in combined:
-                bucket = "r-and-d"
-            elif "payroll" in combined:
-                bucket = "payroll"
-            elif any(t in combined for t in ("treasury", "tbill", "yield")):
-                bucket = "treasury"
+            bucket = _resolve_profithelm_bucket(f"{s_clean}-{combined.replace(' ', '-')}")
+            if bucket in ("tax", "crypto", "capital-gains", "prediction-market-tax", "prediction"):
+                bucket = "runway"
             raw_partners = INTENT_ROUTING_TABLE.get(bucket, ["mercury", "ramp", "stripe"])
             rec_partners = [
                 k for k in raw_partners

@@ -357,3 +357,88 @@ def test_market_intelligence_engine_ranking_db_sync_and_cli(tmp_path: Path, caps
     assert_no_forbidden_dashes(captured_query, "cli_market_intel_query")
     parsed_query = json.loads(captured_query)
     assert parsed_query["recommended_tenant_id"] == "freighttariff"
+
+
+def test_profithelm_b2b_expansion_calculators_and_affiliate_consolidation():
+    """
+    Verifies consolidation of the 6 active commercial B2B affiliate partners and
+    9 high-converting B2B calculators onto ProfitHelm:
+    - All 6 new partners exist in PROFITHELM_AFFILIATES, B2B_PARTNER_KEYS, and ENTERPRISE_B2B_PARTNERS.
+    - Prexvo strictly rejects all 6 new B2B partners and all 9 B2B calculator slugs.
+    - All 9 B2B calculators compile with verified=True, 5-point sensitivity grids, and pass audit_rendered_asset.
+    """
+    from pseofactory.affiliates import (
+        B2B_PARTNER_KEYS,
+        ENTERPRISE_B2B_PARTNERS,
+        PROFITHELM_AFFILIATES,
+        RETAIL_TAX_PARTNERS,
+        STUDENT_LOAN_PARTNER_KEYS,
+        get_affiliate_route,
+    )
+    from pseofactory.audit import audit_rendered_asset
+    from pseofactory.compiler import (
+        compile_high_effort_page,
+        get_profithelm_b2b_expansion_specs,
+    )
+    from pseofactory.qualification import assert_high_effort_content_qualified
+
+    new_b2b_partners = (
+        "simply_business",
+        "suretybonds_direct",
+        "next_insurance_b2b",
+        "national_funding_med",
+        "otr_solutions_factoring",
+        "freightos_marketplace",
+    )
+    for pk in new_b2b_partners:
+        assert pk in PROFITHELM_AFFILIATES
+        assert pk in B2B_PARTNER_KEYS
+        assert pk in ENTERPRISE_B2B_PARTNERS
+        with pytest.raises(ValueError, match="Strict isolation violation"):
+            get_affiliate_route("prexvo", "student-loan-repayment-calculator", partner_key=pk)
+
+    specs = get_profithelm_b2b_expansion_specs()
+    assert len(specs) == 9
+
+    for spec in specs:
+        slug = spec["slug"]
+        expected_partner = spec["expected_partner"]
+
+        # Prexvo must reject commercial B2B tool slugs
+        with pytest.raises(ValueError, match="Strict isolation violation"):
+            get_affiliate_route("prexvo", slug)
+
+        # Qualification & compilation on ProfitHelm
+        qual_check = assert_high_effort_content_qualified(spec)
+        assert qual_check is True
+
+        compiled = compile_high_effort_page(spec)
+        assert compiled["verified"] is True
+        assert compiled["tenant"] == "profithelm"
+        assert compiled["commercial_offers_allowed"] is True
+        assert compiled["affiliate_route"]["partner_key"] == expected_partner
+
+        html = compiled["html"]
+        assert_no_forbidden_dashes(html, f"compiled_b2b_{slug}")
+        assert f'data-partner="{expected_partner}"' in html
+        for sl_partner in STUDENT_LOAN_PARTNER_KEYS:
+            assert f'data-partner="{sl_partner}"' not in html
+
+        audit_rep = audit_rendered_asset(html, spec, tenant="profithelm")
+        assert audit_rep.passed is True, f"Audit failed for {slug}: {audit_rep.violations}"
+
+        mon_qual = qualify_monetization_opportunity(
+            query=spec["query"],
+            slug=slug,
+            property_id="profithelm",
+            search_volume=5400,
+            cpc_usd=18.50,
+            jev_score=1.88,
+            durable_prob=0.93,
+        )
+        assert mon_qual["monetization_qualified"] is True
+        assert mon_qual["intent_tier"] == "commercial_b2b"
+        assert mon_qual["primary_partner"] == expected_partner
+        assert set(mon_qual["recommended_partners"]).isdisjoint(RETAIL_TAX_PARTNERS)
+        assert set(mon_qual["recommended_partners"]).isdisjoint(STUDENT_LOAN_PARTNER_KEYS)
+
