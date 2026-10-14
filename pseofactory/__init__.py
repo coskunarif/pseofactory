@@ -449,6 +449,8 @@ from pseofactory.maintenance import (
     RefactorCascadeEngine,
     MaintenanceLifecycle,
     FleetMaintenanceCoordinator,
+    RetroReflectionEngine,
+    retrofit_tenant_estate,
     run_maintenance_lifecycle,
     run_fleet_maintenance,
     audit_property_assets,
@@ -1086,6 +1088,8 @@ __all__ = [
     "govern_graduated_exposure",
     "resolve_tenant_distribution_config",
     "parse_subprocess_envelope",
+    "RetroReflectionEngine",
+    "retrofit_tenant_estate",
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses

@@ -864,3 +864,76 @@ def test_indexing_preflight_airlock_quarantines_blocked_urls_without_failing_cle
     entries = json.loads(ledger_path.read_text(encoding="utf-8"))
     assert any(e.get("url") == "https://profithelm.com/blocked-404/" for e in entries)
 
+
+def test_retro_reflection_engine_repairs_legacy_stale_estate_in_single_pass(tmp_path):
+    """
+    Verifies that RetroReflectionEngine scans a legacy static distribution missing
+    upgraded pseofactory mechanics (calculation-manifest, output-value, 5-point
+    server_rendered_sensitivity_grid, deep_link_scenario_presets, multi-dataset-join,
+    compliant_intent_monetization, and range slider) and repairs all pages in one pass.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine, retrofit_tenant_estate, LiveTruthAuditEngine
+
+    dist_dir = tmp_path / "dist"
+    tool_dir = dist_dir / "tools" / "rap-payment-calculator"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+
+    legacy_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RAP Payment Calculator | Prexvo</title>
+  <link rel="canonical" href="https://prexvo.com/tools/rap-payment-calculator/" />
+</head>
+<body>
+  <main>
+    <h1>RAP Payment Calculator</h1>
+    <aside class="quick-answer">
+      <p>The Repayment Assistance Plan calculates monthly payments at 10 percent of discretionary income above 225 percent of the HHS Poverty Guideline under 34 CFR Part 685.</p>
+    </aside>
+    <form class="calculator-form">
+      <label for="agi">Adjusted Gross Income</label>
+      <input type="number" id="agi" name="agi" value="65000" class="touch-target" style="min-height: 44px; min-width: 44px;" />
+      <button type="submit" class="touch-target" style="min-height: 44px; min-width: 44px;">Calculate</button>
+    </form>
+  </main>
+</body>
+</html>"""
+
+    page_path = tool_dir / "index.html"
+    page_path.write_text(legacy_html, encoding="utf-8")
+
+    # Pre-audit should detect all 7 missing mechanics
+    pre_audit = RetroReflectionEngine.audit_estate(dist_dir, "prexvo")
+    assert pre_audit["status"] == "STALE"
+    assert pre_audit["stale_count"] == 1
+    assert set(pre_audit["stale_pages"]["tools/rap-payment-calculator/index.html"]) == set(
+        RetroReflectionEngine.REQUIRED_MECHANICS
+    )
+
+    # Single-pass retro-reflection repairs the page
+    res = retrofit_tenant_estate(dist_dir, "prexvo", canonical_base="https://prexvo.com")
+    assert res["status"] == "PASS"
+    assert res["pages_scanned"] == 1
+    assert res["pages_retrofitted"] == 1
+
+    # Post-audit should pass with 0 missing mechanics
+    post_audit = RetroReflectionEngine.audit_estate(dist_dir, "prexvo")
+    assert post_audit["status"] == "PASS"
+    assert post_audit["stale_count"] == 0
+
+    repaired_html = page_path.read_text(encoding="utf-8")
+    assert 'id="calculation-manifest" class="calculation-manifest"' in repaired_html
+    assert 'class="output-value"' in repaired_html
+    assert 'data-mechanic="server_rendered_sensitivity_grid"' in repaired_html
+    assert 'data-mechanic="deep_link_scenario_presets"' in repaired_html
+    assert 'multi-dataset-join' in repaired_html
+    assert 'data-mechanic="compliant_intent_monetization"' in repaired_html
+    assert 'type="range"' in repaired_html
+
+    # Verify LiveTruthAuditEngine passes on the retrofitted HTML
+    truth_violations = LiveTruthAuditEngine().audit_html(repaired_html, property_id="prexvo")
+    assert truth_violations == []
+
+

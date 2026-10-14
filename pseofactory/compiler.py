@@ -295,7 +295,8 @@ def _render_5point_sensitivity_table_html(
         f'      <h2>Sensitivity Scenario Modeling</h2>\n'
         f'      <p>SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>\n'
         f'      <div class="table-wrap">\n'
-        f'        <table class="scenario-table comparison-table" data-entity-type="scenario">\n'
+        f'        <table class="scenario-table comparison-table" data-entity-type="scenario" '
+        f'data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
         f'          <thead>\n'
         f'            <tr>\n'
         f'              <th scope="col">Scenario Analysis</th>\n'
@@ -1356,7 +1357,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     </footer>
   </div>
 
-  <script type="application/json" class="calculation-manifest" id="{slug}-manifest">
+  <script type="application/json" id="calculation-manifest" class="calculation-manifest">
 {manifest_json_str}
   </script>
 
