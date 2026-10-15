@@ -661,10 +661,12 @@ class IndexingFeedbackLoop:
         preflight_engine: Optional[IndexingPreflightEngine] = None,
         telemetry_logger: Optional[AtomicTelemetryLogger] = None,
         gitops_coordinator: Optional[Any] = None,
+        action_bus: Optional[Any] = None,
     ):
         self.property_id = property_id.lower()
         self.telemetry_logger = telemetry_logger or AtomicTelemetryLogger()
         self.gitops_coordinator = gitops_coordinator
+        self.action_bus = action_bus
 
         # Discover property adapter if available
         adapter = None
@@ -1047,6 +1049,281 @@ class IndexingFeedbackLoop:
             logger.warning("Failed applying HTML repair to %s: %s", target_file, err)
             return False
 
+    def _get_or_create_action_bus(self) -> Any:
+        if self.action_bus is not None:
+            return self.action_bus
+        from pseofactory.action_bus import HumanActionBus
+        if self.base_dir:
+            default_bus_path = Path("/home/ubuntuadmin/projects/.agy/human_action_bus.json")
+            local_bus_path = self.base_dir / ".agy" / "human_action_bus.json"
+            if str(self.base_dir).startswith("/home/ubuntuadmin/projects/") and default_bus_path.exists():
+                self.action_bus = HumanActionBus(ledger_path=default_bus_path)
+            else:
+                self.action_bus = HumanActionBus(ledger_path=local_bus_path)
+        else:
+            self.action_bus = HumanActionBus()
+        return self.action_bus
+
+    def audit_impression_monetization_and_distribution_gaps(
+        self,
+        query_records: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Closes the loop between search ranking telemetry and monetization/distribution:
+        Scans query telemetry records (plus persisted visibility_snapshot.json when
+        query_records is None) to spot pages gaining search impressions that still lack
+        strong conversion paths or external distribution, and flags high-intent calculators
+        and guides for automatic content sharpening, internal linking, and partner offer
+        placement.
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.gsc_remediation import (
+            _slug_from_url_or_query,
+            evaluate_asset_conversion_and_distribution_readiness,
+        )
+
+        source_records: List[Dict[str, Any]] = []
+        if query_records is not None:
+            for qr in query_records:
+                if isinstance(qr, dict):
+                    source_records.append(dict(qr))
+        elif self.base_dir:
+            vis_path = self.base_dir / ".agy" / "visibility_snapshot.json"
+            if vis_path.is_file():
+                try:
+                    vis_data = json.loads(vis_path.read_text(encoding="utf-8"))
+                    for q_item in vis_data.get("top_queries", []) + vis_data.get("striking_distance_candidates", []):
+                        if isinstance(q_item, dict) and int(float(q_item.get("impressions", 0) or 0)) > 0:
+                            source_records.append(dict(q_item))
+                except Exception:
+                    pass
+
+        enriched_records: List[Dict[str, Any]] = []
+        conversion_gap_slugs: List[str] = []
+        distribution_gap_slugs: List[str] = []
+        high_intent_slugs: List[str] = []
+        manual_gate_slugs: List[str] = []
+
+        for rec in source_records:
+            t_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
+            q_str = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
+            slug = _slug_from_url_or_query(
+                target_url=t_url,
+                query=q_str,
+                default_slug=str(rec.get("slug") or ""),
+            )
+            impr = int(float(rec.get("impressions", 0) or 0))
+            pos = float(rec.get("position", 0.0) or 0.0)
+            readiness = evaluate_asset_conversion_and_distribution_readiness(
+                slug=slug,
+                tenant_id=self.property_id,
+                query=q_str,
+                impressions=impr,
+                position=pos,
+                dist_dir=self.dist_dir,
+                base_dir=self.base_dir,
+                candidate=rec,
+            )
+            merged = {
+                **rec,
+                "slug": slug,
+                "intent_class": readiness["intent_class"],
+                "is_high_intent_calculator_or_guide": readiness["is_high_intent_calculator_or_guide"],
+                "has_strong_conversion_path": readiness["has_strong_conversion_path"],
+                "conversion_gap_detected": readiness["conversion_gap_detected"],
+                "has_external_distribution": readiness["has_external_distribution"],
+                "distribution_gap_detected": readiness["distribution_gap_detected"],
+                "missing_syndication_files": readiness["missing_syndication_files"],
+                "restricted_public_service": readiness["restricted_public_service"],
+                "commercial_offers_allowed": readiness["commercial_offers_allowed"],
+                "partner_offer": readiness["partner_offer"],
+                "manual_requirement_detected": readiness["manual_requirement_detected"],
+                "manual_requirement": readiness["manual_requirement"],
+            }
+            if readiness["is_high_intent_calculator_or_guide"] and slug not in high_intent_slugs:
+                high_intent_slugs.append(slug)
+            if readiness["conversion_gap_detected"] and slug not in conversion_gap_slugs:
+                conversion_gap_slugs.append(slug)
+            if readiness["distribution_gap_detected"] and slug not in distribution_gap_slugs:
+                distribution_gap_slugs.append(slug)
+            if readiness["manual_requirement_detected"] and slug not in manual_gate_slugs:
+                manual_gate_slugs.append(slug)
+            enriched_records.append(merged)
+
+        return {
+            "property_id": self.property_id,
+            "total_evaluated": len(enriched_records),
+            "high_intent_calculators_and_guides": high_intent_slugs,
+            "conversion_gap_slugs": conversion_gap_slugs,
+            "distribution_gap_slugs": distribution_gap_slugs,
+            "manual_gate_slugs": manual_gate_slugs,
+            "enriched_records": enriched_records,
+        }
+
+    def _sync_external_distribution_for_candidate(
+        self,
+        slug: str,
+        target_url: str,
+        overlay_spec: Dict[str, Any],
+        dry_run: bool = False,
+    ) -> List[str]:
+        """
+        Generates missing external syndication distribution files (LinkedIn, Newsletter,
+        Substack Notes) and records broadcast dispatch for an impression-gaining asset
+        with a distribution gap.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if dry_run or not self.base_dir or not slug or self._is_protected_hub_route(slug, target_url):
+            return []
+
+        synd_dir = self.base_dir / "syndication"
+        synd_dir.mkdir(parents=True, exist_ok=True)
+
+        def _scrub(text: str) -> str:
+            return (
+                str(text or "")
+                .replace("\u2014", ": ")
+                .replace("\u2013", "-")
+                .replace(" - ", ": ")
+            )
+
+        title = _scrub(str(overlay_spec.get("title_rewrite") or overlay_spec.get("title") or slug.replace("-", " ").title()))
+        quick_ans = _scrub(str(overlay_spec.get("quick_answer") or ""))
+        canon_url = _scrub(target_url or f"https://{self.domain}/tools/{slug}/")
+        if not canon_url.endswith("/"):
+            canon_url += "/"
+        brand = "Prexvo" if self.property_id == "prexvo" else "ProfitHelm"
+        auth_tag = "Title IV 34 CFR Part 685" if self.property_id == "prexvo" else "Internal Revenue Code 2026"
+
+        linkedin_path = synd_dir / f"{slug}-linkedin.md"
+        newsletter_path = synd_dir / f"{slug}-newsletter.md"
+        substack_path = synd_dir / f"{slug}-Substack Notes-post.txt"
+
+        written_files: List[str] = []
+        if not linkedin_path.is_file():
+            linkedin_body = (
+                f"# {title}\n\n"
+                f"{quick_ans}\n\n"
+                f"Key statutory highlights ({auth_tag}):\n"
+                f"* Deterministic scenario modeling with audit-ready assumptions\n"
+                f"* Real-time sensitivity analysis across marginal brackets and thresholds\n\n"
+                f"Run the interactive calculator on {brand}: {canon_url}\n"
+            )
+            linkedin_path.write_text(_scrub(linkedin_body), encoding="utf-8")
+            written_files.append(str(linkedin_path))
+
+        if not newsletter_path.is_file():
+            newsletter_body = (
+                f"Subject: {title}\n\n"
+                f"## {title}\n\n"
+                f"{quick_ans}\n\n"
+                f"Access the full interactive calculator and scenario comparison table at {canon_url}\n"
+            )
+            newsletter_path.write_text(_scrub(newsletter_body), encoding="utf-8")
+            written_files.append(str(newsletter_path))
+
+        if not substack_path.is_file():
+            substack_body = (
+                f"{title}: {quick_ans} "
+                f"Explore the interactive {brand} model at {canon_url}\n"
+            )
+            substack_path.write_text(_scrub(substack_body), encoding="utf-8")
+            written_files.append(str(substack_path))
+
+        # Record in local broadcast ledger so distribution tracking stays synchronized
+        try:
+            b_ledger_path = self.base_dir / ".agy" / "broadcast_ledger.json"
+            b_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            b_data: Any = []
+            if b_ledger_path.is_file():
+                try:
+                    b_data = json.loads(b_ledger_path.read_text(encoding="utf-8"))
+                except Exception:
+                    b_data = []
+            entry = {
+                "slug": slug,
+                "url": canon_url,
+                "dispatched_at": datetime.now(timezone.utc).isoformat(),
+                "channels": ["linkedin", "newsletter", "substack_notes"],
+            }
+            if isinstance(b_data, list):
+                existing_idx = next(
+                    (i for i, it in enumerate(b_data) if isinstance(it, dict) and it.get("slug") == slug),
+                    None,
+                )
+                if existing_idx is None:
+                    b_data.append(entry)
+            elif isinstance(b_data, dict):
+                dispatched = b_data.setdefault("dispatched_slugs", {})
+                dispatched[slug] = entry
+            b_ledger_path.write_text(json.dumps(b_data, indent=2), encoding="utf-8")
+        except Exception as b_err:
+            logger.warning("Failed updating broadcast ledger for %s: %s", slug, b_err)
+
+        return written_files
+
+    def _route_manual_dependencies_for_candidates(
+        self,
+        candidates: List[Dict[str, Any]],
+        dry_run: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Routes a single clean, deduplicated alert onto HumanActionBus for any candidate
+        that hits a manual partner or external platform requirement while allowing the
+        rest of the autonomous growth loop to continue uninterrupted.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if dry_run or not candidates:
+            return []
+
+        bus = self._get_or_create_action_bus()
+        routed_by_id: Dict[str, Dict[str, Any]] = {}
+
+        for cand in candidates:
+            if not isinstance(cand, dict):
+                continue
+            spec = cand.get("overlay_spec") if isinstance(cand.get("overlay_spec"), dict) else {}
+            m_req = (
+                cand.get("manual_requirement")
+                or spec.get("manual_requirement")
+                or cand.get("manual_partner_requirement")
+                or cand.get("manual_platform_requirement")
+            )
+            if not isinstance(m_req, dict) or not m_req:
+                continue
+
+            c_slug = str(cand.get("slug") or m_req.get("asset_slug") or "asset")
+            p_key = str(m_req.get("partner_key") or m_req.get("platform_key") or f"{self.property_id}_manual_gate")
+            p_name = str(m_req.get("partner_name") or m_req.get("platform_name") or p_key.replace("_", " ").title())
+            title = str(m_req.get("title") or f"Manual operator confirmation required for {p_name}")
+            desc = str(
+                m_req.get("description")
+                or f"Asset {c_slug} gaining search demand triggered a manual partner or platform gate for {p_name}."
+            )
+            act_type = str(m_req.get("action_type") or "INTEGRATION_REQUIREMENT")
+            sev = str(m_req.get("severity") or "HIGH")
+            reqs = list(m_req.get("missing_requirements") or [])
+            cand_url = str(m_req.get("candidate_url") or "")
+
+            try:
+                item = bus.route_asset_manual_dependency(
+                    property_id=self.property_id,
+                    asset_slug=c_slug,
+                    partner_key=p_key,
+                    partner_name=p_name,
+                    title=title,
+                    description=desc,
+                    action_type=act_type,
+                    severity=sev,
+                    missing_requirements=reqs,
+                    candidate_url=cand_url,
+                )
+                routed_by_id[item.action_id] = item.to_dict()
+            except Exception as a_err:
+                logger.warning("Failed routing manual dependency alert for %s: %s", c_slug, a_err)
+
+        return list(routed_by_id.values())
+
     def execute_engine_repairs(
         self,
         diagnoses: List[DiagnosisResult],
@@ -1057,9 +1334,12 @@ class IndexingFeedbackLoop:
     ) -> Dict[str, Any]:
         """
         Executes engine repairs, writes rich remediation overlays to content/overlays/,
-        applies template/overlay fixes directly to compiled HTML assets, prunes dead
-        routes from sitemaps, handles CRAWL_BUDGET_SIGNAL_LAG, and reflects changes
-        across child products.
+        applies template/overlay fixes (including sharpened content, contextual internal
+        links, and compliant partner offer placements) directly to compiled HTML assets,
+        dispatches external syndication for impression-gaining pages with distribution
+        gaps, routes a single clean alert for any manual partner/platform requirement,
+        prunes dead routes from sitemaps, handles CRAWL_BUDGET_SIGNAL_LAG, and reflects
+        changes across child products.
         """
         from pseofactory.gsc_remediation import (
             _slug_from_url_or_query,
@@ -1099,6 +1379,9 @@ class IndexingFeedbackLoop:
         overlays_written: List[str] = []
         html_files_repaired = 0
         repaired_slugs: Set[str] = set()
+        conversion_gaps_closed: List[str] = []
+        distribution_gaps_closed: List[str] = []
+        syndication_files_generated: List[str] = []
 
         if not dry_run and self.base_dir:
             overlays_dir = self.base_dir / "content" / "overlays"
@@ -1127,6 +1410,22 @@ class IndexingFeedbackLoop:
                     if c_slug not in repaired_slugs and self._apply_html_repairs_for_slug(c_slug, t_url, spec):
                         repaired_slugs.add(c_slug)
                         html_files_repaired += 1
+                    if cand.get("conversion_gap_detected") and c_slug not in conversion_gaps_closed:
+                        conversion_gaps_closed.append(c_slug)
+                    if cand.get("distribution_gap_detected") or int(float(cand.get("impressions", 0) or 0)) > 0:
+                        gen_synd = self._sync_external_distribution_for_candidate(
+                            slug=c_slug,
+                            target_url=t_url,
+                            overlay_spec=spec,
+                            dry_run=dry_run,
+                        )
+                        if gen_synd:
+                            syndication_files_generated.extend(gen_synd)
+                            if c_slug not in distribution_gaps_closed:
+                                distribution_gaps_closed.append(c_slug)
+                        elif cand.get("distribution_gap_detected") and c_slug not in distribution_gaps_closed:
+                            distribution_gaps_closed.append(c_slug)
+
                 if "CRAWL_BUDGET" in anom and cand.get("target_url") and cand["target_url"] not in crawl_lag_urls:
                     crawl_lag_urls.append(str(cand["target_url"]))
 
@@ -1169,6 +1468,11 @@ class IndexingFeedbackLoop:
                     repaired_slugs.add(d_slug)
                     html_files_repaired += 1
 
+        manual_dependency_alerts = self._route_manual_dependencies_for_candidates(
+            prioritized_candidates or [],
+            dry_run=dry_run,
+        )
+
         crawl_lag_dispatched = len(crawl_lag_urls) > 0
 
         reflection_res: Dict[str, Any] = {"status": "SKIPPED", "total_recompiled": 0}
@@ -1196,6 +1500,10 @@ class IndexingFeedbackLoop:
             "overlays_written": overlays_written,
             "repaired_slugs": sorted(repaired_slugs),
             "html_files_repaired": html_files_repaired,
+            "conversion_gaps_closed": conversion_gaps_closed,
+            "distribution_gaps_closed": distribution_gaps_closed,
+            "syndication_files_generated": syndication_files_generated,
+            "manual_dependency_alerts": manual_dependency_alerts,
             "crawl_lag_dispatched": crawl_lag_dispatched,
             "crawl_lag_urls": crawl_lag_urls,
             "recompiled_assets_count": recompiled_count,
@@ -1319,10 +1627,15 @@ class IndexingFeedbackLoop:
     ) -> Dict[str, Any]:
         """
         Executes a complete closed-loop feedback cycle:
-        1. Audits unindexed pages from GSC feeds and quarantine records.
+        1. Audits unindexed pages from GSC feeds and quarantine records, and audits
+           search ranking telemetry for impression-gaining pages lacking conversion
+           paths or external distribution.
         2. Diagnoses root causes via GSCRootCauseClassifier and attributes coverage per section.
-        3. Prioritizes across query records and unindexed diagnoses via ROI engine.
-        4. Enqueues and executes engine repairs via AsyncRemediationQueue.
+        3. Prioritizes high-intent calculators and guides across query records and unindexed
+           diagnoses via ROI engine.
+        4. Enqueues and executes engine repairs (content sharpening, internal linking,
+           partner offer placement, external syndication dispatch, and deduplicated
+           HumanActionBus alert routing) via AsyncRemediationQueue.
         5. Enforces preflight airlock (6 stages, Tier-1 Hub cap <= 150).
         6. Ships repaired assets via GitOpsCoordinator after preflight pass and before search dispatch.
         7. Dispatches multi-engine push indexing and explicit child-sitemap GSC registration.
@@ -1336,7 +1649,7 @@ class IndexingFeedbackLoop:
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Step 1: Audit
+        # Step 1: Audit unindexed pages & impression-to-monetization/distribution gaps
         eff_unindexed = unindexed_urls if unindexed_urls is not None else unindexed_records
         raw_unindexed = (
             eff_unindexed
@@ -1344,14 +1657,21 @@ class IndexingFeedbackLoop:
             else self.audit_unindexed_pages(live=live)
         )
 
+        impression_gap_audit = self.audit_impression_monetization_and_distribution_gaps(
+            query_records=query_records if query_records is not None else ([] if eff_unindexed is not None else None),
+        )
+        effective_query_records = impression_gap_audit["enriched_records"]
+
         # Step 2: Diagnose & Attribute per-section coverage
         diagnoses = self.diagnose_unindexed_pages(raw_unindexed)
 
         # Step 3: ROI-Driven Prioritization across queries and unindexed diagnoses
         prioritized_candidates = prioritize_gsc_signals(
             tenant_id=self.property_id,
-            query_records=query_records or [],
+            query_records=effective_query_records,
             unindexed_diagnoses=diagnoses,
+            base_dir=self.base_dir,
+            dist_dir=self.dist_dir,
         )
 
         queue_obj = remediation_queue
@@ -1365,7 +1685,7 @@ class IndexingFeedbackLoop:
             and hasattr(queue_obj, "get_pending_tasks")
             and queue_obj.get_pending_tasks(self.property_id)
         )
-        no_op_empty_queue = not raw_unindexed and not (query_records or []) and not has_pending_queue
+        no_op_empty_queue = not raw_unindexed and not effective_query_records and not has_pending_queue
 
         # Step 4: Repair & Reflect + AsyncRemediationQueue persistence
         if no_op_empty_queue:
@@ -1375,6 +1695,10 @@ class IndexingFeedbackLoop:
                 "sitemaps_pruned": 0,
                 "overlays_written": [],
                 "html_files_repaired": 0,
+                "conversion_gaps_closed": [],
+                "distribution_gaps_closed": [],
+                "syndication_files_generated": [],
+                "manual_dependency_alerts": [],
                 "crawl_lag_dispatched": False,
                 "crawl_lag_urls": [],
                 "recompiled_assets_count": 0,
@@ -1503,6 +1827,10 @@ class IndexingFeedbackLoop:
             "section_coverage_attribution": section_coverage,
             "child_sitemap_submissions": push_summary.get("child_sitemap_submissions", []),
             "sitemap_registration": push_summary.get("sitemap_registration"),
+            "impression_gap_audit": impression_gap_audit,
+            "conversion_gaps_closed": repair_summary.get("conversion_gaps_closed", []),
+            "distribution_gaps_closed": repair_summary.get("distribution_gaps_closed", []),
+            "manual_dependency_alerts": repair_summary.get("manual_dependency_alerts", []),
             "prioritized_candidates": prioritized_candidates,
             "crawl_lag_dispatched": bool(repair_summary.get("crawl_lag_dispatched")),
             "repair_summary": repair_summary,

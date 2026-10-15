@@ -619,3 +619,339 @@ def test_refactor_cascade_preserves_active_remediation_overlay(tmp_path):
     assert 'id="gsc-striking-overlay"' in final_html
     assert "2026 Tax Deduction Rules" in final_html
 
+
+def test_telemetry_monetization_loop_spots_conversion_and_distribution_gaps_and_prioritizes_calculators_and_guides(tmp_path):
+    """
+    Verifies the closed loop between search ranking telemetry and monetization/distribution:
+    1. Spots impression-gaining pages lacking strong conversion paths or external distribution.
+    2. Prioritizes high-intent calculators and guides ahead of low-intent general pages.
+    3. Automatically sharpens content, injects vertical-clustered internal links and compliant
+       partner offer placements into HTML, and generates missing external syndication files.
+    """
+    from pseofactory.action_bus import HumanActionBus
+
+    dist_dir = tmp_path / "dist"
+    calc_dir = dist_dir / "tools" / "landed-cost-calculator"
+    guide_dir = dist_dir / "tools" / "section-301-tariff-audit-guide"
+    about_dir = dist_dir / "about"
+    for d in (calc_dir, guide_dir, about_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Create bare HTML pages that lack conversion paths (no partner CTA, no preset scenarios, no internal hub links)
+    bare_html_tpl = (
+        "<!DOCTYPE html><html><head><title>{title}</title>"
+        '<meta name="description" content="Short description.">'
+        "</head><body><main><h1>{title}</h1><p>Initial statutory content.</p></main></body></html>"
+    )
+    (calc_dir / "index.html").write_text(bare_html_tpl.format(title="Landed Cost Calculator"), encoding="utf-8")
+    (guide_dir / "index.html").write_text(bare_html_tpl.format(title="Section 301 Tariff Audit Guide"), encoding="utf-8")
+    (about_dir / "index.html").write_text(bare_html_tpl.format(title="About ProfitHelm"), encoding="utf-8")
+
+    mock_indexer = MagicMock()
+    mock_indexer.filter_unchanged_push_urls.side_effect = lambda urls, **kw: (list(urls), [])
+    mock_indexer.dispatch_automated_indexing.return_value = {"status": "SUCCESS"}
+    mock_indexer.load_gsc_rollover_queue.return_value = []
+
+    mock_preflight = MagicMock()
+    mock_report = MagicMock()
+    mock_report.passed_count = 2
+    mock_report.blocked_count = 0
+    mock_report.total_inspected = 2
+    mock_report.blocked_urls = []
+    mock_report.push_eligible_urls = [
+        "https://profithelm.com/tools/landed-cost-calculator/",
+        "https://profithelm.com/tools/section-301-tariff-audit-guide/",
+    ]
+    mock_report.sitemap_eligible_urls = []
+    mock_preflight.inspect_dist.return_value = mock_report
+
+    bus = HumanActionBus(ledger_path=tmp_path / ".agy" / "human_action_bus.json")
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=bus,
+    )
+
+    # Give all 3 pages identical search impressions/position/CTR to verify intent + gap prioritization
+    query_records = [
+        {
+            "slug": "about",
+            "target_url": "https://profithelm.com/about/",
+            "query": "about profithelm company overview",
+            "impressions": 300,
+            "clicks": 6,
+            "ctr": 0.02,
+            "position": 8.0,
+        },
+        {
+            "slug": "section-301-tariff-audit-guide",
+            "target_url": "https://profithelm.com/tools/section-301-tariff-audit-guide/",
+            "query": "section 301 tariff audit compliance guide",
+            "impressions": 300,
+            "clicks": 6,
+            "ctr": 0.02,
+            "position": 8.0,
+        },
+        {
+            "slug": "landed-cost-calculator",
+            "target_url": "https://profithelm.com/tools/landed-cost-calculator/",
+            "query": "landed cost import duty calculator",
+            "impressions": 300,
+            "clicks": 6,
+            "ctr": 0.02,
+            "position": 8.0,
+        },
+    ]
+
+    res = loop.run_feedback_cycle(
+        unindexed_urls=[],
+        query_records=query_records,
+        skip_recompile=True,
+    )
+
+    assert res["status"] == "SUCCESS"
+    prioritized = res["prioritized_candidates"]
+    assert len(prioritized) == 3
+
+    # Calculator and Guide must outrank the general 'about' page
+    assert prioritized[0]["slug"] == "landed-cost-calculator"
+    assert prioritized[0]["intent_class"] == "calculator"
+    assert prioritized[0]["is_high_intent_calculator_or_guide"] is True
+    assert prioritized[0]["conversion_gap_detected"] is True
+    assert prioritized[0]["distribution_gap_detected"] is True
+
+    assert prioritized[1]["slug"] == "section-301-tariff-audit-guide"
+    assert prioritized[1]["intent_class"] == "guide"
+    assert prioritized[1]["is_high_intent_calculator_or_guide"] is True
+
+    assert prioritized[2]["slug"] == "about"
+    assert prioritized[2]["intent_class"] == "general"
+    assert prioritized[2]["is_high_intent_calculator_or_guide"] is False
+
+    # Verify conversion gaps and distribution gaps were closed for calculator and guide
+    assert "landed-cost-calculator" in res["conversion_gaps_closed"]
+    assert "section-301-tariff-audit-guide" in res["conversion_gaps_closed"]
+    assert "landed-cost-calculator" in res["distribution_gaps_closed"]
+    assert "section-301-tariff-audit-guide" in res["distribution_gaps_closed"]
+
+    # Inspect sharpened HTML on landed-cost-calculator
+    calc_html = (calc_dir / "index.html").read_text(encoding="utf-8")
+    assert 'class="quick-answer' in calc_html
+    assert "data-calc-preset=" in calc_html
+    assert 'class="overlay-section overlay-hub-links"' in calc_html
+    assert "/tools/section-301-tariff-landed-cost-calculator/" in calc_html
+    assert 'class="overlay-section overlay-partner-offer affiliate-cta-section card"' in calc_html
+    assert 'data-partner="flexport"' in calc_html
+    assert 'rel="noopener sponsored nofollow"' in calc_html
+    assert "\u2014" not in calc_html
+    assert "\u2013" not in calc_html
+
+    # Inspect generated external syndication files
+    synd_dir = tmp_path / "syndication"
+    assert (synd_dir / "landed-cost-calculator-linkedin.md").is_file()
+    assert (synd_dir / "landed-cost-calculator-newsletter.md").is_file()
+    assert (synd_dir / "landed-cost-calculator-Substack Notes-post.txt").is_file()
+
+
+def test_prexvo_feedback_loop_enforces_ymyl_guardrail_and_places_commercial_refi_offers(tmp_path):
+    """
+    Verifies that on Prexvo:
+    1. Public-service pages gaining impressions (pslf-qualifying-payment-simulator) receive
+       sharpened content, internal links, and external syndication, but strictly suppress
+       commercial private refinance offers (restricted_public_service=True).
+    2. Commercial calculators gaining impressions (student-loan-refinance-break-even-calculator)
+       receive live compliant partner offer placements.
+    """
+    dist_dir = tmp_path / "dist"
+    pslf_dir = dist_dir / "tools" / "pslf-qualifying-payment-simulator"
+    refi_dir = dist_dir / "tools" / "student-loan-refinance-break-even-calculator"
+    pslf_dir.mkdir(parents=True, exist_ok=True)
+    refi_dir.mkdir(parents=True, exist_ok=True)
+
+    bare_html = "<!DOCTYPE html><html><head><title>Tool</title></head><body><main><h1>Tool</h1></main></body></html>"
+    (pslf_dir / "index.html").write_text(bare_html, encoding="utf-8")
+    (refi_dir / "index.html").write_text(bare_html, encoding="utf-8")
+
+    mock_indexer = MagicMock()
+    mock_indexer.filter_unchanged_push_urls.side_effect = lambda urls, **kw: (list(urls), [])
+    mock_indexer.dispatch_automated_indexing.return_value = {"status": "SUCCESS"}
+    mock_indexer.load_gsc_rollover_queue.return_value = []
+
+    mock_preflight = MagicMock()
+    mock_report = MagicMock(
+        passed_count=2,
+        blocked_count=0,
+        total_inspected=2,
+        blocked_urls=[],
+        push_eligible_urls=[
+            "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+            "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
+        ],
+        sitemap_eligible_urls=[],
+    )
+    mock_preflight.inspect_dist.return_value = mock_report
+
+    loop = IndexingFeedbackLoop(
+        property_id="prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+    )
+
+    res = loop.run_feedback_cycle(
+        unindexed_urls=[],
+        query_records=[
+            {
+                "slug": "pslf-qualifying-payment-simulator",
+                "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+                "query": "pslf qualifying payment buyback simulator",
+                "impressions": 420,
+                "clicks": 9,
+                "ctr": 0.021,
+                "position": 6.5,
+            },
+            {
+                "slug": "student-loan-refinance-break-even-calculator",
+                "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
+                "query": "student loan refinance rate break even calculator",
+                "impressions": 380,
+                "clicks": 8,
+                "ctr": 0.021,
+                "position": 7.2,
+            },
+        ],
+        skip_recompile=True,
+    )
+
+    assert res["status"] == "SUCCESS"
+    pslf_html = (pslf_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-restricted-public-service="true"' in pslf_html
+    assert 'data-commercial-offers="none"' in pslf_html
+    assert "affiliate-cta-link" not in pslf_html
+
+    refi_html = (refi_dir / "index.html").read_text(encoding="utf-8")
+    assert 'class="overlay-section overlay-partner-offer affiliate-cta-section card"' in refi_html
+    assert 'rel="noopener sponsored nofollow"' in refi_html
+    assert "sofi.com" in refi_html
+
+
+def test_manual_partner_or_platform_dependency_routes_single_clean_alert_without_interrupting_growth_loop(tmp_path):
+    """
+    Verifies that when multiple impression-gaining assets hit the same manual partner or
+    platform requirement, a single clean deduplicated alert is routed onto HumanActionBus
+    while all other autonomous sharpening, fallback partner placement, syndication, and
+    search push stages complete uninterrupted.
+    """
+    from pseofactory.action_bus import HumanActionBus
+
+    dist_dir = tmp_path / "dist"
+    bond1_dir = dist_dir / "tools" / "customs-bond-sufficiency-calculator"
+    bond2_dir = dist_dir / "tools" / "continuous-customs-bond-cost-estimator"
+    saas_dir = dist_dir / "tools" / "saas-burn-multiple-runway-calculator"
+    for d in (bond1_dir, bond2_dir, saas_dir):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.html").write_text(
+            "<!DOCTYPE html><html><head><title>Tool</title></head><body><main><h1>Tool</h1></main></body></html>",
+            encoding="utf-8",
+        )
+
+    bus = HumanActionBus(ledger_path=tmp_path / ".agy" / "human_action_bus.json")
+    mock_indexer = MagicMock()
+    mock_indexer.filter_unchanged_push_urls.side_effect = lambda urls, **kw: (list(urls), [])
+    mock_indexer.dispatch_automated_indexing.return_value = {"status": "SUCCESS"}
+    mock_indexer.load_gsc_rollover_queue.return_value = []
+
+    mock_preflight = MagicMock()
+    mock_preflight.inspect_dist.return_value = MagicMock(
+        passed_count=3,
+        blocked_count=0,
+        total_inspected=3,
+        blocked_urls=[],
+        push_eligible_urls=[
+            "https://profithelm.com/tools/customs-bond-sufficiency-calculator/",
+            "https://profithelm.com/tools/continuous-customs-bond-cost-estimator/",
+            "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
+        ],
+        sitemap_eligible_urls=[],
+    )
+
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=bus,
+    )
+
+    # Both customs bond calculators hit the suretybonds_direct manual partner gate
+    res = loop.run_feedback_cycle(
+        unindexed_urls=[],
+        query_records=[
+            {
+                "slug": "customs-bond-sufficiency-calculator",
+                "target_url": "https://profithelm.com/tools/customs-bond-sufficiency-calculator/",
+                "query": "customs bond sufficiency calculator",
+                "impressions": 510,
+                "clicks": 11,
+                "ctr": 0.021,
+                "position": 5.8,
+            },
+            {
+                "slug": "continuous-customs-bond-cost-estimator",
+                "target_url": "https://profithelm.com/tools/continuous-customs-bond-cost-estimator/",
+                "query": "continuous customs bond cost estimator",
+                "impressions": 440,
+                "clicks": 9,
+                "ctr": 0.020,
+                "position": 6.4,
+            },
+            {
+                "slug": "saas-burn-multiple-runway-calculator",
+                "target_url": "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
+                "query": "saas burn multiple cash runway calculator",
+                "impressions": 390,
+                "clicks": 8,
+                "ctr": 0.020,
+                "position": 7.1,
+            },
+        ],
+        skip_recompile=True,
+    )
+
+    assert res["status"] == "SUCCESS"
+    # Exactly ONE clean deduplicated alert routed for suretybonds_direct across both customs bond calculators
+    pending_alerts = bus.get_pending_items("profithelm")
+    assert len(pending_alerts) == 1
+    alert = pending_alerts[0]
+    assert alert.partner_key == "suretybonds_direct"
+    assert any("customs-bond-sufficiency-calculator" in r for r in alert.missing_requirements)
+    assert any("continuous-customs-bond-cost-estimator" in r for r in alert.missing_requirements)
+
+    # Meanwhile, all 3 calculators completed HTML sharpening, live fallback partner placement, and syndication
+    assert len(res["conversion_gaps_closed"]) == 3
+    assert len(res["distribution_gaps_closed"]) == 3
+    assert (bond1_dir / "index.html").read_text(encoding="utf-8").count('data-partner="flexport"') >= 1
+    assert (saas_dir / "index.html").read_text(encoding="utf-8").count('data-partner="ramp"') >= 1
+    assert (tmp_path / "syndication" / "saas-burn-multiple-runway-calculator-linkedin.md").is_file()
+
+

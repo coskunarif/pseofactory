@@ -69,6 +69,611 @@ def _slug_from_url_or_query(target_url: str = "", query: str = "", default_slug:
     return "statutory-calculator"
 
 
+_CALCULATOR_INTENT_TOKENS = (
+    "calculator",
+    "estimator",
+    "simulator",
+    "analyzer",
+    "modeler",
+    "visualizer",
+    "pricer",
+    "waterfall",
+    "margin",
+    "covenant",
+    "valuation",
+    "breakeven",
+    "break-even",
+    "depreciation",
+    "repayment",
+    "forgiveness",
+    "arbitrage",
+    "payback",
+    "runway",
+    "dilution",
+    "cap-rate",
+    "yield",
+    "tax-shield",
+)
+
+_GUIDE_INTENT_TOKENS = (
+    "guide",
+    "handbook",
+    "playbook",
+    "checklist",
+    "comparison",
+    "vs-",
+    "-vs-",
+    "schedule",
+    "how-to",
+    "rules",
+    "audit",
+    "eligibility",
+    "recertification",
+    "transition",
+    "hardship",
+    "consolidation",
+    "matrix",
+    "blueprint",
+)
+
+_LOW_INTENT_HUB_OR_META_SLUGS = {
+    "index",
+    "about",
+    "privacy",
+    "terms",
+    "contact",
+    "disclaimers",
+    "methodology",
+    "signal",
+    "categories",
+    "articles",
+}
+
+
+def _classify_asset_intent_class(
+    slug: str = "",
+    target_url: str = "",
+    query: str = "",
+    section: str = "",
+) -> Dict[str, Any]:
+    """
+    Classifies an asset's search intent and structural archetype into:
+      - 'calculator' (high-intent interactive calculator/simulator/estimator, 1.45x multiplier)
+      - 'guide' (high-intent statutory guide/comparison/handbook, 1.30x multiplier)
+      - 'general' (directory, hub, or general informational route, 1.00x multiplier)
+    Zero em-dashes. Zero en-dashes.
+    """
+    s_norm = str(slug or "").strip().lower()
+    u_norm = str(target_url or "").strip().lower()
+    q_norm = str(query or "").strip().lower()
+    sec_norm = str(section or "").strip().lower()
+    combined = f"{s_norm} {u_norm} {q_norm}"
+
+    if s_norm in _LOW_INTENT_HUB_OR_META_SLUGS or any(
+        u_norm.endswith(f"/{hub}") or u_norm.endswith(f"/{hub}/")
+        for hub in ("about", "privacy", "terms", "contact", "disclaimers", "methodology")
+    ):
+        return {
+            "intent_class": "general",
+            "is_high_intent_calculator_or_guide": False,
+            "intent_multiplier": 1.0,
+            "value_tier": "tier_2",
+        }
+
+    if any(tok in combined for tok in _CALCULATOR_INTENT_TOKENS):
+        return {
+            "intent_class": "calculator",
+            "is_high_intent_calculator_or_guide": True,
+            "intent_multiplier": 1.45,
+            "value_tier": "tier_1",
+        }
+
+    if sec_norm == "guides" or "/guides/" in u_norm or any(tok in combined for tok in _GUIDE_INTENT_TOKENS):
+        return {
+            "intent_class": "guide",
+            "is_high_intent_calculator_or_guide": True,
+            "intent_multiplier": 1.30,
+            "value_tier": "tier_1",
+        }
+
+    if "/tools/" in u_norm and s_norm and s_norm not in ("tools", "statutory-calculator"):
+        return {
+            "intent_class": "calculator",
+            "is_high_intent_calculator_or_guide": True,
+            "intent_multiplier": 1.35,
+            "value_tier": "tier_1",
+        }
+
+    return {
+        "intent_class": "general",
+        "is_high_intent_calculator_or_guide": False,
+        "intent_multiplier": 1.0,
+        "value_tier": "tier_2",
+    }
+
+
+def _resolve_contextual_internal_links(
+    tenant_id: str,
+    slug: str,
+    query: str = "",
+) -> List[Dict[str, str]]:
+    """
+    Resolves demand-driven internal links to vertical-clustered sibling calculators
+    and guides for the given tenant, strictly excluding self-links.
+    Zero em-dashes. Zero en-dashes.
+    """
+    eff_tenant = str(tenant_id or "profithelm").strip().lower()
+    s_norm = str(slug or "").strip().lower()
+    combined = f"{s_norm} {str(query or '').strip().lower()}"
+    self_href = f"/tools/{s_norm}/"
+
+    if eff_tenant == "prexvo":
+        base_hub = {"anchor": "Title IV Student Loan Calculators Directory", "href": "/tools/"}
+        if any(k in combined for k in ("pslf", "public-service", "public service", "teacher", "joint", "spousal")):
+            cluster = [
+                {"anchor": "PSLF 120 Qualifying Payment Simulator", "href": "/tools/pslf-qualifying-payment-simulator/"},
+                {"anchor": "SAVE Plan Litigation & Transition Guide", "href": "/tools/save-plan-litigation-transition/"},
+                {"anchor": "IBR Financial Hardship Cap Calculator", "href": "/tools/ibr-hardship-cap-calculator/"},
+                {"anchor": "Married Filing Separately Student Loan Calculator", "href": "/tools/married-filing-separately-student-loan-calculator/"},
+                {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
+            ]
+        elif any(k in combined for k in ("parent-plus", "parent plus", "consolidation", "icr", "double")):
+            cluster = [
+                {"anchor": "Parent PLUS Double Consolidation Loop Analyzer", "href": "/tools/parent-plus-double-consolidation/"},
+                {"anchor": "ICR Income-Contingent Repayment Calculator", "href": "/tools/icr-repayment-calculator/"},
+                {"anchor": "Grad PLUS Borrowing Cap Calculator", "href": "/tools/grad-plus-borrowing-cap-calculator/"},
+                {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
+                {"anchor": "Tiered Standard Repayment Schedule Calculator", "href": "/tools/tiered-standard-calculator/"},
+            ]
+        else:
+            cluster = [
+                {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
+                {"anchor": "PSLF 120 Qualifying Payment Simulator", "href": "/tools/pslf-qualifying-payment-simulator/"},
+                {"anchor": "PAYE Sunset & IBR Transition Calculator", "href": "/tools/paye-sunset-calculator/"},
+                {"anchor": "Student Loan Repayment Master Calculator", "href": "/tools/student-loan-repayment-calculator/"},
+                {"anchor": "Student Loan Refinance Break-Even Calculator", "href": "/tools/student-loan-refinance-break-even-calculator/"},
+            ]
+    else:
+        base_hub = {"anchor": "Statutory Tax & Financial Calculators Directory", "href": "/tools/"}
+        if any(k in combined for k in ("tariff", "landed", "customs", "bond", "freight", "cbam", "hs-code", "301", "demurrage")):
+            cluster = [
+                {"anchor": "Section 301 Tariff & Landed Cost Calculator", "href": "/tools/section-301-tariff-landed-cost-calculator/"},
+                {"anchor": "Contractor & Customs Surety Bond Cost Calculator", "href": "/tools/contractor-surety-bond-cost-calculator/"},
+                {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
+                {"anchor": "Equipment Lease vs Buy Section 179 Calculator", "href": "/tools/equipment-lease-vs-buy-section-179-calculator/"},
+                {"anchor": "Invoice Factoring vs Business Line of Credit Calculator", "href": "/tools/invoice-factoring-vs-business-line-of-credit-calculator/"},
+            ]
+        elif any(k in combined for k in ("saas", "burn", "runway", "cac", "rule-of-40", "ltv", "ndr", "174", "r-d", "409a", "cloud", "cap-table")):
+            cluster = [
+                {"anchor": "SaaS Burn Multiple & Cash Runway Calculator", "href": "/tools/saas-runway-calculator/"},
+                {"anchor": "R&D Tax Credit & Section 174 Amortization Calculator", "href": "/tools/r-and-d-tax-credit-section-174-amortization-calculator/"},
+                {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
+                {"anchor": "Workers Comp & Payroll Burden Calculator", "href": "/tools/workers-comp-and-payroll-burden-calculator/"},
+                {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
+            ]
+        elif any(k in combined for k in ("1031", "cost-segregation", "cost segregation", "bonus-depreciation", "opportunity-zone", "dst", "721", "real-estate", "cap-rate")):
+            cluster = [
+                {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "1031 Exchange Statutory Rules Guide", "href": "/tools/1031-exchange-rules-arizona/"},
+                {"anchor": "Section 1031 Scenario Comparison Model", "href": "/tools/section-1031-calculator-scenario-comparison-model/"},
+                {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
+                {"anchor": "IRS Capital Gains Statutory Tax Calculator", "href": "/tools/irs-capital-gains-statutory-tax/"},
+            ]
+        else:
+            cluster = [
+                {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
+                {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
+                {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
+                {"anchor": "IRS 2027 Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
+            ]
+
+    selected = [base_hub]
+    for item in cluster:
+        if item["href"].rstrip("/") != self_href.rstrip("/") and len(selected) < 5:
+            selected.append({
+                "anchor": _strip_forbidden_dashes(item["anchor"]),
+                "href": item["href"],
+            })
+    return selected
+
+
+def _resolve_partner_offer_and_manual_gate(
+    tenant_id: str,
+    slug: str,
+    query: str = "",
+    value_tier: str = "tier_1",
+    candidate: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Resolves an intent-matched partner offer placement for the asset based on live
+    search demand while enforcing Prexvo YMYL public-service guardrails and detecting
+    any manual partner or external platform requirement that needs a single clean
+    HumanActionBus alert.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import (
+        PREXVO_AFFILIATES,
+        PROFITHELM_AFFILIATES,
+        is_restricted_public_service_slug,
+    )
+
+    eff_tenant = str(tenant_id or "profithelm").strip().lower()
+    s_norm = str(slug or "").strip().lower()
+    q_norm = str(query or "").strip().lower()
+    combined = f"{s_norm} {q_norm}"
+    cand_dict = candidate if isinstance(candidate, dict) else {}
+
+    # 1. Enforce Prexvo YMYL public-service commercial offer suppression
+    if eff_tenant == "prexvo" and (
+        is_restricted_public_service_slug(s_norm)
+        or any(
+            ymyl_tok in combined
+            for ymyl_tok in (
+                "pslf",
+                "public service loan forgiveness",
+                "save-plan-litigation",
+                "save plan litigation",
+                "ibr-hardship-cap",
+                "teacher-loan-forgiveness",
+                "teacher loan forgiveness",
+                "joint-consolidation-spousal",
+            )
+        )
+    ):
+        return {
+            "restricted_public_service": True,
+            "commercial_offers_allowed": False,
+            "monetization_mode": "PUBLIC_SERVICE_NON_COMMERCIAL_GUARDRAIL",
+            "partner_offer": None,
+            "manual_requirement_detected": False,
+            "manual_requirement": None,
+        }
+
+    manual_requirement: Optional[Dict[str, Any]] = None
+
+    # 2. Check explicit candidate manual partner or platform requirement overrides
+    raw_manual_req = (
+        cand_dict.get("manual_requirement")
+        or cand_dict.get("manual_partner_requirement")
+        or cand_dict.get("manual_platform_requirement")
+    )
+    if isinstance(raw_manual_req, dict) and raw_manual_req:
+        p_key = str(
+            raw_manual_req.get("partner_key")
+            or raw_manual_req.get("platform_key")
+            or f"{eff_tenant}_manual_gate"
+        ).strip().lower()
+        p_name = _strip_forbidden_dashes(
+            str(raw_manual_req.get("partner_name") or raw_manual_req.get("platform_name") or p_key.replace("_", " ").title())
+        )
+        manual_requirement = {
+            "property_id": eff_tenant,
+            "asset_slug": s_norm,
+            "partner_key": p_key,
+            "partner_name": p_name,
+            "action_type": str(raw_manual_req.get("action_type") or "INTEGRATION_REQUIREMENT"),
+            "severity": str(raw_manual_req.get("severity") or "HIGH"),
+            "title": _strip_forbidden_dashes(
+                str(raw_manual_req.get("title") or f"Manual operator confirmation required for {p_name}")
+            ),
+            "description": _strip_forbidden_dashes(
+                str(
+                    raw_manual_req.get("description")
+                    or f"Asset {s_norm} gaining search demand triggered a manual partner or platform gate for {p_name}."
+                )
+            ),
+            "missing_requirements": [
+                _strip_forbidden_dashes(str(r))
+                for r in (raw_manual_req.get("missing_requirements") or [f"Complete manual onboarding for {p_name}"])
+                if r
+            ],
+            "candidate_url": str(raw_manual_req.get("candidate_url") or ""),
+        }
+
+    # 3. Resolve best live partner offer and detect vertical-matched manual partner gates
+    if eff_tenant == "prexvo":
+        registry = PREXVO_AFFILIATES
+        # Check if query specifically demands a pending/gated partner (e.g., splash_financial Gate 1)
+        if manual_requirement is None and "splash" in combined:
+            sp_info = registry.get("splash_financial", {})
+            manual_requirement = {
+                "property_id": "prexvo",
+                "asset_slug": s_norm,
+                "partner_key": "splash_financial",
+                "partner_name": "Splash Financial",
+                "action_type": "COMPLIANCE_GATE",
+                "severity": "MEDIUM",
+                "title": "Splash Financial Gate 1 Traffic Threshold & Compliance Confirmation",
+                "description": (
+                    "High-intent student loan refinance demand detected on Prexvo. "
+                    "Splash Financial direct integration requires operator verification of Gate 1 traffic threshold."
+                ),
+                "missing_requirements": [
+                    "Confirm Gate 1 10,000 monthly session threshold",
+                    "Verify Engine by Moneylion / Splash partner agreement signature",
+                ],
+                "candidate_url": str(sp_info.get("url") or "https://www.splashfinancial.com/"),
+            }
+
+        if any(k in combined for k in ("medical", "physician", "resident", "dental", "healthcare")):
+            chosen_key = "laurel_road"
+        elif any(k in combined for k in ("group", "collective", "negotiation", "rate-drop", "juno")):
+            chosen_key = "juno"
+        elif any(k in combined for k in ("custom", "precision", "earnest", "skip-payment", "biweekly")):
+            chosen_key = "earnest"
+        else:
+            chosen_key = "sofi_refi"
+
+        p_data = registry.get(chosen_key) or registry.get("sofi_refi") or {}
+        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "SoFi Student Loan Refinancing"))
+        p_url = str(p_data.get("url") or "https://www.sofi.com/refinance-student-loan/")
+        p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or f"Compare Rates with {p_name}"))
+        p_disc = _strip_forbidden_dashes(
+            str(
+                p_data.get("disclosure")
+                or "Editorial Note: Refinancing federal student loans with a private lender permanently waives Title IV income-driven repayment and PSLF eligibility."
+            )
+        )
+    else:
+        registry = PROFITHELM_AFFILIATES
+        # Check if query hits a vertical with a known manual partner dependency while routing fallback live offer
+        if manual_requirement is None:
+            if any(k in combined for k in ("customs-bond", "customs bond", "surety-bond", "surety bond", "continuous bond", "importer security filing")):
+                sb_info = registry.get("suretybonds_direct", {})
+                if sb_info.get("status") != "live":
+                    manual_requirement = {
+                        "property_id": "profithelm",
+                        "asset_slug": s_norm,
+                        "partner_key": "suretybonds_direct",
+                        "partner_name": "SuretyBonds.com Direct",
+                        "action_type": "INTEGRATION_REQUIREMENT",
+                        "severity": "MEDIUM",
+                        "title": "SuretyBonds.com Direct Custom Quote Widget & Producer Verification",
+                        "description": (
+                            f"Customs bond calculator {s_norm} is gaining search impressions and requires "
+                            f"manual agency producer code confirmation for SuretyBonds.com Direct."
+                        ),
+                        "missing_requirements": [
+                            "Verify licensed surety producer agreement",
+                            "Provision direct quote widget affiliate tracking token",
+                        ],
+                        "candidate_url": "https://www.suretybonds.com/",
+                    }
+            elif any(k in combined for k in ("freight-mode", "ocean-air", "container-demurrage", "freightos", "spot-freight")):
+                fr_info = registry.get("freightos_marketplace", {})
+                if fr_info.get("status") != "live":
+                    manual_requirement = {
+                        "property_id": "profithelm",
+                        "asset_slug": s_norm,
+                        "partner_key": "freightos_marketplace",
+                        "partner_name": "Freightos Marketplace",
+                        "action_type": "INTEGRATION_REQUIREMENT",
+                        "severity": "MEDIUM",
+                        "title": "Freightos Marketplace Partner API Key & Referral Attribution",
+                        "description": (
+                            f"Freight analytics tool {s_norm} is gaining search impressions and awaits "
+                            f"manual Freightos Marketplace partner API credentials."
+                        ),
+                        "missing_requirements": [
+                            "Obtain Freightos partner referral tracking ID",
+                            "Confirm live rate widget domain whitelist for profithelm.com",
+                        ],
+                        "candidate_url": "https://www.freightos.com/",
+                    }
+            elif any(k in combined for k in ("interactive-brokers", "portfolio-margin", "section-1256", "prediction-market")):
+                ib_info = registry.get("interactive_brokers", {})
+                if ib_info.get("status") != "live":
+                    manual_requirement = {
+                        "property_id": "profithelm",
+                        "asset_slug": s_norm,
+                        "partner_key": "interactive_brokers",
+                        "partner_name": "Interactive Brokers",
+                        "action_type": "COMPLIANCE_GATE",
+                        "severity": "MEDIUM",
+                        "title": "Interactive Brokers Institutional Referral Compliance Review",
+                        "description": (
+                            f"Trading and tax calculator {s_norm} is gaining search impressions and awaits "
+                            f"manual Interactive Brokers compliance sign-off."
+                        ),
+                        "missing_requirements": [
+                            "Complete IBKR institutional marketing compliance review",
+                            "Confirm approved disclosure copy and referral link",
+                        ],
+                        "candidate_url": "https://www.interactivebrokers.com/",
+                    }
+
+        # Select live fallback or primary partner for immediate conversion path injection
+        if any(k in combined for k in ("tariff", "landed", "customs", "bond", "freight", "cbam", "hs-code", "301", "demurrage")):
+            chosen_key = "flexport"
+        elif any(k in combined for k in ("179", "equipment", "depreciation", "cost-segregation", "cost segregation")):
+            chosen_key = "crest_capital"
+        elif any(k in combined for k in ("payroll", "s-corp", "reasonable-compensation", "fica", "worker", "contractor")):
+            chosen_key = "gusto"
+        elif any(k in combined for k in ("401k", "retirement", "pension", "erisa")):
+            chosen_key = "guideline"
+        elif any(k in combined for k in ("crypto", "8949", "harvesting", "capital-gains")):
+            chosen_key = "coinledger"
+        elif any(k in combined for k in ("treasury", "yield", "3124", "cash-management", "money-market")):
+            chosen_key = "wealthfront"
+        elif any(k in combined for k in ("bookkeeping", "accounting", "174", "r-d", "audit", "reconciliation")):
+            chosen_key = "bench"
+        else:
+            chosen_key = "ramp"
+
+        p_data = registry.get(chosen_key) or registry.get("ramp") or {}
+        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "Ramp Corporate Spend Platform"))
+        p_url = str(p_data.get("url") or "https://ramp.com/")
+        p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or f"Explore {p_name} for Statutory Modeling"))
+        p_disc = _strip_forbidden_dashes(
+            str(
+                p_data.get("disclosure")
+                or "FTC Disclosure: ProfitHelm may earn a commission when you register through approved partner links at no additional cost to you."
+            )
+        )
+
+    partner_offer = {
+        "partner_key": chosen_key,
+        "partner_name": p_name,
+        "url": p_url,
+        "redirect_path": f"/r/{chosen_key}",
+        "cta_text": p_cta,
+        "disclosure": p_disc,
+        "value_tier": value_tier,
+        "status": "live",
+        "compliance_status": "FTC_16_CFR_255_VERIFIED",
+        "mechanic": "compliant_intent_monetization",
+        "rel": "noopener sponsored nofollow",
+    }
+
+    return {
+        "restricted_public_service": False,
+        "commercial_offers_allowed": True,
+        "monetization_mode": "LIVE_INTENT_PARTNER_OFFER",
+        "partner_offer": partner_offer,
+        "manual_requirement_detected": manual_requirement is not None,
+        "manual_requirement": manual_requirement,
+    }
+
+
+def evaluate_asset_conversion_and_distribution_readiness(
+    slug: str,
+    tenant_id: str = "profithelm",
+    query: str = "",
+    impressions: int = 0,
+    position: float = 0.0,
+    dist_dir: Optional[Union[str, Path]] = None,
+    base_dir: Optional[Union[str, Path]] = None,
+    html_content: Optional[str] = None,
+    candidate: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Evaluates whether a page gaining search impressions has:
+      1. A strong live conversion path in compiled HTML (interactive preset scenarios,
+         contextual internal links, and compliant partner offer placement or YMYL guardrail).
+      2. Complete external syndication distribution artifacts (LinkedIn, Newsletter,
+         Substack Notes) and broadcast readiness.
+      3. Any manual partner or external platform dependency that must route a single
+         clean alert onto HumanActionBus.
+    Zero em-dashes. Zero en-dashes.
+    """
+    eff_tenant = str(tenant_id or "profithelm").strip().lower()
+    s_norm = _slug_from_url_or_query(default_slug=slug, query=query)
+    cand_dict = candidate if isinstance(candidate, dict) else {}
+    intent_info = _classify_asset_intent_class(
+        slug=s_norm,
+        target_url=str(cand_dict.get("target_url") or cand_dict.get("url") or ""),
+        query=query,
+        section=str(cand_dict.get("section") or ""),
+    )
+    mon_info = _resolve_partner_offer_and_manual_gate(
+        tenant_id=eff_tenant,
+        slug=s_norm,
+        query=query,
+        value_tier=intent_info["value_tier"],
+        candidate=cand_dict,
+    )
+
+    resolved_dist = Path(dist_dir) if dist_dir else (Path(base_dir) / "dist" if base_dir else None)
+    resolved_base = Path(base_dir) if base_dir else (resolved_dist.parent if resolved_dist else None)
+
+    raw_html = html_content
+    if raw_html is None and resolved_dist and resolved_dist.is_dir():
+        for p_cand in (
+            resolved_dist / "tools" / s_norm / "index.html",
+            resolved_dist / s_norm / "index.html",
+            resolved_dist / f"{s_norm}.html",
+        ):
+            if p_cand.is_file():
+                try:
+                    raw_html = p_cand.read_text(encoding="utf-8")
+                except Exception:
+                    raw_html = ""
+                break
+
+    has_partner_cta = False
+    has_preset_scenarios = False
+    has_internal_links = False
+    if raw_html is not None:
+        if mon_info["restricted_public_service"]:
+            has_partner_cta = (
+                'data-restricted-public-service="true"' in raw_html
+                or 'data-commercial-offers="none"' in raw_html
+            )
+        else:
+            has_partner_cta = (
+                'rel="noopener sponsored nofollow"' in raw_html
+                and (
+                    "affiliate-cta" in raw_html
+                    or "partner-btn" in raw_html
+                    or "overlay-partner-offer" in raw_html
+                )
+            )
+        has_preset_scenarios = "data-calc-preset" in raw_html or "scenario-preset-link" in raw_html
+        has_internal_links = "overlay-hub-links" in raw_html or (raw_html.count('href="/tools/') >= 2)
+    else:
+        # If HTML wasn't loaded from disk, check explicit flags on candidate
+        has_partner_cta = bool(cand_dict.get("has_conversion_path", True))
+        has_preset_scenarios = bool(cand_dict.get("has_preset_scenarios", True))
+        has_internal_links = bool(cand_dict.get("has_internal_links", True))
+
+    if cand_dict.get("has_conversion_path") is False or cand_dict.get("conversion_gap") is True:
+        has_partner_cta = False
+
+    has_strong_conversion_path = bool(has_partner_cta and has_preset_scenarios and has_internal_links)
+    conversion_gap_detected = bool(impressions > 0 and not has_strong_conversion_path)
+
+    # Check external syndication & distribution readiness
+    has_external_distribution = True
+    missing_syndication_files: List[str] = []
+    if resolved_base and resolved_base.is_dir():
+        synd_dir = resolved_base / "syndication"
+        expected_files = [
+            f"{s_norm}-linkedin.md",
+            f"{s_norm}-newsletter.md",
+            f"{s_norm}-Substack Notes-post.txt",
+        ]
+        for fname in expected_files:
+            if not (synd_dir / fname).is_file():
+                missing_syndication_files.append(fname)
+        if missing_syndication_files:
+            has_external_distribution = False
+
+    if cand_dict.get("has_external_distribution") is False or cand_dict.get("distribution_gap") is True:
+        has_external_distribution = False
+        if not missing_syndication_files:
+            missing_syndication_files = [
+                f"{s_norm}-linkedin.md",
+                f"{s_norm}-newsletter.md",
+                f"{s_norm}-Substack Notes-post.txt",
+            ]
+
+    distribution_gap_detected = bool(impressions > 0 and not has_external_distribution)
+
+    return {
+        "slug": s_norm,
+        "tenant_id": eff_tenant,
+        "impressions": int(impressions),
+        "position": float(position),
+        "intent_class": intent_info["intent_class"],
+        "is_high_intent_calculator_or_guide": intent_info["is_high_intent_calculator_or_guide"],
+        "intent_multiplier": intent_info["intent_multiplier"],
+        "has_strong_conversion_path": has_strong_conversion_path,
+        "has_partner_cta": has_partner_cta,
+        "has_preset_scenarios": has_preset_scenarios,
+        "has_internal_links": has_internal_links,
+        "conversion_gap_detected": conversion_gap_detected,
+        "has_external_distribution": has_external_distribution,
+        "missing_syndication_files": missing_syndication_files,
+        "distribution_gap_detected": distribution_gap_detected,
+        "restricted_public_service": mon_info["restricted_public_service"],
+        "commercial_offers_allowed": mon_info["commercial_offers_allowed"],
+        "partner_offer": mon_info["partner_offer"],
+        "manual_requirement_detected": mon_info["manual_requirement_detected"],
+        "manual_requirement": mon_info["manual_requirement"],
+    }
+
+
 def compute_composite_idempotency_key(
     tenant_id: str,
     target_url: str,
@@ -121,13 +726,16 @@ def calculate_candidate_roi(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    Calculates expected click lift, CTR deficit, and composite ROI score for a
-    GSC query signal or unindexed page diagnosis.
-    Ranks:
-      1. High-impression CTR shortfall (pos 1-5, high impressions, low CTR)
-      2. Striking-distance query (pos 4-20, moderate-high impressions)
-      3. Content quality / canonical / depth unindexed defects
-      4. Crawl budget signal lag / dead routes
+    Calculates expected click lift, CTR deficit, intent priority multiplier,
+    conversion/distribution gap boost, and composite ROI score for a GSC query
+    signal or unindexed page diagnosis.
+    Prioritizes:
+      1. High-intent calculators and guides gaining search impressions that lack
+         strong conversion paths or external distribution.
+      2. High-impression CTR shortfall (pos 1-5, high impressions, low CTR)
+      3. Striking-distance query (pos 4-20, moderate-high impressions)
+      4. Content quality / canonical / depth unindexed defects
+      5. Crawl budget signal lag / dead routes
     Zero em-dashes. Zero en-dashes.
     """
     data: Dict[str, Any] = {}
@@ -149,6 +757,32 @@ def calculate_candidate_roi(
     if actual_ctr <= 0.0 and impressions > 0 and clicks > 0:
         actual_ctr = round(clicks / float(impressions), 4)
 
+    target_url = str(data.get("target_url") or data.get("page") or data.get("url") or "").strip()
+    query_str = str(data.get("query") or data.get("primary_keyword") or "").strip()
+    slug_str = _slug_from_url_or_query(
+        target_url=target_url,
+        query=query_str,
+        default_slug=str(data.get("slug") or ""),
+    )
+    intent_info = _classify_asset_intent_class(
+        slug=slug_str,
+        target_url=target_url,
+        query=query_str,
+        section=str(data.get("section") or data.get("template_section") or ""),
+    )
+
+    conversion_gap = bool(
+        data.get("conversion_gap_detected")
+        or data.get("conversion_gap")
+        or (impressions > 0 and data.get("has_conversion_path") is False)
+        or (impressions > 0 and data.get("has_strong_conversion_path") is False)
+    )
+    distribution_gap = bool(
+        data.get("distribution_gap_detected")
+        or data.get("distribution_gap")
+        or (impressions > 0 and data.get("has_external_distribution") is False)
+    )
+
     anomaly_type = str(
         data.get("anomaly_type")
         or data.get("classification")
@@ -157,7 +791,11 @@ def calculate_candidate_roi(
     ).strip().upper()
 
     if not anomaly_type:
-        if 1.0 <= position <= 5.0 and actual_ctr < expected_ctr_for_position(position) - 0.005:
+        if conversion_gap and impressions >= 25:
+            anomaly_type = "IMPRESSION_GAINING_CONVERSION_GAP"
+        elif distribution_gap and impressions >= 25:
+            anomaly_type = "IMPRESSION_GAINING_DISTRIBUTION_GAP"
+        elif 1.0 <= position <= 5.0 and actual_ctr < expected_ctr_for_position(position) - 0.005:
             anomaly_type = "HIGH_IMPRESSION_CTR_SHORTFALL"
         elif 4.0 <= position <= 20.0:
             anomaly_type = "STRIKING_DISTANCE_QUERY"
@@ -170,8 +808,8 @@ def calculate_candidate_roi(
     if raw_exp_ctr is not None and float(raw_exp_ctr) > 0:
         exp_ctr = float(raw_exp_ctr)
     else:
-        if "STRIKING" in anomaly_type:
-            # Target top-4 CTR benchmark upon striking-distance overlay lift
+        if "STRIKING" in anomaly_type or "CONVERSION_GAP" in anomaly_type or "DISTRIBUTION_GAP" in anomaly_type:
+            # Target top-4 CTR benchmark upon striking-distance / conversion overlay lift
             exp_ctr = max(0.08, expected_ctr_for_position(position) + 0.035)
         elif 1.0 <= position <= 10.0:
             exp_ctr = expected_ctr_for_position(position)
@@ -180,7 +818,13 @@ def calculate_candidate_roi(
 
     ctr_deficit = round(max(0.015, exp_ctr - actual_ctr), 4)
 
-    if "CTR_SHORTFALL" in anomaly_type:
+    if "CONVERSION_GAP" in anomaly_type:
+        severity_factor = 1.65
+        action_type = "SHARPEN_CONTENT_INTERNAL_LINKS_AND_PARTNER_OFFER"
+    elif "DISTRIBUTION_GAP" in anomaly_type:
+        severity_factor = 1.4
+        action_type = "SHARPEN_CONTENT_AND_DISPATCH_SYNDICATION"
+    elif "CTR_SHORTFALL" in anomaly_type:
         severity_factor = 1.5
         action_type = "REWRITE_TITLE_META_AND_SCHEMA"
     elif "STRIKING" in anomaly_type:
@@ -215,13 +859,25 @@ def calculate_candidate_roi(
     cpc = float(data.get("cpc", default_cpc) or default_cpc)
     erpm_usd = float(data.get("erpm_usd", default_erpm) or default_erpm)
 
-    commercial_weight = round(1.0 + (cpc / 20.0) + (erpm_usd / 200.0), 4)
+    intent_multiplier = float(intent_info["intent_multiplier"])
+    gap_boost = 1.0
+    if conversion_gap:
+        gap_boost += 0.35
+    if distribution_gap:
+        gap_boost += 0.20
+
+    commercial_weight = round((1.0 + (cpc / 20.0) + (erpm_usd / 200.0)) * intent_multiplier * gap_boost, 4)
     roi_score = round(expected_click_lift * commercial_weight, 4)
 
     return {
         "tenant_id": resolved_tenant,
         "anomaly_type": anomaly_type,
         "action_type": action_type,
+        "intent_class": intent_info["intent_class"],
+        "is_high_intent_calculator_or_guide": intent_info["is_high_intent_calculator_or_guide"],
+        "intent_multiplier": intent_multiplier,
+        "conversion_gap_detected": conversion_gap,
+        "distribution_gap_detected": distribution_gap,
         "position": position,
         "impressions": impressions,
         "clicks": clicks,
@@ -521,11 +1177,11 @@ def compile_remediation_overlay_spec(
                 ),
             },
         ]
-        hub_links = [
-            {"anchor": "Title IV Student Loan Calculators Directory", "href": "/tools/"},
-            {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
-            {"anchor": "PSLF 120 Qualifying Payment Simulator", "href": "/tools/pslf-qualifying-payment-simulator/"},
-        ]
+        hub_links = _resolve_contextual_internal_links(
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query=query_clean,
+        )
     else:
         h2_headings = [
             f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
@@ -585,11 +1241,11 @@ def compile_remediation_overlay_spec(
                 ),
             },
         ]
-        hub_links = [
-            {"anchor": "Statutory Tax & Financial Calculators Directory", "href": "/tools/"},
-            {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
-            {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
-        ]
+        hub_links = _resolve_contextual_internal_links(
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query=query_clean,
+        )
 
     faq_schema = {
         "@context": "https://schema.org",
@@ -621,6 +1277,20 @@ def compile_remediation_overlay_spec(
     child_sm_url = str(candidate.get("child_sitemap_url") or f"https://{domain}/{child_sm}")
     submitted_scope = f"Submitted pages only ({child_sm})"
 
+    intent_info = _classify_asset_intent_class(
+        slug=slug,
+        target_url=target_url,
+        query=query_clean,
+        section=sec_name,
+    )
+    mon_info = _resolve_partner_offer_and_manual_gate(
+        tenant_id=resolved_tenant,
+        slug=slug,
+        query=query_clean,
+        value_tier=intent_info["value_tier"],
+        candidate=candidate,
+    )
+
     return {
         "slug": slug,
         "property_id": resolved_tenant,
@@ -632,6 +1302,13 @@ def compile_remediation_overlay_spec(
         "child_sitemap": child_sm,
         "child_sitemap_url": child_sm_url,
         "submitted_pages_only_scope": submitted_scope,
+        "intent_class": intent_info["intent_class"],
+        "is_high_intent_calculator_or_guide": intent_info["is_high_intent_calculator_or_guide"],
+        "restricted_public_service": mon_info["restricted_public_service"],
+        "commercial_offers_allowed": mon_info["commercial_offers_allowed"],
+        "partner_offer": mon_info["partner_offer"],
+        "manual_requirement_detected": mon_info["manual_requirement_detected"],
+        "manual_requirement": mon_info["manual_requirement"],
         "anomaly_type": anomaly_type,
         "action": action_type,
         "action_type": action_type,
@@ -671,7 +1348,9 @@ def prioritize_gsc_signals(
     Supports both:
       - prioritize_gsc_signals(signals_list, tenant_id="profithelm")
       - prioritize_gsc_signals(tenant_id="profithelm", query_records=[...], unindexed_diagnoses=[...])
-    Returns candidates sorted by (-roi_score, target_url).
+    Prioritizes high-intent calculators and guides and pages gaining search impressions
+    that lack strong conversion paths or external distribution.
+    Returns candidates sorted by (-roi_score, -is_high_intent_calculator_or_guide, target_url).
     Zero em-dashes. Zero en-dashes.
     """
     raw_items: List[Any] = []
@@ -691,6 +1370,8 @@ def prioritize_gsc_signals(
 
     eff_tenant = str(resolved_tenant or "profithelm").strip().lower()
     domain = "prexvo.com" if eff_tenant == "prexvo" else "profithelm.com"
+    base_dir_arg = kwargs.get("base_dir")
+    dist_dir_arg = kwargs.get("dist_dir")
 
     prioritized: List[Dict[str, Any]] = []
     for item in raw_items:
@@ -728,6 +1409,29 @@ def prioritize_gsc_signals(
             else:
                 rec["impressions"] = 60
 
+        if (
+            base_dir_arg is not None
+            or dist_dir_arg is not None
+            or "has_conversion_path" in rec
+            or "conversion_gap" in rec
+            or "has_external_distribution" in rec
+            or "distribution_gap" in rec
+        ):
+            readiness = evaluate_asset_conversion_and_distribution_readiness(
+                slug=slug,
+                tenant_id=item_tenant,
+                query=query,
+                impressions=int(float(rec.get("impressions", 0) or 0)),
+                position=float(rec.get("position", 0.0) or 0.0),
+                dist_dir=dist_dir_arg,
+                base_dir=base_dir_arg,
+                candidate=rec,
+            )
+            rec.setdefault("conversion_gap_detected", readiness["conversion_gap_detected"])
+            rec.setdefault("distribution_gap_detected", readiness["distribution_gap_detected"])
+            rec.setdefault("has_strong_conversion_path", readiness["has_strong_conversion_path"])
+            rec.setdefault("has_external_distribution", readiness["has_external_distribution"])
+
         roi_metrics = calculate_candidate_roi(rec, tenant_id=item_tenant)
         merged_cand = {
             **rec,
@@ -744,6 +1448,13 @@ def prioritize_gsc_signals(
         merged_cand["child_sitemap"] = overlay_spec["child_sitemap"]
         merged_cand["child_sitemap_url"] = overlay_spec["child_sitemap_url"]
         merged_cand["submitted_pages_only_scope"] = overlay_spec["submitted_pages_only_scope"]
+        merged_cand["intent_class"] = overlay_spec["intent_class"]
+        merged_cand["is_high_intent_calculator_or_guide"] = overlay_spec["is_high_intent_calculator_or_guide"]
+        merged_cand["restricted_public_service"] = overlay_spec["restricted_public_service"]
+        merged_cand["commercial_offers_allowed"] = overlay_spec["commercial_offers_allowed"]
+        merged_cand["partner_offer"] = overlay_spec["partner_offer"]
+        merged_cand["manual_requirement_detected"] = overlay_spec["manual_requirement_detected"]
+        merged_cand["manual_requirement"] = overlay_spec["manual_requirement"]
         spec_bytes = json.dumps(overlay_spec, sort_keys=True).encode("utf-8")
         content_sha256 = hashlib.sha256(spec_bytes).hexdigest()
         idemp_key = compute_composite_idempotency_key(
@@ -757,7 +1468,13 @@ def prioritize_gsc_signals(
         merged_cand["idempotency_key"] = idemp_key
         prioritized.append(merged_cand)
 
-    prioritized.sort(key=lambda x: (-float(x.get("roi_score", 0.0)), str(x.get("target_url", ""))))
+    prioritized.sort(
+        key=lambda x: (
+            -float(x.get("roi_score", 0.0)),
+            -int(bool(x.get("is_high_intent_calculator_or_guide"))),
+            str(x.get("target_url", "")),
+        )
+    )
     return prioritized
 
 
@@ -1298,10 +2015,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     # 4d. Injected Hub Links (for crawl budget signal lag / internal linking)
     hub_links = overlay_data.get("hub_links", [])
+    hub_links_markup = ""
     if hub_links:
         hl_parts = [
             '<section class="overlay-section overlay-hub-links" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">',
-            '  <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem;">Related Statutory Hubs</h3>',
+            '  <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem;">Related Statutory Calculators &amp; Guides</h3>',
             '  <ul class="overlay-hub-list">',
         ]
         for hl in hub_links:
@@ -1310,7 +2028,54 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 anchor = html_lib.escape(_strip_forbidden_dashes(str(hl["anchor"])))
                 hl_parts.append(f'    <li><a href="{href}" class="touch-target">{anchor}</a></li>')
         hl_parts.extend(["  </ul>", "</section>"])
-        injected_sections.append("\n".join(hl_parts))
+        hub_links_markup = "\n".join(hl_parts)
+        injected_sections.append(hub_links_markup)
+
+    # 4e. Injected Partner Offer Placement or YMYL Public-Service Guardrail
+    partner_section_markup = ""
+    restricted_ps = bool(overlay_data.get("restricted_public_service"))
+    p_offer = overlay_data.get("partner_offer")
+    if restricted_ps:
+        if 'data-restricted-public-service="true"' not in html:
+            partner_section_markup = (
+                '<section class="overlay-section overlay-partner-guardrail ymyl-public-service-guardrail" '
+                'data-commercial-offers="none" data-restricted-public-service="true" '
+                'data-mechanic="compliant_intent_monetization" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">\n'
+                '  <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">\n'
+                '    <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Title IV Public Service Protection</h3>\n'
+                '    <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">Direct consolidation and federal repayment plans preserve statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685. Commercial private lender offers are strictly suppressed on restricted public-service pages.</p>\n'
+                '  </div>\n'
+                '</section>'
+            )
+            injected_sections.append(partner_section_markup)
+    elif isinstance(p_offer, dict) and overlay_data.get("commercial_offers_allowed", True) is not False:
+        p_key = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_key") or "ramp")))
+        p_name = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_name") or "Featured Partner")))
+        p_url = html_lib.escape(str(p_offer.get("url") or "https://ramp.com/"))
+        p_cta = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_text") or f"Explore {p_name}")))
+        p_disc = html_lib.escape(
+            _strip_forbidden_dashes(
+                str(
+                    p_offer.get("disclosure")
+                    or "FTC Disclosure: We may earn an affiliate commission when you register through approved partner links at no additional cost to you."
+                )
+            )
+        )
+        prop_id = html_lib.escape(
+            _strip_forbidden_dashes(str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "profithelm"))
+        )
+        partner_section_markup = (
+            f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
+            f'data-property="{prop_id}" data-partner="{p_key}" data-mechanic="compliant_intent_monetization" '
+            f'style="margin-top: 1.5rem; margin-bottom: 1.5rem; padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">\n'
+            f'  <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Recommended Partner Solution: {p_name}</h3>\n'
+            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #64748b); margin-bottom: 0.75rem;">{p_disc}</p>\n'
+            f'  <a href="{p_url}" rel="noopener sponsored nofollow" target="_blank" '
+            f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{p_key}" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
+            f'</section>'
+        )
+        injected_sections.append(partner_section_markup)
 
     # 5. Injected FAQ Additions & FAQPage Schema
     raw_faqs = (
@@ -1422,7 +2187,22 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             + "\n</div>"
         )
         if 'id="gsc-striking-overlay"' in html:
-            pass
+            incremental_parts: List[str] = []
+            if hub_links_markup and 'class="overlay-section overlay-hub-links"' not in html:
+                incremental_parts.append(hub_links_markup)
+            if partner_section_markup and (
+                'class="overlay-section overlay-partner-offer' not in html
+                and 'class="overlay-section overlay-partner-guardrail' not in html
+            ):
+                incremental_parts.append(partner_section_markup)
+            if incremental_parts:
+                inc_html = "\n".join(incremental_parts)
+                if "</main>" in html:
+                    html = html.replace("</main>", f"{inc_html}\n</main>", 1)
+                elif "</body>" in html:
+                    html = html.replace("</body>", f"{inc_html}\n</body>", 1)
+                else:
+                    html = f"{html}\n{inc_html}"
         elif "</main>" in html:
             html = html.replace("</main>", f"{overlay_markup}\n</main>", 1)
         elif "</body>" in html:

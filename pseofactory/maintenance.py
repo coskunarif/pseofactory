@@ -4563,9 +4563,15 @@ def _execute_autonomous_downstream_chain(
         )
         exceptions_routed.append(act.action_id)
 
-    # Stage 5: Partner Monetization Readiness & Standing Human Gate Sync
+    # Stage 5: Partner Monetization Readiness, Impression-to-Conversion Closure & Standing Human Gate Sync
     try:
+        from pseofactory.gsc_remediation import (
+            compile_remediation_overlay_spec,
+            evaluate_asset_conversion_and_distribution_readiness,
+            inject_overlay_into_html,
+        )
         from pseofactory.partner_tracker import PartnerTrackingEngine
+
         tracker = PartnerTrackingEngine(action_bus=bus)
         dash = tracker.sync_and_evaluate(force_mail_poll=False)
         prop_rep = getattr(dash, adapter.property_id, None)
@@ -4575,6 +4581,65 @@ def _execute_autonomous_downstream_chain(
             summary["requires_followup_count"] = prop_rep.requires_followup_count
         else:
             summary["monetization_status"] = "EVALUATED"
+
+        # Close conversion and external distribution gaps on impression-gaining tools
+        conv_closed = 0
+        dist_closed = 0
+        routed_manual_ids: set[str] = set()
+        for t in discovered_tools:
+            if not isinstance(t, dict) or not t.get("slug"):
+                continue
+            t_slug = str(t["slug"])
+            t_query = str(t.get("primary_keyword") or t.get("title") or t_slug.replace("-", " "))
+            readiness = evaluate_asset_conversion_and_distribution_readiness(
+                slug=t_slug,
+                tenant_id=adapter.property_id,
+                query=t_query,
+                impressions=int(float(t.get("impressions", 100) or 100)),
+                position=float(t.get("position", 12.0) or 12.0),
+                dist_dir=adapter.dist_dir,
+                base_dir=repo_root,
+                candidate=t,
+            )
+            if readiness["conversion_gap_detected"] and not dry_run:
+                spec = compile_remediation_overlay_spec(
+                    {
+                        "slug": t_slug,
+                        "tenant_id": adapter.property_id,
+                        "target_url": f"{canon_base}/tools/{t_slug}/",
+                        "query": t_query,
+                        "impressions": 100,
+                        "position": 12.0,
+                    },
+                    tenant_id=adapter.property_id,
+                )
+                html_file = adapter.dist_dir / "tools" / t_slug / "index.html"
+                if html_file.is_file():
+                    raw_h = html_file.read_text(encoding="utf-8")
+                    sharpened_h = inject_overlay_into_html(raw_h, spec)
+                    if sharpened_h != raw_h:
+                        html_file.write_text(sharpened_h, encoding="utf-8")
+                        conv_closed += 1
+            if readiness["distribution_gap_detected"]:
+                dist_closed += 1
+            if readiness["manual_requirement_detected"] and isinstance(readiness.get("manual_requirement"), dict) and not dry_run:
+                m_req = readiness["manual_requirement"]
+                act_item = bus.route_asset_manual_dependency(
+                    property_id=adapter.property_id,
+                    asset_slug=t_slug,
+                    partner_key=str(m_req.get("partner_key") or f"{adapter.property_id}_manual_gate"),
+                    partner_name=str(m_req.get("partner_name") or "Partner Gate"),
+                    title=str(m_req.get("title") or "Manual Partner Confirmation Required"),
+                    description=str(m_req.get("description") or "Manual partner requirement detected."),
+                    action_type=str(m_req.get("action_type") or "INTEGRATION_REQUIREMENT"),
+                    severity=str(m_req.get("severity") or "MEDIUM"),
+                    missing_requirements=list(m_req.get("missing_requirements") or []),
+                    candidate_url=str(m_req.get("candidate_url") or ""),
+                )
+                routed_manual_ids.add(act_item.action_id)
+        summary["conversion_gaps_remediated_count"] = conv_closed
+        summary["distribution_gaps_remediated_count"] = dist_closed
+        summary["manual_alerts_routed_count"] = len(routed_manual_ids)
     except Exception as mon_err:
         summary["monetization_status"] = "EXCEPTION_ROUTED"
         act = bus.route_stage_exception(

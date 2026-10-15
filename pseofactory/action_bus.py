@@ -109,8 +109,14 @@ class HumanActionBus:
     compliance warnings, and integration readiness gaps.
     """
 
-    def __init__(self, bus_path: Optional[str] = None, hub: Optional[Any] = None):
-        self.bus_path = bus_path or os.path.join(
+    def __init__(
+        self,
+        bus_path: Optional[Any] = None,
+        hub: Optional[Any] = None,
+        ledger_path: Optional[Any] = None,
+    ):
+        eff_path = bus_path or ledger_path
+        self.bus_path = str(eff_path) if eff_path else os.path.join(
             os.path.dirname(__file__), "..", ".agy", "human_action_bus.json"
         )
         self.hub = hub
@@ -352,6 +358,89 @@ class HumanActionBus:
             severity=severity,
             deadline=deadline,
             missing_requirements=clean_reqs,
+            candidate_url=candidate_url,
+        )
+
+    def route_asset_manual_dependency(
+        self,
+        property_id: str,
+        asset_slug: str,
+        partner_key: str,
+        partner_name: str,
+        title: str,
+        description: str,
+        action_type: str = "INTEGRATION_REQUIREMENT",
+        severity: str = "HIGH",
+        deadline: Optional[str] = None,
+        missing_requirements: Optional[List[str]] = None,
+        candidate_url: str = "",
+    ) -> ActionItem:
+        """
+        Routes a single clean, deduplicated alert onto the HumanActionBus when an
+        impression-gaining or prioritized asset hits a manual partner or external
+        platform requirement. Multiple assets hitting the same manual partner/platform
+        gate consolidate into the single existing ActionItem record without duplicating
+        alerts or interrupting the autonomous growth loop.
+        """
+        prop_clean = (property_id or "profithelm").strip().lower()
+        slug_clean = re.sub(r"[^a-z0-9-]+", "-", (asset_slug or "asset").strip().lower()).strip("-") or "asset"
+        eff_key = re.sub(r"[^a-z0-9_]+", "_", (partner_key or "").strip().lower()).strip("_")
+        if not eff_key:
+            eff_key = f"{prop_clean}_manual_partner_gate"
+        elif (
+            eff_key not in PROFITHELM_AFFILIATES
+            and eff_key not in PREXVO_AFFILIATES
+            and not eff_key.startswith(f"{prop_clean}_")
+        ):
+            eff_key = f"{prop_clean}_{eff_key}"
+
+        def _scrub_dashes(text: str) -> str:
+            return (
+                (text or "")
+                .replace("\u2014", ": ")
+                .replace("\u2013", "-")
+                .replace(" - ", ": ")
+            )
+
+        eff_name = _scrub_dashes(partner_name or eff_key.replace("_", " ").title())
+        safe_key = re.sub(r"[^a-z0-9]+", "-", eff_key.lower()).strip("-")
+        safe_type = re.sub(r"[^a-z0-9]+", "-", action_type.lower()).strip("-")
+        action_id = f"act-{prop_clean}-{safe_key}-{safe_type}"
+
+        asset_req_tag = f"Affected asset awaiting manual gate: {slug_clean}"
+        base_reqs = [_scrub_dashes(r) for r in (missing_requirements or []) if r]
+        if asset_req_tag not in base_reqs:
+            base_reqs.append(asset_req_tag)
+
+        if action_id in self.items:
+            existing = self.items[action_id]
+            updated = False
+            for r in base_reqs:
+                if r not in existing.missing_requirements:
+                    existing.missing_requirements.append(r)
+                    updated = True
+            if deadline and not existing.deadline:
+                existing.deadline = deadline
+                updated = True
+            if candidate_url and not existing.candidate_url:
+                existing.candidate_url = candidate_url
+                updated = True
+            if updated:
+                existing.updated_at = datetime.now(timezone.utc).isoformat()
+                self._assert_item_invariants(existing)
+                self.save()
+            return existing
+
+        return self.route_manual_requirement(
+            property_id=prop_clean,
+            partner_key=eff_key,
+            partner_name=eff_name,
+            title=_scrub_dashes(title),
+            description=_scrub_dashes(description),
+            action_type=action_type,
+            severity=severity,
+            deadline=deadline,
+            missing_requirements=base_reqs,
             candidate_url=candidate_url,
         )
 
