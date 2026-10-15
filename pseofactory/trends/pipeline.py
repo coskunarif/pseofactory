@@ -55,6 +55,29 @@ def compute_trend_idempotency_key(record: Dict[str, Any]) -> str:
     return f"{tenant_id}:{slug}:{action}:{payload_hash}"
 
 
+# Engine triage actions that tenants may act on. Every other verdict (MONITOR, REJECT)
+# is persisted as REJECTED so tenant consumers that default a missing status to
+# PENDING never synthesize assets the engine already declined.
+ACTIONABLE_ENGINE_ACTIONS = frozenset({"BUILD_PAGE", "REFACTOR_PAGE"})
+
+
+def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Stamps the shared void_candidates lifecycle status from the Jev engine verdict.
+    Records that already carry a status are left untouched.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if record.get("status"):
+        return record
+    action = str(record.get("action") or "").strip().upper()
+    if action in ACTIONABLE_ENGINE_ACTIONS:
+        record["status"] = "PENDING"
+    else:
+        record["status"] = "REJECTED"
+        record["status_reason"] = f"Engine verdict {action or 'UNKNOWN'}: {record.get('decision_reason') or 'not actionable'}"
+    return record
+
+
 class TrendPipeline:
     """
     Autonomous pipeline taking raw breakout spikes to validated programmatic assets.
@@ -324,7 +347,7 @@ class TrendPipeline:
                             continue
                     f.seek(0, os.SEEK_END)
                     for d in rankings:
-                        record = _enrich_record(d)
+                        record = stamp_engine_verdict_status(_enrich_record(d))
                         idem_key = record["idempotency_key"]
                         if idem_key in existing_keys:
                             deduplicated_sink_count += 1

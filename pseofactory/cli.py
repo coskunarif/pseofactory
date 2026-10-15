@@ -425,8 +425,20 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
             dur = res.get("duration_seconds", 0.0)
             print(f"[SUPERVISOR] Cycle {res.get('cycle_id')}: status={status} duration={dur:.2f}s")
             if "properties" in res and isinstance(res["properties"], dict):
+                from pseofactory.supervisor import extract_failure_reason
                 for p, p_res in res["properties"].items():
                     print(f"  - [{p}] status={p_res.get('status')}")
+                    if p_res.get("status") in ("FAILED", "TIMEOUT"):
+                        reason = extract_failure_reason(p_res.get("failed_records") or [])
+                        if reason:
+                            print(f"    reason: {reason}")
+            if res.get("error"):
+                print(f"  error: {res['error']}")
+            for esc in res.get("escalations") or []:
+                print(
+                    f"  ESCALATED [{esc['tenant_id']}] identical failure for {esc['streak']} "
+                    f"consecutive cycles since {esc['first_seen']}"
+                )
         if res.get("status") == "DEFERRED":
             return 75
         return 0 if res.get("status") in ("SUCCESS", "SKIPPED_ALIGNED", "SKIPPED_NO_CHANGES", "DRY_RUN", "NO_PROPERTIES") else 1

@@ -296,6 +296,10 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
     logger = AtomicTelemetryLogger(log_path=getattr(args, "log_path", None))
 
     if args.command in ("emit-failure", "record-systemd"):
+        # ExecStopPost hooks fire on every stop; a clean stop is not a failure signal
+        if str(args.result or "").strip().lower() == "success":
+            print(f"Service {args.service or 'unit'} result=success: no failure recorded.")
+            return 0
         service = args.service
         tenant = args.tenant or args.property or parse_systemd_tenant(service)
         exit_code_val = None

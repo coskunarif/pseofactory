@@ -3143,7 +3143,10 @@ class MaintenanceLifecycle:
                 r_slug = item.get("slug") if isinstance(item, dict) else str(item)
                 if not dry_run:
                     try:
-                        from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+                        from pseofactory.gsc_remediation import (
+                            compile_remediation_overlay_spec,
+                            persist_overlay_respecting_lock,
+                        )
                         base_dir = getattr(adapter, "base_dir", None) or adapter.dist_dir.parent
                         overlay_dir = base_dir / "content" / "overlays"
                         overlay_dir.mkdir(parents=True, exist_ok=True)
@@ -3161,7 +3164,7 @@ class MaintenanceLifecycle:
                                 if v and k not in overlay_payload:
                                     overlay_payload[k] = v
                         overlay_payload["action"] = "REFACTOR_PAGE"
-                        overlay_file.write_text(json.dumps(overlay_payload, indent=2), encoding="utf-8")
+                        persist_overlay_respecting_lock(overlay_file, overlay_payload)
                     except Exception as o_err:
                         print(f"Warning: Failed to persist overlay for slug '{r_slug}': {o_err}")
 

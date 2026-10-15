@@ -213,6 +213,106 @@ class HeartbeatTracker:
         return self.ledger.load_json(self.heartbeat_path)
 
 
+_GENERIC_FAILURE_LINE_MARKERS = (
+    "factory error encountered at line",
+    "failed at line",
+)
+REPEATED_FAILURE_ESCALATION_THRESHOLD: int = 3
+
+
+def extract_failure_reason(failed_records: List[Dict[str, Any]]) -> str:
+    """
+    Extracts the most specific human-readable failure cause from tenant failure records.
+    Tenant runners print the real cause on stdout and only a generic trap line on stderr,
+    so stdout is scanned first. Returns at most 300 characters.
+    Zero em-dashes. Zero en-dashes.
+    """
+    for rec in failed_records or []:
+        if not isinstance(rec, dict):
+            continue
+        for key in ("stdout_tail", "stderr_tail", "traceback"):
+            lines = [ln.strip() for ln in str(rec.get(key) or "").splitlines() if ln.strip()]
+            for ln in reversed(lines):
+                low = ln.lower()
+                if any(m in low for m in _GENERIC_FAILURE_LINE_MARKERS):
+                    continue
+                if "fail" in low or "error" in low or "exception" in low:
+                    return ln[:300]
+        if rec.get("error"):
+            return str(rec["error"])[:300]
+    return ""
+
+
+class SupervisorFailureStreak:
+    """
+    Persists consecutive cycle failures and per-tenant failure fingerprints across
+    --run-once invocations, so the backoff ceiling (DEGRADED) and repeated-failure
+    escalation work under hourly systemd timers instead of resetting every process.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self, path: Union[str, Path]):
+        self.path = Path(path)
+
+    def load(self) -> Dict[str, Any]:
+        data = AtomicStateLedger.load_json(self.path) if self.path.exists() else {}
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("consecutive_failures", 0)
+        data.setdefault("tenants", {})
+        return data
+
+    def record_cycle(
+        self,
+        cycle_ok: bool,
+        consecutive_failures: int,
+        properties: Dict[str, Any],
+        scoped: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Updates the streak ledger and returns tenants whose identical failure reached the
+        escalation threshold on this cycle. Scoped (--property) cycles only touch their tenants.
+        Serialized by a transaction lock so overlapping timers cannot lose updates.
+        """
+        with AtomicStateLedger.acquire_lock(str(self.path) + ".txn"):
+            return self._record_cycle_locked(cycle_ok, consecutive_failures, properties, scoped)
+
+    def _record_cycle_locked(
+        self,
+        cycle_ok: bool,
+        consecutive_failures: int,
+        properties: Dict[str, Any],
+        scoped: bool,
+    ) -> List[Dict[str, Any]]:
+        state = self.load()
+        state["consecutive_failures"] = int(consecutive_failures)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        escalations: List[Dict[str, Any]] = []
+        tenants: Dict[str, Any] = state["tenants"]
+        for pid, res in (properties or {}).items():
+            status = str((res or {}).get("status") or "")
+            if status not in ("FAILED", "TIMEOUT"):
+                tenants.pop(pid, None)
+                continue
+            reason = extract_failure_reason((res or {}).get("failed_records") or []) or status
+            fingerprint = reason[:160]
+            prev = tenants.get(pid) or {}
+            streak = int(prev.get("streak", 0)) + 1 if prev.get("fingerprint") == fingerprint else 1
+            tenants[pid] = {
+                "fingerprint": fingerprint,
+                "reason": reason,
+                "streak": streak,
+                "first_seen": prev.get("first_seen") if streak > 1 else now_iso,
+                "last_seen": now_iso,
+            }
+            if streak == REPEATED_FAILURE_ESCALATION_THRESHOLD:
+                escalations.append({"tenant_id": pid, **tenants[pid]})
+        if cycle_ok and not scoped:
+            tenants.clear()
+        AtomicStateLedger.save_json(self.path, state)
+        return escalations
+
+
 class AsyncFleetCoordinator:
     """
     Coordinates multi-tenant maintenance asynchronously with bounded concurrency ceiling
@@ -279,14 +379,22 @@ class AsyncFleetCoordinator:
                 enable_distribution=enable_distribution,
             )
         except SubprocessCrashError as sce:
+            record = {
+                "error": str(sce),
+                "type": "SubprocessCrashError",
+                "returncode": sce.returncode,
+                "stderr_tail": sce.stderr_tail,
+                "stdout_tail": getattr(sce, "stdout_tail", "") or "",
+            }
+            record["reason"] = extract_failure_reason([record])
             logger = AtomicTelemetryLogger()
             event = TelemetryEvent(
                 event_type="SUBPROCESS_CRASH",
                 tenant_id=adapter.property_id,
                 exit_code=sce.returncode,
                 error_type="SubprocessCrashError",
-                error_message=str(sce),
-                stderr_tail=sce.stderr_tail,
+                error_message=f"{sce} | reason: {record['reason']}",
+                stderr_tail=(f"{sce.stderr_tail}\n--- stdout tail ---\n{record['stdout_tail']}")[-2048:],
                 action_taken="ESCALATED",
                 run_id=run_id,
             )
@@ -298,12 +406,7 @@ class AsyncFleetCoordinator:
                 assets_drifted=0,
                 assets_refactored=0,
                 assets_failed=1,
-                failed_records=[{
-                    "error": str(sce),
-                    "type": "SubprocessCrashError",
-                    "returncode": sce.returncode,
-                    "stderr_tail": sce.stderr_tail,
-                }],
+                failed_records=[record],
             )
         except PropertyContaminationError as pce:
             logger = AtomicTelemetryLogger()
@@ -650,8 +753,44 @@ class AutonomousLifecycleSupervisor:
             heartbeat_path=self.heartbeat_path
         )
 
-        self.consecutive_failures: int = 0
+        streak_path = self.workspace_root / ".agy" / "supervisor_failure_streak.json"
+        if os.environ.get("PYTEST_CURRENT_TEST") and str(self.workspace_root) == "/home/ubuntuadmin/projects":
+            streak_path = Path(tempfile.gettempdir()) / f"pseofactory_pytest_failure_streak_{os.getpid()}.json"
+        self.failure_streak = SupervisorFailureStreak(streak_path)
+        self.consecutive_failures: int = int(self.failure_streak.load().get("consecutive_failures", 0))
         self._stop_requested: bool = False
+
+    def _record_failure_streak(
+        self,
+        cycle_ok: bool,
+        properties: Dict[str, Any],
+        cycle_id: str,
+        dry_run: bool,
+        scoped: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Persists the failure streak and escalates tenants failing identically across cycles.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if dry_run:
+            return []
+        try:
+            escalations = self.failure_streak.record_cycle(cycle_ok, self.consecutive_failures, properties, scoped=scoped)
+        except Exception:
+            return []
+        for esc in escalations:
+            try:
+                AtomicTelemetryLogger().record(
+                    event_type="SUPERVISOR_REPEATED_FAILURE",
+                    tenant_id=esc["tenant_id"],
+                    error_type="RepeatedTenantFailure",
+                    error_message=f"Identical failure for {esc['streak']} consecutive cycles since {esc['first_seen']}: {esc['reason']}",
+                    action_taken="ESCALATED",
+                    run_id=cycle_id,
+                )
+            except Exception:
+                pass
+        return escalations
 
     def compute_backoff(self, consecutive_failures: int) -> float:
         """
@@ -738,6 +877,7 @@ class AutonomousLifecycleSupervisor:
                     cascade_engine.replay_quarantine()
                 duration = time.time() - start_time
                 self.consecutive_failures = 0
+                self._record_failure_streak(True, {}, cycle_id, dry_run, scoped=bool(property_ids))
                 self.heartbeat_tracker.emit(
                     status="HEALTHY",
                     cycle_id=cycle_id,
@@ -793,6 +933,13 @@ class AutonomousLifecycleSupervisor:
             if all_passed:
                 if not any_deferred:
                     self.consecutive_failures = 0
+                    self._record_failure_streak(
+                        True,
+                        {k: v.to_dict() for k, v in fleet_results.items()},
+                        cycle_id,
+                        dry_run,
+                        scoped=bool(property_ids),
+                    )
                 if not dry_run and not any_deferred:
                     if not property_ids:
                         from pseofactory.maintenance import RefactorCascadeEngine
@@ -856,6 +1003,10 @@ class AutonomousLifecycleSupervisor:
                     if self.consecutive_failures >= self.max_consecutive_failures
                     else "FAILED"
                 )
+                property_dicts = {k: v.to_dict() for k, v in fleet_results.items()}
+                escalations = self._record_failure_streak(
+                    False, property_dicts, cycle_id, dry_run, scoped=bool(property_ids)
+                )
                 self.heartbeat_tracker.emit(
                     status=cycle_status,
                     cycle_id=cycle_id,
@@ -868,10 +1019,11 @@ class AutonomousLifecycleSupervisor:
                     "status": cycle_status,
                     "cycle_id": cycle_id,
                     "drift_detected": drift_detected,
-                    "properties": {k: v.to_dict() for k, v in fleet_results.items()},
+                    "properties": property_dicts,
                     "engine_hash": None,
                     "duration_seconds": duration,
                     "consecutive_failures": self.consecutive_failures,
+                    "escalations": escalations,
                 }
         except Exception as exc:
             duration = time.time() - start_time
@@ -881,6 +1033,7 @@ class AutonomousLifecycleSupervisor:
                 if self.consecutive_failures >= self.max_consecutive_failures
                 else "ERROR"
             )
+            self._record_failure_streak(False, {}, cycle_id, dry_run, scoped=bool(property_ids))
             try:
                 AtomicTelemetryLogger().record(
                     event_type="SUPERVISOR_CYCLE_ERROR",

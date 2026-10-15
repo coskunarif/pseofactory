@@ -1432,6 +1432,7 @@ class IndexingFeedbackLoop:
         from pseofactory.gsc_remediation import (
             _slug_from_url_or_query,
             compile_remediation_overlay_spec,
+            persist_overlay_respecting_lock,
         )
 
         needs_recompile = force or any(
@@ -1493,8 +1494,8 @@ class IndexingFeedbackLoop:
                 t_url = str(cand.get("target_url") or spec.get("target_url") or "")
                 if not self._is_protected_hub_route(c_slug, t_url):
                     overlay_file = overlays_dir / f"{c_slug}.json"
-                    overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
-                    if c_slug not in overlays_written:
+                    spec, written = persist_overlay_respecting_lock(overlay_file, spec)
+                    if written and c_slug not in overlays_written:
                         overlays_written.append(c_slug)
                     if c_slug not in repaired_slugs and self._apply_html_repairs_for_slug(c_slug, t_url, spec):
                         repaired_slugs.add(c_slug)

@@ -1972,6 +1972,37 @@ def is_overlay_locked(overlay_data: Dict[str, Any]) -> bool:
         return False
 
 
+def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """
+    Writes a remediation overlay unless the existing overlay still holds an active
+    measurement lock. Rewriting a locked overlay restarts its observation window, so
+    evaluate_expired_overlays would never reach a verdict. Returns (effective_spec, written).
+    Zero em-dashes. Zero en-dashes.
+    """
+    path = Path(overlay_file)
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = None
+        if isinstance(existing, dict) and is_overlay_locked(existing):
+            return existing, False
+        if isinstance(existing, dict) and existing.get("status") == "DEGRADED_ROLLED_BACK":
+            # Cooldown: do not immediately re-apply a rewrite that was just measured as degrading
+            try:
+                rolled_back = datetime.fromisoformat(str(existing.get("rolled_back_at")).replace("Z", "+00:00"))
+                if rolled_back.tzinfo is None:
+                    rolled_back = rolled_back.replace(tzinfo=timezone.utc)
+                cooldown_days = int(existing.get("measurement_lock_days") or existing.get("lock_days") or 14)
+                if datetime.now(timezone.utc) < rolled_back + timedelta(days=cooldown_days):
+                    return existing, False
+            except (TypeError, ValueError):
+                pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+    return spec, True
+
+
 def evaluate_expired_overlays(
     site_url: Optional[str] = None,
     days_threshold: int = 28,
