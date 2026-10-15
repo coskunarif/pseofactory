@@ -855,5 +855,153 @@ def test_unified_vault_roster_tiers_completeness():
     assert set(px_tiers["unapplied_expansion_queue"]) == {"sofi", "credible", "earnest", "lendkey"}
 
 
+def test_record_and_aggregate_outbound_partner_engagement_and_isolation(tmp_path):
+    """
+    Verifies record_outbound_partner_engagement and aggregate_outbound_partner_engagement:
+    1. Tracks calculator CTA slots, preset clicks, and outbound partner clicks per slug, partner, and slot.
+    2. Enforces strict cross-property isolation (rejects Prexvo partners on ProfitHelm and vice versa).
+    3. Ranks partner offers by empirical revenue yield.
+    """
+    from pseofactory.affiliates import (
+        record_outbound_partner_engagement,
+        aggregate_outbound_partner_engagement,
+        rank_partner_offers_by_revenue_yield,
+    )
+
+    ledger = tmp_path / "outbound_engagement.jsonl"
+
+    # Strict cross-property isolation checks
+    with pytest.raises(ValueError, match="Strict isolation violation"):
+        record_outbound_partner_engagement(
+            {"event_type": "affiliate_click", "slug": "student-loan-repayment-calculator", "partner_key": "mercury"},
+            ledger_path=ledger,
+            property_id="prexvo",
+        )
+
+    with pytest.raises(ValueError, match="Strict isolation violation"):
+        record_outbound_partner_engagement(
+            {"event_type": "affiliate_click", "slug": "irs-2027-tax-brackets", "partner_key": "splash_financial"},
+            ledger_path=ledger,
+            property_id="profithelm",
+        )
+
+    # Record valid ProfitHelm engagement events across two CTA slots and two partners
+    record_outbound_partner_engagement(
+        {"event_type": "page_view", "slug": "crypto-tax-liability-calculator-2027"},
+        ledger_path=ledger,
+        property_id="profithelm",
+    )
+    record_outbound_partner_engagement(
+        {"event_type": "calculation", "slug": "crypto-tax-liability-calculator-2027"},
+        ledger_path=ledger,
+        property_id="profithelm",
+    )
+    record_outbound_partner_engagement(
+        {
+            "event_type": "affiliate_click",
+            "slug": "crypto-tax-liability-calculator-2027",
+            "partner_key": "coinledger",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 35.0,
+        },
+        ledger_path=ledger,
+        property_id="profithelm",
+    )
+    record_outbound_partner_engagement(
+        {
+            "event_type": "affiliate_click",
+            "slug": "crypto-tax-liability-calculator-2027",
+            "partner_key": "koinly",
+            "cta_slot": "preset_scenario_cta",
+            "payout_usd": 85.0,
+        },
+        ledger_path=ledger,
+        property_id="profithelm",
+    )
+    record_outbound_partner_engagement(
+        {
+            "event_type": "affiliate_click",
+            "slug": "crypto-tax-liability-calculator-2027",
+            "partner_key": "koinly",
+            "cta_slot": "preset_scenario_cta",
+            "payout_usd": 85.0,
+        },
+        ledger_path=ledger,
+        property_id="profithelm",
+    )
+
+    agg = aggregate_outbound_partner_engagement(ledger, property_id="profithelm")
+    assert agg["total_outbound_clicks"] == 3
+    slug_stats = agg["by_slug"]["crypto-tax-liability-calculator-2027"]
+    assert slug_stats["top_converting_partner"] == "koinly"
+    assert slug_stats["top_converting_cta_slot"] == "preset_scenario_cta"
+    assert slug_stats["estimated_revenue_yield_usd"] == 205.0
+
+    ranked_offers = rank_partner_offers_by_revenue_yield(
+        property_id="profithelm",
+        slug="crypto-tax-liability-calculator-2027",
+        engagement_metrics=agg,
+        only_live=True,
+    )
+    assert len(ranked_offers) > 0
+    # Koinly should rank ahead of CoinLedger on this slug due to higher empirical revenue yield
+    koinly_idx = next(i for i, r in enumerate(ranked_offers) if r["key"] == "koinly")
+    coinledger_idx = next(i for i, r in enumerate(ranked_offers) if r["key"] == "coinledger")
+    assert koinly_idx < coinledger_idx
+
+
+def test_action_bus_and_partner_tracker_rank_pending_approvals_by_revenue_impact_and_render_ui(temp_bus_path, temp_email_paths):
+    """
+    Verifies that HumanActionBus and PartnerTrackingEngine rank pending manual partner approvals
+    by estimated monthly revenue impact and render priority rank and revenue impact badges in UI.
+    """
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+
+    # Route two pending partner approvals with different traffic and CTA intent levels
+    action_bus.route_manual_requirement(
+        property_id="profithelm",
+        partner_key="suretybonds_direct",
+        partner_name="SuretyBonds.com",
+        title="Approve SuretyBonds Direct Partner Agreement",
+        description="Complete partner agreement for customs bond calculators.",
+        action_type="PARTNER_APPROVAL",
+        severity="MEDIUM",
+        affected_traffic_impressions=250,
+        outbound_cta_intent_clicks=2,
+        affected_slugs=["customs-bond-sufficiency-calculator"],
+    )
+    action_bus.route_manual_requirement(
+        property_id="profithelm",
+        partner_key="avalara",
+        partner_name="Avalara AvaTax",
+        title="Approve Avalara Partner Agreement",
+        description="Complete partner agreement for sales tax economic nexus calculators.",
+        action_type="PARTNER_APPROVAL",
+        severity="HIGH",
+        affected_traffic_impressions=2400,
+        outbound_cta_intent_clicks=18,
+        affected_slugs=["sales-tax-economic-nexus-calculator"],
+    )
+
+    ranked_bus = action_bus.rank_pending_partner_approvals(property_id="profithelm")
+    assert len(ranked_bus) >= 2
+    assert ranked_bus[0].partner_key == "avalara"
+    assert ranked_bus[0].revenue_priority_rank == 1
+    assert ranked_bus[0].estimated_monthly_revenue_impact_usd > ranked_bus[1].estimated_monthly_revenue_impact_usd
+
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    dashboard = tracker.sync_and_evaluate(force_mail_poll=False)
+    html_content = render_light_interface(dashboard)
+
+    assert "data-revenue-rank=" in html_content
+    assert "data-revenue-impact=" in html_content
+    assert "Est. Impact: $" in html_content
+    assert "\u2014" not in html_content
+    assert "\u2013" not in html_content
+
+
+
 
 

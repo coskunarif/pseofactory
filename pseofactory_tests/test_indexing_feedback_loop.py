@@ -955,3 +955,424 @@ def test_manual_partner_or_platform_dependency_routes_single_clean_alert_without
     assert (tmp_path / "syndication" / "saas-burn-multiple-runway-calculator-linkedin.md").is_file()
 
 
+def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers_on_top_traffic_pages(tmp_path):
+    """
+    Verifies that the monetization loop extends beyond initial offer placement:
+    1. Tracks calculator CTA slots and outbound partner clicks per slug and per partner.
+    2. Detects when a top traffic page's current partner offer lags a higher-converting
+       partner in the same vertical (yield_optimization_needed=True).
+    3. Automatically promotes higher-converting partner offers in-place on both
+       ProfitHelm (e.g., promoting brex over ramp and koinly over coinledger) and
+       Prexvo (promoting earnest over sofi_refi while preserving YMYL PSLF suppression).
+    """
+    from pseofactory.action_bus import HumanActionBus
+
+    # --- 1. ProfitHelm Tenant Verification ---
+    ph_base = tmp_path / "profithelm"
+    ph_dist = ph_base / "dist"
+    saas_dir = ph_dist / "tools" / "saas-burn-multiple-runway-calculator"
+    crypto_dir = ph_dist / "tools" / "crypto-tax-liability-calculator-2027"
+    saas_dir.mkdir(parents=True, exist_ok=True)
+    crypto_dir.mkdir(parents=True, exist_ok=True)
+
+    # Initial pages already have baseline offers (ramp and coinledger), presets, quick-answer, and internal links
+    initial_saas_html = (
+        '<!DOCTYPE html><html><head><title>SaaS Burn Multiple Calculator</title></head><body><main>'
+        '<h1>SaaS Burn Multiple Calculator</h1>'
+        '<div class="quick-answer"><p>Calculate SaaS burn multiple and cash runway.</p></div>'
+        '<button data-calc-preset="baseline">Baseline</button>'
+        '<a href="/tools/saas-cac-payback-period-calculator/">CAC Payback</a>'
+        '<a href="/tools/inventory-carrying-cost-calculator/">Inventory Cost</a>'
+        '<section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-partner="ramp">'
+        '<a href="https://ramp.com/?ref=profithelm" class="overlay-partner-btn affiliate-cta-link" '
+        'data-partner="ramp" rel="noopener sponsored nofollow">Compare Ramp Corporate Cards</a>'
+        '</section></main></body></html>'
+    )
+    initial_crypto_html = (
+        '<!DOCTYPE html><html><head><title>Crypto Tax Calculator 2027</title></head><body><main>'
+        '<h1>Crypto Tax Calculator 2027</h1>'
+        '<div class="quick-answer"><p>Calculate Form 1099-DA crypto capital gains tax.</p></div>'
+        '<button data-calc-preset="baseline">Baseline</button>'
+        '<a href="/tools/irs-2027-tax-brackets/">2027 Tax Brackets</a>'
+        '<a href="/tools/capital-gains-tax-calculator-2027/">Capital Gains</a>'
+        '<section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-partner="coinledger">'
+        '<a href="https://coinledger.io/?fpr=lv44v" class="overlay-partner-btn affiliate-cta-link" '
+        'data-partner="coinledger" rel="noopener sponsored nofollow">Import 1099-DA Trades into CoinLedger</a>'
+        '</section></main></body></html>'
+    )
+    (saas_dir / "index.html").write_text(initial_saas_html, encoding="utf-8")
+    (crypto_dir / "index.html").write_text(initial_crypto_html, encoding="utf-8")
+
+    # Pre-create syndication files so distribution is already complete; only yield optimization is needed
+    ph_synd = ph_base / "syndication"
+    ph_synd.mkdir(parents=True, exist_ok=True)
+    for slug in ("saas-burn-multiple-runway-calculator", "crypto-tax-liability-calculator-2027"):
+        (ph_synd / f"{slug}-linkedin.md").write_text("LinkedIn copy", encoding="utf-8")
+        (ph_synd / f"{slug}-newsletter.md").write_text("Newsletter copy", encoding="utf-8")
+        (ph_synd / f"{slug}-Substack Notes-post.txt").write_text("Substack copy", encoding="utf-8")
+
+    mock_indexer = MagicMock()
+    mock_indexer.filter_unchanged_push_urls.side_effect = lambda urls, **kw: (list(urls), [])
+    mock_indexer.dispatch_automated_indexing.return_value = {"status": "SUCCESS"}
+    mock_indexer.load_gsc_rollover_queue.return_value = []
+
+    mock_preflight = MagicMock()
+    mock_preflight.inspect_dist.return_value = MagicMock(
+        passed_count=2,
+        blocked_count=0,
+        total_inspected=2,
+        blocked_urls=[],
+        push_eligible_urls=[
+            "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
+            "https://profithelm.com/tools/crypto-tax-liability-calculator-2027/",
+        ],
+        sitemap_eligible_urls=[],
+    )
+
+    ph_bus = HumanActionBus(ledger_path=ph_base / ".agy" / "human_action_bus.json")
+    ph_loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=ph_base,
+        dist_dir=ph_dist,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=ph_bus,
+    )
+
+    # Outbound telemetry shows Brex out-converts Ramp on SaaS runway calculator,
+    # and Koinly out-converts CoinLedger on Crypto tax calculator
+    ph_engagement_events = [
+        {"event_type": "page_view", "slug": "saas-burn-multiple-runway-calculator"},
+        {"event_type": "calculation", "slug": "saas-burn-multiple-runway-calculator"},
+        {"event_type": "select_preset", "slug": "saas-burn-multiple-runway-calculator", "cta_slot": "preset_scenario_cta"},
+        {
+            "event_type": "affiliate_click",
+            "slug": "saas-burn-multiple-runway-calculator",
+            "partner_key": "ramp",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 35.0,
+        },
+        {
+            "event_type": "affiliate_click",
+            "slug": "saas-burn-multiple-runway-calculator",
+            "partner_key": "brex",
+            "cta_slot": "preset_scenario_cta",
+            "payout_usd": 250.0,
+        },
+        {
+            "event_type": "affiliate_click",
+            "slug": "saas-burn-multiple-runway-calculator",
+            "partner_key": "brex",
+            "cta_slot": "preset_scenario_cta",
+            "payout_usd": 250.0,
+        },
+        {"event_type": "page_view", "slug": "crypto-tax-liability-calculator-2027"},
+        {"event_type": "calculation", "slug": "crypto-tax-liability-calculator-2027"},
+        {
+            "event_type": "affiliate_click",
+            "slug": "crypto-tax-liability-calculator-2027",
+            "partner_key": "coinledger",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 35.0,
+        },
+        {
+            "event_type": "affiliate_click",
+            "slug": "crypto-tax-liability-calculator-2027",
+            "partner_key": "koinly",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 85.0,
+        },
+        {
+            "event_type": "affiliate_click",
+            "slug": "crypto-tax-liability-calculator-2027",
+            "partner_key": "koinly",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 85.0,
+        },
+    ]
+
+    ph_res = ph_loop.run_feedback_cycle(
+        unindexed_urls=[],
+        query_records=[
+            {
+                "slug": "saas-burn-multiple-runway-calculator",
+                "target_url": "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
+                "query": "saas burn multiple cash runway calculator",
+                "impressions": 680,
+                "clicks": 22,
+                "ctr": 0.032,
+                "position": 5.4,
+            },
+            {
+                "slug": "crypto-tax-liability-calculator-2027",
+                "target_url": "https://profithelm.com/tools/crypto-tax-liability-calculator-2027/",
+                "query": "crypto tax form 1099 da capital gains calculator",
+                "impressions": 540,
+                "clicks": 18,
+                "ctr": 0.033,
+                "position": 6.1,
+            },
+        ],
+        outbound_engagement_events=ph_engagement_events,
+        skip_recompile=True,
+    )
+
+    assert ph_res["status"] == "SUCCESS"
+    assert "saas-burn-multiple-runway-calculator" in ph_res["yield_optimized_slugs"]
+    assert "crypto-tax-liability-calculator-2027" in ph_res["yield_optimized_slugs"]
+
+    # Check telemetry summary captured top converting partners and CTA slots
+    eng_sum = ph_res["outbound_engagement_summary"]
+    assert eng_sum["total_outbound_clicks"] == 6
+    assert eng_sum["by_slug"]["saas-burn-multiple-runway-calculator"]["top_converting_partner"] == "brex"
+    assert eng_sum["by_slug"]["saas-burn-multiple-runway-calculator"]["top_converting_cta_slot"] == "preset_scenario_cta"
+    assert eng_sum["by_slug"]["crypto-tax-liability-calculator-2027"]["top_converting_partner"] == "koinly"
+
+    # Check HTML was upgraded in-place to the higher-converting partner offers
+    updated_saas_html = (saas_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-partner="brex"' in updated_saas_html
+    assert 'data-optimization-status="YIELD_OPTIMIZED_PROMOTED"' in updated_saas_html
+    assert 'data-cta-slot="preset_scenario_cta"' in updated_saas_html
+    assert "\u2014" not in updated_saas_html
+    assert "\u2013" not in updated_saas_html
+
+    updated_crypto_html = (crypto_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-partner="koinly"' in updated_crypto_html
+    assert 'data-optimization-status="YIELD_OPTIMIZED_PROMOTED"' in updated_crypto_html
+    assert "koinly.io" in updated_crypto_html
+
+    # --- 2. Prexvo Tenant Verification ---
+    px_base = tmp_path / "prexvo"
+    px_dist = px_base / "dist"
+    refi_dir = px_dist / "tools" / "student-loan-refinance-break-even-calculator"
+    pslf_dir = px_dist / "tools" / "pslf-qualifying-payment-simulator"
+    refi_dir.mkdir(parents=True, exist_ok=True)
+    pslf_dir.mkdir(parents=True, exist_ok=True)
+
+    initial_refi_html = (
+        '<!DOCTYPE html><html><head><title>Student Loan Refinance Calculator</title></head><body><main>'
+        '<h1>Student Loan Refinance Calculator</h1>'
+        '<div class="quick-answer"><p>Compare private refinance savings against Title IV plans.</p></div>'
+        '<button data-calc-preset="baseline">Baseline</button>'
+        '<a href="/tools/rap-vs-ibr-calculator/">RAP vs IBR</a>'
+        '<a href="/tools/tiered-standard-calculator/">Tiered Standard</a>'
+        '<section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-partner="sofi_refi">'
+        '<a href="https://www.sofi.com/refinance-student-loan/?ref=prexvo" class="overlay-partner-btn affiliate-cta-link" '
+        'data-partner="sofi_refi" rel="noopener sponsored nofollow">Check SoFi Refinance Rates</a>'
+        '</section></main></body></html>'
+    )
+    (refi_dir / "index.html").write_text(initial_refi_html, encoding="utf-8")
+    (pslf_dir / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>PSLF Simulator</title></head><body><main><h1>PSLF Simulator</h1></main></body></html>",
+        encoding="utf-8",
+    )
+
+    px_loop = IndexingFeedbackLoop(
+        property_id="prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        base_dir=px_base,
+        dist_dir=px_dist,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=HumanActionBus(ledger_path=px_base / ".agy" / "human_action_bus.json"),
+    )
+
+    px_engagement_events = [
+        {"event_type": "page_view", "slug": "student-loan-refinance-break-even-calculator", "property_id": "prexvo"},
+        {"event_type": "calculation", "slug": "student-loan-refinance-break-even-calculator", "property_id": "prexvo"},
+        {
+            "event_type": "affiliate_click",
+            "slug": "student-loan-refinance-break-even-calculator",
+            "partner_key": "sofi_refi",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 100.0,
+            "property_id": "prexvo",
+        },
+        {
+            "event_type": "affiliate_click",
+            "slug": "student-loan-refinance-break-even-calculator",
+            "partner_key": "earnest",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 150.0,
+            "property_id": "prexvo",
+        },
+        {
+            "event_type": "affiliate_click",
+            "slug": "student-loan-refinance-break-even-calculator",
+            "partner_key": "earnest",
+            "cta_slot": "calculator_primary_cta",
+            "payout_usd": 150.0,
+            "property_id": "prexvo",
+        },
+    ]
+
+    px_res = px_loop.run_feedback_cycle(
+        unindexed_urls=[],
+        query_records=[
+            {
+                "slug": "student-loan-refinance-break-even-calculator",
+                "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
+                "query": "student loan refinance rate break even calculator",
+                "impressions": 490,
+                "clicks": 16,
+                "ctr": 0.032,
+                "position": 5.9,
+            },
+            {
+                "slug": "pslf-qualifying-payment-simulator",
+                "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+                "query": "pslf qualifying payment simulator",
+                "impressions": 520,
+                "clicks": 19,
+                "ctr": 0.036,
+                "position": 5.2,
+            },
+        ],
+        outbound_engagement_events=px_engagement_events,
+        skip_recompile=True,
+    )
+
+    assert px_res["status"] == "SUCCESS"
+    assert "student-loan-refinance-break-even-calculator" in px_res["yield_optimized_slugs"]
+
+    updated_refi_html = (refi_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-partner="earnest"' in updated_refi_html
+    assert 'data-optimization-status="YIELD_OPTIMIZED_PROMOTED"' in updated_refi_html
+    assert "earnest.com" in updated_refi_html
+
+    # Restricted public-service page must remain 100% free of commercial offers
+    updated_pslf_html = (pslf_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-restricted-public-service="true"' in updated_pslf_html
+    assert 'data-commercial-offers="none"' in updated_pslf_html
+    assert "affiliate-cta-link" not in updated_pslf_html
+
+
+def test_pending_manual_partner_approvals_ranked_by_estimated_revenue_impact(tmp_path):
+    """
+    Verifies that when multiple pending manual partner approvals are routed onto HumanActionBus,
+    they are automatically enriched with estimated monthly revenue impact and ranked in descending
+    order of estimated revenue yield for human review.
+    """
+    from pseofactory.action_bus import HumanActionBus
+
+    dist_dir = tmp_path / "dist"
+    bond_dir = dist_dir / "tools" / "customs-bond-sufficiency-calculator"
+    tax_dir = dist_dir / "tools" / "sales-tax-economic-nexus-calculator"
+    payroll_dir = dist_dir / "tools" / "payroll-fica-tax-withholding-calculator"
+    for d in (bond_dir, tax_dir, payroll_dir):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.html").write_text(
+            "<!DOCTYPE html><html><head><title>Tool</title></head><body><main><h1>Tool</h1></main></body></html>",
+            encoding="utf-8",
+        )
+
+    bus = HumanActionBus(ledger_path=tmp_path / ".agy" / "human_action_bus.json")
+    mock_indexer = MagicMock()
+    mock_indexer.filter_unchanged_push_urls.side_effect = lambda urls, **kw: (list(urls), [])
+    mock_indexer.dispatch_automated_indexing.return_value = {"status": "SUCCESS"}
+    mock_indexer.load_gsc_rollover_queue.return_value = []
+
+    mock_preflight = MagicMock()
+    mock_preflight.inspect_dist.return_value = MagicMock(
+        passed_count=3,
+        blocked_count=0,
+        total_inspected=3,
+        blocked_urls=[],
+        push_eligible_urls=[
+            "https://profithelm.com/tools/customs-bond-sufficiency-calculator/",
+            "https://profithelm.com/tools/sales-tax-economic-nexus-calculator/",
+            "https://profithelm.com/tools/payroll-fica-tax-withholding-calculator/",
+        ],
+        sitemap_eligible_urls=[],
+    )
+
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=bus,
+    )
+
+    # Give sales-tax-economic-nexus-calculator (avalara: $250 bounty, 1800 impressions, 12 CTA clicks)
+    # much higher traffic + CTA intent than payroll (gusto: $150 bounty, 500 impressions, 4 CTA clicks)
+    # and customs bond (suretybonds_direct: $95 bounty, 200 impressions, 1 CTA click).
+    engagement_events = [
+        {"event_type": "affiliate_click", "slug": "sales-tax-economic-nexus-calculator", "partner_key": "stripe_tax", "payout_usd": 120.0}
+        for _ in range(12)
+    ] + [
+        {"event_type": "affiliate_click", "slug": "payroll-fica-tax-withholding-calculator", "partner_key": "rippling", "payout_usd": 175.0}
+        for _ in range(4)
+    ] + [
+        {"event_type": "affiliate_click", "slug": "customs-bond-sufficiency-calculator", "partner_key": "flexport", "payout_usd": 180.0}
+    ]
+
+    res = loop.run_feedback_cycle(
+        unindexed_urls=[],
+        query_records=[
+            {
+                "slug": "customs-bond-sufficiency-calculator",
+                "target_url": "https://profithelm.com/tools/customs-bond-sufficiency-calculator/",
+                "query": "customs bond sufficiency calculator",
+                "impressions": 200,
+                "clicks": 4,
+                "ctr": 0.02,
+                "position": 7.5,
+            },
+            {
+                "slug": "payroll-fica-tax-withholding-calculator",
+                "target_url": "https://profithelm.com/tools/payroll-fica-tax-withholding-calculator/",
+                "query": "payroll fica tax withholding calculator",
+                "impressions": 500,
+                "clicks": 12,
+                "ctr": 0.024,
+                "position": 6.2,
+            },
+            {
+                "slug": "sales-tax-economic-nexus-calculator",
+                "target_url": "https://profithelm.com/tools/sales-tax-economic-nexus-calculator/",
+                "query": "sales tax economic nexus threshold calculator",
+                "impressions": 1800,
+                "clicks": 45,
+                "ctr": 0.025,
+                "position": 5.1,
+            },
+        ],
+        outbound_engagement_events=engagement_events,
+        skip_recompile=True,
+    )
+
+    assert res["status"] == "SUCCESS"
+    ranked = res["ranked_pending_partner_approvals"]
+    assert len(ranked) == 3
+
+    # Verify descending order by estimated_monthly_revenue_impact_usd: avalara (#1) > gusto (#2) > suretybonds_direct (#3)
+    assert ranked[0]["partner_key"] == "avalara"
+    assert ranked[0]["revenue_priority_rank"] == 1
+    assert ranked[1]["partner_key"] == "gusto"
+    assert ranked[1]["revenue_priority_rank"] == 2
+    assert ranked[2]["partner_key"] == "suretybonds_direct"
+    assert ranked[2]["revenue_priority_rank"] == 3
+
+    assert ranked[0]["estimated_monthly_revenue_impact_usd"] > ranked[1]["estimated_monthly_revenue_impact_usd"]
+    assert ranked[1]["estimated_monthly_revenue_impact_usd"] > ranked[2]["estimated_monthly_revenue_impact_usd"]
+    assert ranked[0]["affected_traffic_impressions"] == 1800
+    assert ranked[0]["outbound_cta_intent_clicks"] == 12
+
+
+

@@ -27,6 +27,7 @@ from pseofactory.affiliates import (
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
     validate_affiliate_url,
+    estimate_partner_approval_revenue_impact,
 )
 from pseofactory.email_ingest import PartnerEmailClassification
 
@@ -54,6 +55,12 @@ class ActionItem:
     source_email_id: Optional[str] = None
     candidate_url: str = ""
     vault_synced: bool = False
+    estimated_monthly_revenue_impact_usd: float = 0.0
+    bounty_uplift_usd: float = 0.0
+    affected_traffic_impressions: int = 0
+    outbound_cta_intent_clicks: int = 0
+    affected_slugs: List[str] = field(default_factory=list)
+    revenue_priority_rank: int = 0
 
     @property
     def operator_note(self) -> str:
@@ -122,6 +129,7 @@ class HumanActionBus:
         self.hub = hub
         self._ensure_dir()
         self.items: Dict[str, ActionItem] = self._load()
+        self._recompute_revenue_priority_ranks()
 
     def _ensure_dir(self) -> None:
         dir_name = os.path.dirname(os.path.abspath(self.bus_path))
@@ -138,6 +146,8 @@ class HumanActionBus:
                 for k, v in data.get("actions", {}).items():
                     filtered_v = {fk: fv for fk, fv in v.items() if fk in valid_fields}
                     item = ActionItem(**filtered_v)
+                    if item.estimated_monthly_revenue_impact_usd <= 0.0:
+                        self._compute_and_apply_revenue_impact(item)
                     self._assert_item_invariants(item)
                     items_dict[k] = item
                 return items_dict
@@ -145,14 +155,83 @@ class HumanActionBus:
                 pass
         return {}
 
+    def _compute_and_apply_revenue_impact(
+        self,
+        item: ActionItem,
+        affected_slugs: Optional[List[str]] = None,
+        impressions: int = 0,
+        outbound_clicks: int = 0,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Calculates and updates estimated monthly revenue impact for an action item."""
+        merged_slugs: List[str] = []
+        for s in list(item.affected_slugs or []) + list(affected_slugs or []):
+            s_clean = str(s or "").strip().lower()
+            if s_clean and s_clean not in merged_slugs:
+                merged_slugs.append(s_clean)
+
+        for req in item.missing_requirements:
+            if req.startswith("Affected asset awaiting manual gate:"):
+                extracted = req.split(":", 1)[1].strip().lower()
+                if extracted and extracted not in merged_slugs:
+                    merged_slugs.append(extracted)
+
+        eff_impr = max(int(item.affected_traffic_impressions or 0), int(impressions or 0))
+        eff_clicks = max(int(item.outbound_cta_intent_clicks or 0), int(outbound_clicks or 0))
+
+        impact = estimate_partner_approval_revenue_impact(
+            property_id=item.property_id,
+            partner_key=item.partner_key,
+            affected_slugs=merged_slugs,
+            impressions=eff_impr,
+            outbound_clicks=eff_clicks,
+            engagement_metrics=engagement_metrics,
+        )
+        item.estimated_monthly_revenue_impact_usd = float(impact["estimated_monthly_revenue_impact_usd"])
+        item.bounty_uplift_usd = float(impact["bounty_uplift_usd"])
+        item.affected_traffic_impressions = int(impact["affected_traffic_impressions"])
+        item.outbound_cta_intent_clicks = int(impact["outbound_cta_intent_clicks"])
+        item.affected_slugs = list(impact["affected_slugs"])
+
+    def _recompute_revenue_priority_ranks(self) -> None:
+        """Assigns 1-based revenue_priority_rank across pending operator items."""
+        prio = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        pending = [it for it in self.items.values() if it.status == "PENDING_OPERATOR"]
+        for it in pending:
+            if it.estimated_monthly_revenue_impact_usd <= 0.0:
+                self._compute_and_apply_revenue_impact(it)
+
+        pending.sort(
+            key=lambda x: (
+                -float(x.estimated_monthly_revenue_impact_usd or 0.0),
+                prio.get(x.severity, 4),
+                x.created_at,
+            )
+        )
+        for idx, it in enumerate(pending, start=1):
+            it.revenue_priority_rank = idx
+
+        for it in self.items.values():
+            if it.status != "PENDING_OPERATOR":
+                it.revenue_priority_rank = 0
+
     def save(self) -> None:
         """Persists action bus atomically with zero-dash and boundary checks."""
+        self._recompute_revenue_priority_ranks()
         data = {
             "bus_metadata": {
                 "version": "1.0.0",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "total_items": len(self.items),
                 "pending_operator_count": sum(1 for it in self.items.values() if it.status == "PENDING_OPERATOR"),
+                "total_pending_monthly_revenue_impact_usd": round(
+                    sum(
+                        float(it.estimated_monthly_revenue_impact_usd or 0.0)
+                        for it in self.items.values()
+                        if it.status == "PENDING_OPERATOR"
+                    ),
+                    2,
+                ),
             },
             "actions": {k: it.to_dict() for k, it in self.items.items()},
         }
@@ -203,6 +282,7 @@ class HumanActionBus:
     def route_classification(
         self,
         c: PartnerEmailClassification,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> Optional[ActionItem]:
         """
         Routes an email classification onto the human action bus if operator intervention is required.
@@ -226,6 +306,8 @@ class HumanActionBus:
                 existing.deadline = c.deadline
             if cand_url and not existing.candidate_url:
                 existing.candidate_url = cand_url
+            self._compute_and_apply_revenue_impact(existing, engagement_metrics=engagement_metrics)
+            self._recompute_revenue_priority_ranks()
             return existing
 
         title = f"{c.partner_name}: {c.classification_type.replace('_', ' ').title()}"
@@ -249,6 +331,7 @@ class HumanActionBus:
             candidate_url=cand_url,
         )
 
+        self._compute_and_apply_revenue_impact(item, engagement_metrics=engagement_metrics)
         self._assert_item_invariants(item)
         self.items[action_id] = item
         self.save()
@@ -266,11 +349,19 @@ class HumanActionBus:
         deadline: Optional[str] = None,
         missing_requirements: Optional[List[str]] = None,
         candidate_url: str = "",
+        affected_slugs: Optional[List[str]] = None,
+        impressions: int = 0,
+        outbound_clicks: int = 0,
+        affected_traffic_impressions: int = 0,
+        outbound_cta_intent_clicks: int = 0,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> ActionItem:
         """Creates or updates a manual operator requirement on the action bus."""
         title_clean = title.replace("\u2014", "-").replace("\u2013", "-")
         desc_clean = description.replace("\u2014", "-").replace("\u2013", "-")
         pname_clean = partner_name.replace("\u2014", "-").replace("\u2013", "-")
+        eff_impr = int(impressions or affected_traffic_impressions or 0)
+        eff_clicks = int(outbound_clicks or outbound_cta_intent_clicks or 0)
 
         safe_key = re.sub(r"[^a-z0-9]+", "-", partner_key.lower()).strip("-")
         safe_type = re.sub(r"[^a-z0-9]+", "-", action_type.lower()).strip("-")
@@ -283,6 +374,14 @@ class HumanActionBus:
                 existing.deadline = deadline
             if candidate_url and not existing.candidate_url:
                 existing.candidate_url = candidate_url
+            self._compute_and_apply_revenue_impact(
+                existing,
+                affected_slugs=affected_slugs,
+                impressions=eff_impr,
+                outbound_clicks=eff_clicks,
+                engagement_metrics=engagement_metrics,
+            )
+            self.save()
             return existing
 
         item = ActionItem(
@@ -299,8 +398,18 @@ class HumanActionBus:
             deadline=deadline,
             missing_requirements=missing_requirements or [],
             candidate_url=candidate_url,
+            affected_slugs=list(affected_slugs or []),
+            affected_traffic_impressions=eff_impr,
+            outbound_cta_intent_clicks=eff_clicks,
         )
 
+        self._compute_and_apply_revenue_impact(
+            item,
+            affected_slugs=affected_slugs,
+            impressions=eff_impr,
+            outbound_clicks=eff_clicks,
+            engagement_metrics=engagement_metrics,
+        )
         self._assert_item_invariants(item)
         self.items[action_id] = item
         self.save()
@@ -319,6 +428,10 @@ class HumanActionBus:
         deadline: Optional[str] = None,
         missing_requirements: Optional[List[str]] = None,
         candidate_url: str = "",
+        affected_slugs: Optional[List[str]] = None,
+        impressions: int = 0,
+        outbound_clicks: int = 0,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> ActionItem:
         """
         Routes a genuine human-only stage dependency onto the HumanActionBus
@@ -359,6 +472,10 @@ class HumanActionBus:
             deadline=deadline,
             missing_requirements=clean_reqs,
             candidate_url=candidate_url,
+            affected_slugs=affected_slugs,
+            impressions=impressions,
+            outbound_clicks=outbound_clicks,
+            engagement_metrics=engagement_metrics,
         )
 
     def route_asset_manual_dependency(
@@ -374,14 +491,19 @@ class HumanActionBus:
         deadline: Optional[str] = None,
         missing_requirements: Optional[List[str]] = None,
         candidate_url: str = "",
+        impressions: int = 0,
+        outbound_clicks: int = 0,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> ActionItem:
         """
         Routes a single clean, deduplicated alert onto the HumanActionBus when an
         impression-gaining or prioritized asset hits a manual partner or external
         platform requirement. Multiple assets hitting the same manual partner/platform
         gate consolidate into the single existing ActionItem record without duplicating
-        alerts or interrupting the autonomous growth loop.
+        alerts or interrupting the autonomous growth loop, while accumulating traffic
+        and outbound CTA intent to rank pending approvals by estimated revenue impact.
         """
+        from pseofactory.affiliates import EXTENDED_PARTNER_BOUNTY_ESTIMATES
         prop_clean = (property_id or "profithelm").strip().lower()
         slug_clean = re.sub(r"[^a-z0-9-]+", "-", (asset_slug or "asset").strip().lower()).strip("-") or "asset"
         eff_key = re.sub(r"[^a-z0-9_]+", "_", (partner_key or "").strip().lower()).strip("_")
@@ -390,6 +512,7 @@ class HumanActionBus:
         elif (
             eff_key not in PROFITHELM_AFFILIATES
             and eff_key not in PREXVO_AFFILIATES
+            and eff_key not in EXTENDED_PARTNER_BOUNTY_ESTIMATES
             and not eff_key.startswith(f"{prop_clean}_")
         ):
             eff_key = f"{prop_clean}_{eff_key}"
@@ -415,6 +538,7 @@ class HumanActionBus:
         if action_id in self.items:
             existing = self.items[action_id]
             updated = False
+            is_new_slug = slug_clean not in existing.affected_slugs
             for r in base_reqs:
                 if r not in existing.missing_requirements:
                     existing.missing_requirements.append(r)
@@ -425,6 +549,28 @@ class HumanActionBus:
             if candidate_url and not existing.candidate_url:
                 existing.candidate_url = candidate_url
                 updated = True
+
+            if is_new_slug:
+                new_impr = int(existing.affected_traffic_impressions or 0) + max(int(impressions or 0), 0)
+                new_clicks = int(existing.outbound_cta_intent_clicks or 0) + max(int(outbound_clicks or 0), 0)
+                updated = True
+            else:
+                new_impr = max(int(existing.affected_traffic_impressions or 0), int(impressions or 0))
+                new_clicks = max(int(existing.outbound_cta_intent_clicks or 0), int(outbound_clicks or 0))
+                if new_impr != existing.affected_traffic_impressions or new_clicks != existing.outbound_cta_intent_clicks:
+                    updated = True
+
+            prev_impact = existing.estimated_monthly_revenue_impact_usd
+            self._compute_and_apply_revenue_impact(
+                existing,
+                affected_slugs=[slug_clean],
+                impressions=new_impr,
+                outbound_clicks=new_clicks,
+                engagement_metrics=engagement_metrics,
+            )
+            if existing.estimated_monthly_revenue_impact_usd != prev_impact:
+                updated = True
+
             if updated:
                 existing.updated_at = datetime.now(timezone.utc).isoformat()
                 self._assert_item_invariants(existing)
@@ -442,7 +588,40 @@ class HumanActionBus:
             deadline=deadline,
             missing_requirements=base_reqs,
             candidate_url=candidate_url,
+            affected_slugs=[slug_clean],
+            impressions=impressions,
+            outbound_clicks=outbound_clicks,
+            engagement_metrics=engagement_metrics,
         )
+
+    def rank_pending_partner_approvals(
+        self,
+        property_id: Optional[str] = None,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
+    ) -> List[ActionItem]:
+        """
+        Re-evaluates and ranks all pending manual partner approvals on the human action bus
+        by estimated monthly revenue impact (`estimated_monthly_revenue_impact_usd` descending).
+        """
+        prop_clean = property_id.strip().lower() if property_id else None
+        updated = False
+        for it in self.items.values():
+            if it.status != "PENDING_OPERATOR":
+                continue
+            if prop_clean and it.property_id.lower() != prop_clean:
+                continue
+            prev_val = it.estimated_monthly_revenue_impact_usd
+            self._compute_and_apply_revenue_impact(
+                it,
+                engagement_metrics=engagement_metrics,
+            )
+            if it.estimated_monthly_revenue_impact_usd != prev_val:
+                updated = True
+
+        self._recompute_revenue_priority_ranks()
+        if updated:
+            self.save()
+        return self.get_pending_items(property_id=property_id, sort_by_revenue_impact=True)
 
     def auto_approve(self, action_id: str) -> None:
         """
@@ -517,8 +696,13 @@ class HumanActionBus:
         self.save()
         return item
 
-    def get_pending_items(self, property_id: Optional[str] = None) -> List[ActionItem]:
-        """Returns list of items awaiting operator confirmation."""
+    def get_pending_items(
+        self,
+        property_id: Optional[str] = None,
+        sort_by_revenue_impact: bool = True,
+    ) -> List[ActionItem]:
+        """Returns list of items awaiting operator confirmation, ranked by estimated revenue impact."""
+        self._recompute_revenue_priority_ranks()
         pending = [
             it for it in self.items.values()
             if it.status == "PENDING_OPERATOR"
@@ -527,17 +711,36 @@ class HumanActionBus:
             prop_clean = property_id.strip().lower()
             pending = [it for it in pending if it.property_id.lower() == prop_clean]
 
-        # Sort by severity priority: CRITICAL > HIGH > MEDIUM > LOW
         prio = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-        pending.sort(key=lambda x: (prio.get(x.severity, 4), x.created_at))
+        if sort_by_revenue_impact:
+            pending.sort(
+                key=lambda x: (
+                    -float(x.estimated_monthly_revenue_impact_usd or 0.0),
+                    prio.get(x.severity, 4),
+                    x.created_at,
+                )
+            )
+            for idx, it in enumerate(pending, start=1):
+                it.revenue_priority_rank = idx
+        else:
+            pending.sort(key=lambda x: (prio.get(x.severity, 4), x.created_at))
         return pending
 
     def get_all_items(self, property_id: Optional[str] = None) -> List[ActionItem]:
-        """Returns all action items."""
+        """Returns all action items with pending items ranked by estimated revenue impact."""
+        self._recompute_revenue_priority_ranks()
         items = list(self.items.values())
         if property_id:
             prop_clean = property_id.strip().lower()
             items = [it for it in items if it.property_id.lower() == prop_clean]
         prio = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-        items.sort(key=lambda x: (0 if x.status == "PENDING_OPERATOR" else 1, prio.get(x.severity, 4), x.created_at))
+        items.sort(
+            key=lambda x: (
+                0 if x.status == "PENDING_OPERATOR" else 1,
+                -float(x.estimated_monthly_revenue_impact_usd or 0.0) if x.status == "PENDING_OPERATOR" else 0.0,
+                prio.get(x.severity, 4),
+                x.created_at,
+            )
+        )
         return items
+

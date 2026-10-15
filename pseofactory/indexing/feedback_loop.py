@@ -1064,22 +1064,72 @@ class IndexingFeedbackLoop:
             self.action_bus = HumanActionBus()
         return self.action_bus
 
+    def _load_outbound_engagement_metrics(
+        self,
+        outbound_engagement_events: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Loads and aggregates outbound partner CTA engagement and calculator intent
+        telemetry from passed events/aggregates or persisted property ledgers.
+        """
+        from pseofactory.affiliates import aggregate_outbound_partner_engagement
+
+        if isinstance(outbound_engagement_events, dict) and (
+            "by_slug" in outbound_engagement_events or "by_partner" in outbound_engagement_events
+        ):
+            return outbound_engagement_events
+
+        if outbound_engagement_events is not None:
+            return aggregate_outbound_partner_engagement(
+                outbound_engagement_events,
+                property_id=self.property_id,
+            )
+
+        if self.base_dir:
+            for rel_p in (
+                self.base_dir / ".agy" / "outbound_partner_engagement.json",
+                self.base_dir / ".agy" / "telemetry_events.jsonl",
+                self.base_dir / "data" / "telemetry_events.jsonl",
+            ):
+                if rel_p.is_file():
+                    return aggregate_outbound_partner_engagement(
+                        rel_p,
+                        property_id=self.property_id,
+                    )
+
+        return aggregate_outbound_partner_engagement([], property_id=self.property_id)
+
     def audit_impression_monetization_and_distribution_gaps(
         self,
         query_records: Optional[List[Dict[str, Any]]] = None,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Closes the loop between search ranking telemetry and monetization/distribution:
         Scans query telemetry records (plus persisted visibility_snapshot.json when
         query_records is None) to spot pages gaining search impressions that still lack
         strong conversion paths or external distribution, and flags high-intent calculators
-        and guides for automatic content sharpening, internal linking, and partner offer
-        placement.
+        and guides for automatic content sharpening, internal linking, and revenue-yield
+        optimized partner offer placement.
         Zero em-dashes. Zero en-dashes.
         """
         from pseofactory.gsc_remediation import (
             _slug_from_url_or_query,
             evaluate_asset_conversion_and_distribution_readiness,
+        )
+
+        eff_engagement = (
+            engagement_metrics
+            if isinstance(engagement_metrics, dict) and engagement_metrics
+            else self._load_outbound_engagement_metrics()
+        )
+        has_eng_signal = bool(
+            isinstance(eff_engagement, dict)
+            and (
+                int(eff_engagement.get("total_events", 0) or 0) > 0
+                or bool(eff_engagement.get("by_slug"))
+                or bool(eff_engagement.get("by_partner"))
+            )
         )
 
         source_records: List[Dict[str, Any]] = []
@@ -1103,8 +1153,11 @@ class IndexingFeedbackLoop:
         distribution_gap_slugs: List[str] = []
         high_intent_slugs: List[str] = []
         manual_gate_slugs: List[str] = []
+        yield_optimized_slugs: List[str] = []
 
         for rec in source_records:
+            if has_eng_signal and "engagement_metrics" not in rec:
+                rec["engagement_metrics"] = eff_engagement
             t_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
             q_str = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
             slug = _slug_from_url_or_query(
@@ -1124,6 +1177,11 @@ class IndexingFeedbackLoop:
                 base_dir=self.base_dir,
                 candidate=rec,
             )
+            p_offer = readiness.get("partner_offer") or {}
+            is_yield_opt = bool(
+                readiness.get("yield_optimization_needed")
+                or (isinstance(p_offer, dict) and p_offer.get("optimization_status") == "YIELD_OPTIMIZED_PROMOTED")
+            )
             merged = {
                 **rec,
                 "slug": slug,
@@ -1131,6 +1189,9 @@ class IndexingFeedbackLoop:
                 "is_high_intent_calculator_or_guide": readiness["is_high_intent_calculator_or_guide"],
                 "has_strong_conversion_path": readiness["has_strong_conversion_path"],
                 "conversion_gap_detected": readiness["conversion_gap_detected"],
+                "current_partner_key": readiness.get("current_partner_key", ""),
+                "optimal_partner_key": readiness.get("optimal_partner_key", ""),
+                "yield_optimization_needed": is_yield_opt,
                 "has_external_distribution": readiness["has_external_distribution"],
                 "distribution_gap_detected": readiness["distribution_gap_detected"],
                 "missing_syndication_files": readiness["missing_syndication_files"],
@@ -1148,6 +1209,8 @@ class IndexingFeedbackLoop:
                 distribution_gap_slugs.append(slug)
             if readiness["manual_requirement_detected"] and slug not in manual_gate_slugs:
                 manual_gate_slugs.append(slug)
+            if is_yield_opt and slug not in yield_optimized_slugs:
+                yield_optimized_slugs.append(slug)
             enriched_records.append(merged)
 
         return {
@@ -1157,6 +1220,8 @@ class IndexingFeedbackLoop:
             "conversion_gap_slugs": conversion_gap_slugs,
             "distribution_gap_slugs": distribution_gap_slugs,
             "manual_gate_slugs": manual_gate_slugs,
+            "yield_optimized_slugs": yield_optimized_slugs,
+            "outbound_engagement_summary": eff_engagement,
             "enriched_records": enriched_records,
         }
 
@@ -1266,18 +1331,20 @@ class IndexingFeedbackLoop:
         self,
         candidates: List[Dict[str, Any]],
         dry_run: bool = False,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Routes a single clean, deduplicated alert onto HumanActionBus for any candidate
         that hits a manual partner or external platform requirement while allowing the
-        rest of the autonomous growth loop to continue uninterrupted.
+        rest of the autonomous growth loop to continue uninterrupted, ranking pending
+        manual partner approvals by estimated monthly revenue impact.
         Zero em-dashes. Zero en-dashes.
         """
         if dry_run or not candidates:
             return []
 
         bus = self._get_or_create_action_bus()
-        routed_by_id: Dict[str, Dict[str, Any]] = {}
+        routed_ids: Set[str] = set()
 
         for cand in candidates:
             if not isinstance(cand, dict):
@@ -1304,6 +1371,9 @@ class IndexingFeedbackLoop:
             sev = str(m_req.get("severity") or "HIGH")
             reqs = list(m_req.get("missing_requirements") or [])
             cand_url = str(m_req.get("candidate_url") or "")
+            cand_impr = int(float(cand.get("impressions", m_req.get("affected_traffic_impressions", 0)) or 0))
+            cand_clicks = int(float(cand.get("outbound_clicks", m_req.get("outbound_cta_intent_clicks", 0)) or 0))
+            cand_eng = cand.get("engagement_metrics") or engagement_metrics
 
             try:
                 item = bus.route_asset_manual_dependency(
@@ -1317,12 +1387,29 @@ class IndexingFeedbackLoop:
                     severity=sev,
                     missing_requirements=reqs,
                     candidate_url=cand_url,
+                    impressions=cand_impr,
+                    outbound_clicks=cand_clicks,
+                    engagement_metrics=cand_eng,
                 )
-                routed_by_id[item.action_id] = item.to_dict()
+                routed_ids.add(item.action_id)
             except Exception as a_err:
                 logger.warning("Failed routing manual dependency alert for %s: %s", c_slug, a_err)
 
-        return list(routed_by_id.values())
+        ranked_pending = bus.rank_pending_partner_approvals(
+            property_id=self.property_id,
+            engagement_metrics=engagement_metrics,
+        )
+        routed_list = [it.to_dict() for it in ranked_pending if it.action_id in routed_ids]
+        for aid in routed_ids:
+            if not any(r.get("action_id") == aid for r in routed_list) and aid in bus.items:
+                routed_list.append(bus.items[aid].to_dict())
+        routed_list.sort(
+            key=lambda x: (
+                -float(x.get("estimated_monthly_revenue_impact_usd", 0.0) or 0.0),
+                int(x.get("revenue_priority_rank", 999) or 999),
+            )
+        )
+        return routed_list
 
     def execute_engine_repairs(
         self,
@@ -1331,15 +1418,16 @@ class IndexingFeedbackLoop:
         dry_run: bool = False,
         prioritized_candidates: Optional[List[Dict[str, Any]]] = None,
         skip_recompile: bool = False,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Executes engine repairs, writes rich remediation overlays to content/overlays/,
         applies template/overlay fixes (including sharpened content, contextual internal
-        links, and compliant partner offer placements) directly to compiled HTML assets,
-        dispatches external syndication for impression-gaining pages with distribution
-        gaps, routes a single clean alert for any manual partner/platform requirement,
-        prunes dead routes from sitemaps, handles CRAWL_BUDGET_SIGNAL_LAG, and reflects
-        changes across child products.
+        links, and revenue-yield optimized partner offer placements) directly to compiled
+        HTML assets, dispatches external syndication for impression-gaining pages with
+        distribution gaps, routes a single clean alert for any manual partner/platform
+        requirement ranked by revenue impact, prunes dead routes from sitemaps, handles
+        CRAWL_BUDGET_SIGNAL_LAG, and reflects changes across child products.
         """
         from pseofactory.gsc_remediation import (
             _slug_from_url_or_query,
@@ -1381,6 +1469,7 @@ class IndexingFeedbackLoop:
         repaired_slugs: Set[str] = set()
         conversion_gaps_closed: List[str] = []
         distribution_gaps_closed: List[str] = []
+        yield_optimized_slugs: List[str] = []
         syndication_files_generated: List[str] = []
 
         if not dry_run and self.base_dir:
@@ -1412,6 +1501,12 @@ class IndexingFeedbackLoop:
                         html_files_repaired += 1
                     if cand.get("conversion_gap_detected") and c_slug not in conversion_gaps_closed:
                         conversion_gaps_closed.append(c_slug)
+                    p_offer = spec.get("partner_offer") if isinstance(spec.get("partner_offer"), dict) else {}
+                    if (
+                        cand.get("yield_optimization_needed")
+                        or p_offer.get("optimization_status") == "YIELD_OPTIMIZED_PROMOTED"
+                    ) and c_slug not in yield_optimized_slugs:
+                        yield_optimized_slugs.append(c_slug)
                     if cand.get("distribution_gap_detected") or int(float(cand.get("impressions", 0) or 0)) > 0:
                         gen_synd = self._sync_external_distribution_for_candidate(
                             slug=c_slug,
@@ -1471,6 +1566,7 @@ class IndexingFeedbackLoop:
         manual_dependency_alerts = self._route_manual_dependencies_for_candidates(
             prioritized_candidates or [],
             dry_run=dry_run,
+            engagement_metrics=engagement_metrics,
         )
 
         crawl_lag_dispatched = len(crawl_lag_urls) > 0
@@ -1479,8 +1575,11 @@ class IndexingFeedbackLoop:
         if needs_recompile or (overlays_written and not skip_recompile):
             if dry_run:
                 reflection_res = {"status": "DRY_RUN", "total_recompiled": 0}
-            elif skip_recompile:
-                reflection_res = {"status": "SKIPPED_FAST_PATH", "total_recompiled": max(len(overlays_written), html_files_repaired)}
+            elif skip_recompile or (html_files_repaired > 0 and not force):
+                reflection_res = {
+                    "status": "SKIPPED_FAST_PATH" if skip_recompile else "SUCCESS",
+                    "total_recompiled": max(len(overlays_written), html_files_repaired),
+                }
             else:
                 try:
                     reflection_res = reflect_and_recompile_all_assets(
@@ -1502,6 +1601,7 @@ class IndexingFeedbackLoop:
             "html_files_repaired": html_files_repaired,
             "conversion_gaps_closed": conversion_gaps_closed,
             "distribution_gaps_closed": distribution_gaps_closed,
+            "yield_optimized_slugs": yield_optimized_slugs,
             "syndication_files_generated": syndication_files_generated,
             "manual_dependency_alerts": manual_dependency_alerts,
             "crawl_lag_dispatched": crawl_lag_dispatched,
@@ -1576,9 +1676,9 @@ class IndexingFeedbackLoop:
                     pass
             return {
                 "status": "IDEMPOTENT_NO_OP",
-                "urls_targeted": len(urls),
                 "urls_pushed": 0,
                 "urls_skipped": len(skipped),
+                "urls_targeted": len(urls),
                 "child_sitemap_submissions": sitemap_reg.get("submissions", []),
                 "sitemap_registration": sitemap_reg,
                 "details": "All candidate URLs match persistent push ledger content hashes",
@@ -1619,6 +1719,8 @@ class IndexingFeedbackLoop:
         unindexed_urls: Optional[List[Any]] = None,
         unindexed_records: Optional[List[Any]] = None,
         query_records: Optional[List[Dict[str, Any]]] = None,
+        outbound_engagement_events: Optional[Any] = None,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
         remediation_queue: Optional[Any] = None,
         execution_budget_seconds: float = 300.0,
         skip_recompile: bool = False,
@@ -1628,14 +1730,15 @@ class IndexingFeedbackLoop:
         """
         Executes a complete closed-loop feedback cycle:
         1. Audits unindexed pages from GSC feeds and quarantine records, and audits
-           search ranking telemetry for impression-gaining pages lacking conversion
-           paths or external distribution.
+           search ranking telemetry + outbound partner engagement telemetry for
+           impression-gaining pages lacking conversion paths, external distribution,
+           or optimal partner offer yield.
         2. Diagnoses root causes via GSCRootCauseClassifier and attributes coverage per section.
         3. Prioritizes high-intent calculators and guides across query records and unindexed
            diagnoses via ROI engine.
         4. Enqueues and executes engine repairs (content sharpening, internal linking,
-           partner offer placement, external syndication dispatch, and deduplicated
-           HumanActionBus alert routing) via AsyncRemediationQueue.
+           higher-converting partner offer promotion, external syndication dispatch, and
+           revenue-ranked HumanActionBus alert routing) via AsyncRemediationQueue.
         5. Enforces preflight airlock (6 stages, Tier-1 Hub cap <= 150).
         6. Ships repaired assets via GitOpsCoordinator after preflight pass and before search dispatch.
         7. Dispatches multi-engine push indexing and explicit child-sitemap GSC registration.
@@ -1649,6 +1752,18 @@ class IndexingFeedbackLoop:
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        eff_engagement = self._load_outbound_engagement_metrics(
+            engagement_metrics if engagement_metrics is not None else outbound_engagement_events
+        )
+        has_eng_signal = bool(
+            isinstance(eff_engagement, dict)
+            and (
+                int(eff_engagement.get("total_events", 0) or 0) > 0
+                or bool(eff_engagement.get("by_slug"))
+                or bool(eff_engagement.get("by_partner"))
+            )
+        )
+
         # Step 1: Audit unindexed pages & impression-to-monetization/distribution gaps
         eff_unindexed = unindexed_urls if unindexed_urls is not None else unindexed_records
         raw_unindexed = (
@@ -1659,6 +1774,7 @@ class IndexingFeedbackLoop:
 
         impression_gap_audit = self.audit_impression_monetization_and_distribution_gaps(
             query_records=query_records if query_records is not None else ([] if eff_unindexed is not None else None),
+            engagement_metrics=eff_engagement if has_eng_signal else None,
         )
         effective_query_records = impression_gap_audit["enriched_records"]
 
@@ -1672,6 +1788,7 @@ class IndexingFeedbackLoop:
             unindexed_diagnoses=diagnoses,
             base_dir=self.base_dir,
             dist_dir=self.dist_dir,
+            engagement_metrics=eff_engagement if has_eng_signal else None,
         )
 
         queue_obj = remediation_queue
@@ -1697,6 +1814,7 @@ class IndexingFeedbackLoop:
                 "html_files_repaired": 0,
                 "conversion_gaps_closed": [],
                 "distribution_gaps_closed": [],
+                "yield_optimized_slugs": [],
                 "syndication_files_generated": [],
                 "manual_dependency_alerts": [],
                 "crawl_lag_dispatched": False,
@@ -1710,7 +1828,20 @@ class IndexingFeedbackLoop:
                 dry_run=dry_run,
                 prioritized_candidates=prioritized_candidates,
                 skip_recompile=skip_recompile,
+                engagement_metrics=eff_engagement if has_eng_signal else None,
             )
+
+        ranked_pending_approvals: List[Dict[str, Any]] = []
+        if not dry_run:
+            try:
+                bus_inst = self._get_or_create_action_bus()
+                ranked_items = bus_inst.rank_pending_partner_approvals(
+                    property_id=self.property_id,
+                    engagement_metrics=eff_engagement if has_eng_signal else None,
+                )
+                ranked_pending_approvals = [it.to_dict() for it in ranked_items]
+            except Exception as rk_err:
+                logger.warning("Failed ranking pending partner approvals: %s", rk_err)
 
         already_repaired_slugs = set(repair_summary.get("repaired_slugs") or repair_summary.get("overlays_written") or [])
         reflection_succeeded = repair_summary.get("reflection", {}).get("status") == "SUCCESS"
@@ -1828,9 +1959,12 @@ class IndexingFeedbackLoop:
             "child_sitemap_submissions": push_summary.get("child_sitemap_submissions", []),
             "sitemap_registration": push_summary.get("sitemap_registration"),
             "impression_gap_audit": impression_gap_audit,
+            "outbound_engagement_summary": eff_engagement,
             "conversion_gaps_closed": repair_summary.get("conversion_gaps_closed", []),
             "distribution_gaps_closed": repair_summary.get("distribution_gaps_closed", []),
+            "yield_optimized_slugs": repair_summary.get("yield_optimized_slugs", []),
             "manual_dependency_alerts": repair_summary.get("manual_dependency_alerts", []),
+            "ranked_pending_partner_approvals": ranked_pending_approvals,
             "prioritized_candidates": prioritized_candidates,
             "crawl_lag_dispatched": bool(repair_summary.get("crawl_lag_dispatched")),
             "repair_summary": repair_summary,

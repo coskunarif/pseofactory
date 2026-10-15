@@ -35,6 +35,9 @@ from pseofactory.affiliates import (
     PREXVO_DISCLOSURES,
     resolve_partner_url,
     validate_affiliate_url,
+    score_partner_yield,
+    estimate_partner_approval_revenue_impact,
+    aggregate_outbound_partner_engagement,
 )
 from pseofactory.affiliates_hub import MonetizationHub
 from pseofactory.email_ingest import EmailIngestionEngine, EmailMessage, PartnerEmailClassification
@@ -62,6 +65,11 @@ class PartnerStatusSummary:
     last_email_date: Optional[str] = None
     target_tools: List[str] = field(default_factory=list)
     next_action: str = ""
+    estimated_monthly_revenue_impact_usd: float = 0.0
+    revenue_priority_rank: int = 0
+    outbound_clicks: int = 0
+    empirical_erpm_usd: float = 0.0
+    yield_score: float = 0.0
 
     @property
     def partner_key(self) -> str:
@@ -96,6 +104,9 @@ class PropertyReadinessReport:
     standing_restrictions: str
     partners: List[PartnerStatusSummary] = field(default_factory=list)
     action_items: List[ActionItem] = field(default_factory=list)
+    ranked_pending_approvals: List[Dict[str, Any]] = field(default_factory=list)
+    outbound_engagement_summary: Dict[str, Any] = field(default_factory=dict)
+    total_pending_monthly_revenue_impact_usd: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -142,10 +153,22 @@ class PartnerTrackingEngine:
         self.monetization_hub = monetization_hub or MonetizationHub()
         self.hub = self.monetization_hub
 
+    def rank_pending_partner_approvals(
+        self,
+        property_id: Optional[str] = None,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
+    ) -> List[ActionItem]:
+        """Ranks pending manual partner approvals by estimated monthly revenue impact."""
+        return self.action_bus.rank_pending_partner_approvals(
+            property_id=property_id,
+            engagement_metrics=engagement_metrics,
+        )
+
     def sync_and_evaluate(
         self,
         force_mail_poll: bool = False,
         personal_fixture: Optional[str] = None,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> FleetMonetizationDashboardData:
         """
         Executes full synchronization:
@@ -162,14 +185,16 @@ class PartnerTrackingEngine:
         # 2. Route decisions onto Human Action Bus
         for c in classifications:
             if c.requires_operator_decision:
-                self.action_bus.route_classification(c)
+                self.action_bus.route_classification(c, engagement_metrics=engagement_metrics)
 
         # Check for Prexvo standing P2 Gate 1 requirements on action bus if not present
         self._ensure_standing_operator_items()
+        if engagement_metrics:
+            self.action_bus.rank_pending_partner_approvals(engagement_metrics=engagement_metrics)
 
         # 3. Evaluate property statuses
-        ph_report = self._evaluate_property("profithelm", classifications)
-        px_report = self._evaluate_property("prexvo", classifications)
+        ph_report = self._evaluate_property("profithelm", classifications, engagement_metrics=engagement_metrics)
+        px_report = self._evaluate_property("prexvo", classifications, engagement_metrics=engagement_metrics)
 
         # 4. Enforce strict property isolation
         self._assert_fleet_isolation(ph_report, px_report)
@@ -338,6 +363,7 @@ class PartnerTrackingEngine:
         self,
         property_id: str,
         classifications: List[PartnerEmailClassification],
+        engagement_metrics: Optional[Dict[str, Any]] = None,
     ) -> PropertyReadinessReport:
         """Evaluates readiness and partner statuses for a single property tenant."""
         prop_clean = property_id.strip().lower()
@@ -357,6 +383,12 @@ class PartnerTrackingEngine:
         assert_no_forbidden_dashes(standing_restriction, context=f"Standing restriction for {prop_clean}")
         assert_no_forbidden_dashes(disclosure_text, context=f"Disclosure for {prop_clean}")
 
+        if engagement_metrics:
+            self.action_bus.rank_pending_partner_approvals(
+                property_id=prop_clean,
+                engagement_metrics=engagement_metrics,
+            )
+
         action_items = self.action_bus.get_all_items(property_id=prop_clean)
         # Prioritize PENDING_OPERATOR over resolved items; among resolved items, prefer the most recent
         action_map = {}
@@ -374,6 +406,10 @@ class PartnerTrackingEngine:
         awaiting_count = 0
         followup_count = 0
         pending_exp_count = 0
+
+        by_partner_eng = {}
+        if isinstance(engagement_metrics, dict):
+            by_partner_eng = engagement_metrics.get("by_partner", {}) or {}
 
         # Classifications for this property - prioritize newest correspondence
         prop_classifications = [c for c in classifications if c.property_id == prop_clean]
@@ -467,6 +503,26 @@ class PartnerTrackingEngine:
                 else f"Run: pseofactory partner-sync --property {prop_clean} --partner {p_obj.key} --status live --url <tracking_url> (after human approval)"
             )
 
+            p_eng = by_partner_eng.get(p_obj.key, {}) if isinstance(by_partner_eng, dict) else {}
+            p_clicks = int(p_eng.get("outbound_clicks", 0) or 0)
+            p_erpm = float(p_eng.get("empirical_erpm_usd", 0.0) or 0.0)
+            p_yield = score_partner_yield(
+                p_obj,
+                vault_status="live" if is_live else effective_status,
+                engagement_metrics=engagement_metrics,
+            )
+            est_impact = (
+                float(act_item.estimated_monthly_revenue_impact_usd)
+                if act_item and act_item.estimated_monthly_revenue_impact_usd > 0
+                else float(
+                    estimate_partner_approval_revenue_impact(
+                        property_id=prop_clean,
+                        partner_key=p_obj.key,
+                        engagement_metrics=engagement_metrics,
+                    )["estimated_monthly_revenue_impact_usd"]
+                )
+            )
+
             summary = PartnerStatusSummary(
                 key=p_obj.key,
                 name=p_obj.name,
@@ -486,6 +542,11 @@ class PartnerTrackingEngine:
                 last_email_date=class_item.date if class_item else None,
                 target_tools=list(p_obj.target_tools),
                 next_action=next_act,
+                estimated_monthly_revenue_impact_usd=est_impact,
+                revenue_priority_rank=int(act_item.revenue_priority_rank) if act_item else 0,
+                outbound_clicks=p_clicks,
+                empirical_erpm_usd=p_erpm,
+                yield_score=p_yield,
             )
             self._assert_summary_invariants(summary)
             partner_summaries.append(summary)
@@ -526,6 +587,8 @@ class PartnerTrackingEngine:
                     last_email_date=None,
                     target_tools=[],
                     next_action=next_act,
+                    estimated_monthly_revenue_impact_usd=float(act.estimated_monthly_revenue_impact_usd or 0.0),
+                    revenue_priority_rank=int(act.revenue_priority_rank or 0),
                 )
                 self._assert_summary_invariants(summary)
                 partner_summaries.append(summary)
@@ -536,6 +599,31 @@ class PartnerTrackingEngine:
             readiness_score = round((live_count / max(total_p, 1)) * 100, 1)
         else:
             readiness_score = 0.0
+
+        pending_ranked_items = self.action_bus.get_pending_items(
+            property_id=prop_clean,
+            sort_by_revenue_impact=True,
+        )
+        ranked_pending_approvals = [
+            {
+                "rank": idx,
+                "action_id": it.action_id,
+                "partner_key": it.partner_key,
+                "partner_name": it.partner_name,
+                "title": it.title,
+                "severity": it.severity,
+                "estimated_monthly_revenue_impact_usd": float(it.estimated_monthly_revenue_impact_usd or 0.0),
+                "bounty_uplift_usd": float(it.bounty_uplift_usd or 0.0),
+                "affected_traffic_impressions": int(it.affected_traffic_impressions or 0),
+                "outbound_cta_intent_clicks": int(it.outbound_cta_intent_clicks or 0),
+                "affected_slugs": list(it.affected_slugs or []),
+            }
+            for idx, it in enumerate(pending_ranked_items, start=1)
+        ]
+        total_pending_impact = round(
+            sum(float(it.estimated_monthly_revenue_impact_usd or 0.0) for it in pending_ranked_items),
+            2,
+        )
 
         report = PropertyReadinessReport(
             property_id=prop_clean,
@@ -552,6 +640,9 @@ class PartnerTrackingEngine:
             standing_restrictions=standing_restriction,
             partners=partner_summaries,
             action_items=action_items,
+            ranked_pending_approvals=ranked_pending_approvals,
+            outbound_engagement_summary=engagement_metrics or {},
+            total_pending_monthly_revenue_impact_usd=total_pending_impact,
         )
 
         return report

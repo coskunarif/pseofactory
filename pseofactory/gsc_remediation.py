@@ -372,6 +372,20 @@ def _resolve_partner_offer_and_manual_gate(
         }
 
     # 3. Resolve best live partner offer and detect vertical-matched manual partner gates
+    from pseofactory.affiliates import (
+        _extract_partner_engagement_record,
+        get_partner_bounty_midpoint,
+        estimate_partner_approval_revenue_impact,
+    )
+
+    eng_metrics = (
+        cand_dict.get("engagement_metrics")
+        or cand_dict.get("outbound_engagement")
+        or None
+    )
+    cand_impressions = int(float(cand_dict.get("impressions", 0) or 0))
+    cand_outbound_clicks = int(float(cand_dict.get("outbound_clicks", 0) or 0))
+
     if eff_tenant == "prexvo":
         registry = PREXVO_AFFILIATES
         # Check if query specifically demands a pending/gated partner (e.g., splash_financial Gate 1)
@@ -397,24 +411,17 @@ def _resolve_partner_offer_and_manual_gate(
             }
 
         if any(k in combined for k in ("medical", "physician", "resident", "dental", "healthcare")):
-            chosen_key = "laurel_road"
+            default_chosen_key = "laurel_road"
+            vertical_candidates = ["laurel_road", "sofi_refi", "earnest", "credible", "juno"]
         elif any(k in combined for k in ("group", "collective", "negotiation", "rate-drop", "juno")):
-            chosen_key = "juno"
+            default_chosen_key = "juno"
+            vertical_candidates = ["juno", "sofi_refi", "earnest", "credible", "laurel_road"]
         elif any(k in combined for k in ("custom", "precision", "earnest", "skip-payment", "biweekly")):
-            chosen_key = "earnest"
+            default_chosen_key = "earnest"
+            vertical_candidates = ["earnest", "sofi_refi", "credible", "laurel_road", "juno"]
         else:
-            chosen_key = "sofi_refi"
-
-        p_data = registry.get(chosen_key) or registry.get("sofi_refi") or {}
-        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "SoFi Student Loan Refinancing"))
-        p_url = str(p_data.get("url") or "https://www.sofi.com/refinance-student-loan/")
-        p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or f"Compare Rates with {p_name}"))
-        p_disc = _strip_forbidden_dashes(
-            str(
-                p_data.get("disclosure")
-                or "Editorial Note: Refinancing federal student loans with a private lender permanently waives Title IV income-driven repayment and PSLF eligibility."
-            )
-        )
+            default_chosen_key = "sofi_refi"
+            vertical_candidates = ["sofi_refi", "earnest", "laurel_road", "juno", "credible"]
     else:
         registry = PROFITHELM_AFFILIATES
         # Check if query hits a vertical with a known manual partner dependency while routing fallback live offer
@@ -482,26 +489,266 @@ def _resolve_partner_offer_and_manual_gate(
                         ],
                         "candidate_url": "https://www.interactivebrokers.com/",
                     }
+            elif any(k in combined for k in ("sales-tax", "economic-nexus", "avalara", "vat-compliance")):
+                manual_requirement = {
+                    "property_id": "profithelm",
+                    "asset_slug": s_norm,
+                    "partner_key": "avalara",
+                    "partner_name": "Avalara AvaTax",
+                    "action_type": "PARTNER_APPROVAL",
+                    "severity": "HIGH",
+                    "title": "Avalara AvaTax Partner Program Agreement & Referral Attribution",
+                    "description": (
+                        f"Sales tax nexus calculator {s_norm} is gaining search impressions and requires "
+                        f"manual Avalara partner agreement approval."
+                    ),
+                    "missing_requirements": [
+                        "Execute Avalara partner referral agreement",
+                        "Configure AvaTax referral tracking link",
+                    ],
+                    "candidate_url": "https://www.avalara.com/",
+                }
+            elif any(k in combined for k in ("payroll-fica", "fica-tax", "withholding-calculator", "gusto-payroll")):
+                g_info = registry.get("gusto", {})
+                if g_info.get("status") != "live":
+                    manual_requirement = {
+                        "property_id": "profithelm",
+                        "asset_slug": s_norm,
+                        "partner_key": "gusto",
+                        "partner_name": "Gusto Payroll & HR",
+                        "action_type": "PARTNER_APPROVAL",
+                        "severity": "HIGH",
+                        "title": "Gusto PartnerStack Referral Agreement Confirmation",
+                        "description": (
+                            f"Payroll calculator {s_norm} is gaining search impressions and awaits "
+                            f"manual Gusto PartnerStack contract confirmation."
+                        ),
+                        "missing_requirements": [
+                            "Confirm Gusto PartnerStack partner contract",
+                            "Activate live Gusto referral link",
+                        ],
+                        "candidate_url": "https://gusto.com/",
+                    }
 
         # Select live fallback or primary partner for immediate conversion path injection
         if any(k in combined for k in ("tariff", "landed", "customs", "bond", "freight", "cbam", "hs-code", "301", "demurrage")):
-            chosen_key = "flexport"
+            default_chosen_key = "flexport"
+            vertical_candidates = ["flexport", "ramp", "brex", "mercury"]
         elif any(k in combined for k in ("179", "equipment", "depreciation", "cost-segregation", "cost segregation")):
-            chosen_key = "crest_capital"
+            default_chosen_key = "crest_capital"
+            vertical_candidates = ["crest_capital", "national_funding", "ramp", "brex"]
         elif any(k in combined for k in ("payroll", "s-corp", "reasonable-compensation", "fica", "worker", "contractor")):
-            chosen_key = "gusto"
+            default_chosen_key = "gusto" if not (manual_requirement and manual_requirement.get("partner_key") == "gusto") else "rippling"
+            vertical_candidates = [default_chosen_key, "rippling", "deel", "bench", "mercury"]
+        elif any(k in combined for k in ("sales-tax", "economic-nexus", "avalara", "vat-compliance")):
+            default_chosen_key = "stripe_tax"
+            vertical_candidates = ["stripe_tax", "ramp", "brex", "mercury"]
         elif any(k in combined for k in ("401k", "retirement", "pension", "erisa")):
-            chosen_key = "guideline"
+            default_chosen_key = "guideline"
+            vertical_candidates = ["guideline", "gusto", "rippling"]
         elif any(k in combined for k in ("crypto", "8949", "harvesting", "capital-gains")):
-            chosen_key = "coinledger"
+            default_chosen_key = "coinledger"
+            vertical_candidates = ["coinledger", "koinly", "taxbit"]
         elif any(k in combined for k in ("treasury", "yield", "3124", "cash-management", "money-market")):
-            chosen_key = "wealthfront"
+            default_chosen_key = "wealthfront"
+            vertical_candidates = ["wealthfront", "mercury", "ramp", "brex"]
         elif any(k in combined for k in ("bookkeeping", "accounting", "174", "r-d", "audit", "reconciliation")):
-            chosen_key = "bench"
+            default_chosen_key = "bench"
+            vertical_candidates = ["bench", "pilot", "ramp", "gusto"]
         else:
-            chosen_key = "ramp"
+            default_chosen_key = "ramp"
+            vertical_candidates = ["ramp", "brex", "mercury", "gusto"]
 
-        p_data = registry.get(chosen_key) or registry.get("ramp") or {}
+    _remediation_partner_fallbacks: Dict[str, Dict[str, str]] = {
+        "flexport": {
+            "name": "Flexport Global Customs & Freight",
+            "url": "https://www.flexport.com/",
+            "cta_text": "Model Landed Cost & Customs Duties with Flexport",
+        },
+        "brex": {
+            "name": "Brex Corporate Card & Treasury",
+            "url": "https://www.brex.com/",
+            "cta_text": "Optimize SaaS Spend & Runway with Brex",
+        },
+        "ramp": {
+            "name": "Ramp Corporate Spend Platform",
+            "url": "https://ramp.com/",
+            "cta_text": "Explore Ramp Corporate Spend Platform for Statutory Modeling",
+        },
+        "wealthfront": {
+            "name": "Wealthfront Automated Treasury Cash",
+            "url": "https://www.wealthfront.com/",
+            "cta_text": "Compare Treasury Yield Accounts on Wealthfront",
+        },
+        "bench": {
+            "name": "Bench Bookkeeping & Tax Advisory",
+            "url": "https://www.bench.co/",
+            "cta_text": "Automate Statutory Bookkeeping with Bench",
+        },
+        "pilot": {
+            "name": "Pilot R&D Tax Credit & Bookkeeping",
+            "url": "https://pilot.com/",
+            "cta_text": "Claim Section 174 R&D Credits with Pilot",
+        },
+        "guideline": {
+            "name": "Guideline 401(k) Retirement Platform",
+            "url": "https://www.guideline.com/",
+            "cta_text": "Model Small Business 401(k) Plans with Guideline",
+        },
+        "stripe_tax": {
+            "name": "Stripe Tax Automated Nexus Compliance",
+            "url": "https://stripe.com/tax",
+            "cta_text": "Automate Multi-State Economic Nexus with Stripe Tax",
+        },
+        "deel": {
+            "name": "Deel Global Payroll & Compliance",
+            "url": "https://www.deel.com/",
+            "cta_text": "Manage Global Payroll & Contractors with Deel",
+        },
+        "taxbit": {
+            "name": "TaxBit Digital Asset Tax Engine",
+            "url": "https://taxbit.com/",
+            "cta_text": "Automate Form 1099-DA Compliance with TaxBit",
+        },
+        "sofi_refi": {
+            "name": "SoFi Student Loan Refinancing",
+            "url": "https://www.sofi.com/refinance-student-loan/",
+            "cta_text": "Compare Rates with SoFi Student Loan Refinancing",
+        },
+        "laurel_road": {
+            "name": "Laurel Road Healthcare & Professional Refinancing",
+            "url": "https://www.laurelroad.com/",
+            "cta_text": "Compare Healthcare Refinance Rates with Laurel Road",
+        },
+        "juno": {
+            "name": "Juno Group Negotiated Student Loan Rates",
+            "url": "https://joinjuno.com/",
+            "cta_text": "Check Group Negotiated Refinance Rates on Juno",
+        },
+    }
+
+    # Evaluate empirical outbound partner engagement across vertical_candidates
+    chosen_key = default_chosen_key
+    ranked_candidates: List[Dict[str, Any]] = []
+    any_empirical_signal = False
+    preferred_cta_slot = str(cand_dict.get("preferred_cta_slot") or "overlay_primary_cta")
+
+    if isinstance(eng_metrics, dict) and eng_metrics:
+        by_slug_map = eng_metrics.get("by_slug", {}) if isinstance(eng_metrics.get("by_slug"), dict) else {}
+        slug_rec = by_slug_map.get(s_norm, {}) if isinstance(by_slug_map, dict) else {}
+        if isinstance(slug_rec, dict) and slug_rec.get("top_converting_cta_slot"):
+            preferred_cta_slot = str(slug_rec["top_converting_cta_slot"])
+
+        # Include any compliant partner in this tenant's registry or fallback catalog that has recorded engagement on this slug
+        slug_partners = (
+            list(slug_rec.get("partners", {}).keys())
+            if isinstance(slug_rec, dict) and isinstance(slug_rec.get("partners"), dict)
+            else []
+        )
+        for sp_k in slug_partners:
+            norm_sp = "sofi_refi" if (eff_tenant == "prexvo" and sp_k == "sofi") else sp_k
+            if (norm_sp in registry or norm_sp in _remediation_partner_fallbacks) and norm_sp not in vertical_candidates:
+                vertical_candidates.append(norm_sp)
+
+    gated_partner_key = str((manual_requirement or {}).get("partner_key") or "").strip().lower()
+    seen_cands = set()
+    for idx, c_key in enumerate(vertical_candidates):
+        if c_key in seen_cands:
+            continue
+        seen_cands.add(c_key)
+        if gated_partner_key and c_key == gated_partner_key and c_key != default_chosen_key:
+            continue
+        c_info = registry.get(c_key) or _remediation_partner_fallbacks.get(c_key) or {
+            "name": c_key.replace("_", " ").title(),
+            "url": f"https://www.{c_key.replace('_', '')}.com/",
+        }
+
+        emp_rec = _extract_partner_engagement_record(c_key, eng_metrics, slug=s_norm)
+        if not emp_rec and eff_tenant == "prexvo" and c_key == "sofi_refi":
+            emp_rec = _extract_partner_engagement_record("sofi", eng_metrics, slug=s_norm)
+        if not isinstance(emp_rec, dict):
+            emp_rec = {}
+
+        out_clicks = int(float(emp_rec.get("outbound_clicks", emp_rec.get("affiliate_clicks", 0)) or 0))
+        calc_inter = int(float(emp_rec.get("calculator_interactions", emp_rec.get("calculations", 0)) or 0))
+        p_views = int(float(emp_rec.get("page_views", emp_rec.get("impressions", 0)) or 0))
+        cta_ctr = float(emp_rec.get("cta_ctr", 0.0) or 0.0)
+        if cta_ctr <= 0.0 and p_views > 0 and out_clicks > 0:
+            cta_ctr = out_clicks / float(p_views)
+        intent_rate = float(emp_rec.get("intent_to_click_rate", 0.0) or 0.0)
+        if intent_rate <= 0.0 and calc_inter > 0 and out_clicks > 0:
+            intent_rate = out_clicks / float(calc_inter)
+
+        bounty_mid = get_partner_bounty_midpoint(c_key)
+        est_conv_rate = 0.035 if eff_tenant == "profithelm" else 0.025
+        emp_erpm = float(emp_rec.get("empirical_erpm_usd", emp_rec.get("erpm_usd", 0.0)) or 0.0)
+        if emp_erpm <= 0.0 and p_views > 0 and out_clicks > 0:
+            emp_erpm = ((out_clicks * est_conv_rate * bounty_mid) / float(p_views)) * 1000.0
+        realized_rev = float(emp_rec.get("realized_revenue_usd", emp_rec.get("estimated_revenue_yield_usd", 0.0)) or 0.0)
+        if realized_rev <= 0.0 and out_clicks > 0:
+            realized_rev = out_clicks * est_conv_rate * bounty_mid
+
+        if out_clicks > 0 or emp_erpm > 0.0 or realized_rev > 0.0 or cta_ctr > 0.0:
+            any_empirical_signal = True
+
+        # Base score gives slight tie-breaker to default_chosen_key when no telemetry exists
+        base_score = round(bounty_mid * 0.5 + (5.0 if idx == 0 else 0.0), 2)
+        empirical_lift = (
+            min(emp_erpm * 0.45, 250.0)
+            + min(cta_ctr * 400.0, 90.0)
+            + min(intent_rate * 150.0, 60.0)
+            + min(out_clicks * 3.5, 80.0)
+            + min(realized_rev * 0.25, 120.0)
+        )
+        composite_yield = round(base_score + empirical_lift, 2)
+        ranked_candidates.append({
+            "partner_key": c_key,
+            "partner_name": _strip_forbidden_dashes(str(c_info.get("name") or c_key)),
+            "yield_score": composite_yield,
+            "bounty_midpoint_usd": round(bounty_mid, 2),
+            "outbound_clicks": out_clicks,
+            "cta_ctr": round(cta_ctr, 4),
+            "intent_to_click_rate": round(intent_rate, 4),
+            "empirical_erpm_usd": round(emp_erpm, 2),
+            "estimated_revenue_yield_usd": round(realized_rev, 2),
+            "is_default": (c_key == default_chosen_key),
+        })
+
+    if any_empirical_signal and ranked_candidates:
+        # Rank strictly by empirical performance + composite yield when engagement data exists
+        ranked_candidates.sort(
+            key=lambda x: (
+                -float(x["estimated_revenue_yield_usd"]),
+                -float(x["empirical_erpm_usd"]),
+                -int(x["outbound_clicks"]),
+                -float(x["yield_score"]),
+            )
+        )
+        chosen_key = str(ranked_candidates[0]["partner_key"])
+        chosen_metrics = ranked_candidates[0]
+    else:
+        chosen_key = default_chosen_key
+        chosen_metrics = ranked_candidates[0] if ranked_candidates else {
+            "yield_score": round(get_partner_bounty_midpoint(chosen_key) * 0.5, 2),
+            "empirical_erpm_usd": 0.0,
+            "cta_ctr": 0.0,
+            "outbound_clicks": 0,
+            "estimated_revenue_yield_usd": 0.0,
+        }
+
+    if eff_tenant == "prexvo":
+        p_data = registry.get(chosen_key) or _remediation_partner_fallbacks.get(chosen_key) or registry.get("sofi_refi") or {}
+        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "SoFi Student Loan Refinancing"))
+        p_url = str(p_data.get("url") or "https://www.sofi.com/refinance-student-loan/")
+        p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or f"Compare Rates with {p_name}"))
+        p_disc = _strip_forbidden_dashes(
+            str(
+                p_data.get("disclosure")
+                or "Editorial Note: Refinancing federal student loans with a private lender permanently waives Title IV income-driven repayment and PSLF eligibility."
+            )
+        )
+    else:
+        p_data = registry.get(chosen_key) or _remediation_partner_fallbacks.get(chosen_key) or registry.get("ramp") or {}
         p_name = _strip_forbidden_dashes(str(p_data.get("name") or "Ramp Corporate Spend Platform"))
         p_url = str(p_data.get("url") or "https://ramp.com/")
         p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or f"Explore {p_name} for Statutory Modeling"))
@@ -512,18 +759,48 @@ def _resolve_partner_offer_and_manual_gate(
             )
         )
 
+    if manual_requirement is not None:
+        impact_est = estimate_partner_approval_revenue_impact(
+            property_id=eff_tenant,
+            partner_key=str(manual_requirement.get("partner_key") or ""),
+            affected_slugs=[s_norm],
+            impressions=cand_impressions,
+            outbound_clicks=max(cand_outbound_clicks, int(chosen_metrics.get("outbound_clicks", 0) or 0)),
+            engagement_metrics=eng_metrics,
+        )
+        manual_requirement["estimated_monthly_revenue_impact_usd"] = impact_est["estimated_monthly_revenue_impact_usd"]
+        manual_requirement["bounty_uplift_usd"] = impact_est["bounty_uplift_usd"]
+        manual_requirement["affected_traffic_impressions"] = impact_est["affected_traffic_impressions"]
+        manual_requirement["outbound_cta_intent_clicks"] = impact_est["outbound_cta_intent_clicks"]
+
+    optimization_status = (
+        "YIELD_OPTIMIZED_PROMOTED"
+        if chosen_key != default_chosen_key
+        else ("YIELD_VERIFIED_LEADER" if any_empirical_signal else "INITIAL_PLACEMENT")
+    )
+
     partner_offer = {
         "partner_key": chosen_key,
         "partner_name": p_name,
         "url": p_url,
         "redirect_path": f"/r/{chosen_key}",
         "cta_text": p_cta,
+        "cta_slot": preferred_cta_slot,
+        "cta_id": f"cta-{eff_tenant}-{s_norm}-{chosen_key}",
         "disclosure": p_disc,
         "value_tier": value_tier,
         "status": "live",
         "compliance_status": "FTC_16_CFR_255_VERIFIED",
         "mechanic": "compliant_intent_monetization",
         "rel": "noopener sponsored nofollow",
+        "yield_score": float(chosen_metrics.get("yield_score", 0.0)),
+        "empirical_erpm_usd": float(chosen_metrics.get("empirical_erpm_usd", 0.0)),
+        "empirical_cta_ctr": float(chosen_metrics.get("cta_ctr", 0.0)),
+        "outbound_clicks": int(chosen_metrics.get("outbound_clicks", 0)),
+        "estimated_revenue_yield_usd": float(chosen_metrics.get("estimated_revenue_yield_usd", 0.0)),
+        "optimization_status": optimization_status,
+        "initial_default_partner_key": default_chosen_key,
+        "ranked_partner_candidates": ranked_candidates,
     }
 
     return {
@@ -551,15 +828,18 @@ def evaluate_asset_conversion_and_distribution_readiness(
     Evaluates whether a page gaining search impressions has:
       1. A strong live conversion path in compiled HTML (interactive preset scenarios,
          contextual internal links, and compliant partner offer placement or YMYL guardrail).
-      2. Complete external syndication distribution artifacts (LinkedIn, Newsletter,
+      2. Optimal partner offer placement based on empirical outbound engagement yield
+         (detecting when a page with traffic displays a lower-converting partner offer).
+      3. Complete external syndication distribution artifacts (LinkedIn, Newsletter,
          Substack Notes) and broadcast readiness.
-      3. Any manual partner or external platform dependency that must route a single
+      4. Any manual partner or external platform dependency that must route a single
          clean alert onto HumanActionBus.
     Zero em-dashes. Zero en-dashes.
     """
     eff_tenant = str(tenant_id or "profithelm").strip().lower()
     s_norm = _slug_from_url_or_query(default_slug=slug, query=query)
-    cand_dict = candidate if isinstance(candidate, dict) else {}
+    cand_dict = dict(candidate) if isinstance(candidate, dict) else {}
+    cand_dict.setdefault("impressions", impressions)
     intent_info = _classify_asset_intent_class(
         slug=s_norm,
         target_url=str(cand_dict.get("target_url") or cand_dict.get("url") or ""),
@@ -594,6 +874,7 @@ def evaluate_asset_conversion_and_distribution_readiness(
     has_partner_cta = False
     has_preset_scenarios = False
     has_internal_links = False
+    current_html_partner = ""
     if raw_html is not None:
         if mon_info["restricted_public_service"]:
             has_partner_cta = (
@@ -609,6 +890,19 @@ def evaluate_asset_conversion_and_distribution_readiness(
                     or "overlay-partner-offer" in raw_html
                 )
             )
+            p_matches = re.findall(r'data-partner=["\']([^"\']+)["\']', raw_html, flags=re.IGNORECASE)
+            if p_matches:
+                # Prefer the overlay-partner-offer partner if present
+                overlay_match = re.search(
+                    r'class=["\'][^"\']*overlay-partner-offer[^"\']*["\'][^>]*data-partner=["\']([^"\']+)["\']',
+                    raw_html,
+                    flags=re.IGNORECASE,
+                )
+                current_html_partner = (
+                    overlay_match.group(1).strip().lower()
+                    if overlay_match
+                    else p_matches[-1].strip().lower()
+                )
         has_preset_scenarios = "data-calc-preset" in raw_html or "scenario-preset-link" in raw_html
         has_internal_links = "overlay-hub-links" in raw_html or (raw_html.count('href="/tools/') >= 2)
     else:
@@ -616,9 +910,23 @@ def evaluate_asset_conversion_and_distribution_readiness(
         has_partner_cta = bool(cand_dict.get("has_conversion_path", True))
         has_preset_scenarios = bool(cand_dict.get("has_preset_scenarios", True))
         has_internal_links = bool(cand_dict.get("has_internal_links", True))
+        current_html_partner = str(cand_dict.get("current_partner_key") or "").strip().lower()
 
     if cand_dict.get("has_conversion_path") is False or cand_dict.get("conversion_gap") is True:
         has_partner_cta = False
+
+    p_offer = mon_info.get("partner_offer") or {}
+    optimal_partner_key = str(p_offer.get("partner_key") or "").strip().lower()
+    yield_optimization_needed = bool(cand_dict.get("yield_optimization_needed", False))
+    if (
+        not mon_info["restricted_public_service"]
+        and optimal_partner_key
+        and p_offer.get("optimization_status") == "YIELD_OPTIMIZED_PROMOTED"
+    ):
+        if current_html_partner and current_html_partner != optimal_partner_key:
+            yield_optimization_needed = True
+        elif not current_html_partner and has_partner_cta:
+            yield_optimization_needed = True
 
     has_strong_conversion_path = bool(has_partner_cta and has_preset_scenarios and has_internal_links)
     conversion_gap_detected = bool(impressions > 0 and not has_strong_conversion_path)
@@ -663,6 +971,9 @@ def evaluate_asset_conversion_and_distribution_readiness(
         "has_preset_scenarios": has_preset_scenarios,
         "has_internal_links": has_internal_links,
         "conversion_gap_detected": conversion_gap_detected,
+        "current_partner_key": current_html_partner,
+        "optimal_partner_key": optimal_partner_key,
+        "yield_optimization_needed": yield_optimization_needed,
         "has_external_distribution": has_external_distribution,
         "missing_syndication_files": missing_syndication_files,
         "distribution_gap_detected": distribution_gap_detected,
@@ -782,6 +1093,7 @@ def calculate_candidate_roi(
         or data.get("distribution_gap")
         or (impressions > 0 and data.get("has_external_distribution") is False)
     )
+    yield_opt_needed = bool(data.get("yield_optimization_needed"))
 
     anomaly_type = str(
         data.get("anomaly_type")
@@ -793,6 +1105,8 @@ def calculate_candidate_roi(
     if not anomaly_type:
         if conversion_gap and impressions >= 25:
             anomaly_type = "IMPRESSION_GAINING_CONVERSION_GAP"
+        elif yield_opt_needed and impressions >= 25:
+            anomaly_type = "OUTBOUND_YIELD_OPTIMIZATION"
         elif distribution_gap and impressions >= 25:
             anomaly_type = "IMPRESSION_GAINING_DISTRIBUTION_GAP"
         elif 1.0 <= position <= 5.0 and actual_ctr < expected_ctr_for_position(position) - 0.005:
@@ -808,7 +1122,12 @@ def calculate_candidate_roi(
     if raw_exp_ctr is not None and float(raw_exp_ctr) > 0:
         exp_ctr = float(raw_exp_ctr)
     else:
-        if "STRIKING" in anomaly_type or "CONVERSION_GAP" in anomaly_type or "DISTRIBUTION_GAP" in anomaly_type:
+        if (
+            "STRIKING" in anomaly_type
+            or "CONVERSION_GAP" in anomaly_type
+            or "DISTRIBUTION_GAP" in anomaly_type
+            or "YIELD_OPTIMIZATION" in anomaly_type
+        ):
             # Target top-4 CTR benchmark upon striking-distance / conversion overlay lift
             exp_ctr = max(0.08, expected_ctr_for_position(position) + 0.035)
         elif 1.0 <= position <= 10.0:
@@ -821,6 +1140,9 @@ def calculate_candidate_roi(
     if "CONVERSION_GAP" in anomaly_type:
         severity_factor = 1.65
         action_type = "SHARPEN_CONTENT_INTERNAL_LINKS_AND_PARTNER_OFFER"
+    elif "YIELD_OPTIMIZATION" in anomaly_type:
+        severity_factor = 1.55
+        action_type = "PROMOTE_HIGH_YIELD_PARTNER_OFFER"
     elif "DISTRIBUTION_GAP" in anomaly_type:
         severity_factor = 1.4
         action_type = "SHARPEN_CONTENT_AND_DISPATCH_SYNDICATION"
@@ -857,12 +1179,14 @@ def calculate_candidate_roi(
     default_cpc = 8.0 if resolved_tenant == "prexvo" else 10.5
     default_erpm = 75.0 if resolved_tenant == "prexvo" else 85.0
     cpc = float(data.get("cpc", default_cpc) or default_cpc)
-    erpm_usd = float(data.get("erpm_usd", default_erpm) or default_erpm)
+    erpm_usd = float(data.get("erpm_usd", data.get("empirical_erpm_usd", default_erpm)) or default_erpm)
 
     intent_multiplier = float(intent_info["intent_multiplier"])
     gap_boost = 1.0
     if conversion_gap:
         gap_boost += 0.35
+    if yield_opt_needed:
+        gap_boost += 0.30
     if distribution_gap:
         gap_boost += 0.20
 
@@ -878,6 +1202,7 @@ def calculate_candidate_roi(
         "intent_multiplier": intent_multiplier,
         "conversion_gap_detected": conversion_gap,
         "distribution_gap_detected": distribution_gap,
+        "yield_optimization_needed": yield_opt_needed,
         "position": position,
         "impressions": impressions,
         "clicks": clicks,
@@ -1103,7 +1428,23 @@ def compile_remediation_overlay_spec(
         for bad in ("prexvo", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
             query_clean = re.sub(re.escape(bad), "statutory tax", query_clean, flags=re.IGNORECASE)
 
-    words = [w.upper() if w.lower() in ("irc", "irs", "rap", "ibr", "pslf", "paye", "icr", "agi", "saas", "gaap") else w.capitalize() for w in query_clean.split() if w]
+    query_clean = re.sub(r"\bs[\s-]+corp\b", "S-Corp", query_clean, flags=re.IGNORECASE)
+    query_clean = re.sub(r"\bc[\s-]+corp\b", "C-Corp", query_clean, flags=re.IGNORECASE)
+    query_clean = re.sub(r"\br[\s-]+(?:and[\s-]+|&[\s-]*)?d\b", "R&D", query_clean, flags=re.IGNORECASE)
+    query_clean = re.sub(r"\bk[\s-]+1\b", "K-1", query_clean, flags=re.IGNORECASE)
+    query_clean = re.sub(r"\bw[\s-]+([249])\b", r"W-\1", query_clean, flags=re.IGNORECASE)
+
+    _upper_tokens = {"irc", "irs", "rap", "ibr", "pslf", "paye", "icr", "agi", "saas", "gaap", "r&d", "roi", "ebitda", "cbam", "tcja", "qsbs"}
+
+    def _cap_word(w: str) -> str:
+        wl = w.lower()
+        if wl in _upper_tokens:
+            return w.upper()
+        if "-" in w:
+            return "-".join(p.upper() if len(p) == 1 else p.capitalize() for p in w.split("-"))
+        return w.capitalize()
+
+    words = [_cap_word(w) for w in query_clean.split() if w]
     heading_label = " ".join(words) if words else ("Title IV Repayment Calculator" if resolved_tenant == "prexvo" else "Statutory Tax Calculator")
 
     title_rewrite = _normalize_title_50_60(f"{heading_label} 2026", brand=brand, tenant_id=resolved_tenant)
@@ -1372,6 +1713,7 @@ def prioritize_gsc_signals(
     domain = "prexvo.com" if eff_tenant == "prexvo" else "profithelm.com"
     base_dir_arg = kwargs.get("base_dir")
     dist_dir_arg = kwargs.get("dist_dir")
+    eng_metrics_arg = kwargs.get("engagement_metrics")
 
     prioritized: List[Dict[str, Any]] = []
     for item in raw_items:
@@ -1381,6 +1723,9 @@ def prioritize_gsc_signals(
             rec = dict(item)
         else:
             continue
+
+        if eng_metrics_arg and "engagement_metrics" not in rec:
+            rec["engagement_metrics"] = eng_metrics_arg
 
         item_tenant = str(rec.get("tenant_id") or rec.get("property_id") or eff_tenant).strip().lower()
         target_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
@@ -1412,6 +1757,8 @@ def prioritize_gsc_signals(
         if (
             base_dir_arg is not None
             or dist_dir_arg is not None
+            or eng_metrics_arg is not None
+            or "engagement_metrics" in rec
             or "has_conversion_path" in rec
             or "conversion_gap" in rec
             or "has_external_distribution" in rec
@@ -1431,6 +1778,9 @@ def prioritize_gsc_signals(
             rec.setdefault("distribution_gap_detected", readiness["distribution_gap_detected"])
             rec.setdefault("has_strong_conversion_path", readiness["has_strong_conversion_path"])
             rec.setdefault("has_external_distribution", readiness["has_external_distribution"])
+            rec.setdefault("yield_optimization_needed", readiness["yield_optimization_needed"])
+            rec.setdefault("current_partner_key", readiness["current_partner_key"])
+            rec.setdefault("optimal_partner_key", readiness["optimal_partner_key"])
 
         roi_metrics = calculate_candidate_roi(rec, tenant_id=item_tenant)
         merged_cand = {
@@ -1929,15 +2279,23 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     # 4a. Injected H2 Headings
     h2_headings = overlay_data.get("h2_headings") or overlay_data.get("h2_blocks") or []
+    h2_section_markup = ""
     if h2_headings:
         h2_parts = ['<section class="overlay-section overlay-headings" style="margin-top: 2rem; margin-bottom: 2rem;">']
         for h2 in h2_headings:
             h2_val = h2.get("heading", "") if isinstance(h2, dict) else str(h2)
-            clean_h2 = html_lib.escape(_strip_forbidden_dashes(str(h2_val)))
+            h2_norm = _strip_forbidden_dashes(str(h2_val))
+            h2_norm = re.sub(r"\bS\s+Corp\b", "S-Corp", h2_norm, flags=re.IGNORECASE)
+            h2_norm = re.sub(r"\bC\s+Corp\b", "C-Corp", h2_norm, flags=re.IGNORECASE)
+            h2_norm = re.sub(r"\bR\s+(?:And|&)\s+D\b", "R&D", h2_norm, flags=re.IGNORECASE)
+            h2_norm = re.sub(r"\bK\s+1\b", "K-1", h2_norm, flags=re.IGNORECASE)
+            h2_norm = re.sub(r"\bW\s+([249])\b", r"W-\1", h2_norm, flags=re.IGNORECASE)
+            clean_h2 = html_lib.escape(h2_norm)
             h2_parts.append(f'  <h2 class="section-title" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem;">{clean_h2}</h2>')
             h2_parts.append(f'  <p class="section-desc" style="color: var(--text-secondary, #64748b); margin-bottom: 1.5rem;">Statutory analysis and compliance guidelines for {clean_h2}.</p>')
         h2_parts.append("</section>")
-        injected_sections.append("\n".join(h2_parts))
+        h2_section_markup = "\n".join(h2_parts)
+        injected_sections.append(h2_section_markup)
 
     # 4b. Injected Interactive Preset Scenarios (with data-calc-preset)
     scenarios = overlay_data.get("preset_scenarios", [])
@@ -1966,6 +2324,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 sc_parts.append(f'      <p style="font-size: 0.875rem; color: var(--text-secondary, #64748b);">{html_lib.escape(desc_str)}</p>')
             sc_parts.append(
                 f'      <button type="button" class="btn-preset touch-target" data-calc-preset="{preset_json}" '
+                f'data-cta-slot="calculator_preset_cta" '
                 f'style="margin-top: 0.5rem; min-height: 44px; padding: 0.5rem 1rem;">Load Preset Scenario</button>'
             )
             sc_parts.append("    </div>")
@@ -2053,6 +2412,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         p_name = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_name") or "Featured Partner")))
         p_url = html_lib.escape(str(p_offer.get("url") or "https://ramp.com/"))
         p_cta = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_text") or f"Explore {p_name}")))
+        p_slot = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_slot") or "overlay_primary_cta")))
+        p_cta_id = html_lib.escape(
+            _strip_forbidden_dashes(
+                str(p_offer.get("cta_id") or f"cta-{overlay_data.get('tenant_id', 'profithelm')}-{overlay_data.get('slug', 'tool')}-{p_key}")
+            )
+        )
+        p_yield = f"{float(p_offer.get('yield_score', 0.0) or 0.0):.2f}"
+        p_erpm = f"{float(p_offer.get('empirical_erpm_usd', 0.0) or 0.0):.2f}"
+        p_opt_status = html_lib.escape(
+            _strip_forbidden_dashes(str(p_offer.get("optimization_status") or "INITIAL_PLACEMENT"))
+        )
         p_disc = html_lib.escape(
             _strip_forbidden_dashes(
                 str(
@@ -2066,12 +2436,15 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         partner_section_markup = (
             f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
-            f'data-property="{prop_id}" data-partner="{p_key}" data-mechanic="compliant_intent_monetization" '
+            f'data-property="{prop_id}" data-partner="{p_key}" data-cta-slot="{p_slot}" '
+            f'data-cta-id="{p_cta_id}" data-yield-score="{p_yield}" data-empirical-erpm="{p_erpm}" '
+            f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization" '
             f'style="margin-top: 1.5rem; margin-bottom: 1.5rem; padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">\n'
             f'  <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Recommended Partner Solution: {p_name}</h3>\n'
             f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #64748b); margin-bottom: 0.75rem;">{p_disc}</p>\n'
             f'  <a href="{p_url}" rel="noopener sponsored nofollow" target="_blank" '
             f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{p_key}" '
+            f'data-cta-slot="{p_slot}" data-cta-id="{p_cta_id}" '
             f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
             f'</section>'
         )
@@ -2188,13 +2561,27 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         if 'id="gsc-striking-overlay"' in html:
             incremental_parts: List[str] = []
+            if h2_section_markup and 'class="overlay-section overlay-headings"' in html:
+                html = re.sub(
+                    r'<section\s+class=["\']overlay-section\s+overlay-headings[^>]*>.*?</section>',
+                    h2_section_markup,
+                    html,
+                    count=1,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
             if hub_links_markup and 'class="overlay-section overlay-hub-links"' not in html:
                 incremental_parts.append(hub_links_markup)
-            if partner_section_markup and (
-                'class="overlay-section overlay-partner-offer' not in html
-                and 'class="overlay-section overlay-partner-guardrail' not in html
-            ):
-                incremental_parts.append(partner_section_markup)
+            if partner_section_markup:
+                if 'class="overlay-section overlay-partner-offer' in html:
+                    html = re.sub(
+                        r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',
+                        partner_section_markup,
+                        html,
+                        count=1,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+                elif 'class="overlay-section overlay-partner-guardrail' not in html:
+                    incremental_parts.append(partner_section_markup)
             if incremental_parts:
                 inc_html = "\n".join(incremental_parts)
                 if "</main>" in html:

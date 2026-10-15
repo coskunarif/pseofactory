@@ -1078,12 +1078,117 @@ def parse_bounty_estimate(bounty_str: str) -> Dict[str, float]:
     }
 
 
-def score_partner_yield(partner: AffiliatePartner, vault_status: Optional[str] = None) -> float:
+EXTENDED_PARTNER_BOUNTY_ESTIMATES: Dict[str, str] = {
+    "flexport": "$200-$500",
+    "wealthfront": "$100-$250",
+    "bench": "$150-$300",
+    "guideline": "$150-$350",
+    "sofi_refi": "$120",
+    "laurel_road": "$200-$300",
+    "juno": "$100-$175",
+    "freetaxusa": "$20-$45",
+    "public_com": "$50-$150",
+    "avalara": "$200-$350",
+    "brex": "$250-$500",
+    "stripe_tax": "$150-$250",
+    "pilot": "$200-$400",
+    "deel": "$200-$500",
+    "taxbit": "$40-$100",
+}
+
+
+def get_partner_bounty_midpoint(partner_or_key: Any) -> float:
     """
-    Scores expected yield of an affiliate partner weighted by operational status.
+    Returns numeric midpoint bounty in USD for an AffiliatePartner, partner dict, or partner_key string.
     Zero em-dashes. Zero en-dashes.
     """
-    effective_status = (vault_status or partner.status or "").strip().lower()
+    if isinstance(partner_or_key, AffiliatePartner):
+        return float(parse_bounty_estimate(partner_or_key.bounty_est)["midpoint"])
+    if isinstance(partner_or_key, dict):
+        b_str = str(partner_or_key.get("bounty_est") or partner_or_key.get("commission_est") or "")
+        if b_str:
+            return float(parse_bounty_estimate(b_str)["midpoint"])
+        k = str(partner_or_key.get("key") or partner_or_key.get("partner_key") or "").strip().lower()
+    else:
+        k = str(partner_or_key or "").strip().lower()
+
+    if k in AFFILIATE_REGISTRY:
+        return float(parse_bounty_estimate(AFFILIATE_REGISTRY[k].bounty_est)["midpoint"])
+    if k in EXTENDED_PARTNER_BOUNTY_ESTIMATES:
+        return float(parse_bounty_estimate(EXTENDED_PARTNER_BOUNTY_ESTIMATES[k])["midpoint"])
+    return 120.0
+
+
+def _extract_partner_engagement_record(
+    partner_key: str,
+    engagement_metrics: Optional[Dict[str, Any]],
+    slug: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Extracts empirical engagement telemetry for a partner_key (and optional slug)
+    from a flexible engagement_metrics dictionary structure.
+    """
+    if not engagement_metrics or not isinstance(engagement_metrics, dict):
+        return None
+    pk = str(partner_key or "").strip().lower()
+    pk_alias = "sofi" if pk == "sofi_refi" else ("sofi_refi" if pk == "sofi" else pk)
+    s_clean = str(slug or "").strip().lower()
+
+    # 1. Check slug-scoped partner breakdown: by_slug[slug]["partners"][pk]
+    by_slug = engagement_metrics.get("by_slug")
+    if s_clean and isinstance(by_slug, dict):
+        slug_entry = by_slug.get(s_clean)
+        if isinstance(slug_entry, dict):
+            partners_map = slug_entry.get("partners")
+            if isinstance(partners_map, dict):
+                for cand_k in (pk, pk_alias):
+                    if isinstance(partners_map.get(cand_k), dict):
+                        return partners_map[cand_k]
+
+    # 2. Check direct slug["partners"][pk]
+    partners_direct = engagement_metrics.get("partners")
+    if isinstance(partners_direct, dict):
+        for cand_k in (pk, pk_alias):
+            if isinstance(partners_direct.get(cand_k), dict):
+                return partners_direct[cand_k]
+
+    # 3. Check property-wide partner breakdown: by_partner[pk]
+    by_partner = engagement_metrics.get("by_partner")
+    if isinstance(by_partner, dict):
+        for cand_k in (pk, pk_alias):
+            if isinstance(by_partner.get(cand_k), dict):
+                return by_partner[cand_k]
+
+    # 4. Check top-level mapping {partner_key: {...}}
+    for cand_k in (pk, pk_alias):
+        if isinstance(engagement_metrics.get(cand_k), dict):
+            return engagement_metrics[cand_k]
+
+    return None
+
+
+def score_partner_yield(
+    partner: Any,
+    vault_status: Optional[str] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+    slug: Optional[str] = None,
+) -> float:
+    """
+    Scores expected yield of an affiliate partner weighted by operational status
+    and optional empirical outbound CTA engagement / conversion yield telemetry.
+    When engagement_metrics is None, preserves exact baseline status-weighted bounty midpoint.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(partner, dict):
+        p_status = str(partner.get("status") or "")
+        p_key = str(partner.get("key") or partner.get("partner_key") or "")
+        midpoint = get_partner_bounty_midpoint(partner)
+    else:
+        p_status = str(getattr(partner, "status", "") or "")
+        p_key = str(getattr(partner, "key", "") or "")
+        midpoint = parse_bounty_estimate(getattr(partner, "bounty_est", ""))["midpoint"]
+
+    effective_status = (vault_status or p_status or "").strip().lower()
     if effective_status in ("live", "active_direct"):
         weight = 1.0
     elif effective_status == "pending":
@@ -1094,8 +1199,41 @@ def score_partner_yield(partner: AffiliatePartner, vault_status: Optional[str] =
         weight = 0.15
     else:
         weight = 0.0
-    midpoint = parse_bounty_estimate(partner.bounty_est)["midpoint"]
-    return round(midpoint * weight, 4)
+    base_score = round(midpoint * weight, 4)
+
+    if not engagement_metrics:
+        return base_score
+
+    emp = _extract_partner_engagement_record(p_key, engagement_metrics, slug=slug)
+    if not isinstance(emp, dict):
+        return base_score
+
+    outbound_clicks = int(float(emp.get("outbound_clicks", emp.get("affiliate_clicks", emp.get("clicks", 0))) or 0))
+    calc_interactions = int(float(emp.get("calculator_interactions", emp.get("interactions", emp.get("calculations", 0))) or 0))
+    views = int(float(emp.get("views_exposed", emp.get("page_views", emp.get("impressions", 0))) or 0))
+    cta_ctr = float(emp.get("cta_ctr", emp.get("conversion_rate", emp.get("ctr", 0.0))) or 0.0)
+    intent_rate = float(emp.get("intent_to_click_rate", 0.0) or 0.0)
+    emp_erpm = float(emp.get("empirical_erpm_usd", emp.get("empirical_erpm", 0.0)) or 0.0)
+    realized_rev = float(emp.get("realized_revenue_usd", emp.get("est_revenue_usd", 0.0)) or 0.0)
+
+    traffic_basis = max(1, views, calc_interactions, outbound_clicks)
+    if cta_ctr <= 0.0 and outbound_clicks > 0:
+        cta_ctr = outbound_clicks / float(traffic_basis)
+    if intent_rate <= 0.0 and outbound_clicks > 0 and calc_interactions > 0:
+        intent_rate = outbound_clicks / float(calc_interactions)
+
+    # If the partner was exposed to meaningful traffic (>= 20 views/interactions) with zero clicks, dampen score
+    if outbound_clicks == 0 and cta_ctr <= 0.0 and emp_erpm <= 0.0 and realized_rev <= 0.0:
+        if max(views, calc_interactions) >= 20:
+            return round(base_score * 0.65, 4)
+        return base_score
+
+    # Combine base yield with empirical CTA conversion rate, calculator intent rate, and realized eRPM
+    ctr_multiplier = 1.0 + min(2.5, (cta_ctr / 0.04) * 0.55) + min(1.5, (intent_rate / 0.08) * 0.35)
+    click_confidence = 1.0 + min(0.60, outbound_clicks * 0.03)
+    erpm_bonus = min(midpoint * 1.5, emp_erpm * 0.35) + min(midpoint * 2.0, realized_rev * 0.25)
+    empirical_score = (base_score * ctr_multiplier * click_confidence) + (erpm_bonus * max(weight, 0.25))
+    return round(empirical_score, 4)
 
 
 def is_commercial_b2b_slug(slug: str) -> bool:
@@ -1219,10 +1357,12 @@ def resolve_optimal_partner_for_slug(
     property_id: str,
     slug: str,
     vault_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
 ) -> Optional[AffiliatePartner]:
     """
     Resolves the optimal affiliate partner for a property and calculator slug,
-    enforcing domain boundaries and prioritizing highest-yielding live partners.
+    enforcing domain boundaries and prioritizing highest-yielding live partners
+    (incorporating empirical outbound partner engagement and conversion telemetry when present).
     Suppresses commercial refinance partners on restricted Prexvo public-service pages.
     Zero em-dashes. Zero en-dashes.
     """
@@ -1243,8 +1383,27 @@ def resolve_optimal_partner_for_slug(
             if eff_status in ("live", "active_direct"):
                 live_candidates.append((p, eff_status))
         if live_candidates:
-            best = max(live_candidates, key=lambda item: score_partner_yield(item[0], item[1]))
+            best = max(
+                live_candidates,
+                key=lambda item: score_partner_yield(
+                    item[0],
+                    item[1],
+                    engagement_metrics=engagement_metrics,
+                    slug=s,
+                ),
+            )
             return best[0]
+        if engagement_metrics:
+            best_pending = max(
+                candidates,
+                key=lambda p: score_partner_yield(
+                    p,
+                    p.status,
+                    engagement_metrics=engagement_metrics,
+                    slug=s,
+                ),
+            )
+            return best_pending
         return PREXVO_AFFILIATES.get("splash_financial")
 
     if prop in ("profithelm", "exchange1031"):
@@ -1286,7 +1445,7 @@ def resolve_optimal_partner_for_slug(
                 live_candidates.append((p, eff_status))
 
         if live_candidates:
-            if matched_bucket_name == "crypto":
+            if matched_bucket_name == "crypto" and not engagement_metrics:
                 for p, eff_st in live_candidates:
                     if p.key == "coinledger" and not (explicit_vault_live_keys - {"coinledger"}):
                         return p
@@ -1298,19 +1457,720 @@ def resolve_optimal_partner_for_slug(
                 "equipment",
                 "tariff-landed-cost",
                 "invoice-factoring",
-            ) and not explicit_vault_live_keys:
+            ) and not explicit_vault_live_keys and not engagement_metrics:
                 non_fallback_live = [
                     (p, eff_st) for p, eff_st in live_candidates if p.key != "mercury"
                 ]
                 if not non_fallback_live:
                     return candidates[0]
                 live_candidates = non_fallback_live
-            best = max(live_candidates, key=lambda item: score_partner_yield(item[0], item[1]))
+            best = max(
+                live_candidates,
+                key=lambda item: score_partner_yield(
+                    item[0],
+                    item[1],
+                    engagement_metrics=engagement_metrics,
+                    slug=s,
+                ),
+            )
             return best[0]
+
+        if engagement_metrics:
+            best_cand = max(
+                candidates,
+                key=lambda p: score_partner_yield(
+                    p,
+                    p.status,
+                    engagement_metrics=engagement_metrics,
+                    slug=s,
+                ),
+            )
+            return best_cand
 
         return candidates[0]
 
     return None
+
+
+def record_outbound_partner_engagement(
+    event: Dict[str, Any],
+    ledger_path: Optional[Any] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Appends an outbound partner engagement or calculator CTA interaction event
+    to a tenant telemetry JSONL ledger with strict property isolation and zero dashes.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    import uuid
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    prop_clean = str(event.get("property_id") or event.get("tenant_id") or property_id or "profithelm").strip().lower()
+    event_type = str(event.get("event_type") or event.get("event") or "affiliate_click").strip().lower()
+    tool_slug = str(event.get("tool_slug") or event.get("slug") or event.get("source_tool") or "general").strip().lower()
+    props = dict(event.get("properties") or {})
+    mon = dict(event.get("monetization") or {})
+
+    partner_key = str(
+        event.get("partner_key")
+        or event.get("partner")
+        or props.get("partner_key")
+        or props.get("partner")
+        or mon.get("partner_key")
+        or mon.get("partner")
+        or ""
+    ).strip().lower()
+    cta_slot = str(
+        event.get("cta_slot")
+        or event.get("cta_id")
+        or props.get("cta_slot")
+        or props.get("cta_id")
+        or mon.get("cta_slot")
+        or ("calculator_preset_cta" if "preset" in event_type else "primary_partner_cta")
+    ).strip()
+    value_tier = str(
+        event.get("value_tier")
+        or event.get("tier")
+        or props.get("value_tier")
+        or mon.get("value_tier")
+        or "starter"
+    ).strip().lower()
+
+    if prop_clean == "prexvo" and partner_key in B2B_PARTNER_KEYS:
+        raise ValueError(
+            f"Strict isolation violation: B2B partner '{partner_key}' engagement cannot be recorded on Prexvo."
+        )
+    if prop_clean in ("profithelm", "exchange1031") and partner_key in STUDENT_LOAN_PARTNER_KEYS:
+        raise ValueError(
+            f"Strict isolation violation: Student loan partner '{partner_key}' engagement cannot be recorded on ProfitHelm."
+        )
+
+    raw_payout = (
+        event.get("payout_usd")
+        if event.get("payout_usd") is not None
+        else (
+            event.get("revenue_usd")
+            if event.get("revenue_usd") is not None
+            else (props.get("payout_usd") if props.get("payout_usd") is not None else mon.get("payout_usd"))
+        )
+    )
+    payout_val: Optional[float] = None
+    if raw_payout is not None:
+        try:
+            payout_val = float(raw_payout)
+        except Exception:
+            payout_val = None
+
+    merged_props = {
+        **props,
+        "partner_key": partner_key,
+        "cta_slot": cta_slot,
+        "value_tier": value_tier,
+    }
+    merged_mon = {
+        **mon,
+        "partner_key": partner_key,
+        "cta_slot": cta_slot,
+        "value_tier": value_tier,
+    }
+    if payout_val is not None:
+        merged_props["payout_usd"] = payout_val
+        merged_mon["payout_usd"] = payout_val
+
+    rec: Dict[str, Any] = {
+        "schema_version": f"{prop_clean}.telemetry.v1",
+        "event_id": str(event.get("event_id") or uuid.uuid4()),
+        "timestamp": str(event.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+        "property_id": prop_clean,
+        "tenant_id": prop_clean,
+        "event_type": event_type,
+        "tool_slug": tool_slug,
+        "partner_key": partner_key,
+        "cta_slot": cta_slot,
+        "value_tier": value_tier,
+        "properties": merged_props,
+        "monetization": merged_mon,
+    }
+    if payout_val is not None:
+        rec["payout_usd"] = payout_val
+    if ledger_path is not None:
+        p = Path(ledger_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    return {"status": "SUCCESS", "event_id": rec["event_id"], "record": rec}
+
+
+def aggregate_outbound_partner_engagement(
+    events_or_path: Any = None,
+    property_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Aggregates calculator CTA interactions and outbound affiliate partner clicks
+    into empirical conversion rates, EPC, eRPM, and revenue yield scores across
+    tools, CTA slots, and partners.
+    Accepts a list of telemetry event dicts, an existing summary dict, a Path/str to
+    a JSONL/JSON telemetry file, or a tenant base_dir.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    from pathlib import Path
+
+    if isinstance(events_or_path, dict) and ("by_slug" in events_or_path or "by_partner" in events_or_path):
+        return events_or_path
+
+    raw_events: List[Dict[str, Any]] = []
+    prop_filter = str(property_id or "").strip().lower() or None
+
+    if isinstance(events_or_path, list):
+        raw_events = [e for e in events_or_path if isinstance(e, dict)]
+    elif isinstance(events_or_path, (str, Path)):
+        p = Path(events_or_path)
+        if p.is_dir():
+            for cand_file in (
+                p / ".agy" / "telemetry_events.jsonl",
+                p / ".agy" / "outbound_partner_engagement.json",
+                p / "telemetry_events.jsonl",
+            ):
+                if cand_file.is_file():
+                    p = cand_file
+                    break
+        if p.is_file():
+            try:
+                content = p.read_text(encoding="utf-8").strip()
+                if p.suffix == ".json" and content.startswith("{"):
+                    loaded = json.loads(content)
+                    if isinstance(loaded, dict) and ("by_slug" in loaded or "by_partner" in loaded):
+                        return loaded
+                    if isinstance(loaded, dict) and isinstance(loaded.get("events"), list):
+                        raw_events = [e for e in loaded["events"] if isinstance(e, dict)]
+                else:
+                    for line in content.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = json.loads(line)
+                            if isinstance(ev, dict):
+                                raw_events.append(ev)
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+    by_slug: Dict[str, Dict[str, Any]] = {}
+    by_partner: Dict[str, Dict[str, Any]] = {}
+    by_cta_slot: Dict[str, Dict[str, Any]] = {}
+
+    def _ensure_slug(slug_val: str, prop_val: str) -> Dict[str, Any]:
+        if slug_val not in by_slug:
+            by_slug[slug_val] = {
+                "tool_slug": slug_val,
+                "property_id": prop_val,
+                "page_views": 0,
+                "calculator_interactions": 0,
+                "preset_clicks": 0,
+                "outbound_clicks": 0,
+                "cta_ctr": 0.0,
+                "intent_to_click_rate": 0.0,
+                "realized_revenue_usd": 0.0,
+                "estimated_revenue_yield_usd": 0.0,
+                "empirical_erpm_usd": 0.0,
+                "top_converting_partner": "",
+                "top_converting_cta_slot": "",
+                "cta_slots": {},
+                "partners": {},
+            }
+        return by_slug[slug_val]
+
+    def _ensure_partner(pk_val: str, prop_val: str) -> Dict[str, Any]:
+        if pk_val not in by_partner:
+            by_partner[pk_val] = {
+                "partner_key": pk_val,
+                "property_id": prop_val,
+                "bounty_midpoint_usd": get_partner_bounty_midpoint(pk_val),
+                "views_exposed": 0,
+                "calculator_interactions": 0,
+                "outbound_clicks": 0,
+                "cta_ctr": 0.0,
+                "intent_to_click_rate": 0.0,
+                "empirical_epc_usd": 0.0,
+                "empirical_erpm_usd": 0.0,
+                "realized_revenue_usd": 0.0,
+                "estimated_revenue_yield_usd": 0.0,
+                "composite_yield_score": 0.0,
+                "cta_slots": {},
+                "slugs": {},
+            }
+        return by_partner[pk_val]
+
+    def _ensure_cta_slot(slot_val: str) -> Dict[str, Any]:
+        if slot_val not in by_cta_slot:
+            by_cta_slot[slot_val] = {
+                "cta_slot": slot_val,
+                "views_exposed": 0,
+                "intent_interactions": 0,
+                "outbound_clicks": 0,
+                "cta_ctr": 0.0,
+                "intent_to_click_rate": 0.0,
+                "estimated_revenue_yield_usd": 0.0,
+                "partners": {},
+            }
+        return by_cta_slot[slot_val]
+
+    for ev in raw_events:
+        ev_prop = str(
+            ev.get("property_id")
+            or ev.get("tenant_id")
+            or (ev.get("properties") or {}).get("property_id")
+            or prop_filter
+            or "profithelm"
+        ).strip().lower()
+        if prop_filter and ev_prop and ev_prop != prop_filter:
+            continue
+
+        etype = str(ev.get("event_type") or ev.get("event") or "").strip().lower()
+        # Skip system failure events from pseofactory crash logger
+        if etype in ("subprocess_crash", "systemd_failure", "unhandled_exception", "indexing_anomaly", "property_contamination", "lock_contention"):
+            continue
+
+        props = ev.get("properties") if isinstance(ev.get("properties"), dict) else {}
+        mon = ev.get("monetization") if isinstance(ev.get("monetization"), dict) else {}
+
+        slug = str(
+            ev.get("tool_slug")
+            or ev.get("slug")
+            or ev.get("source_tool")
+            or props.get("tool_slug")
+            or props.get("source_tool")
+            or ""
+        ).strip().lower()
+        if not slug:
+            path_val = str(ev.get("path") or "").strip("/")
+            parts = [pt for pt in path_val.split("/") if pt]
+            if len(parts) >= 2 and parts[0] == "tools":
+                slug = parts[1].lower()
+            elif len(parts) == 1 and parts[0] != "tools":
+                slug = parts[0].lower()
+            else:
+                slug = "general"
+
+        partner_key = str(
+            ev.get("partner_key")
+            or ev.get("partner")
+            or props.get("partner_key")
+            or props.get("partner")
+            or mon.get("partner_key")
+            or mon.get("partner")
+            or ""
+        ).strip().lower()
+        if not partner_key:
+            href_or_path = str(ev.get("href") or props.get("href") or ev.get("path") or "")
+            m_r = re.search(r"/r/([a-z0-9_]+)", href_or_path.lower())
+            if m_r:
+                partner_key = m_r.group(1)
+
+        cta_slot = str(
+            ev.get("cta_slot")
+            or ev.get("cta_id")
+            or props.get("cta_slot")
+            or props.get("cta_id")
+            or mon.get("cta_slot")
+            or ("calculator_preset_cta" if "preset" in etype else "primary_partner_cta")
+        ).strip()
+
+        value_tier = str(
+            ev.get("value_tier")
+            or ev.get("tier")
+            or props.get("value_tier")
+            or mon.get("value_tier")
+            or "starter"
+        ).strip().lower()
+
+        payout = 0.0
+        for p_src in (props, mon, ev):
+            raw_pay = p_src.get("payout_usd") or p_src.get("revenue_usd") or p_src.get("revenue") or p_src.get("amount")
+            if raw_pay is not None:
+                try:
+                    payout = float(raw_pay)
+                    break
+                except Exception:
+                    pass
+
+        s_rec = _ensure_slug(slug, ev_prop)
+        slot_rec = _ensure_cta_slot(cta_slot)
+        s_slot = s_rec["cta_slots"].setdefault(
+            cta_slot,
+            {"cta_slot": cta_slot, "views": 0, "intent_interactions": 0, "outbound_clicks": 0, "estimated_revenue_yield_usd": 0.0},
+        )
+
+        is_view = etype in ("page_view", "impression", "offer_impression")
+        is_calc_intent = (
+            etype in ("client_calculation", "calculation", "scenario_copy", "slider_drag", "input_change", "calculator_interaction")
+            or etype.startswith("select_preset")
+            or etype == "preset_click"
+        )
+        is_outbound_click = etype in ("affiliate_click", "click_conversion_cta", "outbound_redirect", "partner_cta_click")
+
+        if is_view:
+            s_rec["page_views"] += 1
+            s_slot["views"] += 1
+            slot_rec["views_exposed"] += 1
+            if partner_key:
+                p_rec = _ensure_partner(partner_key, ev_prop)
+                p_rec["views_exposed"] += 1
+                sp_entry = s_rec["partners"].setdefault(
+                    partner_key,
+                    {
+                        "partner_key": partner_key,
+                        "views_exposed": 0,
+                        "calculator_interactions": 0,
+                        "outbound_clicks": 0,
+                        "realized_revenue_usd": 0.0,
+                        "estimated_revenue_yield_usd": 0.0,
+                        "cta_ctr": 0.0,
+                        "intent_to_click_rate": 0.0,
+                        "empirical_erpm_usd": 0.0,
+                    },
+                )
+                sp_entry["views_exposed"] += 1
+
+        if is_calc_intent:
+            s_rec["calculator_interactions"] += 1
+            if "preset" in etype:
+                s_rec["preset_clicks"] += 1
+            s_slot["intent_interactions"] += 1
+            slot_rec["intent_interactions"] += 1
+            if partner_key:
+                p_rec = _ensure_partner(partner_key, ev_prop)
+                p_rec["calculator_interactions"] += 1
+                sp_entry = s_rec["partners"].setdefault(
+                    partner_key,
+                    {
+                        "partner_key": partner_key,
+                        "views_exposed": 0,
+                        "calculator_interactions": 0,
+                        "outbound_clicks": 0,
+                        "realized_revenue_usd": 0.0,
+                        "estimated_revenue_yield_usd": 0.0,
+                        "cta_ctr": 0.0,
+                        "intent_to_click_rate": 0.0,
+                        "empirical_erpm_usd": 0.0,
+                    },
+                )
+                sp_entry["calculator_interactions"] += 1
+
+        if is_outbound_click:
+            s_rec["outbound_clicks"] += 1
+            s_Slot_clicks = s_slot["outbound_clicks"] + 1
+            s_slot["outbound_clicks"] = s_Slot_clicks
+            slot_rec["outbound_clicks"] += 1
+
+            eff_pk = partner_key or _select_partner_for_slug(ev_prop, slug) or "default_partner"
+            p_rec = _ensure_partner(eff_pk, ev_prop)
+            p_rec["outbound_clicks"] += 1
+            p_rec["cta_slots"][cta_slot] = p_rec["cta_slots"].get(cta_slot, 0) + 1
+            p_rec["slugs"][slug] = p_rec["slugs"].get(slug, 0) + 1
+            slot_rec["partners"][eff_pk] = slot_rec["partners"].get(eff_pk, 0) + 1
+
+            bounty_mid = p_rec["bounty_midpoint_usd"]
+            is_b2b_partner = eff_pk in ENTERPRISE_B2B_PARTNERS or is_commercial_b2b_slug(slug)
+            base_conv = 0.045 if is_b2b_partner else 0.035
+            tier_mult = 1.25 if value_tier in ("premium", "tier_1") else 1.0
+            click_yield = payout if payout > 0 else round(bounty_mid * base_conv * tier_mult, 4)
+
+            s_rec["realized_revenue_usd"] = round(s_rec["realized_revenue_usd"] + payout, 4)
+            s_rec["estimated_revenue_yield_usd"] = round(s_rec["estimated_revenue_yield_usd"] + click_yield, 4)
+            s_slot["estimated_revenue_yield_usd"] = round(s_slot["estimated_revenue_yield_usd"] + click_yield, 4)
+            slot_rec["estimated_revenue_yield_usd"] = round(slot_rec["estimated_revenue_yield_usd"] + click_yield, 4)
+
+            p_rec["realized_revenue_usd"] = round(p_rec["realized_revenue_usd"] + payout, 4)
+            p_rec["estimated_revenue_yield_usd"] = round(p_rec["estimated_revenue_yield_usd"] + click_yield, 4)
+
+            sp_entry = s_rec["partners"].setdefault(
+                eff_pk,
+                {
+                    "partner_key": eff_pk,
+                    "views_exposed": 0,
+                    "calculator_interactions": 0,
+                    "outbound_clicks": 0,
+                    "realized_revenue_usd": 0.0,
+                    "estimated_revenue_yield_usd": 0.0,
+                    "cta_ctr": 0.0,
+                    "intent_to_click_rate": 0.0,
+                    "empirical_erpm_usd": 0.0,
+                },
+            )
+            sp_entry["outbound_clicks"] += 1
+            sp_entry["realized_revenue_usd"] = round(sp_entry["realized_revenue_usd"] + payout, 4)
+            sp_entry["estimated_revenue_yield_usd"] = round(sp_entry["estimated_revenue_yield_usd"] + click_yield, 4)
+
+    # Finalize derived ratios and rankings
+    for slug_k, s_rec in by_slug.items():
+        t_basis = max(1, s_rec["page_views"], s_rec["calculator_interactions"], s_rec["outbound_clicks"])
+        s_rec["cta_ctr"] = round(s_rec["outbound_clicks"] / float(t_basis), 4)
+        s_rec["intent_to_click_rate"] = round(
+            s_rec["outbound_clicks"] / float(max(1, s_rec["calculator_interactions"])),
+            4,
+        ) if s_rec["calculator_interactions"] > 0 else s_rec["cta_ctr"]
+        s_rec["empirical_erpm_usd"] = round((s_rec["estimated_revenue_yield_usd"] / float(t_basis)) * 1000.0, 2)
+
+        for sp_k, sp_data in s_rec["partners"].items():
+            sp_basis = max(1, sp_data["views_exposed"], s_rec["page_views"], s_rec["calculator_interactions"], sp_data["outbound_clicks"])
+            sp_data["cta_ctr"] = round(sp_data["outbound_clicks"] / float(sp_basis), 4)
+            sp_calc_basis = max(1, sp_data["calculator_interactions"], s_rec["calculator_interactions"])
+            sp_data["intent_to_click_rate"] = round(sp_data["outbound_clicks"] / float(sp_calc_basis), 4)
+            sp_data["empirical_erpm_usd"] = round((sp_data["estimated_revenue_yield_usd"] / float(sp_basis)) * 1000.0, 2)
+
+        if s_rec["partners"]:
+            best_p = max(
+                s_rec["partners"].values(),
+                key=lambda x: (x.get("estimated_revenue_yield_usd", 0.0), x.get("outbound_clicks", 0)),
+            )
+            s_rec["top_converting_partner"] = best_p["partner_key"]
+        if s_rec["cta_slots"]:
+            best_slot = max(
+                s_rec["cta_slots"].values(),
+                key=lambda x: (x.get("estimated_revenue_yield_usd", 0.0), x.get("outbound_clicks", 0)),
+            )
+            s_rec["top_converting_cta_slot"] = best_slot["cta_slot"]
+
+    for pk_k, p_rec in by_partner.items():
+        p_basis = max(1, p_rec["views_exposed"], p_rec["calculator_interactions"], p_rec["outbound_clicks"])
+        p_rec["cta_ctr"] = round(p_rec["outbound_clicks"] / float(p_basis), 4)
+        p_rec["intent_to_click_rate"] = round(
+            p_rec["outbound_clicks"] / float(max(1, p_rec["calculator_interactions"])),
+            4,
+        ) if p_rec["calculator_interactions"] > 0 else p_rec["cta_ctr"]
+        p_rec["empirical_epc_usd"] = round(
+            p_rec["estimated_revenue_yield_usd"] / float(max(1, p_rec["outbound_clicks"])),
+            4,
+        ) if p_rec["outbound_clicks"] > 0 else round(p_rec["bounty_midpoint_usd"] * 0.04, 4)
+        p_rec["empirical_erpm_usd"] = round((p_rec["estimated_revenue_yield_usd"] / float(p_basis)) * 1000.0, 2)
+        p_rec["composite_yield_score"] = round(
+            p_rec["bounty_midpoint_usd"] * (1.0 + p_rec["cta_ctr"] * 8.0 + p_rec["intent_to_click_rate"] * 4.0)
+            + p_rec["estimated_revenue_yield_usd"],
+            4,
+        )
+
+    for slot_k, slot_rec in by_cta_slot.items():
+        sl_basis = max(1, slot_rec["views_exposed"], slot_rec["intent_interactions"], slot_rec["outbound_clicks"])
+        slot_rec["cta_ctr"] = round(slot_rec["outbound_clicks"] / float(sl_basis), 4)
+        slot_rec["intent_to_click_rate"] = round(
+            slot_rec["outbound_clicks"] / float(max(1, slot_rec["intent_interactions"])),
+            4,
+        ) if slot_rec["intent_interactions"] > 0 else slot_rec["cta_ctr"]
+
+    return {
+        "property_id": prop_filter or "all",
+        "total_events_processed": len(raw_events),
+        "total_outbound_clicks": sum(s["outbound_clicks"] for s in by_slug.values()),
+        "total_calculator_interactions": sum(s["calculator_interactions"] for s in by_slug.values()),
+        "total_estimated_revenue_yield_usd": round(sum(s["estimated_revenue_yield_usd"] for s in by_slug.values()), 2),
+        "by_slug": by_slug,
+        "by_partner": by_partner,
+        "by_cta_slot": by_cta_slot,
+    }
+
+
+def rank_partner_offers_by_revenue_yield(
+    property_id: str,
+    slug: str,
+    candidate_keys: Optional[List[str]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+    vault_overrides: Optional[Dict[str, Any]] = None,
+    only_live: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Ranks compliant candidate partner offers for a (property_id, slug) pair by composite
+    revenue yield (combining status-weighted bounty midpoint and empirical outbound CTA
+    conversion rate / revenue yield).
+    Enforces strict property boundaries and Prexvo YMYL public-service suppression.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "profithelm").strip().lower()
+    s_clean = (slug or "").strip().lower()
+
+    if prop == "prexvo" and is_restricted_public_service_slug(s_clean):
+        return []
+
+    agg = aggregate_outbound_partner_engagement(engagement_metrics, property_id=prop) if engagement_metrics else None
+
+    if candidate_keys is None:
+        if prop == "prexvo":
+            candidate_keys = list(PREXVO_AFFILIATES.keys())
+        else:
+            bucket = _resolve_profithelm_bucket(s_clean)
+            candidate_keys = list(INTENT_ROUTING_TABLE.get(bucket, ["mercury", "ramp", "coinledger"]))
+
+    ranked: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for idx, raw_k in enumerate(candidate_keys):
+        k = str(raw_k or "").strip().lower()
+        if not k or k in seen:
+            continue
+        if prop == "prexvo" and (k in B2B_PARTNER_KEYS or k in PROFITHELM_AFFILIATES):
+            continue
+        if prop in ("profithelm", "exchange1031") and (k in STUDENT_LOAN_PARTNER_KEYS or k in PREXVO_AFFILIATES):
+            continue
+        seen.add(k)
+
+        registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+        p_obj = registry.get(k) or (PREXVO_AFFILIATES.get("sofi") if k == "sofi_refi" else None)
+        bounty_mid = get_partner_bounty_midpoint(p_obj if p_obj is not None else k)
+        ov_status = _extract_partner_vault_status(k, vault_overrides)
+        eff_status = (ov_status or (p_obj.status if p_obj else "live")).strip().lower()
+        if only_live and eff_status not in ("live", "active_direct"):
+            continue
+
+        if p_obj is not None:
+            y_score = score_partner_yield(p_obj, eff_status, engagement_metrics=agg or engagement_metrics, slug=s_clean)
+        else:
+            # Extended remediation partner (e.g. flexport, wealthfront, bench, guideline, laurel_road, juno)
+            dummy_p = AffiliatePartner(
+                key=k,
+                name=k.replace("_", " ").title(),
+                category="Commercial",
+                property_id=prop,
+                status=eff_status,
+                env_var=f"AFFILIATE_{k.upper()}_URL",
+                default_url=f"https://{k.replace('_', '')}.com/",
+                badge="Featured",
+                commission_est=f"${int(bounty_mid)}",
+                bounty_est=f"${int(bounty_mid)}",
+                network="Direct",
+                description="Partner",
+                target_tools=[s_clean],
+                supported_params=[],
+            )
+            y_score = score_partner_yield(dummy_p, eff_status, engagement_metrics=agg or engagement_metrics, slug=s_clean)
+
+        emp_rec = _extract_partner_engagement_record(k, agg or engagement_metrics, slug=s_clean) or {}
+        outbound_clicks = int(float(emp_rec.get("outbound_clicks", emp_rec.get("affiliate_clicks", emp_rec.get("clicks", 0))) or 0))
+        cta_ctr = float(emp_rec.get("cta_ctr", emp_rec.get("conversion_rate", emp_rec.get("ctr", 0.0))) or 0.0)
+        emp_erpm = float(emp_rec.get("empirical_erpm_usd", emp_rec.get("empirical_erpm", 0.0)) or 0.0)
+        est_yield = float(emp_rec.get("estimated_revenue_yield_usd", emp_rec.get("est_revenue_usd", 0.0)) or 0.0)
+
+        ranked.append({
+            "key": k,
+            "partner_key": k,
+            "partner_name": p_obj.name if p_obj else k.replace("_", " ").title(),
+            "status": eff_status,
+            "bounty_midpoint_usd": round(bounty_mid, 2),
+            "yield_score": round(y_score, 4),
+            "outbound_clicks": outbound_clicks,
+            "cta_ctr": round(cta_ctr, 4),
+            "empirical_erpm_usd": round(emp_erpm, 2),
+            "estimated_revenue_yield_usd": round(est_yield, 2),
+            "has_empirical_signal": bool(outbound_clicks > 0 or cta_ctr > 0.0 or emp_erpm > 0.0 or est_yield > 0.0),
+            "default_order": idx,
+        })
+
+    # When empirical signal exists on any candidate, sort by (-has_empirical_signal, -yield_score, default_order);
+    # otherwise preserve default_order or static yield_score.
+    any_empirical = any(item["has_empirical_signal"] for item in ranked)
+    if any_empirical:
+        ranked.sort(key=lambda x: (-x["yield_score"], x["default_order"]))
+    for rank_idx, item in enumerate(ranked, start=1):
+        item["rank"] = rank_idx
+    return ranked
+
+
+def estimate_partner_approval_revenue_impact(
+    property_id: str,
+    partner_key: str,
+    affected_slugs: Optional[List[str]] = None,
+    impressions: int = 0,
+    outbound_clicks: int = 0,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Calculates the estimated monthly revenue impact (in USD) of approving/resolving
+    a pending manual partner approval or integration gate for human review.
+    Combines:
+      1. Partner bounty midpoint and net uplift over current fallback/suppressed state.
+      2. Affected calculator/guide search impressions across target tools.
+      3. Empirical outbound CTA engagement clicks and user intent conversion rates.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "profithelm").strip().lower()
+    pk = (partner_key or "").strip().lower()
+
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    p_obj = registry.get(pk)
+    bounty_mid = get_partner_bounty_midpoint(p_obj if p_obj is not None else pk)
+
+    # Determine net bounty uplift upon human operator approval
+    if prop == "prexvo":
+        # On Prexvo, pending_p2 offers are 100% suppressed until Gate 1 approval
+        fallback_yield = 0.0
+        bounty_uplift = bounty_mid
+    else:
+        # On ProfitHelm, pending offers fall back to Sovrn (~18% of direct bounty) or secondary partner
+        fallback_yield = round(bounty_mid * 0.20, 2)
+        bounty_uplift = round(max(25.0, bounty_mid - fallback_yield), 2)
+
+    slugs_set: List[str] = []
+    if p_obj and p_obj.target_tools:
+        for t_slug in p_obj.target_tools:
+            if t_slug and t_slug not in slugs_set:
+                slugs_set.append(t_slug)
+    for a_slug in (affected_slugs or []):
+        clean_s = str(a_slug or "").strip().lower()
+        if clean_s and clean_s not in slugs_set:
+            slugs_set.append(clean_s)
+
+    agg = aggregate_outbound_partner_engagement(engagement_metrics, property_id=prop) if engagement_metrics else None
+    agg_impressions = 0
+    agg_clicks = 0
+    emp_calc_interactions = 0
+
+    if agg and isinstance(agg.get("by_slug"), dict):
+        for s in slugs_set:
+            s_entry = agg["by_slug"].get(s)
+            if isinstance(s_entry, dict):
+                agg_impressions += int(s_entry.get("page_views", 0) or 0)
+                agg_clicks += int(s_entry.get("outbound_clicks", 0) or 0)
+                emp_calc_interactions += int(s_entry.get("calculator_interactions", 0) or 0)
+    if agg and isinstance(agg.get("by_partner"), dict):
+        p_entry = agg["by_partner"].get(pk)
+        if isinstance(p_entry, dict):
+            agg_impressions = max(agg_impressions, int(p_entry.get("views_exposed", 0) or 0))
+            agg_clicks = max(agg_clicks, int(p_entry.get("outbound_clicks", 0) or 0))
+
+    emp_impressions = max(int(impressions or 0), agg_impressions)
+    emp_clicks = max(int(outbound_clicks or 0), agg_clicks)
+
+    # Baseline monthly impressions across affected tools when live telemetry is not yet populated
+    tool_count = max(1, len(slugs_set))
+    baseline_impressions = tool_count * (650 if prop == "profithelm" else 800)
+    effective_impressions = max(emp_impressions, baseline_impressions) if emp_impressions == 0 else emp_impressions
+
+    # Estimate monthly outbound CTA clicks from impressions + empirical clicks
+    expected_cta_ctr = 0.042 if prop == "profithelm" else 0.038
+    projected_monthly_clicks = max(
+        float(emp_clicks),
+        (effective_impressions * expected_cta_ctr) + (emp_clicks * 1.5) + (emp_calc_interactions * 0.15),
+    )
+
+    lead_to_sale_rate = 0.045 if (pk in ENTERPRISE_B2B_PARTNERS or prop == "profithelm") else 0.035
+    est_monthly_conversions = projected_monthly_clicks * lead_to_sale_rate
+    est_monthly_rev_impact = round(est_monthly_conversions * bounty_uplift, 2)
+
+    return {
+        "property_id": prop,
+        "partner_key": pk,
+        "bounty_midpoint_usd": round(bounty_mid, 2),
+        "bounty_uplift_usd": round(bounty_uplift, 2),
+        "affected_slugs": slugs_set,
+        "affected_traffic_impressions": int(effective_impressions),
+        "outbound_cta_intent_clicks": int(emp_clicks),
+        "estimated_monthly_conversions": round(est_monthly_conversions, 2),
+        "estimated_monthly_revenue_impact_usd": est_monthly_rev_impact,
+    }
+
 
 
 def get_profithelm_partner_for_slug(slug: str) -> Optional[AffiliatePartner]:

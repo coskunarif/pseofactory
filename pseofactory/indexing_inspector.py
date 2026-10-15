@@ -129,12 +129,15 @@ class DailyIndexingInspector:
         queue_size = len(tenant_urls)
         backlog_exceeded = queue_size > 200
 
-        # Scan recent telemetry events for 429 quota exhaustion
+        # Scan recent telemetry events newest-first for active 429 quota exhaustion
         quota_exhausted = False
         quota_reasons = []
         try:
             recent_events = self.telemetry_logger.read_recent(limit=50, tenant_id=self.tenant_id)
-            for ev in recent_events:
+            for ev in reversed(recent_events):
+                act = (ev.action_taken or "").upper()
+                if act in ("AUTO_REMEDIATED", "QUOTA_GOVERNOR_DEFERRED"):
+                    break
                 msg = (ev.error_message or "").lower()
                 tail = (ev.stderr_tail or "").lower()
                 if "429" in msg or "quota" in msg or "429" in tail or "quota" in tail:
@@ -701,9 +704,10 @@ class DailyIndexingInspector:
                     inspector=self,
                     telemetry_logger=self.telemetry_logger,
                 )
+                live_cycle = (not dry_run) and not bool(rollover_report.get("quota_exhausted"))
                 auto_rem_res = loop.run_feedback_cycle(
                     dry_run=dry_run,
-                    live=not dry_run,
+                    live=live_cycle,
                     unindexed_urls=synthesized_unindexed if synthesized_unindexed else None,
                     skip_recompile=False,
                 )
@@ -729,7 +733,8 @@ class DailyIndexingInspector:
 
         # Telemetry emission on anomalies
         if overall_status in ("WARN", "FAIL"):
-            action = "AUTO_REMEDIATED" if (auto_remediate and report.get("auto_remediation", {}).get("status") == "SUCCESS") else ("ESCALATED" if strict else "RECORDED")
+            rem_ok = auto_remediate and report.get("auto_remediation", {}).get("status") in ("SUCCESS", "PARTIAL")
+            action = "AUTO_REMEDIATED" if rem_ok else ("ESCALATED" if strict else "RECORDED")
             err_msg = (
                 f"Daily indexing inspection detected {overall_status} status: "
                 f"rollover={rollover_report.get('status')}, "
@@ -744,6 +749,30 @@ class DailyIndexingInspector:
                 action_taken=action,
             )
             self.telemetry_logger.log(event)
+            if rem_ok:
+                rollover_report = self.audit_gsc_rollover_queue()
+                quarantine_report = self.audit_airlock_quarantine()
+                statuses = [
+                    rollover_report.get("status"),
+                    quarantine_report.get("status"),
+                    velocity_report.get("status"),
+                    traffic_report.get("status"),
+                ]
+                if "FAIL" in statuses:
+                    overall_status = "FAIL"
+                elif "WARN" in statuses:
+                    overall_status = "WARN"
+                else:
+                    overall_status = "PASS"
+                audit_summary["gsc_rollover"] = rollover_report
+                audit_summary["quarantine"] = quarantine_report
+                report["audit_status"] = overall_status
+                report["gsc_rollover"] = rollover_report
+                report["airlock_quarantine"] = quarantine_report
+                report["remediation_prompts"] = self.synthesize_remediation_prompts(
+                    audit_summary,
+                    omit_auto_remediated=True,
+                )
 
         # Atomic persistence to metric recovery ledger
         if not dry_run:

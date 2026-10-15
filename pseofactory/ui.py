@@ -51,19 +51,23 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             </div>"""
         )
     else:
-        for it in pending_actions:
+        for idx, it in enumerate(pending_actions, start=1):
             sev_class = f"badge-{it.severity.lower()}"
             prop_badge = "ProfitHelm" if it.property_id == "profithelm" else "Prexvo"
             deadline_markup = f'<div class="action-deadline">Deadline: {html.escape(it.deadline)}</div>' if it.deadline else ""
             reqs_markup = "".join(f"<li>{html.escape(r)}</li>" for r in it.missing_requirements)
+            rev_impact = float(getattr(it, "estimated_monthly_revenue_impact_usd", 0.0) or 0.0)
+            rev_rank = int(getattr(it, "revenue_priority_rank", 0) or idx)
+            rev_badge = f'<span class="badge badge-live">Rank #{rev_rank} | Est. Impact: ${rev_impact:,.2f}/mo</span>'
 
             action_cards_html.append(f"""
-            <div class="action-card" data-action-id="{html.escape(it.action_id)}" data-property="{html.escape(it.property_id)}">
+            <div class="action-card" data-action-id="{html.escape(it.action_id)}" data-property="{html.escape(it.property_id)}" data-revenue-rank="{rev_rank}" data-revenue-impact="{rev_impact:.2f}">
                 <div class="action-card-header">
                     <div class="action-card-title-group">
                         <span class="badge badge-property">{prop_badge}</span>
                         <span class="badge {sev_class}">{html.escape(it.severity)}</span>
                         <span class="badge badge-type">{html.escape(it.action_type.replace('_', ' '))}</span>
+                        {rev_badge}
                     </div>
                     {deadline_markup}
                 </div>
