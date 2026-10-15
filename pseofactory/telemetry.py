@@ -97,6 +97,9 @@ class AtomicTelemetryLogger:
     def __init__(self, log_path: Optional[Union[str, Path]] = None):
         if log_path:
             self.log_path = Path(log_path).resolve()
+        elif os.environ.get("PYTEST_CURRENT_TEST") and "FACTORY_TELEMETRY_PATH" not in os.environ:
+            import tempfile
+            self.log_path = (Path(tempfile.gettempdir()) / f"pseofactory_pytest_telemetry_{os.getpid()}.jsonl").resolve()
         else:
             self.log_path = Path(
                 os.environ.get("FACTORY_TELEMETRY_PATH", "/home/ubuntuadmin/projects/.agy/telemetry_events.jsonl")

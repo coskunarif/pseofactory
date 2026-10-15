@@ -277,3 +277,69 @@ def test_inspector_auto_remediate_triggers_closed_loop_feedback(tmp_path):
     assert "auto_remediation" in report
     assert report["auto_remediation"]["status"] == "SUCCESS"
 
+
+def test_vertex_anomaly_diagnosis_and_zero_benefit_guard(tmp_path):
+    """
+    Verifies DailyIndexingInspector.diagnose_anomalies_via_vertex:
+    1. Skips Vertex call with status SKIPPED_ZERO_BENEFIT (0 tokens) when no anomalies exist.
+    2. Subtracts deterministic quarantine/velocity prompts when omit_auto_remediated=True.
+    3. Passes pre-assembled local telemetry context to stateless Vertex caller when anomalies exist
+       and sanitizes forbidden dashes in the returned JSON diagnosis.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes
+
+    inspector = DailyIndexingInspector(tenant_id="profithelm", base_dir=tmp_path)
+
+    # 1. Zero-benefit guard when all audits are clean
+    clean_summary = {
+        "gsc_rollover": {"status": "PASS", "quota_exhausted": False, "backlog_exceeded": False},
+        "quarantine": {"status": "PASS", "total_quarantined": 0, "breakdown": {}},
+        "velocity": {"status": "PASS", "stalled_routes_count": 0, "stalled_routes": []},
+        "traffic": {"status": "PASS", "traffic_drop_detected": False, "drop_percentage": 0.0},
+    }
+    calls = []
+
+    def fake_vertex(prompt: str, enable_google_search: bool = True):
+        calls.append((prompt, enable_google_search))
+        return [
+            {
+                "target": "https://profithelm.com/tools/section-179-calculator/",
+                "root_cause": "2026 IRS Section 179 phase-out threshold updated\u2014page table shows prior limit",
+                "external_serp_signal": "IRS Rev. Proc. 2025-2026 inflation adjustment\u2013competitors updated statutory caps",
+                "recommended_context_update": "Update section_179_max_deduction and phase_out_threshold in statutory_rates.json",
+            }
+        ]
+
+    res_clean = inspector.diagnose_anomalies_via_vertex(clean_summary, vertex_caller=fake_vertex)
+    assert res_clean["status"] == "SKIPPED_ZERO_BENEFIT"
+    assert res_clean["tokens_used"] == 0
+    assert len(calls) == 0
+
+    # 2. Subtract auto-remediated prompts when omit_auto_remediated=True
+    anomaly_summary = {
+        "gsc_rollover": {"quota_exhausted": False, "backlog_exceeded": False, "queue_size": 10},
+        "quarantine": {"total_quarantined": 2, "breakdown": {"HTTP_404": 1, "CANONICAL_MISMATCH": 1}},
+        "velocity": {"stalled_routes_count": 1, "stalled_routes": [{"slug": "irs-calc", "domain_url": "https://profithelm.com/tools/irs-calc/"}]},
+        "traffic": {"traffic_drop_detected": True, "drop_percentage": -24.0, "current_rma7": 76.0, "previous_rma7": 100.0},
+    }
+    reduced_prompts = inspector.synthesize_remediation_prompts(anomaly_summary, omit_auto_remediated=True)
+    assert len(reduced_prompts) == 1
+    assert "24.0%" in reduced_prompts[0]
+
+    # 3. Stateless Context-In -> Vertex AI -> JSON-Out when anomaly is present
+    res_diag = inspector.diagnose_anomalies_via_vertex(
+        anomaly_summary,
+        unindexed_urls=[{"url": "https://profithelm.com/tools/section-179-calculator/", "coverage_state": "Crawled - currently not indexed"}],
+        vertex_caller=fake_vertex,
+    )
+    assert res_diag["status"] == "SUCCESS"
+    assert res_diag["model"] == "gemini-3.8-flash"
+    assert len(calls) == 1
+    assert "CONTEXT_JSON:" in calls[0][0]
+    assert "section-179-calculator" in calls[0][0]
+    assert len(res_diag["diagnoses"]) == 1
+    diag = res_diag["diagnoses"][0]
+    for val in diag.values():
+        assert_no_forbidden_dashes(val, "vertex diagnosis field")
+
+

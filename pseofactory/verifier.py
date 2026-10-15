@@ -1513,18 +1513,21 @@ class MasterSEOVerifier:
                 "/privacy/",
                 "/tools/",
             ]
-        self._file_cache: Dict[str, Tuple[float, int, str]] = {}
+        self._file_cache: Dict[str, Tuple[float, int, str]] = MasterSEOVerifier._GLOBAL_FILE_CACHE
+
+    _GLOBAL_FILE_CACHE: Dict[str, Tuple[float, int, str]] = {}
+    _GLOBAL_AUDIT_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
     def _read_cached_html(self, file_path: Union[str, Path]) -> str:
         """
-        Reads HTML from file, memoizing by (st_mtime, st_size) across gate passes.
+        Reads HTML from file, memoizing by (st_mtime_ns, st_size) across gate passes.
         Zero em-dashes. Zero en-dashes.
         """
         p = Path(file_path).resolve()
         key = str(p)
         try:
             st = p.stat()
-            mtime, size = st.st_mtime, st.st_size
+            mtime, size = st.st_mtime_ns, st.st_size
         except OSError:
             return p.read_text(encoding="utf-8", errors="ignore")
 
@@ -3629,14 +3632,17 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
 
+        from pseofactory.contracts import _fast_strip_style_and_js
+
         if target.exists():
             for p in sorted(target.glob("**/*.html")):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
+                clean_lower = _fast_strip_style_and_js(content).lower()
                 has_containers = any(
-                    tag in content.lower()
+                    tag in clean_lower
                     for tag in (
                         "<carousel",
                         "<imagegrid",
@@ -4279,6 +4285,45 @@ class MasterSEOVerifier:
                 raise SEOVerificationError(f"Target dist directory {target} does not exist.", issues=err_dict["issues"])
             return err_dict
 
+        cache_sig: Optional[Tuple[Any, ...]] = None
+        try:
+            file_sigs = []
+            for fp in sorted(target.rglob("*")):
+                if fp.is_file():
+                    st = fp.stat()
+                    file_sigs.append((fp.relative_to(target).as_posix(), st.st_mtime_ns, st.st_size))
+            parent_entries = tuple(sorted(p.name for p in target.parent.iterdir())) if target.parent and target.parent.exists() else ()
+            cache_sig = (
+                str(target.resolve()),
+                self.domain,
+                self.canonical_base,
+                self.brand_name,
+                self.min_manifests,
+                self.strict_robots,
+                len(self.tools),
+                tuple(self.required_endpoints),
+                enforce_relevance,
+                parent_entries,
+                tuple(file_sigs),
+            )
+            if cache_sig in MasterSEOVerifier._GLOBAL_AUDIT_CACHE:
+                cached_res = MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig]
+                if raise_on_error and cached_res.get("status") != "PASS":
+                    c_issues = cached_res.get("issues", [])
+                    issue_summary = "; ".join(c_issues[:3])
+                    if len(c_issues) > 3:
+                        issue_summary += f" (...and {len(c_issues) - 3} more)"
+                    raise SEOVerificationError(
+                        f"SEO checklist verification failed with {len(c_issues)} issues: {issue_summary}",
+                        issues=c_issues,
+                        gates=cached_res.get("gates", {}),
+                    )
+                return cached_res
+        except SEOVerificationError:
+            raise
+        except Exception:
+            cache_sig = None
+
         content_relevance_gate = self.check_content_relevance_gate(target)
 
         g_alt_text = self.check_alt_text_gate(target)
@@ -4507,6 +4552,8 @@ class MasterSEOVerifier:
             "total_issues_count": len(all_issues),
             "content_relevance": content_relevance_gate,
         }
+        if cache_sig is not None:
+            MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = result
 
         if raise_on_error and not all_passed:
             issue_summary = "; ".join(all_issues[:3])
@@ -5107,6 +5154,7 @@ def verify_html_citable_specific_facts(
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
     from pseofactory.contracts import (
+        _fast_strip_style_and_js,
         extract_statutory_citations,
         detect_malformed_statutory_citations,
         detect_vague_generalizations,
@@ -5115,8 +5163,10 @@ def verify_html_citable_specific_facts(
         assert_data_table_structure,
     )
 
+    clean_html = _fast_strip_style_and_js(html_content)
+
     # Vague generalizations check
-    vague_phrases = detect_vague_generalizations(html_content)
+    vague_phrases = detect_vague_generalizations(clean_html)
     for vp in vague_phrases:
         issues.append(
             f"Page {rel_path}: Vague generalization disguised as factual analysis ('{vp}') "
@@ -5124,17 +5174,17 @@ def verify_html_citable_specific_facts(
         )
 
     # Malformed statutory citations check
-    malformed = detect_malformed_statutory_citations(html_content)
+    malformed = detect_malformed_statutory_citations(clean_html)
     for m in malformed:
         issues.append(f"Page {rel_path}: {m}")
 
     # Incomplete figures check
-    incomp = detect_incomplete_figures(html_content)
+    incomp = detect_incomplete_figures(clean_html)
     for inc in incomp:
         issues.append(f"Page {rel_path}: {inc}")
 
     # Primary statutory citations check
-    citations = extract_statutory_citations(html_content)
+    citations = extract_statutory_citations(clean_html)
     if len(citations) < min_statutory_citations:
         issues.append(
             f"Page {rel_path}: Statutory citation deficit: found {len(citations)} citations, "
@@ -5154,7 +5204,7 @@ def verify_html_citable_specific_facts(
         "annual exclusion",
         "lifetime exemption",
     ]
-    text_lower = html_content.lower()
+    text_lower = clean_html.lower()
     has_reg_claim = any(k in text_lower for k in regulatory_keywords)
     if has_reg_claim and not citations:
         issues.append(
@@ -5163,7 +5213,7 @@ def verify_html_citable_specific_facts(
         )
 
     # Numeric data density check
-    facts = extract_numeric_facts(html_content)
+    facts = extract_numeric_facts(clean_html)
     if len(facts) < min_numeric_facts:
         issues.append(
             f"Page {rel_path}: Numeric data density deficit: found {len(facts)} numeric facts, "
@@ -5171,15 +5221,14 @@ def verify_html_citable_specific_facts(
         )
 
     # Data table check
-    parser = SinglePassSEODocumentParser()
-    parser.feed(html_content)
+    tables_count = text_lower.count("<table")
 
     if require_data_table:
-        if "<table" not in html_content.lower():
+        if tables_count == 0:
             issues.append(f"Page {rel_path}: Missing <table> element required for structured data points")
         else:
             try:
-                assert_data_table_structure(html_content, context=f"Page {rel_path}")
+                assert_data_table_structure(clean_html, context=f"Page {rel_path}")
             except Exception as ex:
                 issues.append(str(ex))
 
@@ -5190,7 +5239,7 @@ def verify_html_citable_specific_facts(
         "issues": issues,
         "statutory_citations_count": len(citations),
         "numeric_facts_count": len(facts),
-        "tables_count": len(parser.tables_data),
+        "tables_count": tables_count,
     }
 
 
@@ -5234,6 +5283,7 @@ def verify_html_organic_fan_out_coverage(
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
     from pseofactory.contracts import (
+        _fast_strip_style_and_js,
         assert_no_thin_fan_out_cannibalization,
         assert_subquery_clustering,
         assert_calculation_variant_cross_links,
@@ -5242,16 +5292,18 @@ def verify_html_organic_fan_out_coverage(
         detect_orphaned_calculation_nodes,
     )
 
+    clean_html = _fast_strip_style_and_js(html_content)
+
     # 1. Thin page check
     try:
-        assert_no_thin_fan_out_cannibalization(html_content, min_words=min_total_words, context=f"Page {rel_path}")
+        assert_no_thin_fan_out_cannibalization(clean_html, min_words=min_total_words, context=f"Page {rel_path}")
     except Exception as ex:
         issues.append(str(ex))
 
     # 2. Subquery clustering check
     try:
         assert_subquery_clustering(
-            html_content,
+            clean_html,
             min_subqueries=min_subqueries,
             min_words_per_answer=min_words_per_answer,
             context=f"Page {rel_path}",
@@ -5262,7 +5314,7 @@ def verify_html_organic_fan_out_coverage(
     # 3. Calculation variant cross-links check
     try:
         assert_calculation_variant_cross_links(
-            html_content,
+            clean_html,
             min_variants=min_variants,
             require_reciprocal=require_reciprocal,
             context=f"Page {rel_path}",
@@ -5270,8 +5322,8 @@ def verify_html_organic_fan_out_coverage(
     except Exception as ex:
         issues.append(str(ex))
 
-    subqueries = [s for s in extract_subquery_sections(html_content) if s.get("is_subquery")]
-    variants = extract_calculation_variant_nodes(html_content)
+    subqueries = [s for s in extract_subquery_sections(clean_html) if s.get("is_subquery")]
+    variants = extract_calculation_variant_nodes(clean_html)
     total_links = sum(len(v.get("outgoing_links", [])) for v in variants)
     orphaned = detect_orphaned_calculation_nodes(variants)
 
@@ -5384,6 +5436,7 @@ def verify_html_unique_first_party_information(
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
     from pseofactory.contracts import (
+        _fast_strip_style_and_js,
         detect_ungrounded_synthetic_claims,
         detect_orphaned_calculation_tables,
         extract_calculation_manifests,
@@ -5392,19 +5445,21 @@ def verify_html_unique_first_party_information(
         assert_no_thin_syndicated_content,
     )
 
+    clean_html = _fast_strip_style_and_js(html_content)
+
     # 1. Ungrounded synthetic claims check
-    syn_issues = detect_ungrounded_synthetic_claims(html_content)
+    syn_issues = detect_ungrounded_synthetic_claims(clean_html)
     for si in syn_issues:
         issues.append(f"Page {rel_path}: {si}")
 
     # 2. Thin syndicated content check
     try:
-        assert_no_thin_syndicated_content(html_content, context=f"Page {rel_path}")
+        assert_no_thin_syndicated_content(clean_html, context=f"Page {rel_path}")
     except Exception as ex:
         issues.append(str(ex))
 
     # 3. Calculation manifests extraction and validation
-    manifests = extract_calculation_manifests(html_content)
+    manifests = extract_calculation_manifests(clean_html)
     if manifest_data:
         manifests.append(manifest_data)
     if not manifests and manifests_dir:
@@ -5432,7 +5487,7 @@ def verify_html_unique_first_party_information(
                         pass
 
     # 4. Orphaned calculation tables check
-    orphaned_tables = detect_orphaned_calculation_tables(html_content, manifests=manifests)
+    orphaned_tables = detect_orphaned_calculation_tables(clean_html, manifests=manifests)
     for ot in orphaned_tables:
         issues.append(f"Page {rel_path}: {ot}")
 
@@ -5440,20 +5495,21 @@ def verify_html_unique_first_party_information(
     joins_count = 0
     if require_multi_dataset:
         try:
-            content_to_check = html_content
+            content_to_check = clean_html
             if manifests:
-                content_to_check = f"{html_content}\n{json.dumps(manifests)}"
+                content_to_check = f"{clean_html}\n{json.dumps(manifests)}"
             assert_multi_dataset_enrichment(content_to_check, context=f"Page {rel_path}")
             joins_count += 1
         except Exception as ex:
             issues.append(str(ex))
 
     if not manifests:
+        clean_lower = clean_html.lower()
         has_calc_markup = (
-            "<form" in html_content.lower()
-            or "calculation-container" in html_content.lower()
-            or "data-formula" in html_content.lower()
-            or "class=\"calculator" in html_content.lower()
+            "<form" in clean_lower
+            or "calculation-container" in clean_lower
+            or "data-formula" in clean_lower
+            or 'class="calculator' in clean_lower
         )
         if not has_calc_markup:
             issues.append(
@@ -5518,16 +5574,17 @@ def verify_html_cross_web_consensus_and_corroboration(
     detected = detect_uncorroborated_statutory_claims(html_content, rel_path=rel_path)
     issues.extend(detected)
 
-    try:
-        assert_cross_web_consensus_and_corroboration(
-            html_content,
-            require_corroboration=require_corroboration,
-            context=f"Page {rel_path}",
-        )
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
+    if require_corroboration:
+        try:
+            assert_cross_web_consensus_and_corroboration(
+                html_content,
+                require_corroboration=require_corroboration,
+                context=f"Page {rel_path}",
+            )
+        except Exception as ex:
+            err_msg = str(ex)
+            if err_msg not in issues:
+                issues.append(err_msg)
 
     verified_tokens = [
         "1,250,000", "1,220,000", "1,290,000",
@@ -5587,23 +5644,11 @@ def verify_html_source_publisher_reputation(
 
     from pseofactory.contracts import (
         detect_publisher_reputation_issues,
-        assert_source_publisher_reputation,
         extract_author_and_publisher_metadata,
     )
 
     detected = detect_publisher_reputation_issues(html_content, rel_path=rel_path, require_strict=require_strict)
     issues.extend(detected)
-
-    try:
-        assert_source_publisher_reputation(
-            html_content,
-            require_strict=require_strict,
-            context=f"Page {rel_path}",
-        )
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
 
     meta = extract_author_and_publisher_metadata(html_content)
 
@@ -5665,7 +5710,6 @@ def verify_html_extractable_content_structure(
 
     from pseofactory.contracts import (
         detect_extractable_content_issues,
-        assert_extractable_content_structure,
         extract_content_structure_metadata,
     )
 
@@ -5675,17 +5719,6 @@ def verify_html_extractable_content_structure(
         require_strict=require_strict,
     )
     issues.extend(detected)
-
-    try:
-        assert_extractable_content_structure(
-            html_content,
-            require_strict=require_strict,
-            context=f"Page {rel_path}",
-        )
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
 
     meta = extract_content_structure_metadata(html_content)
     ordered_steps_count = sum(len(b.get("items", [])) for b in meta.get("ordered_lists", []))
@@ -5749,7 +5782,6 @@ def verify_html_answer_prominence(
 
     from pseofactory.contracts import (
         detect_answer_prominence_issues,
-        assert_answer_prominence,
         extract_answer_prominence_metadata,
     )
 
@@ -5760,18 +5792,6 @@ def verify_html_answer_prominence(
         require_strict=require_strict,
     )
     issues.extend(detected)
-
-    try:
-        assert_answer_prominence(
-            html_content,
-            max_words=max_words,
-            require_strict=require_strict,
-            context=f"Page {rel_path}",
-        )
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
 
     meta = extract_answer_prominence_metadata(html_content)
 

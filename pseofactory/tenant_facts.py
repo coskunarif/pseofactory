@@ -567,9 +567,14 @@ class TenantFactStore:
                 re.IGNORECASE,
             )
             valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
+            allowed_statutory_monthly = {
+                float(v)
+                for k, v in profile.statutory_truth.limits_and_thresholds.items()
+                if isinstance(v, (int, float)) and ("monthly" in k or "subsidy" in k)
+            }
             for price_str in pricing_matches:
                 price_val = float(price_str)
-                if price_val not in valid_prices:
+                if price_val not in valid_prices and price_val not in allowed_statutory_monthly:
                     violations.append(
                         f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
                     )

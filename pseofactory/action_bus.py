@@ -300,6 +300,61 @@ class HumanActionBus:
         self.save()
         return item
 
+    def route_stage_exception(
+        self,
+        property_id: str,
+        stage: str,
+        title: str,
+        description: str,
+        partner_key: Optional[str] = None,
+        partner_name: Optional[str] = None,
+        action_type: str = "INTEGRATION_REQUIREMENT",
+        severity: str = "HIGH",
+        deadline: Optional[str] = None,
+        missing_requirements: Optional[List[str]] = None,
+        candidate_url: str = "",
+    ) -> ActionItem:
+        """
+        Routes a genuine human-only stage dependency onto the HumanActionBus
+        without halting autonomous execution of remaining pipeline stages.
+        Guarantees strict property isolation on partner_key and zero forbidden dashes.
+        """
+        prop_clean = (property_id or "profithelm").strip().lower()
+        stage_slug = re.sub(r"[^a-z0-9]+", "_", (stage or "stage").strip().lower()).strip("_")
+        eff_key = (partner_key or "").strip().lower()
+        if not eff_key:
+            eff_key = f"{prop_clean}_{stage_slug}_gate"
+        elif (
+            eff_key not in PROFITHELM_AFFILIATES
+            and eff_key not in PREXVO_AFFILIATES
+            and not eff_key.startswith(f"{prop_clean}_")
+        ):
+            eff_key = f"{prop_clean}_{eff_key}"
+
+        eff_name = (partner_name or f"{prop_clean.capitalize()} {stage.replace('_', ' ').title()} Gate").strip()
+
+        def _scrub_dashes(text: str) -> str:
+            return (
+                (text or "")
+                .replace("\u2014", ": ")
+                .replace("\u2013", "-")
+                .replace(" - ", ": ")
+            )
+
+        clean_reqs = [_scrub_dashes(r) for r in (missing_requirements or []) if r]
+        return self.route_manual_requirement(
+            property_id=prop_clean,
+            partner_key=eff_key,
+            partner_name=_scrub_dashes(eff_name),
+            title=_scrub_dashes(title),
+            description=_scrub_dashes(description),
+            action_type=action_type,
+            severity=severity,
+            deadline=deadline,
+            missing_requirements=clean_reqs,
+            candidate_url=candidate_url,
+        )
+
     def auto_approve(self, action_id: str) -> None:
         """
         Guaranteed guardrail: Auto-approving partner agreements without operator confirmation

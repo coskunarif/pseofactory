@@ -2090,11 +2090,15 @@ def assert_data_table_structure(table_html: str, context: str = "") -> bool:
 
     assert_no_forbidden_dashes(table_html, context=f"data table{ctx}")
 
-    if "<table" not in table_html.lower():
+    lower_html = table_html.lower()
+    t_start = lower_html.find("<table")
+    if t_start == -1:
         raise ValueError(f"Document missing <table> element{ctx}")
+    t_end = lower_html.rfind("</table>")
+    table_slice = table_html[t_start : (t_end + 8 if t_end != -1 else len(table_html))]
 
     parser = _SimpleTableParser()
-    parser.feed(table_html)
+    parser.feed(table_slice)
 
     if not parser.tables:
         raise ValueError(f"Malformed or empty <table> structure{ctx}")
@@ -2633,12 +2637,12 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
 
     sections: List[Dict[str, Any]] = []
 
-    target_content = html_or_text
-    if "<" in html_or_text and ">" in html_or_text:
+    target_content = _fast_strip_style_and_js(html_or_text)
+    if "<" in target_content and ">" in target_content:
         target_content = re.sub(
             r'<(?P<tag>div|section|article)\b[^>]*(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|overlay-scenarios|scenarios-grid|scenario-card|calc-scenario-card)[^"\']*["\']|data-variant(?:-id)?=["\'][^"\']+["\'])[^>]*>.*?</(?P=tag)>',
             ' ',
-            html_or_text,
+            target_content,
             flags=re.IGNORECASE | re.DOTALL,
         )
 
@@ -2828,6 +2832,7 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
         return []
 
     nodes: List[Dict[str, Any]] = []
+    clean_input = _fast_strip_style_and_js(html_or_text)
 
     # Container-based detection via regex
     container_pattern = re.compile(
@@ -2835,7 +2840,7 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
         re.IGNORECASE | re.DOTALL,
     )
 
-    matches = list(container_pattern.finditer(html_or_text))
+    matches = list(container_pattern.finditer(clean_input))
     if matches:
         for idx, match in enumerate(matches):
             attrs_str = match.group("attrs")
@@ -5831,7 +5836,7 @@ def extract_content_structure_metadata(content: str) -> Dict[str, Any]:
 
     parser = _ExtractableContentParser()
     try:
-        parser.feed(content)
+        parser.feed(_fast_strip_style_and_js(content))
     except Exception:
         pass
 
@@ -6521,7 +6526,7 @@ def extract_answer_prominence_metadata(content: str) -> Dict[str, Any]:
         }
 
     parser = _AnswerProminenceParser()
-    parser.feed(content)
+    parser.feed(_fast_strip_style_and_js(content))
 
     fa = parser.first_answer
     if fa:
@@ -6756,10 +6761,12 @@ SUPPORTED_AUXILIARY_SCHEMAS: Set[str] = {
     "PropertyValue",
     "WebSite",
     "WebPage",
+    "CollectionPage",
     "ItemPage",
     "AboutPage",
     "ContactPage",
     "BreadcrumbList",
+    "ItemList",
     "ListItem",
     "PostalAddress",
     "ContactPoint",
@@ -7250,6 +7257,21 @@ def detect_structured_data_issues(
                     desc = str(ent.get("description", "")).strip()
                     if not desc:
                         issues.append(f"Page {rel_path}: Invalid Dataset schema: missing or empty 'description'")
+                    is_part_of = ent.get("isPartOf")
+                    if is_part_of:
+                        ipo_items = is_part_of if isinstance(is_part_of, list) else [is_part_of]
+                        for ipo in ipo_items:
+                            if isinstance(ipo, dict):
+                                ipo_id = str(ipo.get("@id", "")).lower()
+                                ipo_type = str(ipo.get("@type", "")).lower()
+                                if "#webpage" in ipo_id or ipo_type == "webpage":
+                                    issues.append(
+                                        f"Page {rel_path}: Invalid Dataset schema: 'isPartOf' must not reference WebPage (#webpage); use 'mainEntityOfPage' or 'includedInDataCatalog'"
+                                    )
+                            elif isinstance(ipo, str) and "#webpage" in ipo.lower():
+                                issues.append(
+                                    f"Page {rel_path}: Invalid Dataset schema: 'isPartOf' must not reference WebPage (#webpage); use 'mainEntityOfPage' or 'includedInDataCatalog'"
+                                )
 
     return issues
 

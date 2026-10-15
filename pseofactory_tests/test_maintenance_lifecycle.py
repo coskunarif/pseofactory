@@ -937,3 +937,67 @@ def test_retro_reflection_engine_repairs_legacy_stale_estate_in_single_pass(tmp_
     assert truth_violations == []
 
 
+def test_autonomous_downstream_chain_and_exception_routing(tmp_path):
+    """
+    Verifies that _discover_tenant_tools discovers built tools from dist/tools/,
+    _has_pending_downstream_work detects unexecuted downstream stages, and
+    _execute_autonomous_downstream_chain routes genuine stage exceptions to
+    HumanActionBus while continuing autonomous execution of remaining stages.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from unittest.mock import patch
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.maintenance import (
+        SubprocessPropertyAdapter,
+        _discover_tenant_tools,
+        _execute_autonomous_downstream_chain,
+        _has_pending_downstream_work,
+    )
+
+    repo_dir = tmp_path / "prexvo"
+    dist_dir = repo_dir / "dist"
+    tool_dir = dist_dir / "tools" / "rap-payment-calculator"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    (tool_dir / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>RAP Payment Calculator | Prexvo</title>"
+        '<meta name="description" content="Calculate 2026 RAP monthly student loan payments.">'
+        '<link rel="canonical" href="https://prexvo.com/tools/rap-payment-calculator/"></head>'
+        "<body><h1>RAP Payment Calculator</h1></body></html>",
+        encoding="utf-8",
+    )
+
+    adapter = SubprocessPropertyAdapter(
+        property_id="prexvo",
+        brand_name="Prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        dist_dir=dist_dir,
+        repo_path=repo_dir,
+    )
+
+    discovered = _discover_tenant_tools(adapter, [])
+    assert any(t["slug"] == "rap-payment-calculator" for t in discovered)
+    assert _has_pending_downstream_work(adapter, check_in_pytest=True) is True
+
+    bus_path = str(tmp_path / "human_action_bus.json")
+    bus = HumanActionBus(bus_path=bus_path)
+
+    with patch(
+        "pseofactory.distributor.dispatch_to_distribution_lead",
+        side_effect=RuntimeError("Manual OAuth token refresh required for social broadcast"),
+    ):
+        summary = _execute_autonomous_downstream_chain(
+            adapter,
+            dry_run=True,
+            run_id="test-auto-chain",
+            action_bus=bus,
+        )
+
+    assert summary["syndication_status"] == "EXCEPTION_ROUTED"
+    assert len(summary["exceptions_routed"]) >= 1
+    assert summary["monetization_status"].startswith("SCORE_") or summary["monetization_status"] == "EVALUATED"
+
+    pending_items = bus.get_pending_items(property_id="prexvo")
+    assert any("Syndication Dispatch Exception" in it.title for it in pending_items)
+
+

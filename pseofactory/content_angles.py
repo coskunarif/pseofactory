@@ -696,20 +696,220 @@ def generate_markdown_brief(
     return brief_text
 
 
+def _sanitize_contract_text(value: Any) -> str:
+    """Replaces forbidden em-dashes and en-dashes with standard ASCII hyphens."""
+    text = str(value or "").strip()
+    return text.replace("\u2014", " - ").replace("\u2013", "-")
+
+
+def call_stateless_vertex_json(
+    prompt_context: str,
+    model: str = "gemini-3.8-flash",
+    project: str = "profithelm-477200",
+    location: str = "global",
+    account: str = "coskun.arf@gmail.com",
+    enable_google_search: bool = True,
+) -> Any:
+    """
+    Executes a strictly stateless Context-In -> Vertex AI -> JSON-Out call funded by
+    GCP promotional credits on profithelm-477200 without invoking local agent tools.
+    Explicitly mints user credentials via gcloud to bypass GOOGLE_APPLICATION_CREDENTIALS
+    service-account overrides in the workspace environment.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json as _json
+    import os as _os
+    import subprocess as _subprocess
+    from google import genai
+    from google.genai import types
+    from google.oauth2.credentials import Credentials
+
+    token = _subprocess.check_output(
+        ["gcloud", "auth", "print-access-token", f"--account={account}"],
+        text=True,
+        stderr=_subprocess.DEVNULL,
+        timeout=15,
+    ).strip()
+    if not token:
+        raise RuntimeError("Failed to obtain gcloud access token for stateless Vertex AI call.")
+
+    saved_gac = _os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+    try:
+        creds = Credentials(token=token, quota_project_id=project)
+        client = genai.Client(
+            vertexai=True,
+            project=project,
+            location=location,
+            credentials=creds,
+        )
+        cfg_kwargs: Dict[str, Any] = {
+            "temperature": 0.2,
+            "max_output_tokens": 4096,
+        }
+        if enable_google_search:
+            cfg_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+        else:
+            cfg_kwargs["response_mime_type"] = "application/json"
+
+        resp = client.models.generate_content(
+            model=model,
+            contents=prompt_context,
+            config=types.GenerateContentConfig(**cfg_kwargs),
+        )
+        raw_text = (resp.text or "").strip()
+    finally:
+        if saved_gac is not None:
+            _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = saved_gac
+
+    if not raw_text:
+        raise ValueError("Empty response from stateless Vertex AI call.")
+
+    cleaned = raw_text
+    if "```" in cleaned:
+        m = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        if m and m.group(1).strip():
+            cleaned = m.group(1).strip()
+
+    try:
+        return _json.loads(cleaned)
+    except Exception:
+        # Extract outermost JSON array or object if model emitted preamble text with GoogleSearch
+        first_bracket = cleaned.find("[")
+        last_bracket = cleaned.rfind("]")
+        first_brace = cleaned.find("{")
+        last_brace = cleaned.rfind("}")
+        if first_bracket != -1 and last_bracket > first_bracket and (first_brace == -1 or first_bracket < first_brace):
+            return _json.loads(cleaned[first_bracket : last_bracket + 1])
+        if first_brace != -1 and last_brace > first_brace:
+            return _json.loads(cleaned[first_brace : last_brace + 1])
+        raise
+
+
+def synthesize_underdog_angles_via_vertex(
+    query: str,
+    triage_action: str,
+    incumbents: Optional[List[Union[Dict[str, Any], IncumbentSummary]]] = None,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+    enable_google_search: bool = True,
+    vertex_caller: Optional[Any] = None,
+) -> List[UnderdogAngle]:
+    """
+    Synthesizes validated UnderdogAngle objects using a stateless Context-In -> Vertex AI -> JSON-Out
+    request when local candidate angles are absent.
+    Enforces the Zero-Benefit Subtraction rule: returns [] immediately (0 tokens) when
+    triage_action == 'MONITOR' or query is empty.
+    Zero em-dashes. Zero en-dashes.
+    """
+    clean_query = _sanitize_contract_text(query)
+    if not clean_query or str(triage_action).upper() == "MONITOR":
+        return []
+
+    incumbent_objs = classify_serp_incumbents(incumbents or [], target_query=clean_query)
+    incumbent_tokens = sorted(_tokenize_text(" ".join(
+        f"{inc.title} {inc.weakness_detail}" for inc in incumbent_objs
+    )))
+    catalog_slugs = [
+        str(t.get("slug") or t.get("title") or "")
+        for t in (existing_tools or [])[:15]
+        if isinstance(t, dict) and (t.get("slug") or t.get("title"))
+    ]
+
+    import json as _json
+    context_bundle = {
+        "target_query": clean_query,
+        "triage_action": triage_action,
+        "incumbent_competitors": [inc.to_dict() for inc in incumbent_objs],
+        "incumbent_tokens_to_avoid_for_divergence": incumbent_tokens[:60],
+        "existing_site_catalog_slugs": catalog_slugs,
+        "valid_archetypes": VALID_UNDERDOG_ARCHETYPES,
+        "constraints": {
+            "min_jaccard_divergence": 0.50,
+            "grant_o_triad_required_keys": [
+                "audience_niche",
+                "problem_scope",
+                "geographic_or_vertical_bound",
+            ],
+            "punctuation_rule": "Strictly ASCII hyphens only. Never output em-dashes or en-dashes.",
+        },
+    }
+
+    prompt = (
+        "You are a stateless programmatic SEO specification synthesizer.\n"
+        "Using the pre-assembled local context JSON below (and external Google Search grounding for current "
+        "statutory rates, thresholds, or SERP weaknesses if needed), return ONLY a valid JSON array containing "
+        "1 to 2 underdog content angle objects.\n"
+        "Each object in the JSON array MUST contain:\n"
+        "- angle_id (snake_case string)\n"
+        "- archetype (one of valid_archetypes)\n"
+        "- triad: {audience_niche, problem_scope, geographic_or_vertical_bound}\n"
+        "- primary_value_proposition (concise proposition avoiding incumbent_tokens_to_avoid_for_divergence so token Jaccard divergence >= 0.50)\n"
+        "- first_party_utility_asset (specific interactive calculator, matrix, or audit tool description)\n"
+        "Strict rules: Output raw JSON only. Use standard ASCII hyphens only (zero em-dashes, zero en-dashes).\n\n"
+        f"CONTEXT_JSON:\n{_json.dumps(context_bundle, ensure_ascii=True)}"
+    )
+
+    caller = vertex_caller or call_stateless_vertex_json
+    payload = caller(prompt, enable_google_search=enable_google_search)
+    raw_list = payload.get("angles", []) if isinstance(payload, dict) else (payload if isinstance(payload, list) else [])
+
+    synthesized: List[UnderdogAngle] = []
+    for idx, item in enumerate(raw_list):
+        if not isinstance(item, dict):
+            continue
+        triad_raw = item.get("triad") if isinstance(item.get("triad"), dict) else item
+        triad = GrantOTriad(
+            audience_niche=_sanitize_contract_text(
+                triad_raw.get("audience_niche") or triad_raw.get("target_audience_niche") or "Specialized operators"
+            ),
+            problem_scope=_sanitize_contract_text(
+                triad_raw.get("problem_scope") or f"Quantitative workflow for {clean_query}"
+            ),
+            geographic_or_vertical_bound=_sanitize_contract_text(
+                triad_raw.get("geographic_or_vertical_bound") or "US statutory and commercial operations"
+            ),
+        )
+        archetype = _sanitize_contract_text(item.get("archetype") or VALID_UNDERDOG_ARCHETYPES[0])
+        if archetype not in VALID_UNDERDOG_ARCHETYPES:
+            archetype = VALID_UNDERDOG_ARCHETYPES[0]
+
+        prop = _sanitize_contract_text(item.get("primary_value_proposition") or "")
+        asset = _sanitize_contract_text(item.get("first_party_utility_asset") or "Interactive statutory calculator")
+        angle_id = _sanitize_contract_text(item.get("angle_id") or f"vertex_angle_{idx + 1}")
+
+        assert_no_forbidden_dashes(prop, "UnderdogAngle.primary_value_proposition")
+        assert_no_prompt_leakage(prop, "UnderdogAngle.primary_value_proposition")
+
+        angle_obj = UnderdogAngle(
+            angle_id=angle_id,
+            triad=triad,
+            archetype=archetype,
+            primary_value_proposition=prop,
+            first_party_utility_asset=asset,
+        )
+        angle_obj.divergence_score = calculate_token_jaccard_divergence(prop, incumbent_objs)
+        synthesized.append(angle_obj)
+
+    return synthesized
+
+
 def evaluate_content_angles(
     query_data: Dict[str, Any],
     incumbents: Optional[List[Union[Dict[str, Any], IncumbentSummary]]] = None,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     total_site_impressions: int = 500,
     candidate_angles: Optional[List[Union[Dict[str, Any], UnderdogAngle]]] = None,
+    use_vertex_fallback: bool = False,
+    vertex_caller: Optional[Any] = None,
 ) -> ContentAngleBrief:
     """
     Evaluates candidate query content angles across the complete pipeline:
     1. Enforces Search Intent Doctrine qualification triage.
-    2. Disallows page creation on exploratory impressions.
+    2. Disallows page creation on exploratory impressions (0 LLM tokens on MONITOR).
     3. Directs striking distance matching queries to 28-day refactoring overlays.
-    4. Evaluates underdog angles against the Grant O Triad and divergence oracle.
-    5. Emits certified ContentAngleBrief with verified punctuation contracts.
+    4. Optionally synthesizes missing candidate angles via stateless Vertex AI when
+       use_vertex_fallback=True and triage_action != 'MONITOR'.
+    5. Evaluates underdog angles against the Grant O Triad and divergence oracle.
+    6. Emits certified ContentAngleBrief with verified punctuation contracts.
     """
     # 1. Normalize query data
     q_text = str(query_data.get("query", "")).strip()
@@ -771,6 +971,17 @@ def evaluate_content_angles(
     elif "angles" in query_data:
         raw_angles = query_data["angles"]
 
+    if not raw_angles and use_vertex_fallback and triage_action != "MONITOR":
+        raw_angles = list(
+            synthesize_underdog_angles_via_vertex(
+                query=q_text,
+                triage_action=triage_action,
+                incumbents=incumbent_objects,
+                existing_tools=existing_tools,
+                vertex_caller=vertex_caller,
+            )
+        )
+
     validated_angles: List[UnderdogAngle] = []
 
     # 4. Process angles according to triage action
@@ -821,3 +1032,4 @@ def evaluate_content_angles(
         overlay_spec=overlay_spec,
         candidate_spec=candidate_spec,
     )
+

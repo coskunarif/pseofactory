@@ -89,11 +89,7 @@ class DailyIndexingInspector:
         parsed = urllib.parse.urlparse(url_str)
         netloc = parsed.netloc.lower()
         if netloc:
-            if self.tenant_id in netloc:
-                return True
-            for other in ("profithelm", "prexvo"):
-                if other != self.tenant_id and other in netloc:
-                    return False
+            return self.tenant_id in netloc
         return self.tenant_id in url_str or not any(
             other in url_str for other in ("profithelm", "prexvo") if other != self.tenant_id
         )
@@ -174,7 +170,15 @@ class DailyIndexingInspector:
         if q_path.exists():
             try:
                 with open(q_path, "r", encoding="utf-8") as f:
-                    quarantined_records = json.load(f)
+                    raw_q = json.load(f)
+                if isinstance(raw_q, dict):
+                    quarantined_records = raw_q
+                elif isinstance(raw_q, list):
+                    for item in raw_q:
+                        if isinstance(item, dict) and item.get("url"):
+                            quarantined_records[str(item["url"])] = item
+                        elif isinstance(item, str) and item.strip():
+                            quarantined_records[item.strip()] = {"url": item.strip()}
             except Exception:
                 quarantined_records = {}
 
@@ -256,7 +260,15 @@ class DailyIndexingInspector:
                             urls.append(u_str)
                     return urls
                 elif isinstance(data, list):
-                    return [str(u) for u in data if self._url_belongs_to_tenant(str(u))]
+                    urls = []
+                    for item in data:
+                        if isinstance(item, dict):
+                            u_str = str(item.get("url") or "")
+                            if u_str and self._url_belongs_to_tenant(u_str, item):
+                                urls.append(u_str)
+                        elif isinstance(item, str) and self._url_belongs_to_tenant(item):
+                            urls.append(item)
+                    return urls
         except Exception:
             return []
         return []
@@ -369,8 +381,16 @@ class DailyIndexingInspector:
             "threshold_percentage": round(drop_threshold * 100, 2),
         }
 
-    def synthesize_remediation_prompts(self, audit_summary: Dict[str, Any]) -> List[str]:
-        """Synthesizes grounded agy /goal prompt suggestions for detected anomalies."""
+    def synthesize_remediation_prompts(
+        self,
+        audit_summary: Dict[str, Any],
+        omit_auto_remediated: bool = False,
+    ) -> List[str]:
+        """
+        Synthesizes grounded agy /goal prompt suggestions for detected anomalies.
+        When omit_auto_remediated=True, skips deterministic quarantine/canonical/velocity
+        prompts that IndexingFeedbackLoop already heals locally with 0 LLM tokens.
+        """
         prompts: List[str] = []
         tenant = self.tenant_id
 
@@ -385,26 +405,27 @@ class DailyIndexingInspector:
                 f'agy /goal "Drain {tenant} GSC rollover queue backlog of {rollover.get("queue_size")} URLs via tiered hub partition"'
             )
 
-        # 2. Airlock quarantine
-        quarantine = audit_summary.get("quarantine", {})
-        breakdown = quarantine.get("breakdown", {})
-        if breakdown.get("HTTP_404", 0) > 0:
-            prompts.append(
-                f'agy /goal "Fix {breakdown.get("HTTP_404")} route compilation HTTP 404 errors quarantined in {tenant} airlock"'
-            )
-        if breakdown.get("CANONICAL_MISMATCH", 0) > 0:
-            prompts.append(
-                f'agy /goal "Resolve {breakdown.get("CANONICAL_MISMATCH")} canonical link tag mismatches in {tenant} dist templates"'
-            )
+        if not omit_auto_remediated:
+            # 2. Airlock quarantine
+            quarantine = audit_summary.get("quarantine", {})
+            breakdown = quarantine.get("breakdown", {})
+            if breakdown.get("HTTP_404", 0) > 0:
+                prompts.append(
+                    f'agy /goal "Fix {breakdown.get("HTTP_404")} route compilation HTTP 404 errors quarantined in {tenant} airlock"'
+                )
+            if breakdown.get("CANONICAL_MISMATCH", 0) > 0:
+                prompts.append(
+                    f'agy /goal "Resolve {breakdown.get("CANONICAL_MISMATCH")} canonical link tag mismatches in {tenant} dist templates"'
+                )
 
-        # 3. Velocity stagnation
-        velocity = audit_summary.get("velocity", {})
-        if velocity.get("stalled_routes_count", 0) > 0:
-            stalled_slugs = [r.get("slug") for r in velocity.get("stalled_routes", [])[:3] if r.get("slug")]
-            slug_str = f" including {', '.join(stalled_slugs)}" if stalled_slugs else ""
-            prompts.append(
-                f'agy /goal "Unstall {velocity.get("stalled_routes_count")} slow-crawling routes for {tenant}{slug_str} via IndexNow WebSub hub ping"'
-            )
+            # 3. Velocity stagnation
+            velocity = audit_summary.get("velocity", {})
+            if velocity.get("stalled_routes_count", 0) > 0:
+                stalled_slugs = [r.get("slug") for r in velocity.get("stalled_routes", [])[:3] if r.get("slug")]
+                slug_str = f" including {', '.join(stalled_slugs)}" if stalled_slugs else ""
+                prompts.append(
+                    f'agy /goal "Unstall {velocity.get("stalled_routes_count")} slow-crawling routes for {tenant}{slug_str} via IndexNow WebSub hub ping"'
+                )
 
         # 4. Traffic drop
         traffic = audit_summary.get("traffic", {})
@@ -414,6 +435,100 @@ class DailyIndexingInspector:
             )
 
         return prompts
+
+    def diagnose_anomalies_via_vertex(
+        self,
+        audit_summary: Dict[str, Any],
+        unindexed_urls: Optional[List[Dict[str, Any]]] = None,
+        enable_google_search: bool = True,
+        vertex_caller: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Executes a stateless Context-In -> Vertex AI -> JSON-Out root-cause and external
+        SERP/statutory freshness diagnosis funded by GCP promotional credits.
+        Enforces the Zero-Benefit Subtraction rule: if no external traffic drop or
+        unindexed/quarantine anomaly is present, returns immediately with 0 API tokens.
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.content_angles import _sanitize_contract_text, call_stateless_vertex_json
+        from pseofactory.contracts import assert_no_forbidden_dashes
+
+        traffic = audit_summary.get("traffic", {})
+        quarantine = audit_summary.get("quarantine", {})
+        velocity = audit_summary.get("velocity", {})
+        rollover = audit_summary.get("gsc_rollover", {})
+
+        has_anomaly = bool(
+            traffic.get("traffic_drop_detected")
+            or quarantine.get("total_quarantined", 0) > 0
+            or velocity.get("stalled_routes_count", 0) > 0
+            or rollover.get("quota_exhausted")
+            or rollover.get("backlog_exceeded")
+            or (unindexed_urls and len(unindexed_urls) > 0)
+        )
+        if not has_anomaly:
+            return {
+                "status": "SKIPPED_ZERO_BENEFIT",
+                "tokens_used": 0,
+                "diagnoses": [],
+            }
+
+        context_bundle = {
+            "tenant_id": self.tenant_id,
+            "search_traffic": {
+                "traffic_drop_detected": bool(traffic.get("traffic_drop_detected")),
+                "drop_percentage": traffic.get("drop_percentage", 0.0),
+                "current_rma7": traffic.get("current_rma7", 0.0),
+                "previous_rma7": traffic.get("previous_rma7", 0.0),
+            },
+            "quarantine_breakdown": quarantine.get("breakdown", {}),
+            "stalled_routes": [
+                {"slug": r.get("slug"), "domain_url": r.get("domain_url"), "ttfc_domain_hours": r.get("ttfc_domain_hours")}
+                for r in velocity.get("stalled_routes", [])[:10]
+                if isinstance(r, dict)
+            ],
+            "unindexed_sample": (unindexed_urls or [])[:15],
+        }
+
+        prompt = (
+            "You are a stateless technical SEO and statutory freshness diagnostic engine.\n"
+            "Given the pre-assembled local indexing telemetry JSON below (and external Google Search grounding "
+            "for current statutory thresholds, tax/regulatory changes, or SERP intent shifts), return ONLY a "
+            "valid JSON array of diagnosis objects.\n"
+            "Each object in the JSON array MUST contain:\n"
+            "- target (URL, slug, or tenant section)\n"
+            "- root_cause (concise explanation of the indexing or impression anomaly)\n"
+            "- external_serp_signal (what external SERP or statutory freshness signal explains the gap)\n"
+            "- recommended_context_update (specific data table, formula, or schema field to update locally)\n"
+            "Strict rules: Output raw JSON only. Use standard ASCII hyphens only (zero em-dashes, zero en-dashes).\n\n"
+            f"CONTEXT_JSON:\n{json.dumps(context_bundle, ensure_ascii=True)}"
+        )
+
+        caller = vertex_caller or call_stateless_vertex_json
+        payload = caller(prompt, enable_google_search=enable_google_search)
+        raw_items = payload.get("diagnoses", []) if isinstance(payload, dict) else (payload if isinstance(payload, list) else [])
+
+        diagnoses: List[Dict[str, str]] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            entry = {
+                "target": _sanitize_contract_text(item.get("target") or self.tenant_id),
+                "root_cause": _sanitize_contract_text(item.get("root_cause") or "Unclassified indexing anomaly"),
+                "external_serp_signal": _sanitize_contract_text(item.get("external_serp_signal") or "External SERP freshness gap"),
+                "recommended_context_update": _sanitize_contract_text(
+                    item.get("recommended_context_update") or "Refresh statutory table and FAQ schema"
+                ),
+            }
+            for k, v in entry.items():
+                assert_no_forbidden_dashes(v, f"diagnose_anomalies_via_vertex.{k}")
+            diagnoses.append(entry)
+
+        return {
+            "status": "SUCCESS",
+            "model": "gemini-3.8-flash",
+            "diagnoses": diagnoses,
+        }
 
     def audit_child_sitemaps_and_section_coverage(
         self,
@@ -480,6 +595,8 @@ class DailyIndexingInspector:
         gsc_records: Optional[List[GSCDailyMetricRecord]] = None,
         coverage_records: Optional[List[Any]] = None,
         auto_remediate: bool = False,
+        vertex_diagnose: bool = False,
+        vertex_caller: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Executes complete Loop 3 inspection cycle across GSC rollover queue,
@@ -488,6 +605,8 @@ class DailyIndexingInspector:
         When auto_remediate=True and anomalies or unindexed pages exist,
         connects diagnosis directly to IndexingFeedbackLoop for closed-loop
         template reflection and republication.
+        When vertex_diagnose=True, executes a stateless Context-In -> Vertex AI -> JSON-Out
+        diagnosis for external SERP/statutory anomalies (skipping with 0 tokens when clean).
         Persists findings to metric recovery ledger and emits telemetry.
         """
         rollover_report = self.audit_gsc_rollover_queue()
@@ -532,45 +651,48 @@ class DailyIndexingInspector:
             "remediation_prompts": remediation_prompts,
         }
 
+        synthesized_unindexed: List[Dict[str, Any]] = []
+        if (auto_remediate or vertex_diagnose) and (overall_status in ("WARN", "FAIL") or coverage_records):
+            from pseofactory.indexing.feedback_loop import SectionExclusionClassifier
+
+            seen_u: set = set()
+            for c_rec in (coverage_records or []):
+                if not SectionExclusionClassifier._is_record_indexed(c_rec):
+                    u_val = c_rec.get("url") if isinstance(c_rec, dict) else str(c_rec)
+                    if u_val and u_val not in seen_u:
+                        seen_u.add(u_val)
+                        synthesized_unindexed.append(
+                            c_rec if isinstance(c_rec, dict) else {"url": str(c_rec), "coverage_state": "Crawled - currently not indexed"}
+                        )
+
+            q_details = quarantine_report.get("details", {})
+            for cat, items in (q_details.items() if isinstance(q_details, dict) else []):
+                for it in items:
+                    u_val = it.get("url")
+                    if u_val and u_val not in seen_u:
+                        seen_u.add(u_val)
+                        synthesized_unindexed.append({
+                            "url": u_val,
+                            "error": it.get("reason") or it.get("code") or cat,
+                            "code": it.get("code") or cat,
+                            "status": "QUARANTINED",
+                        })
+
+            for stalled in velocity_report.get("stalled_routes", []):
+                if isinstance(stalled, dict):
+                    u_val = stalled.get("domain_url")
+                    if u_val and u_val not in seen_u:
+                        seen_u.add(u_val)
+                        synthesized_unindexed.append({
+                            "url": u_val,
+                            "coverage_state": "Discovered - currently not indexed",
+                            "status": "VELOCITY_STALLED",
+                        })
+
         # Closed-loop autonomous remediation bridge when auto_remediate=True
         if auto_remediate and (overall_status in ("WARN", "FAIL") or coverage_records):
             try:
-                from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop, SectionExclusionClassifier
-
-                synthesized_unindexed: List[Dict[str, Any]] = []
-                seen_u: set = set()
-                for c_rec in (coverage_records or []):
-                    if not SectionExclusionClassifier._is_record_indexed(c_rec):
-                        u_val = c_rec.get("url") if isinstance(c_rec, dict) else str(c_rec)
-                        if u_val and u_val not in seen_u:
-                            seen_u.add(u_val)
-                            synthesized_unindexed.append(
-                                c_rec if isinstance(c_rec, dict) else {"url": str(c_rec), "coverage_state": "Crawled - currently not indexed"}
-                            )
-
-                q_details = quarantine_report.get("details", {})
-                for cat, items in (q_details.items() if isinstance(q_details, dict) else []):
-                    for it in items:
-                        u_val = it.get("url")
-                        if u_val and u_val not in seen_u:
-                            seen_u.add(u_val)
-                            synthesized_unindexed.append({
-                                "url": u_val,
-                                "error": it.get("reason") or it.get("code") or cat,
-                                "code": it.get("code") or cat,
-                                "status": "QUARANTINED",
-                            })
-
-                for stalled in velocity_report.get("stalled_routes", []):
-                    if isinstance(stalled, dict):
-                        u_val = stalled.get("domain_url")
-                        if u_val and u_val not in seen_u:
-                            seen_u.add(u_val)
-                            synthesized_unindexed.append({
-                                "url": u_val,
-                                "coverage_state": "Discovered - currently not indexed",
-                                "status": "VELOCITY_STALLED",
-                            })
+                from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
 
                 loop = IndexingFeedbackLoop(
                     property_id=self.tenant_id,
@@ -590,6 +712,19 @@ class DailyIndexingInspector:
                 report["auto_remediation"] = {
                     "status": "FAILED",
                     "error": str(rem_err),
+                }
+
+        if vertex_diagnose:
+            try:
+                report["vertex_diagnosis"] = self.diagnose_anomalies_via_vertex(
+                    audit_summary=audit_summary,
+                    unindexed_urls=synthesized_unindexed if synthesized_unindexed else None,
+                    vertex_caller=vertex_caller,
+                )
+            except Exception as vx_err:
+                report["vertex_diagnosis"] = {
+                    "status": "FAILED",
+                    "error": str(vx_err),
                 }
 
         # Telemetry emission on anomalies
@@ -641,6 +776,7 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
         p.add_argument("--strict", action="store_true", help="Fail with non-zero exit code on WARN or FAIL status")
         p.add_argument("--sample", action="store_true", help="Inspect small sample of URLs")
         p.add_argument("--auto-remediate", action="store_true", help="Automatically trigger closed-loop remediation when anomalies are detected")
+        p.add_argument("--vertex-diagnose", action="store_true", help="Run stateless Context-In / Vertex AI / JSON-Out diagnosis on detected anomalies")
         p.add_argument("--json", action="store_true", help="Output results as JSON")
         p.add_argument("--recovery-ledger", type=str, default=None, help="Custom metric recovery ledger path")
         p.add_argument("--quarantine-ledger", type=str, default=None, help="Custom quarantine ledger path")
@@ -662,6 +798,7 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
         dry_run=getattr(args, "dry_run", False),
         sample=getattr(args, "sample", False),
         auto_remediate=getattr(args, "auto_remediate", False),
+        vertex_diagnose=getattr(args, "vertex_diagnose", False),
     )
 
     if getattr(args, "json", False):
@@ -675,6 +812,9 @@ def handle_cli(argv: Optional[List[str]] = None) -> int:
         if "auto_remediation" in report:
             ar = report["auto_remediation"]
             print(f"  - Auto-Remediation: status={ar.get('status')}, recompiled={ar.get('repair_summary', {}).get('recompiled_assets_count', 0)}")
+        if "vertex_diagnosis" in report:
+            vd = report["vertex_diagnosis"]
+            print(f"  - Vertex Diagnosis: status={vd.get('status')}, count={len(vd.get('diagnoses', []))}")
         if report.get("remediation_prompts"):
             print("  Suggested Remediation Prompts:")
             for prompt in report["remediation_prompts"]:

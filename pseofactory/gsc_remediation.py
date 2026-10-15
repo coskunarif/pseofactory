@@ -254,15 +254,25 @@ def _normalize_title_50_60(raw_title: str, brand: str, tenant_id: str) -> str:
             else "Statutory Tax and Financial Model Calculator"
         )
 
+    if "calculator" not in base.lower():
+        max_for_calc = 60 - len(suffix) - len(" Calculator")
+        if len(base) > max_for_calc:
+            trimmed_b = base[:max_for_calc].rstrip(" |-&")
+            if " " in trimmed_b and len(trimmed_b.rsplit(" ", 1)[0]) >= 20:
+                trimmed_b = trimmed_b.rsplit(" ", 1)[0].rstrip(" |-&")
+            base = f"{trimmed_b} Calculator"
+        else:
+            base = f"{base} Calculator"
+
     cand = f"{base}{suffix}"
     if 50 <= len(cand) <= 60:
         return cand
 
     # Pad if shorter than 50 chars
     pad_tokens = (
-        ["2026", "Model", "Tool", "Guide", "Rules", "Engine"]
+        ["Calculator", "2026", "Model", "Tool", "Guide", "Rules", "Engine"]
         if tenant_id == "prexvo"
-        else ["2026", "Tax", "Model", "Tool", "Guide", "Engine"]
+        else ["Calculator", "2026", "Tax", "Model", "Tool", "Guide", "Engine"]
     )
     for tok in pad_tokens:
         if len(cand) >= 50:

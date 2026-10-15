@@ -219,6 +219,88 @@ class PartnerTrackingEngine:
                 "Mandatory Title IV statutory forfeiture YMYL disclaimer review",
             ],
         )
+
+        # ProfitHelm genuine human-only partner onboarding gates
+        ph_partners = (
+            self.monetization_hub.vault_data.get("properties", {})
+            .get("profithelm", {})
+            .get("partners", {})
+        )
+        if ph_partners.get("stripe", {}).get("status") != "live":
+            self.action_bus.route_manual_requirement(
+                property_id="profithelm",
+                partner_key="stripe",
+                partner_name="Stripe Partner Ecosystem",
+                title="Stripe Partner Ecosystem: $1M Volume & Connect Gate",
+                description=(
+                    "Stripe Partner Ecosystem (Inbox #971) requires $1M+ USD annual payment volume "
+                    "and an active Stripe Connect integration before issuing referral tracking links."
+                ),
+                action_type="INTEGRATION_REQUIREMENT",
+                severity="MEDIUM",
+                deadline=None,
+                missing_requirements=[
+                    "Verify $1M+ USD annual payment processing volume threshold",
+                    "Complete Stripe Connect platform integration review",
+                ],
+                candidate_url="https://stripe.com/partners",
+            )
+        if ph_partners.get("suretybonds_direct", {}).get("status") != "live":
+            self.action_bus.route_manual_requirement(
+                property_id="profithelm",
+                partner_key="suretybonds_direct",
+                partner_name="SuretyBonds.com",
+                title="SuretyBonds.com: Direct Partner Inquiry Required",
+                description=(
+                    "SuretyBonds.com public /affiliate-program route returns HTTP 404. "
+                    "Operator authorization or direct partnership agreement with customercare@suretybonds.com "
+                    "is required to activate /r/suretybonds_direct commission tracking."
+                ),
+                action_type="PARTNER_APPROVAL",
+                severity="MEDIUM",
+                deadline=None,
+                missing_requirements=[
+                    "Execute direct agency referral agreement with SuretyBonds.com partnership desk",
+                ],
+                candidate_url="https://www.suretybonds.com/",
+            )
+        if ph_partners.get("freightos_marketplace", {}).get("status") != "live":
+            self.action_bus.route_manual_requirement(
+                property_id="profithelm",
+                partner_key="freightos_marketplace",
+                partner_name="Freightos Marketplace",
+                title="Freightos Marketplace: Direct Partner Onboarding Required",
+                description=(
+                    "Freightos is not listed in the public Impact.com directory. "
+                    "Direct partner agreement is required to replace Sovrn fallback on customs bond and tariff calculators."
+                ),
+                action_type="PARTNER_APPROVAL",
+                severity="MEDIUM",
+                deadline=None,
+                missing_requirements=[
+                    "Complete direct Freightos B2B referral onboarding and obtain tracking URL",
+                ],
+                candidate_url="https://www.freightos.com/",
+            )
+        if ph_partners.get("interactive_brokers", {}).get("status") != "live":
+            self.action_bus.route_manual_requirement(
+                property_id="profithelm",
+                partner_key="interactive_brokers",
+                partner_name="Interactive Brokers (IBKR)",
+                title="Interactive Brokers: Compliance & KYC Affiliate Application",
+                description=(
+                    "Interactive Brokers requires manual operator KYC/tax identity verification "
+                    "in the IBKR Affiliate Portal before issuing /r/interactive_brokers tracking links."
+                ),
+                action_type="PARTNER_APPROVAL",
+                severity="MEDIUM",
+                deadline=None,
+                missing_requirements=[
+                    "Complete operator KYC verification in Interactive Brokers Affiliate Portal",
+                ],
+                candidate_url="https://www.interactivebrokers.com/",
+            )
+
         payroll_cat = (
             self.monetization_hub.vault_data.get("properties", {})
             .get("profithelm", {})

@@ -898,6 +898,24 @@ class FactoryPipeline:
                 or []
             )
 
+            if not candidate_angles and (
+                not in_pytest or os.environ.get("PSEOFACTORY_VERTEX_ANGLES") == "1"
+            ):
+                try:
+                    from pseofactory.content_angles import synthesize_underdog_angles_via_vertex
+
+                    vx_angles = synthesize_underdog_angles_via_vertex(
+                        query=decision.query,
+                        triage_action=decision.action,
+                        incumbents=incumbents,
+                        existing_tools=existing_tools,
+                    )
+                    valid_vx = [a for a in vx_angles if a.divergence_score >= 0.50]
+                    if valid_vx:
+                        candidate_angles = valid_vx
+                except Exception:
+                    pass
+
             if not candidate_angles:
                 # Synthesize valid underdog angle adhering to Grant O Triad and validated archetype
                 candidate_angles = [

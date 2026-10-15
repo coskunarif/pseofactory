@@ -1290,6 +1290,21 @@ def resolve_optimal_partner_for_slug(
                 for p, eff_st in live_candidates:
                     if p.key == "coinledger" and not (explicit_vault_live_keys - {"coinledger"}):
                         return p
+            if matched_bucket_name in (
+                "section-179",
+                "179",
+                "macrs",
+                "depreciation",
+                "equipment",
+                "tariff-landed-cost",
+                "invoice-factoring",
+            ) and not explicit_vault_live_keys:
+                non_fallback_live = [
+                    (p, eff_st) for p, eff_st in live_candidates if p.key != "mercury"
+                ]
+                if not non_fallback_live:
+                    return candidates[0]
+                live_candidates = non_fallback_live
             best = max(live_candidates, key=lambda item: score_partner_yield(item[0], item[1]))
             return best[0]
 

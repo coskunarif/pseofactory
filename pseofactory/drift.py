@@ -36,6 +36,13 @@ def compute_engine_hash(
     mtimes: List[float] = []
     try:
         mtimes.append(pseofactory_pkg_dir.stat().st_mtime)
+        for p in pseofactory_pkg_dir.glob("**/*.py"):
+            if "__pycache__" in p.parts or p.name.endswith(".pyc"):
+                continue
+            try:
+                mtimes.append(p.stat().st_mtime)
+            except OSError:
+                pass
     except OSError:
         pass
 

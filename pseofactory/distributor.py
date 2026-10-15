@@ -4785,6 +4785,28 @@ def export_all_syndication_files(
             if isinstance(t, (dict, str))
         }
 
+        # Dynamically discover built tool directories in dist/tools/
+        candidate_dist_tools = []
+        try:
+            adapter_obj = TenantRegistry.default().get_adapter(property_id)
+            if adapter_obj and getattr(adapter_obj, "dist_dir", None):
+                candidate_dist_tools.append(Path(adapter_obj.dist_dir) / "tools")
+        except Exception:
+            pass
+        if not dry_run and (output_dir.parent / "dist" / "tools").is_dir():
+            candidate_dist_tools.append(output_dir.parent / "dist" / "tools")
+
+        for dt_dir in candidate_dist_tools:
+            if dt_dir.is_dir():
+                for item in sorted(dt_dir.iterdir()):
+                    if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                        if item.name not in known_slugs:
+                            target_tools.append({
+                                "slug": item.name,
+                                "title": item.name.replace("-", " ").title(),
+                            })
+                            known_slugs.add(item.name)
+
         # Dynamically discover existing tool directories in target_dir
         # (excluding hidden folders, files, and 'ai_benchmarks')
         if output_dir.exists():
@@ -5030,21 +5052,40 @@ def dispatch_to_distribution_lead(
     eff_run_id = run_id or f"run-dist-{int(time.time())}"
 
     # Determine tools to target dynamically via TenantRegistry
+    adapter = None
+    try:
+        from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+        adapter = TenantRegistry.default().get_adapter(property_id)
+    except Exception:
+        adapter = None
+
     target_tools = tools
     if target_tools is None:
-        from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
-        try:
-            adapter = TenantRegistry.default().get_adapter(property_id)
-            target_tools = adapter.tools if (adapter and adapter.tools) else []
-        except Exception:
-            target_tools = []
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+        target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
         if not target_tools:
             if property_id == "prexvo":
-                target_tools = PREXVO_DEFAULT_TOOLS
+                target_tools = list(PREXVO_DEFAULT_TOOLS)
             elif property_id == "profithelm":
-                target_tools = PROFITHELM_DEFAULT_TOOLS
+                target_tools = list(PROFITHELM_DEFAULT_TOOLS)
             else:
-                target_tools = TOOLS
+                target_tools = list(TOOLS)
+
+        known_slugs = {
+            t["slug"] if isinstance(t, dict) else str(t)
+            for t in target_tools
+            if isinstance(t, (dict, str))
+        }
+        eff_dist = Path(dist_dir) if dist_dir else (Path(adapter.dist_dir) if (adapter and getattr(adapter, "dist_dir", None)) else None)
+        if eff_dist and (eff_dist / "tools").is_dir():
+            for item in sorted((eff_dist / "tools").iterdir()):
+                if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                    if item.name not in known_slugs:
+                        target_tools.append({
+                            "slug": item.name,
+                            "title": item.name.replace("-", " ").title(),
+                        })
+                        known_slugs.add(item.name)
 
     # Idempotency and WAL recording
     import hashlib
@@ -5145,6 +5186,65 @@ def dispatch_to_distribution_lead(
     # Stage syndication files
     export_all_syndication_files(tools=target_tools, dry_run=dry_run, run_id=eff_run_id, property_id=property_id)
 
+    # Sync tenant broadcast_ledger.json when not dry_run
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not dry_run:
+        repo_dir: Optional[Path] = None
+        if dist_dir:
+            repo_dir = Path(dist_dir).resolve().parent
+        elif adapter and getattr(adapter, "repo_path", None):
+            repo_dir = Path(adapter.repo_path).resolve()
+        elif adapter and getattr(adapter, "dist_dir", None):
+            repo_dir = Path(adapter.dist_dir).resolve().parent
+
+        is_foreign_pytest = bool(
+            "PYTEST_CURRENT_TEST" in os.environ
+            and repo_dir is not None
+            and str(repo_dir).startswith("/home/ubuntuadmin/projects/")
+        )
+        if repo_dir is not None and repo_dir.is_dir() and not is_foreign_pytest:
+            b_ledger_path = repo_dir / ".agy" / "broadcast_ledger.json"
+            b_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            existing_entries: List[Dict[str, Any]] = []
+            if b_ledger_path.is_file():
+                try:
+                    raw_b = json.loads(b_ledger_path.read_text(encoding="utf-8"))
+                    if isinstance(raw_b, list):
+                        existing_entries = [
+                            e for e in raw_b
+                            if isinstance(e, dict)
+                            and str(e.get("slug", "")) not in ("", "direct_broadcast")
+                            and not str(e.get("slug", "")).startswith("mock_")
+                        ]
+                except Exception:
+                    existing_entries = []
+            seen_slugs = {str(e.get("slug")) for e in existing_entries if e.get("slug")}
+            canon_base = "https://prexvo.com" if property_id == "prexvo" else "https://profithelm.com"
+            for slug in all_assets:
+                if slug not in seen_slugs:
+                    existing_entries.append({
+                        "slug": slug,
+                        "timestamp": now_iso,
+                        "mode": "SYNDICATED_STAGED",
+                        "run_id": eff_run_id,
+                        "post_url": f"{canon_base}/tools/{slug}/",
+                        "dispatches": {
+                            "x": "STAGED",
+                            "linkedin": "STAGED",
+                            "facebook": "STAGED",
+                            "youtube": "STAGED",
+                            "reddit": "STAGED",
+                            "quora": "STAGED",
+                            "google_sites": "STAGED",
+                            "linkedin_pulse": "STAGED",
+                            "substack_teardown": "STAGED",
+                            "outreach_pitch": "STAGED",
+                        },
+                        "metrics": None,
+                    })
+                    seen_slugs.add(slug)
+            b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
+
     # Save distribution_draft.json
     draft_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run_id
     draft_dir.mkdir(parents=True, exist_ok=True)
@@ -5179,7 +5279,7 @@ def dispatch_to_distribution_lead(
             "Approve live social distribution on LinkedIn / Facebook pages",
             "Approve YouTube video uploads or channel modifications",
         ],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso,
     }
     draft_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
 

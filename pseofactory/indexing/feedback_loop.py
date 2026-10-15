@@ -884,6 +884,39 @@ class IndexingFeedbackLoop:
                 logger.warning("Failed pruning dead URLs from %s: %s", sm_path, err)
         return pruned_count
 
+    _PROTECTED_HUB_SLUGS: Set[str] = {
+        "index",
+        "about",
+        "privacy",
+        "tools",
+        "terms",
+        "contact",
+        "methodology",
+        "disclaimers",
+        "signal",
+    }
+
+    _PROTECTED_HUB_REL_PATHS: Set[str] = {
+        "index.html",
+        "about/index.html",
+        "privacy/index.html",
+        "tools/index.html",
+        "terms/index.html",
+        "contact/index.html",
+        "methodology/index.html",
+        "disclaimers/index.html",
+        "signal/index.html",
+    }
+
+    def _is_protected_hub_route(self, slug: str, target_url: str) -> bool:
+        s_clean = str(slug or "").strip().lower()
+        u_clean = str(target_url or "").strip().lower()
+        if s_clean in self._PROTECTED_HUB_SLUGS:
+            return True
+        if s_clean == "statutory-calculator" and "/tools/statutory-calculator" not in u_clean:
+            return True
+        return False
+
     def _apply_html_repairs_for_slug(
         self,
         slug: str,
@@ -897,6 +930,8 @@ class IndexingFeedbackLoop:
         Zero em-dashes. Zero en-dashes.
         """
         if not self.dist_dir or not self.dist_dir.exists():
+            return False
+        if self._is_protected_hub_route(slug, target_url):
             return False
         import re
         import urllib.parse
@@ -923,11 +958,21 @@ class IndexingFeedbackLoop:
                 break
         if target_file is None:
             return False
+        try:
+            rel_check = target_file.relative_to(self.dist_dir).as_posix()
+            if rel_check in self._PROTECTED_HUB_REL_PATHS:
+                return False
+        except Exception:
+            pass
 
         try:
             raw_html = target_file.read_text(encoding="utf-8")
             expected_url = target_url
-            if not expected_url or not expected_url.startswith("https://"):
+            if (
+                not expected_url
+                or not expected_url.startswith("https://")
+                or (self.domain and self.domain.lower() not in urllib.parse.urlparse(expected_url).netloc.lower())
+            ):
                 rel = target_file.relative_to(self.dist_dir).as_posix()
                 if rel == "index.html":
                     u_path = "/"
@@ -987,7 +1032,13 @@ class IndexingFeedbackLoop:
                     repaired = re.sub(r"(<body[^>]*>)", rf"\g<1>\n<h1>{h1_text}</h1>", repaired, count=1, flags=re.IGNORECASE)
 
             # 6. Inject remediation overlay (quick answer, H2s, preset scenarios, comparison rows, FAQs, JSON-LD)
-            repaired = inject_overlay_into_html(repaired, overlay_spec)
+            rel_target = target_file.relative_to(self.dist_dir).as_posix()
+            is_hub_or_fallback = (
+                rel_target in ("index.html", "tools/index.html")
+                or slug in ("statutory-calculator", "index", "tools")
+            )
+            if not is_hub_or_fallback:
+                repaired = inject_overlay_into_html(repaired, overlay_spec)
 
             target_file.write_text(repaired, encoding="utf-8")
             IndexingPreflightEngine.clear_cache()
@@ -1067,14 +1118,15 @@ class IndexingFeedbackLoop:
                 spec = cand.get("overlay_spec")
                 if not isinstance(spec, dict) or "title_rewrite" not in spec:
                     spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
-                overlay_file = overlays_dir / f"{c_slug}.json"
-                overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
-                if c_slug not in overlays_written:
-                    overlays_written.append(c_slug)
                 t_url = str(cand.get("target_url") or spec.get("target_url") or "")
-                if c_slug not in repaired_slugs and self._apply_html_repairs_for_slug(c_slug, t_url, spec):
-                    repaired_slugs.add(c_slug)
-                    html_files_repaired += 1
+                if not self._is_protected_hub_route(c_slug, t_url):
+                    overlay_file = overlays_dir / f"{c_slug}.json"
+                    overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+                    if c_slug not in overlays_written:
+                        overlays_written.append(c_slug)
+                    if c_slug not in repaired_slugs and self._apply_html_repairs_for_slug(c_slug, t_url, spec):
+                        repaired_slugs.add(c_slug)
+                        html_files_repaired += 1
                 if "CRAWL_BUDGET" in anom and cand.get("target_url") and cand["target_url"] not in crawl_lag_urls:
                     crawl_lag_urls.append(str(cand["target_url"]))
 
@@ -1083,6 +1135,8 @@ class IndexingFeedbackLoop:
                 if d.classification == RootCauseClassification.DEAD_ROUTE_IN_SITEMAP.value:
                     continue
                 d_slug = _slug_from_url_or_query(target_url=d.url)
+                if self._is_protected_hub_route(d_slug, d.url):
+                    continue
                 overlay_file = overlays_dir / f"{d_slug}.json"
                 if overlay_file.exists():
                     try:
@@ -1140,6 +1194,7 @@ class IndexingFeedbackLoop:
             "dead_routes_quarantined": len(dead_routes),
             "sitemaps_pruned": sitemaps_pruned,
             "overlays_written": overlays_written,
+            "repaired_slugs": sorted(repaired_slugs),
             "html_files_repaired": html_files_repaired,
             "crawl_lag_dispatched": crawl_lag_dispatched,
             "crawl_lag_urls": crawl_lag_urls,
@@ -1333,6 +1388,9 @@ class IndexingFeedbackLoop:
                 skip_recompile=skip_recompile,
             )
 
+        already_repaired_slugs = set(repair_summary.get("repaired_slugs") or repair_summary.get("overlays_written") or [])
+        reflection_succeeded = repair_summary.get("reflection", {}).get("status") == "SUCCESS"
+
         def _remediation_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             t_slug = str(task.get("slug") or "")
             t_url = str(task.get("target_url") or "")
@@ -1341,7 +1399,10 @@ class IndexingFeedbackLoop:
                 spec = compile_remediation_overlay_spec(task, tenant_id=self.property_id)
             repaired_html = False
             if t_slug and not dry_run:
-                repaired_html = self._apply_html_repairs_for_slug(t_slug, t_url, spec)
+                if reflection_succeeded and t_slug in already_repaired_slugs:
+                    repaired_html = True
+                else:
+                    repaired_html = self._apply_html_repairs_for_slug(t_slug, t_url, spec)
             return {
                 "status": "COMPLETED",
                 "slug": t_slug,

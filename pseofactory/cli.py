@@ -167,15 +167,24 @@ def cmd_reflect(args: argparse.Namespace) -> int:
         latch_state=True,
     )
     if res.get("total_recompiled", 0) > 0 and not no_gitops:
+        from pseofactory.gitops import GitOpsCoordinator
         reg = TenantRegistry.default()
         for p_id, r_info in res.get("property_reports", {}).items():
-            if r_info.get("recompiled", 0) > 0:
+            if r_info.get("recompiled", 0) > 0 and r_info.get("final_status") == "PASS":
                 try:
                     adapter = reg.get_adapter(p_id)
                     repo_path = adapter.repo_path or adapter.dist_dir.parent
                     if (repo_path / ".git").exists():
-                        lc_res = run_maintenance_lifecycle(property_id=p_id, force=True)
-                        if lc_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
+                        coordinator = GitOpsCoordinator(repo_path=repo_path, branch="main", dry_run=False)
+                        gitops_res = coordinator.dispatch_to_shipper(
+                            property_id=p_id,
+                            dry_run=False,
+                            commit_message=f"fix({p_id}): automated reflection and maintenance cycle",
+                            edge_url=getattr(adapter, "canonical_base", None),
+                            dist_dir=adapter.dist_dir,
+                        )
+                        r_info["gitops_status"] = gitops_res.status
+                        if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
                             res["status"] = "FAIL"
                 except Exception as g_err:
                     res["status"] = "FAIL"
@@ -1241,14 +1250,32 @@ def cmd_indexing_inspect(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.indexer import PushIndexer
     property_id = getattr(args, "property", "profithelm") or "profithelm"
     strict = getattr(args, "strict", False)
     dry_run = getattr(args, "dry_run", False)
     sample = getattr(args, "sample", False)
+    auto_remediate = getattr(args, "auto_remediate", False)
+    prune_sitemaps = getattr(args, "prune_sitemaps", False)
     output_json = getattr(args, "json", False)
 
     inspector = DailyIndexingInspector(tenant_id=property_id)
-    report = inspector.run_inspection(strict=strict, dry_run=dry_run, sample=sample)
+    report = inspector.run_inspection(
+        strict=strict,
+        dry_run=dry_run,
+        sample=sample,
+        auto_remediate=auto_remediate,
+    )
+    if prune_sitemaps or auto_remediate:
+        try:
+            indexer = PushIndexer(
+                domain=f"{property_id}.com",
+                tenant_id=property_id,
+                dist_dir=inspector.base_dir / "dist",
+            )
+            report["sitemap_hygiene"] = indexer.prune_dead_gsc_sitemaps(live=not dry_run)
+        except Exception as ex:
+            report["sitemap_hygiene"] = {"status": "ERROR", "error": str(ex)}
 
     if output_json:
         print(json.dumps(report, indent=2))
@@ -1276,6 +1303,7 @@ def cmd_indexing_feedback_loop(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
+    from pseofactory.indexer import PushIndexer
     property_id = getattr(args, "property", "profithelm") or "profithelm"
     dry_run = getattr(args, "dry_run", False)
     live = getattr(args, "live", False)
@@ -1283,6 +1311,15 @@ def cmd_indexing_feedback_loop(args: argparse.Namespace) -> int:
 
     coordinator = IndexingFeedbackLoop(property_id=property_id)
     result = coordinator.run_feedback_cycle(dry_run=dry_run, live=live)
+    try:
+        indexer = PushIndexer(
+            domain=coordinator.domain,
+            tenant_id=property_id,
+            dist_dir=coordinator.dist_dir,
+        )
+        result["sitemap_hygiene"] = indexer.prune_dead_gsc_sitemaps(live=(live and not dry_run))
+    except Exception as ex:
+        result["sitemap_hygiene"] = {"status": "ERROR", "error": str(ex)}
 
     if output_json:
         print(json.dumps(result, indent=2))
@@ -1639,6 +1676,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--strict", action="store_true", help="Fail with non-zero exit code if anomalies or warnings detected")
     p_inspect.add_argument("--dry-run", action="store_true", help="Audit without updating recovery ledger on disk")
     p_inspect.add_argument("--sample", action="store_true", help="Audit sample partition")
+    p_inspect.add_argument("--auto-remediate", action="store_true", help="Automatically trigger closed-loop remediation and dead sitemap pruning")
+    p_inspect.add_argument("--prune-sitemaps", action="store_true", help="Audit and delete dead or unfetchable sitemaps from GSC and ledger")
     p_inspect.add_argument("--json", action="store_true", help="Output inspection results as structured JSON")
 
     # indexing-feedback-loop

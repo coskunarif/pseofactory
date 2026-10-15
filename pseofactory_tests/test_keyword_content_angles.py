@@ -474,3 +474,78 @@ def test_classify_serp_incumbents_batch_and_evaluate_angles_integration():
     assert "FORUM_INCOMPLETE_ANSWER" in markdown
     assert "OUTDATED_STATUTORY_DATA" in markdown
     assert "GENERIC_THIN_ARTICLE" in markdown
+
+
+def test_stateless_vertex_angle_synthesis_and_zero_benefit_guard():
+    """
+    Verifies stateless Context-In -> Vertex AI -> JSON-Out angle synthesis:
+    1. Zero-benefit guard skips Vertex call (0 calls) when triage_action is MONITOR.
+    2. Pre-assembles local context and parses structured JSON angles on BUILD_PAGE,
+       sanitizing forbidden dashes and enforcing Jaccard divergence >= 0.50.
+    """
+    calls = []
+
+    def fake_vertex_caller(prompt: str, enable_google_search: bool = True):
+        calls.append((prompt, enable_google_search))
+        return [
+            {
+                "angle_id": "reefer_haccp_telemetry_matrix",
+                "archetype": "Free Interactive Tool/Calculator",
+                "triad": {
+                    "audience_niche": "Independent 2-truck refrigerated owner-operators",
+                    "problem_scope": "Automated FDA FSMA sanitary transport compliance logging\u2014without enterprise contracts",
+                    "geographic_or_vertical_bound": "US interstate cold-chain freight",
+                },
+                "primary_value_proposition": "Self-serve FDA FSMA sanitary transport compliance calculator\u2013with continuous temperature excursion alerts",
+                "first_party_utility_asset": "Interactive FSMA temperature excursion threshold calculator",
+            }
+        ]
+
+    # 1. Exploratory MONITOR scenario -> 0 Vertex calls (Zero-Benefit Subtraction)
+    monitor_payload = {
+        "query": "reefer truck dispatch",
+        "gsc_metrics": {"position": 65.0, "impressions": 3, "days_observed": 5, "clicks": 0},
+        "incumbents": [],
+        "existing_site_catalog": [],
+    }
+    brief_mon = evaluate_content_angles(
+        monitor_payload,
+        total_site_impressions=500,
+        use_vertex_fallback=True,
+        vertex_caller=fake_vertex_caller,
+    )
+    assert brief_mon.triage_action == "MONITOR"
+    assert len(calls) == 0
+    assert len(brief_mon.angles) == 0
+
+    # 2. Qualified BUILD_PAGE scenario without local angles -> 1 stateless Vertex call with full context
+    build_payload = {
+        "query": "cold chain reefer dispatch software 2 truck fleet",
+        "gsc_metrics": {"position": 12.0, "impressions": 45, "days_observed": 30, "clicks": 3},
+        "incumbents": [
+            {
+                "domain": "reddit.com",
+                "rank": 1,
+                "title": "What tools do you use for cold chain dispatch?",
+                "snippet": "Looking for recommendations on cold chain temperature sync",
+            }
+        ],
+        "existing_site_catalog": [{"slug": "freight-margin-calculator", "title": "Freight Margin Calculator"}],
+    }
+    brief_build = evaluate_content_angles(
+        build_payload,
+        total_site_impressions=500,
+        use_vertex_fallback=True,
+        vertex_caller=fake_vertex_caller,
+    )
+    assert brief_build.triage_action == "BUILD_PAGE"
+    assert len(calls) == 1
+    sent_prompt, used_search = calls[0]
+    assert used_search is True
+    assert "CONTEXT_JSON:" in sent_prompt
+    assert "freight-margin-calculator" in sent_prompt
+    assert len(brief_build.angles) == 1
+    assert brief_build.angles[0].divergence_score >= 0.50
+    assert_no_forbidden_dashes(brief_build.to_markdown(), "vertex fallback brief")
+    assert_no_prompt_leakage(brief_build.to_markdown(), "vertex fallback brief")
+
