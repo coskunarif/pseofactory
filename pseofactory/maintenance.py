@@ -3665,6 +3665,10 @@ class RetroReflectionEngine:
         "multi_dataset_join",
         "compliant_intent_monetization",
         "range_slider",
+        "instant_edge_case_trap_immediacy",
+        "statutory_compliance_framing",
+        "three_tier_topic_cluster_nav",
+        "vetted_commercial_handoff_framing",
     )
 
     PREXVO_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -3767,6 +3771,28 @@ class RetroReflectionEngine:
 
         if 'type="range"' not in html_content and "type='range'" not in html_content:
             missing.append("range_slider")
+
+        if 'data-mechanic="instant_edge_case_trap_immediacy"' not in html_content or "(1 - P)" in html_content:
+            missing.append("instant_edge_case_trap_immediacy")
+
+        if 'data-mechanic="statutory_compliance_framing"' not in html_content or "<h3 id=\"statutory-pitfalls-matrix\"" in html_content:
+            missing.append("statutory_compliance_framing")
+
+        if (
+            'data-mechanic="three_tier_topic_cluster_nav"' not in html_content
+            or 'data-mechanic="on_this_page_jump_nav"' not in html_content
+            or "<h2>3-Tier Statutory Topic Cluster" in html_content
+            or 'href="#calculator-workspace-anchor"' in html_content
+            or "student-loan-interest-subsidy-calculator" in html_content
+            or "california-1031-exchange-clawback-ftb-3840-calculator" in html_content
+        ):
+            missing.append("three_tier_topic_cluster_nav")
+
+        if (
+            'data-mechanic="vetted_commercial_handoff_framing"' not in html_content
+            or 'id="vetted-commercial-handoff"' not in html_content
+        ):
+            missing.append("vetted_commercial_handoff_framing")
 
         if '"@type": "Dataset"' in html_content or '"@type":"Dataset"' in html_content:
             for m in re.finditer(
@@ -4144,6 +4170,46 @@ class RetroReflectionEngine:
         if monetization_block_html:
             injected_parts.append(monetization_block_html)
 
+        if any(
+            m_key in missing
+            for m_key in (
+                "instant_edge_case_trap_immediacy",
+                "statutory_compliance_framing",
+                "three_tier_topic_cluster_nav",
+                "vetted_commercial_handoff_framing",
+            )
+        ):
+            from pseofactory.competitor import render_competitor_winning_pattern_blocks
+            base_dom = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+            if canonical_url and "/tools/" in canonical_url:
+                base_dom = canonical_url.split("/tools/")[0]
+            winning_blocks = render_competitor_winning_pattern_blocks(
+                slug=slug,
+                title=manifest["model_name"],
+                property_id=property_id,
+                canonical_base=base_dom,
+                statutory_authority=stat_auth,
+                economic_dataset=econ_ds,
+            )
+            if "instant_edge_case_trap_immediacy" in missing:
+                updated = re.sub(r'\s*<aside[^>]+data-mechanic="instant_edge_case_trap_immediacy"[\s\S]*?</aside>', "", updated)
+                injected_parts.append(winning_blocks["edge_case_trap_html"])
+                repaired.append("instant_edge_case_trap_immediacy")
+            if "vetted_commercial_handoff_framing" in missing:
+                updated = re.sub(r'\s*<section[^>]+data-mechanic="vetted_commercial_handoff_framing"[\s\S]*?</section>', "", updated)
+                injected_parts.append(winning_blocks["vetted_handoff_html"])
+                repaired.append("vetted_commercial_handoff_framing")
+            if "statutory_compliance_framing" in missing:
+                updated = re.sub(r'\s*<section[^>]+data-mechanic="statutory_compliance_framing"[\s\S]*?</section>', "", updated)
+                injected_parts.append(winning_blocks["statutory_compliance_html"])
+                repaired.append("statutory_compliance_framing")
+            if "three_tier_topic_cluster_nav" in missing:
+                updated = re.sub(r'\s*<nav[^>]+data-mechanic="on_this_page_jump_nav"[\s\S]*?</nav>', "", updated)
+                updated = re.sub(r'\s*<section[^>]+data-mechanic="three_tier_topic_cluster_nav"[\s\S]*?</section>', "", updated)
+                injected_parts.append(winning_blocks["on_this_page_nav_html"])
+                injected_parts.append(winning_blocks["three_tier_cluster_html"])
+                repaired.append("three_tier_topic_cluster_nav")
+
         if "calculation_manifest" in missing:
             manifest_json_str = json.dumps(manifest, ensure_ascii=False, indent=2)
             injected_parts.append(
@@ -4183,6 +4249,15 @@ class RetroReflectionEngine:
                         updated = updated[:body_close_idx] + "\n" + retro_bundle + "\n" + updated[body_close_idx:]
                     else:
                         updated = updated + "\n" + retro_bundle
+        if "Calculator Calculator" in updated or "calculator calculator" in updated.lower():
+            updated = re.sub(r"\bCalculator(?:\s+Calculator)+\b", "Calculator", updated, flags=re.IGNORECASE)
+            if "title_dedup" not in repaired:
+                repaired.append("title_dedup")
+        if property_id.lower() == "profithelm" and "1031" in slug.lower() and 'data-partner="mercury"' in updated:
+            updated = updated.replace('data-partner="mercury"', 'data-partner="ipx1031"').replace(
+                "Mercury Startup Banking", "IPX1031 Qualified Intermediary"
+            ).replace("/r/mercury", "/r/ipx1031")
+            repaired.append("vertical_partner_alignment")
 
         return updated, repaired
 

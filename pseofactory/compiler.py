@@ -883,6 +883,21 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     )
     monetization_section_html = monetization_block["html"]
 
+    from pseofactory.competitor import render_competitor_winning_pattern_blocks
+    winning_blocks = render_competitor_winning_pattern_blocks(
+        slug=slug,
+        title=title,
+        property_id="prexvo" if is_prexvo else "profithelm",
+        canonical_base=canonical_base,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+    )
+    on_this_page_nav_html = winning_blocks["on_this_page_nav_html"]
+    edge_case_trap_html = winning_blocks["edge_case_trap_html"]
+    statutory_compliance_html = winning_blocks["statutory_compliance_html"]
+    three_tier_cluster_html = winning_blocks["three_tier_cluster_html"]
+    vetted_handoff_html = winning_blocks["vetted_handoff_html"]
+
     is_prexvo_js = "true" if is_prexvo else "false"
 
     is_prediction_tool = (not is_prexvo) and any(
@@ -1264,7 +1279,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       border-radius: 8px;
       margin-top: 16px;
     }}
-    .calculation-table {{
+    .calculation-table, .statutory-pitfalls-table {{
       width: 100%;
       table-layout: fixed;
       border-collapse: collapse;
@@ -1272,13 +1287,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       font-size: 14px;
       font-variant-numeric: tabular-nums;
     }}
-    .calculation-table th, .calculation-table td {{
+    .calculation-table th, .calculation-table td, .statutory-pitfalls-table th, .statutory-pitfalls-table td {{
       border: 1px solid var(--border);
       padding: 12px;
       text-align: left;
       min-width: 110px;
     }}
-    .calculation-table th {{
+    .calculation-table th, .statutory-pitfalls-table th {{
       background-color: var(--bg-elevated);
     }}
     .canonical-tool-link {{
@@ -1409,6 +1424,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </div>
     </header>
 
+{on_this_page_nav_html}
+
     <div class="multi-dataset-join card" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
       <h2>Dual Dataset Provenance and Statutory Corroboration</h2>
       <p>
@@ -1421,13 +1438,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </p>
     </div>
 
-    <div class="calculation-container card">
+    <div id="calculator-workspace-anchor" class="calculation-container card">
       <h2>Interactive Quantitative Model: {model_name}</h2>
       <p>
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
         (greater than or equal to zero) per HWL-1263 to prevent crawler or user state corruption.
       </p>
 {scenario_presets_bar_html}
+{edge_case_trap_html}
       <form class="calculator-form" id="{slug}-calculator" method="post" action="javascript:void(0);">
 {form_inputs_str}
         <button type="submit" class="touch-target" id="calculate-btn" style="min-height: 44px; min-width: 44px;">Recalculate Output</button>
@@ -1465,6 +1483,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
 {monetization_section_html}
 
+{vetted_handoff_html}
+
+{statutory_compliance_html}
+
     <section class="methodology card">
       <h2>Statutory Analysis and Computational Methodology</h2>
       <p>
@@ -1481,6 +1503,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       <h2>Frequently Asked Questions</h2>
 {faq_accordions_html}
     </section>
+
+{three_tier_cluster_html}
 
     <nav class="cluster-nav card" aria-label="{cluster_title}">
       <h2>{cluster_title}</h2>

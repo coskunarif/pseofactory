@@ -796,10 +796,9 @@ WINNING_COMPETITOR_MECHANICS: Dict[str, Dict[str, Any]] = {
         "mechanic_id": "instant_edge_case_trap_immediacy",
         "title": "Pre-Hydrated Statutory Deadline and Edge-Case Trap Immediacy",
         "why_competitors_rank_higher": (
-            "Niche conversion leaders like start1031.com pre-hydrate realistic statutory scenarios "
-            "on load and surface immediate statutory deadline or boot/phaseout traps (such as IRC "
-            "Section 1031(a)(3)(B)(ii) tax-return due-date compression requiring Form 4868) inside "
-            "the calculator workspace before users click submit."
+            "Niche conversion leaders pre-hydrate realistic statutory scenarios "
+            "on load and surface immediate statutory deadline or phaseout traps "
+            "inside the calculator workspace before users click submit."
         ),
         "compiler_implementation": (
             "compile_high_effort_page and RetroReflectionEngine render a pre-hydrated statutory "
@@ -812,9 +811,8 @@ WINNING_COMPETITOR_MECHANICS: Dict[str, Dict[str, Any]] = {
         "title": "Beyond the Calculator Statutory Compliance Checklist and Pitfall Matrix",
         "why_competitors_rank_higher": (
             "Authoritative YMYL tools explicitly separate what arithmetic proves from what requires "
-            "legal and procedural verification (such as pre-closing QI assignment under Treas. Reg. "
-            "1.1031(k)-1(g)(4), state clawback filings like CA FTB Form 3840, and Issue-to-Prevention "
-            "statutory pitfall tables)."
+            "legal and procedural verification through compliance checklists and Issue-to-Prevention "
+            "statutory pitfall tables."
         ),
         "compiler_implementation": (
             "compile_high_effort_page and RetroReflectionEngine render a structured Beyond the "
@@ -847,7 +845,7 @@ WINNING_COMPETITOR_MECHANICS: Dict[str, Dict[str, Any]] = {
         "compiler_implementation": (
             "compile_high_effort_page and RetroReflectionEngine attach a vertical-matched Provider "
             "Vetting Checklist (data-mechanic='vetted_commercial_handoff_framing') while preserving "
-            "strict non-commercial guardrails on Prexvo public-service pages."
+            "strict non-commercial guardrails on restricted public-service pages."
         ),
     },
 }
@@ -1558,6 +1556,496 @@ def run_blind_spot_pass(
     )
 
 
+def _resolve_vertical_competitor_content(
+    slug: str,
+    property_id: str,
+    statutory_authority: str,
+    canonical_base: str,
+) -> Dict[str, Any]:
+    """
+    Resolves domain-isolated, vertical-specific statutory edge-case traps,
+    Beyond-the-Calculator compliance checklists, pitfall tables, 3-tier topic
+    clusters, and commercial/statutory handoff vetting checklists.
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    s_low = slug.lower()
+    is_prexvo = property_id.strip().lower() == "prexvo"
+    base_url = canonical_base.rstrip("/")
+
+    if is_prexvo:
+        restricted_ps = is_restricted_public_service_slug(slug)
+        is_refi = any(tok in s_low for tok in ("refinance", "refinancing"))
+        if restricted_ps:
+            trap_title = "Immediate Title IV Statutory Eligibility and Buyback Trap Alert (34 CFR 685.219)"
+            trap_body = (
+                "Under 34 CFR 685.219, Public Service Loan Forgiveness requires strictly 120 qualifying "
+                "monthly payments while employed full-time by an eligible governmental or 501(c)(3) non-profit "
+                "organization. Consolidating Direct Loans after submitting a PSLF hold-harmless buyback request "
+                "or converting federal balances into private credit permanently voids qualifying buyback months."
+            )
+            checklist_items = [
+                "Annual Employment Certification Form (ECF) signature verification by an authorized employer official under 34 CFR 685.219(c).",
+                "Direct Loan program status audit confirming any legacy FFEL or Perkins loans were consolidated into Direct Loans prior to qualifying service.",
+                "NSLDS payment counter reconciliation verifying all 120 qualifying monthly payments occurred during full-time (>=30 hours weekly) public service.",
+                "Formal PSLF Buyback eligibility check confirming 120 months of approved employment exist before requesting lump-sum hold-harmless assessment.",
+            ]
+            pitfalls = [
+                (
+                    "Consolidating Direct Loans during pending PSLF Buyback review",
+                    "Creates a new Direct Consolidation substrate that erases pre-consolidation buyback month eligibility",
+                    "Complete PSLF Buyback settlement and receive official discharge determination before any loan consolidation",
+                ),
+                (
+                    "Employer 501(c)(3) revocation or non-qualifying contractor status",
+                    "Disqualifies monthly payments made while billed as a 1099 independent contractor rather than a W-2 employee",
+                    "Verify EIN eligibility in the official Federal Student Aid PSLF Employer Search database annually",
+                ),
+                (
+                    "Relying on non-qualifying general forbearance without hold-harmless buyback",
+                    "Months in discretionary forbearance do not count toward the 120 qualifying monthly payments without buyback",
+                    "Track eligible deferment or forbearance periods and submit a formal 34 CFR 685.219(g) buyback request at month 120",
+                ),
+            ]
+            handoff_title = "Non-Commercial Title IV Statutory Verification Protocol"
+            handoff_items = [
+                "Verify qualifying employer EIN status directly in the official StudentAid.gov PSLF Help Tool.",
+                "Download your raw NSLDS loan-level text file to audit cumulative qualifying payment counts across servicers.",
+                "Retain signed W-2 wage statements and employer certifications for all 120 qualifying monthly payment periods.",
+            ]
+        elif is_refi:
+            trap_title = "Immediate Title IV Federal Protection Forfeiture Trap Alert (34 CFR Part 685)"
+            trap_body = (
+                "Refinancing federal student loans into a private credit agreement is irreversible: borrowers "
+                "permanently waive federal protections, including Income-Based Repayment (IBR), the Repayment "
+                "Assistance Plan (RAP), federal unpaid interest subsidies, and 120-payment Public Service Loan Forgiveness."
+            )
+            checklist_items = [
+                "Confirm zero remaining eligibility or intent for 120-payment Public Service Loan Forgiveness (34 CFR 685.219) before private conversion.",
+                "Verify emergency cash reserves cover at least 6 months of fixed private loan obligations since private contracts lack statutory IDR hardship caps.",
+                "Audit soft-pull rate pre-qualification disclosures under Truth in Lending Act (TILA) Regulation Z (12 CFR Part 1026) before authorizing a hard inquiry.",
+                "Compare fixed vs variable APR amortization schedules alongside autopay discount permanence and cosigner release clauses.",
+            ]
+            pitfalls = [
+                (
+                    "Refinancing Direct Loans while employed at a 501(c)(3) hospital or public agency",
+                    "Permanently waives federal protections and forfeits tax-free 120-payment PSLF principal discharge",
+                    "Isolate only private student loans for refinancing while retaining federal Direct Loans in Title IV IDR plans",
+                ),
+                (
+                    "Comparing nominal interest rate reduction without modeling lost RAP unpaid interest subsidies",
+                    "Overstates net savings when federal unpaid interest waivers reduce effective Title IV borrowing cost",
+                    "Compare lifetime out-of-pocket cash outflow across both Title IV RAP/IBR and private amortization schedules",
+                ),
+                (
+                    "Triggering multiple uncoordinated hard credit inquiries across private lenders",
+                    "Can depress FICO credit scores if applications span outside the bureau rate-shopping window",
+                    "Use soft-pull pre-qualification first and batch final applications within a single 14-day underwriting window",
+                ),
+            ]
+            handoff_title = "Vetted Private Refinance Underwriting Checklist (TILA Reg Z)"
+            handoff_items = [
+                "Confirm 100% soft-credit-pull rate check with zero impact on your FICO score before formal underwriting.",
+                "Verify fixed APR terms, zero origination or prepayment fees, and documented disability/death discharge policies.",
+                "Review mandatory Title IV forfeiture disclosure confirming refinancing federal student loans permanently waives federal protections.",
+            ]
+        else:
+            trap_title = "Immediate AGI Filing Status and Interest Capitalization Trap Alert (34 CFR 685.209)"
+            trap_body = (
+                "Under 34 CFR 685.209 and OBBBA Title VIII Subtitle B, Married Filing Jointly (MFJ) pools both "
+                "spouses' Adjusted Gross Income when computing RAP and IBR discretionary payments, whereas Married "
+                "Filing Separately (MFS) isolates individual borrower AGI. Exiting Income-Based Repayment (IBR) "
+                "also triggers statutory capitalization of accrued unpaid interest onto principal."
+            )
+            checklist_items = [
+                "Model Married Filing Jointly (MFJ) vs Married Filing Separately (MFS) tax liability delta against annual Title IV repayment savings.",
+                "Verify whether your Direct Loans meet the July 1, 2014 New Borrower threshold (10% vs 15% discretionary income under 34 CFR 685.209).",
+                "Confirm annual IRS Data Retrieval Tool (DRT) income recertification deadlines to prevent administrative payment spikes.",
+                "Audit accrued unpaid interest balances before switching out of IBR, as statutory exit rules capitalize unpaid interest into principal.",
+            ]
+            pitfalls = [
+                (
+                    "Filing joint tax returns (MFJ) when both spouses have disparate income-to-debt ratios",
+                    "Combines household AGI and can double or triple monthly RAP/IBR required payments",
+                    "Run side-by-side MFS vs MFJ tax and repayment simulations prior to filing annual federal returns",
+                ),
+                (
+                    "Switching out of statutory IBR into another repayment plan with accrued unpaid interest",
+                    "Triggers mandatory statutory interest capitalization under 20 U.S.C. 1098e(b)(3), permanently increasing principal",
+                    "Evaluate accrued interest balance impact before executing a formal plan migration away from IBR",
+                ),
+                (
+                    "Missing annual IDR income recertification deadline with loan servicer",
+                    "Reverts monthly billing to the 10-year Standard Repayment amount and can trigger interest capitalization",
+                    "Enable automatic IRS tax data consent or submit recertification documentation 45 days before anniversary date",
+                ),
+            ]
+            handoff_title = "Title IV Repayment Execution and Verification Checklist"
+            handoff_items = [
+                "Cross-check loan origination dates in StudentAid.gov to confirm pre-2014 vs post-2014 IBR statutory tier.",
+                "Compare total 240-to-360-month cumulative repayment cost including potential tax treatment of forgiven balances.",
+                "Verify family size and state of residence against current HHS Federal Poverty Guidelines (42 U.S.C. 9902(2)).",
+            ]
+
+        tier_clusters = [
+            (
+                "Tier 1: Core Title IV Statutory Pillar Models",
+                [
+                    ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs IBR Payment Model"),
+                    ("student-loan-repayment-calculator", "Title IV Federal Student Loan Repayment Calculator"),
+                    ("rap-payment-calculator", "Repayment Assistance Plan (RAP) Monthly Payment Calculator"),
+                ],
+            ),
+            (
+                "Tier 2: Forgiveness, Buyback and Litigation Transition Matrices",
+                [
+                    ("pslf-qualifying-payment-simulator", "PSLF 120 Qualifying Payments Verification Simulator"),
+                    ("save-plan-litigation-transition", "SAVE Plan Forbearance to IBR/RAP Transition Calculator"),
+                    ("ibr-hardship-cap-calculator", "IBR Partial Financial Hardship Cap Calculator"),
+                ],
+            ),
+            (
+                "Tier 3: Filing Status, Consolidation and Specialty Borrower Spokes",
+                [
+                    ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint IDR Tax Model"),
+                    ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
+                    ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
+                ],
+            ),
+        ]
+    else:
+        # ProfitHelm vertical resolution
+        if any(tok in s_low for tok in ("1031", "like-kind", "exchange", "ftb-3840")):
+            trap_title = "Immediate Statutory Deadline and Mortgage Boot Trap Alert (IRC Section 1031(a)(3)(B)(ii))"
+            trap_body = (
+                "Under IRC Section 1031(a)(3)(B)(ii), your exchange completion deadline is the EARLIER of 180 "
+                "calendar days after closing relinquished property OR the due date (including extensions) of your "
+                "federal income tax return for the year of sale. For Q4 closings between October 18 and December 31, "
+                "you must file IRS Form 4868 (or Form 7004) before April 15 to preserve the full 180-day window. "
+                "Additionally, any net debt reduction (mortgage boot) triggers immediate tax recognition unless offset "
+                "by equal or greater replacement debt or fresh cash equity."
+            )
+            checklist_items = [
+                "Execute written Qualified Intermediary (QI) Exchange Agreement and Assignment BEFORE closing relinquished property under Treas. Reg. 1.1031(k)-1(g)(4).",
+                "Screen intermediary, escrow, and title agents against Disqualified Person rules under Treas. Reg. 1.1031(k)-1(k) (excluding attorneys, CPAs, or brokers who acted as your agent within 2 years).",
+                "Deliver signed written identification of replacement property by midnight on Calendar Day 45 under the Three-Property Rule or 200% Fair Market Value Rule.",
+                "Prepare IRS Form 8824 for the year of sale and track mandatory state clawback reporting (such as California FTB Form 3840 or Oregon Form OR-24) annually.",
+            ]
+            pitfalls = [
+                (
+                    "Closing relinquished property in Q4 (Nov/Dec) and filing April 15 tax return without extension",
+                    "Compresses the 180-day exchange window under IRC Section 1031(a)(3)(B)(ii) and disqualifies post-filing acquisitions",
+                    "Always file IRS Form 4868 (individuals) or Form 7004 (entities) before filing the return for a Q4 exchange",
+                ),
+                (
+                    "Acquiring equal replacement value using more cash and less debt than relinquished property",
+                    "Taking less replacement debt without adding equivalent cash equity creates taxable Mortgage Boot under Treas. Reg. 1.1031(b)-1(c)",
+                    "Match or exceed both total net sales price AND total paid-off debt (or inject equivalent new cash equity at closing)",
+                ),
+                (
+                    "Allowing escrow deposit or net sale proceeds to touch taxpayer's bank account",
+                    "Triggers immediate constructive receipt under Treas. Reg. 1.1031(k)-1(f) and voids tax deferral across the entire gain",
+                    "Route all sale proceeds and assignment addenda directly through a bonded Qualified Intermediary segregated escrow account",
+                ),
+            ]
+            handoff_title = "Qualified Intermediary (QI) Provider Vetting Checklist"
+            handoff_items = [
+                "Verify fidelity bond coverage, Errors & Omissions insurance, and segregated qualified escrow/trust account structure.",
+                "Confirm pre-closing exchange assignment documentation under Treas. Reg. 1.1031(k)-1(g)(4) before escrow closes.",
+                "Audit multi-state clawback compliance support (CA FTB Form 3840 / OR-24) and reverse/improvement EAT structuring capability.",
+            ]
+        elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash")):
+            trap_title = "Immediate Wallet-by-Wallet Basis and Form 1099-DA Trap Alert (Rev. Proc. 2024-28)"
+            trap_body = (
+                "Under IRS Rev. Proc. 2024-28 and Treasury final digital asset broker regulations, universal "
+                "cross-wallet tax lot pooling is prohibited: taxpayers must maintain wallet-by-wallet or account-by-account "
+                "cost-basis allocation and reconcile custodial broker gross proceeds reported on IRS Form 1099-DA "
+                "against Specific Identification (HIFO/FIFO) records on IRS Form 8949."
+            )
+            checklist_items = [
+                "Document wallet-by-wallet cost-basis allocation election under IRS Rev. Proc. 2024-28 prior to executing digital asset disposals.",
+                "Record contemporaneous Fair Market Value (FMV) at the exact timestamp staking rewards achieve dominion and control under Rev. Rul. 2023-14.",
+                "Reconcile custodial exchange IRS Form 1099-DA gross proceeds against non-custodial transfer logs to prevent zero-basis double taxation.",
+                "Separate CFTC-regulated Section 1256 contracts (Form 6781) from spot digital asset capital gains and losses (Form 8949 / Schedule D).",
+            ]
+            pitfalls = [
+                (
+                    "Applying universal HIFO lot selection across multiple unlinked hardware wallets and exchanges",
+                    "Violates Rev. Proc. 2024-28 account-by-account basis tracking rules and risks IRS FIFO recharacterization",
+                    "Maintain segregated per-wallet tax lot ledgers and specify lot IDs before or at the time of each transfer",
+                ),
+                (
+                    "Omitting self-custody transfer cost basis when importing Form 1099-DA from a centralized broker",
+                    "Causes broker-reported gross proceeds to be taxed at 100% gain with $0 reported cost basis",
+                    "Join on-chain transfer hashes with historical acquisition lots to substantiate Form 8949 Column (e) basis",
+                ),
+                (
+                    "Deferring staking reward income recognition until tokens are sold for fiat currency",
+                    "Understates ordinary income under Rev. Rul. 2023-14 and triggers accuracy-related penalties under IRC Section 6662",
+                    "Report validator/staking rewards as ordinary income at receipt FMV and establish that FMV as the token's cost basis",
+                ),
+            ]
+            handoff_title = "Digital Asset Tax Subledger Vetting Checklist"
+            handoff_items = [
+                "Confirm native support for IRS Rev. Proc. 2024-28 wallet-by-wallet Specific Identification (HIFO/FIFO) lot accounting.",
+                "Verify read-only API key security (SOC 2 Type II) and automated IRS Form 8949, Schedule D, and Form 1099-DA reconciliation.",
+                "Check automated detection of DeFi liquidity pool wraps, bridges, and Rev. Rul. 2023-14 staking reward timestamps.",
+            ]
+        elif any(tok in s_low for tok in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig", "break-even")):
+            trap_title = "Immediate Quadratic Fee Drag and Section 1256 Tax Bifurcation Trap Alert"
+            trap_body = (
+                "Event contract net expected value is compressed by exchange fee schedules that peak at 50-cent "
+                "implied probability (Kalshi quadratic fee formula 0.07 * P * (1 minus P) = $0.0175 per contract at P=0.50) "
+                "and by tax regime bifurcation between CFTC-regulated Designated Contract Markets (IRC Section 1256 "
+                "60/40 capital treatment) and non-DCM venues subject to IRC Section 165(d) loss deduction limits."
+            )
+            checklist_items = [
+                "Deduct exact round-trip maker/taker exchange fees and bid-ask spread slippage before computing Kelly bankroll sizing.",
+                "Apply Fractional Kelly (0.25x to 0.50x) multipliers to protect bankroll against parameter estimation variance and correlated event resolution.",
+                "Calculate time-to-settlement annualized capital lockup cost against risk-free 3-month U.S. Treasury yields (FRED DTB3).",
+                "Verify venue regulatory classification (CFTC DCM under 17 CFR Part 40 vs offshore/non-DCM) for accurate Form 6781 vs Schedule 1 reporting.",
+            ]
+            pitfalls = [
+                (
+                    "Sizing binary event positions using full (1.0x) Kelly on unadjusted mid-market probabilities",
+                    "Exposes portfolio to severe drawdown risk when true win probability is overestimated by even 200 basis points",
+                    "Subtract round-trip fee drag from edge first and cap position sizing at Half-Kelly (0.50x) or Quarter-Kelly (0.25x)",
+                ),
+                (
+                    "Executing cross-platform arbitrage between two venues with divergent oracle resolution rules",
+                    "Creates resolution basis risk where both legs settle unfavorably due to differing cutoff timestamps or data sources",
+                    "Audit exact contract rulebook settlement criteria and resolution sources on both venues before locking arbitrage capital",
+                ),
+                (
+                    "Netting non-DCM wagering losses against unrelated capital gains without itemizing",
+                    "IRC Section 165(d) restricts wagering loss deductions to the extent of wagering gains",
+                    "Segregate CFTC-regulated Section 1256 exchange contracts from non-DCM event transactions in tax subledgers",
+                ),
+            ]
+            handoff_title = "Quantitative Execution & Tax Subledger Vetting Checklist"
+            handoff_items = [
+                "Verify CFTC Designated Contract Market (DCM) regulatory status and automated Form 1099 / Form 6781 tax statement exports.",
+                "Audit maker vs taker fee schedules and API order-book depth across probability bands before deploying automated sizing.",
+                "Confirm subledger compatibility for reconciling high-frequency binary contract settlements and wash/rollover positions.",
+            ]
+        else:
+            trap_title = "Immediate Placed-in-Service Deadline and Recapture Trap Alert (IRC Section 179 & 168(k))"
+            trap_body = (
+                "Under IRC Section 179 and Treas. Reg. 1.179-4(e), qualifying equipment or software must be both "
+                "purchased AND placed in operational readiness before midnight on December 31 of the tax year. "
+                "Furthermore, if qualified business use drops to 50% or below during any subsequent MACRS recovery "
+                "year, IRC Section 179(d)(10) triggers mandatory ordinary income recapture on IRS Form 4797."
+            )
+            checklist_items = [
+                "Retain dated delivery receipts, installation logs, and operational commissioning records proving placed-in-service status by December 31.",
+                "Verify total annual equipment additions against the IRC Section 179(b)(2) dollar-for-dollar investment phase-out threshold on IRS Form 4562.",
+                "Confirm active trade or business taxable income limitation under IRC Section 179(b)(3) (including W-2 wages and S-Corp officer compensation).",
+                "Cross-check state-level conformity (such as California state depreciation decoupling and bonus depreciation adjustments) before finalizing quarterly estimates.",
+            ]
+            pitfalls = [
+                (
+                    "Signing an equipment purchase contract and paying in December when delivery occurs in January",
+                    "Disqualifies the asset from current-year Section 179 and 168(k) expensing under Treas. Reg. 1.179-4(e)",
+                    "Require documented physical delivery and operational readiness prior to December 31 midnight cutoff",
+                ),
+                (
+                    "Claiming full Section 179 deduction on a heavy SUV (6,000 to 14,000 lbs GVWR) without applying IRC 179(b)(5)",
+                    "Exceeds the statutory heavy SUV Section 179 cap and triggers Form 4562 audit adjustments",
+                    "Apply the statutory IRC Section 179(b)(5) SUV cap first, then apply IRC Section 168(k) bonus depreciation to remaining basis",
+                ),
+                (
+                    "Allowing business-use percentage on listed property or vehicles to fall to 50% or below in Year 2-5",
+                    "Triggers mandatory IRC Section 179(d)(10) and Section 280F excess depreciation recapture as ordinary income on Form 4797",
+                    "Maintain contemporaneous mileage/usage logs substantiating strictly greater than 50% qualified business use every year",
+                ),
+            ]
+            handoff_title = "Commercial Equipment & Tax Execution Vetting Checklist"
+            handoff_items = [
+                "Confirm non-tax capital lease ($1 Buyout or Equipment Finance Agreement) structure preserves 100% taxpayer title for IRC Section 179.",
+                "Verify same-day underwriting approval and dealer funding cutoff dates to guarantee December 31 placed-in-service compliance.",
+                "Review UCC-1 equipment-only lien terms, zero-prepayment-penalty clauses, and IRS Form 4562 asset classification schedules.",
+            ]
+
+        tier_clusters = [
+            (
+                "Tier 1: Core Statutory Tax & Capital Pillar Hubs",
+                [
+                    ("section-179-calculator", "Section 179 Equipment Expense & Phaseout Calculator"),
+                    ("section-1031-calculator", "Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
+                    ("s-corp-reasonable-salary-tax-calculator", "S-Corp Reasonable Salary & FICA Tax Savings Calculator"),
+                ],
+            ),
+            (
+                "Tier 2: Comparative Financing, Entity & Arbitrage Matrices",
+                [
+                    ("equipment-lease-vs-buy-section-179-calculator", "Equipment Lease vs Buy Section 179 Cash Flow Matrix"),
+                    ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
+                    ("invoice-factoring-vs-business-line-of-credit-calculator", "Invoice Factoring vs Business Line of Credit APR Matrix"),
+                ],
+            ),
+            (
+                "Tier 3: Specialized Compliance, Jurisdiction & Asset Spokes",
+                [
+                    ("1031-exchange-rules-arizona", "Multi-State 1031 Exchange & Clawback Compliance Calculator"),
+                    ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
+                    ("crypto-tax-calculator", "Digital Asset Form 8949 & Rev. Proc. 2024-28 Tax Calculator"),
+                ],
+            ),
+        ]
+
+    return {
+        "trap_title": trap_title,
+        "trap_body": trap_body,
+        "checklist_items": checklist_items,
+        "pitfalls": pitfalls,
+        "handoff_title": handoff_title,
+        "handoff_items": handoff_items,
+        "tier_clusters": tier_clusters,
+        "base_url": base_url,
+        "statutory_authority": statutory_authority,
+    }
+
+
+def render_competitor_winning_pattern_blocks(
+    slug: str,
+    title: str,
+    property_id: str,
+    canonical_base: str,
+    statutory_authority: str,
+    economic_dataset: str,
+) -> Dict[str, str]:
+    """
+    Renders the 4 winning competitor patterns in HTML for compile_high_effort_page
+    and RetroReflectionEngine:
+      1. Calculator Immediacy: instant_edge_case_trap_immediacy
+      2. Authority Framing: statutory_compliance_framing (Beyond the Calculator + Pitfall Matrix)
+      3. Topic Clustering: on_this_page_jump_nav + three_tier_topic_cluster_nav
+      4. Commercial Handoffs: vetted_commercial_handoff_framing
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    ctx = _resolve_vertical_competitor_content(
+        slug=slug,
+        property_id=property_id,
+        statutory_authority=statutory_authority,
+        canonical_base=canonical_base,
+    )
+    base_url = ctx["base_url"]
+
+    on_this_page_html = (
+        '    <nav class="on-this-page-nav card" aria-label="On This Page" '
+        'data-mechanic="on_this_page_jump_nav" style="margin-top: 16px; margin-bottom: 16px; padding: 14px 18px;">\n'
+        '      <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px;">On This Page: Rapid Decision Navigation</div>\n'
+        '      <div style="display: flex; flex-wrap: wrap; gap: 8px;">\n'
+        '        <a href="#statutory-trap-alert" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">1. Statutory Deadline &amp; Edge-Case Trap</a>\n'
+        '        <a href="#vetted-commercial-handoff" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">2. Provider Vetting Checklist</a>\n'
+        '        <a href="#statutory-compliance-checklist" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">3. Beyond the Calculator Checklist</a>\n'
+        '        <a href="#statutory-pitfalls-matrix" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">4. Common Statutory Pitfalls</a>\n'
+        '        <a href="#topic-cluster-hub" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">5. 3-Tier Topic Cluster</a>\n'
+        '      </div>\n'
+        '    </nav>'
+    )
+
+    edge_case_trap_html = (
+        f'    <aside id="statutory-trap-alert" class="statutory-edge-case-trap card" '
+        f'data-mechanic="instant_edge_case_trap_immediacy" '
+        f'style="margin-top: 16px; margin-bottom: 16px; border-left: 4px solid #f59e0b; background: var(--bg-elevated); padding: 16px 20px;">\n'
+        f'      <div style="margin-top: 0; margin-bottom: 6px; font-size: 15px; font-weight: 700;">{ctx["trap_title"]}</div>\n'
+        f'      <p style="margin: 0; font-size: 14px; line-height: 1.55;">{ctx["trap_body"]}</p>\n'
+        f'    </aside>'
+    )
+
+    checklist_li = "\n".join(
+        f'        <li style="margin-bottom: 8px;">{item}</li>'
+        for item in ctx["checklist_items"]
+    )
+    pitfall_rows = "\n".join(
+        f'            <tr>\n'
+        f'              <td><strong>{issue}</strong></td>\n'
+        f'              <td>{conseq}</td>\n'
+        f'              <td>{prev}</td>\n'
+        f'            </tr>'
+        for issue, conseq, prev in ctx["pitfalls"]
+    )
+    statutory_compliance_html = (
+        f'    <section id="statutory-compliance-checklist" class="statutory-compliance-section card" '
+        f'data-mechanic="statutory_compliance_framing" style="margin-top: 24px;">\n'
+        f'      <h2>Beyond the Calculator: Statutory Compliance and Procedural Verification</h2>\n'
+        f'      <p>Deterministic arithmetic under <strong>{statutory_authority}</strong> computes your baseline quantitative exposure, but statutory qualification depends on strict procedural execution that no calculator can verify automatically:</p>\n'
+        f'      <ul style="padding-left: 20px; margin-top: 12px; margin-bottom: 20px;">\n'
+        f'{checklist_li}\n'
+        f'      </ul>\n'
+        f'      <div id="statutory-pitfalls-matrix" style="font-size: 16px; font-weight: 700; margin-top: 18px; margin-bottom: 10px;">Common Statutory Pitfalls: Issue to Prevention Matrix</div>\n'
+        f'      <div class="table-wrap">\n'
+        f'        <table class="statutory-pitfalls-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
+        f'          <thead>\n'
+        f'            <tr>\n'
+        f'              <th scope="col">Statutory Pitfall or Edge Case</th>\n'
+        f'              <th scope="col">Regulatory Consequence</th>\n'
+        f'              <th scope="col">Mandatory Prevention Protocol</th>\n'
+        f'            </tr>\n'
+        f'          </thead>\n'
+        f'          <tbody>\n'
+        f'{pitfall_rows}\n'
+        f'          </tbody>\n'
+        f'        </table>\n'
+        f'      </div>\n'
+        f'    </section>'
+    )
+
+    tier_blocks: List[str] = []
+    for tier_heading, tier_links in ctx["tier_clusters"]:
+        links_li: List[str] = []
+        for t_slug, t_label in tier_links:
+            if t_slug == slug:
+                continue
+            links_li.append(
+                f'          <li style="margin-bottom: 8px;">\n'
+                f'            <a href="{base_url}/tools/{t_slug}/" class="touch-target cluster-link" '
+                f'style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600;">{t_label}</a>\n'
+                f'          </li>'
+            )
+        if links_li:
+            joined_li = "\n".join(links_li)
+            tier_blocks.append(
+                f'      <div class="topic-cluster-tier" style="margin-bottom: 16px;">\n'
+                f'        <div style="font-size: 15px; font-weight: 700; margin-bottom: 8px;">{tier_heading}</div>\n'
+                f'        <ul style="list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px;">\n'
+                f'{joined_li}\n'
+                f'        </ul>\n'
+                f'      </div>'
+            )
+    joined_tiers = "\n".join(tier_blocks)
+    three_tier_cluster_html = (
+        f'    <section id="topic-cluster-hub" class="three-tier-cluster-section card" '
+        f'data-mechanic="three_tier_topic_cluster_nav" style="margin-top: 24px;">\n'
+        f'      <h2>Connected Statutory Topic Cluster and Decision Architecture</h2>\n'
+        f'      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 14px;">Navigate connected pillar models, side-by-side comparative matrices, and jurisdiction/entity compliance calculators:</p>\n'
+        f'{joined_tiers}\n'
+        f'    </section>'
+    )
+
+    handoff_li = "\n".join(
+        f'        <li style="margin-bottom: 6px; font-size: 13px;">{h_item}</li>'
+        for h_item in ctx["handoff_items"]
+    )
+    vetted_handoff_html = (
+        f'    <section id="vetted-commercial-handoff" class="commercial-handoff-vetting card" '
+        f'data-mechanic="vetted_commercial_handoff_framing" style="margin-top: 16px;">\n'
+        f'      <div style="font-size: 16px; font-weight: 700; margin-top: 0; margin-bottom: 8px;">{ctx["handoff_title"]}</div>\n'
+        f'      <ul style="padding-left: 18px; margin: 0;">\n'
+        f'{handoff_li}\n'
+        f'      </ul>\n'
+        f'    </section>'
+    )
+
+    return {
+        "on_this_page_nav_html": on_this_page_html,
+        "edge_case_trap_html": edge_case_trap_html,
+        "statutory_compliance_html": statutory_compliance_html,
+        "three_tier_cluster_html": three_tier_cluster_html,
+        "vetted_handoff_html": vetted_handoff_html,
+    }
+
+
 __all__ = [
     "INTERACTIVE_PATTERNS",
     "CLICK_MAGNET_PATTERNS",
@@ -1571,6 +2059,8 @@ __all__ = [
     "benchmark_multi_engine_rankings",
     "benchmark_all_properties",
     "run_blind_spot_pass",
+    "render_competitor_winning_pattern_blocks",
 ]
+
 
 

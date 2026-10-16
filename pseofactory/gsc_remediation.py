@@ -555,9 +555,6 @@ def _resolve_partner_offer_and_manual_gate(
         elif any(k in combined for k in ("1031", "like-kind", "like kind", "exchange", "boot", "qi-fee", "replacement-property", "ftb-3840", "3840")):
             default_chosen_key = "ipx1031"
             vertical_candidates = ["ipx1031", "exeter1031", "first_american"]
-        elif any(k in combined for k in ("saas", "runway", "burn", "zero-cash", "mrr")):
-            default_chosen_key = "mercury"
-            vertical_candidates = ["mercury", "ramp", "brex", "rippling"]
         elif any(k in combined for k in ("prediction-market-tax",)):
             default_chosen_key = "coinledger"
             vertical_candidates = ["coinledger", "koinly", "taxslayer", "kalshi"]
@@ -1818,8 +1815,8 @@ def _build_vertical_profithelm_overlay_blocks(
                     "question": "How is Tax-Equivalent Yield (TEY) calculated under 31 U.S.C. Section 3124?",
                     "answer": (
                         "Because direct US Treasury obligations are exempt from state and local income taxes under 31 U.S.C. "
-                        "Section 3124, Tax-Equivalent Yield equals Nominal Treasury Yield multiplied by (1 - Federal Rate) "
-                        "divided by (1 - Combined Federal and State Rate)."
+                        "Section 3124, Tax-Equivalent Yield equals Nominal Treasury Yield multiplied by (1 minus Federal Rate) "
+                        "divided by (1 minus Combined Federal and State Rate)."
                     ),
                 },
                 {
