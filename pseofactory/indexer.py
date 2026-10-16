@@ -2740,39 +2740,48 @@ class PushIndexer:
                 return m_other.group(1), None, True
             return "master", None, False
 
-        # 1. Inspect existing sitemaps in self.dist_dir if present on disk
-        try:
-            if self.dist_dir.exists() and self.dist_dir.is_dir():
-                for sm_path in sorted(self.dist_dir.glob("sitemap*.xml")):
-                    if not sm_path.exists():
-                        continue
-                    try:
-                        xml_text = sm_path.read_text(encoding="utf-8")
-                    except Exception:
-                        continue
-                    sm_name = sm_path.name
-                    sec_name, d_bucket, is_child = _infer_section_and_bucket(sm_name)
-                    locs = [u.strip() for u in re.findall(r"<loc>(.*?)</loc>", xml_text) if u.strip()]
-                    xml_sha = hashlib.sha256(xml_text.encode("utf-8")).hexdigest()
-                    sm_url = f"{base_clean}/{sm_name}"
-                    discovered[sm_name] = {
-                        "sitemap_name": sm_name,
-                        "sitemap_url": sm_url,
-                        "section": sec_name,
-                        "date_bucket": d_bucket,
-                        "is_child_sitemap": is_child,
-                        "url_count": len(locs),
-                        "urls": locs,
-                        "xml_sha256": xml_sha,
-                    }
-        except Exception:
-            pass
+        # 1. Inspect existing sitemaps in self.dist_dir (or canonical tenant dist_dir) if present on disk
+        search_dirs = [self.dist_dir]
+        if self.domain == "profithelm.com":
+            search_dirs.append(Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
+        elif self.domain == "prexvo.com":
+            search_dirs.append(Path("/home/ubuntuadmin/projects/prexvo/dist"))
+
+        for cand_dist in search_dirs:
+            if discovered:
+                break
+            try:
+                if cand_dist.exists() and cand_dist.is_dir():
+                    for sm_path in sorted(cand_dist.glob("sitemap*.xml")):
+                        if not sm_path.exists():
+                            continue
+                        try:
+                            xml_text = sm_path.read_text(encoding="utf-8")
+                        except Exception:
+                            continue
+                        sm_name = sm_path.name
+                        sec_name, d_bucket, is_child = _infer_section_and_bucket(sm_name)
+                        locs = [u.strip() for u in re.findall(r"<loc>(.*?)</loc>", xml_text) if u.strip()]
+                        xml_sha = hashlib.sha256(xml_text.encode("utf-8")).hexdigest()
+                        sm_url = f"{base_clean}/{sm_name}"
+                        discovered[sm_name] = {
+                            "sitemap_name": sm_name,
+                            "sitemap_url": sm_url,
+                            "section": sec_name,
+                            "date_bucket": d_bucket,
+                            "is_child_sitemap": is_child,
+                            "url_count": len(locs),
+                            "urls": locs,
+                            "xml_sha256": xml_sha,
+                        }
+            except Exception:
+                pass
 
         # 2. Synthesize template child sitemaps from candidate URLs ONLY if no sitemaps were discovered on disk
         candidate_urls: List[Any] = list(urls) if urls else []
         if not candidate_urls and "sitemap.xml" in discovered:
             candidate_urls = list(discovered["sitemap.xml"].get("urls", []))
-        if not discovered and candidate_urls:
+        if not discovered and candidate_urls and self.domain not in ("profithelm.com", "prexvo.com"):
             try:
                 built = build_multi_tenant_sitemaps(
                     urls_or_records=candidate_urls,
@@ -2865,25 +2874,31 @@ class PushIndexer:
                 or shutil.which("google-search-console-cli")
                 or "/home/ubuntuadmin/.nvm/versions/node/v22.20.0/bin/google-search-console-cli"
             )
-            live_res = self.fetch_gsc_sitemaps(live=True, site=target_site)
-            for sm in live_res.get("sitemaps", []) or []:
-                if not isinstance(sm, dict):
-                    continue
-                sm_path = str(sm.get("path", "")).strip()
-                err_cnt = int(sm.get("errors", 0) or 0)
-                if sm_path and (err_cnt > 0 or (valid_urls and sm_path not in valid_urls)):
-                    try:
-                        if os.path.exists(cli_bin):
-                            subprocess.run(
-                                [cli_bin, "sitemap-delete", target_site, sm_path],
-                                capture_output=True,
-                                text=True,
-                                timeout=20,
-                            )
-                            deleted_from_gsc.append(sm_path)
-                        self.child_sitemap_ledger.remove_sitemap(eff_tenant, sm_path)
-                    except Exception:
-                        pass
+            sites_to_check = [target_site]
+            url_prefix_site = f"{self.canonical_base.rstrip('/')}/"
+            if site is None and url_prefix_site not in sites_to_check:
+                sites_to_check.append(url_prefix_site)
+            for check_site in sites_to_check:
+                live_res = self.fetch_gsc_sitemaps(live=True, site=check_site)
+                for sm in live_res.get("sitemaps", []) or []:
+                    if not isinstance(sm, dict):
+                        continue
+                    sm_path = str(sm.get("path", "")).strip()
+                    err_cnt = int(sm.get("errors", 0) or 0)
+                    if sm_path and (err_cnt > 0 or (valid_urls and sm_path not in valid_urls)):
+                        try:
+                            if os.path.exists(cli_bin):
+                                subprocess.run(
+                                    [cli_bin, "sitemap-delete", check_site, sm_path],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=20,
+                                )
+                                if sm_path not in deleted_from_gsc:
+                                    deleted_from_gsc.append(sm_path)
+                            self.child_sitemap_ledger.remove_sitemap(eff_tenant, sm_path)
+                        except Exception:
+                            pass
 
         return {
             "status": "PRUNED" if (pruned_from_ledger or deleted_from_gsc) else "CLEAN",
