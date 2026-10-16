@@ -3672,6 +3672,7 @@ class RetroReflectionEngine:
         "statutory_compliance_framing",
         "three_tier_topic_cluster_nav",
         "vetted_commercial_handoff_framing",
+        "deterministic_visual_primitives",
     )
 
     PREXVO_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -3796,6 +3797,16 @@ class RetroReflectionEngine:
             or 'id="vetted-commercial-handoff"' not in html_content
         ):
             missing.append("vetted_commercial_handoff_framing")
+
+        from pseofactory.visual_primitives import VISUAL_PRIMITIVES_VERSION
+        if (
+            'id="pseo-visual-primitives"' not in html_content
+            or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
+            or 'id="pseo-runtime-sync"' not in html_content
+            or 'class="calc-matrix-table-wrap"' in html_content
+            or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
+        ):
+            missing.append("deterministic_visual_primitives")
 
         if '"@type": "Dataset"' in html_content or '"@type":"Dataset"' in html_content:
             for m in re.finditer(
@@ -4124,6 +4135,8 @@ class RetroReflectionEngine:
                     f'class="touch-target scenario-preset-link" '
                     f'style="display: inline-flex; align-items: center; justify-content: center; '
                     f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
+                    f'background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); '
+                    f'border: 1px solid var(--border-strong, #bfdbfe); '
                     f'text-decoration: none; font-size: 14px; font-weight: 600;">{label}</a>'
                 )
             joined_p_links = "\n".join(p_links)
@@ -4271,6 +4284,12 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
+        from pseofactory.visual_primitives import normalize_html_visual_primitives
+        updated, vp_repaired = normalize_html_visual_primitives(updated)
+        if "deterministic_visual_primitives" in missing or vp_repaired:
+            if "deterministic_visual_primitives" not in repaired:
+                repaired.append("deterministic_visual_primitives")
+
         return updated, repaired
 
     @classmethod
@@ -4318,8 +4337,11 @@ class RetroReflectionEngine:
     ) -> Dict[str, Any]:
         """
         Scans existing HTML inventory in dist_dir and automatically retro-reflects missing
-        pseofactory engine mechanics into every tool and calculator page in a single pass.
+        pseofactory engine mechanics into every tool and calculator page in a single pass,
+        while normalizing deterministic visual primitives across all HTML pages in the estate.
         """
+        from pseofactory.visual_primitives import normalize_html_visual_primitives
+
         d = Path(dist_dir).resolve()
         if not d.is_dir():
             return {
@@ -4350,6 +4372,9 @@ class RetroReflectionEngine:
                             retrofitted_paths.append(rel)
                     except Exception:
                         pass
+                norm_html, norm_rep = normalize_html_visual_primitives(content, is_tenant_porcelain=True)
+                if norm_rep and norm_html != content:
+                    html_file.write_text(norm_html, encoding="utf-8")
                 continue
             scanned += 1
             parts = rel.split("/")

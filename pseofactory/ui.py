@@ -244,10 +244,11 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             min-height: 80px;
         }}
         .header-title-group h1 {{
-            font-size: 20px;
+            font-size: 28px;
+            line-height: 1.2;
             font-weight: 700;
             color: var(--text-main);
-            letter-spacing: -0.01em;
+            letter-spacing: -0.02em;
         }}
         .header-title-group p {{
             font-size: 13px;

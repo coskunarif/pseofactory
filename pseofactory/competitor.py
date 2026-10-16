@@ -1931,23 +1931,23 @@ def render_competitor_winning_pattern_blocks(
     base_url = ctx["base_url"]
 
     on_this_page_html = (
-        '    <nav class="on-this-page-nav card" aria-label="On This Page" '
-        'data-mechanic="on_this_page_jump_nav" style="margin-top: 16px; margin-bottom: 16px; padding: 14px 18px;">\n'
-        '      <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px;">On This Page: Rapid Decision Navigation</div>\n'
+        '    <nav class="on-this-page-nav card pseo-card" aria-label="On This Page" '
+        'data-mechanic="on_this_page_jump_nav">\n'
+        '      <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted, #475569); margin-bottom: 8px;">On This Page: Rapid Decision Navigation</div>\n'
         '      <div style="display: flex; flex-wrap: wrap; gap: 8px;">\n'
-        '        <a href="#statutory-trap-alert" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">1. Statutory Deadline &amp; Edge-Case Trap</a>\n'
-        '        <a href="#vetted-commercial-handoff" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">2. Provider Vetting Checklist</a>\n'
-        '        <a href="#statutory-compliance-checklist" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">3. Beyond the Calculator Checklist</a>\n'
-        '        <a href="#statutory-pitfalls-matrix" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">4. Common Statutory Pitfalls</a>\n'
-        '        <a href="#topic-cluster-hub" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600;">5. 3-Tier Topic Cluster</a>\n'
+        '        <a href="#statutory-trap-alert" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">1. Statutory Deadline &amp; Edge-Case Trap</a>\n'
+        '        <a href="#vetted-commercial-handoff" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">2. Provider Vetting Checklist</a>\n'
+        '        <a href="#statutory-compliance-checklist" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">3. Beyond the Calculator Checklist</a>\n'
+        '        <a href="#statutory-pitfalls-matrix" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">4. Common Statutory Pitfalls</a>\n'
+        '        <a href="#topic-cluster-hub" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">5. 3-Tier Topic Cluster</a>\n'
         '      </div>\n'
         '    </nav>'
     )
 
     edge_case_trap_html = (
-        f'    <aside id="statutory-trap-alert" class="statutory-edge-case-trap card" '
+        f'    <aside id="statutory-trap-alert" class="statutory-edge-case-trap card pseo-card" '
         f'data-mechanic="instant_edge_case_trap_immediacy" '
-        f'style="margin-top: 16px; margin-bottom: 16px; border-left: 4px solid #f59e0b; background: var(--bg-elevated); padding: 16px 20px;">\n'
+        f'style="border-left: 4px solid #f59e0b; background: var(--bg-elevated, #eff6ff);">\n'
         f'      <div style="margin-top: 0; margin-bottom: 6px; font-size: 15px; font-weight: 700;">{ctx["trap_title"]}</div>\n'
         f'      <p style="margin: 0; font-size: 14px; line-height: 1.55;">{ctx["trap_body"]}</p>\n'
         f'    </aside>'
@@ -1966,15 +1966,15 @@ def render_competitor_winning_pattern_blocks(
         for issue, conseq, prev in ctx["pitfalls"]
     )
     statutory_compliance_html = (
-        f'    <section id="statutory-compliance-checklist" class="statutory-compliance-section card" '
-        f'data-mechanic="statutory_compliance_framing" style="margin-top: 24px;">\n'
+        f'    <section id="statutory-compliance-checklist" class="statutory-compliance-section card pseo-card" '
+        f'data-mechanic="statutory_compliance_framing">\n'
         f'      <h2>Beyond the Calculator: Statutory Compliance and Procedural Verification</h2>\n'
         f'      <p>Deterministic arithmetic under <strong>{statutory_authority}</strong> computes your baseline quantitative exposure, but statutory qualification depends on strict procedural execution that no calculator can verify automatically:</p>\n'
         f'      <ul style="padding-left: 20px; margin-top: 12px; margin-bottom: 20px;">\n'
         f'{checklist_li}\n'
         f'      </ul>\n'
         f'      <div id="statutory-pitfalls-matrix" style="font-size: 16px; font-weight: 700; margin-top: 18px; margin-bottom: 10px;">Common Statutory Pitfalls: Issue to Prevention Matrix</div>\n'
-        f'      <div class="table-wrap">\n'
+        f'      <div class="table-wrap pseo-table-wrap">\n'
         f'        <table class="statutory-pitfalls-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
         f'          <thead>\n'
         f'            <tr>\n'
@@ -2000,7 +2000,7 @@ def render_competitor_winning_pattern_blocks(
             links_li.append(
                 f'          <li style="margin-bottom: 8px;">\n'
                 f'            <a href="{base_url}/tools/{t_slug}/" class="touch-target cluster-link" '
-                f'style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600;">{t_label}</a>\n'
+                f'style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">{t_label}</a>\n'
                 f'          </li>'
             )
         if links_li:
@@ -2015,10 +2015,10 @@ def render_competitor_winning_pattern_blocks(
             )
     joined_tiers = "\n".join(tier_blocks)
     three_tier_cluster_html = (
-        f'    <section id="topic-cluster-hub" class="three-tier-cluster-section card" '
-        f'data-mechanic="three_tier_topic_cluster_nav" style="margin-top: 24px;">\n'
+        f'    <section id="topic-cluster-hub" class="three-tier-cluster-section card pseo-card" '
+        f'data-mechanic="three_tier_topic_cluster_nav">\n'
         f'      <h2>Connected Statutory Topic Cluster and Decision Architecture</h2>\n'
-        f'      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 14px;">Navigate connected pillar models, side-by-side comparative matrices, and jurisdiction/entity compliance calculators:</p>\n'
+        f'      <p style="font-size: 14px; color: var(--text-muted, #475569); margin-bottom: 14px;">Navigate connected pillar models, side-by-side comparative matrices, and jurisdiction/entity compliance calculators:</p>\n'
         f'{joined_tiers}\n'
         f'    </section>'
     )
@@ -2028,8 +2028,8 @@ def render_competitor_winning_pattern_blocks(
         for h_item in ctx["handoff_items"]
     )
     vetted_handoff_html = (
-        f'    <section id="vetted-commercial-handoff" class="commercial-handoff-vetting card" '
-        f'data-mechanic="vetted_commercial_handoff_framing" style="margin-top: 16px;">\n'
+        f'    <section id="vetted-commercial-handoff" class="commercial-handoff-vetting card pseo-card" '
+        f'data-mechanic="vetted_commercial_handoff_framing">\n'
         f'      <div style="font-size: 16px; font-weight: 700; margin-top: 0; margin-bottom: 8px;">{ctx["handoff_title"]}</div>\n'
         f'      <ul style="padding-left: 18px; margin: 0;">\n'
         f'{handoff_li}\n'

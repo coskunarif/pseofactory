@@ -779,6 +779,7 @@ def audit_code_slop_ratchet(
             pkg_dir / "audit.py",
             pkg_dir / "drift.py",
             pkg_dir / "browser_verifier.py",
+            pkg_dir / "visual_primitives.py",
         ]
     else:
         if isinstance(effective_targets, (str, Path)):

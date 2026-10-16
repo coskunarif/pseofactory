@@ -2825,7 +2825,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     h2_headings = overlay_data.get("h2_headings") or overlay_data.get("h2_blocks") or []
     h2_section_markup = ""
     if h2_headings:
-        h2_parts = ['<section class="overlay-section overlay-headings" style="margin-top: 2rem; margin-bottom: 2rem;">']
+        h2_parts = ['<section class="overlay-section overlay-headings card pseo-card">']
         for h2 in h2_headings:
             h2_val = h2.get("heading", "") if isinstance(h2, dict) else str(h2)
             h2_norm = _strip_forbidden_dashes(str(h2_val))
@@ -2835,8 +2835,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             h2_norm = re.sub(r"\bK\s+1\b", "K-1", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bW\s+([249])\b", r"W-\1", h2_norm, flags=re.IGNORECASE)
             clean_h2 = html_lib.escape(h2_norm)
-            h2_parts.append(f'  <h2 class="section-title" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem;">{clean_h2}</h2>')
-            h2_parts.append(f'  <p class="section-desc" style="color: var(--text-secondary, #64748b); margin-bottom: 1.5rem;">Statutory analysis and compliance guidelines for {clean_h2}.</p>')
+            h2_parts.append(f'  <h2 class="section-title">{clean_h2}</h2>')
+            h2_parts.append(f'  <p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 1.5rem;">Statutory analysis and compliance guidelines for {clean_h2}.</p>')
         h2_parts.append("</section>")
         h2_section_markup = "\n".join(h2_parts)
         injected_sections.append(h2_section_markup)
@@ -2844,8 +2844,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     # 4b. Injected Interactive Preset Scenarios (with data-calc-preset)
     scenarios = overlay_data.get("preset_scenarios", [])
     if scenarios:
-        sc_parts = ['<section class="overlay-section overlay-scenarios" style="margin-top: 2rem; margin-bottom: 2rem;">']
-        sc_parts.append('  <h3 class="section-subtitle" style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem;">Target Scenarios</h3>')
+        sc_parts = ['<section class="overlay-section overlay-scenarios card pseo-card">']
+        sc_parts.append('  <h3 class="section-subtitle">Target Scenarios</h3>')
         sc_parts.append('  <div class="scenarios-grid" style="display: grid; gap: 1rem;">')
         for idx, sc in enumerate(scenarios):
             if not isinstance(sc, dict):
@@ -2856,20 +2856,19 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             }
             preset_json = html_lib.escape(json.dumps(params_obj))
             sc_parts.append(
-                f'    <div class="card scenario-card" data-calc-preset="{preset_json}" '
-                f'style="padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">'
+                f'    <div class="card pseo-card scenario-card" data-calc-preset="{preset_json}">'
             )
-            sc_parts.append(f'      <h4 style="font-weight: 700; margin-bottom: 0.5rem;">{label}</h4>')
+            sc_parts.append(f'      <h4>{label}</h4>')
             desc_str = _strip_forbidden_dashes(str(sc.get("description") or ""))
             if not desc_str:
                 details = [f"{k.replace('_', ' ').title()}: {v}" for k, v in sc.items() if k not in ("label", "params")]
                 desc_str = ", ".join(details)
             if desc_str:
-                sc_parts.append(f'      <p style="font-size: 0.875rem; color: var(--text-secondary, #64748b);">{html_lib.escape(desc_str)}</p>')
+                sc_parts.append(f'      <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">{html_lib.escape(desc_str)}</p>')
             sc_parts.append(
                 f'      <button type="button" class="btn-preset touch-target" data-calc-preset="{preset_json}" '
                 f'data-cta-slot="calculator_preset_cta" '
-                f'style="margin-top: 0.5rem; min-height: 44px; padding: 0.5rem 1rem;">Load Preset Scenario</button>'
+                f'style="margin-top: 0.5rem; min-height: 44px; min-width: 44px; padding: 10px 16px;">Load Preset Scenario</button>'
             )
             sc_parts.append("    </div>")
         sc_parts.append("  </div>")
@@ -2880,9 +2879,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     comparison_rows = overlay_data.get("comparison_rows", [])
     if comparison_rows:
         tbl_parts = [
-            '<section class="overlay-section overlay-comparison" style="margin-top: 2rem; margin-bottom: 2rem;">',
-            '  <h3 class="section-subtitle" style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem;">Statutory Scenario Comparison</h3>',
-            '  <div class="table-wrap">',
+            '<section class="overlay-section overlay-comparison card pseo-card">',
+            '  <h3 class="section-subtitle">Statutory Scenario Comparison</h3>',
+            '  <div class="table-wrap pseo-table-wrap">',
             '    <table class="overlay-comparison-table">',
             "      <thead>",
             "        <tr>",
@@ -2921,15 +2920,18 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     hub_links_markup = ""
     if hub_links:
         hl_parts = [
-            '<section class="overlay-section overlay-hub-links" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">',
-            '  <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem;">Related Statutory Calculators &amp; Guides</h3>',
-            '  <ul class="overlay-hub-list">',
+            '<section class="overlay-section overlay-hub-links">',
+            '  <h3 class="section-subtitle">Related Statutory Calculators &amp; Guides</h3>',
+            '  <ul class="overlay-hub-list" style="list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px;">',
         ]
         for hl in hub_links:
             if isinstance(hl, dict) and hl.get("href") and hl.get("anchor"):
                 href = html_lib.escape(str(hl["href"]))
                 anchor = html_lib.escape(_strip_forbidden_dashes(str(hl["anchor"])))
-                hl_parts.append(f'    <li><a href="{href}" class="touch-target">{anchor}</a></li>')
+                hl_parts.append(
+                    f'    <li><a href="{href}" class="touch-target cluster-link" '
+                    f'style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">{anchor}</a></li>'
+                )
         hl_parts.extend(["  </ul>", "</section>"])
         hub_links_markup = "\n".join(hl_parts)
         injected_sections.append(hub_links_markup)
@@ -2941,11 +2943,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     if restricted_ps:
         if 'data-restricted-public-service="true"' not in html:
             partner_section_markup = (
-                '<section class="overlay-section overlay-partner-guardrail ymyl-public-service-guardrail" '
+                '<section class="overlay-section overlay-partner-guardrail ymyl-public-service-guardrail card" '
                 'data-commercial-offers="none" data-restricted-public-service="true" '
-                'data-mechanic="compliant_intent_monetization" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">\n'
-                '  <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">\n'
-                '    <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Title IV Public Service Protection</h3>\n'
+                'data-mechanic="compliant_intent_monetization">\n'
+                '  <div class="partner-card">\n'
+                '    <h3 class="section-subtitle">Title IV Public Service Protection</h3>\n'
                 '    <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">Direct consolidation and federal repayment plans preserve statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685. Commercial private lender offers are strictly suppressed on restricted public-service pages.</p>\n'
                 '  </div>\n'
                 '</section>'
@@ -3006,14 +3008,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
             f'data-property="{prop_id}" data-partner="{p_key}" data-partner-url="{html_lib.escape(raw_p_url)}" data-cta-slot="{p_slot}" '
             f'data-cta-id="{p_cta_id}" data-yield-score="{p_yield}" data-empirical-erpm="{p_erpm}" '
-            f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization" '
-            f'style="margin-top: 1.5rem; margin-bottom: 1.5rem; padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">\n'
-            f'  <h3 class="section-subtitle" style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Recommended Partner Solution: {p_name}</h3>\n'
-            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #64748b); margin-bottom: 0.75rem;">{p_disc}</p>\n'
+            f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization">\n'
+            f'  <h3 class="section-subtitle">Recommended Partner Solution: {p_name}</h3>\n'
+            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{p_disc}</p>\n'
             f'  <a href="{p_url}" rel="noopener sponsored nofollow" target="_blank" '
             f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{p_key}" '
             f'data-cta-slot="{p_slot}" data-cta-id="{p_cta_id}" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
             f'</section>'
         )
         injected_sections.append(partner_section_markup)
@@ -3047,15 +3048,15 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     })
 
     if faq_items:
-        faq_parts = ['<section class="overlay-section overlay-faqs" style="margin-top: 2rem; margin-bottom: 2rem;">']
-        faq_parts.append('  <h3 class="section-subtitle" style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem;">Frequently Asked Questions</h3>')
+        faq_parts = ['<section class="overlay-section overlay-faqs">']
+        faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
         faq_parts.append('  <div class="faq-list">')
         schema_entities = []
         for f in faq_items:
             q = f["question"]
             a = f["answer"]
-            faq_parts.append('    <div class="faq-card" style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-card, #f8fafc); border-radius: 6px;">')
-            faq_parts.append(f'      <h4 style="font-weight: 600; margin-bottom: 0.25rem;">{html_lib.escape(q)}</h4>')
+            faq_parts.append('    <div class="faq-card" style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-inset, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">')
+            faq_parts.append(f'      <h4>{html_lib.escape(q)}</h4>')
             faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary, #475569);">{html_lib.escape(a)}</p>')
             faq_parts.append("    </div>")
             schema_entities.append({

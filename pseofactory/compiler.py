@@ -434,11 +434,11 @@ def _render_5point_sensitivity_table_html(
     aggressive_output = _format_scenario_number(published_output * 1.2)
 
     return (
-        f'    <div class="scenario-container comparison-container card" style="margin-top: 24px;" '
+        f'    <div class="scenario-container comparison-container card pseo-card" '
         f'data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid">\n'
         f'      <h2>Sensitivity Scenario Modeling</h2>\n'
         f'      <p>SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>\n'
-        f'      <div class="table-wrap">\n'
+        f'      <div class="table-wrap pseo-table-wrap">\n'
         f'        <table class="scenario-table comparison-table" data-entity-type="scenario" '
         f'data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
         f'          <thead>\n'
@@ -523,7 +523,8 @@ def _render_scenario_presets_bar_html(
             f'class="touch-target scenario-preset-link" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
-            f'background: var(--bg-elevated); color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600;">'
+            f'background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); '
+            f'border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">'
             f'{label}</a>'
         )
     joined_links = "\n".join(links_html)
@@ -561,7 +562,7 @@ def _render_compiler_monetization_and_guardrail_html(
         ftc_disc = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
 
         block_html = (
-            f'    <section class="affiliate-cta-section card" data-property="profithelm" '
+            f'    <section class="affiliate-cta-section card pseo-card" data-property="profithelm" '
             f'data-partner="{partner_key}" data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Verified Commercial Execution Partner: {partner_name}</h2>\n'
             f'      <p>Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:</p>\n'
@@ -570,10 +571,10 @@ def _render_compiler_monetization_and_guardrail_html(
             f'class="affiliate-cta-link touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
-            f'background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none;">'
+            f'background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">'
             f'{cta_text}</a>\n'
             f'      </p>\n'
-            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
+            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted, #475569); margin-top: 10px;">\n'
             f'        {ftc_disc}\n'
             f'      </p>\n'
             f'    </section>'
@@ -596,7 +597,7 @@ def _render_compiler_monetization_and_guardrail_html(
             "Public Service & Statutory Repayment Notice: Commercial private lender offers are suppressed on public-service and statutory hardship pages.",
         )
         block_html = (
-            f'    <section class="ymyl-public-service-guardrail card" data-property="prexvo" '
+            f'    <section class="ymyl-public-service-guardrail card pseo-card" data-property="prexvo" '
             f'data-commercial-offers="none" data-restricted-public-service="true" '
             f'data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Title IV Public Service Statutory Protection Guardrail</h2>\n'
@@ -621,11 +622,11 @@ def _render_compiler_monetization_and_guardrail_html(
         ftc_disc = PREXVO_DISCLOSURES.get("ftc_disclosure", "")
 
         block_html = (
-            f'    <section class="affiliate-cta-section ymyl-refinance-guardrail card" data-property="prexvo" '
+            f'    <section class="affiliate-cta-section ymyl-refinance-guardrail card pseo-card" data-property="prexvo" '
             f'data-partner="{partner_key}" data-commercial-offers="compliant-refinance" '
             f'data-restricted-public-service="false" data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Private Student Loan Refinance Comparison: {partner_name}</h2>\n'
-            f'      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted);">\n'
+            f'      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted, #475569);">\n'
             f'        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685. {ymyl_disc}\n'
             f'      </p>\n'
             f'      <p style="margin-top: 12px;">\n'
@@ -633,10 +634,10 @@ def _render_compiler_monetization_and_guardrail_html(
             f'class="affiliate-cta-link touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
-            f'background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none;">'
+            f'background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">'
             f'{cta_text}</a>\n'
             f'      </p>\n'
-            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
+            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted, #475569); margin-top: 10px;">\n'
             f'        {ftc_disc}\n'
             f'      </p>\n'
             f'    </section>'
@@ -1279,21 +1280,23 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       border-radius: 8px;
       margin-top: 16px;
     }}
-    .calculation-table, .statutory-pitfalls-table {{
+    .calculation-table, .statutory-pitfalls-table, .scenario-table, .comparison-table {{
       width: 100%;
+      min-width: 600px;
       table-layout: fixed;
       border-collapse: collapse;
       margin-top: 0;
       font-size: 14px;
       font-variant-numeric: tabular-nums;
     }}
-    .calculation-table th, .calculation-table td, .statutory-pitfalls-table th, .statutory-pitfalls-table td {{
+    .calculation-table th, .calculation-table td, .statutory-pitfalls-table th, .statutory-pitfalls-table td,
+    .scenario-table th, .scenario-table td, .comparison-table th, .comparison-table td {{
       border: 1px solid var(--border);
       padding: 12px;
       text-align: left;
       min-width: 110px;
     }}
-    .calculation-table th, .statutory-pitfalls-table th {{
+    .calculation-table th, .statutory-pitfalls-table th, .scenario-table th, .comparison-table th {{
       background-color: var(--bg-elevated);
     }}
     .canonical-tool-link {{
@@ -1639,6 +1642,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 </body>
 </html>
 """
+
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+    html_content, _ = normalize_html_visual_primitives(html_content, is_tenant_porcelain=False)
 
     # 7. Strictly verify zero forbidden dashes
     assert_no_forbidden_dashes(html_content, context=f"compiled page '{slug}'")
