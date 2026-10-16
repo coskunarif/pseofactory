@@ -555,7 +555,8 @@ def _render_compiler_monetization_and_guardrail_html(
         partner_key = route.get("partner_key", "crest_capital")
         partner_name = route.get("partner_name", "Crest Capital")
         cta_text = route.get("cta_text", "Calculate Section 179 Equipment Financing Rates")
-        url = route.get("url", "https://www.crestcapital.com/tax_deduction_calculator")
+        raw_url = route.get("url", "https://www.crestcapital.com/tax_deduction_calculator")
+        url = raw_url if route.get("status") in ("live", "active_direct") else f"/r/{partner_key}"
         rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
         ftc_disc = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
 

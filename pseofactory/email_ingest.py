@@ -302,7 +302,8 @@ class EmailIngestionEngine:
         partner_tokens = [
             "impact", "gusto", "mercury", "stripe", "koinly", "coinledger",
             "turbotax", "taxslayer", "kalshi", "interactive", "crest", "ipx1031",
-            "partner", "affiliate", "startups", "prexvo", "ecosystem-governance@shopify.com"
+            "partner", "affiliate", "startups", "prexvo", "ecosystem-governance@shopify.com",
+            "otrsolutions", "otr solutions", "next insurance", "ergo next", "rho.co",
         ]
 
         for env in envelopes:
@@ -760,6 +761,61 @@ class EmailIngestionEngine:
                         date=msg.date,
                         candidate_url=cand_url,
                         network=net_name,
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "otrsolutions.com" in sender_lower or "otr solutions" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="otr_solutions_factoring",
+                        partner_name="OTR Solutions Freight Factoring",
+                        category="LOGISTICS_TRADE",
+                        classification_type="ONBOARDING_ACTION_REQUIRED",
+                        requires_operator_decision=True,
+                        summary="OTR Solutions Partnerships Team Lead (Wade Fenton) responded to follow up and invited ProfitHelm to complete partner onboarding via https://otrsolutions.com/become-a-partner/.",
+                        urgency="HIGH",
+                        deadline=None,
+                        missing_requirements=[
+                            "Complete partner onboarding form at https://otrsolutions.com/become-a-partner/ or schedule alignment call with Wade Fenton (wade.fenton@otrsolutions.com)"
+                        ],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url or "https://otrsolutions.com/become-a-partner/",
+                        network="In-House Direct",
+                    )
+                )
+                continue
+
+            # 0b. ERGO NEXT Insurance Affiliate Application (Impact.com digest)
+            if msg.mailbox != "Sent" and (
+                "ergo next insurance" in combined_text or "next insurance" in body_lower
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="next_insurance_b2b",
+                        partner_name="Next Insurance Commercial B2B",
+                        category="COMMERCIAL_INSURANCE",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary="Application submitted to ERGO NEXT Insurance via Impact.com (#15709). Awaiting partner review and tracking link issuance.",
+                        urgency="MEDIUM",
+                        deadline=None,
+                        missing_requirements=["Pending Impact.com vendor review for ERGO NEXT Insurance (#15709)"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url,
+                        network="Impact.com",
                     )
                 )
                 continue

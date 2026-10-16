@@ -106,6 +106,36 @@
           "bounty": "$80-$150"
         }
       },
+      "agentic_api_programs": {
+        "sovrn_commerce_api": {
+          "provider": "Sovrn Commerce (VigLink Redirect & Merchant API)",
+          "auth": "Secret Key + Site Domain Key (0a5ac1bfe04034bff021b394f5e71d90)",
+          "redirect_endpoint": "https://redirect.viglink.com?key=0a5ac1bfe04034bff021b394f5e71d90&u=",
+          "role": "Instant programmatic monetization wrapper across 70,000+ merchants; eliminates dead clicks on all pending/stalled direct applications"
+        },
+        "partnerstack_api_v2": {
+          "provider": "PartnerStack Partnerships REST API v2",
+          "endpoint": "https://api.partnerstack.com/api/v2/partnerships",
+          "active_partners": ["rippling", "mercury"],
+          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling)"
+        },
+        "firstpromoter_api_v1": {
+          "provider": "FirstPromoter REST API",
+          "active_partners": ["coinledger", "koinly"],
+          "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission)"
+        },
+        "impact_rest_api": {
+          "provider": "Impact.com Publisher REST API",
+          "account_id": "7932737",
+          "submitted_campaigns": ["gusto (#15154)", "kalshi (#37770)", "simply_business (#49719)", "next_insurance_b2b (#14516 / ERGO NEXT)", "national_funding_med (#15709)", "splash_financial (#9516)", "credible (#3874)"],
+          "role": "Programmatic contract status polling and Insertion Order verification"
+        },
+        "dub_partners_api": {
+          "provider": "Dub Partners API",
+          "endpoint": "https://api.dub.co/partners",
+          "role": "API-first shortlink attribution and programmatic B2B SaaS partner link provisioning"
+        }
+      },
       "roster_tiers": {
         "live_revenue_ready": [
           "coinledger",
@@ -116,7 +146,8 @@
         ],
         "answered_action_required": [
           "rho",
-          "stripe"
+          "stripe",
+          "otr_solutions_factoring"
         ],
         "awaiting_vendor_response": [
           "gusto",
@@ -124,17 +155,16 @@
           "crest_capital",
           "exeter1031",
           "first_american",
-          "otr_solutions_factoring"
+          "kalshi",
+          "simply_business",
+          "next_insurance_b2b",
+          "national_funding_med"
         ],
         "unapplied_expansion_queue": [
           "turbotax",
           "taxslayer",
-          "kalshi",
           "interactive_brokers",
-          "simply_business",
           "suretybonds_direct",
-          "next_insurance_b2b",
-          "national_funding_med",
           "freightos_marketplace"
         ]
       },
@@ -174,7 +204,7 @@
           "partnership_key": "part_jp9R0iYpPGriHu",
           "stack_key": "stck_lZgJHub85wwvkX",
           "tos_status": "active",
-          "correspondence_status": "Approved & Live (Newsletter #1552 Welcome & #1562 October Newsletter from Erica Grodin; $600 SQO + $1,000 Closed Won)"
+          "correspondence_status": "Approved & Live (Newsletter #1552 Welcome, #1562 October Newsletter & #1568 Commission Structure from Erica Grodin on 2026-10-15; $600 SQO + $1,000 Closed Won = $1,600 via https://try.rippling.com/mcfo1m09qiwt)"
         },
         "ipx1031": {
           "status": "active_direct",
@@ -285,7 +315,7 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$45-$120",
-          "correspondence_status": "Not Yet Applied (Wrapped via Sovrn Commerce fallback until CJ direct approval)"
+          "correspondence_status": "Not Yet Applied (Wrapped via Sovrn Commerce API edge redirect /r/turbotax + paired with live CoinLedger/Koinly tax partners)"
         },
         "taxslayer": {
           "status": "pending",
@@ -296,11 +326,11 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "Not Yet Applied (Wrapped via Sovrn Commerce fallback until CJ direct approval)"
+          "correspondence_status": "Not Yet Applied (Wrapped via Sovrn Commerce API edge redirect /r/taxslayer + paired with live CoinLedger/Koinly tax partners)"
         },
         "kalshi": {
-          "status": "pending",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://kalshi.com/",
           "direct_url": "https://kalshi.com/",
           "edge_route": "/r/kalshi",
@@ -309,7 +339,7 @@
           "campaign_id": "37770",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Kalshi.brand",
           "bounty": "$40-$150",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #37770 Kalshi verified Insertion Order payout: $40.00 USD per Trade)"
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #37770 Kalshi verified Insertion Order payout: $40.00 USD per Trade; active Sovrn Commerce fallback via /r/kalshi)"
         },
         "interactive_brokers": {
           "status": "pending",
@@ -320,11 +350,11 @@
           "category": "MARKET_ARBITRAGE",
           "network": "In-House Direct",
           "bounty": "$100-$200",
-          "correspondence_status": "Not Yet Applied (Requires IBKR Affiliate application)"
+          "correspondence_status": "Not Yet Applied (Requires IBKR Affiliate KYC application; wrapped via Sovrn Commerce API edge redirect /r/interactive_brokers)"
         },
         "simply_business": {
-          "status": "pending",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.simplybusiness.com/",
           "direct_url": "https://www.simplybusiness.com/",
           "edge_route": "/r/simply_business",
@@ -333,7 +363,7 @@
           "campaign_id": "49719",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Simply-Business.brand",
           "bounty": "$30-$100",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #49719 Simply Business verified Insertion Order payout: $30.00 USD per RFQ Quoted)"
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #49719 Simply Business verified Insertion Order payout: $30.00 USD per RFQ Quoted; active Sovrn Commerce fallback via /r/simply_business)"
         },
         "suretybonds_direct": {
           "status": "pending",
@@ -344,11 +374,11 @@
           "category": "COMMERCIAL_SURETY",
           "network": "In-House Direct",
           "bounty": "$75-$300",
-          "correspondence_status": "Not Yet Applied (No public web form; /affiliate-program returns 404; requires email inquiry to customercare@suretybonds.com)"
+          "correspondence_status": "Not Yet Applied (No public web form; /affiliate-program returns 404; wrapped via Sovrn Commerce API edge redirect /r/suretybonds_direct + paired with live Mercury/Rippling B2B partners)"
         },
         "next_insurance_b2b": {
-          "status": "pending",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.nextinsurance.com/",
           "direct_url": "https://www.nextinsurance.com/",
           "edge_route": "/r/next_insurance_b2b",
@@ -357,11 +387,11 @@
           "campaign_id": "14516",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Next-Insurance.brand",
           "bounty": "$25-$150",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #14516 Next Insurance verified Insertion Order payout: $25.00 USD per Quote)"
+          "correspondence_status": "Impact Marketplace Application Confirmed (Inbox #982 on 2026-10-14T23:02Z from notifications@app.impact.com confirming application to ERGO NEXT Insurance; Campaign #14516 verified Insertion Order payout: $25.00 USD per Quote; active Sovrn Commerce fallback via /r/next_insurance_b2b)"
         },
         "national_funding_med": {
-          "status": "pending",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.nationalfunding.com/",
           "direct_url": "https://www.nationalfunding.com/",
           "edge_route": "/r/national_funding_med",
@@ -370,18 +400,18 @@
           "campaign_id": "15709",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/National-Funding.brand",
           "bounty": "5% of loan amount",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #15709 National Funding verified Insertion Order payout: 5% of Loan Amount per Loan Received)"
+          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #15709 National Funding verified Insertion Order payout: 5% of Loan Amount per Loan Received; active Sovrn Commerce fallback via /r/national_funding_med)"
         },
         "otr_solutions_factoring": {
-          "status": "awaiting_response",
-          "pipeline_tier": "awaiting_vendor_response",
+          "status": "requires_followup",
+          "pipeline_tier": "answered_action_required",
           "url": "https://www.otrsolutions.com/",
           "direct_url": "https://www.otrsolutions.com/",
           "edge_route": "/r/otr_solutions_factoring",
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted (Partner web form at otrsolutions.com/become-a-partner on 2026-10-14T22:04Z): Awaiting vendor reply"
+          "correspondence_status": "Answered (Inbox #983 & #984 from Wade Fenton <wade.fenton@otrsolutions.com>, Partnerships Team Lead, on 2026-10-15T15:09Z): Invited ProfitHelm to complete partner onboarding via https://otrsolutions.com/become-a-partner/ or schedule alignment call"
         },
         "freightos_marketplace": {
           "status": "pending",
@@ -392,7 +422,7 @@
           "category": "CUSTOMS_TRADE_FINANCE",
           "network": "Impact.com",
           "bounty": "$50-$200",
-          "correspondence_status": "Not Yet Applied (Not listed in Impact public directory; requires direct Freightos partner inquiry)"
+          "correspondence_status": "Not Yet Applied (Not listed in Impact public directory; wrapped via Sovrn Commerce API edge redirect /r/freightos_marketplace + paired with live Mercury B2B partner)"
         }
       }
     },

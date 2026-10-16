@@ -2485,7 +2485,18 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     elif isinstance(p_offer, dict) and overlay_data.get("commercial_offers_allowed", True) is not False:
         p_key = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_key") or "ramp")))
         p_name = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_name") or "Featured Partner")))
-        p_url = html_lib.escape(str(p_offer.get("url") or "https://ramp.com/"))
+        raw_p_url = str(p_offer.get("url") or "https://ramp.com/").strip()
+        prop_id = html_lib.escape(
+            _strip_forbidden_dashes(str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "profithelm"))
+        )
+        _has_direct_token = any(
+            tok in raw_p_url
+            for tok in ("fpr=", "via=", "try.rippling.com", "mercury.com/r/", "utm_source=", "redirect.viglink.com")
+        ) or raw_p_url.startswith("/r/")
+        if prop_id.lower() == "profithelm" and not _has_direct_token:
+            p_url = html_lib.escape(str(p_offer.get("redirect_path") or f"/r/{p_key}"))
+        else:
+            p_url = html_lib.escape(raw_p_url)
         p_cta = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_text") or f"Explore {p_name}")))
         p_slot = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_slot") or "overlay_primary_cta")))
         p_cta_id = html_lib.escape(
@@ -2505,9 +2516,6 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     or "FTC Disclosure: We may earn an affiliate commission when you register through approved partner links at no additional cost to you."
                 )
             )
-        )
-        prop_id = html_lib.escape(
-            _strip_forbidden_dashes(str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "profithelm"))
         )
         partner_section_markup = (
             f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '

@@ -1002,6 +1002,69 @@ def test_action_bus_and_partner_tracker_rank_pending_approvals_by_revenue_impact
     assert "\u2013" not in html_content
 
 
+def test_latest_himalaya_correspondence_classification_otr_ergo_next_rippling():
+    """
+    Verifies that:
+    1. Impact.com digest emails with sender display name 'The Gusto Affiliate Team'
+       but body referencing 'ERGO NEXT Insurance' (#982) classify as next_insurance_b2b
+       (APPLICATION_SUBMITTED) rather than gusto.
+    2. OTR Solutions follow-up emails from Wade Fenton (#983/#984) classify as
+       otr_solutions_factoring (ONBOARDING_ACTION_REQUIRED).
+    3. Rippling commission structure emails from Erica Grodin (#1568) classify as
+       rippling (APPLICATION_APPROVED) with tracking link https://try.rippling.com/mcfo1m09qiwt.
+    """
+    engine = EmailIngestionEngine()
+    messages = [
+        EmailMessage(
+            id="982",
+            message_id="msg-982",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-14T23:02:27Z",
+            subject="Updates Digest",
+            sender_name="The Gusto Affiliate Team",
+            sender_email="notifications@app.impact.com",
+            body_snippet="Thank you for applying to be a partner of ERGO NEXT Insurance. Your application will be reviewed shortly.",
+        ),
+        EmailMessage(
+            id="984",
+            message_id="msg-984",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-15T15:09:49Z",
+            subject="OTR Solutions Follow Up",
+            sender_name="Wade Fenton",
+            sender_email="wade.fenton@otrsolutions.com",
+            body_snippet="I am following up with you to see if you are still interested in partnering with OTR Solutions. Complete our Become A Partner form (https://otrsolutions.com/become-a-partner/).",
+        ),
+        EmailMessage(
+            id="news-1568",
+            message_id="msg-1568",
+            account="zoho",
+            mailbox="Newsletter",
+            date="2026-10-15T14:30:24Z",
+            subject="How you earn - your commission structure",
+            sender_name="Erica Grodin",
+            sender_email="erica.grodin@rippling.com",
+            body_snippet="Tier 1: $600 per Sales Qualified Opportunity (SQO) demo. Tier 2: $1,000 per Closed Won deal. Your unique link: https://try.rippling.com/mcfo1m09qiwt",
+        ),
+    ]
 
+    classifications = engine.classify_partner_emails(messages)
+    assert len(classifications) == 3
 
+    next_c = next(c for c in classifications if c.partner_key == "next_insurance_b2b")
+    assert next_c.classification_type == "APPLICATION_SUBMITTED"
+    assert next_c.requires_operator_decision is False
+    assert next_c.network == "Impact.com"
+
+    otr_c = next(c for c in classifications if c.partner_key == "otr_solutions_factoring")
+    assert otr_c.classification_type == "ONBOARDING_ACTION_REQUIRED"
+    assert otr_c.requires_operator_decision is True
+    assert "otrsolutions.com/become-a-partner" in otr_c.candidate_url
+
+    rip_c = next(c for c in classifications if c.partner_key == "rippling")
+    assert rip_c.classification_type == "APPLICATION_APPROVED"
+    assert rip_c.requires_operator_decision is False
+    assert rip_c.candidate_url == "https://try.rippling.com/mcfo1m09qiwt"
 

@@ -1051,6 +1051,31 @@ def generate_edge_redirect_function(
             f'  }},'
         )
 
+    extended_fallback_catalog = {
+        "brex": ("https://www.brex.com/", "AFFILIATE_BREX_URL"),
+        "flexport": ("https://www.flexport.com/", "AFFILIATE_FLEXPORT_URL"),
+        "wealthfront": ("https://www.wealthfront.com/", "AFFILIATE_WEALTHFRONT_URL"),
+        "bench": ("https://www.bench.co/", "AFFILIATE_BENCH_URL"),
+        "pilot": ("https://pilot.com/", "AFFILIATE_PILOT_URL"),
+        "guideline": ("https://www.guideline.com/", "AFFILIATE_GUIDELINE_URL"),
+        "stripe_tax": ("https://stripe.com/tax", "AFFILIATE_STRIPE_TAX_URL"),
+        "deel": ("https://www.deel.com/", "AFFILIATE_DEEL_URL"),
+        "taxbit": ("https://taxbit.com/", "AFFILIATE_TAXBIT_URL"),
+        "freetaxusa": ("https://www.freetaxusa.com/", "AFFILIATE_FREETAXUSA_URL"),
+        "public_com": ("https://public.com/", "AFFILIATE_PUBLIC_COM_URL"),
+        "avalara": ("https://www.avalara.com/", "AFFILIATE_AVALARA_URL"),
+        "national_funding": ("https://www.nationalfunding.com/", "AFFILIATE_NATIONAL_FUNDING_MED_URL"),
+    }
+    for ext_k, (ext_url, ext_env) in extended_fallback_catalog.items():
+        if ext_k not in ordered_keys:
+            catalog_entries.append(
+                f'  {ext_k}: {{\n'
+                f'    defaultUrl: "{ext_url}",\n'
+                f'    envVar: "{ext_env}",\n'
+                f'    isDirect: false,\n'
+                f'  }},'
+            )
+
     catalog_block = "\n".join(catalog_entries)
 
     js_code = f"""/**
