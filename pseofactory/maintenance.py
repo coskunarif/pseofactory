@@ -2952,7 +2952,7 @@ class MaintenanceLifecycle:
             if (
                 not dry_run
                 and getattr(adapter, "repo_path", None)
-                and adapter.property_id == "profithelm"
+                and adapter.property_id in ("profithelm", "prexvo")
                 and (Path(adapter.repo_path) / "functions" / "r").is_dir()
                 and not (
                     "PYTEST_CURRENT_TEST" in os.environ
@@ -4725,7 +4725,7 @@ def reflect_and_recompile_all_assets(
 
         if (
             getattr(adapter, "repo_path", None)
-            and adapter.property_id == "profithelm"
+            and adapter.property_id in ("profithelm", "prexvo")
             and (Path(adapter.repo_path) / "functions" / "r").is_dir()
             and not is_foreign_pytest
         ):

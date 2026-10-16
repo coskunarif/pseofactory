@@ -992,20 +992,241 @@ def generate_edge_redirect_function(
 ) -> str:
     """
     Generates the deterministic Cloudflare Pages Function (functions/r/[partner].js)
-    for ProfitHelm outbound affiliate redirects from the canonical affiliate registry
-    and monetization vault.
+    for ProfitHelm or Prexvo outbound affiliate redirects from the canonical affiliate registry,
+    verified Sovrn merchant coverage table, and monetization vault.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.affiliates import PROFITHELM_AFFILIATES
+    from pseofactory.affiliates import (
+        PROFITHELM_AFFILIATES,
+        PREXVO_AFFILIATES,
+        SOVRN_VERIFIED_PAYING_MERCHANTS,
+    )
     from pseofactory.affiliates_hub import MonetizationHub
 
     prop_clean = (property_id or "").strip().lower()
-    if prop_clean != "profithelm":
+    if prop_clean not in ("profithelm", "prexvo"):
         raise ValueError(
-            f"Edge redirect function generation is only supported for profithelm (got '{property_id}')."
+            f"Edge redirect function generation is only supported for profithelm or prexvo (got '{property_id}')."
         )
 
     active_hub = hub if hub is not None else MonetizationHub()
+
+    if prop_clean == "prexvo":
+        prexvo_catalog_entries: List[str] = []
+        for k, p_obj in PREXVO_AFFILIATES.items():
+            status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
+            status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
+            prexvo_catalog_entries.append(
+                f'  {k}: {{\n'
+                f'    defaultUrl: "{p_obj.default_url}",\n'
+                f'    envVar: "{p_obj.env_var}",\n'
+                f'    statusEnvVar: "{status_env}",\n'
+                f'    status: "{status_val}",\n'
+                f'  }},'
+            )
+        prexvo_aliases = {
+            "sofi_refi": (
+                "https://www.sofi.com/refinance-student-loan/",
+                "AFFILIATE_SOFI_URL",
+                "AFFILIATE_SOFI_STATUS",
+            ),
+            "laurel_road": (
+                "https://www.laurelroad.com/student-loan-refinancing/",
+                "AFFILIATE_LAUREL_ROAD_URL",
+                "AFFILIATE_LAUREL_ROAD_STATUS",
+            ),
+            "juno": (
+                "https://joinjuno.com/student-loan-refinancing",
+                "AFFILIATE_JUNO_URL",
+                "AFFILIATE_JUNO_STATUS",
+            ),
+        }
+        for alias_k, (alias_url, alias_env, alias_status_env) in prexvo_aliases.items():
+            if alias_k not in PREXVO_AFFILIATES:
+                prexvo_catalog_entries.append(
+                    f'  {alias_k}: {{\n'
+                    f'    defaultUrl: "{alias_url}",\n'
+                    f'    envVar: "{alias_env}",\n'
+                    f'    statusEnvVar: "{alias_status_env}",\n'
+                    f'    status: "live",\n'
+                    f'  }},'
+                )
+        prexvo_catalog_block = "\n".join(prexvo_catalog_entries)
+        prexvo_js = f"""/**
+ * Cloudflare Pages Function: Prexvo Outbound Student Loan Lending Marketplace Redirect Handler
+ * Intercepts /r/:partner requests and executes low-latency server-side 302 redirects (<15ms TTFB).
+ *
+ * Enforces Prexvo Standing Constraints:
+ * 1. Strict Partner Whitelist: Only approved student loan lending marketplace partners (zero B2B contamination).
+ * 2. Sub-Affiliate Aggregator Prohibition: Rejects Sovrn, VigLink, and Skimlinks redirect domains.
+ * 3. Live Lending Marketplace Routing: Routes live student loan callouts directly to external
+ *    commission-bearing lending marketplaces with ref=prexvo attribution.
+ * 4. SSRF & Open Redirect Protection: Strictly validates schemes and blocks private/loopback CIDRs.
+ *
+ * Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
+ */
+
+const PARTNER_CATALOG = {{
+{prexvo_catalog_block}
+}};
+
+const EDUCATIONAL_CALCULATOR_URL = "https://prexvo.com/tools/student-loan-repayment-calculator/";
+
+const FORBIDDEN_AGGREGATOR_DOMAINS = [
+  "sovrn.com",
+  "viglink.com",
+  "redirect.viglink.com",
+  "skimlinks.com",
+  "go.redirectingat.com",
+];
+
+const TRACKING_PARAMS = [
+  "subid",
+  "click_id",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "gclid",
+  "source_tool",
+];
+
+function isSafeAndCompliantUrl(urlStr) {{
+  try {{
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
+      return false;
+    }}
+    const hostname = parsed.hostname.toLowerCase();
+
+    for (const forbidden of FORBIDDEN_AGGREGATOR_DOMAINS) {{
+      if (hostname === forbidden || hostname.endsWith(`.${{forbidden}}`)) {{
+        return false;
+      }}
+    }}
+
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "169.254.169.254" ||
+      hostname === "metadata.google.internal" ||
+      hostname === "instance-data"
+    ) {{
+      return false;
+    }}
+
+    if (/^\\d+$/.test(hostname) || /^0x[0-9a-f]+$/i.test(hostname)) {{
+      return false;
+    }}
+
+    const ipv4Regex = /^(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})$/;
+    const match = hostname.match(ipv4Regex);
+    if (match) {{
+      const [_, o1, o2, o3, o4] = match.map(Number);
+      if (o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255) return false;
+      if (o1 === 0) return false;
+      if (o1 === 127) return false;
+      if (o1 === 10) return false;
+      if (o1 === 172 && o2 >= 16 && o2 <= 31) return false;
+      if (o1 === 192 && o2 === 168) return false;
+      if (o1 === 169 && o2 === 254) return false;
+    }}
+
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {{
+      const ipv6 = hostname.slice(1, -1).toLowerCase();
+      if (
+        ipv6 === "::1" ||
+        ipv6 === "::" ||
+        ipv6.startsWith("fc") ||
+        ipv6.startsWith("fd") ||
+        ipv6.startsWith("fe80")
+      ) {{
+        return false;
+      }}
+    }}
+
+    return true;
+  }} catch {{
+    return false;
+  }}
+}}
+
+function makeRedirectResponse(locationUrl) {{
+  return new Response(null, {{
+    status: 302,
+    headers: {{
+      Location: locationUrl,
+      "Cache-Control": "private, no-cache, no-store, must-revalidate",
+      "X-Robots-Tag": "noindex, nofollow",
+    }},
+  }});
+}}
+
+export async function onRequest(context) {{
+  const {{ request, env, params }} = context;
+  const rawPartner = (params.partner || "").trim().toLowerCase();
+
+  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  if (!partnerConfig) {{
+    return new Response("Partner not found", {{
+      status: 404,
+      headers: {{
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+
+  const envStatus =
+    env && partnerConfig.statusEnvVar && env[partnerConfig.statusEnvVar]
+      ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
+      : null;
+  const effectiveStatus = envStatus || partnerConfig.status;
+
+  if (effectiveStatus !== "live") {{
+    return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
+  }}
+
+  const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
+  const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
+  const rawTargetUrl = (hasDirectConfig ? envUrl : partnerConfig.defaultUrl).trim();
+
+  if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
+    return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
+  }}
+
+  const reqUrl = new URL(request.url);
+  const targetObj = new URL(rawTargetUrl);
+  for (const param of TRACKING_PARAMS) {{
+    const val = reqUrl.searchParams.get(param);
+    if (val !== null && val !== "") {{
+      targetObj.searchParams.set(param, val);
+    }}
+  }}
+
+  if (
+    !targetObj.searchParams.has("ref") &&
+    !targetObj.searchParams.has("utm_source") &&
+    !targetObj.searchParams.has("aff")
+  ) {{
+    targetObj.searchParams.set("ref", "prexvo");
+  }}
+
+  const finalRedirectUrl = targetObj.toString();
+
+  if (!isSafeAndCompliantUrl(finalRedirectUrl)) {{
+    return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
+  }}
+
+  return makeRedirectResponse(finalRedirectUrl);
+}}
+"""
+        assert_no_forbidden_dashes(prexvo_js, "generate_edge_redirect_function(prexvo)")
+        return prexvo_js
+
     prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
     sovrn_key = getattr(active_hub, "sovrn_domain_key", "0a5ac1bfe04034bff021b394f5e71d90")
 
@@ -1039,9 +1260,19 @@ def generate_edge_redirect_function(
         p_obj = PROFITHELM_AFFILIATES[k]
         v_entry = prop_vault.get(p_obj.key, {}) if isinstance(prop_vault, dict) else {}
         v_status = str(v_entry.get("status") or "").strip().lower()
-        is_direct = bool(p_obj.status == "live" or v_status in ("live", "active_direct"))
+        verified_meta = SOVRN_VERIFIED_PAYING_MERCHANTS.get(k, {})
+        is_direct = bool(
+            verified_meta.get("is_direct")
+            or p_obj.status == "live"
+            or v_status in ("live", "active_direct")
+        )
         v_url = str(v_entry.get("url") or v_entry.get("direct_url") or "").strip()
-        default_url = v_url if (is_direct and v_url) else p_obj.default_url
+        if verified_meta.get("verified_url"):
+            default_url = str(verified_meta["verified_url"]).strip()
+        elif is_direct and v_url:
+            default_url = v_url
+        else:
+            default_url = p_obj.default_url
         is_direct_js = "true" if is_direct else "false"
         catalog_entries.append(
             f'  {k}: {{\n'
@@ -1052,29 +1283,47 @@ def generate_edge_redirect_function(
         )
 
     extended_fallback_catalog = {
-        "brex": ("https://www.brex.com/", "AFFILIATE_BREX_URL"),
-        "flexport": ("https://www.flexport.com/", "AFFILIATE_FLEXPORT_URL"),
-        "wealthfront": ("https://www.wealthfront.com/", "AFFILIATE_WEALTHFRONT_URL"),
-        "bench": ("https://www.bench.co/", "AFFILIATE_BENCH_URL"),
-        "pilot": ("https://pilot.com/", "AFFILIATE_PILOT_URL"),
-        "guideline": ("https://www.guideline.com/", "AFFILIATE_GUIDELINE_URL"),
-        "stripe_tax": ("https://stripe.com/tax", "AFFILIATE_STRIPE_TAX_URL"),
-        "deel": ("https://www.deel.com/", "AFFILIATE_DEEL_URL"),
-        "taxbit": ("https://taxbit.com/", "AFFILIATE_TAXBIT_URL"),
-        "freetaxusa": ("https://www.freetaxusa.com/", "AFFILIATE_FREETAXUSA_URL"),
-        "public_com": ("https://public.com/", "AFFILIATE_PUBLIC_COM_URL"),
-        "avalara": ("https://www.avalara.com/", "AFFILIATE_AVALARA_URL"),
-        "national_funding": ("https://www.nationalfunding.com/", "AFFILIATE_NATIONAL_FUNDING_MED_URL"),
+        "brex": "AFFILIATE_BREX_URL",
+        "flexport": "AFFILIATE_FLEXPORT_URL",
+        "wealthfront": "AFFILIATE_WEALTHFRONT_URL",
+        "bench": "AFFILIATE_BENCH_URL",
+        "pilot": "AFFILIATE_PILOT_URL",
+        "guideline": "AFFILIATE_GUIDELINE_URL",
+        "stripe_tax": "AFFILIATE_STRIPE_TAX_URL",
+        "deel": "AFFILIATE_DEEL_URL",
+        "taxbit": "AFFILIATE_TAXBIT_URL",
+        "freetaxusa": "AFFILIATE_FREETAXUSA_URL",
+        "public_com": "AFFILIATE_PUBLIC_COM_URL",
+        "avalara": "AFFILIATE_AVALARA_URL",
+        "national_funding": "AFFILIATE_NATIONAL_FUNDING_MED_URL",
     }
-    for ext_k, (ext_url, ext_env) in extended_fallback_catalog.items():
+    for ext_k, ext_env in extended_fallback_catalog.items():
         if ext_k not in ordered_keys:
+            v_meta = SOVRN_VERIFIED_PAYING_MERCHANTS.get(ext_k, {})
+            ext_url = str(v_meta.get("verified_url") or f"https://www.{ext_k}.com/").strip()
+            ext_direct_js = "true" if v_meta.get("is_direct") else "false"
             catalog_entries.append(
                 f'  {ext_k}: {{\n'
                 f'    defaultUrl: "{ext_url}",\n'
                 f'    envVar: "{ext_env}",\n'
-                f'    isDirect: false,\n'
+                f'    isDirect: {ext_direct_js},\n'
                 f'  }},'
             )
+            ordered_keys.append(ext_k)
+
+    for v_key, v_meta in SOVRN_VERIFIED_PAYING_MERCHANTS.items():
+        if v_key not in ordered_keys:
+            v_url = str(v_meta.get("verified_url") or "").strip()
+            v_env = f"AFFILIATE_{v_key.upper()}_URL"
+            v_direct_js = "true" if v_meta.get("is_direct") else "false"
+            catalog_entries.append(
+                f'  {v_key}: {{\n'
+                f'    defaultUrl: "{v_url}",\n'
+                f'    envVar: "{v_env}",\n'
+                f'    isDirect: {v_direct_js},\n'
+                f'  }},'
+            )
+            ordered_keys.append(v_key)
 
     catalog_block = "\n".join(catalog_entries)
 
@@ -1082,7 +1331,7 @@ def generate_edge_redirect_function(
  * Cloudflare Pages Function: Outbound Affiliate Edge Redirect Handler
  * Intercepts /r/:partner requests and executes low-latency server-side redirects (<15ms TTFB).
  * Enforces partner whitelist, tracking parameter propagation, SSRF / open-redirect guards,
- * and Sovrn Commerce fallback wrapping.
+ * and verified Sovrn Commerce paying merchant routing (approved: true, rate > 0).
  *
  * Zero AI slop. 100% mechanical verification.
  */
@@ -1255,10 +1504,10 @@ def sync_tenant_edge_redirect_function(
 ) -> Dict[str, Any]:
     """
     Synchronizes the tenant Cloudflare Pages edge redirect handler (functions/r/[partner].js)
-    when repo_path contains a functions/r directory and property_id is profithelm.
+    when repo_path contains a functions/r directory and property_id is profithelm or prexvo.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.affiliates import PROFITHELM_AFFILIATES
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
     from pseofactory.affiliates_hub import MonetizationHub
 
     prop_clean = (property_id or "").strip().lower()
@@ -1266,7 +1515,7 @@ def sync_tenant_edge_redirect_function(
     r_dir = repo / "functions" / "r"
     target_file = r_dir / "[partner].js"
 
-    if prop_clean != "profithelm" or not r_dir.is_dir():
+    if prop_clean not in ("profithelm", "prexvo") or not r_dir.is_dir():
         return {
             "status": "SKIPPED",
             "path": str(target_file),
@@ -1274,11 +1523,12 @@ def sync_tenant_edge_redirect_function(
         }
 
     active_hub = hub if hub is not None else MonetizationHub()
-    js_code = generate_edge_redirect_function(property_id="profithelm", hub=active_hub)
+    js_code = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
 
-    prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
+    prop_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {})
+    registry_map = PREXVO_AFFILIATES if prop_clean == "prexvo" else PROFITHELM_AFFILIATES
     live_direct_partners: List[str] = []
-    for k, p_obj in PROFITHELM_AFFILIATES.items():
+    for k, p_obj in registry_map.items():
         if k != p_obj.key:
             continue
         v_entry = prop_vault.get(k, {}) if isinstance(prop_vault, dict) else {}
@@ -1304,5 +1554,6 @@ def sync_tenant_edge_redirect_function(
         "path": str(target_file),
         "live_direct_partners": live_direct_partners,
     }
+
 
 

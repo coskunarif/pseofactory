@@ -47,6 +47,8 @@ from pseofactory.affiliates import (
     resolve_optimal_partner_for_slug,
     verify_partner_domain_alignment,
     qualify_monetization_opportunity,
+    SOVRN_VERIFIED_PAYING_MERCHANTS,
+    audit_merchant_coverage_and_yield,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -1372,5 +1374,13 @@ class MonetizationHub:
             "checked_count": len(results),
             "results": results,
         }
+
+    def audit_merchant_coverage(self) -> Dict[str, Any]:
+        """
+        Audits all ProfitHelm and Prexvo partner keys against verified commission-bearing
+        merchants and direct partner approvals, verifying zero unmonetized Sovrn pass-throughs
+        and zero circular internal redirects.
+        """
+        return audit_merchant_coverage_and_yield()
 
 

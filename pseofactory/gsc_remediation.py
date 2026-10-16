@@ -549,9 +549,24 @@ def _resolve_partner_offer_and_manual_gate(
         elif any(k in combined for k in ("crypto", "8949", "harvesting", "capital-gains")):
             default_chosen_key = "coinledger"
             vertical_candidates = ["coinledger", "koinly", "taxbit"]
-        elif any(k in combined for k in ("treasury", "yield", "3124", "cash-management", "money-market")):
+        elif any(k in combined for k in ("treasury", "yield", "3124", "cash-management", "money-market", "tbill", "hysa")):
             default_chosen_key = "wealthfront"
-            vertical_candidates = ["wealthfront", "mercury", "ramp", "brex"]
+            vertical_candidates = ["wealthfront", "interactive_brokers", "mercury", "ramp"]
+        elif any(k in combined for k in ("1031", "like-kind", "like kind", "exchange", "boot", "qi-fee", "replacement-property", "ftb-3840", "3840")):
+            default_chosen_key = "ipx1031"
+            vertical_candidates = ["ipx1031", "exeter1031", "first_american"]
+        elif any(k in combined for k in ("saas", "runway", "burn", "zero-cash", "mrr")):
+            default_chosen_key = "mercury"
+            vertical_candidates = ["mercury", "ramp", "brex", "rippling"]
+        elif any(k in combined for k in ("prediction-market-tax",)):
+            default_chosen_key = "coinledger"
+            vertical_candidates = ["coinledger", "koinly", "taxslayer", "kalshi"]
+        elif any(k in combined for k in ("prediction-market", "kalshi", "polymarket", "event-contract")):
+            default_chosen_key = "kalshi"
+            vertical_candidates = ["kalshi", "moby", "zacks", "coinledger"]
+        elif any(k in combined for k in ("tax-bracket", "irs-2027", "ca-tax-bracket", "standard-deduction")):
+            default_chosen_key = "taxslayer"
+            vertical_candidates = ["taxslayer", "taxact", "eztaxreturn", "turbotax"]
         elif any(k in combined for k in ("bookkeeping", "accounting", "174", "r-d", "audit", "reconciliation")):
             default_chosen_key = "bench"
             vertical_candidates = ["bench", "pilot", "ramp", "gusto"]
@@ -560,6 +575,21 @@ def _resolve_partner_offer_and_manual_gate(
             vertical_candidates = ["ramp", "brex", "mercury", "gusto"]
 
     _remediation_partner_fallbacks: Dict[str, Dict[str, str]] = {
+        "ipx1031": {
+            "name": "IPX1031 Qualified Intermediary Services",
+            "url": "https://www.ipx1031.com/?utm_source=profithelm&utm_medium=referral",
+            "cta_text": "Open a 1031 Exchange Escrow Account with IPX1031",
+        },
+        "kalshi": {
+            "name": "Moby Investment Research & Market Intelligence",
+            "url": "/r/kalshi",
+            "cta_text": "Analyze Market Odds & Research Alpha with Moby",
+        },
+        "taxslayer": {
+            "name": "TaxSlayer Online Tax Filing",
+            "url": "/r/taxslayer",
+            "cta_text": "File Federal & State Tax Brackets Online with TaxSlayer",
+        },
         "flexport": {
             "name": "Flexport Global Customs & Freight",
             "url": "https://www.flexport.com/",
@@ -1218,15 +1248,17 @@ def calculate_candidate_roi(
 def _normalize_title_50_60(raw_title: str, brand: str, tenant_id: str) -> str:
     """
     Deterministically normalizes any title string into [50, 60] characters
-    with brand attribution and zero forbidden dashes.
+    with brand attribution, whole-word boundaries, zero duplicate 'Calculator Calculator',
+    and zero forbidden dashes.
     """
     clean = _strip_forbidden_dashes(raw_title).strip()
     clean = re.sub(r"\s+", " ", clean)
+    clean = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", clean, flags=re.IGNORECASE)
     suffix = f" | {brand}"
     if clean.lower().endswith(suffix.lower()):
-        base = clean[: -len(suffix)].strip(" |-")
+        base = clean[: -len(suffix)].strip(" |-:")
     else:
-        base = clean.strip(" |-")
+        base = clean.strip(" |-:")
 
     if not base:
         base = (
@@ -1235,58 +1267,85 @@ def _normalize_title_50_60(raw_title: str, brand: str, tenant_id: str) -> str:
             else "Statutory Tax and Financial Model Calculator"
         )
 
+    max_base = 60 - len(suffix)
+    min_base = 50 - len(suffix)
+
     if "calculator" not in base.lower():
-        max_for_calc = 60 - len(suffix) - len(" Calculator")
+        max_for_calc = max_base - len(" Calculator")
         if len(base) > max_for_calc:
-            trimmed_b = base[:max_for_calc].rstrip(" |-&")
-            if " " in trimmed_b and len(trimmed_b.rsplit(" ", 1)[0]) >= 20:
-                trimmed_b = trimmed_b.rsplit(" ", 1)[0].rstrip(" |-&")
+            b_words = base.split()
+            while len(b_words) > 1 and len(" ".join(b_words)) > max_for_calc:
+                b_words.pop()
+            trimmed_b = " ".join(b_words).rstrip(" |-&:")
+            if len(trimmed_b) > max_for_calc:
+                trimmed_b = trimmed_b[:max_for_calc].rstrip(" |-&:")
             base = f"{trimmed_b} Calculator"
         else:
             base = f"{base} Calculator"
 
+    if len(base) > max_base:
+        b_words = base.split()
+        while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
+            b_words.pop()
+        base = " ".join(b_words).rstrip(" |-&:")
+        if "calculator" not in base.lower() and len(base) + len(" Calculator") <= max_base:
+            base = f"{base} Calculator"
+
     cand = f"{base}{suffix}"
     if 50 <= len(cand) <= 60:
-        return cand
+        return _strip_forbidden_dashes(cand)
 
-    # Pad if shorter than 50 chars
+    # Pad with whole words if shorter than 50 chars
     pad_tokens = (
-        ["Calculator", "2026", "Model", "Tool", "Guide", "Rules", "Engine"]
+        ["2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
         if tenant_id == "prexvo"
-        else ["Calculator", "2026", "Tax", "Model", "Tool", "Guide", "Engine"]
+        else ["2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
     )
     for tok in pad_tokens:
         if len(cand) >= 50:
             break
         if tok.lower() not in base.lower():
-            trial = f"{base} {tok}{suffix}"
-            if len(trial) <= 60:
-                base = f"{base} {tok}"
-                cand = trial
+            trial_base = f"{base} {tok}".strip()
+            if len(trial_base) <= max_base:
+                base = trial_base
+                cand = f"{base}{suffix}"
 
     if len(cand) < 50:
-        filler = (
-            " & Statutory Simulator"
+        extra_pads = (
+            ["& Title IV Simulator", "& Statutory Model", "Simulator", "Engine", "Guide"]
             if tenant_id == "prexvo"
-            else " & Statutory Calculator"
+            else ["& Statutory Model", "& Planning Engine", "Simulator", "Engine", "Guide"]
         )
-        needed = 52 - len(cand)
-        base = (base + filler[: max(needed, len(filler))]).strip()
+        for ep in extra_pads:
+            trial_base = f"{base} {ep}".strip()
+            if min_base <= len(trial_base) <= max_base:
+                base = trial_base
+                cand = f"{base}{suffix}"
+                break
+
+    while len(cand) < 50:
+        add_tok = "2026" if "2026" not in base else ("Model" if "model" not in base.lower() else "Tool")
+        if len(base) + 1 + len(add_tok) <= max_base:
+            base = f"{base} {add_tok}"
+        else:
+            break
         cand = f"{base}{suffix}"
 
     if len(cand) > 60:
-        max_base = 60 - len(suffix)
-        trimmed = base[:max_base].rstrip(" |-&")
-        if " " in trimmed and len(trimmed.rsplit(" ", 1)[0]) >= (50 - len(suffix)):
-            trimmed = trimmed.rsplit(" ", 1)[0].rstrip(" |-&")
+        b_words = base.split()
+        while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
+            b_words.pop()
+        trimmed = " ".join(b_words).rstrip(" |-&:")
+        if len(trimmed) < min_base:
+            for short_tok in ("2026", "Tool", "Guide", "Model", "Tax", "Plan"):
+                if short_tok.lower() not in trimmed.lower() and min_base <= len(f"{trimmed} {short_tok}") <= max_base:
+                    trimmed = f"{trimmed} {short_tok}"
+                    break
+        if len(trimmed) > max_base or len(trimmed) < min_base:
+            trimmed = base[:max_base].rstrip(" |-&:")
         cand = f"{trimmed}{suffix}"
 
-    # Final exact guard for [50, 60]
-    while len(cand) < 50:
-        base = f"{base} Tool"
-        cand = f"{base}{suffix}"
-    if len(cand) > 60:
-        cand = f"{base[: 60 - len(suffix)].rstrip()}{suffix}"
+    cand = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", cand, flags=re.IGNORECASE)
     return _strip_forbidden_dashes(cand)
 
 
@@ -1300,12 +1359,37 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
     if 120 <= len(clean) <= 155:
         return clean
 
+    q_low = query_label.lower()
     if tenant_id == "prexvo":
         default_meta = (
             f"Calculate {query_label} under Title IV 34 CFR Part 685 using 225% HHS Poverty "
             f"Guidelines, discretionary income caps, and forgiveness schedules."
         )
         tail_pad = " Verified under Title IV 34 CFR Part 685 statutory rules."
+    elif "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
+        default_meta = (
+            f"Calculate {query_label} under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
+            f"Section 1250 recapture, boot, and state clawback rules."
+        )
+        tail_pad = " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824."
+    elif "crypto" in q_low or "8949" in q_low or "1099-da" in q_low:
+        default_meta = (
+            f"Calculate {query_label} under IRC Section 1012 and Form 1099-DA, modeling short-term "
+            f"vs long-term capital gains, staking yield, and 3.8% NIIT."
+        )
+        tail_pad = " Grounded in IRS Form 8949 and Schedule D compliance rules."
+    elif "saas" in q_low or "runway" in q_low or "burn" in q_low:
+        default_meta = (
+            f"Calculate {query_label} under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
+            f"collected MRR growth, and exact Zero Cash Date horizons."
+        )
+        tail_pad = " Grounded in institutional corporate treasury benchmarks."
+    elif "treasury" in q_low or "tbill" in q_low or "hysa" in q_low or "3124" in q_low:
+        default_meta = (
+            f"Calculate {query_label} under 31 U.S.C. Section 3124 state tax exemption rules, "
+            f"comparing US Treasury Bill Tax-Equivalent Yield against HYSA APY."
+        )
+        tail_pad = " Grounded in federal statutory yield exemption formulas."
     else:
         default_meta = (
             f"Calculate {query_label} using deterministic IRC statutory formulas, federal "
@@ -1328,15 +1412,16 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
     return _strip_forbidden_dashes(cand)
 
 
-def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str) -> str:
+def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: str = "") -> str:
     """
     Synthesizes a Princeton GEO Sentence-1 statutory quick answer strictly
-    between 40 and 60 words with zero cross-tenant tokens and zero dashes.
+    between 40 and 60 words with vertical-specific IRC/Title IV citations,
+    zero cross-tenant tokens, and zero dashes.
     """
     clean_q = _strip_forbidden_dashes(query_label).strip()
-    # Keep query phrase concise (max 6 words) so total word count stays inside [40, 60]
     q_words = [w for w in clean_q.split() if w.strip()][:6]
     short_q = " ".join(q_words) if q_words else ("repayment options" if tenant_id == "prexvo" else "tax deductions")
+    combined_low = f"{clean_q.lower()} {slug.lower()}"
 
     if tenant_id == "prexvo":
         base_words = (
@@ -1350,17 +1435,82 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str) -> str
             "Verified", "against", "annual", "Department", "of", "Education",
             "amortization", "tables", "and", "federal", "poverty", "benchmarks.",
         ]
+    elif any(k in combined_low for k in ("1031", "like-kind", "like kind", "exchange", "3840")):
+        base_words = (
+            f"Under IRC Section 1031(a)(3) and Treasury Regulation Section 1.1031(k)-1, {short_q} "
+            f"defers 100 percent of federal capital gains (20 percent), Section 1250 depreciation recapture "
+            f"(25 percent), and 3.8 percent NIIT when proceeds roll via a Qualified Intermediary within "
+            f"45-day identification and 180-day closing windows reported on IRS Form 8824."
+        ).split()
+        filler_pool = [
+            "Includes", "state", "clawback", "tracking", "under", "California",
+            "FTB", "Form", "3840", "and", "statutory", "boot", "rules.",
+        ]
+    elif any(k in combined_low for k in ("crypto", "8949", "1099-da", "bitcoin", "defi")):
+        base_words = (
+            f"Under IRC Section 1012, IRS Notice 2014-21, and Form 1099-DA broker rules, {short_q} "
+            f"bifurcates digital asset dispositions by holding period on IRS Form 8949 and Schedule D. "
+            f"Positions held over 365 days qualify for 0, 15, or 20 percent long-term rates plus "
+            f"3.8 percent Section 1411 NIIT above statutory MAGI thresholds."
+        ).split()
+        filler_pool = [
+            "Short-term", "trades", "and", "staking", "rewards", "are",
+            "taxed", "at", "ordinary", "federal", "marginal", "rates.",
+        ]
+    elif any(k in combined_low for k in ("saas", "runway", "burn", "zero-cash", "mrr")):
+        base_words = (
+            f"Modeled pursuant to GAAP ASC 205-40 going-concern presentation standards, {short_q} "
+            f"calculates exact startup cash horizon by dividing liquid treasury reserves by net monthly "
+            f"burn (gross operating expenses minus collected MRR) compounded across monthly revenue growth "
+            f"and hiring cohorts to establish the deterministic Zero Cash Date."
+        ).split()
+        filler_pool = [
+            "Benchmarked", "against", "institutional", "venture", "net", "burn",
+            "multiples", "and", "18-month", "liquidity", "buffer", "targets.",
+        ]
+    elif any(k in combined_low for k in ("treasury", "tbill", "hysa", "3124", "yield")):
+        base_words = (
+            f"Pursuant to 31 U.S.C. Section 3124, {short_q} models the full state and local income "
+            f"tax exemption granted to direct United States Treasury obligations. Dividing nominal Treasury "
+            f"yield after federal tax by one minus the combined federal and state marginal rate reveals "
+            f"the exact Tax-Equivalent Yield required from taxable HYSA deposits."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "Federal", "Reserve", "constant", "maturity",
+            "series", "and", "Section", "1411", "NIIT", "thresholds.",
+        ]
+    elif any(k in combined_low for k in ("prediction", "1256", "kalshi", "polymarket", "odds")):
+        base_words = (
+            f"Under IRC Section 1256(g) and CFTC Part 40 regulations, {short_q} contrasts regulated "
+            f"Designated Contract Market event contracts (60 percent long-term and 40 percent short-term "
+            f"capital gains blend on IRS Form 6781) against unregulated decentralized prediction protocols "
+            f"taxed at ordinary marginal rates up to 37 percent plus 3.8 percent NIIT."
+        ).split()
+        filler_pool = [
+            "Includes", "Section", "1212(c)", "three-year", "loss", "carryback",
+            "and", "Half-Kelly", "arbitrage", "allocation", "benchmarks.",
+        ]
+    elif any(k in combined_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")):
+        base_words = (
+            f"Under IRC Section 179 and Section 168(k), {short_q} computes immediate first-year "
+            f"capital expensing up to the $2,560,000 statutory deduction cap ($4,090,000 phase-out threshold) "
+            f"plus 20 percent bonus depreciation on IRS Form 4562 for qualifying commercial equipment, "
+            f"off-the-shelf software, and heavy vehicles exceeding 6,000 pounds GVWR."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "IRS", "Publication", "946", "MACRS",
+            "tables", "and", "Section", "280F", "recapture", "rules.",
+        ]
     else:
         base_words = (
-            f"Under Internal Revenue Code statutory provisions, {short_q} establishes exact "
-            f"deduction ceilings, basis adjustments, and marginal rate thresholds for 2026 commercial "
-            f"filings. Businesses and investors applying IRC Section 179, Section 1031, or Form 8949 "
-            f"schedules can shelter up to $1,250,000 in qualifying capital allocations while "
-            f"maintaining full audit compliance across federal and state jurisdictions."
+            f"Under IRC Section 1, Section 1(h), and Section 1411 statutory schedules, {short_q} "
+            f"computes progressive federal and state marginal tax liabilities, standard deduction thresholds, "
+            f"and post-TCJA sunset rate reversions (10, 15, 25, 28, 33, 35, and 39.6 percent) alongside "
+            f"the 3.8 percent Net Investment Income Tax surtax."
         ).split()
         filler_pool = [
             "Verified", "against", "published", "Internal", "Revenue", "Service",
-            "revenue", "procedures", "and", "statutory", "accounting", "standards.",
+            "revenue", "procedures", "and", "statutory", "inflation", "adjustments.",
         ]
 
     idx = 0
@@ -1374,6 +1524,374 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str) -> str
             base_words[-1] = base_words[-1].rstrip(",;:-") + "."
 
     return _strip_forbidden_dashes(" ".join(base_words))
+
+
+def _build_vertical_profithelm_overlay_blocks(
+    slug: str,
+    query_clean: str,
+    heading_label: str,
+    pos: float,
+    ctr: float,
+    impr: int,
+) -> Dict[str, Any]:
+    """
+    Builds vertical-specific h2_headings, preset_scenarios, comparison_rows, and faq_entries
+    for ProfitHelm overlays so 1031, Crypto, SaaS Runway, Treasury, Prediction Market,
+    Section 179, and Tax Bracket overlays never receive cross-vertical boilerplate.
+    """
+    comb = f"{slug.lower()} {query_clean.lower()}"
+    if any(k in comb for k in ("1031", "like-kind", "like kind", "exchange", "3840")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 1031(a)(3) Deadlines & Boot Rules",
+                f"Audit-Ready {heading_label} Deferral Scenarios & Form 8824 Compliance",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-1031-full-deferral",
+                    "label": "CA to TX $2.5M Full Equity Roll ($0 Boot)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {
+                        "sale_price": 2500000,
+                        "basis": 650000,
+                        "depreciation": 400000,
+                        "from_state": "CA",
+                        "to_state": "TX",
+                        "rep_price": 2500000,
+                    },
+                    "description": "Full reinvestment of $2.5M proceeds deferring $706,350 combined federal, Section 1250 recapture, NIIT, and CA state tax (with FTB Form 3840 tracking).",
+                },
+                {
+                    "id": "preset-1031-boot-trap",
+                    "label": "Partial Downsize ($300k Mortgage Boot Trap)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {
+                        "sale_price": 2500000,
+                        "basis": 650000,
+                        "depreciation": 400000,
+                        "from_state": "CA",
+                        "to_state": "TX",
+                        "rep_price": 2200000,
+                    },
+                    "description": "Acquiring $2.2M replacement property triggers $300,000 taxable boot taxed first against 25% Section 1250 recapture and state clawback.",
+                },
+                {
+                    "id": "preset-1031-q4-deadline-trap",
+                    "label": "Q4 Closing Deadline Trap (Form 4868 Extension Required)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {
+                        "sale_price": 1500000,
+                        "basis": 500000,
+                        "depreciation": 250000,
+                        "from_state": "NY",
+                        "to_state": "FL",
+                        "rep_price": 1650000,
+                    },
+                    "description": "Closing between Oct 19 and Dec 31 truncates the 180-day window to the April 15 tax filing deadline unless IRS Form 4868 is filed prior to filing.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$2.5M Sale ($650k Basis, $400k Sec. 1250 Recapture, CA to TX)",
+                    "baseline": "$706,350 Immediate Tax Outflow (28.25% Drag)",
+                    "optimized": "$0 Current Tax via Qualified Intermediary Roll",
+                    "delta": "+$706,350 Reinvested Equity Shield",
+                    "authority": "IRC Section 1031(a)(3) & IRS Form 8824",
+                },
+                {
+                    "scenario": "Partial Downsize to $2.2M Replacement ($300k Net Boot)",
+                    "baseline": "$706,350 Unmitigated Taxable Sale",
+                    "optimized": "$594,450 Deferred / $111,900 Boot Tax Recognized",
+                    "delta": "-$111,900 Boot Leakage (Recapture First)",
+                    "authority": "IRC Section 1031(b) & Section 1250",
+                },
+                {
+                    "scenario": "Post-Oct 18 Relinquished Closing Without Form 4868 Extension",
+                    "baseline": "Exchange Window Truncated on April 15",
+                    "optimized": "Full 180 Calendar Days Preserved via Form 4868",
+                    "delta": "Prevents Disqualification After Day 105-179",
+                    "authority": "IRC Section 1031(a)(3)(B)(ii) & Treas. Reg. 1.1031(k)-1",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "Why can the 180-day Section 1031 exchange window be shorter than 180 days?",
+                    "answer": (
+                        "Under IRC Section 1031(a)(3)(B)(ii), the exchange period ends on the earlier of 180 calendar days "
+                        "after closing the relinquished property OR the due date (including extensions) of the taxpayer's federal "
+                        "income tax return for the year of the transfer. If you close between October 19 and December 31, you must "
+                        "file IRS Form 4868 (or Form 7004 for entities) before filing your return to receive the full 180 days."
+                    ),
+                },
+                {
+                    "question": "What statutory compliance rules cannot be verified by a 1031 calculator alone?",
+                    "answer": (
+                        "Arithmetic models cannot verify non-numeric statutory mandates: (1) executing a written Qualified Intermediary "
+                        "exchange agreement BEFORE relinquished closing under Treas. Reg. 1.1031(k)-1(g)(4), (2) avoiding disqualified "
+                        "persons (agents, CPAs, attorneys, or family members within 2 years under Treas. Reg. 1.1031(k)-1(k)), "
+                        "(3) delivering signed 3-Property or 200% Rule written identification by midnight of Day 45, and "
+                        "(4) filing annual state clawback returns such as California FTB Form 3840 or Oregon Form OR-24."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("crypto", "8949", "1099-da", "bitcoin", "defi")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRS Form 1099-DA & Form 8949 Statutory Rules",
+                f"Audit-Ready {heading_label} Holding Period & HIFO Lot Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-crypto-ltcg",
+                    "label": "Long-Term Holder (>365 Days Preferential Tier)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"short_term": 15000, "long_term": 85000, "staking": 5000, "ordinary_income": 120000},
+                    "description": "Holding digital assets >365 days shifts gains from 24-37% ordinary tiers to 15% preferential LTCG on Schedule D.",
+                },
+                {
+                    "id": "preset-crypto-defi",
+                    "label": "Active DeFi & Staking Trader (Form 1099-DA Reconciliation)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"short_term": 95000, "long_term": 25000, "staking": 22000, "ordinary_income": 165000},
+                    "description": "High-frequency swaps and staking rewards crossing the $200k Single MAGI threshold trigger 3.8% Section 1411 NIIT.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$100,000 Realized Crypto Gain ($150k W-2 Baseline, Single CA)",
+                    "baseline": "$41,100 Tax (Short-Term <=365 Days + NIIT + State)",
+                    "optimized": "$27,100 Tax (Long-Term >365 Days + HIFO Lot Selection)",
+                    "delta": "+$14,000 Net Post-Tax Proceeds Saved",
+                    "authority": "IRC Section 1(h), Section 1411 & IRS Form 8949",
+                },
+                {
+                    "scenario": "Multi-Wallet Transfer Without Per-Wallet Cost Basis Tracking",
+                    "baseline": "$0 Basis Assumed on Unreconciled Form 1099-DA Proceeds",
+                    "optimized": "Verified Specific Identification (Rev. Proc. 2024-28)",
+                    "delta": "Prevents Overpayment on Non-Taxable Self-Transfers",
+                    "authority": "Treas. Reg. 1.6045-1 & Rev. Proc. 2024-28",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How does Rev. Proc. 2024-28 change wallet-by-wallet crypto cost basis tracking?",
+                    "answer": (
+                        "Beginning January 1, 2025 and continuing for 2026-2027 Form 1099-DA filings, the IRS eliminated "
+                        "universal multi-wallet cost basis pooling. Taxpayers must track cost basis on a per-wallet or per-account "
+                        "basis and identify specific units prior to disposition to apply HIFO or Specific Identification."
+                    ),
+                },
+                {
+                    "question": "Are wallet-to-wallet transfers taxable on IRS Form 1099-DA?",
+                    "answer": (
+                        "Self-transfers between wallets you own are non-taxable, but exchanges issuing Form 1099-DA may report "
+                        "outbound transfers or lack original acquisition cost basis unless reconciled across all wallets on Form 8949."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("saas", "runway", "burn", "zero-cash", "mrr")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: GAAP ASC 205-40 Runway & Net Burn Benchmarks",
+                f"Board-Ready {heading_label} Cohort & Zero Cash Date Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-runway-seed",
+                    "label": "Seed Stage Baseline ($650k Cash, $33k Net Burn)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"cash": 650000, "expenses": 45000, "revenue": 12000, "growth": 8},
+                    "description": "Seed startup with $650k treasury reserves and 8% MoM MRR growth reaching 22 months of runway.",
+                },
+                {
+                    "id": "preset-runway-series-a",
+                    "label": "Series A Expansion ($2.5M Cash, $75k Net Burn)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"cash": 2500000, "expenses": 120000, "revenue": 45000, "growth": 12},
+                    "description": "Post-Series A scaling cohort balancing engineering payroll expansion against the 18-month going-concern buffer.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$650,000 Cash Reserves ($45k Gross Spend, $12k MRR)",
+                    "baseline": "19.7 Months Static Runway (0% MRR Growth)",
+                    "optimized": "24.8 Months Dynamic Runway (8% MoM Growth + 4.8% Treasury Yield)",
+                    "delta": "+5.1 Months Additional Operating Horizon",
+                    "authority": "GAAP ASC 205-40 & Bessemer Burn Multiple Standard",
+                },
+                {
+                    "scenario": "Unallocated Idle Checking vs Swept Treasury Reserve ($2.5M)",
+                    "baseline": "$0 Annual Interest Yield",
+                    "optimized": "$120,000 Annual Risk-Free Treasury Yield (Offsets 1.6 Mo Burn)",
+                    "delta": "+$120,000 Non-Dilutive Runway Extension",
+                    "authority": "31 U.S.C. Section 3124 & Corporate Cash Governance",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "Why does GAAP ASC 205-40 require a minimum 12-to-18 month runway buffer?",
+                    "answer": (
+                        "Under FASB ASC 205-40 Going Concern standards, management must evaluate whether liquid cash reserves "
+                        "can fund operations for at least 12 months beyond the financial statement issuance date. Initiating "
+                        "fundraising or burn reductions at 18 months prevents distressed bridge terms."
+                    ),
+                },
+                {
+                    "question": "How does Section 174 R&D amortization impact startup cash runway?",
+                    "answer": (
+                        "Under IRC Section 174, software engineering payroll must be capitalized and amortized over 5 years "
+                        "(15 years for foreign developers), which can create unexpected cash tax liabilities for revenue-generating "
+                        "startups that otherwise appear cash-flow breakeven."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("treasury", "tbill", "hysa", "3124", "yield")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: 31 U.S.C. Section 3124 State Tax Exemption Rules",
+                f"Audit-Ready {heading_label} Tax-Equivalent Yield Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-tey-ca",
+                    "label": "California Top Tier ($250k Reserve, 13.3% State Exemption)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"principal": 250000, "tbill_yield": 4.80, "hysa_yield": 4.50, "state": "CA", "fed_bracket": 35},
+                    "description": "4.80% US Treasury Bill delivers a 6.13% Tax-Equivalent Yield vs fully taxable California HYSA interest.",
+                },
+                {
+                    "id": "preset-tey-ny",
+                    "label": "New York Corporate/Family Reserve ($500k, 10.9% State Rate)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"principal": 500000, "tbill_yield": 4.80, "hysa_yield": 4.50, "state": "NY", "fed_bracket": 37},
+                    "description": "Eliminates New York state income tax leakage under 31 U.S.C. Section 3124 on $500k liquid cash.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$250,000 Cash Principal (35% Fed + 3.8% NIIT + 13.3% CA State)",
+                    "baseline": "$5,389 Net After-Tax HYSA Interest (at 4.50% Nominal)",
+                    "optimized": "$7,344 Net After-Tax T-Bill Interest (at 4.80% Nominal, 6.13% TEY)",
+                    "delta": "+$1,955 Annual Risk-Free After-Tax Alpha",
+                    "authority": "31 U.S.C. Section 3124 & IRC Section 1411",
+                },
+                {
+                    "scenario": "Treasury Money Market Fund Below 50% Quarterly Threshold in CA/NY",
+                    "baseline": "Disqualified From State Tax Pass-Through Exemption",
+                    "optimized": "100% Direct T-Bill Ladder or Qualifying Government MMF",
+                    "delta": "Preserves Full State Tax Exemption on Form 1099-DIV/INT",
+                    "authority": "Cal. Rev. & Tax Code Section 17145 & NY Tax Law",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How is Tax-Equivalent Yield (TEY) calculated under 31 U.S.C. Section 3124?",
+                    "answer": (
+                        "Because direct US Treasury obligations are exempt from state and local income taxes under 31 U.S.C. "
+                        "Section 3124, Tax-Equivalent Yield equals Nominal Treasury Yield multiplied by (1 - Federal Rate) "
+                        "divided by (1 - Combined Federal and State Rate)."
+                    ),
+                },
+                {
+                    "question": "What trap disqualifies money market funds from state tax exemption in CA, NY, and CT?",
+                    "answer": (
+                        "California, New York, and Connecticut require a mutual fund or money market fund to hold at least 50% "
+                        "of its assets in direct US government obligations at the end of each quarter (excluding repurchase agreements) "
+                        "to pass through the state tax exemption."
+                    ),
+                },
+            ],
+        }
+    return {
+        "h2_headings": [
+            f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
+            f"Audit-Ready {heading_label} Scenarios & Deduction Limits",
+        ],
+        "preset_scenarios": [
+            {
+                "id": "preset-baseline",
+                "label": f"{heading_label} Mid-Market Baseline ($250k Allocation)",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"cost": 250000, "bracket": 32, "revenue": 1200000, "cogs": 420000},
+                "description": "Operating entity at 32% marginal bracket evaluating immediate first-year statutory write-offs.",
+            },
+            {
+                "id": "preset-enterprise",
+                "label": f"{heading_label} High-Cap Scenario ($1.25M Statutory Limit)",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"cost": 1250000, "bracket": 37, "revenue": 4500000, "cogs": 1600000},
+                "description": "Top-bracket pass-through or C-Corp modeling phase-out thresholds and bonus depreciation.",
+            },
+        ],
+        "comparison_rows": [
+            {
+                "scenario": "$250,000 Qualifying Capital Allocation (32% Bracket)",
+                "baseline": "$16,000 Year-1 Straight-Line Deduction",
+                "optimized": "$80,000 Immediate Year-1 Tax Shield",
+                "delta": "+$64,000 Accelerated Cash Flow",
+                "authority": "IRC Section 179 & Section 168(k)",
+            },
+            {
+                "scenario": "$850,000 High-Earner Statutory Tax Scenario (37% Bracket)",
+                "baseline": "$202,300 Unoptimized Statutory Tax Liability",
+                "optimized": "$138,300 Optimized After Statutory Elections",
+                "delta": "+$64,000 Working Capital Preserved",
+                "authority": "IRC Section 1, Section 179 & Form 4562",
+            },
+        ],
+        "faq_entries": [
+            {
+                "question": f"How is {query_clean} calculated under 2026 IRS statutory rules?",
+                "answer": (
+                    f"Deterministic calculation of {query_clean} applies published Internal Revenue Code phase-out "
+                    f"thresholds, marginal bracket schedules, and cost-basis adjustments to compute exact net tax impact."
+                ),
+            },
+            {
+                "question": f"What documentation is required to substantiate {query_clean}?",
+                "answer": (
+                    "Taxpayers must retain contemporaneous placed-in-service logs, closing statements, and "
+                    "reconciled federal schedules (Form 4562, Form 8824, or Form 8949) for audit verification."
+                ),
+            },
+        ],
+    }
 
 
 def compile_remediation_overlay_spec(
@@ -1449,7 +1967,7 @@ def compile_remediation_overlay_spec(
 
     title_rewrite = _normalize_title_50_60(f"{heading_label} 2026", brand=brand, tenant_id=resolved_tenant)
     meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label)
-    quick_answer = _normalize_quick_answer_40_60_words(heading_label, tenant_id=resolved_tenant)
+    quick_answer = _normalize_quick_answer_40_60_words(heading_label, tenant_id=resolved_tenant, slug=slug)
 
     pos = float(candidate.get("position", 10.0) or 10.0)
     impr = int(float(candidate.get("impressions", 100) or 100))
@@ -1524,64 +2042,18 @@ def compile_remediation_overlay_spec(
             query=query_clean,
         )
     else:
-        h2_headings = [
-            f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
-            f"Audit-Ready {heading_label} Scenarios & Deduction Limits",
-        ]
-        preset_scenarios = [
-            {
-                "id": "preset-baseline",
-                "label": f"{heading_label} Mid-Market Baseline ($250k Allocation)",
-                "query": query_clean,
-                "target_position": pos,
-                "baseline_ctr": ctr,
-                "impressions": impr,
-                "params": {"cost": 250000, "bracket": 32, "revenue": 1200000, "cogs": 420000},
-                "description": "Operating entity at 32% marginal bracket evaluating immediate first-year statutory write-offs.",
-            },
-            {
-                "id": "preset-enterprise",
-                "label": f"{heading_label} High-Cap Scenario ($1.25M Statutory Limit)",
-                "query": query_clean,
-                "target_position": pos,
-                "baseline_ctr": ctr,
-                "impressions": impr,
-                "params": {"cost": 1250000, "bracket": 37, "revenue": 4500000, "cogs": 1600000},
-                "description": "Top-bracket pass-through or C-Corp modeling phase-out thresholds and bonus depreciation.",
-            },
-        ]
-        comparison_rows = [
-            {
-                "scenario": "$250,000 Qualifying Capital Allocation (32% Bracket)",
-                "baseline": "$16,000 Year-1 Straight-Line Deduction",
-                "optimized": "$80,000 Immediate Year-1 Tax Shield",
-                "delta": "+$64,000 Accelerated Cash Flow",
-                "authority": "IRC Section 179 & Section 168(k)",
-            },
-            {
-                "scenario": "$850,000 Deferred Property or Asset Basis (37% Bracket)",
-                "baseline": "$202,300 Immediate Capital Gains Outflow",
-                "optimized": "$0 Current Tax via Statutory Deferral",
-                "delta": "100% Working Capital Preservation",
-                "authority": "IRC Section 1031 & Form 8949",
-            },
-        ]
-        faq_entries = [
-            {
-                "question": f"How is {query_clean} calculated under 2026 IRS statutory rules?",
-                "answer": (
-                    f"Deterministic calculation of {query_clean} applies published Internal Revenue Code phase-out "
-                    f"thresholds, marginal bracket schedules, and cost-basis adjustments to compute exact net tax impact."
-                ),
-            },
-            {
-                "question": f"What documentation is required to substantiate {query_clean}?",
-                "answer": (
-                    "Taxpayers must retain contemporaneous placed-in-service logs, closing statements, and "
-                    "reconciled federal schedules (Form 4562, Form 8824, or Form 8949) for audit verification."
-                ),
-            },
-        ]
+        v_blocks = _build_vertical_profithelm_overlay_blocks(
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+        )
+        h2_headings = v_blocks["h2_headings"]
+        preset_scenarios = v_blocks["preset_scenarios"]
+        comparison_rows = v_blocks["comparison_rows"]
+        faq_entries = v_blocks["faq_entries"]
         hub_links = _resolve_contextual_internal_links(
             tenant_id=resolved_tenant,
             slug=slug,
@@ -2493,7 +2965,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             tok in raw_p_url
             for tok in ("fpr=", "via=", "try.rippling.com", "mercury.com/r/", "utm_source=", "redirect.viglink.com")
         ) or raw_p_url.startswith("/r/")
-        if prop_id.lower() == "profithelm" and not _has_direct_token:
+        if prop_id.lower() in ("profithelm", "prexvo") and not _has_direct_token:
             p_url = html_lib.escape(str(p_offer.get("redirect_path") or f"/r/{p_key}"))
         else:
             p_url = html_lib.escape(raw_p_url)
@@ -2519,7 +2991,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         partner_section_markup = (
             f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
-            f'data-property="{prop_id}" data-partner="{p_key}" data-cta-slot="{p_slot}" '
+            f'data-property="{prop_id}" data-partner="{p_key}" data-partner-url="{html_lib.escape(raw_p_url)}" data-cta-slot="{p_slot}" '
             f'data-cta-id="{p_cta_id}" data-yield-score="{p_yield}" data-empirical-erpm="{p_erpm}" '
             f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization" '
             f'style="margin-top: 1.5rem; margin-bottom: 1.5rem; padding: 1.25rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;">\n'

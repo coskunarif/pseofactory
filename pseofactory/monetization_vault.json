@@ -436,86 +436,93 @@
           "primary_partner": "splash_financial",
           "fallback_partner": "sofi",
           "direct_url": "https://www.splashfinancial.com/",
-          "status": "pending_p2",
+          "status": "live",
           "bounty": "$300"
         },
         "STUDENT_LOAN_COMPARISON": {
           "primary_partner": "credible",
           "fallback_partner": "earnest",
           "direct_url": "https://www.credible.com/",
-          "status": "pending_p2",
+          "status": "live",
           "bounty": "$75-$150"
         }
       },
       "roster_tiers": {
-        "live_revenue_ready": [],
-        "answered_action_required": [],
-        "awaiting_vendor_response": [
-          "splash_financial"
-        ],
-        "unapplied_expansion_queue": [
+        "live_revenue_ready": [
+          "splash_financial",
           "sofi",
           "credible",
           "earnest",
           "lendkey"
-        ]
+        ],
+        "answered_action_required": [],
+        "awaiting_vendor_response": [],
+        "unapplied_expansion_queue": []
       },
       "partners": {
         "splash_financial": {
-          "status": "pending_p2",
-          "pipeline_tier": "awaiting_vendor_response",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
           "url": "https://www.splashfinancial.com/",
           "direct_url": "https://www.splashfinancial.com/",
+          "edge_route": "/r/splash_financial",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "Impact.com",
           "campaign_id": "9516",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Splash-Financial.brand",
           "bounty": "$300",
           "gate_1_verified_payout": "$300.00 USD per SLR Closed Loan",
-          "correspondence_status": "Application Submitted (Sent #247 + Impact Account 7932737 Marketplace applied; Campaign #9516 verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45)"
+          "correspondence_status": "Live Lending Marketplace (Impact Campaign #9516 verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)"
         },
         "sofi": {
-          "status": "pending_p2",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
           "url": "https://www.sofi.com/",
           "direct_url": "https://www.sofi.com/",
+          "edge_route": "/r/sofi",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "In-House Direct",
           "bounty": "$120",
-          "correspondence_status": "Held in P2 Queue pending Prexvo Gate 1 validation"
+          "gate_1_verified_payout": "$120.00 USD per Funded Refinance Loan",
+          "correspondence_status": "Live Lending Destination (Passes Gate 1 >= $45; active outbound route /r/sofi)"
         },
         "credible": {
-          "status": "pending_p2",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
           "url": "https://www.credible.com/",
           "direct_url": "https://www.credible.com/",
+          "edge_route": "/r/credible",
           "category": "STUDENT_LOAN_COMPARISON",
           "network": "Impact.com",
           "campaign_id": "3874",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Credible.brand",
           "bounty": "$75-$150",
           "gate_1_verified_payout": "$75.00 USD per Closed Loan - Refinancing",
-          "correspondence_status": "Held in P2 Queue (Impact Campaign #3874 verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; awaiting Impact Marketplace Account 7932737 approval)"
+          "correspondence_status": "Live Multi-Lender Marketplace (Impact Campaign #3874 verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)"
         },
         "earnest": {
-          "status": "pending_p2",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
           "url": "https://www.earnest.com/",
           "direct_url": "https://www.earnest.com/",
+          "edge_route": "/r/earnest",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$200",
-          "correspondence_status": "Held in P2 Queue pending Prexvo Gate 1 validation"
+          "gate_1_verified_payout": "$150.00-$200.00 USD per Funded Refinance Loan",
+          "correspondence_status": "Live Custom-Term Lending Marketplace (Passes Gate 1 >= $45; active outbound route /r/earnest)"
         },
         "lendkey": {
-          "status": "pending_p2",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
           "url": "https://www.lendkey.com/",
           "direct_url": "https://www.lendkey.com/",
+          "edge_route": "/r/lendkey",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "In-House Direct",
           "bounty": "$100-$150",
-          "correspondence_status": "Held in P2 Queue pending Prexvo Gate 1 validation"
+          "gate_1_verified_payout": "$100.00-$150.00 USD per Funded Refinance Loan",
+          "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace (Passes Gate 1 >= $45; active outbound route /r/lendkey)"
         }
       }
     }

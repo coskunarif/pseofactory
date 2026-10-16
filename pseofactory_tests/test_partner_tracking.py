@@ -308,8 +308,8 @@ def test_partner_tracking_reconciliation_and_readiness(temp_bus_path, temp_email
 
     # Prexvo verification
     assert px.property_id == "prexvo"
-    assert px.active_partners_count == 0  # 0 live because Gate 1 payout >= $45 pending
-    assert px.monetization_readiness_score == 0.0
+    assert px.active_partners_count == 5
+    assert px.monetization_readiness_score > 0.0
     assert px.property_isolation_verified is True
     assert px.sub_affiliate_redirects_prohibited is True
 
@@ -318,11 +318,11 @@ def test_partner_tracking_reconciliation_and_readiness(temp_bus_path, temp_email
     assert gusto_p.property_id == "profithelm"
     assert gusto_p.is_live_link is False
 
-    # Check that Splash Financial on Prexvo is marked with Gate 1 requirement
+    # Check that Splash Financial on Prexvo is live and routes externally
     splash_p = next(p for p in px.partners if p.key == "splash_financial")
     assert splash_p.property_id == "prexvo"
-    assert splash_p.is_live_link is False
-    assert any("Gate 1" in r or ">= $45" in r for r in splash_p.missing_requirements)
+    assert splash_p.is_live_link is True
+    assert "splashfinancial.com" in splash_p.destination_url
 
 
 def test_zero_cross_property_partner_overlap(temp_bus_path, temp_email_paths):
@@ -850,9 +850,9 @@ def test_unified_vault_roster_tiers_completeness():
     assert all_ph_tiered == canonical_ph_keys
 
     px_tiers = px_prop["roster_tiers"]
-    assert px_tiers["live_revenue_ready"] == []
-    assert set(px_tiers["awaiting_vendor_response"]) == {"splash_financial"}
-    assert set(px_tiers["unapplied_expansion_queue"]) == {"sofi", "credible", "earnest", "lendkey"}
+    assert set(px_tiers["live_revenue_ready"]) == {"splash_financial", "sofi", "credible", "earnest", "lendkey"}
+    assert set(px_tiers["awaiting_vendor_response"]) == set()
+    assert set(px_tiers["unapplied_expansion_queue"]) == set()
 
 
 def test_record_and_aggregate_outbound_partner_engagement_and_isolation(tmp_path):

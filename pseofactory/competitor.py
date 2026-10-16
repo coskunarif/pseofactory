@@ -452,7 +452,7 @@ class CompetitorGapEngine:
                 spec.setdefault("statutory_authority", "IRC Section 1031(a)(1)")
                 spec.setdefault("economic_dataset", "FRED CPILFESL Series")
                 spec.setdefault("category", "1031 Exchange")
-                spec.setdefault("affiliates", ["ipx1031", "mercury"])
+                spec.setdefault("affiliates", ["ipx1031", "exeter1031"])
                 spec.setdefault("model_name", "Section 1031 Like-Kind Exchange Model")
                 spec.setdefault("formula", "relinquished_basis + recognized_gain")
                 spec.setdefault("inputs", {"relinquished_basis": 450000, "recognized_gain": 0})
@@ -792,6 +792,64 @@ WINNING_COMPETITOR_MECHANICS: Dict[str, Dict[str, Any]] = {
             "restricted public-service pages."
         ),
     },
+    "instant_edge_case_trap_immediacy": {
+        "mechanic_id": "instant_edge_case_trap_immediacy",
+        "title": "Pre-Hydrated Statutory Deadline and Edge-Case Trap Immediacy",
+        "why_competitors_rank_higher": (
+            "Niche conversion leaders like start1031.com pre-hydrate realistic statutory scenarios "
+            "on load and surface immediate statutory deadline or boot/phaseout traps (such as IRC "
+            "Section 1031(a)(3)(B)(ii) tax-return due-date compression requiring Form 4868) inside "
+            "the calculator workspace before users click submit."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page and RetroReflectionEngine render a pre-hydrated statutory "
+            "edge-case trap alert (data-mechanic='instant_edge_case_trap_immediacy') directly "
+            "inside the interactive calculator workspace."
+        ),
+    },
+    "statutory_compliance_framing": {
+        "mechanic_id": "statutory_compliance_framing",
+        "title": "Beyond the Calculator Statutory Compliance Checklist and Pitfall Matrix",
+        "why_competitors_rank_higher": (
+            "Authoritative YMYL tools explicitly separate what arithmetic proves from what requires "
+            "legal and procedural verification (such as pre-closing QI assignment under Treas. Reg. "
+            "1.1031(k)-1(g)(4), state clawback filings like CA FTB Form 3840, and Issue-to-Prevention "
+            "statutory pitfall tables)."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page and RetroReflectionEngine render a structured Beyond the "
+            "Calculator compliance checklist and 3-column Statutory Pitfalls matrix "
+            "(data-mechanic='statutory_compliance_framing')."
+        ),
+    },
+    "three_tier_topic_cluster_nav": {
+        "mechanic_id": "three_tier_topic_cluster_nav",
+        "title": "On-This-Page Jump Bar and 3-Tier Hub-and-Spoke Topic Cluster",
+        "why_competitors_rank_higher": (
+            "Specialist financial hubs pair an accessible On-This-Page anchor bar with a 3-tier "
+            "topic cluster (Tier 1 Core Statutory Pillars, Tier 2 Comparative Matrices, Tier 3 "
+            "Jurisdiction and Entity Spokes) to concentrate internal PageRank and guide decisions."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page and RetroReflectionEngine render an accessible "
+            "nav.on-this-page-nav jump bar and a 3-tier topic cluster hub "
+            "(data-mechanic='three_tier_topic_cluster_nav')."
+        ),
+    },
+    "vetted_commercial_handoff_framing": {
+        "mechanic_id": "vetted_commercial_handoff_framing",
+        "title": "Vertical-Matched Commercial Handoff with Provider Vetting Checklist",
+        "why_competitors_rank_higher": (
+            "High-converting tools never display cross-vertical ads; they pair strictly vertical-matched "
+            "execution partners with a Provider Vetting Checklist (fidelity bond, segregated escrow, "
+            "or statutory rate-lock verification) that converts calculator intent into trusted action."
+        ),
+        "compiler_implementation": (
+            "compile_high_effort_page and RetroReflectionEngine attach a vertical-matched Provider "
+            "Vetting Checklist (data-mechanic='vetted_commercial_handoff_framing') while preserving "
+            "strict non-commercial guardrails on Prexvo public-service pages."
+        ),
+    },
 }
 
 TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
@@ -811,6 +869,7 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
                         "server_rendered_sensitivity_grid",
                         "deep_link_scenario_presets",
                         "compliant_intent_monetization",
+                        "instant_edge_case_trap_immediacy",
                     ],
                     "indexing_advantage": "Pre-rendered statutory cap phaseout table + equipment financing CTA.",
                 },
@@ -821,6 +880,7 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
                     "winning_mechanics": [
                         "server_rendered_sensitivity_grid",
                         "jsonld_entity_triad",
+                        "vetted_commercial_handoff_framing",
                     ],
                     "indexing_advantage": "Direct lender authority + immediate equipment lease financing workflow.",
                 },
@@ -830,12 +890,7 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
                 "DuckDuckGo because they pair IRC Section 179 phaseout tables with immediate equipment "
                 "financing CTAs and deep-linked cost presets."
             ),
-            "compiler_upgrades_applied": [
-                "server_rendered_sensitivity_grid",
-                "deep_link_scenario_presets",
-                "jsonld_entity_triad",
-                "compliant_intent_monetization",
-            ],
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
             "recommended_affiliates": ["crest_capital", "mercury"],
         },
         {
@@ -857,6 +912,22 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
                     "indexing_advantage": "Qualified intermediary domain authority + mortgage boot breakdown table.",
                 },
                 {
+                    "domain": "start1031.com",
+                    "url": "https://start1031.com/tools/boot-calculator/",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "instant_edge_case_trap_immediacy",
+                        "statutory_compliance_framing",
+                        "three_tier_topic_cluster_nav",
+                        "vetted_commercial_handoff_framing",
+                    ],
+                    "indexing_advantage": (
+                        "Pre-hydrated mortgage and cash boot inputs, IRC Section 1031(a)(3)(B)(ii) "
+                        "tax-return deadline trap alerts, Beyond the Calculator QI compliance framing, "
+                        "and 3-tier pillar/tool/state topic clustering."
+                    ),
+                },
+                {
                     "domain": "exeter1031.com",
                     "url": "https://www.exeter1031.com/1031_exchange_calculator.aspx",
                     "engine_ranks": {"google": 3, "bing": 4, "duckduckgo": 4},
@@ -865,16 +936,13 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
                 },
             ],
             "root_cause_diagnosis": (
-                "Qualified intermediary calculators dominate top SERP positions by rendering cash boot vs "
-                "mortgage boot sensitivity tables and 45-day/180-day statutory timelines in static HTML."
+                "Qualified intermediary and specialist 1031 portals (ipx1031.com, start1031.com, exeter1031.com) "
+                "dominate top SERP positions and conversion rates by pairing pre-hydrated cash vs mortgage boot "
+                "tables with IRC Section 1031(a)(3)(B)(ii) deadline trap alerts, Beyond the Calculator QI "
+                "compliance checklists, and 3-tier pillar/tool/state topic clusters."
             ),
-            "compiler_upgrades_applied": [
-                "server_rendered_sensitivity_grid",
-                "deep_link_scenario_presets",
-                "jsonld_entity_triad",
-                "compliant_intent_monetization",
-            ],
-            "recommended_affiliates": ["ipx1031", "mercury"],
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["ipx1031", "exeter1031"],
         },
         {
             "query": "crypto staking tax calculator",

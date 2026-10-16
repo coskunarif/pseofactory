@@ -486,6 +486,8 @@ from pseofactory.affiliates import (
     resolve_partner_url,
     get_affiliates_for_property,
     get_affiliate_route,
+    SOVRN_VERIFIED_PAYING_MERCHANTS,
+    audit_merchant_coverage_and_yield,
 )
 from pseofactory.affiliates_hub import MonetizationHub
 from pseofactory.email_ingest import (
@@ -1007,6 +1009,8 @@ __all__ = [
     "resolve_partner_url",
     "get_affiliates_for_property",
     "get_affiliate_route",
+    "SOVRN_VERIFIED_PAYING_MERCHANTS",
+    "audit_merchant_coverage_and_yield",
     "MonetizationHub",
     "FeedSpike",
     "TrendCandidate",

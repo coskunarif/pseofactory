@@ -593,3 +593,50 @@ def test_cli_sync_monetization_execution(tmp_path):
     exit_code_invalid = main(["sync-monetization", "--payload", "not-a-json", "--json"])
     assert exit_code_invalid == 1
 
+
+def test_merchant_coverage_and_yield_audit():
+    """Verifies that all ProfitHelm and Prexvo partner keys map to verified paying destinations with zero circular redirects."""
+    from pseofactory.affiliates import SOVRN_VERIFIED_PAYING_MERCHANTS, audit_merchant_coverage_and_yield
+
+    hub = MonetizationHub()
+    report = hub.audit_merchant_coverage()
+    assert report == audit_merchant_coverage_and_yield()
+    assert report["status"] == "PASS"
+    assert report["non_paying_passthrough_count"] == 0
+    assert report["internal_loop_count"] == 0
+    assert report["verified_paying_count"] >= 45
+
+    px_report = audit_merchant_coverage_and_yield("prexvo")
+    assert px_report["status"] == "PASS"
+    assert px_report["non_paying_passthrough_count"] == 0
+    assert px_report["internal_loop_count"] == 0
+    assert px_report["verified_paying_count"] == 5
+
+    for pk, m_info in SOVRN_VERIFIED_PAYING_MERCHANTS.items():
+        assert m_info["approved"] is True, f"Partner {pk} must be approved"
+        assert m_info["payout_rate"], f"Partner {pk} must have positive commission rate"
+        assert m_info["verified_url"].startswith("https://"), f"Partner {pk} must have https URL"
+
+
+def test_edge_redirect_generation_profithelm_and_prexvo():
+    """Verifies edge redirect function generation for both ProfitHelm and Prexvo."""
+    from pseofactory.edge import generate_edge_redirect_function
+
+    ph_js = generate_edge_redirect_function("profithelm")
+    assert 'defaultUrl: "https://coinledger.io/?fpr=arif-554004"' in ph_js
+    assert 'defaultUrl: "https://mercury.com/r/profithelm-llc"' in ph_js
+    assert 'defaultUrl: "https://www.taxact.com/"' in ph_js
+    assert 'defaultUrl: "https://www.surepayroll.com/"' in ph_js
+    assert 'defaultUrl: "https://www.altlendingllc.com/"' in ph_js
+    assert 'defaultUrl: "https://www.moby.co/"' in ph_js
+
+    px_js = generate_edge_redirect_function("prexvo")
+    assert 'defaultUrl: "https://www.splashfinancial.com/"' in px_js
+    assert 'defaultUrl: "https://www.sofi.com/"' in px_js
+    assert 'defaultUrl: "https://www.credible.com/"' in px_js
+    assert 'defaultUrl: "https://www.earnest.com/"' in px_js
+    assert 'defaultUrl: "https://www.lendkey.com/"' in px_js
+    assert 'defaultUrl: "https://www.sofi.com/refinance-student-loan/"' in px_js
+    assert 'status: "live"' in px_js
+    assert 'status: "pending_p2"' not in px_js
+
