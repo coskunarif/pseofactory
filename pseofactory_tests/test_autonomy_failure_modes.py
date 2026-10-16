@@ -227,3 +227,104 @@ def test_rolled_back_overlay_is_not_reapplied_during_cooldown(tmp_path):
     overlay.write_text(json.dumps(rolled), encoding="utf-8")
     _, written = persist_overlay_respecting_lock(overlay, {"status": "ACTIVE_LOCKED", "title_rewrite": "again"})
     assert written is True
+
+
+def test_canonical_trend_history_db_path_resolves_independent_of_cwd():
+    """Failure mode: relative DB paths split crawl history across 3 SQLite files depending on cwd."""
+    from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+    assert DEFAULT_DB_PATH.is_absolute()
+    assert DEFAULT_DB_PATH.parts[-3:] == ("trends", "data", "trend_history.db")
+    db = TrendHistoryDB()
+    assert db.db_path == DEFAULT_DB_PATH
+
+
+def test_remediation_queue_strips_volatile_timestamps_for_idempotency(tmp_path):
+    """Failure mode: volatile locked_until/created_at timestamps caused 182 duplicate queue tasks."""
+    from pseofactory.gsc_remediation import AsyncRemediationQueue
+
+    q = AsyncRemediationQueue(queue_path=tmp_path / "queue.json")
+    cand1 = {
+        "tenant_id": "profithelm",
+        "slug": "saas-runway-calculator",
+        "target_url": "https://profithelm.com/tools/saas-runway-calculator/",
+        "anomaly_type": "LOW_CTR_STRIKING_DISTANCE",
+        "overlay_spec": {
+            "slug": "saas-runway-calculator",
+            "title_rewrite": "SaaS Runway Calculator 2026",
+            "created_at": "2026-10-14T00:00:00+00:00",
+            "locked_until": "2026-10-28T00:00:00+00:00",
+        },
+    }
+    cand2 = {
+        "tenant_id": "profithelm",
+        "slug": "saas-runway-calculator",
+        "target_url": "https://profithelm.com/tools/saas-runway-calculator/",
+        "anomaly_type": "LOW_CTR_STRIKING_DISTANCE",
+        "overlay_spec": {
+            "slug": "saas-runway-calculator",
+            "title_rewrite": "SaaS Runway Calculator 2026",
+            "created_at": "2026-10-15T00:00:00+00:00",
+            "locked_until": "2026-10-29T00:00:00+00:00",
+        },
+    }
+    r1 = q.enqueue_batch([cand1], tenant_id="profithelm")
+    r2 = q.enqueue_batch([cand2], tenant_id="profithelm")
+    assert r1["enqueued_count"] == 1
+    assert r2["enqueued_count"] == 0
+    assert r2["deduplicated_count"] == 1
+    assert r2["status"] == "DEDUPLICATED_NO_OP"
+
+
+def test_evaluate_expired_overlays_records_metric_recovery_ledger(tmp_path):
+    """Failure mode: Day-28 overlay evaluations never wrote outcomes back to metric_recovery_ledger.json."""
+    from pseofactory.gsc_remediation import evaluate_expired_overlays
+
+    ov_dir = tmp_path / "content" / "overlays"
+    ov_dir.mkdir(parents=True)
+    now = datetime.now(timezone.utc)
+    ov_file = ov_dir / "section-179-calculator.json"
+    ov_file.write_text(
+        json.dumps({
+            "slug": "section-179-calculator",
+            "status": "ACTIVE_LOCKED",
+            "created_at": (now - timedelta(days=30)).isoformat(),
+            "locked_until": (now - timedelta(days=2)).isoformat(),
+            "baseline_ctr": 0.01,
+            "baseline_position": 12.0,
+            "current_metrics": {"ctr": 0.04, "position": 6.5, "impressions": 200, "clicks": 8},
+        }),
+        encoding="utf-8",
+    )
+    res = evaluate_expired_overlays(
+        site_url="sc-domain:profithelm.com",
+        base_dir=tmp_path,
+    )
+    assert any(item["slug"] == "section-179-calculator" for item in res["accretive"])
+    ledger_file = tmp_path / ".agy" / "metric_recovery_ledger.json"
+    assert ledger_file.is_file()
+    ledger = json.loads(ledger_file.read_text(encoding="utf-8"))
+    assert any(e["slug"] == "section-179-calculator" for e in ledger["evaluations"])
+
+
+def test_indexing_inspector_merges_global_and_tenant_ledgers(tmp_path):
+    """Failure mode: DailyIndexingInspector read only agy_dir and missed tenant-local base_dir/.agy ledgers."""
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+
+    global_agy = tmp_path / "global_agy"
+    global_agy.mkdir(parents=True)
+    tenant_base = tmp_path / "profithelm-platform"
+    (tenant_base / ".agy").mkdir(parents=True)
+
+    (global_agy / "gsc_rollover_queue.json").write_text(
+        json.dumps(["https://profithelm.com/tools/saas-runway-calculator/"]), encoding="utf-8"
+    )
+    (tenant_base / ".agy" / "gsc_rollover_queue.json").write_text(
+        json.dumps(["https://profithelm.com/tools/section-179-calculator/"]), encoding="utf-8"
+    )
+
+    inspector = DailyIndexingInspector(tenant_id="profithelm", base_dir=tenant_base, agy_dir=global_agy)
+    rollover_audit = inspector.audit_gsc_rollover_queue()
+    assert rollover_audit["queue_size"] == 2
+
+

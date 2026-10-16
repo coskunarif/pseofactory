@@ -4521,6 +4521,7 @@ def _execute_autonomous_downstream_chain(
     # Stage 4: Search Ranking Visibility Inspection & Metric Recovery Baseline
     try:
         from pseofactory.indexing_inspector import DailyIndexingInspector
+        from pseofactory.gsc_remediation import evaluate_expired_overlays
         inspector = DailyIndexingInspector(
             tenant_id=adapter.property_id,
             base_dir=repo_root,
@@ -4554,6 +4555,11 @@ def _execute_autonomous_downstream_chain(
                     }
             m_ledger_file.parent.mkdir(parents=True, exist_ok=True)
             m_ledger_file.write_text(json.dumps(m_data, indent=2), encoding="utf-8")
+            overlay_eval_res = evaluate_expired_overlays(
+                site_url=f"sc-domain:{adapter.property_id}.com",
+                base_dir=repo_root,
+            )
+            summary["overlay_evaluations_count"] = overlay_eval_res.get("total_evaluated", 0)
         summary["visibility_status"] = insp_report.get("overall_status", "PASS")
     except Exception as vis_err:
         summary["visibility_status"] = "EXCEPTION_ROUTED"

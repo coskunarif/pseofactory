@@ -37,7 +37,7 @@ from pseofactory.trends.models import (
 from pseofactory.trends.filters import calculate_second_derivative_acceleration
 
 
-DEFAULT_DB_PATH = Path("pseofactory/trends/data/trend_history.db")
+DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "trend_history.db"
 
 
 class TrendHistoryDB:

@@ -59,10 +59,14 @@ class DailyIndexingInspector:
                 self.base_dir = alt_base
 
         self.agy_dir = Path(agy_dir).resolve() if agy_dir else DEFAULT_AGY_DIR
-        self.recovery_ledger_path = Path(recovery_ledger_path).resolve() if recovery_ledger_path else DEFAULT_METRIC_RECOVERY_LEDGER
-        self.quarantine_ledger_path = Path(quarantine_ledger_path).resolve() if quarantine_ledger_path else DEFAULT_QUARANTINE_LEDGER
-        self.velocity_ledger_path = Path(velocity_ledger_path).resolve() if velocity_ledger_path else DEFAULT_VELOCITY_LEDGER
-        self.rollover_queue_path = Path(rollover_queue_path).resolve() if rollover_queue_path else DEFAULT_GSC_ROLLOVER_QUEUE
+        self._custom_recovery_path = recovery_ledger_path is not None
+        self._custom_quarantine_path = quarantine_ledger_path is not None
+        self._custom_velocity_path = velocity_ledger_path is not None
+        self._custom_rollover_path = rollover_queue_path is not None
+        self.recovery_ledger_path = Path(recovery_ledger_path).resolve() if recovery_ledger_path else (self.agy_dir / "metric_recovery_ledger.json")
+        self.quarantine_ledger_path = Path(quarantine_ledger_path).resolve() if quarantine_ledger_path else (self.agy_dir / "indexing_quarantine_ledger.json")
+        self.velocity_ledger_path = Path(velocity_ledger_path).resolve() if velocity_ledger_path else (self.agy_dir / "indexing_velocity_ledger.json")
+        self.rollover_queue_path = Path(rollover_queue_path).resolve() if rollover_queue_path else (self.agy_dir / "gsc_rollover_queue.json")
         self.child_sitemap_ledger_path = (
             Path(child_sitemap_ledger_path).resolve()
             if child_sitemap_ledger_path
@@ -100,30 +104,40 @@ class DailyIndexingInspector:
         and HTTP 429 quota exhaustion.
         """
         queue_path = self.rollover_queue_path
-        if not queue_path.exists():
-            # Check tenant-specific agy folder if global does not exist
-            local_q = self.base_dir / ".agy" / "gsc_rollover_queue.json"
-            if local_q.exists():
-                queue_path = local_q
+        local_q = self.base_dir / ".agy" / "gsc_rollover_queue.json"
+        if not queue_path.exists() and local_q.exists():
+            queue_path = local_q
+
+        paths_to_check = [queue_path]
+        if not self._custom_rollover_path and local_q.exists() and local_q.resolve() != queue_path.resolve():
+            paths_to_check.append(local_q)
 
         queue_urls: List[str] = []
-        if queue_path.exists():
+        seen_q_urls: set = set()
+        for qp in paths_to_check:
+            if not qp.exists():
+                continue
             try:
-                with open(queue_path, "r", encoding="utf-8") as f:
+                with open(qp, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    if isinstance(data, list):
-                        queue_urls = [str(u) for u in data]
-                    elif isinstance(data, dict):
-                        if "tenants" in data and isinstance(data["tenants"], dict):
-                            t_entry = data["tenants"].get(self.tenant_id, {})
-                            if isinstance(t_entry, dict):
-                                queue_urls = [str(u) for u in t_entry.get("urls", [])]
-                            elif isinstance(t_entry, list):
-                                queue_urls = [str(u) for u in t_entry]
-                        else:
-                            queue_urls = [str(u) for u in data.get("urls", [])]
+                extracted: List[str] = []
+                if isinstance(data, list):
+                    extracted = [str(u) for u in data]
+                elif isinstance(data, dict):
+                    if "tenants" in data and isinstance(data["tenants"], dict):
+                        t_entry = data["tenants"].get(self.tenant_id, {})
+                        if isinstance(t_entry, dict):
+                            extracted = [str(u) for u in t_entry.get("urls", [])]
+                        elif isinstance(t_entry, list):
+                            extracted = [str(u) for u in t_entry]
+                    else:
+                        extracted = [str(u) for u in data.get("urls", [])]
+                for u in extracted:
+                    if u not in seen_q_urls:
+                        seen_q_urls.add(u)
+                        queue_urls.append(u)
             except Exception:
-                queue_urls = []
+                continue
 
         tenant_urls = [u for u in queue_urls if self._url_belongs_to_tenant(u)] if queue_urls else []
         queue_size = len(tenant_urls)
@@ -158,32 +172,44 @@ class DailyIndexingInspector:
             "queue_path": str(queue_path),
         }
 
-    def audit_airlock_quarantine(self) -> Dict[str, Any]:
-        """
-        Audits preflight airlock quarantine anomalies including HTTP 404,
-        thin content, robots disallow, redirect, and canonical mismatch.
-        """
+    def _load_merged_quarantine_records(self) -> tuple[Dict[str, Any], Path]:
         q_path = self.quarantine_ledger_path
-        if not q_path.exists():
-            local_q = self.base_dir / ".agy" / "indexing_quarantine_ledger.json"
-            if local_q.exists():
-                q_path = local_q
+        local_q = self.base_dir / ".agy" / "indexing_quarantine_ledger.json"
+        if not q_path.exists() and local_q.exists():
+            q_path = local_q
+
+        paths_to_check = [q_path]
+        if not self._custom_quarantine_path and local_q.exists() and local_q.resolve() != q_path.resolve():
+            paths_to_check.append(local_q)
 
         quarantined_records: Dict[str, Any] = {}
-        if q_path.exists():
+        active_path = q_path
+        for qp in paths_to_check:
+            if not qp.exists():
+                continue
             try:
-                with open(q_path, "r", encoding="utf-8") as f:
+                with open(qp, "r", encoding="utf-8") as f:
                     raw_q = json.load(f)
-                if isinstance(raw_q, dict):
-                    quarantined_records = raw_q
-                elif isinstance(raw_q, list):
+                if isinstance(raw_q, dict) and raw_q:
+                    quarantined_records.update(raw_q)
+                    active_path = qp
+                elif isinstance(raw_q, list) and raw_q:
                     for item in raw_q:
                         if isinstance(item, dict) and item.get("url"):
                             quarantined_records[str(item["url"])] = item
                         elif isinstance(item, str) and item.strip():
                             quarantined_records[item.strip()] = {"url": item.strip()}
+                    active_path = qp
             except Exception:
-                quarantined_records = {}
+                continue
+        return quarantined_records, active_path
+
+    def audit_airlock_quarantine(self) -> Dict[str, Any]:
+        """
+        Audits preflight airlock quarantine anomalies including HTTP 404,
+        thin content, robots disallow, redirect, and canonical mismatch.
+        """
+        quarantined_records, q_path = self._load_merged_quarantine_records()
 
         categories: Dict[str, List[Dict[str, Any]]] = {
             "HTTP_404": [],
@@ -243,38 +269,13 @@ class DailyIndexingInspector:
         Returns list of quarantined URLs from airlock quarantine ledger for self.tenant_id.
         Zero em-dashes. Zero en-dashes.
         """
-        q_path = self.quarantine_ledger_path
-        if not q_path.exists():
-            local_q = self.base_dir / ".agy" / "indexing_quarantine_ledger.json"
-            if local_q.exists():
-                q_path = local_q
-
-        if not q_path.exists():
-            return []
-
-        try:
-            with open(q_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    urls = []
-                    for url, details in data.items():
-                        u_str = details.get("url", url) if isinstance(details, dict) else str(url)
-                        if self._url_belongs_to_tenant(u_str, details if isinstance(details, dict) else None):
-                            urls.append(u_str)
-                    return urls
-                elif isinstance(data, list):
-                    urls = []
-                    for item in data:
-                        if isinstance(item, dict):
-                            u_str = str(item.get("url") or "")
-                            if u_str and self._url_belongs_to_tenant(u_str, item):
-                                urls.append(u_str)
-                        elif isinstance(item, str) and self._url_belongs_to_tenant(item):
-                            urls.append(item)
-                    return urls
-        except Exception:
-            return []
-        return []
+        data, _ = self._load_merged_quarantine_records()
+        urls: List[str] = []
+        for url, details in data.items():
+            u_str = details.get("url", url) if isinstance(details, dict) else str(url)
+            if self._url_belongs_to_tenant(u_str, details if isinstance(details, dict) else None):
+                urls.append(u_str)
+        return urls
 
     def audit_velocity_stagnation(self, stagnation_threshold_hours: float = 336.0) -> Dict[str, Any]:
         """
@@ -282,20 +283,31 @@ class DailyIndexingInspector:
         or indexing velocity stagnation exceeding 336.0 hours (14 days).
         """
         v_path = self.velocity_ledger_path
-        if not v_path.exists():
-            local_v = self.base_dir / ".agy" / "indexing_velocity_ledger.json"
-            if local_v.exists():
-                v_path = local_v
+        local_v = self.base_dir / ".agy" / "indexing_velocity_ledger.json"
+        if not v_path.exists() and local_v.exists():
+            v_path = local_v
+
+        paths_to_check = [v_path]
+        if not self._custom_velocity_path and local_v.exists() and local_v.resolve() != v_path.resolve():
+            paths_to_check.append(local_v)
 
         routes: List[Dict[str, Any]] = []
-        velocity_data: Dict[str, Any] = {}
-        if v_path.exists():
+        seen_route_keys: set = set()
+        for vp in paths_to_check:
+            if not vp.exists():
+                continue
             try:
-                with open(v_path, "r", encoding="utf-8") as f:
+                with open(vp, "r", encoding="utf-8") as f:
                     velocity_data = json.load(f)
-                    routes = velocity_data.get("routes", [])
+                for r in (velocity_data.get("routes", []) if isinstance(velocity_data, dict) else []):
+                    if not isinstance(r, dict):
+                        continue
+                    r_key = str(r.get("domain_url") or r.get("slug") or "")
+                    if r_key and r_key not in seen_route_keys:
+                        seen_route_keys.add(r_key)
+                        routes.append(r)
             except Exception:
-                routes = []
+                continue
 
         tenant_routes: List[Dict[str, Any]] = []
         stalled_routes: List[Dict[str, Any]] = []

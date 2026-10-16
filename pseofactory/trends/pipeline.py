@@ -321,42 +321,26 @@ class TrendPipeline:
 
         def _enrich_record(dec: JevDecisionResult) -> Dict[str, Any]:
             rec = dec.to_dict()
+            cand_spec = rec.get("candidate_spec") if isinstance(rec.get("candidate_spec"), dict) else {}
+            ov_spec = rec.get("overlay_spec") if isinstance(rec.get("overlay_spec"), dict) else {}
+            if not rec.get("property_id"):
+                prop_id = cand_spec.get("property_id") or ov_spec.get("property_id") or ""
+                if not prop_id:
+                    from pseofactory.affiliates import qualify_monetization_opportunity
+                    prop_id = qualify_monetization_opportunity(
+                        query=dec.query,
+                        slug=dec.slug,
+                    ).get("property_id", "unassigned")
+                rec["property_id"] = prop_id
             rec["idempotency_key"] = compute_trend_idempotency_key(rec)
             return rec
 
+        enriched_rankings = [_enrich_record(d) for d in rankings]
         deduplicated_sink_count = 0
 
         # 5. HWL-1253: Atomic file sink persistence under flock lock with composite idempotency deduplication
         if sink_path:
-            sink_file = Path(sink_path).resolve()
-            sink_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(sink_file, "a+", encoding="utf-8") as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                try:
-                    f.seek(0)
-                    existing_keys: Set[str] = set()
-                    for raw_line in f:
-                        line_str = raw_line.strip()
-                        if not line_str:
-                            continue
-                        try:
-                            existing_rec = json.loads(line_str)
-                            if isinstance(existing_rec, dict):
-                                existing_keys.add(compute_trend_idempotency_key(existing_rec))
-                        except Exception:
-                            continue
-                    f.seek(0, os.SEEK_END)
-                    for d in rankings:
-                        record = stamp_engine_verdict_status(_enrich_record(d))
-                        idem_key = record["idempotency_key"]
-                        if idem_key in existing_keys:
-                            deduplicated_sink_count += 1
-                            continue
-                        existing_keys.add(idem_key)
-                        f.write(json.dumps(record) + "\n")
-                    f.flush()
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+            deduplicated_sink_count = sink_records_to_jsonl(enriched_rankings, sink_path)
 
         return {
             "status": "COMPLETED",
@@ -368,8 +352,56 @@ class TrendPipeline:
             "refactor_pages": [_enrich_record(d) for d in refactor_pages],
             "monitored": [_enrich_record(d) for d in monitored],
             "rejected": [_enrich_record(d) for d in rejected],
-            "rankings": [_enrich_record(d) for d in rankings],
+            "rankings": enriched_rankings,
         }
+
+
+def sink_records_to_jsonl(
+    records: List[Dict[str, Any]],
+    sink_path: Union[str, Path],
+) -> int:
+    """
+    Atomically appends evaluated trend decision records to a JSONL sink under
+    fcntl.flock, enforcing composite idempotency deduplication and stamping
+    engine verdict statuses (PENDING for actionable, REJECTED for declined).
+    Returns the number of deduplicated (skipped) records.
+    Zero em-dashes. Zero en-dashes.
+    """
+    sink_file = Path(sink_path).expanduser().resolve()
+    sink_file.parent.mkdir(parents=True, exist_ok=True)
+    deduplicated_sink_count = 0
+    with open(sink_file, "a+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            existing_keys: Set[str] = set()
+            for raw_line in f:
+                line_str = raw_line.strip()
+                if not line_str:
+                    continue
+                try:
+                    existing_rec = json.loads(line_str)
+                    if isinstance(existing_rec, dict):
+                        existing_keys.add(compute_trend_idempotency_key(existing_rec))
+                except Exception:
+                    continue
+            f.seek(0, os.SEEK_END)
+            for raw_rec in records:
+                if not isinstance(raw_rec, dict):
+                    continue
+                rec_copy = dict(raw_rec)
+                rec_copy["idempotency_key"] = compute_trend_idempotency_key(rec_copy)
+                record = stamp_engine_verdict_status(rec_copy)
+                idem_key = record["idempotency_key"]
+                if idem_key in existing_keys:
+                    deduplicated_sink_count += 1
+                    continue
+                existing_keys.add(idem_key)
+                f.write(json.dumps(record) + "\n")
+            f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    return deduplicated_sink_count
 
 
 def run_trend_pipeline(

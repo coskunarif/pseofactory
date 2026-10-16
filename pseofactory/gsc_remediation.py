@@ -2230,6 +2230,50 @@ def evaluate_expired_overlays(
 
         results["total_evaluated"] += 1
 
+    # Persist evaluation outcomes into metric_recovery_ledger.json
+    agy_dir = root / ".agy"
+    if results["total_evaluated"] > 0:
+        m_ledger_path = agy_dir / "metric_recovery_ledger.json"
+        try:
+            agy_dir.mkdir(parents=True, exist_ok=True)
+            m_data = AtomicStateLedger.load_json(m_ledger_path)
+            if not isinstance(m_data, dict):
+                m_data = {"snapshots": {}, "evaluations": []}
+            snaps = m_data.setdefault("snapshots", {})
+            evals_list = m_data.setdefault("evaluations", [])
+            if not isinstance(evals_list, list):
+                evals_list = []
+                m_data["evaluations"] = evals_list
+            eval_by_slug = {
+                str(e.get("slug")): idx
+                for idx, e in enumerate(evals_list)
+                if isinstance(e, dict) and e.get("slug")
+            }
+            for item in (
+                results["accretive"]
+                + results["degraded_rolled_back"]
+                + results["monitoring"]
+            ):
+                s_key = str(item.get("slug") or "")
+                if not s_key:
+                    continue
+                eval_entry = {
+                    **item,
+                    "evaluated_at": results["timestamp"],
+                }
+                if s_key in eval_by_slug:
+                    evals_list[eval_by_slug[s_key]] = eval_entry
+                else:
+                    eval_by_slug[s_key] = len(evals_list)
+                    evals_list.append(eval_entry)
+                if isinstance(snaps, dict) and s_key in snaps and isinstance(snaps[s_key], dict):
+                    snaps[s_key]["status"] = item.get("status", "ACTIVE_MONITORING")
+                    snaps[s_key]["last_evaluated_at"] = results["timestamp"]
+            m_data["last_evaluated"] = results["timestamp"]
+            AtomicStateLedger.save_json(m_ledger_path, m_data)
+        except Exception:
+            pass
+
     return results
 
 
@@ -2714,8 +2758,36 @@ class AsyncRemediationQueue:
             ).strip().upper()
             payload_hash = str(cand.get("content_sha256") or "").strip()
             if not payload_hash:
+                _volatile_keys = frozenset({
+                    "locked_until",
+                    "lock_until",
+                    "created_at",
+                    "updated_at",
+                    "enqueued_at",
+                    "completed_at",
+                    "timestamp",
+                    "recorded_at",
+                    "evaluated_at",
+                    "idempotency_key",
+                    "content_sha256",
+                    "attempt_count",
+                    "next_attempt_at",
+                })
+
+                def _strip_volatile(obj: Any) -> Any:
+                    if isinstance(obj, dict):
+                        return {
+                            k: _strip_volatile(v)
+                            for k, v in obj.items()
+                            if k not in _volatile_keys
+                        }
+                    if isinstance(obj, list):
+                        return [_strip_volatile(x) for x in obj]
+                    return obj
+
+                norm_payload = _strip_volatile(cand.get("overlay_spec") or cand)
                 payload_hash = hashlib.sha256(
-                    json.dumps(cand.get("overlay_spec") or cand, sort_keys=True).encode("utf-8")
+                    json.dumps(norm_payload, sort_keys=True).encode("utf-8")
                 ).hexdigest()
 
             idemp_key = str(cand.get("idempotency_key") or "").strip() or compute_composite_idempotency_key(

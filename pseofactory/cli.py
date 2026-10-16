@@ -611,6 +611,7 @@ def cmd_trend_cron(args: argparse.Namespace) -> int:
             property_filter=args.property,
             dry_run=args.dry_run,
             include_unassigned=getattr(args, "include_unassigned", False),
+            sink_path=getattr(args, "sink", None),
         )
         if args.json:
             print(json.dumps(result, indent=2))
@@ -1353,8 +1354,9 @@ def cmd_market_intel(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.market_intel import MarketIntelligenceEngine
+    from pseofactory.trends.db import DEFAULT_DB_PATH
 
-    db_path = getattr(args, "db_path", "pseofactory/trends/data/trend_history.db")
+    db_path = getattr(args, "db_path", None) or str(DEFAULT_DB_PATH)
     engine = MarketIntelligenceEngine(db_path=db_path)
 
     query_arg = getattr(args, "query", None)
@@ -1519,14 +1521,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_monitor.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # trend-cron
+    from pseofactory.trends.db import DEFAULT_DB_PATH
     p_cron = subparsers.add_parser("trend-cron", help="Execute autonomous daily cron loop trend monitoring and longitudinal analysis")
-    p_cron.add_argument("--db-path", type=str, default="trends_history.db", help="Path to persistent SQLite trend history database file")
+    p_cron.add_argument("--db-path", type=str, default=str(DEFAULT_DB_PATH), help="Path to persistent SQLite trend history database file")
     p_cron.add_argument("--fixture", type=str, default=None, help="Path to JSON multi-source crawl fixture file for deterministic testing")
     p_cron.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries for live streaming collectors")
     p_cron.add_argument("--cycle-id", type=str, default=None, help="Explicit cycle identifier (default: auto-generated UTC timestamp/hash)")
     p_cron.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold for asset build/refactor")
     p_cron.add_argument("--property", type=str, default=None, help="Optional tenant filter (prexvo, profithelm, unassigned)")
     p_cron.add_argument("--include-unassigned", action="store_true", help="Also evaluate unassigned greenfield clusters when --property is set")
+    p_cron.add_argument("--sink", type=str, default=None, help="Optional path for JSONL candidates sink (e.g. void_candidates.jsonl)")
     p_cron.add_argument("--json", action="store_true", help="Output machine-readable JSON cycle summary")
     p_cron.add_argument("--dry-run", action="store_true", help="Evaluate cycle without committing mutations to SQLite history")
 
@@ -1535,7 +1539,7 @@ def build_parser() -> argparse.ArgumentParser:
         "market-intel",
         help="Evaluate buyer intent, organic ranking difficulty, and active commission offers for new tenant launches",
     )
-    p_mi.add_argument("--db-path", type=str, default="pseofactory/trends/data/trend_history.db", help="Path to persistent SQLite trend history database")
+    p_mi.add_argument("--db-path", type=str, default=str(DEFAULT_DB_PATH), help="Path to persistent SQLite trend history database")
     p_mi.add_argument("--query", type=str, default=None, help="Evaluate a single search query across all 3 market-intelligence pillars")
     p_mi.add_argument("--top", type=int, default=None, help="Limit output to top N ranked tenant candidates")
     p_mi.add_argument("--sync-db", action="store_true", help="Persist ranked tenant candidates into market_intel_candidates table")
@@ -1545,7 +1549,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # trend-backfill
     p_backfill = subparsers.add_parser("trend-backfill", help="Execute historical session crawl and idempotent bulk insert into trend history DB")
-    p_backfill.add_argument("--db-path", type=str, default="pseofactory/trends/data/trend_history.db", help="Path to persistent SQLite trend history database file")
+    p_backfill.add_argument("--db-path", type=str, default=str(DEFAULT_DB_PATH), help="Path to persistent SQLite trend history database file")
     p_backfill.add_argument("--staging-dir", type=str, default=".agy/scratch/backfill_staged", help="Path to intermediate staged buffer directory")
     p_backfill.add_argument("--dlq-path", type=str, default=".agy/runs/5017e890/staging_dlq.jsonl", help="Path to quarantine dead letter queue file")
     p_backfill.add_argument("--fixture", type=str, default=None, help="Optional JSON fixture file to include in backfill")

@@ -268,6 +268,7 @@ class TrendCronRunner:
         dry_run: bool = False,
         total_site_impressions: int = 500,
         include_unassigned: bool = False,
+        sink_path: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Public entrypoint for executing autonomous trend cron cycle.
@@ -281,6 +282,7 @@ class TrendCronRunner:
             dry_run=dry_run,
             total_site_impressions=total_site_impressions,
             include_unassigned=include_unassigned,
+            sink_path=sink_path,
         )
 
     def run_cycle(
@@ -292,6 +294,7 @@ class TrendCronRunner:
         dry_run: bool = False,
         total_site_impressions: int = 500,
         include_unassigned: bool = False,
+        sink_path: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Executes complete daily cron monitoring cycle.
@@ -360,11 +363,13 @@ class TrendCronRunner:
             all_rankings: List[Dict[str, Any]] = []
             filtered_noise_count = 0
             seen_cycle_queries: Set[str] = set()
+            slug_to_query: Dict[str, str] = {}
 
             # 4. Process each spike
             for rank_idx, spike in enumerate(spikes):
                 clean_q = spike.query.strip()
                 slug = sanitize_url_slug(clean_q)
+                slug_to_query[slug] = clean_q
                 norm_q = " ".join(clean_q.lower().split())
                 raw_meta = dict(spike.raw_payload or {})
 
@@ -896,6 +901,7 @@ class TrendCronRunner:
             all_rankings.sort(key=lambda r: r["composite_profit_yield"], reverse=True)
 
             # 5. Commit all records atomically to SQLite
+            deduplicated_sink_count = 0
             if not dry_run:
                 with db.transaction():
                     db.record_observations(obs_records)
@@ -920,6 +926,30 @@ class TrendCronRunner:
                             "proposals_count": len(proposals_created),
                         },
                     )
+                if sink_path:
+                    from pseofactory.trends.pipeline import sink_records_to_jsonl
+                    sink_candidates: List[Dict[str, Any]] = []
+                    for ev in eval_records:
+                        q_text = slug_to_query.get(ev.query_slug, ev.query_slug.replace("-", " "))
+                        spec_dict = ev.spec_payload if isinstance(ev.spec_payload, dict) else None
+                        sink_candidates.append({
+                            "query": q_text,
+                            "slug": ev.query_slug,
+                            "property_id": ev.property_id,
+                            "action": ev.action,
+                            "jev_score": ev.jev_score,
+                            "durable_prob": ev.durable_prob,
+                            "composite_profit_yield": ev.composite_profit_yield,
+                            "cannibalization_risk": ev.cannibalization_risk,
+                            "target_asset_type": ev.target_asset_type,
+                            "decision_reason": ev.decision_reason,
+                            "passed_thresholds": bool(ev.passed_thresholds),
+                            "evaluated_at": ev.evaluated_at,
+                            "matching_tool": spec_dict.get("slug") if ev.action == "REFACTOR_PAGE" and spec_dict else None,
+                            "overlay_spec": spec_dict if ev.action == "REFACTOR_PAGE" else None,
+                            "candidate_spec": spec_dict if ev.action == "BUILD_PAGE" else None,
+                        })
+                    deduplicated_sink_count = sink_records_to_jsonl(sink_candidates, sink_path)
 
             return {
                 "cycle_id": cycle_id,
@@ -928,6 +958,7 @@ class TrendCronRunner:
                 "total_raw_observations": len(obs_records),
                 "unique_queries_count": len(spikes),
                 "filtered_noise_count": filtered_noise_count,
+                "deduplicated_sink_count": deduplicated_sink_count,
                 "approved_build": approved_build,
                 "refactor_pages": refactor_pages,
                 "monitored": monitored,
