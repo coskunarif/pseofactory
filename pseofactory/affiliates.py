@@ -95,8 +95,8 @@ class AffiliatePartner:
 PROFITHELM_DISCLOSURES: Dict[str, str] = {
     "ftc_disclosure": (
         "ProfitHelm is an independent financial research publisher. We may earn a commission "
-        "when you register or subscribe through approved affiliate links on this site (including IPX1031, Exeter 1031, "
-        "Crest Capital, Mercury, Ramp, CoinLedger, Koinly, and institutional tax, treasury, or exchange partners) "
+        "when you register or subscribe through approved affiliate links on this site (including IPX1031, DLP Capital, "
+        "Xendoo, Mercury, Stax Payments, CoinLedger, Koinly, and institutional tax, treasury, or exchange partners) "
         "at no additional cost to you. Calculations are for educational and informational modeling purposes "
         "only and do not constitute formal tax or legal advice."
     ),
@@ -119,15 +119,15 @@ def get_contextual_ftc_disclosure(
         return PREXVO_DISCLOSURES.get("ftc_disclosure", "")
     s_lower = (slug or "").strip().lower()
     if any(k in s_lower for k in ("1031", "like-kind", "exchange", "real-estate")):
-        vertical_partners = "IPX1031, Exeter 1031, First American Exchange, and verified Qualified Intermediary partners"
+        vertical_partners = "IPX1031, DLP Capital, GROUNDFLOOR, and verified Qualified Intermediary or real estate capital partners"
     elif any(k in s_lower for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "truck", "suv")):
-        vertical_partners = "Crest Capital, National Funding, Ramp, and verified equipment financing partners"
+        vertical_partners = "Xendoo, Stax Payments, Mercury, and verified Section 179 accounting or commercial capital partners"
     elif any(k in s_lower for k in ("saas", "runway", "burn", "s-corp", "payroll", "174", "workers-comp", "factoring", "tariff", "surety")):
-        vertical_partners = "Mercury, Ramp, Rippling, Gusto, and verified commercial treasury or payroll partners"
+        vertical_partners = "Mercury, Rippling, SurePayroll, Stax Payments, Simply Business, Next Insurance, Hiscox, Invoice Simple, and verified commercial treasury or payroll partners"
     elif any(k in s_lower for k in ("treasury", "tbill", "hysa", "yield", "qsbs", "1202")):
-        vertical_partners = "Interactive Brokers, Wealthfront, Mercury, and verified institutional brokerage partners"
+        vertical_partners = "Zacks Investment Research, Valley Bank, Quontic Bank, Mercury, and verified institutional yield partners"
     elif any(k in s_lower for k in ("crypto", "8949", "1099-da", "prediction", "1256", "kalshi", "polymarket")):
-        vertical_partners = "CoinLedger, Koinly, Kalshi, TurboTax, and verified digital asset or tax reporting partners"
+        vertical_partners = "CoinLedger, Koinly, Moby Investment Research, TaxAct, TaxSlayer, and verified digital asset or tax reporting partners"
     elif partner_name:
         vertical_partners = f"{partner_name} and approved tax or financial research partners (including CoinLedger and Koinly)"
     else:
@@ -197,73 +197,73 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
     "stripe": AffiliatePartner(
         key="stripe",
-        name="Stripe Treasury & Payments",
+        name="Stax Commercial Payments & Merchant Processing",
         category="B2B Treasury / Commercial Banking",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_STRIPE_URL",
-        default_url="https://stripe.com/",
-        badge="Enterprise Financial Infrastructure",
-        commission_est="$150-$300/account",
-        bounty_est="$150-$300",
-        network="In-House Direct",
-        description="Global financial infrastructure and embedded banking platform for internet businesses, SaaS startups, and enterprises.",
+        default_url="https://staxpayments.com/",
+        badge="Zero-Markup Commercial Payments",
+        commission_est="$500/closed won",
+        bounty_est="$500",
+        network="Sovrn Commerce",
+        description="All-in-one commercial payment processing, automated billing, and flat-rate merchant infrastructure for scaling SaaS platforms and B2B enterprises.",
         target_tools=["saas-runway-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Explore Stripe Financial Infrastructure",
+        cta_text="Lower Payment Processing Costs with Stax",
     ),
 
     # High-Bounty B2B Opportunities
     "ramp": AffiliatePartner(
         key="ramp",
-        name="Ramp Corporate Card & Spend Management",
+        name="Mercury IO Corporate Card & Spend Control",
         category="Corporate Finance",
         property_id="profithelm",
         status="pending_expansion",
         env_var="AFFILIATE_RAMP_URL",
-        default_url="https://ramp.com/",
+        default_url="https://mercury.com/r/profithelm-llc",
         badge="Automated Founder Spend Control",
-        commission_est="$500 flat",
-        bounty_est="$500 flat",
+        commission_est="$250 flat",
+        bounty_est="$250 flat",
         network="In-House Direct",
-        description="Automated expense controls, spend limits, and 1.5% cashback corporate cards to stretch startup runway.",
+        description="Zero-fee commercial banking, 1.5% cashback IO corporate credit cards, and automated expense controls to extend startup runway.",
         target_tools=["saas-runway-calculator", "section-179-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Apply for Ramp Corporate Card",
+        cta_text="Apply for Mercury IO Corporate Spend",
     ),
     "rho": AffiliatePartner(
         key="rho",
-        name="Rho Commercial Banking & Treasury",
+        name="Mercury Commercial Treasury & Yield",
         category="Corporate Finance",
         property_id="profithelm",
         status="pending_expansion",
         env_var="AFFILIATE_RHO_URL",
-        default_url="https://rho.co/",
+        default_url="https://mercury.com/r/profithelm-llc",
         badge="Enterprise Treasury Yield",
-        commission_est="$500-$1000",
-        bounty_est="$500-$1000",
+        commission_est="$250-$500",
+        bounty_est="$250-$500",
         network="In-House Direct",
-        description="Automated treasury yield and commercial banking for funded startups and scaling entities.",
+        description="Automated treasury yield portfolios and FDIC-insured commercial banking for funded startups and scaling corporate entities.",
         target_tools=["saas-runway-calculator", "qsbs-section-1202-tax-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Explore Rho Commercial Treasury",
+        cta_text="Explore Mercury Commercial Treasury",
     ),
     "gusto": AffiliatePartner(
         key="gusto",
-        name="Gusto Payroll & HR",
+        name="SurePayroll by Paychex Business Payroll",
         category="Corporate Finance",
         property_id="profithelm",
         status="pending_expansion",
         env_var="AFFILIATE_GUSTO_URL",
-        default_url="https://gusto.com/",
-        badge="Modern Team Payroll",
-        commission_est="$300 flat",
-        bounty_est="$300 flat",
-        network="PartnerStack",
-        description="Modern payroll, benefits, and HR management built for growing teams and startups.",
+        default_url="https://www.surepayroll.com/",
+        badge="Automated S-Corp & Team Payroll",
+        commission_est="$100 flat",
+        bounty_est="$100 flat",
+        network="Sovrn Commerce",
+        description="Automated small business and S-Corp payroll tax filing, W-2 and 1099 compliance, and same-day direct deposit backed by Paychex.",
         target_tools=["saas-runway-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Optimize Payroll with Gusto",
+        cta_text="Automate Business Payroll with SurePayroll",
     ),
     "rippling": AffiliatePartner(
         key="rippling",
@@ -286,20 +286,20 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     # Supporting Partners
     "crest_capital": AffiliatePartner(
         key="crest_capital",
-        name="Crest Capital Equipment Financing",
+        name="Xendoo Section 179 & Business Tax Accounting",
         category="Equipment Financing",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_CREST_CAPITAL_URL",
-        default_url="https://www.crestcapital.com/",
-        badge="Section 179 & MACRS Specialist",
-        commission_est="$100-$300/funded deal",
-        bounty_est="$100-$300",
-        network="In-House Direct",
-        description="Direct lender providing Section 179 and MACRS equipment financing, vehicle leasing, and capital write-off solutions.",
+        default_url="https://www.xendoo.com/",
+        badge="Section 179 & MACRS CPA Specialist",
+        commission_est="$500/onboarded client",
+        bounty_est="$500",
+        network="Sovrn Commerce",
+        description="Dedicated online bookkeeping, IRS Form 4562 Section 179 depreciation schedules, and year-round CPA tax advisory for equipment-intensive businesses.",
         target_tools=["section-179-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Finance Section 179 Equipment with Crest Capital",
+        cta_text="Optimize Section 179 Accounting with Xendoo",
     ),
     "ipx1031": AffiliatePartner(
         key="ipx1031",
@@ -316,24 +316,24 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         description="Nation's leading qualified intermediary backed by Fidelity National Financial with $100M bond protection.",
         target_tools=["section-1031-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Initiate Qualified 1031 Exchange",
+        cta_text="Initiate Qualified 1031 Exchange with IPX1031",
     ),
     "turbotax": AffiliatePartner(
         key="turbotax",
-        name="TurboTax Premier & Live CPA",
+        name="TaxAct Online Tax Filing & Xpert Assist",
         category="Tax Intelligence",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_TURBOTAX_URL",
-        default_url="https://turbotax.intuit.com/",
+        default_url="https://www.taxact.com/",
         badge="Top Rated for 2026/2027 Returns",
-        commission_est="$45-$120/sale",
+        commission_est="10% ($45-$120/sale)",
         bounty_est="$45-$120",
-        network="Commission Junction",
-        description="File complex investments, crypto gains, and small business returns with dedicated CPA review.",
+        network="Sovrn Commerce",
+        description="File federal and state tax returns online with step-by-step deduction maximizers, capital gains schedules, and live CPA review.",
         target_tools=["irs-2027-tax-brackets", "tcja-sunset-bracket-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Calculate & File with TurboTax",
+        cta_text="Calculate & File Taxes Online with TaxAct",
     ),
     "taxslayer": AffiliatePartner(
         key="taxslayer",
@@ -346,7 +346,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         badge="Best Value",
         commission_est="$30-$60/sale",
         bounty_est="$30-$60",
-        network="Commission Junction",
+        network="Sovrn Commerce",
         description="Low-cost electronic filing with comprehensive support for investment and self-employment schedules.",
         target_tools=["irs-2027-tax-brackets"],
         supported_params=["ph_tier"],
@@ -354,17 +354,17 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
     "kalshi": AffiliatePartner(
         key="kalshi",
-        name="Kalshi Prediction Markets",
+        name="Moby Institutional Investment & Market Research Platform",
         category="Market Arbitrage",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_KALSHI_URL",
-        default_url="https://kalshi.com/",
-        badge="CFTC Regulated",
-        commission_est="$80-$150/funded account",
-        bounty_est="$80-$150",
-        network="In-House Direct",
-        description="CFTC-regulated exchange to trade event contracts on interest rates, inflation, and political milestones.",
+        default_url="https://www.moby.co/",
+        badge="Institutional Market Intelligence",
+        commission_est="$30-$90/subscription",
+        bounty_est="$30-$90",
+        network="Sovrn Commerce",
+        description="Verified U.S. financial research publisher (moby.co, 5M+ subscribers) delivering SEC-compliant institutional equity, macroeconomic event contract, and tax-aware quantitative research from former Morgan Stanley and Goldman Sachs analysts.",
         target_tools=[
             "prediction-market-tax",
             "prediction-market-odds",
@@ -377,58 +377,58 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
             "prediction-market-break-even",
         ],
         supported_params=["ph_tier"],
-        cta_text="Trade Regulated Event Contracts on Kalshi",
+        cta_text="Analyze Market Odds & Event Research on Moby",
     ),
     "interactive_brokers": AffiliatePartner(
         key="interactive_brokers",
-        name="Interactive Brokers (IBKR)",
+        name="Zacks Quantitative Yield & Investment Research",
         category="Yield Arbitrage",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_IBKR_URL",
-        default_url="https://www.interactivebrokers.com/",
-        badge="Institutional Execution",
-        commission_est="$100-$200/account",
-        bounty_est="$100-$200",
-        network="In-House Direct",
-        description="Global multi-asset brokerage with industry-leading margin rates and professional order routing.",
+        default_url="https://www.zacks.com/",
+        badge="Quantitative Yield & Rank Engine",
+        commission_est="$120/sale",
+        bounty_est="$120",
+        network="Sovrn Commerce",
+        description="Quantitative fixed-income, Treasury yield, and equity research powered by the institutional Zacks Rank earnings model.",
         target_tools=["treasury-yield-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Explore Interactive Brokers Yield",
+        cta_text="Access Quantitative Yield Research on Zacks",
     ),
     "exeter1031": AffiliatePartner(
         key="exeter1031",
-        name="The Exeter 1031 Exchange",
+        name="DLP Capital Institutional Real Estate & 1031 Exchange Funds",
         category="Commercial Real Estate",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_EXETER1031_URL",
-        default_url="https://www.exeterco.com/",
-        badge="Reverse & Improvement Specialist",
-        commission_est="$300-$800/exchange",
-        bounty_est="$300-$800",
-        network="In-House Direct",
-        description="Nationwide qualified intermediary, exchange accommodation titleholder, and reverse exchange specialist.",
+        default_url="https://dlpcapital.com/",
+        badge="Institutional Real Estate Funds",
+        commission_est="$250/qualified lead",
+        bounty_est="$250",
+        network="Sovrn Commerce",
+        description="Established U.S. institutional real estate investment firm founded in 2006 offering audited evergreen real estate funds, 1031 exchange replacement property solutions, and senior secured commercial lending.",
         target_tools=["section-1031-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Initiate Qualified 1031 Exchange",
+        cta_text="Explore Real Estate Funds with DLP Capital",
     ),
     "first_american": AffiliatePartner(
         key="first_american",
-        name="First American Exchange Company",
+        name="GROUNDFLOOR SEC-Qualified Real Estate Investment & 1031 Capital Platform",
         category="Commercial Real Estate",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_FIRST_AMERICAN_URL",
-        default_url="https://www.firstexchange.com/",
-        badge="Institutional Qualified Intermediary",
-        commission_est="$300-$800/exchange",
-        bounty_est="$300-$800",
-        network="In-House Direct",
-        description="Leading Qualified Intermediary facilitating Section 1031 tax-deferred property exchanges nationwide.",
+        default_url="https://www.groundfloor.us/",
+        badge="Fractional Real Estate Debt Yields",
+        commission_est="$100/funded investment",
+        bounty_est="$100",
+        network="Sovrn Commerce",
+        description="SEC-qualified (Regulation A+) commercial real estate investment platform providing institutional-grade real estate debt notes, bridge capital, and 1031 exchange replacement financing at groundfloor.us.",
         target_tools=["section-1031-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Initiate Qualified 1031 Exchange",
+        cta_text="Invest in Real Estate Debt on GROUNDFLOOR",
     ),
     "simply_business": AffiliatePartner(
         key="simply_business",
@@ -441,31 +441,31 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         badge="Instant Multi-Carrier Quotes",
         commission_est="$35-$100/bound policy",
         bounty_est="$35-$100",
-        network="CJ Affiliate / Impact",
+        network="Sovrn Commerce",
         description="Compare instant workers compensation, general liability, and commercial contractor insurance quotes across top carriers.",
         target_tools=[
             "workers-comp-and-payroll-burden-calculator",
             "contractor-surety-bond-cost-calculator",
         ],
         supported_params=["ph_tier"],
-        cta_text="Compare Commercial Workers Comp Quotes",
+        cta_text="Compare Commercial Insurance Quotes on Simply Business",
     ),
     "suretybonds_direct": AffiliatePartner(
         key="suretybonds_direct",
-        name="SuretyBonds.com Instant Bond Underwriting",
+        name="Hiscox Contractor & Commercial Liability Insurance",
         category="Commercial Surety & Bonds",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_SURETYBONDS_DIRECT_URL",
-        default_url="https://www.suretybonds.com/",
-        badge="Nationwide Statutory Bonds",
-        commission_est="20% premium share ($75-$300)",
-        bounty_est="$75-$300",
-        network="In-House Direct",
-        description="Instant online underwriting for contractor license bonds, performance bonds, freight broker BMC-84 bonds, and ERISA fidelity bonds.",
+        default_url="https://www.hiscox.com/",
+        badge="Instant Commercial Policy Quotes",
+        commission_est="$30-$75/qualified quote",
+        bounty_est="$30-$75",
+        network="Sovrn Commerce",
+        description="Instant online underwriting for contractor general liability, professional errors and omissions, and commercial business insurance.",
         target_tools=["contractor-surety-bond-cost-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Get Instant Contractor Surety Bond Quote",
+        cta_text="Get Instant Contractor Insurance Quotes with Hiscox",
     ),
     "next_insurance_b2b": AffiliatePartner(
         key="next_insurance_b2b",
@@ -478,7 +478,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         badge="Instant Certificate of Insurance",
         commission_est="$25-$150/qualified quote",
         bounty_est="$25-$150",
-        network="Impact.com",
+        network="Sovrn Commerce",
         description="Digital commercial insurance providing instant certificates of insurance for workers compensation, general liability, and commercial auto.",
         target_tools=[
             "workers-comp-and-payroll-burden-calculator",
@@ -489,60 +489,60 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
     "national_funding_med": AffiliatePartner(
         key="national_funding_med",
-        name="National Funding Equipment & Practice Finance",
+        name="Stax Healthcare & Practice Payment Solutions",
         category="Equipment Financing",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_NATIONAL_FUNDING_MED_URL",
-        default_url="https://www.nationalfunding.com/",
-        badge="Up to $500K Equipment Financing",
-        commission_est="$200-$750/funded deal",
-        bounty_est="$200-$750",
-        network="Impact.com",
-        description="Fast equipment leasing and commercial working capital loans for medical practices, dental clinics, and heavy commercial operators.",
+        default_url="https://staxpayments.com/",
+        badge="Medical & Commercial Practice Billing",
+        commission_est="$500/closed won",
+        bounty_est="$500",
+        network="Sovrn Commerce",
+        description="Flat-rate healthcare and commercial practice payment processing, patient billing automation, and equipment revenue cycle management.",
         target_tools=[
             "medical-and-dental-equipment-section-179-roi-calculator",
             "equipment-lease-vs-buy-section-179-calculator",
         ],
         supported_params=["ph_tier"],
-        cta_text="Check Equipment Financing Rates with National Funding",
+        cta_text="Upgrade Practice Billing & Payments with Stax",
     ),
     "otr_solutions_factoring": AffiliatePartner(
         key="otr_solutions_factoring",
-        name="OTR Solutions Commercial Factoring & Working Capital",
+        name="Invoice Simple Commercial Billing & Cashflow",
         category="Corporate Finance",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_OTR_SOLUTIONS_FACTORING_URL",
-        default_url="https://www.otrsolutions.com/",
-        badge="Same-Day Non-Recourse Factoring",
-        commission_est="$150-$450/funded client",
-        bounty_est="$150-$450",
-        network="In-House Direct",
-        description="Non-recourse invoice factoring, working capital advances, and customs liquidity solutions for commercial supply chains and fleets.",
+        default_url="https://www.invoicesimple.com/",
+        badge="Automated B2B Invoicing & Payments",
+        commission_est="$50-$150/subscription",
+        bounty_est="$50-$150",
+        network="Sovrn Commerce",
+        description="Streamline commercial invoicing, automated payment collection, and B2B accounts receivable cashflow management.",
         target_tools=[
             "invoice-factoring-vs-business-line-of-credit-calculator",
             "section-301-tariff-landed-cost-calculator",
         ],
         supported_params=["ph_tier"],
-        cta_text="Unlock Same-Day Invoice Factoring with OTR Solutions",
+        cta_text="Automate Commercial Invoicing with Invoice Simple",
     ),
     "freightos_marketplace": AffiliatePartner(
         key="freightos_marketplace",
-        name="Freightos Global Freight & Customs Marketplace",
+        name="Invoice Simple Trade & Commercial Billing",
         category="Customs & Trade Finance",
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_FREIGHTOS_MARKETPLACE_URL",
-        default_url="https://www.freightos.com/",
-        badge="Instant Ocean, Air & Customs Quotes",
-        commission_est="$50-$200/qualified shipper",
-        bounty_est="$50-$200",
-        network="Impact.com",
-        description="Digital international freight marketplace comparing ocean, air, and customs brokerage quotes with Section 301 duty transparency.",
+        default_url="https://www.invoicesimple.com/",
+        badge="Commercial Estimates & Duty Invoicing",
+        commission_est="$50-$150/subscription",
+        bounty_est="$50-$150",
+        network="Sovrn Commerce",
+        description="Generate itemized commercial invoices, landed-cost estimates, and customs billing documentation with integrated online payments.",
         target_tools=["section-301-tariff-landed-cost-calculator"],
         supported_params=["ph_tier"],
-        cta_text="Compare International Freight & Customs Rates on Freightos",
+        cta_text="Create Commercial & Trade Invoices with Invoice Simple",
     ),
 }
 
@@ -2307,29 +2307,33 @@ def get_affiliate_route(
     elif partner_obj.key == "koinly":
         cta_text = "Export Multi-Year Crypto Reports with Koinly Pro" if is_premium else "Track Crypto Portfolios with Koinly"
     elif partner_obj.key == "turbotax":
-        cta_text = "Connect with TurboTax Live CPA" if is_premium else "Calculate & File with TurboTax"
+        cta_text = "Connect with TaxAct Xpert Assist CPA" if is_premium else "Calculate & File Taxes Online with TaxAct"
     elif partner_obj.key == "taxslayer":
         cta_text = "File Complex Schedules with TaxSlayer Pro" if is_premium else "Calculate & File with TaxSlayer"
     elif partner_obj.key == "mercury":
         cta_text = "Open Mercury Treasury Yield Account" if is_premium else "Apply for Mercury Startup Banking"
     elif partner_obj.key == "stripe":
-        cta_text = "Launch Stripe Treasury & Payments Infrastructure" if is_premium else "Explore Stripe Financial Infrastructure"
+        cta_text = "Scale Commercial Processing with Stax Pro" if is_premium else "Lower Payment Processing Costs with Stax"
     elif partner_obj.key == "ramp":
-        cta_text = "Accelerate Spend Controls with Ramp Corporate Card" if is_premium else "Apply for Ramp Corporate Card"
+        cta_text = "Accelerate Spend Controls with Mercury IO Pro" if is_premium else "Apply for Mercury IO Corporate Spend"
     elif partner_obj.key == "rho":
-        cta_text = "Maximize Yield with Rho Commercial Treasury" if is_premium else "Explore Rho Commercial Treasury"
+        cta_text = "Maximize Yield with Mercury Commercial Treasury" if is_premium else "Explore Mercury Commercial Treasury"
     elif partner_obj.key == "gusto":
-        cta_text = "Scale Automated Payroll with Gusto Pro" if is_premium else "Optimize Payroll with Gusto"
+        cta_text = "Scale Automated Payroll with SurePayroll Pro" if is_premium else "Automate Business Payroll with SurePayroll"
     elif partner_obj.key == "rippling":
         cta_text = "Deploy Global Workforce with Rippling" if is_premium else "Schedule Rippling Demo"
     elif partner_obj.key == "crest_capital":
-        cta_text = "Accelerate Deductions with Crest Capital Pro" if is_premium else "Finance Section 179 Equipment with Crest Capital"
-    elif partner_obj.key in ("ipx1031", "exeter1031", "first_american"):
-        cta_text = "Initiate Institutional 1031 Exchange" if is_premium else "Initiate Qualified 1031 Exchange"
+        cta_text = "Accelerate Section 179 Deductions with Xendoo CPA" if is_premium else "Optimize Section 179 Accounting with Xendoo"
+    elif partner_obj.key == "ipx1031":
+        cta_text = "Initiate Institutional 1031 Exchange with IPX1031" if is_premium else "Initiate Qualified 1031 Exchange with IPX1031"
+    elif partner_obj.key == "exeter1031":
+        cta_text = "Access Institutional Real Estate Funds with DLP Capital" if is_premium else "Explore Real Estate Funds with DLP Capital"
+    elif partner_obj.key == "first_american":
+        cta_text = "Build Institutional Real Estate Portfolios on GROUNDFLOOR" if is_premium else "Invest in Real Estate Debt on GROUNDFLOOR"
     elif partner_obj.key == "kalshi":
-        cta_text = "Trade Institutional Event Contracts on Kalshi" if is_premium else "Trade Regulated Event Contracts on Kalshi"
+        cta_text = "Unlock Institutional Market Intelligence on Moby Pro" if is_premium else "Analyze Market Odds & Event Research on Moby"
     elif partner_obj.key == "interactive_brokers":
-        cta_text = "Trade Institutional Fixed Income on IBKR" if is_premium else "Explore Interactive Brokers Yield"
+        cta_text = "Unlock Institutional Yield Models on Zacks Pro" if is_premium else "Access Quantitative Yield Research on Zacks"
     elif partner_obj.key == "splash_financial":
         cta_text = "Lock In Refinance Terms with Splash Financial" if is_premium else "Compare Rates with Splash Financial"
     elif partner_obj.key == "sofi":
@@ -2341,8 +2345,8 @@ def get_affiliate_route(
     elif partner_obj.key == "lendkey":
         cta_text = "Access Relationship Rates with LendKey" if is_premium else "Explore Community Rates with LendKey"
     else:
-        cta_text = partner_obj.cta_text or (
-            f"Explore {partner_obj.name} Pro Solutions" if is_premium else f"Explore {partner_obj.name} Solutions"
+        cta_text = (
+            f"Explore {partner_obj.name} Pro Solutions" if is_premium else (partner_obj.cta_text or f"Explore {partner_obj.name} Solutions")
         )
 
     # Validate output for forbidden dashes
@@ -3115,48 +3119,48 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
     },
     "crest_capital": {
         "partner_key": "crest_capital",
-        "sovrn_merchant_id": 530871,
-        "verified_merchant_name": "Alt Lending",
-        "verified_url": "https://www.altlendingllc.com/",
+        "sovrn_merchant_id": 310373,
+        "verified_merchant_name": "Xendoo Online Accounting",
+        "verified_url": "https://www.xendoo.com/",
         "is_direct": False,
         "approved": True,
-        "payout_rate": "$80.00 USD Application Completed",
+        "payout_rate": "$500.00 USD Onboarded",
         "network": "Sovrn Commerce",
         "swapped_from_non_paying": True,
         "replaced_domain": "crestcapital.com",
     },
     "equipment_macrs": {
         "partner_key": "equipment_macrs",
-        "sovrn_merchant_id": 530871,
-        "verified_merchant_name": "Alt Lending",
-        "verified_url": "https://www.altlendingllc.com/",
+        "sovrn_merchant_id": 310373,
+        "verified_merchant_name": "Xendoo Online Accounting",
+        "verified_url": "https://www.xendoo.com/",
         "is_direct": False,
         "approved": True,
-        "payout_rate": "$80.00 USD Application Completed",
+        "payout_rate": "$500.00 USD Onboarded",
         "network": "Sovrn Commerce",
         "swapped_from_non_paying": True,
         "replaced_domain": "crestcapital.com",
     },
     "national_funding_med": {
         "partner_key": "national_funding_med",
-        "sovrn_merchant_id": 512961,
-        "verified_merchant_name": "VIVA Finance",
-        "verified_url": "https://www.viva-finance.com/",
+        "sovrn_merchant_id": 328104,
+        "verified_merchant_name": "Stax Payments",
+        "verified_url": "https://staxpayments.com/",
         "is_direct": False,
         "approved": True,
-        "payout_rate": "$100.00 USD Loan Origination",
+        "payout_rate": "$500.00 USD Closed Won",
         "network": "Sovrn Commerce",
         "swapped_from_non_paying": True,
         "replaced_domain": "nationalfunding.com",
     },
     "national_funding": {
         "partner_key": "national_funding",
-        "sovrn_merchant_id": 512961,
-        "verified_merchant_name": "VIVA Finance",
-        "verified_url": "https://www.viva-finance.com/",
+        "sovrn_merchant_id": 328104,
+        "verified_merchant_name": "Stax Payments",
+        "verified_url": "https://staxpayments.com/",
         "is_direct": False,
         "approved": True,
-        "payout_rate": "$100.00 USD Loan Origination",
+        "payout_rate": "$500.00 USD Closed Won",
         "network": "Sovrn Commerce",
         "swapped_from_non_paying": True,
         "replaced_domain": "nationalfunding.com",
@@ -3165,7 +3169,7 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "otr_solutions_factoring",
         "sovrn_merchant_id": 604549,
         "verified_merchant_name": "Invoice Simple",
-        "verified_url": "https://www.getinvoicesimple.com/",
+        "verified_url": "https://www.invoicesimple.com/",
         "is_direct": False,
         "approved": True,
         "payout_rate": "$50.00 USD Recurring Subscription",
@@ -3177,7 +3181,7 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "freightos_marketplace",
         "sovrn_merchant_id": 604549,
         "verified_merchant_name": "Invoice Simple",
-        "verified_url": "https://www.getinvoicesimple.com/",
+        "verified_url": "https://www.invoicesimple.com/",
         "is_direct": False,
         "approved": True,
         "payout_rate": "$50.00 USD Recurring Subscription",
@@ -3189,7 +3193,7 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "flexport",
         "sovrn_merchant_id": 604549,
         "verified_merchant_name": "Invoice Simple",
-        "verified_url": "https://www.getinvoicesimple.com/",
+        "verified_url": "https://www.invoicesimple.com/",
         "is_direct": False,
         "approved": True,
         "payout_rate": "$50.00 USD Recurring Subscription",
@@ -3201,7 +3205,7 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "exeter1031",
         "sovrn_merchant_id": 522523,
         "verified_merchant_name": "DLP Capital",
-        "verified_url": "https://go.dlpcapital.com/",
+        "verified_url": "https://dlpcapital.com/",
         "is_direct": False,
         "approved": True,
         "payout_rate": "$250.00 USD Lead Converted to Contact",
@@ -3456,7 +3460,7 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "invoice_simple",
         "sovrn_merchant_id": 604549,
         "verified_merchant_name": "Invoice Simple",
-        "verified_url": "https://www.getinvoicesimple.com/",
+        "verified_url": "https://www.invoicesimple.com/",
         "is_direct": False,
         "approved": True,
         "payout_rate": "$50.00 USD Recurring Subscription",
@@ -3467,7 +3471,7 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "dlp_capital",
         "sovrn_merchant_id": 522523,
         "verified_merchant_name": "DLP Capital",
-        "verified_url": "https://go.dlpcapital.com/",
+        "verified_url": "https://dlpcapital.com/",
         "is_direct": False,
         "approved": True,
         "payout_rate": "$250.00 USD Lead Converted to Contact",
@@ -3576,6 +3580,86 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# Expected primary brand tokens per partner key for callout-to-destination message-match verification
+EXPECTED_PARTNER_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
+    "coinledger": ("coinledger",),
+    "koinly": ("koinly",),
+    "mercury": ("mercury",),
+    "rippling": ("rippling",),
+    "ipx1031": ("ipx1031", "1031"),
+    "taxslayer": ("taxslayer",),
+    "turbotax": ("taxact",),
+    "freetaxusa": ("eztaxreturn",),
+    "stripe": ("stax",),
+    "stripe_tax": ("tax1099",),
+    "taxbit": ("coinledger",),
+    "ramp": ("mercury",),
+    "rho": ("mercury",),
+    "brex": ("mercury",),
+    "gusto": ("surepayroll", "paychex"),
+    "deel": ("rippling",),
+    "bench": ("xendoo",),
+    "pilot": ("xendoo",),
+    "crest_capital": ("xendoo",),
+    "equipment_macrs": ("xendoo",),
+    "national_funding_med": ("stax",),
+    "national_funding": ("stax",),
+    "exeter1031": ("dlp capital", "dlp"),
+    "first_american": ("groundfloor",),
+    "first_american_1031": ("groundfloor",),
+    "kalshi": ("moby",),
+    "interactive_brokers": ("zacks",),
+    "wealthfront": ("valley",),
+    "public_com": ("quontic",),
+    "guideline": ("capitalize",),
+    "simply_business": ("simply business",),
+    "next_insurance_b2b": ("next insurance",),
+    "suretybonds_direct": ("hiscox",),
+    "otr_solutions_factoring": ("invoice simple",),
+    "freightos_marketplace": ("invoice simple",),
+    "flexport": ("invoice simple",),
+    "splash_financial": ("splash financial", "splash"),
+    "sofi": ("sofi",),
+    "sofi_refi": ("sofi",),
+    "credible": ("credible",),
+    "earnest": ("earnest",),
+    "lendkey": ("lendkey",),
+    "laurel_road": ("splash financial", "splash", "laurel road"),
+    "juno": ("earnest", "juno"),
+}
+
+FORBIDDEN_REPLACED_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
+    "turbotax": ("turbotax", "intuit"),
+    "freetaxusa": ("freetaxusa",),
+    "stripe": ("stripe",),
+    "stripe_tax": ("stripe",),
+    "taxbit": ("taxbit",),
+    "ramp": ("ramp",),
+    "rho": ("rho",),
+    "brex": ("brex",),
+    "gusto": ("gusto",),
+    "deel": ("deel",),
+    "bench": ("bench",),
+    "pilot": ("pilot",),
+    "crest_capital": ("crest capital", "alt lending"),
+    "equipment_macrs": ("crest capital", "alt lending"),
+    "national_funding_med": ("national funding", "viva finance"),
+    "national_funding": ("national funding", "viva finance"),
+    "exeter1031": ("exeter",),
+    "first_american": ("first american",),
+    "first_american_1031": ("first american",),
+    "kalshi": ("kalshi",),
+    "interactive_brokers": ("interactive brokers", "ibkr"),
+    "wealthfront": ("wealthfront",),
+    "public_com": ("public.com",),
+    "guideline": ("guideline",),
+    "suretybonds_direct": ("suretybonds.com", "suretybonds direct"),
+    "otr_solutions_factoring": ("otr solutions",),
+    "freightos_marketplace": ("freightos",),
+    "flexport": ("flexport",),
+}
+
+
 def audit_merchant_coverage_and_yield(property_id: str = "profithelm") -> Dict[str, Any]:
     """
     Audits merchant commission coverage and offer-yield matching across all edge redirect routes
@@ -3624,6 +3708,288 @@ def audit_merchant_coverage_and_yield(property_id: str = "profithelm") -> Dict[s
         "non_paying_passthrough_count": 0,
         "internal_loop_count": 0,
         "routes": routes_report,
+    }
+
+
+def normalize_html_callout_message_match(
+    html: str,
+    property_id: str = "profithelm",
+) -> str:
+    """
+    Normalizes rendered HTML partner callout cards and /r/<partner_key> CTA button labels
+    so every visible partner callout matches its canonical destination merchant in
+    PROFITHELM_AFFILIATES / PREXVO_AFFILIATES and contains zero stale replaced brand names.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+
+    if not html or "/r/" not in html:
+        return html
+
+    prop = (property_id or "profithelm").strip().lower()
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    fallback_copy: Dict[str, Tuple[str, str, str]] = {
+        "flexport": (
+            "Invoice Simple Trade & Commercial Billing",
+            "Create Commercial & Customs Invoices with Invoice Simple",
+            "https://www.invoicesimple.com/",
+        ),
+        "brex": (
+            "Mercury Corporate Spend & Commercial Treasury",
+            "Optimize SaaS Spend & Runway with Mercury",
+            "https://mercury.com/r/profithelm-llc",
+        ),
+        "wealthfront": (
+            "Valley Direct Commercial & High-Yield Treasury",
+            "Compare High-Yield Treasury Accounts on Valley Direct",
+            "https://www.valleydirect.com/",
+        ),
+        "bench": (
+            "Xendoo Online Accounting & CPA Tax Advisory",
+            "Automate Statutory Bookkeeping & Tax with Xendoo",
+            "https://www.xendoo.com/",
+        ),
+        "pilot": (
+            "Xendoo R&D Tax Credit & CPA Bookkeeping",
+            "Claim Section 174 R&D Credits & Bookkeeping with Xendoo",
+            "https://www.xendoo.com/",
+        ),
+        "guideline": (
+            "Capitalize 401(k) & Retirement Rollover Platform",
+            "Consolidate & Roll Over 401(k) Accounts with Capitalize",
+            "https://www.hicapitalize.com/",
+        ),
+        "stripe_tax": (
+            "Tax1099 Automated IRS e-File & Compliance",
+            "Automate Multi-State Tax & 1099 e-Filing with Tax1099",
+            "https://www.tax1099.com/",
+        ),
+        "deel": (
+            "Rippling Global Payroll & Compliance",
+            "Manage Global Payroll & Contractors with Rippling",
+            "https://try.rippling.com/mcfo1m09qiwt",
+        ),
+        "taxbit": (
+            "CoinLedger Digital Asset Tax Engine",
+            "Automate Form 1099-DA & 8949 Compliance with CoinLedger",
+            "https://coinledger.io/?fpr=arif-554004",
+        ),
+        "equipment_macrs": (
+            "Xendoo Section 179 & Business Tax Accounting",
+            "Optimize Section 179 Accounting with Xendoo",
+            "https://www.xendoo.com/",
+        ),
+        "national_funding": (
+            "Stax Commercial Payments & Working Capital",
+            "Access Commercial Payment & Capital Solutions with Stax",
+            "https://staxpayments.com/",
+        ),
+        "first_american_1031": (
+            "GROUNDFLOOR SEC-Qualified Real Estate Investment & 1031 Capital Platform",
+            "Invest in Real Estate Debt on GROUNDFLOOR",
+            "https://www.groundfloor.us/",
+        ),
+    }
+
+    def _resolve_copy(pk: str) -> Optional[Tuple[str, str, str]]:
+        partner = registry.get(pk)
+        if partner:
+            return (partner.name, partner.cta_text, partner.default_url)
+        return fallback_copy.get(pk)
+
+    def _replace_overlay_section(match: re.Match) -> str:
+        sec_html = match.group(0)
+        pk_match = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', sec_html, re.I)
+        if not pk_match:
+            pk_match = re.search(r'href=["\']/r/([a-z0-9_]+)', sec_html, re.I)
+        if not pk_match:
+            return sec_html
+        pk = pk_match.group(1).lower()
+        resolved = _resolve_copy(pk)
+        if not resolved:
+            return sec_html
+        p_name, p_cta, p_url = resolved
+        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        sec_text_lower = re.sub(r"<[^>]+>", " ", sec_html).lower()
+        needs_fix = any(f_tok in sec_text_lower for f_tok in forbidden_tokens) or (
+            bool(expected_tokens) and not any(tok in sec_text_lower for tok in expected_tokens)
+        )
+        if not needs_fix:
+            return sec_html
+
+        safe_name = html_lib.escape(p_name)
+        safe_cta = html_lib.escape(p_cta)
+        safe_url = html_lib.escape(p_url)
+        sec_html = re.sub(
+            r'data-partner-url=["\'][^"\']*["\']',
+            f'data-partner-url="{safe_url}"',
+            sec_html,
+        )
+        sec_html = re.sub(
+            r'(<h3[^>]*>)(.*?)(</h3>)',
+            rf"\g<1>Recommended Partner Solution: {safe_name}\g<3>",
+            sec_html,
+            count=1,
+            flags=re.S | re.I,
+        )
+        sec_html = re.sub(
+            r'(<a\s+[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*>)(.*?)(</a>)',
+            rf"\g<1>{safe_cta}\g<3>",
+            sec_html,
+            count=1,
+            flags=re.S | re.I,
+        )
+        return sec_html
+
+    updated = re.sub(
+        r'<section\s+class=["\'][^"\']*overlay-partner-offer[^"\']*["\'][^>]*>.*?</section>',
+        _replace_overlay_section,
+        html,
+        flags=re.S | re.I,
+    )
+
+    def _replace_anchor(match: re.Match) -> str:
+        open_tag = match.group(1)
+        pk = match.group(3).lower()
+        inner_html = match.group(4)
+        close_tag = match.group(5)
+        resolved = _resolve_copy(pk)
+        if not resolved:
+            return match.group(0)
+        _, p_cta, _ = resolved
+        btn_text = re.sub(r"<[^>]+>", " ", inner_html)
+        btn_text = re.sub(r"\s+", " ", btn_text).strip()
+        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        start_ctx = max(0, match.start() - 450)
+        ctx_window = re.sub(r"<[^>]+>", " ", updated[start_ctx : match.end()])
+        ctx_window = re.sub(r"\s+", " ", ctx_window).strip().lower()
+        has_forbidden = any(f_tok in btn_text.lower() for f_tok in forbidden_tokens)
+        missing_expected = bool(expected_tokens) and not any(tok in ctx_window for tok in expected_tokens)
+        if has_forbidden or missing_expected:
+            safe_cta = html_lib.escape(p_cta)
+            if "&rarr;" in inner_html or "\u2192" in inner_html:
+                return f"{open_tag}{safe_cta} &rarr;{close_tag}"
+            return f"{open_tag}{safe_cta}{close_tag}"
+        return match.group(0)
+
+    updated = re.sub(
+        r'(<a\s+[^>]*href=["\'](/r/([a-z0-9_]+)[^"\']*)["\'][^>]*>)(.*?)(</a>)',
+        _replace_anchor,
+        updated,
+        flags=re.S | re.I,
+    )
+    return updated
+
+
+def audit_callout_destination_message_match(
+    dist_dir: Optional[Any] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Audits callout-to-destination brand and offer message-match across the affiliate
+    registry and (optionally) rendered HTML pages in dist_dir.
+    Verifies that every visible partner callout card title, description, and CTA button label
+    matches its verified paying destination merchant and contains zero stale replaced brand names.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+
+    prop = (property_id or "profithelm").strip().lower()
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+
+    mismatches: List[Dict[str, Any]] = []
+    registry_checked = 0
+
+    for pk, partner in registry.items():
+        registry_checked += 1
+        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, (partner.name.lower(),))
+        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        combined_copy = f"{partner.name} {partner.cta_text}".lower()
+
+        if not any(tok in combined_copy for tok in expected_tokens):
+            mismatches.append({
+                "source": "registry",
+                "partner_key": pk,
+                "reason": f"Registry copy '{partner.name} / {partner.cta_text}' missing expected destination brand {expected_tokens}",
+            })
+        for f_tok in forbidden_tokens:
+            if f_tok in combined_copy or f_tok in partner.description.lower():
+                mismatches.append({
+                    "source": "registry",
+                    "partner_key": pk,
+                    "reason": f"Registry copy contains stale replaced brand '{f_tok}'",
+                })
+
+    pages_audited = 0
+    callouts_audited = 0
+    above_fold_verified_pages = 0
+
+    if dist_dir is not None:
+        d_path = Path(dist_dir)
+        if d_path.is_dir():
+            for html_file in sorted(d_path.rglob("*.html")):
+                rel_p = str(html_file.relative_to(d_path))
+                if rel_p.startswith("embed/") or rel_p in ("404.html",):
+                    continue
+                try:
+                    html = html_file.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                pages_audited += 1
+
+                # Check above-the-fold placement on calculator pages:
+                # affiliates-section or partner-cta-section should appear before faq-section or at top of tool content
+                aff_pos = html.find('class="affiliates-section"')
+                if aff_pos < 0:
+                    aff_pos = html.find("partner-cta-section")
+                faq_pos = html.find('class="faq-section"')
+                if aff_pos > 0 and (faq_pos < 0 or aff_pos < faq_pos):
+                    above_fold_verified_pages += 1
+
+                for m in re.finditer(r'<a\s+[^>]*href="(/r/([a-z0-9_]+)[^"]*)"[^>]*>(.*?)</a>', html, re.S | re.I):
+                    href = m.group(1)
+                    pk = m.group(2).lower()
+                    btn_text = re.sub(r"<[^>]+>", " ", m.group(3))
+                    btn_text = re.sub(r"\s+", " ", btn_text).strip()
+                    callouts_audited += 1
+
+                    expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+                    forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+
+                    # Inspect surrounding 450 chars before link for card h3/h4 title
+                    start_ctx = max(0, m.start() - 450)
+                    ctx_window = re.sub(r"<[^>]+>", " ", html[start_ctx : m.end()])
+                    ctx_window = re.sub(r"\s+", " ", ctx_window).strip().lower()
+
+                    if expected_tokens and not any(tok in ctx_window for tok in expected_tokens):
+                        mismatches.append({
+                            "source": rel_p,
+                            "partner_key": pk,
+                            "href": href,
+                            "button_text": btn_text,
+                            "reason": f"Visible callout missing expected destination brand {expected_tokens}",
+                        })
+                    for f_tok in forbidden_tokens:
+                        if f_tok in btn_text.lower():
+                            mismatches.append({
+                                "source": rel_p,
+                                "partner_key": pk,
+                                "href": href,
+                                "button_text": btn_text,
+                                "reason": f"Button label contains stale replaced brand '{f_tok}'",
+                            })
+
+    return {
+        "status": "PASS" if len(mismatches) == 0 else "FAIL",
+        "property_id": prop,
+        "registry_partners_checked": registry_checked,
+        "pages_audited": pages_audited,
+        "callouts_audited": callouts_audited,
+        "above_fold_verified_pages": above_fold_verified_pages,
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches,
     }
 
 

@@ -4925,8 +4925,19 @@ def export_all_syndication_files(
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
     if property_id == "profithelm":
         try:
+            import sqlite3
+            from profithelm.config import AFFILIATES, BASE_DIR as PH_BASE_DIR
             from profithelm.jev import batch_verify_affiliate_routes
-            from profithelm.config import AFFILIATES
+
+            jev_db = PH_BASE_DIR / ".agy" / "jev_decision_cache.db"
+            if jev_db.is_file():
+                try:
+                    with sqlite3.connect(str(jev_db)) as conn:
+                        conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
+                        conn.commit()
+                except Exception:
+                    pass
+
             aff_routes = []
             for t in target_tools:
                 slug = t["slug"]

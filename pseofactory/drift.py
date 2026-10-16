@@ -230,22 +230,27 @@ def detect_engine_drift(
     requires_recompile = True so unattended cron/systemd executions recompile all pages.
     """
     s_path = Path(state_file)
-    current_hash = compute_engine_hash(include_paths=include_paths, base_dirs=base_dirs)
-
     recorded_hash: Optional[str] = None
+    recorded_base_dirs: Optional[List[str]] = None
     if s_path.exists():
         try:
             from pseofactory.supervisor import AtomicStateLedger
             data = AtomicStateLedger.load_json(s_path)
             if isinstance(data, dict):
                 recorded_hash = data.get("engine_hash")
+                raw_bdirs = data.get("base_dirs")
+                if isinstance(raw_bdirs, list) and all(isinstance(x, str) and Path(x).exists() for x in raw_bdirs):
+                    recorded_base_dirs = raw_bdirs
         except Exception:
             recorded_hash = None
+
+    effective_base_dirs = base_dirs if (base_dirs is not None or include_paths is not None) else recorded_base_dirs
+    current_hash = compute_engine_hash(include_paths=include_paths, base_dirs=effective_base_dirs)
 
     drift_detected = (recorded_hash != current_hash)
 
     if auto_record and drift_detected:
-        record_engine_hash(s_path, hash_value=current_hash)
+        record_engine_hash(s_path, hash_value=current_hash, include_paths=include_paths, base_dirs=effective_base_dirs)
 
     return {
         "status": "DRIFT" if drift_detected else "ALIGNED",
@@ -274,11 +279,13 @@ def record_engine_hash(
     substrate_hash = compute_engine_hash()
     _ENGINE_HASH_CACHE.clear()
     try:
-        payload = {
+        payload: Dict[str, Any] = {
             "engine_hash": final_hash,
             "substrate_hash": substrate_hash,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if base_dirs:
+            payload["base_dirs"] = [str(Path(b).resolve()) for b in base_dirs]
         AtomicStateLedger.save_json(s_path, payload)
     except Exception as ex:
         print(f"Warning: Failed to persist engine hash: {ex}")

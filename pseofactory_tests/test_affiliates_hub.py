@@ -94,7 +94,7 @@ def test_direct_high_bounty_partner_resolution():
     route_ramp = hub.get_route("profithelm", partner_key="ramp")
     assert route_ramp["property_id"] == "profithelm"
     assert route_ramp["partner"] == "ramp"
-    assert "ramp.com" in route_ramp["url"]
+    assert "mercury.com" in route_ramp["url"]
 
     # Prexvo direct partner via slug
     route_px = hub.get_route("prexvo", "student-loan-repayment-calculator")
@@ -627,7 +627,9 @@ def test_edge_redirect_generation_profithelm_and_prexvo():
     assert 'defaultUrl: "https://mercury.com/r/profithelm-llc"' in ph_js
     assert 'defaultUrl: "https://www.taxact.com/"' in ph_js
     assert 'defaultUrl: "https://www.surepayroll.com/"' in ph_js
-    assert 'defaultUrl: "https://www.altlendingllc.com/"' in ph_js
+    assert 'defaultUrl: "https://www.xendoo.com/"' in ph_js
+    assert 'defaultUrl: "https://www.invoicesimple.com/"' in ph_js
+    assert 'defaultUrl: "https://dlpcapital.com/"' in ph_js
     assert 'defaultUrl: "https://www.moby.co/"' in ph_js
 
     px_js = generate_edge_redirect_function("prexvo")
@@ -639,4 +641,19 @@ def test_edge_redirect_generation_profithelm_and_prexvo():
     assert 'defaultUrl: "https://www.sofi.com/refinance-student-loan/"' in px_js
     assert 'status: "live"' in px_js
     assert 'status: "pending_p2"' not in px_js
+
+
+def test_callout_destination_message_match_audit():
+    """Verifies that every ProfitHelm and Prexvo partner card title, description, and CTA button matches its destination merchant."""
+    from pseofactory.affiliates import audit_callout_destination_message_match
+
+    hub = MonetizationHub()
+    ph_match = hub.audit_callout_message_match(property_id="profithelm")
+    assert ph_match == audit_callout_destination_message_match(property_id="profithelm")
+    assert ph_match["status"] == "PASS", f"ProfitHelm message-match mismatches: {ph_match['mismatches']}"
+    assert ph_match["mismatch_count"] == 0
+
+    px_match = hub.audit_callout_message_match(property_id="prexvo")
+    assert px_match["status"] == "PASS", f"Prexvo message-match mismatches: {px_match['mismatches']}"
+    assert px_match["mismatch_count"] == 0
 

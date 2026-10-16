@@ -49,6 +49,7 @@ from pseofactory.affiliates import (
     qualify_monetization_opportunity,
     SOVRN_VERIFIED_PAYING_MERCHANTS,
     audit_merchant_coverage_and_yield,
+    audit_callout_destination_message_match,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -1382,5 +1383,16 @@ class MonetizationHub:
         and zero circular internal redirects.
         """
         return audit_merchant_coverage_and_yield()
+
+    def audit_callout_message_match(
+        self,
+        dist_dir: Optional[Any] = None,
+        property_id: str = "profithelm",
+    ) -> Dict[str, Any]:
+        """
+        Audits callout-to-destination brand and offer message-match across the affiliate
+        registry and rendered HTML pages.
+        """
+        return audit_callout_destination_message_match(dist_dir=dist_dir, property_id=property_id)
 
 

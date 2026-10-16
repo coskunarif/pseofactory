@@ -580,7 +580,7 @@ def _resolve_partner_offer_and_manual_gate(
         "kalshi": {
             "name": "Moby Investment Research & Market Intelligence",
             "url": "/r/kalshi",
-            "cta_text": "Analyze Market Odds & Research Alpha with Moby",
+            "cta_text": "Analyze Market Odds & Event Research on Moby",
         },
         "taxslayer": {
             "name": "TaxSlayer Online Tax Filing",
@@ -588,54 +588,54 @@ def _resolve_partner_offer_and_manual_gate(
             "cta_text": "File Federal & State Tax Brackets Online with TaxSlayer",
         },
         "flexport": {
-            "name": "Flexport Global Customs & Freight",
-            "url": "https://www.flexport.com/",
-            "cta_text": "Model Landed Cost & Customs Duties with Flexport",
+            "name": "Invoice Simple Trade & Commercial Billing",
+            "url": "/r/flexport",
+            "cta_text": "Create Commercial & Customs Invoices with Invoice Simple",
         },
         "brex": {
-            "name": "Brex Corporate Card & Treasury",
-            "url": "https://www.brex.com/",
-            "cta_text": "Optimize SaaS Spend & Runway with Brex",
+            "name": "Mercury Corporate Spend & Commercial Treasury",
+            "url": "/r/brex",
+            "cta_text": "Optimize SaaS Spend & Runway with Mercury",
         },
         "ramp": {
-            "name": "Ramp Corporate Spend Platform",
-            "url": "https://ramp.com/",
-            "cta_text": "Explore Ramp Corporate Spend Platform for Statutory Modeling",
+            "name": "Mercury IO Corporate Card & Spend Control",
+            "url": "/r/ramp",
+            "cta_text": "Apply for Mercury IO Corporate Spend Control",
         },
         "wealthfront": {
-            "name": "Wealthfront Automated Treasury Cash",
-            "url": "https://www.wealthfront.com/",
-            "cta_text": "Compare Treasury Yield Accounts on Wealthfront",
+            "name": "Valley Direct Commercial & High-Yield Treasury",
+            "url": "/r/wealthfront",
+            "cta_text": "Compare High-Yield Treasury Accounts on Valley Direct",
         },
         "bench": {
-            "name": "Bench Bookkeeping & Tax Advisory",
-            "url": "https://www.bench.co/",
-            "cta_text": "Automate Statutory Bookkeeping with Bench",
+            "name": "Xendoo Online Accounting & CPA Tax Advisory",
+            "url": "/r/bench",
+            "cta_text": "Automate Statutory Bookkeeping & Tax with Xendoo",
         },
         "pilot": {
-            "name": "Pilot R&D Tax Credit & Bookkeeping",
-            "url": "https://pilot.com/",
-            "cta_text": "Claim Section 174 R&D Credits with Pilot",
+            "name": "Xendoo R&D Tax Credit & CPA Bookkeeping",
+            "url": "/r/pilot",
+            "cta_text": "Claim Section 174 R&D Credits & Bookkeeping with Xendoo",
         },
         "guideline": {
-            "name": "Guideline 401(k) Retirement Platform",
-            "url": "https://www.guideline.com/",
-            "cta_text": "Model Small Business 401(k) Plans with Guideline",
+            "name": "Capitalize 401(k) & Retirement Rollover Platform",
+            "url": "/r/guideline",
+            "cta_text": "Consolidate & Roll Over 401(k) Accounts with Capitalize",
         },
         "stripe_tax": {
-            "name": "Stripe Tax Automated Nexus Compliance",
-            "url": "https://stripe.com/tax",
-            "cta_text": "Automate Multi-State Economic Nexus with Stripe Tax",
+            "name": "Tax1099 Automated IRS e-File & Compliance",
+            "url": "/r/stripe_tax",
+            "cta_text": "Automate Multi-State Tax & 1099 e-Filing with Tax1099",
         },
         "deel": {
-            "name": "Deel Global Payroll & Compliance",
-            "url": "https://www.deel.com/",
-            "cta_text": "Manage Global Payroll & Contractors with Deel",
+            "name": "Rippling Global Payroll & Compliance",
+            "url": "/r/deel",
+            "cta_text": "Manage Global Payroll & Contractors with Rippling",
         },
         "taxbit": {
-            "name": "TaxBit Digital Asset Tax Engine",
-            "url": "https://taxbit.com/",
-            "cta_text": "Automate Form 1099-DA Compliance with TaxBit",
+            "name": "CoinLedger Digital Asset Tax Engine",
+            "url": "/r/taxbit",
+            "cta_text": "Automate Form 1099-DA & 8949 Compliance with CoinLedger",
         },
         "sofi_refi": {
             "name": "SoFi Student Loan Refinancing",
@@ -643,14 +643,14 @@ def _resolve_partner_offer_and_manual_gate(
             "cta_text": "Compare Rates with SoFi Student Loan Refinancing",
         },
         "laurel_road": {
-            "name": "Laurel Road Healthcare & Professional Refinancing",
-            "url": "https://www.laurelroad.com/",
-            "cta_text": "Compare Healthcare Refinance Rates with Laurel Road",
+            "name": "Splash Financial Healthcare & Professional Refinancing",
+            "url": "https://www.splashfinancial.com/",
+            "cta_text": "Compare Healthcare Refinance Rates with Splash Financial",
         },
         "juno": {
-            "name": "Juno Group Negotiated Student Loan Rates",
-            "url": "https://joinjuno.com/",
-            "cta_text": "Check Group Negotiated Refinance Rates on Juno",
+            "name": "Earnest Precision Student Loan Refinancing",
+            "url": "https://www.earnest.com/",
+            "cta_text": "Compare Precision Refinance Rates with Earnest",
         },
     }
 
@@ -3148,6 +3148,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             html = html.replace("</body>", f"{overlay_markup}\n</body>", 1)
         else:
             html = f"{html}\n{overlay_markup}"
+
+    try:
+        from pseofactory.affiliates import normalize_html_callout_message_match
+        prop_for_norm = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "profithelm")
+        html = normalize_html_callout_message_match(html, property_id=prop_for_norm)
+    except Exception:
+        pass
 
     return _strip_forbidden_dashes(html)
 
