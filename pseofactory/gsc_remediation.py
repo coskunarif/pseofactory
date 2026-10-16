@@ -2952,25 +2952,41 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             )
             injected_sections.append(partner_section_markup)
     elif isinstance(p_offer, dict) and overlay_data.get("commercial_offers_allowed", True) is not False:
-        p_key = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_key") or "ramp")))
-        p_name = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("partner_name") or "Featured Partner")))
-        raw_p_url = str(p_offer.get("url") or "https://ramp.com/").strip()
-        prop_id = html_lib.escape(
-            _strip_forbidden_dashes(str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "profithelm"))
-        )
+        raw_p_key = _strip_forbidden_dashes(str(p_offer.get("partner_key") or "ramp")).strip()
+        p_key = html_lib.escape(raw_p_key)
+        raw_prop_id = _strip_forbidden_dashes(
+            str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "profithelm")
+        ).strip()
+        prop_id = html_lib.escape(raw_prop_id)
+        raw_p_name = _strip_forbidden_dashes(str(p_offer.get("partner_name") or "Featured Partner")).strip()
+        raw_p_cta = _strip_forbidden_dashes(str(p_offer.get("cta_text") or f"Explore {raw_p_name}")).strip()
+        raw_p_url = str(p_offer.get("url") or "https://mercury.com/r/profithelm-llc").strip()
+        try:
+            from pseofactory.affiliates import FORBIDDEN_REPLACED_BRAND_TOKENS, get_tenant_affiliates
+            tenant_affs = get_tenant_affiliates(raw_prop_id.lower())
+            canonical_aff = tenant_affs.get(raw_p_key) or {}
+            forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(raw_p_key, [])
+            combined_offer_text = f"{raw_p_name} {raw_p_cta}".lower()
+            if canonical_aff and any(tok in combined_offer_text for tok in forbidden_tokens):
+                raw_p_name = _strip_forbidden_dashes(str(canonical_aff.get("name") or raw_p_name)).strip()
+                raw_p_cta = _strip_forbidden_dashes(str(canonical_aff.get("cta_text") or raw_p_cta)).strip()
+                raw_p_url = str(canonical_aff.get("default_url") or raw_p_url).strip()
+        except Exception:
+            pass
+        p_name = html_lib.escape(raw_p_name)
         _has_direct_token = any(
             tok in raw_p_url
             for tok in ("fpr=", "via=", "try.rippling.com", "mercury.com/r/", "utm_source=", "redirect.viglink.com")
         ) or raw_p_url.startswith("/r/")
-        if prop_id.lower() in ("profithelm", "prexvo") and not _has_direct_token:
-            p_url = html_lib.escape(str(p_offer.get("redirect_path") or f"/r/{p_key}"))
+        if raw_prop_id.lower() in ("profithelm", "prexvo") and not _has_direct_token:
+            p_url = html_lib.escape(str(p_offer.get("redirect_path") or f"/r/{raw_p_key}"))
         else:
             p_url = html_lib.escape(raw_p_url)
-        p_cta = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_text") or f"Explore {p_name}")))
+        p_cta = html_lib.escape(raw_p_cta)
         p_slot = html_lib.escape(_strip_forbidden_dashes(str(p_offer.get("cta_slot") or "overlay_primary_cta")))
         p_cta_id = html_lib.escape(
             _strip_forbidden_dashes(
-                str(p_offer.get("cta_id") or f"cta-{overlay_data.get('tenant_id', 'profithelm')}-{overlay_data.get('slug', 'tool')}-{p_key}")
+                str(p_offer.get("cta_id") or f"cta-{overlay_data.get('tenant_id', 'profithelm')}-{overlay_data.get('slug', 'tool')}-{raw_p_key}")
             )
         )
         p_yield = f"{float(p_offer.get('yield_score', 0.0) or 0.0):.2f}"

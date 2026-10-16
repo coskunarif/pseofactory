@@ -553,9 +553,9 @@ def _render_compiler_monetization_and_guardrail_html(
             route = get_affiliate_route("profithelm", "section-179-deduction-calculator", partner_key="crest_capital")
 
         partner_key = route.get("partner_key", "crest_capital")
-        partner_name = route.get("partner_name", "Crest Capital")
-        cta_text = route.get("cta_text", "Calculate Section 179 Equipment Financing Rates")
-        raw_url = route.get("url", "https://www.crestcapital.com/tax_deduction_calculator")
+        partner_name = route.get("partner_name", "Xendoo Section 179 & Business Tax Accounting")
+        cta_text = route.get("cta_text", "Optimize Section 179 Accounting with Xendoo")
+        raw_url = route.get("url", "https://www.xendoo.com/")
         url = raw_url if route.get("status") in ("live", "active_direct") else f"/r/{partner_key}"
         rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
         ftc_disc = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")

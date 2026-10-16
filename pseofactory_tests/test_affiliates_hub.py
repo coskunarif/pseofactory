@@ -643,9 +643,12 @@ def test_edge_redirect_generation_profithelm_and_prexvo():
     assert 'status: "pending_p2"' not in px_js
 
 
-def test_callout_destination_message_match_audit():
+def test_callout_destination_message_match_audit(tmp_path):
     """Verifies that every ProfitHelm and Prexvo partner card title, description, and CTA button matches its destination merchant."""
-    from pseofactory.affiliates import audit_callout_destination_message_match
+    from pseofactory.affiliates import (
+        audit_callout_destination_message_match,
+        normalize_html_callout_message_match,
+    )
 
     hub = MonetizationHub()
     ph_match = hub.audit_callout_message_match(property_id="profithelm")
@@ -656,4 +659,36 @@ def test_callout_destination_message_match_audit():
     px_match = hub.audit_callout_message_match(property_id="prexvo")
     assert px_match["status"] == "PASS", f"Prexvo message-match mismatches: {px_match['mismatches']}"
     assert px_match["mismatch_count"] == 0
+
+    # Negative check: stale replaced brand copy inside rendered HTML must fail closed until normalized
+    stale_html = """<!DOCTYPE html>
+<html><body>
+  <div class="calculator-grid">Calculator</div>
+  <section class="affiliates-section">
+    <div class="card">
+      <h3>Crest Capital Equipment Financing</h3>
+      <a href="/r/crest_capital" class="btn-cta">Finance Section 179 Equipment with Crest Capital</a>
+    </div>
+  </section>
+  <section class="faq-section">FAQ</section>
+</body></html>"""
+    sample_page = tmp_path / "tools" / "section-179-calculator" / "index.html"
+    sample_page.parent.mkdir(parents=True, exist_ok=True)
+    sample_page.write_text(stale_html, encoding="utf-8")
+
+    fail_audit = audit_callout_destination_message_match(dist_dir=str(tmp_path), property_id="profithelm")
+    assert fail_audit["status"] == "FAIL"
+    assert fail_audit["mismatch_count"] >= 1
+    assert fail_audit["above_fold_verified_pages"] == 1
+
+    repaired_html = normalize_html_callout_message_match(stale_html, property_id="profithelm")
+    assert "Xendoo" in repaired_html
+    assert "Crest Capital" not in repaired_html
+    sample_page.write_text(repaired_html, encoding="utf-8")
+
+    pass_audit = audit_callout_destination_message_match(dist_dir=str(tmp_path), property_id="profithelm")
+    assert pass_audit["status"] == "PASS"
+    assert pass_audit["mismatch_count"] == 0
+    assert pass_audit["above_fold_verified_pages"] == 1
+
 

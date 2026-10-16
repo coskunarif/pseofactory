@@ -876,7 +876,10 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         if not factory_script.is_file():
             factory_script = self._repo_path / "scripts" / "run_factory.sh"
 
-        if factory_script.is_file():
+        has_local_builder = (self._repo_path / self._property_id / "builder.py").is_file()
+        is_prod_tenant_repo = str(self._repo_path.resolve()).startswith("/home/ubuntuadmin/projects/")
+
+        if factory_script.is_file() and not (has_local_builder and is_prod_tenant_repo):
             cmd = ["bash", str(factory_script), "--target", slug]
             try:
                 env = os.environ.copy()

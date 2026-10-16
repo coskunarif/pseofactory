@@ -3849,6 +3849,29 @@ def normalize_html_callout_message_match(
         flags=re.S | re.I,
     )
 
+    def _replace_card_heading(match: re.Match) -> str:
+        h_open = match.group(1)
+        h_text = match.group(2)
+        h_close = match.group(3)
+        between = match.group(4)
+        href_attr = match.group(5)
+        pk = match.group(6).lower()
+        resolved = _resolve_copy(pk)
+        if not resolved:
+            return match.group(0)
+        p_name, _, _ = resolved
+        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        if any(f_tok in h_text.lower() for f_tok in forbidden_tokens):
+            return f"{h_open}{html_lib.escape(p_name)}{h_close}{between}{href_attr}"
+        return match.group(0)
+
+    updated = re.sub(
+        r'(<h[34][^>]*>)([^<]*)(</h[34]>)((?:(?!</a>).){0,400}?)(href=["\']/r/([a-z0-9_]+))',
+        _replace_card_heading,
+        updated,
+        flags=re.S | re.I,
+    )
+
     def _replace_anchor(match: re.Match) -> str:
         open_tag = match.group(1)
         pk = match.group(3).lower()
@@ -3858,10 +3881,10 @@ def normalize_html_callout_message_match(
         if not resolved:
             return match.group(0)
         _, p_cta, _ = resolved
+        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         btn_text = re.sub(r"<[^>]+>", " ", inner_html)
         btn_text = re.sub(r"\s+", " ", btn_text).strip()
-        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
-        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         start_ctx = max(0, match.start() - 450)
         ctx_window = re.sub(r"<[^>]+>", " ", updated[start_ctx : match.end()])
         ctx_window = re.sub(r"\s+", " ", ctx_window).strip().lower()
@@ -3940,11 +3963,15 @@ def audit_callout_destination_message_match(
                 pages_audited += 1
 
                 # Check above-the-fold placement on calculator pages:
-                # affiliates-section or partner-cta-section should appear before faq-section or at top of tool content
-                aff_pos = html.find('class="affiliates-section"')
-                if aff_pos < 0:
-                    aff_pos = html.find("partner-cta-section")
+                # partner callout section should appear before faq-section/related-tools-section or immediately after calculator
+                aff_pos = -1
+                for sec_cls in ("affiliates-section", "affiliate-section", "partner-cta-section", "refinance-partner-section", "partners-section"):
+                    idx = html.find(sec_cls)
+                    if idx > 0 and (aff_pos < 0 or idx < aff_pos):
+                        aff_pos = idx
                 faq_pos = html.find('class="faq-section"')
+                if faq_pos < 0:
+                    faq_pos = html.find('class="related-tools-section"')
                 if aff_pos > 0 and (faq_pos < 0 or aff_pos < faq_pos):
                     above_fold_verified_pages += 1
 
