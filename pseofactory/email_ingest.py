@@ -823,6 +823,54 @@ class EmailIngestionEngine:
                 )
                 continue
 
+            if msg.mailbox != "Sent" and "rho.co" in sender_lower and "thank you for confirming" in body_lower:
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="rho",
+                        partner_name="Rho Commercial Banking & Treasury",
+                        category="CORPORATE_SPEND",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary="Rho Client Service (Hawk, Inbox #989) confirmed receipt of ProfitHelm LLC's Rho Partner Portal submission under ticket [P6E9MZ-W3N0M].",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=["Awaiting Rho Partnerships team review and referral tracking link"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.rho.co/partners",
+                        network="In-House Direct",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and "partner of sofi" in body_lower:
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="prexvo",
+                        partner_key="sofi",
+                        partner_name="SoFi",
+                        category="STUDENT_LOAN_REFINANCE",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary="Application submitted to SoFi via Impact.com (#11190, Inbox #988). Awaiting partner review and tracking link issuance.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=["Pending Impact.com vendor review for SoFi (#11190)"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://app.impact.com/campaign-promo-signup/SoFi.brand",
+                        network="Impact.com",
+                    )
+                )
+                continue
+
             # 0b. ERGO NEXT Insurance Affiliate Application (Impact.com digest)
             if msg.mailbox != "Sent" and (
                 "ergo next insurance" in combined_text or "next insurance" in body_lower

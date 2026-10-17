@@ -1071,9 +1071,9 @@ def test_latest_himalaya_correspondence_classification_otr_ergo_next_rippling():
 
 def test_suretybonds_and_ibkr_publisher_email_classifications():
     """
-    Verifies that inbound SuretyBonds.com confirmation emails (Inbox #987) and
-    outbound Interactive Brokers CPC Publisher Program emails (Sent #252) classify
-    cleanly as APPLICATION_SUBMITTED.
+    Verifies that inbound SuretyBonds.com (#987), SoFi Impact (#988), and Rho confirmation (#989)
+    emails alongside outbound Interactive Brokers CPC Publisher Program emails (Sent #252)
+    classify cleanly as APPLICATION_SUBMITTED.
     """
     engine = EmailIngestionEngine()
     messages = [
@@ -1087,6 +1087,28 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
             sender_name="Customer Care",
             sender_email="customercare@suretybonds.com",
             body_snippet="Thank you for contacting SuretyBonds.com! We have received your message and will respond as soon as possible.",
+        ),
+        EmailMessage(
+            id="988",
+            message_id="msg-988",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-17T06:01:44Z",
+            subject="Updates Digest",
+            sender_name="The Gusto Affiliate Team",
+            sender_email="notifications@app.impact.com",
+            body_snippet="Thank you for applying to be a partner of SoFi. Your application will be reviewed shortly.",
+        ),
+        EmailMessage(
+            id="989",
+            message_id="msg-989",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-17T06:09:44Z",
+            subject="[Rho] Re: Re: [Rho] Re: ProfitHelm LLC - Rho Affiliate & Referral Partner Program Inquiry [M92K76-GN1J4]",
+            sender_name="Rho Client Service",
+            sender_email="clientservice@rho.co",
+            body_snippet="Hey Arif, Thank you for confirming! Please let us know if we can assist you with anything else. Sincerely, Hawk",
         ),
         EmailMessage(
             id="sent-252",
@@ -1103,12 +1125,23 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
     ]
 
     classifications = engine.classify_partner_emails(messages)
-    assert len(classifications) == 2
+    assert len(classifications) == 4
 
     sb_c = next(c for c in classifications if c.partner_key == "suretybonds_direct")
     assert sb_c.classification_type == "APPLICATION_SUBMITTED"
     assert sb_c.requires_operator_decision is False
 
+    sofi_c = next(c for c in classifications if c.partner_key == "sofi")
+    assert sofi_c.property_id == "prexvo"
+    assert sofi_c.classification_type == "APPLICATION_SUBMITTED"
+    assert sofi_c.requires_operator_decision is False
+
+    rho_c = next(c for c in classifications if c.partner_key == "rho")
+    assert rho_c.property_id == "profithelm"
+    assert rho_c.classification_type == "APPLICATION_SUBMITTED"
+    assert rho_c.requires_operator_decision is False
+
     ib_c = next(c for c in classifications if c.partner_key == "interactive_brokers")
     assert ib_c.classification_type == "APPLICATION_SUBMITTED"
     assert ib_c.requires_operator_decision is False
+
