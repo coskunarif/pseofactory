@@ -304,6 +304,7 @@ class EmailIngestionEngine:
             "turbotax", "taxslayer", "kalshi", "interactive", "crest", "ipx1031",
             "partner", "affiliate", "startups", "prexvo", "ecosystem-governance@shopify.com",
             "otrsolutions", "otr solutions", "next insurance", "ergo next", "rho.co",
+            "suretybonds", "interactivebrokers",
         ]
 
         for env in envelopes:
@@ -361,10 +362,13 @@ class EmailIngestionEngine:
                 "exeterco.com",
                 "firstam.com",
                 "splashfinancial.com",
+                "interactivebrokers.com",
+                "suretybonds.com",
             )
             skipped_sent_recipients = (
                 "partnerships@rho.co",
                 "advisory@studentloaninquiry.org",
+                "wade.fenton@otrsolutions.com",
             )
             sent_envelopes = self.fetch_zoho_envelopes(mailbox="Sent", page_size=20, force=True)
             for env in sent_envelopes:
@@ -627,6 +631,8 @@ class EmailIngestionEngine:
             "ask@exeterco.com": ("profithelm", "exeter1031", "The Exeter 1031 Exchange", "In-House Direct"),
             "1031@firstam.com": ("profithelm", "first_american", "First American Exchange Company", "In-House Direct"),
             "contact@splashfinancial.com": ("prexvo", "splash_financial", "Splash Financial", "Impact.com"),
+            "publishers@interactivebrokers.com": ("profithelm", "interactive_brokers", "Interactive Brokers CPC Publisher Program", "In-House Direct"),
+            "customercare@suretybonds.com": ("profithelm", "suretybonds_direct", "SuretyBonds.com", "In-House Direct"),
         }
 
         for msg in messages:
@@ -788,6 +794,30 @@ class EmailIngestionEngine:
                         sender_email=msg.sender_email,
                         date=msg.date,
                         candidate_url=cand_url or "https://otrsolutions.com/become-a-partner/",
+                        network="In-House Direct",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and "suretybonds.com" in sender_lower:
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="suretybonds_direct",
+                        partner_name="SuretyBonds.com",
+                        category="COMMERCIAL_SURETY",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary="SuretyBonds.com Customer Care confirmed receipt of partnership inquiry (Inbox #987); awaiting agency referral tracking URL.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=["Awaiting SuretyBonds.com partnership desk tracking link"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.suretybonds.com/",
                         network="In-House Direct",
                     )
                 )

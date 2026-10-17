@@ -1068,3 +1068,47 @@ def test_latest_himalaya_correspondence_classification_otr_ergo_next_rippling():
     assert rip_c.requires_operator_decision is False
     assert rip_c.candidate_url == "https://try.rippling.com/mcfo1m09qiwt"
 
+
+def test_suretybonds_and_ibkr_publisher_email_classifications():
+    """
+    Verifies that inbound SuretyBonds.com confirmation emails (Inbox #987) and
+    outbound Interactive Brokers CPC Publisher Program emails (Sent #252) classify
+    cleanly as APPLICATION_SUBMITTED.
+    """
+    engine = EmailIngestionEngine()
+    messages = [
+        EmailMessage(
+            id="987",
+            message_id="msg-987",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-17T05:56:24Z",
+            subject="Re: ProfitHelm LLC - Contractor Surety Bond Referral Partnership Inquiry",
+            sender_name="Customer Care",
+            sender_email="customercare@suretybonds.com",
+            body_snippet="Thank you for contacting SuretyBonds.com! We have received your message and will respond as soon as possible.",
+        ),
+        EmailMessage(
+            id="sent-252",
+            message_id="msg-sent-252",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-16T22:56:15-07:00",
+            subject="ProfitHelm LLC - IBKR CPC Publisher & Affiliate Program Application",
+            sender_name="Arif Coskun",
+            sender_email="publishers@interactivebrokers.com",
+            body_snippet="ProfitHelm LLC - IBKR CPC Publisher & Affiliate Program Application",
+            raw_headers={"to_email": "publishers@interactivebrokers.com"},
+        ),
+    ]
+
+    classifications = engine.classify_partner_emails(messages)
+    assert len(classifications) == 2
+
+    sb_c = next(c for c in classifications if c.partner_key == "suretybonds_direct")
+    assert sb_c.classification_type == "APPLICATION_SUBMITTED"
+    assert sb_c.requires_operator_decision is False
+
+    ib_c = next(c for c in classifications if c.partner_key == "interactive_brokers")
+    assert ib_c.classification_type == "APPLICATION_SUBMITTED"
+    assert ib_c.requires_operator_decision is False
