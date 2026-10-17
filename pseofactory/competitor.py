@@ -1885,7 +1885,7 @@ def _resolve_vertical_competitor_content(
             (
                 "Tier 3: Specialized Compliance, Jurisdiction & Asset Spokes",
                 [
-                    ("1031-exchange-rules-arizona", "Multi-State 1031 Exchange & Clawback Compliance Calculator"),
+                    ("tcja-sunset-capital-gains", "TCJA Sunset & Long-Term Capital Gains Tax Calculator"),
                     ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
                     ("crypto-tax-calculator", "Digital Asset Form 8949 & Rev. Proc. 2024-28 Tax Calculator"),
                 ],

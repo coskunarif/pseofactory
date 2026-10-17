@@ -3978,6 +3978,7 @@ class RetroReflectionEngine:
             or 'href="#calculator-workspace-anchor"' in html_content
             or "student-loan-interest-subsidy-calculator" in html_content
             or "california-1031-exchange-clawback-ftb-3840-calculator" in html_content
+            or "/tools/1031-exchange-rules-arizona/" in html_content
         ):
             missing.append("three_tier_topic_cluster_nav")
 

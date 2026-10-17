@@ -1780,6 +1780,24 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                     seen_lower.add(eq.lower())
             merged_ov["grouped_queries"] = existing_gq
 
+        existing_hub_links = merged_ov.get("hub_links")
+        if isinstance(existing_hub_links, list) and existing_hub_links:
+            has_stale_clone_link = any(
+                isinstance(link_item, dict)
+                and any(
+                    f"/{dead_slug}/" in str(link_item.get("href") or "")
+                    for dead_slug in (set(CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | slugs_to_purge)
+                )
+                for link_item in existing_hub_links
+            )
+            if has_stale_clone_link:
+                from pseofactory.gsc_remediation import _resolve_contextual_internal_links
+                merged_ov["hub_links"] = _resolve_contextual_internal_links(
+                    slug=slug,
+                    tenant_id=prop,
+                    query=str(merged_ov.get("query") or merged_ov.get("target_query") or slug),
+                )
+
         serialized = json.dumps(merged_ov, indent=2, ensure_ascii=False) + "\n"
         for target_f in (agy_f, cnt_f):
             old_txt = target_f.read_text(encoding="utf-8") if target_f.is_file() else ""

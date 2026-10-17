@@ -398,3 +398,70 @@ def test_drift_qualification_signature_and_tenant_topical_reconciliation(tmp_pat
     assert redirects["/tools/ca-tax-brackets-2026/"] == "/tools/irs-2027-tax-brackets/california/"
     assert redirects["/shopify-profit-tracker"] == "/tools/"
     assert redirects["/tools/landed-cost-calculator/"] == "/tools/section-301-tariff-landed-cost-calculator/"
+
+
+def test_competitor_cluster_and_overlay_hub_links_scrub_retired_clones(tmp_path):
+    from pseofactory.competitor import render_competitor_winning_pattern_blocks
+    from pseofactory.gsc_remediation import inject_overlay_into_html
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    blocks = render_competitor_winning_pattern_blocks(
+        slug="irs-2027-tax-brackets",
+        title="2027 IRS Tax Brackets & TCJA Sunset Calculator",
+        property_id="profithelm",
+        canonical_base="https://profithelm.com",
+        statutory_authority="IRC Section 1(j)",
+        economic_dataset="IRS Rev. Proc. 2025-32",
+    )
+    assert "/tools/1031-exchange-rules-arizona/" not in blocks["three_tier_cluster_html"]
+    assert "/tools/tcja-sunset-capital-gains/" in blocks["three_tier_cluster_html"]
+
+    stale_cluster_html = (
+        '<nav data-mechanic="on_this_page_jump_nav"></nav>'
+        '<section data-mechanic="three_tier_topic_cluster_nav">'
+        '<a href="https://profithelm.com/tools/1031-exchange-rules-arizona/">Stale</a>'
+        '</section>'
+    )
+    missing = RetroReflectionEngine.audit_html_mechanics(stale_cluster_html)
+    assert "three_tier_topic_cluster_nav" in missing
+
+    # Verify overlay hub_links reconciliation and HTML re-injection replace stale clone links
+    (tmp_path / "profithelm" / "data").mkdir(parents=True)
+    (tmp_path / ".agy" / "overlays").mkdir(parents=True)
+    (tmp_path / "content" / "overlays").mkdir(parents=True)
+    (tmp_path / "profithelm" / "data" / "dynamic_tools.json").write_text("[]", encoding="utf-8")
+    stale_overlay = {
+        "slug": "section-1031-calculator",
+        "query": "section 1031 calculator",
+        "h2_headings": ["Section 1031 Rules"],
+        "hub_links": [
+            {"href": "/tools/1031-exchange-rules-arizona/", "anchor": "AZ 1031 Rules"},
+            {"href": "/tools/irs-capital-gains-statutory-tax/", "anchor": "Statutory Capital Gains"},
+        ],
+    }
+    (tmp_path / ".agy" / "overlays" / "section-1031-calculator.json").write_text(
+        json.dumps(stale_overlay), encoding="utf-8"
+    )
+    qual_mod.reconcile_tenant_topical_authority_and_cannibalization(
+        repo_root=tmp_path,
+        property_id="profithelm",
+    )
+    refreshed_ov = json.loads(
+        (tmp_path / ".agy" / "overlays" / "section-1031-calculator.json").read_text(encoding="utf-8")
+    )
+    refreshed_hrefs = {item["href"] for item in refreshed_ov["hub_links"]}
+    assert "/tools/1031-exchange-rules-arizona/" not in refreshed_hrefs
+    assert "/tools/irs-capital-gains-statutory-tax/" not in refreshed_hrefs
+    assert "/tools/tcja-sunset-capital-gains/" in refreshed_hrefs
+
+    html_with_stale_overlay = (
+        "<html><body><main>"
+        '<div id="gsc-striking-overlay" class="gsc-overlay-container">'
+        '<section class="overlay-section overlay-hub-links">'
+        '<a href="/tools/1031-exchange-rules-arizona/">AZ 1031 Rules</a>'
+        "</section></div></main></body></html>"
+    )
+    reinjected_html = inject_overlay_into_html(html_with_stale_overlay, refreshed_ov)
+    assert "/tools/1031-exchange-rules-arizona/" not in reinjected_html
+    assert "/tools/tcja-sunset-capital-gains/" in reinjected_html
+

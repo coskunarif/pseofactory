@@ -3285,8 +3285,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     count=1,
                     flags=re.DOTALL | re.IGNORECASE,
                 )
-            if hub_links_markup and 'class="overlay-section overlay-hub-links"' not in html:
-                incremental_parts.append(hub_links_markup)
+            if hub_links_markup:
+                if 'class="overlay-section overlay-hub-links"' in html:
+                    html = re.sub(
+                        r'<section\s+class=["\']overlay-section\s+overlay-hub-links[^>]*>.*?</section>',
+                        hub_links_markup,
+                        html,
+                        count=1,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+                else:
+                    incremental_parts.append(hub_links_markup)
             if partner_section_markup:
                 if 'class="overlay-section overlay-partner-offer' in html:
                     html = re.sub(
