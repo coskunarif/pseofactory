@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-17T06:12:00+00:00",
+    "updated_at": "2026-10-17T07:42:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -33,7 +33,7 @@
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
-      "pending_advertiser_contracts": 2
+      "pending_advertiser_contracts": 13
     }
   },
   "sub_affiliate_master": {
@@ -137,18 +137,25 @@
           "provider": "Impact.com Publisher REST API",
           "account_id": "7932737",
           "submitted_campaigns": [
-            "gusto (#15154)",
-            "kalshi (#37770)",
-            "simply_business (#49719)",
-            "next_insurance_b2b (#14516 / ERGO NEXT)",
-            "national_funding_med (#15709)",
-            "splash_financial (#9516)",
-            "credible (#3874)",
-            "sofi (#11190)"
+            "gusto (#15154 - Inbox #967)",
+            "next_insurance_b2b (#14516 / ERGO NEXT - Inbox #982)",
+            "sofi (#11190 / #8084 - Inbox #988, pendAdvContracts=2)",
+            "kalshi (#37770 - pendAdvContracts 2->3)",
+            "national_funding_med (#15709 / IO 400810 - pendAdvContracts 3->4)",
+            "splash_financial (#9516 - pendAdvContracts 4->5)",
+            "credible (#3874 / IO 25024 - pendAdvContracts 5->6)",
+            "invoice_simple (#24994 / IO 325053 - pendAdvContracts 6->7)",
+            "lendkey (#3276 / IO 20978 - pendAdvContracts 7->8)",
+            "surepayroll (#16532 / IO 153438 - pendAdvContracts 8->9)",
+            "stax (#15236 / IO 126473 - pendAdvContracts 9->10)",
+            "groundfloor (#11975 / IO 84162 - pendAdvContracts 10->11)",
+            "zacks (#39258 / IO 332588 - pendAdvContracts 11->12)",
+            "dlp_capital (#20525 / IO 191764 - pendAdvContracts 12->13)",
+            "simply_business (#49719 / IO 368837 - Sent #260 & Zendesk Ticket #6270665 in Inbox #990)"
           ],
           "role": "Programmatic contract status polling and Insertion Order verification",
           "member_id": "8871615",
-          "platform_approval_state": "PENDING (Branded Account 3161796 under Gusto #15154 review; pendAdvContracts=2)",
+          "platform_approval_state": "PENDING (Branded Account 3161796 under Gusto #15154 review; pendAdvContracts=13 across Account 7932737 / Member 8871615)",
           "discovered_promo_signup_campaigns": [
             "sofi (#11190 - https://app.impact.com/campaign-promo-signup/SoFi.brand)",
             "lendkey (#3276 - https://app.impact.com/campaign-promo-signup/LendKey.brand)",
@@ -208,7 +215,7 @@
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
           "bounty": "$35-$90",
-          "correspondence_status": "Approved & Live"
+          "correspondence_status": "Approved & Live (FirstPromoter token fpr=arif-554004 verified active via /r/coinledger -> https://coinledger.io/?fpr=arif-554004)"
         },
         "koinly": {
           "status": "live",
@@ -220,7 +227,7 @@
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
           "bounty": "$40-$100",
-          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner)"
+          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?via=A4FABF09&utm_source=affiliate)"
         },
         "rippling": {
           "status": "live",
@@ -245,7 +252,7 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$250-$750",
-          "correspondence_status": "Active Direct Referral Route"
+          "correspondence_status": "Active Direct Referral Route & Partnership Inquiry Sent (Live UTM route /r/ipx1031 -> https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator + formal referral partnership inquiry Sent #259 to info@ipx1031.com on 2026-10-17T07:39Z)"
         },
         "mercury": {
           "status": "live",
@@ -256,7 +263,7 @@
           "category": "STARTUP_BANKING",
           "network": "PartnerStack / In-House",
           "bounty": "$250",
-          "correspondence_status": "Approved & Live (Customer referral link https://mercury.com/r/profithelm-llc extracted from app.mercury.com + Mercury Partnerships form submitted 2026-10-14; $250 bonus on $10K deposit within 90 days)"
+          "correspondence_status": "Approved & Live (Customer referral link https://mercury.com/r/profithelm-llc extracted from app.mercury.com + Mercury Partnerships form submitted 2026-10-14 per Inbox #978 & Sent #236; $250 bonus on $10K deposit within 90 days)"
         },
         "rho": {
           "status": "awaiting_response",
@@ -296,7 +303,7 @@
           "network": "Impact.com",
           "campaign_id": "15154",
           "bounty": "$300",
-          "correspondence_status": "Application Submitted (Impact.com Account 7932737, Campaign #15154; In Review; Verified Insertion Order Payout: $300.00 USD per Sale)",
+          "correspondence_status": "Application Submitted & Confirmed by Email (Inbox #967 on 2026-10-12T17:17Z from notifications@app.impact.com confirming Gusto Campaign #15154 application on Impact Account 7932737 / Branded Account 3161796; Verified Insertion Order Payout: $300.00 USD per Sale)",
           "active_fallback_merchant": "rippling",
           "active_fallback_url": "https://try.rippling.com/mcfo1m09qiwt",
           "active_fallback_payout": "$600-$1600 via PartnerStack + Sovrn Commerce /r/gusto"
@@ -335,7 +342,7 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #243 on 2026-10-13 + follow-up nudge Sent #257 on 2026-10-16T22:56Z to ask@exeterco.com; Impact DLP Capital #20525 also discovered at https://app.impact.com/campaign-promo-signup/DLP-Capital.brand)",
+          "correspondence_status": "Application Submitted & Followed Up (Sent #243 on 2026-10-13 + follow-up nudge Sent #257 on 2026-10-16T22:56Z to ask@exeterco.com; Impact DLP Capital #20525 IO #191764 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 12 -> 13)",
           "active_fallback_merchant": "ipx1031",
           "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
           "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/exeter1031"
@@ -349,7 +356,7 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #244 on 2026-10-13 + follow-up nudge Sent #256 on 2026-10-16T22:56Z to 1031@firstam.com; Impact Groundfloor Finance #11975 also discovered at https://app.impact.com/campaign-promo-signup/Groundfloor-Finance.brand)",
+          "correspondence_status": "Application Submitted & Followed Up (Sent #244 on 2026-10-13 + follow-up nudge Sent #256 on 2026-10-16T22:56Z to 1031@firstam.com; Impact Groundfloor Finance #11975 IO #84162 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 10 -> 11)",
           "active_fallback_merchant": "ipx1031",
           "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
           "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/first_american"
@@ -389,9 +396,9 @@
           "category": "MARKET_ARBITRAGE",
           "network": "Impact.com",
           "campaign_id": "37770",
-          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Kalshi.brand",
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Kalshi.brand",
           "bounty": "$40-$150",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #37770 Kalshi verified Insertion Order payout: $40.00 USD per Trade; active Sovrn Commerce fallback via /r/kalshi)"
+          "correspondence_status": "Impact Application Confirmed in Portal (Account 7932737; Campaign #37770 Kalshi submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 2 -> 3; Insertion Order payout: $40.00 USD per Trade; active Sovrn Commerce fallback via /r/kalshi)"
         },
         "interactive_brokers": {
           "status": "awaiting_response",
@@ -402,7 +409,7 @@
           "category": "MARKET_ARBITRAGE",
           "network": "In-House Direct",
           "bounty": "$100-$200",
-          "correspondence_status": "Application Submitted (Sent #252 to publishers@interactivebrokers.com on 2026-10-16T22:56Z for IBKR CPC Publisher Program discovered at https://www.interactivebrokers.com/en/general/about/affiliate-programs.php, bypassing retail Refer-a-Friend personal KYC; Impact Zacks Investment Research #39258 also discovered at https://app.impact.com/campaign-promo-signup/Zacks-Investment-Research.brand)"
+          "correspondence_status": "Application Submitted (Sent #252 to publishers@interactivebrokers.com on 2026-10-16T22:56Z for IBKR CPC Publisher Program discovered at https://www.interactivebrokers.com/en/general/about/affiliate-programs.php, bypassing retail Refer-a-Friend personal KYC; Impact Zacks Investment Research #39258 IO #332588 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 11 -> 12)"
         },
         "simply_business": {
           "status": "awaiting_response",
@@ -413,9 +420,10 @@
           "category": "COMMERCIAL_INSURANCE",
           "network": "Impact.com",
           "campaign_id": "49719",
-          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Simply-Business.brand",
+          "applied_io_id": "368837",
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Simply-Business.brand",
           "bounty": "$30-$100",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #49719 Simply Business verified Insertion Order payout: $30.00 USD per RFQ Quoted; active Sovrn Commerce fallback via /r/simply_business)"
+          "correspondence_status": "Application Submitted & Ticket Confirmed (Impact Campaign #49719 IO #368837 e1s1 promo-signup gated by Account #7932737 PENDING marketplace state [pendAdvContracts 13 -> 13]; direct affiliate inquiry dispatched in Sent #260 to contactus@simplybusiness.com and confirmed by Simply Business Inc Zendesk in Inbox #990 on 2026-10-17T07:39Z under Ticket ID 6270665 [KVEV1K-DK9DV]; active Sovrn Commerce fallback via /r/simply_business)"
         },
         "suretybonds_direct": {
           "status": "awaiting_response",
@@ -439,7 +447,7 @@
           "campaign_id": "14516",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Next-Insurance.brand",
           "bounty": "$25-$150",
-          "correspondence_status": "Impact Marketplace Application Confirmed (Inbox #982 on 2026-10-14T23:02Z from notifications@app.impact.com confirming application to ERGO NEXT Insurance; Campaign #14516 verified Insertion Order payout: $25.00 USD per Quote; active Sovrn Commerce fallback via /r/next_insurance_b2b)",
+          "correspondence_status": "Impact Marketplace Application Confirmed by Email (Inbox #982 on 2026-10-14T23:02Z from notifications@app.impact.com confirming application to ERGO NEXT Insurance; Campaign #14516 verified Insertion Order payout: $25.00 USD per Quote; active Sovrn Commerce fallback via /r/next_insurance_b2b)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/next_insurance_b2b"
@@ -453,9 +461,10 @@
           "category": "COMMERCIAL_REAL_ESTATE",
           "network": "Impact.com",
           "campaign_id": "15709",
-          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/National-Funding.brand",
+          "applied_io_id": "400810",
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/National-Funding.brand",
           "bounty": "5% of loan amount",
-          "correspondence_status": "Impact Marketplace Application Submitted (Account 7932737; Campaign #15709 National Funding verified Insertion Order payout: 5% of Loan Amount per Loan Received; active Sovrn Commerce fallback via /r/national_funding_med)"
+          "correspondence_status": "Impact Application Confirmed in Portal (Account 7932737; Campaign #15709 National Funding IO #400810 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 3 -> 4; Insertion Order payout: 5% of Loan Amount per Loan Received; active Sovrn Commerce fallback via /r/national_funding_med)"
         },
         "otr_solutions_factoring": {
           "status": "awaiting_response",
@@ -466,7 +475,7 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z, referred by Wade Fenton per Inbox #983 & #984; awaiting referral tracking URL)",
+          "correspondence_status": "Application Submitted & Followed Up (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984; awaiting referral tracking URL)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"
@@ -480,7 +489,7 @@
           "category": "CUSTOMS_TRADE_FINANCE",
           "network": "Impact.com",
           "bounty": "$50-$200",
-          "correspondence_status": "Application Submitted (Completed partner/referral inquiry form at https://www.freightos.com/contact-us/ via https://www.freightos.com/partners/ on 2026-10-16T22:50Z; confirmed with \"Thanks for contacting us! We will get in touch with you shortly.\"; Impact Invoice Simple #24994 also discovered at https://app.impact.com/campaign-promo-signup/Invoice-Simple.brand)"
+          "correspondence_status": "Application Submitted (Completed partner/referral inquiry form at https://www.freightos.com/contact-us/ via https://www.freightos.com/partners/ on 2026-10-16T22:50Z; confirmed with \"Thanks for contacting us! We will get in touch with you shortly.\"; Impact Invoice Simple #24994 IO #325053 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 6 -> 7)"
         }
       }
     },
@@ -527,10 +536,10 @@
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "Impact.com",
           "campaign_id": "9516",
-          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Splash-Financial.brand",
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Splash-Financial.brand",
           "bounty": "$300",
           "gate_1_verified_payout": "$300.00 USD per SLR Closed Loan",
-          "correspondence_status": "Live Lending Marketplace (Impact Campaign #9516 verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; follow-up nudge Sent #258 to contact@splashfinancial.com on 2026-10-16T22:56Z; active outbound route /r/splash_financial)"
+          "correspondence_status": "Live Lending Marketplace & Impact Application Confirmed (Impact Campaign #9516 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 4 -> 5 + direct follow-up Sent #247 & #258 to contact@splashfinancial.com; verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)"
         },
         "sofi": {
           "status": "live",
@@ -542,7 +551,7 @@
           "network": "Impact.com",
           "bounty": "$120",
           "gate_1_verified_payout": "$120.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Lending Destination & Impact Application Confirmed (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190; passes Gate 1 >= $45; active outbound route /r/sofi)",
+          "correspondence_status": "Live Lending Destination & Impact Application Confirmed by Email (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737; passes Gate 1 >= $45; active outbound route /r/sofi)",
           "campaign_id": "11190",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/SoFi.brand"
         },
@@ -555,10 +564,11 @@
           "category": "STUDENT_LOAN_COMPARISON",
           "network": "Impact.com",
           "campaign_id": "3874",
-          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Credible.brand",
+          "applied_io_id": "25024",
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Credible.brand",
           "bounty": "$75-$150",
           "gate_1_verified_payout": "$75.00 USD per Closed Loan - Refinancing",
-          "correspondence_status": "Live Multi-Lender Marketplace (Impact Campaign #3874 verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)"
+          "correspondence_status": "Live Multi-Lender Marketplace & Impact Application Confirmed (Impact Campaign #3874 IO #25024 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 5 -> 6; verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)"
         },
         "earnest": {
           "status": "live",
@@ -580,11 +590,12 @@
           "direct_url": "https://www.lendkey.com/",
           "edge_route": "/r/lendkey",
           "category": "STUDENT_LOAN_REFINANCE",
-          "network": "In-House Direct",
+          "network": "Impact.com",
           "bounty": "$100-$150",
           "gate_1_verified_payout": "$100.00-$150.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace (Passes Gate 1 >= $45; Impact Campaign #3276 verified at https://app.impact.com/campaign-promo-signup/LendKey.brand; active outbound route /r/lendkey)",
+          "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace & Impact Application Confirmed (Impact Campaign #3276 IO #20978 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 7 -> 8; passes Gate 1 >= $45; active outbound route /r/lendkey)",
           "campaign_id": "3276",
+          "applied_io_id": "20978",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/LendKey.brand"
         }
       }

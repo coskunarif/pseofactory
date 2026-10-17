@@ -1122,10 +1122,33 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
             body_snippet="ProfitHelm LLC - IBKR CPC Publisher & Affiliate Program Application",
             raw_headers={"to_email": "publishers@interactivebrokers.com"},
         ),
+        EmailMessage(
+            id="sent-259",
+            message_id="msg-sent-259",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-17T00:39:05-07:00",
+            subject="ProfitHelm LLC - Section 1031 Qualified Intermediary Referral Partnership Inquiry",
+            sender_name="Arif Coskun",
+            sender_email="info@ipx1031.com",
+            body_snippet="ProfitHelm LLC - Section 1031 Qualified Intermediary Referral Partnership Inquiry",
+            raw_headers={"to_email": "info@ipx1031.com"},
+        ),
+        EmailMessage(
+            id="990",
+            message_id="msg-990",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-17T07:39:17Z",
+            subject="Simply Business Inc - We have received your request - Ticket ID 6270665",
+            sender_name="Simply Business Inc",
+            sender_email="support@simplybusinessinc.zendesk.com",
+            body_snippet="Thank you for contacting Simply Business. This email is an automated response to let you know that we have received your inquiry.",
+        ),
     ]
 
     classifications = engine.classify_partner_emails(messages)
-    assert len(classifications) == 4
+    assert len(classifications) == 6
 
     sb_c = next(c for c in classifications if c.partner_key == "suretybonds_direct")
     assert sb_c.classification_type == "APPLICATION_SUBMITTED"
@@ -1144,4 +1167,48 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
     ib_c = next(c for c in classifications if c.partner_key == "interactive_brokers")
     assert ib_c.classification_type == "APPLICATION_SUBMITTED"
     assert ib_c.requires_operator_decision is False
+
+    ipx_c = next(c for c in classifications if c.partner_key == "ipx1031")
+    assert ipx_c.property_id == "profithelm"
+    assert ipx_c.classification_type == "APPLICATION_SUBMITTED"
+
+    simp_c = next(c for c in classifications if c.partner_key == "simply_business")
+    assert simp_c.property_id == "profithelm"
+    assert simp_c.classification_type == "APPLICATION_SUBMITTED"
+    assert simp_c.network == "Impact.com"
+
+
+def test_all_partners_have_verified_external_receipt_in_vault():
+    """
+    Asserts that every partner entry in monetization_vault.json across ProfitHelm and Prexvo
+    contains a concrete external verification proof token (Inbox #, Sent #, Newsletter #,
+    pendAdvContracts, FirstPromoter token, FormAssembly, freightos.com/contact-us,
+    earnest.com/partner-sign-up, or CJ Advertiser ID) and that Impact pending_advertiser_contracts == 13.
+    """
+    vault_path = os.path.join(
+        os.path.dirname(__file__), "..", "pseofactory", "monetization_vault.json"
+    )
+    with open(vault_path, "r", encoding="utf-8") as f:
+        vault = json.load(f)
+
+    assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 13
+
+    proof_tokens = (
+        "Inbox #",
+        "Sent #",
+        "Newsletter #",
+        "pendAdvContracts",
+        "FirstPromoter token",
+        "FormAssembly",
+        "freightos.com/contact-us",
+        "earnest.com/partner-sign-up",
+        "CJ Advertiser ID",
+    )
+    for prop_id in ("profithelm", "prexvo"):
+        partners = vault["properties"][prop_id]["partners"]
+        for p_key, p_cfg in partners.items():
+            corr = p_cfg.get("correspondence_status", "")
+            assert any(tok in corr for tok in proof_tokens), (
+                f"{prop_id}.{p_key} lacks hard external receipt proof in correspondence_status: {corr}"
+            )
 

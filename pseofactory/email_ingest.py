@@ -364,6 +364,8 @@ class EmailIngestionEngine:
                 "splashfinancial.com",
                 "interactivebrokers.com",
                 "suretybonds.com",
+                "ipx1031.com",
+                "simplybusiness.com",
             )
             skipped_sent_recipients = (
                 "partnerships@rho.co",
@@ -633,6 +635,8 @@ class EmailIngestionEngine:
             "contact@splashfinancial.com": ("prexvo", "splash_financial", "Splash Financial", "Impact.com"),
             "publishers@interactivebrokers.com": ("profithelm", "interactive_brokers", "Interactive Brokers CPC Publisher Program", "In-House Direct"),
             "customercare@suretybonds.com": ("profithelm", "suretybonds_direct", "SuretyBonds.com", "In-House Direct"),
+            "info@ipx1031.com": ("profithelm", "ipx1031", "IPX1031 (Investment Property Exchange Services)", "In-House Direct"),
+            "contactus@simplybusiness.com": ("profithelm", "simply_business", "Simply Business", "Impact.com"),
         }
 
         for msg in messages:
@@ -819,6 +823,33 @@ class EmailIngestionEngine:
                         date=msg.date,
                         candidate_url="https://www.suretybonds.com/",
                         network="In-House Direct",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "simplybusinessinc.zendesk.com" in sender_lower
+                or "simply business inc" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="simply_business",
+                        partner_name="Simply Business",
+                        category="COMMERCIAL_INSURANCE",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary="Simply Business Inc Zendesk confirmed receipt of Impact Account #7932737 / Campaign #49719 affiliate application inquiry (Inbox #990, Ticket ID 6270665).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=["Awaiting Simply Business affiliate team invitation on Impact.com (#49719)"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.simplybusiness.com/",
+                        network="Impact.com",
                     )
                 )
                 continue
