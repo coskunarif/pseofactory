@@ -692,3 +692,58 @@ def test_callout_destination_message_match_audit(tmp_path):
     assert pass_audit["above_fold_verified_pages"] == 1
 
 
+def test_callout_expansion_for_prexvo_and_profithelm_approved_partners():
+    """Verifies that normalize_html_callout_message_match expands Prexvo non-restricted refinance grids to all 5 live partners and enriches ProfitHelm crypto/R&D sections with Koinly and Rippling."""
+    from pseofactory.affiliates import normalize_html_callout_message_match
+
+    prexvo_single_partner_html = """<!DOCTYPE html>
+<html><body>
+  <section class="refinance-partner-section" aria-label="Refinance Option">
+    <div class="partner-matrix-grid">
+      <div class="card">
+        <h3>Splash Financial Student Loan Refinancing</h3>
+        <a href="/r/splash_financial" class="btn-cta">Compare Rates at Splash Financial</a>
+      </div>
+    </div>
+  </section>
+</body></html>"""
+    expanded_prexvo = normalize_html_callout_message_match(prexvo_single_partner_html, property_id="prexvo")
+    for route in ("/r/splash_financial", "/r/sofi", "/r/credible", "/r/earnest", "/r/lendkey"):
+        assert route in expanded_prexvo, f"Expected {route} in expanded Prexvo callout section"
+
+    # Restricted public-service pages must never receive commercial partner cards
+    restricted_prexvo_html = prexvo_single_partner_html.replace(
+        '<section class="refinance-partner-section"',
+        '<section class="refinance-partner-section" data-restricted-public-service="true"',
+    )
+    unchanged_restricted = normalize_html_callout_message_match(restricted_prexvo_html, property_id="prexvo")
+    assert "/r/credible" not in unchanged_restricted
+    assert "/r/earnest" not in unchanged_restricted
+
+    # ProfitHelm crypto tool page with only CoinLedger should also render approved Koinly
+    profithelm_crypto_html = """<!DOCTYPE html>
+<html><head><title>Crypto Tax Form 1099-DA Calculator</title></head><body>
+  <section class="affiliates-section">
+    <div class="card">
+      <h3>CoinLedger Crypto Tax Automation</h3>
+      <a href="/r/coinledger" class="btn-cta">Generate IRS Form 8949 with CoinLedger</a>
+    </div>
+  </section>
+</body></html>"""
+    expanded_crypto = normalize_html_callout_message_match(profithelm_crypto_html, property_id="profithelm")
+    assert "/r/coinledger" in expanded_crypto
+    assert "/r/koinly" in expanded_crypto
+
+    # ProfitHelm R&D Section 174 page with only Mercury should also render approved Rippling
+    profithelm_rnd_html = """<!DOCTYPE html>
+<html><head><title>R&D Tax Credit Section 174 Amortization Calculator</title></head><body>
+  <section class="affiliates-section">
+    <div class="card">
+      <h3>Mercury Business Banking</h3>
+      <a href="/r/mercury" class="btn-cta">Open a Mercury Account</a>
+    </div>
+  </section>
+</body></html>"""
+    expanded_rnd = normalize_html_callout_message_match(profithelm_rnd_html, property_id="profithelm")
+    assert "/r/mercury" in expanded_rnd
+    assert "/r/rippling" in expanded_rnd

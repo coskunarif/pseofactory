@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-14T08:37:39.628910+00:00",
+    "updated_at": "2026-10-16T21:50:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -116,18 +116,32 @@
         "partnerstack_api_v2": {
           "provider": "PartnerStack Partnerships REST API v2",
           "endpoint": "https://api.partnerstack.com/api/v2/partnerships",
-          "active_partners": ["rippling", "mercury"],
+          "active_partners": [
+            "rippling",
+            "mercury"
+          ],
           "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling)"
         },
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
-          "active_partners": ["coinledger", "koinly"],
+          "active_partners": [
+            "coinledger",
+            "koinly"
+          ],
           "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission)"
         },
         "impact_rest_api": {
           "provider": "Impact.com Publisher REST API",
           "account_id": "7932737",
-          "submitted_campaigns": ["gusto (#15154)", "kalshi (#37770)", "simply_business (#49719)", "next_insurance_b2b (#14516 / ERGO NEXT)", "national_funding_med (#15709)", "splash_financial (#9516)", "credible (#3874)"],
+          "submitted_campaigns": [
+            "gusto (#15154)",
+            "kalshi (#37770)",
+            "simply_business (#49719)",
+            "next_insurance_b2b (#14516 / ERGO NEXT)",
+            "national_funding_med (#15709)",
+            "splash_financial (#9516)",
+            "credible (#3874)"
+          ],
           "role": "Programmatic contract status polling and Insertion Order verification"
         },
         "dub_partners_api": {
@@ -237,7 +251,10 @@
           "category": "CORPORATE_SPEND",
           "network": "In-House Direct",
           "bounty": "$500-$1000",
-          "correspondence_status": "Answered (Inbox #974 from clientservice@rho.co on 2026-10-14): Directed to Rho Partner Portal form; form submitted 2026-10-14T08:37Z, awaiting partner link"
+          "correspondence_status": "Answered (Inbox #974 from clientservice@rho.co on 2026-10-14): Directed to Rho Partner Portal form; form submitted 2026-10-14T08:37Z, awaiting partner link",
+          "active_fallback_merchant": "mercury",
+          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
+          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/rho"
         },
         "stripe": {
           "status": "requires_followup",
@@ -248,7 +265,10 @@
           "category": "B2B_PAYMENTS",
           "network": "In-House Direct",
           "bounty": "$150-$300",
-          "correspondence_status": "Answered / Gated (Inbox #971 from partner-ecosystem@stripe.com on 2026-10-12): Requires $1M+ USD annual volume and Stripe Connect integration"
+          "correspondence_status": "Answered / Gated (Inbox #971 from partner-ecosystem@stripe.com on 2026-10-12): Requires $1M+ USD annual volume and Stripe Connect integration",
+          "active_fallback_merchant": "mercury",
+          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
+          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/stripe"
         },
         "gusto": {
           "status": "awaiting_response",
@@ -260,7 +280,10 @@
           "network": "Impact.com",
           "campaign_id": "15154",
           "bounty": "$300",
-          "correspondence_status": "Application Submitted (Impact.com Account 7932737, Campaign #15154; In Review; Verified Insertion Order Payout: $300.00 USD per Sale)"
+          "correspondence_status": "Application Submitted (Impact.com Account 7932737, Campaign #15154; In Review; Verified Insertion Order Payout: $300.00 USD per Sale)",
+          "active_fallback_merchant": "rippling",
+          "active_fallback_url": "https://try.rippling.com/mcfo1m09qiwt",
+          "active_fallback_payout": "$600-$1600 via PartnerStack + Sovrn Commerce /r/gusto"
         },
         "ramp": {
           "status": "awaiting_response",
@@ -271,7 +294,10 @@
           "category": "CORPORATE_SPEND",
           "network": "In-House / PartnerStack",
           "bounty": "$500",
-          "correspondence_status": "Application Submitted (Sent #237 to hi@ramp.com on 2026-10-13 + Ramp Referral Partner portal form at ramp.com/technology-partnerships on 2026-10-14T22:04Z): Awaiting vendor reply"
+          "correspondence_status": "Application Submitted (Sent #237 to hi@ramp.com on 2026-10-13 + Ramp Referral Partner portal form at ramp.com/technology-partnerships on 2026-10-14T22:04Z): Awaiting vendor reply",
+          "active_fallback_merchant": "mercury",
+          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
+          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
         },
         "crest_capital": {
           "status": "awaiting_response",
@@ -293,7 +319,10 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted (Sent #243 to ask@exeterco.com on 2026-10-13): Awaiting vendor reply"
+          "correspondence_status": "Application Submitted (Sent #243 to ask@exeterco.com on 2026-10-13): Awaiting vendor reply",
+          "active_fallback_merchant": "ipx1031",
+          "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
+          "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/exeter1031"
         },
         "first_american": {
           "status": "awaiting_response",
@@ -304,7 +333,10 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted (Sent #244 to 1031@firstam.com on 2026-10-13): Awaiting vendor reply"
+          "correspondence_status": "Application Submitted (Sent #244 to 1031@firstam.com on 2026-10-13): Awaiting vendor reply",
+          "active_fallback_merchant": "ipx1031",
+          "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
+          "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/first_american"
         },
         "turbotax": {
           "status": "pending",
@@ -387,7 +419,10 @@
           "campaign_id": "14516",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Next-Insurance.brand",
           "bounty": "$25-$150",
-          "correspondence_status": "Impact Marketplace Application Confirmed (Inbox #982 on 2026-10-14T23:02Z from notifications@app.impact.com confirming application to ERGO NEXT Insurance; Campaign #14516 verified Insertion Order payout: $25.00 USD per Quote; active Sovrn Commerce fallback via /r/next_insurance_b2b)"
+          "correspondence_status": "Impact Marketplace Application Confirmed (Inbox #982 on 2026-10-14T23:02Z from notifications@app.impact.com confirming application to ERGO NEXT Insurance; Campaign #14516 verified Insertion Order payout: $25.00 USD per Quote; active Sovrn Commerce fallback via /r/next_insurance_b2b)",
+          "active_fallback_merchant": "mercury",
+          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
+          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/next_insurance_b2b"
         },
         "national_funding_med": {
           "status": "awaiting_response",
@@ -411,7 +446,10 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Answered (Inbox #983 & #984 from Wade Fenton <wade.fenton@otrsolutions.com>, Partnerships Team Lead, on 2026-10-15T15:09Z): Invited ProfitHelm to complete partner onboarding via https://otrsolutions.com/become-a-partner/ or schedule alignment call"
+          "correspondence_status": "Answered (Inbox #983 & #984 from Wade Fenton <wade.fenton@otrsolutions.com>, Partnerships Team Lead, on 2026-10-15T15:09Z): Invited ProfitHelm to complete partner onboarding via https://otrsolutions.com/become-a-partner/ or schedule alignment call",
+          "active_fallback_merchant": "mercury",
+          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
+          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"
         },
         "freightos_marketplace": {
           "status": "pending",

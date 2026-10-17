@@ -155,7 +155,15 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$35-$90",
         network="FirstPromoter",
         description="Automated import for 500+ exchanges, DeFi protocols, and NFT marketplaces to generate IRS Form 8949.",
-        target_tools=["crypto-tax-calculator", "prediction-market-tax"],
+        target_tools=[
+            "crypto-tax-calculator",
+            "crypto-tax-calculator-scenario-comparison-model",
+            "crypto-tax-form-1099-da-mandatory-reporting",
+            "prediction-market-tax",
+            "irs-capital-gains-statutory-tax",
+            "tcja-sunset-capital-gains",
+            "tcja-sunset-capital-gains-scenario-comparison-model",
+        ],
         supported_params=["fpr", "ph_tier"],
         cta_text="Calculate & Export Crypto Taxes with CoinLedger",
     ),
@@ -172,7 +180,12 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$40-$100",
         network="FirstPromoter",
         description="Track cryptocurrency portfolios and generate country-specific tax reports in minutes.",
-        target_tools=["crypto-tax-calculator"],
+        target_tools=[
+            "crypto-tax-calculator",
+            "crypto-tax-calculator-scenario-comparison-model",
+            "crypto-tax-form-1099-da-mandatory-reporting",
+            "prediction-market-tax",
+        ],
         supported_params=["via", "ph_tier"],
         cta_text="Track Crypto Portfolios with Koinly",
     ),
@@ -191,7 +204,14 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$250 bonus / $150-$300",
         network="In-House Direct",
         description="FDIC-insured business checking, treasury yield, and automated runway management for founders.",
-        target_tools=["saas-runway-calculator", "treasury-yield-calculator"],
+        target_tools=[
+            "saas-runway-calculator",
+            "saas-burn-multiple-benchmarks-2026",
+            "treasury-yield-calculator",
+            "r-and-d-tax-credit-section-174-amortization-calculator",
+            "s-corp-reasonable-salary-tax-calculator",
+            "invoice-factoring-vs-business-line-of-credit-calculator",
+        ],
         supported_params=["ph_tier"],
         cta_text="Apply for Mercury Startup Banking",
     ),
@@ -208,7 +228,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$500",
         network="Sovrn Commerce",
         description="All-in-one commercial payment processing, automated billing, and flat-rate merchant infrastructure for scaling SaaS platforms and B2B enterprises.",
-        target_tools=["saas-runway-calculator"],
+        target_tools=["saas-runway-calculator", "saas-burn-multiple-benchmarks-2026"],
         supported_params=["ph_tier"],
         cta_text="Lower Payment Processing Costs with Stax",
     ),
@@ -261,7 +281,11 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$100 flat",
         network="Sovrn Commerce",
         description="Automated small business and S-Corp payroll tax filing, W-2 and 1099 compliance, and same-day direct deposit backed by Paychex.",
-        target_tools=["saas-runway-calculator"],
+        target_tools=[
+            "saas-runway-calculator",
+            "s-corp-reasonable-salary-tax-calculator",
+            "workers-comp-and-payroll-burden-calculator",
+        ],
         supported_params=["ph_tier"],
         cta_text="Automate Business Payroll with SurePayroll",
     ),
@@ -278,7 +302,15 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="Up to $1600",
         network="PartnerStack",
         description="Unified HR, IT, and payroll infrastructure for scaling tech companies and distributed teams.",
-        target_tools=["saas-runway-calculator"],
+        target_tools=[
+            "saas-runway-calculator",
+            "saas-burn-multiple-benchmarks-2026",
+            "s-corp-reasonable-salary-tax-calculator",
+            "workers-comp-and-payroll-burden-calculator",
+            "r-and-d-tax-credit-section-174-amortization-calculator",
+            "section-301-tariff-landed-cost-calculator",
+            "contractor-surety-bond-cost-calculator",
+        ],
         supported_params=["ph_tier"],
         cta_text="Schedule Rippling Demo",
     ),
@@ -297,7 +329,14 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$500",
         network="Sovrn Commerce",
         description="Dedicated online bookkeeping, IRS Form 4562 Section 179 depreciation schedules, and year-round CPA tax advisory for equipment-intensive businesses.",
-        target_tools=["section-179-calculator"],
+        target_tools=[
+            "section-179-calculator",
+            "section-179-vehicle-equipment-deduction",
+            "equipment-lease-vs-buy-section-179-calculator",
+            "equipment-lease-tax-deduction",
+            "commercial-heavy-vehicle-section-179-weight-calculator",
+            "medical-and-dental-equipment-section-179-roi-calculator",
+        ],
         supported_params=["ph_tier"],
         cta_text="Optimize Section 179 Accounting with Xendoo",
     ),
@@ -314,7 +353,11 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$250-$750",
         network="In-House Direct",
         description="Nation's leading qualified intermediary backed by Fidelity National Financial with $100M bond protection.",
-        target_tools=["section-1031-calculator"],
+        target_tools=[
+            "section-1031-calculator",
+            "section-1031-calculator-scenario-comparison-model",
+            "1031-exchange-rules-arizona",
+        ],
         supported_params=["ph_tier"],
         cta_text="Initiate Qualified 1031 Exchange with IPX1031",
     ),
@@ -409,7 +452,11 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$250",
         network="Sovrn Commerce",
         description="Established U.S. institutional real estate investment firm founded in 2006 offering audited evergreen real estate funds, 1031 exchange replacement property solutions, and senior secured commercial lending.",
-        target_tools=["section-1031-calculator"],
+        target_tools=[
+            "section-1031-calculator",
+            "section-1031-calculator-scenario-comparison-model",
+            "1031-exchange-rules-arizona",
+        ],
         supported_params=["ph_tier"],
         cta_text="Explore Real Estate Funds with DLP Capital",
     ),
@@ -426,7 +473,11 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$100",
         network="Sovrn Commerce",
         description="SEC-qualified (Regulation A+) commercial real estate investment platform providing institutional-grade real estate debt notes, bridge capital, and 1031 exchange replacement financing at groundfloor.us.",
-        target_tools=["section-1031-calculator"],
+        target_tools=[
+            "section-1031-calculator",
+            "section-1031-calculator-scenario-comparison-model",
+            "1031-exchange-rules-arizona",
+        ],
         supported_params=["ph_tier"],
         cta_text="Invest in Real Estate Debt on GROUNDFLOOR",
     ),
@@ -587,6 +638,19 @@ PREXVO_DISCLOSURES: Dict[str, str] = {
     ),
 }
 
+PREXVO_MONETIZED_CALCULATOR_SLUGS: List[str] = [
+    "student-loan-repayment-calculator",
+    "rap-vs-ibr-calculator",
+    "rap-payment-calculator",
+    "tiered-standard-calculator",
+    "paye-sunset-calculator",
+    "icr-repayment-calculator",
+    "parent-plus-double-consolidation",
+    "grad-plus-borrowing-cap-calculator",
+    "married-filing-separately-student-loan-calculator",
+    "student-loan-refinance-break-even-calculator",
+]
+
 PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
     "splash_financial": AffiliatePartner(
         key="splash_financial",
@@ -601,7 +665,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$200-$240",
         network="Impact.com",
         description="Compare competing fixed and variable rate refinancing offers across multiple lenders with a single soft inquiry.",
-        target_tools=["student-loan-repayment-calculator", "rap-vs-ibr-calculator"],
+        target_tools=list(PREXVO_MONETIZED_CALCULATOR_SLUGS),
         supported_params=[],
         cta_text="Compare Rates with Splash Financial",
     ),
@@ -618,7 +682,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$120",
         network="In-House Direct",
         description="Zero origination fee refinancing with unemployment protection, career coaching, and member rate discounts.",
-        target_tools=["student-loan-repayment-calculator"],
+        target_tools=list(PREXVO_MONETIZED_CALCULATOR_SLUGS),
         supported_params=[],
         cta_text="Check Rates with SoFi",
     ),
@@ -635,7 +699,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$100-$150",
         network="Impact.com",
         description="Multi-lender comparison engine showing prequalified rates and monthly payment projections in two minutes.",
-        target_tools=["student-loan-repayment-calculator"],
+        target_tools=list(PREXVO_MONETIZED_CALCULATOR_SLUGS),
         supported_params=[],
         cta_text="Compare Rates with Credible",
     ),
@@ -652,7 +716,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$150-$200",
         network="In-House Direct",
         description="Customizable repayment terms, precision monthly payment matching, and biweekly autopay interest rate discounts.",
-        target_tools=["student-loan-repayment-calculator"],
+        target_tools=list(PREXVO_MONETIZED_CALCULATOR_SLUGS),
         supported_params=[],
         cta_text="Check Rates with Earnest",
     ),
@@ -669,7 +733,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         bounty_est="$100-$150",
         network="In-House Direct",
         description="Community bank and credit union network offering relationship-based student refinancing terms.",
-        target_tools=["student-loan-repayment-calculator"],
+        target_tools=list(PREXVO_MONETIZED_CALCULATOR_SLUGS),
         supported_params=[],
         cta_text="Explore Community Rates with LendKey",
     ),
@@ -3903,6 +3967,111 @@ def normalize_html_callout_message_match(
         updated,
         flags=re.S | re.I,
     )
+
+    if prop == "prexvo":
+        def _expand_prexvo_refinance_section(match: re.Match) -> str:
+            sec_html = match.group(0)
+            if (
+                'data-restricted-public-service="true"' in sec_html
+                or 'data-commercial-offers="none"' in sec_html
+                or "/r/splash_financial" not in sec_html
+                or "/r/credible" in sec_html
+            ):
+                return sec_html
+            cards_html: List[str] = []
+            for pk in ("splash_financial", "sofi", "credible", "earnest", "lendkey"):
+                p_obj = PREXVO_AFFILIATES.get(pk)
+                if not p_obj:
+                    continue
+                slot = "calculator_primary_cta" if pk == "splash_financial" else "partner_matrix_card"
+                cards_html.append(
+                    f'      <div class="partner-card" data-partner="{pk}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
+                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
+                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
+                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
+                    f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-cta-slot="{slot}">\n'
+                    f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
+                    f'        </a>\n'
+                    f'      </div>'
+                )
+            grid_inner = "\n".join(cards_html)
+            return (
+                '<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+                '      <div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
+                f'{grid_inner}\n'
+                '      </div>\n'
+                '    </section>'
+            )
+
+        updated = re.sub(
+            r'<section\s+class=["\'][^"\']*refinance-partner-section[^"\']*["\'][^>]*>.*?</section>',
+            _expand_prexvo_refinance_section,
+            updated,
+            flags=re.S | re.I,
+        )
+    elif prop in ("profithelm", "exchange1031"):
+        html_lower = updated.lower()
+
+        def _build_profithelm_partner_card(pk: str) -> str:
+            p_obj = PROFITHELM_AFFILIATES.get(pk)
+            if not p_obj:
+                return ""
+            return (
+                f'\n    <div class="affiliate-card partner-card">\n'
+                f'      <div class="affiliate-info">\n'
+                f'        <span class="affiliate-badge">{html_lib.escape(p_obj.badge)}</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
+                f'        <h3 class="affiliate-title">{html_lib.escape(p_obj.name)}</h3>\n'
+                f'        <p class="affiliate-desc">{html_lib.escape(p_obj.description)}</p>\n'
+                f'      </div>\n'
+                f'      <div>\n'
+                f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(p_obj.status)}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
+                f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
+                f'        </a>\n'
+                f'      </div>\n'
+                f'    </div>\n'
+            )
+
+        def _expand_profithelm_affiliates_section(match: re.Match) -> str:
+            sec_html = match.group(0)
+            extra_cards = ""
+            if (
+                "/r/coinledger" in sec_html
+                and "/r/koinly" not in sec_html
+                and any(tok in html_lower for tok in ("crypto-tax", "crypto tax", "1099-da", "prediction-market-tax", "prediction market tax"))
+            ):
+                extra_cards += _build_profithelm_partner_card("koinly")
+            if (
+                "/r/mercury" in sec_html
+                and "/r/rippling" not in sec_html
+                and any(tok in html_lower for tok in ("section-174", "section 174", "r-and-d-tax-credit", "r&d tax credit"))
+            ):
+                extra_cards += _build_profithelm_partner_card("rippling")
+            if not extra_cards:
+                return sec_html
+            if re.search(r"</div>\s*</section>\s*$", sec_html, re.S | re.I):
+                return re.sub(
+                    r"(</div>\s*</section>\s*$)",
+                    rf"{extra_cards}        \g<1>",
+                    sec_html,
+                    count=1,
+                    flags=re.S | re.I,
+                )
+            return re.sub(
+                r"(</section>\s*$)",
+                rf"{extra_cards}      \g<1>",
+                sec_html,
+                count=1,
+                flags=re.S | re.I,
+            )
+
+        updated = re.sub(
+            r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>',
+            _expand_profithelm_affiliates_section,
+            updated,
+            flags=re.S | re.I,
+        )
+
     return updated
 
 
