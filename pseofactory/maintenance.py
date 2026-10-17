@@ -13,6 +13,7 @@ import re
 import json
 import time
 import uuid
+import hashlib
 import shutil
 import tempfile
 import subprocess
