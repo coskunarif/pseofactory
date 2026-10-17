@@ -21,7 +21,75 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import xml.etree.ElementTree as ET
 
+from html import unescape as html_unescape
+import functools
+from html.parser import HTMLParser
 from bs4 import BeautifulSoup
+
+_RE_SCRIPT_STYLE_SVG = re.compile(
+    r"<(script|style|svg)\b[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+_RE_BOILERPLATE_BLOCKS = re.compile(
+    r"<(noscript|nav|footer|header)\b[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+_RE_BODY_EXTRACT = re.compile(r"<body\b[^>]*>(.*?)</body\s*>", re.IGNORECASE | re.DOTALL)
+_RE_ALL_TAGS = re.compile(r"<[^>]+>")
+_RE_WORDS = re.compile(r"\b\w+\b")
+
+
+class _FastPreflightHTMLParser(HTMLParser):
+    """Single-pass HTML parser for preflight metadata without BeautifulSoup DOM construction."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.canonical_hrefs: List[Optional[str]] = []
+        self.meta_robots: Optional[str] = None
+        self.meta_viewport: Optional[str] = None
+        self.h1_count: int = 0
+        self.has_early_answer: bool = False
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        t = tag.lower()
+        if t == "h1":
+            self.h1_count += 1
+        if not attrs:
+            return
+        attr_map = {k.lower(): (v or "") for k, v in attrs if k}
+        if t == "link":
+            rel_val = attr_map.get("rel", "")
+            rel_tokens = [tok.lower() for tok in rel_val.split()]
+            if "canonical" in rel_tokens or "canonical" in rel_val.lower():
+                href_raw = attr_map.get("href")
+                self.canonical_hrefs.append(href_raw.strip() if href_raw else None)
+        elif t == "meta":
+            m_name = attr_map.get("name", "").lower()
+            if m_name == "robots" and self.meta_robots is None:
+                self.meta_robots = attr_map.get("content", "")
+            elif m_name == "viewport" and self.meta_viewport is None:
+                self.meta_viewport = attr_map.get("content", "")
+        if not self.has_early_answer:
+            if attr_map.get("id") == "quick-answer":
+                self.has_early_answer = True
+            else:
+                cls_val = attr_map.get("class", "")
+                if "quick-answer" in cls_val or "answer-box" in cls_val:
+                    self.has_early_answer = True
+
+
+@functools.lru_cache(maxsize=512)
+def _parse_html_preflight_fast(html_content: str) -> Tuple[_FastPreflightHTMLParser, int]:
+    stripped = _RE_SCRIPT_STYLE_SVG.sub(" ", html_content)
+    parser = _FastPreflightHTMLParser()
+    parser.feed(stripped)
+    m_body = _RE_BODY_EXTRACT.search(stripped)
+    body_slice = m_body.group(1) if m_body else stripped
+    cleaned = _RE_BOILERPLATE_BLOCKS.sub(" ", body_slice)
+    text_only = html_unescape(_RE_ALL_TAGS.sub(" ", cleaned))
+    word_count = len(_RE_WORDS.findall(text_only))
+    return parser, word_count
+
 
 
 class PreflightStatus(str, Enum):
@@ -92,13 +160,14 @@ class IndexingPreflightEngine:
     """
     Deterministic 6-stage indexing preflight engine with multi-tier partitioning.
     """
-    _memo_cache: Dict[Tuple[str, float, int], PreflightURLRecord] = {}
+    _memo_cache: Dict[Any, PreflightURLRecord] = {}
     _dist_memo_cache: Dict[Any, PreflightReport] = {}
 
     @classmethod
     def clear_cache(cls) -> None:
         cls._memo_cache.clear()
         cls._dist_memo_cache.clear()
+        _parse_html_preflight_fast.cache_clear()
 
     def __init__(
         self,
@@ -253,7 +322,7 @@ class IndexingPreflightEngine:
     ) -> PreflightURLRecord:
         """
         Inspects a single static HTML file with memoization cache keyed by (file_path, st_mtime, st_size).
-        Prevents repeated BeautifulSoup DOM parsing during maintenance cycles.
+        Prevents repeated DOM parsing during maintenance cycles.
         """
         path_obj = Path(file_path).resolve()
         if not path_obj.is_file():
@@ -267,7 +336,7 @@ class IndexingPreflightEngine:
 
         try:
             st = path_obj.stat()
-            cache_key = (str(path_obj), st.st_mtime, st.st_size)
+            cache_key = (str(path_obj), st.st_mtime, st.st_size, url or "", self.min_words, self.require_viewport)
             if cache_key in self._memo_cache:
                 return self._memo_cache[cache_key]
         except OSError:
@@ -457,18 +526,17 @@ class IndexingPreflightEngine:
                     canonical_match = True
 
             elif html_content:
-                soup = BeautifulSoup(html_content, "html.parser")
-                canonical_tags = soup.find_all("link", rel=lambda r: r and "canonical" in r)
-                if len(canonical_tags) != 1:
+                parsed_meta, parsed_word_count = _parse_html_preflight_fast(html_content)
+                canonical_hrefs = parsed_meta.canonical_hrefs
+                if len(canonical_hrefs) != 1:
                     status = PreflightStatus.BLOCKED_CANONICAL_MISMATCH
                     canonical_match = False
-                    if len(canonical_tags) == 0:
+                    if len(canonical_hrefs) == 0:
                         issues.append('Missing <link rel="canonical"> tag in HTML')
                     else:
-                        issues.append(f"Multiple canonical tags detected: {len(canonical_tags)} tags found (expected exactly 1)")
+                        issues.append(f"Multiple canonical tags detected: {len(canonical_hrefs)} tags found (expected exactly 1)")
                 else:
-                    c_tag = canonical_tags[0]
-                    tag_canonical = c_tag.get("href").strip() if c_tag and c_tag.get("href") else None
+                    tag_canonical = canonical_hrefs[0]
                     canonical_url = tag_canonical
 
                     # Edge header Link check
@@ -499,7 +567,8 @@ class IndexingPreflightEngine:
                         canonical_match = True
 
             else:
-                soup = None
+                parsed_meta = None
+                parsed_word_count = 0
                 canonical_url = url
                 canonical_match = True
 
@@ -534,10 +603,9 @@ class IndexingPreflightEngine:
                     issues.append("Disallowed by robots.txt")
 
                 # meta robots check
-                if soup is None:
-                    soup = BeautifulSoup(html_content, "html.parser")
-                m_tag = soup.find("meta", attrs={"name": re.compile(r"^robots$", re.I)})
-                meta_val = m_tag.get("content", "").lower() if m_tag else ""
+                if parsed_meta is None:
+                    parsed_meta, parsed_word_count = _parse_html_preflight_fast(html_content)
+                meta_val = (parsed_meta.meta_robots or "").lower()
                 if any(t in meta_val for t in ["noindex", "none"]):
                     status = PreflightStatus.BLOCKED_NOINDEX
                     robots_allowed = False
@@ -584,29 +652,12 @@ class IndexingPreflightEngine:
                     issues.append("Missing early direct answer block")
 
             elif html_content:
-                if soup is None:
-                    soup = BeautifulSoup(html_content, "html.parser")
+                if parsed_meta is None:
+                    parsed_meta, parsed_word_count = _parse_html_preflight_fast(html_content)
 
-                # Body word count excluding boilerplate
-                body = soup.find("body") or soup
-                for tag in body(["script", "style", "noscript", "nav", "footer", "header", "svg"]):
-                    tag.decompose()
-                body_text = body.get_text(separator=" ")
-                words = re.findall(r"\b\w+\b", body_text)
-                word_count = len(words)
-
-                # Exactly one <h1> tag
-                h1_tags = soup.find_all("h1")
-                h1_count = len(h1_tags)
-
-                # Early direct answer block
-                # Looks for .quick-answer, .answer-box, or id="quick-answer"
-                answer_node = soup.find(
-                    lambda el: el.has_attr("class")
-                    and any("quick-answer" in c or "answer-box" in c for c in el.get("class", []))
-                    or el.get("id") == "quick-answer"
-                )
-                has_early_answer = bool(answer_node)
+                word_count = parsed_word_count
+                h1_count = parsed_meta.h1_count
+                has_early_answer = parsed_meta.has_early_answer
 
                 if word_count < self.min_words:
                     status = PreflightStatus.BLOCKED_THIN_CONTENT
@@ -625,11 +676,8 @@ class IndexingPreflightEngine:
                         issues.append("Missing early direct answer block (.quick-answer or .answer-box)")
 
                 # Viewport meta tag verification
-                viewport_tag = soup.find("meta", attrs={"name": re.compile(r"^viewport$", re.I)})
-                has_viewport = bool(
-                    viewport_tag
-                    and "width=device-width" in viewport_tag.get("content", "").lower()
-                )
+                vp_val = (parsed_meta.meta_viewport or "").lower()
+                has_viewport = bool(parsed_meta.meta_viewport is not None and "width=device-width" in vp_val)
                 if not has_viewport:
                     issues.append('Missing or invalid mobile viewport meta tag: expected <meta name="viewport" content="width=device-width, initial-scale=1.0">')
                     if self.require_viewport:

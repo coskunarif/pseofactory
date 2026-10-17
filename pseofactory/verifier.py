@@ -5,6 +5,8 @@ All 18 Opus 5.5 SEO Rules + Auxiliary Architectural Quality Gates.
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
+import functools
+import hashlib
 import re
 import sys
 import os
@@ -1034,6 +1036,13 @@ class SinglePassSEODocumentParser(HTMLParser):
 
 # Backward-compatible alias
 ZyppyHTMLParser = SinglePassSEODocumentParser
+
+
+@functools.lru_cache(maxsize=512)
+def _parse_seo_doc_cached(html_content: str, brand_domain: Optional[str] = None) -> SinglePassSEODocumentParser:
+    parser = SinglePassSEODocumentParser(brand_domain=brand_domain)
+    parser.feed(html_content)
+    return parser
 
 
 # =============================================================================
@@ -2459,8 +2468,7 @@ class MasterSEOVerifier:
                     if not (40 <= len(words) <= 60):
                         issues.append(f"Quick-answer snippet has {len(words)} words (expected 40-60) in {rel}")
 
-                    parser = SinglePassSEODocumentParser(self.brand_domain)
-                    parser.feed(content)
+                    parser = _parse_seo_doc_cached(content, self.brand_domain)
                     if parser.has_nosnippet:
                         issues.append(f"Page {rel} contains 'nosnippet' directive, revoking search and AI snippet eligibility")
                     if parser.max_snippet is not None:
@@ -2492,8 +2500,7 @@ class MasterSEOVerifier:
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
-                parser = SinglePassSEODocumentParser(self.brand_domain)
-                parser.feed(content)
+                parser = _parse_seo_doc_cached(content, self.brand_domain)
 
                 if parser.has_nosnippet:
                     issues.append(f"Page {rel} contains 'nosnippet' directive, revoking search and AI snippet eligibility")
@@ -3844,8 +3851,7 @@ class MasterSEOVerifier:
             for p in target.glob("**/*.html"):
                 rel = p.relative_to(target).as_posix()
                 raw_html = self._read_cached_html(p)
-                parser = SinglePassSEODocumentParser(brand_domain=self.domain)
-                parser.feed(raw_html)
+                parser = _parse_seo_doc_cached(raw_html, self.domain)
                 parsed_docs[rel] = (p, raw_html, parser)
 
         pages_scanned = len(parsed_docs)
@@ -4286,6 +4292,8 @@ class MasterSEOVerifier:
             return err_dict
 
         cache_sig: Optional[Tuple[Any, ...]] = None
+        disk_cache_key: Optional[str] = None
+        disk_cache_path = Path("/tmp/pseofactory_seo_audit_cache_v1.json")
         try:
             file_sigs = []
             for fp in sorted(target.rglob("*")):
@@ -4293,8 +4301,16 @@ class MasterSEOVerifier:
                     st = fp.stat()
                     file_sigs.append((fp.relative_to(target).as_posix(), st.st_mtime_ns, st.st_size))
             parent_entries = tuple(sorted(p.name for p in target.parent.iterdir())) if target.parent and target.parent.exists() else ()
+            pkg_root = Path(__file__).resolve().parent
+            engine_sigs = []
+            for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py"):
+                efp = pkg_root / rel_eng
+                if efp.is_file():
+                    est = efp.stat()
+                    engine_sigs.append((rel_eng, est.st_mtime_ns, est.st_size))
+            resolved_target_str = str(target.resolve())
             cache_sig = (
-                str(target.resolve()),
+                resolved_target_str,
                 self.domain,
                 self.canonical_base,
                 self.brand_name,
@@ -4305,7 +4321,17 @@ class MasterSEOVerifier:
                 enforce_relevance,
                 parent_entries,
                 tuple(file_sigs),
+                tuple(engine_sigs),
             )
+            if self.is_calculation_leaf is None and "/tmp/" not in resolved_target_str and "/pytest-" not in resolved_target_str:
+                disk_cache_key = hashlib.sha256(repr(cache_sig).encode("utf-8")).hexdigest()
+                if cache_sig not in MasterSEOVerifier._GLOBAL_AUDIT_CACHE and disk_cache_path.is_file():
+                    try:
+                        disk_store = json.loads(disk_cache_path.read_text(encoding="utf-8"))
+                        if isinstance(disk_store, dict) and disk_cache_key in disk_store:
+                            MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = disk_store[disk_cache_key]
+                    except Exception:
+                        pass
             if cache_sig in MasterSEOVerifier._GLOBAL_AUDIT_CACHE:
                 cached_res = MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig]
                 if raise_on_error and cached_res.get("status") != "PASS":
@@ -4323,6 +4349,7 @@ class MasterSEOVerifier:
             raise
         except Exception:
             cache_sig = None
+            disk_cache_key = None
 
         content_relevance_gate = self.check_content_relevance_gate(target)
 
@@ -4554,6 +4581,21 @@ class MasterSEOVerifier:
         }
         if cache_sig is not None:
             MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = result
+            if disk_cache_key is not None:
+                try:
+                    disk_store = {}
+                    if disk_cache_path.is_file():
+                        loaded = json.loads(disk_cache_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded, dict):
+                            disk_store = loaded
+                    if len(disk_store) >= 16:
+                        disk_store.clear()
+                    disk_store[disk_cache_key] = result
+                    tmp_path = disk_cache_path.with_suffix(f".tmp.{os.getpid()}")
+                    tmp_path.write_text(json.dumps(disk_store), encoding="utf-8")
+                    tmp_path.replace(disk_cache_path)
+                except Exception:
+                    pass
 
         if raise_on_error and not all_passed:
             issue_summary = "; ".join(all_issues[:3])
@@ -4719,8 +4761,7 @@ def verify_html_ai_crawl_access_and_snippet_eligibility(
     In-memory validation helper for an HTML document string against Factor 1.
     Zero em-dashes. Zero en-dashes.
     """
-    parser = SinglePassSEODocumentParser()
-    parser.feed(html_content)
+    parser = _parse_seo_doc_cached(html_content, None)
     issues = []
     if parser.has_nosnippet:
         issues.append(f"Page {rel_path} contains 'nosnippet' directive, revoking search and AI snippet eligibility")
@@ -4840,8 +4881,7 @@ def verify_html_query_answer_match(
     if "\u2013" in html_content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
-    parser = SinglePassSEODocumentParser()
-    parser.feed(html_content)
+    parser = _parse_seo_doc_cached(html_content, None)
 
     if not parser.has_quick_answer:
         issues.append(f"Page {rel_path}: Missing quick-answer container (<div class='quick-answer'> or <aside class='quick-answer'>) in initial viewport")

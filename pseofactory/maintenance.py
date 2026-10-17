@@ -2287,6 +2287,43 @@ class AssetIntegrityEvaluator:
                 drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
 
+        resolved_dist_str = str(adapter.dist_dir.resolve()) if adapter.dist_dir else ""
+        use_disk_eval_cache = (
+            bool(resolved_dist_str)
+            and "/tmp/" not in resolved_dist_str
+            and "/pytest-" not in resolved_dist_str
+            and not self.enforce_operational_shield
+            and not engine_drifted
+        )
+        disk_eval_cache_path = Path("/tmp/pseofactory_asset_eval_cache_v1.json")
+        eng_code_sig_str = ""
+        disk_clean_entries: Dict[str, str] = {}
+        if use_disk_eval_cache:
+            try:
+                pkg_root = Path(__file__).resolve().parent
+                sig_parts = []
+                for rel_eng in ("maintenance.py", "contracts.py"):
+                    efp = pkg_root / rel_eng
+                    if efp.is_file():
+                        est = efp.stat()
+                        sig_parts.append(f"{rel_eng}:{est.st_mtime_ns}:{est.st_size}")
+                eng_code_sig_str = "|".join(sig_parts)
+                if disk_eval_cache_path.is_file():
+                    raw_disk = json.loads(disk_eval_cache_path.read_text(encoding="utf-8"))
+                    if isinstance(raw_disk, dict) and raw_disk.get("engine_sig") == eng_code_sig_str:
+                        entries = raw_disk.get("entries", {})
+                        if isinstance(entries, dict):
+                            disk_clean_entries = entries
+                            for k_str, fp_hash in entries.items():
+                                parts = k_str.split("|")
+                                if len(parts) == 3:
+                                    ck = (parts[0], float(parts[1]), int(parts[2]))
+                                    if ck not in self._audit_cache:
+                                        self._audit_cache[ck] = None
+                                        self._fingerprint_cache[ck] = fp_hash
+            except Exception:
+                pass
+
         for asset in assets:
             record = self.audit_asset(
                 asset,
@@ -2296,6 +2333,29 @@ class AssetIntegrityEvaluator:
             )
             if record:
                 drifted.append(record)
+
+        if use_disk_eval_cache and eng_code_sig_str:
+            try:
+                updated_entries = dict(disk_clean_entries)
+                changed = False
+                for ck, rec_val in list(self._audit_cache.items()):
+                    if rec_val is None and ck in self._fingerprint_cache:
+                        k_str = f"{ck[0]}|{ck[1]}|{ck[2]}"
+                        fp_val = self._fingerprint_cache[ck]
+                        if updated_entries.get(k_str) != fp_val:
+                            updated_entries[k_str] = fp_val
+                            changed = True
+                if changed:
+                    if len(updated_entries) > 2000:
+                        updated_entries = dict(list(updated_entries.items())[-1000:])
+                    tmp_path = disk_eval_cache_path.with_suffix(f".tmp.{os.getpid()}")
+                    tmp_path.write_text(
+                        json.dumps({"engine_sig": eng_code_sig_str, "entries": updated_entries}),
+                        encoding="utf-8",
+                    )
+                    tmp_path.replace(disk_eval_cache_path)
+            except Exception:
+                pass
 
         # Optional Master SEO Checklist check
         if self.enforce_master_seo and adapter.dist_dir.exists() and (adapter.dist_dir / "sitemap.xml").is_file():

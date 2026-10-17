@@ -10,6 +10,8 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import ast
+import copy
+import functools
 import operator
 import re
 import json
@@ -1768,16 +1770,10 @@ INCOMPLETE_FIGURE_PATTERNS = [
 ]
 
 
-def extract_statutory_citations(text: str) -> List[Dict[str, str]]:
-    """
-    Extracts valid primary statutory citations (CFR, USC, IRC, and IRS guidance) from text.
-    Zero em-dashes. Zero en-dashes.
-    """
+@functools.lru_cache(maxsize=1024)
+def _extract_statutory_citations_cached(text: str) -> Tuple[Dict[str, str], ...]:
     citations: List[Dict[str, str]] = []
     seen: Set[str] = set()
-
-    if not text or not isinstance(text, str):
-        return citations
 
     # CFR
     for m in CFR_CITATION_PATTERN.finditer(text):
@@ -1842,7 +1838,17 @@ def extract_statutory_citations(text: str) -> List[Dict[str, str]]:
                     "normalized": norm,
                 })
 
-    return citations
+    return tuple(citations)
+
+
+def extract_statutory_citations(text: str) -> List[Dict[str, str]]:
+    """
+    Extracts valid primary statutory citations (CFR, USC, IRC, and IRS guidance) from text.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not text or not isinstance(text, str):
+        return []
+    return [dict(c) for c in _extract_statutory_citations_cached(text)]
 
 
 _MALFORMED_USC_DANGLING_RE = re.compile(r'\b([0-9]{1,3})\s*U\.?S\.?C\.?(?:\s*A\.?)?', re.IGNORECASE)
@@ -1968,20 +1974,25 @@ def detect_incomplete_figures(text: str) -> List[str]:
     return issues
 
 
+@functools.lru_cache(maxsize=1024)
+def _extract_numeric_facts_cached(text: str) -> Tuple[str, ...]:
+    facts: List[str] = []
+    for m in NUMERIC_FACT_PATTERN.finditer(text):
+        val = m.group(0).strip()
+        if val:
+            facts.append(val)
+    return tuple(facts)
+
+
 def extract_numeric_facts(text: str) -> List[str]:
     """
     Extracts high-density verifiable statistics, currency figures, percentages,
     and statutory numbers from text.
     Zero em-dashes. Zero en-dashes.
     """
-    facts: List[str] = []
     if not text or not isinstance(text, str):
-        return facts
-    for m in NUMERIC_FACT_PATTERN.finditer(text):
-        val = m.group(0).strip()
-        if val:
-            facts.append(val)
-    return facts
+        return []
+    return list(_extract_numeric_facts_cached(text))
 
 
 def assert_statutory_citation_syntax(text_or_citation: str, context: str = "") -> bool:
@@ -2433,9 +2444,10 @@ def classify_subtopic_facets(
         return set()
 
     active_facets = facets if facets is not None else DEFAULT_FAN_OUT_SUBTOPIC_FACETS
-    clean_text = html.unescape(re.sub(r'<[^>]+>', ' ', html_or_text))
+    stripped_input = _fast_strip_style_and_js(html_or_text)
+    clean_text = html.unescape(re.sub(r'<[^>]+>', ' ', stripped_input))
     normalized_text = " " + re.sub(r'\s+', ' ', clean_text).lower() + " "
-    raw_normalized = " " + re.sub(r'\s+', ' ', html_or_text).lower() + " "
+    raw_normalized: Optional[str] = None
 
     covered: Set[str] = set()
 
@@ -2459,9 +2471,16 @@ def classify_subtopic_facets(
         for cand in candidates:
             if not cand:
                 continue
-            if cand in normalized_text or cand in raw_normalized:
+            if cand in normalized_text:
                 pattern = rf"\b{re.escape(cand)}\b"
-                if re.search(pattern, normalized_text) or re.search(pattern, raw_normalized):
+                if re.search(pattern, normalized_text):
+                    matched = True
+                    break
+            if raw_normalized is None:
+                raw_normalized = " " + re.sub(r'\s+', ' ', stripped_input).lower() + " "
+            if cand in raw_normalized:
+                pattern = rf"\b{re.escape(cand)}\b"
+                if re.search(pattern, raw_normalized):
                     matched = True
                     break
 
@@ -2645,25 +2664,53 @@ SECONDARY_INTENT_KEYWORDS: Tuple[str, ...] = (
 )
 
 
-def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
-    """
-    Extracts subheadings (h2, h3, h4) and their following content sections from HTML or text.
-    Classifies whether each section addresses a related question, secondary intent, or calculation variant.
-    Zero em-dashes. Zero en-dashes.
-    """
-    if not isinstance(html_or_text, str):
-        return []
+_SUBQUERY_VARIANT_MARKERS = (
+    "calculation-variant",
+    "fan-out-node",
+    "calc-variant",
+    "calculation-node",
+    "variant-container",
+    "overlay-scenarios",
+    "scenarios-grid",
+    "scenario-card",
+    "calc-scenario-card",
+    "data-variant",
+)
 
+_CALC_VARIANT_MARKERS = (
+    "calculation-variant",
+    "fan-out-node",
+    "calc-variant",
+    "calculation-node",
+    "variant-container",
+    "calc-scenario-card",
+    "scenario-card",
+    "scenario-preset-pill",
+    "data-variant",
+    "data-node-id",
+    'id="variant',
+    "id='variant",
+    'id="calc',
+    "id='calc",
+    'id="node',
+    "id='node",
+)
+
+
+@functools.lru_cache(maxsize=512)
+def _extract_subquery_sections_cached(html_or_text: str) -> Tuple[Dict[str, Any], ...]:
     sections: List[Dict[str, Any]] = []
 
     target_content = _fast_strip_style_and_js(html_or_text)
     if "<" in target_content and ">" in target_content:
-        target_content = re.sub(
-            r'<(?P<tag>div|section|article)\b[^>]*(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|overlay-scenarios|scenarios-grid|scenario-card|calc-scenario-card)[^"\']*["\']|data-variant(?:-id)?=["\'][^"\']+["\'])[^>]*>.*?</(?P=tag)>',
-            ' ',
-            target_content,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
+        target_lower = target_content.lower()
+        if any(m in target_lower for m in _SUBQUERY_VARIANT_MARKERS):
+            target_content = re.sub(
+                r'<(?P<tag>div|section|article)\b[^>]*(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|overlay-scenarios|scenarios-grid|scenario-card|calc-scenario-card)[^"\']*["\']|data-variant(?:-id)?=["\'][^"\']+["\'])[^>]*>.*?</(?P=tag)>',
+                ' ',
+                target_content,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
 
     # If HTML headings are present, extract via regex
     heading_pattern = re.compile(
@@ -2692,10 +2739,11 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
 
             heading_lower = clean_heading.lower()
             preceding_window = target_content[max(0, match.start() - 150):match.start()].lower()
+            body_lower = body_html.lower()
             is_monetization = (
                 any(k in heading_lower for k in ("partner", "affiliate", "sponsor", "monetization"))
                 or any(k in preceding_window for k in ("affiliate-section", "partner-section", "affiliate-card", "partner-card", 'class="affiliate', 'class="partner'))
-                or any(k in body_html.lower() for k in ("affiliate-card", "partner-card", 'class="affiliate', 'class="partner', "sponsored / partner"))
+                or any(k in body_lower for k in ("affiliate-card", "partner-card", 'class="affiliate', 'class="partner', "sponsored / partner"))
             )
             starts_q = any(heading_lower.startswith(w + " ") for w in SUBQUERY_QUESTION_STARTERS)
             ends_q = heading_lower.endswith("?")
@@ -2714,9 +2762,9 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
                 "is_secondary_intent": is_sec_intent,
                 "is_subquery": is_question or is_sec_intent,
                 "has_calculation": bool(
-                    "<table" in body_html.lower()
-                    or "<form" in body_html.lower()
-                    or "<input" in body_html.lower()
+                    "<table" in body_lower
+                    or "<form" in body_lower
+                    or "<input" in body_lower
                     or re.search(r'\$?\d+(?:,\d+)*(?:\.\d+)?%?', body_text)
                 ),
             })
@@ -2776,7 +2824,18 @@ def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
                 "has_calculation": bool(re.search(r'\$?\d+(?:,\d+)*(?:\.\d+)?%?', txt)),
             })
 
-    return sections
+    return tuple(sections)
+
+
+def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
+    """
+    Extracts subheadings (h2, h3, h4) and their following content sections from HTML or text.
+    Classifies whether each section addresses a related question, secondary intent, or calculation variant.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(html_or_text, str):
+        return []
+    return [dict(s) for s in _extract_subquery_sections_cached(html_or_text)]
 
 
 def detect_shallow_subquestions(
@@ -2836,30 +2895,20 @@ def assert_subquery_clustering(
     return True
 
 
-def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]:
-    """
-    Extracts calculation variant containers and nodes from HTML or text.
-    Identifies variant nodes by:
-    - Containers with class containing calculation-variant, fan-out-node, calc-variant, calculation-node, or variant-container.
-    - Containers with attributes: data-variant-id, data-variant, data-calculation-variant, data-node-id.
-    - Explicit section IDs: id="variant-..." or id="calc-...".
-    - Heading sections with calculation keywords and explicit calculation logic.
-    For each node, extracts node id, title, calculation indicators, and outgoing links.
-    Zero em-dashes. Zero en-dashes.
-    """
-    if not isinstance(html_or_text, str):
-        return []
-
+@functools.lru_cache(maxsize=512)
+def _extract_calculation_variant_nodes_cached(html_or_text: str) -> Tuple[Dict[str, Any], ...]:
     nodes: List[Dict[str, Any]] = []
     clean_input = _fast_strip_style_and_js(html_or_text)
+    clean_lower = clean_input.lower()
 
-    # Container-based detection via regex
-    container_pattern = re.compile(
-        r'<(?P<tag>div|section|article|a)\b(?P<attrs>[^>]*(?:(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|calc-scenario-card|scenario-card|scenario-preset-pill)[^"\']*["\'])|(?:data-variant(?:-id)?=["\'][^"\']+["\'])|(?:data-node-id=["\'][^"\']+["\'])|(?:id=["\'](?:variant|calc|node)[-_][^"\']+["\']))[^>]*)>(?P<body>.*?)</(?P=tag)>',
-        re.IGNORECASE | re.DOTALL,
-    )
+    matches = []
+    if any(m in clean_lower for m in _CALC_VARIANT_MARKERS):
+        container_pattern = re.compile(
+            r'<(?P<tag>div|section|article|a)\b(?P<attrs>[^>]*(?:(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|calc-scenario-card|scenario-card|scenario-preset-pill)[^"\']*["\'])|(?:data-variant(?:-id)?=["\'][^"\']+["\'])|(?:data-node-id=["\'][^"\']+["\'])|(?:id=["\'](?:variant|calc|node)[-_][^"\']+["\']))[^>]*)>(?P<body>.*?)</(?P=tag)>',
+            re.IGNORECASE | re.DOTALL,
+        )
+        matches = list(container_pattern.finditer(clean_input))
 
-    matches = list(container_pattern.finditer(clean_input))
     if matches:
         for idx, match in enumerate(matches):
             attrs_str = match.group("attrs")
@@ -2889,10 +2938,11 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
                     links.append(href_m.group(1))
 
             body_without_heading = re.sub(r'<h[1-6]\b[^>]*>.*?</h[1-6]>', '', body_html, flags=re.IGNORECASE | re.DOTALL)
+            bwh_lower = body_without_heading.lower()
             has_calc = is_preset or (
-                "<form" in body_without_heading.lower()
-                or "<input" in body_without_heading.lower()
-                or "<table" in body_without_heading.lower()
+                "<form" in bwh_lower
+                or "<input" in bwh_lower
+                or "<table" in bwh_lower
                 or bool(re.search(r'(=|\+|\-|\*|/|%|\$)\s*[0-9]+', body_without_heading))
                 or bool(re.search(r'\$[0-9]+', body_without_heading))
                 or bool(re.search(r'\b[0-9]+(?:\.[0-9]+)?\s*%', body_without_heading))
@@ -2920,7 +2970,7 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
                     n["outgoing_links"] = [other["id"] for other in nodes if other["id"] != n["id"]]
     else:
         # Fallback: inspect subheadings that represent calculation variants
-        sections = extract_subquery_sections(html_or_text)
+        sections = _extract_subquery_sections_cached(html_or_text)
         variant_sections = [
             s for s in sections
             if s.get("has_calculation", False)
@@ -2941,7 +2991,23 @@ def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]
                 "raw_html": b_text,
             })
 
-    return nodes
+    return tuple(nodes)
+
+
+def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]:
+    """
+    Extracts calculation variant containers and nodes from HTML or text.
+    Identifies variant nodes by:
+    - Containers with class containing calculation-variant, fan-out-node, calc-variant, calculation-node, or variant-container.
+    - Containers with attributes: data-variant-id, data-variant, data-calculation-variant, data-node-id.
+    - Explicit section IDs: id="variant-..." or id="calc-...".
+    - Heading sections with calculation keywords and explicit calculation logic.
+    For each node, extracts node id, title, calculation indicators, and outgoing links.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(html_or_text, str):
+        return []
+    return copy.deepcopy(list(_extract_calculation_variant_nodes_cached(html_or_text)))
 
 
 def detect_orphaned_calculation_nodes(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -4646,6 +4712,7 @@ def get_official_statutory_limit(limit_key: str, tax_year: Optional[int] = None)
     return val
 
 
+@functools.lru_cache(maxsize=512)
 def _fast_strip_style_and_js(content: str) -> str:
     """
     Strips <style>...</style> and executable JS <script>...</script> blocks
@@ -5834,25 +5901,8 @@ class _ExtractableContentParser(HTMLParser):
             self.current_passage_text.append(data)
 
 
-def extract_content_structure_metadata(content: str) -> Dict[str, Any]:
-    """
-    Extracts structured content elements from HTML: headings with levels,
-    data tables with header scopes, lists with procedural context, and passage blocks.
-    Zero em-dashes. Zero en-dashes.
-    """
-    if not isinstance(content, str):
-        return {
-            "headings": [],
-            "heading_skips": [],
-            "tables": [],
-            "lists": [],
-            "ordered_lists": [],
-            "unordered_lists": [],
-            "procedural_blocks": [],
-            "passages": [],
-            "empty_passages_count": 0,
-        }
-
+@functools.lru_cache(maxsize=512)
+def _extract_content_structure_metadata_cached(content: str) -> Dict[str, Any]:
     parser = _ExtractableContentParser()
     try:
         parser.feed(_fast_strip_style_and_js(content))
@@ -5943,6 +5993,27 @@ def extract_content_structure_metadata(content: str) -> Dict[str, Any]:
         "passages": parser.passages,
         "empty_passages_count": parser.empty_passages_count,
     }
+
+
+def extract_content_structure_metadata(content: str) -> Dict[str, Any]:
+    """
+    Extracts structured content elements from HTML: headings with levels,
+    data tables with header scopes, lists with procedural context, and passage blocks.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(content, str):
+        return {
+            "headings": [],
+            "heading_skips": [],
+            "tables": [],
+            "lists": [],
+            "ordered_lists": [],
+            "unordered_lists": [],
+            "procedural_blocks": [],
+            "passages": [],
+            "empty_passages_count": 0,
+        }
+    return copy.deepcopy(_extract_content_structure_metadata_cached(content))
 
 
 def detect_extractable_content_issues(
@@ -6522,28 +6593,8 @@ class _AnswerProminenceParser(HTMLParser):
         return False
 
 
-def extract_answer_prominence_metadata(content: str) -> Dict[str, Any]:
-    """
-    Extracts structural answer prominence metadata for Factor 11:
-    Cumulative body words before answer, answer type, presence, and above-the-fold status.
-    Zero em-dashes. Zero en-dashes.
-    """
-    if not content or not isinstance(content, str):
-        return {
-            "has_answer_or_widget": False,
-            "answer_found": False,
-            "answer_type": "none",
-            "answer_tag": "",
-            "answer_word_position": -1,
-            "total_body_words": 0,
-            "answer_text": "",
-            "is_above_fold": False,
-            "has_secondary_discussion_before_answer": False,
-            "secondary_discussion_headings_before_answer": [],
-            "all_answers_and_widgets": [],
-            "dom_depth": 0,
-        }
-
+@functools.lru_cache(maxsize=512)
+def _extract_answer_prominence_metadata_cached(content: str) -> Dict[str, Any]:
     parser = _AnswerProminenceParser()
     parser.feed(_fast_strip_style_and_js(content))
 
@@ -6580,6 +6631,30 @@ def extract_answer_prominence_metadata(content: str) -> Dict[str, Any]:
         "all_answers_and_widgets": [],
         "dom_depth": 0,
     }
+
+
+def extract_answer_prominence_metadata(content: str) -> Dict[str, Any]:
+    """
+    Extracts structural answer prominence metadata for Factor 11:
+    Cumulative body words before answer, answer type, presence, and above-the-fold status.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not content or not isinstance(content, str):
+        return {
+            "has_answer_or_widget": False,
+            "answer_found": False,
+            "answer_type": "none",
+            "answer_tag": "",
+            "answer_word_position": -1,
+            "total_body_words": 0,
+            "answer_text": "",
+            "is_above_fold": False,
+            "has_secondary_discussion_before_answer": False,
+            "secondary_discussion_headings_before_answer": [],
+            "all_answers_and_widgets": [],
+            "dom_depth": 0,
+        }
+    return copy.deepcopy(_extract_answer_prominence_metadata_cached(content))
 
 
 def detect_answer_prominence_issues(
@@ -6834,13 +6909,7 @@ SCHEMA_ORG_CONTEXT_PATTERN = re.compile(
 )
 
 
-def extract_structured_data_metadata(content: Any) -> Dict[str, Any]:
-    """
-    Extracts structured data metadata for Factor 12:
-    JSON-LD blocks, parsed entities, target entities, graph connectivity,
-    unanchored leaf entities, broken graph references, and registered schema types.
-    Zero em-dashes. Zero en-dashes.
-    """
+def _extract_structured_data_metadata_raw(content: Any) -> Dict[str, Any]:
     if content is None:
         return {
             "has_json_ld": False,
@@ -7121,6 +7190,23 @@ def extract_structured_data_metadata(content: Any) -> Dict[str, Any]:
         "multiple_disconnected_scripts": multiple_disconnected,
         "block_contexts": block_contexts,
     }
+
+
+@functools.lru_cache(maxsize=512)
+def _extract_structured_data_metadata_str_cached(content: str) -> Dict[str, Any]:
+    return _extract_structured_data_metadata_raw(content)
+
+
+def extract_structured_data_metadata(content: Any) -> Dict[str, Any]:
+    """
+    Extracts structured data metadata for Factor 12:
+    JSON-LD blocks, parsed entities, target entities, graph connectivity,
+    unanchored leaf entities, broken graph references, and registered schema types.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(content, str):
+        return copy.deepcopy(_extract_structured_data_metadata_str_cached(content))
+    return _extract_structured_data_metadata_raw(content)
 
 
 def detect_structured_data_issues(

@@ -1610,7 +1610,7 @@ class IndexingFeedbackLoop:
             "recompiled_assets_count": recompiled_count,
         }
 
-    def enforce_preflight_airlock(self, max_hub_urls: int = 150) -> PreflightReport:
+    def enforce_preflight_airlock(self, max_hub_urls: int = 150, dry_run: bool = False) -> PreflightReport:
         """
         Enforces 6-stage preflight airlock across compiled dist assets
         (capped at Tier-1 Hub limit <= 150 per HWL-1076) and updates milestone tracker.
@@ -1636,7 +1636,7 @@ class IndexingFeedbackLoop:
         else:
             report = self.preflight_engine.inspect_dist(self.dist_dir)
 
-        if report.blocked_urls:
+        if report.blocked_urls and not dry_run:
             try:
                 self.preflight_engine.quarantine_blocked_urls(report.blocked_urls)
             except Exception as q_err:
@@ -1876,7 +1876,7 @@ class IndexingFeedbackLoop:
             )
 
         # Step 5: Preflight Airlock
-        preflight_report = self.enforce_preflight_airlock()
+        preflight_report = self.enforce_preflight_airlock(dry_run=dry_run)
 
         # Step 6: Release Shipping via GitOps after Indexing Preflight and before Search Dispatch
         repairs_performed = (
@@ -1938,10 +1938,11 @@ class IndexingFeedbackLoop:
         section_coverage = self.attribute_section_coverage(raw_unindexed)
 
         # Step 8: Milestones Persistence
-        try:
-            self.milestone_tracker.save_ledger()
-        except Exception as m_err:
-            logger.warning("Failed saving milestone ledger: %s", m_err)
+        if not dry_run:
+            try:
+                self.milestone_tracker.save_ledger()
+            except Exception as m_err:
+                logger.warning("Failed saving milestone ledger: %s", m_err)
 
         overall_status = "SUCCESS"
         if gitops_failed or push_summary.get("status") in ("FAILED", "ERROR", "SKIPPED_GITOPS_FAILED"):

@@ -428,15 +428,19 @@ class BrainSessionExtractor:
         if not self.brain_dir.exists():
             return records
 
-        for p in self.brain_dir.glob("**/*"):
-            if not p.is_file():
-                continue
-            # Target scratch files or artifact files with trend keywords
-            if not any(k in p.name.lower() for k in ("candidate", "void", "spike", "trend", "eval")):
-                continue
-            if p.suffix not in (".json", ".jsonl"):
-                continue
+        skip_dirs = {".system_generated", "tasks", ".git", "node_modules", "__pycache__"}
+        candidate_files: List[Path] = []
+        for root, dirs, files in os.walk(self.brain_dir):
+            dirs[:] = sorted(d for d in dirs if d not in skip_dirs)
+            for fname in sorted(files):
+                if not fname.endswith((".json", ".jsonl")):
+                    continue
+                fname_lower = fname.lower()
+                if not any(k in fname_lower for k in ("candidate", "void", "spike", "trend", "eval")):
+                    continue
+                candidate_files.append(Path(root) / fname)
 
+        for p in candidate_files:
             try:
                 content = p.read_text(encoding="utf-8")
                 if p.suffix == ".jsonl":
@@ -464,6 +468,7 @@ class BrainSessionExtractor:
                 pass
 
         return records
+
 
 
 class FixtureExtractor:
