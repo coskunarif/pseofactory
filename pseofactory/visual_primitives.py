@@ -794,7 +794,9 @@ def _is_compiled_tenant_or_primitive_page(
         'data-theme="obsidian"',
         "data-mechanic=",
         'id="pseo-runtime-sync"',
-        "<main",
+        "<main class=",
+        "<main style=",
+        "<main id=",
     )
     return any(marker in html_content for marker in tenant_markers)
 
@@ -832,6 +834,9 @@ def _parse_font_size_to_px(style_text: str) -> Optional[Tuple[float, bool]]:
     return px, has_imp
 
 
+import functools as _functools
+
+
 def detect_visual_and_ux_contract_issues(
     html_content: str,
     rel_path: str = "index.html",
@@ -848,7 +853,15 @@ def detect_visual_and_ux_contract_issues(
     """
     if not html_content or not isinstance(html_content, str):
         return [f"[{rel_path}] Empty or non-string HTML content."]
+    return list(_detect_visual_and_ux_contract_issues_cached(html_content, rel_path, require_primitives))
 
+
+@_functools.lru_cache(maxsize=512)
+def _detect_visual_and_ux_contract_issues_cached(
+    html_content: str,
+    rel_path: str = "index.html",
+    require_primitives: Optional[bool] = None,
+) -> Tuple[str, ...]:
     issues: List[str] = []
     expect_primitives = _is_compiled_tenant_or_primitive_page(html_content, require_primitives)
 
@@ -1124,7 +1137,7 @@ def detect_visual_and_ux_contract_issues(
                     )
                     break
 
-    return issues
+    return tuple(issues)
 
 
 def assert_visual_and_ux_contracts(

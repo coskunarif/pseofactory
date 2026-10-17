@@ -4303,11 +4303,10 @@ class MasterSEOVerifier:
             parent_entries = tuple(sorted(p.name for p in target.parent.iterdir())) if target.parent and target.parent.exists() else ()
             pkg_root = Path(__file__).resolve().parent
             engine_sigs = []
-            for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py"):
+            for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py", "visual_primitives.py"):
                 efp = pkg_root / rel_eng
                 if efp.is_file():
-                    est = efp.stat()
-                    engine_sigs.append((rel_eng, est.st_mtime_ns, est.st_size))
+                    engine_sigs.append((rel_eng, hashlib.sha256(efp.read_bytes()).hexdigest()[:16]))
             resolved_target_str = str(target.resolve())
             cache_sig = (
                 resolved_target_str,

@@ -2302,11 +2302,10 @@ class AssetIntegrityEvaluator:
             try:
                 pkg_root = Path(__file__).resolve().parent
                 sig_parts = []
-                for rel_eng in ("maintenance.py", "contracts.py"):
+                for rel_eng in ("maintenance.py", "contracts.py", "visual_primitives.py"):
                     efp = pkg_root / rel_eng
                     if efp.is_file():
-                        est = efp.stat()
-                        sig_parts.append(f"{rel_eng}:{est.st_mtime_ns}:{est.st_size}")
+                        sig_parts.append(f"{rel_eng}:{hashlib.sha256(efp.read_bytes()).hexdigest()[:16]}")
                 eng_code_sig_str = "|".join(sig_parts)
                 if disk_eval_cache_path.is_file():
                     raw_disk = json.loads(disk_eval_cache_path.read_text(encoding="utf-8"))
