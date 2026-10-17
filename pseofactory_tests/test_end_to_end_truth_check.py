@@ -149,3 +149,140 @@ def test_live_truth_audit_engine_end_to_end_verification():
     prop_table_bad = prop_table_ok.replace("$85,000", "$91,000")
     v_prop = engine.audit_html(prop_table_bad, property_id="profithelm", context="prop_bad.html")
     assert any("Proprietary table row arithmetic drift" in v for v in v_prop)
+
+
+def test_test_vs_production_ledger_and_wal_isolation(tmp_path):
+    """
+    Verifies that GitOps and Distribution ledgers, WAL queues, and run manifests
+    automatically isolate to tempfile.gettempdir() during pytest or test fixture execution
+    and transition WAL events from PENDING to COMPLETED/STAGED.
+    """
+    import tempfile
+    from pseofactory.gitops import GitOpsCoordinator, IdempotencyLedger, ShipperQueue
+    from pseofactory.distributor import (
+        DistributionIdempotencyLedger,
+        SyndicationWALQueue,
+        dispatch_to_distribution_lead,
+    )
+
+    tmp_root = tempfile.gettempdir()
+    gitops_ledger = IdempotencyLedger()
+    dist_ledger = DistributionIdempotencyLedger()
+    shipper_q = ShipperQueue()
+    synd_q = SyndicationWALQueue(property_id="test_property")
+    coord = GitOpsCoordinator(repo_path=tmp_path, dry_run=True)
+
+    assert str(gitops_ledger.ledger_path).startswith(tmp_root)
+    assert str(dist_ledger.ledger_path).startswith(tmp_root)
+    assert str(shipper_q.queues_dir).startswith(tmp_root)
+    assert str(synd_q.queues_dir).startswith(tmp_root)
+    assert str(coord.runs_base).startswith(tmp_root)
+
+    # Verify ShipperQueue transitions from PENDING to COMPLETED
+    rec = shipper_q.enqueue({"run_id": "test-run-1"})
+    assert rec["status"] == "PENDING"
+    shipper_q.complete_event(rec["event_id"], status="COMPLETED", details={"head_sha": "abc1234"})
+    updated_lines = [
+        json.loads(line)
+        for line in shipper_q.queue_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    matched = [r for r in updated_lines if r.get("event_id") == rec["event_id"]]
+    assert matched and matched[-1]["status"] == "COMPLETED"
+
+    # Verify dispatch_to_distribution_lead completes its SyndicationWALQueue event
+    dist_res = dispatch_to_distribution_lead(
+        run_id="test-dist-wal-1",
+        property_id="profithelm",
+        dry_run=True,
+        dist_dir=tmp_path,
+        tools=[{"slug": "irs-2027-tax-brackets", "title": "IRS 2027 Tax Brackets Calculator"}],
+    )
+    assert dist_res["status"] == "STAGED"
+    ph_q = SyndicationWALQueue(property_id="profithelm")
+    wal_entries = [
+        json.loads(line)
+        for line in ph_q.queue_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(
+        e.get("payload", {}).get("run_id") == "test-dist-wal-1" and e.get("status") == "STAGED"
+        for e in wal_entries
+    )
+
+
+def test_stub_video_artifacts_detected_and_purged_by_reflection_and_audit(tmp_path):
+    """
+    Verifies that 36-byte ftypisom stub .mp4 files and unrendered batch_seo_catalog.json
+    entries in dist/videos/ are flagged as drift by AssetIntegrityEvaluator and
+    RetroReflectionEngine.audit_estate, and purged by RetroReflectionEngine.retrofit_estate.
+    """
+    from pseofactory.maintenance import (
+        AssetIntegrityEvaluator,
+        ConfigurablePropertyAdapter,
+        DriftReason,
+        RetroReflectionEngine,
+    )
+
+    dist_dir = tmp_path / "dist"
+    videos_dir = dist_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>ProfitHelm</title>"
+        "<meta name='description' content='Deterministic tax and financial modeling calculators.'>"
+        "<link rel='canonical' href='https://profithelm.com/'></head>"
+        "<body><main><h1>ProfitHelm</h1></main></body></html>",
+        encoding="utf-8",
+    )
+
+    stub_mp4 = videos_dir / "fake-stub-tool.mp4"
+    stub_mp4.write_bytes(b"\x00\x00\x00 ftypisom\x00\x00\x02\x00isomiso2mp41\x00\x00\x00\x08free")
+    assert stub_mp4.stat().st_size == 36
+
+    real_mp4 = videos_dir / "real-rendered-tool.mp4"
+    real_mp4.write_bytes(b"\x00\x00\x00 ftypisom" + (b"\x01" * 4096))
+
+    cat_file = videos_dir / "batch_seo_catalog.json"
+    cat_file.write_text(
+        json.dumps(
+            [
+                {"slug": "fake-stub-tool", "video_file": str(stub_mp4), "size_bytes": 36},
+                {"slug": "real-rendered-tool", "video_file": str(real_mp4), "size_bytes": real_mp4.stat().st_size},
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # 1. RetroReflectionEngine.audit_estate detects the stub video
+    estate_audit = RetroReflectionEngine.audit_estate(dist_dir, "profithelm")
+    assert estate_audit["status"] == "STALE"
+    assert "videos/batch_seo_catalog.json" in estate_audit["stale_pages"]
+
+    # 2. AssetIntegrityEvaluator.audit_all flags STRUCTURAL_CONTRACT_VIOLATION
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+    )
+    evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
+    eval_rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+    assert eval_rep.status == "DRIFT"
+    assert any(
+        DriftReason.STRUCTURAL_CONTRACT_VIOLATION in rec.reasons
+        and "batch_seo_catalog.json" in rec.asset_path
+        for rec in eval_rep.drifted_assets
+    )
+
+    # 3. RetroReflectionEngine.retrofit_estate purges the 36-byte stub and prunes the catalog
+    retro_res = RetroReflectionEngine.retrofit_estate(dist_dir, "profithelm", canonical_base="https://profithelm.com")
+    assert retro_res["status"] == "PASS"
+    assert not stub_mp4.exists()
+    assert real_mp4.exists()
+
+    cleaned_cat = json.loads(cat_file.read_text(encoding="utf-8"))
+    assert len(cleaned_cat) == 1
+    assert cleaned_cat[0]["slug"] == "real-rendered-tool"
+

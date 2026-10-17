@@ -165,9 +165,11 @@ def cmd_reflect(args: argparse.Namespace) -> int:
         force=getattr(args, "force", False),
         verbose=getattr(args, "verbose", False),
         latch_state=True,
+        defer_live_indexing=True,
     )
     if res.get("total_recompiled", 0) > 0 and not no_gitops:
         from pseofactory.gitops import GitOpsCoordinator
+        from pseofactory.indexer import PushIndexer
         reg = TenantRegistry.default()
         for p_id, r_info in res.get("property_reports", {}).items():
             if r_info.get("recompiled", 0) > 0 and r_info.get("final_status") == "PASS":
@@ -186,6 +188,18 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                         r_info["gitops_status"] = gitops_res.status
                         if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
                             res["status"] = "FAIL"
+                        else:
+                            canon_base = str(getattr(adapter, "canonical_base", f"https://{adapter.domain}")).rstrip("/")
+                            indexer = PushIndexer(
+                                domain=adapter.domain,
+                                canonical_base=canon_base,
+                                base_dir=repo_path,
+                                dist_dir=adapter.dist_dir,
+                                tenant_id=adapter.property_id,
+                            )
+                            idx_res = indexer.dispatch_automated_indexing(urls=None, live=True)
+                            if isinstance(r_info.get("downstream"), dict):
+                                r_info["downstream"]["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
                 except Exception as g_err:
                     res["status"] = "FAIL"
                     if getattr(args, "verbose", False):

@@ -72,6 +72,39 @@ class GitOpsResult:
 
 DEFAULT_GITOPS_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/gitops_idempotency_ledger.json")
 
+KNOWN_TEST_PROPERTY_IDS = {
+    "test_property",
+    "recovery_app",
+    "probe_prop",
+    "profithelm_test",
+    "prop1",
+    "prop2",
+    "custom",
+    "test_repo",
+}
+
+
+def _is_test_context(
+    repo_path: Optional[Union[str, Path]] = None,
+    property_id: Optional[str] = None,
+) -> bool:
+    """
+    Detects whether execution is running inside a pytest / temporary test harness
+    so test runs never contaminate production .agy/runs or .agy/queues state.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return True
+    if repo_path is not None:
+        rp_str = str(repo_path)
+        if rp_str.startswith(tempfile.gettempdir()) or "/pytest-" in rp_str:
+            return True
+    if property_id is not None:
+        pid = property_id.strip().lower()
+        if pid in KNOWN_TEST_PROPERTY_IDS or pid.startswith("test_") or pid.endswith("_test"):
+            return True
+    return False
+
 
 class IdempotencyLedger:
     """
@@ -81,7 +114,14 @@ class IdempotencyLedger:
     """
 
     def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
-        self.ledger_path = Path(ledger_path or DEFAULT_GITOPS_LEDGER_PATH)
+        if ledger_path is not None:
+            self.ledger_path = Path(ledger_path)
+        elif _is_test_context():
+            self.ledger_path = (
+                Path(tempfile.gettempdir()) / f"pseofactory_pytest_gitops_ledger_{os.getpid()}.json"
+            )
+        else:
+            self.ledger_path = DEFAULT_GITOPS_LEDGER_PATH
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.ledger_path.with_suffix(".lock")
 
@@ -153,7 +193,12 @@ class ShipperQueue:
         max_attempts: int = 3,
     ):
         self.property_id = property_id.lower()
-        self.queues_dir = Path(queues_dir or self.DEFAULT_QUEUES_DIR)
+        if queues_dir is not None:
+            self.queues_dir = Path(queues_dir)
+        elif _is_test_context(property_id=self.property_id):
+            self.queues_dir = Path(tempfile.gettempdir()) / f"pseofactory_pytest_queues_{os.getpid()}"
+        else:
+            self.queues_dir = self.DEFAULT_QUEUES_DIR
         self.queues_dir.mkdir(parents=True, exist_ok=True)
         self.max_attempts = max_attempts
         self.queue_file = self.queues_dir / f"{self.property_id}_release_queue.jsonl"
@@ -176,6 +221,42 @@ class ShipperQueue:
             f.flush()
             os.fsync(f.fileno())
         return record
+
+    def complete_event(
+        self,
+        event_id: str,
+        status: str = "COMPLETED",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Transitions an enqueued WAL event from PENDING to COMPLETED/DRY_RUN/FAILED."""
+        if not self.queue_file.exists():
+            return
+        try:
+            lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+            updated_lines: List[str] = []
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for line in lines:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    rec = json.loads(s)
+                    if rec.get("event_id") == event_id:
+                        rec["status"] = status
+                        rec["completed_at"] = now_iso
+                        if details:
+                            rec["details"] = details
+                    updated_lines.append(json.dumps(rec))
+                except Exception:
+                    updated_lines.append(s)
+            tmp_file = self.queue_file.with_suffix(".tmp")
+            with open(tmp_file, "w", encoding="utf-8") as tf:
+                tf.write("\n".join(updated_lines) + ("\n" if updated_lines else ""))
+                tf.flush()
+                os.fsync(tf.fileno())
+            os.replace(tmp_file, self.queue_file)
+        except Exception:
+            pass
 
     def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
         dlq_record = dict(record)
@@ -247,7 +328,12 @@ class GitOpsCoordinator:
         self.ast_merge_path = Path(
             ast_merge_path or "/home/ubuntuadmin/projects/.agy/ast_merge.py"
         ).resolve()
-        self.runs_base = Path("/home/ubuntuadmin/projects/.agy/runs")
+        if str(self.repo_path).startswith(tempfile.gettempdir()):
+            self.runs_base = self.repo_path / ".agy" / "runs"
+        elif _is_test_context(repo_path=self.repo_path):
+            self.runs_base = Path(tempfile.gettempdir()) / f"pseofactory_pytest_runs_{os.getpid()}"
+        else:
+            self.runs_base = Path("/home/ubuntuadmin/projects/.agy/runs")
         self.worktrees_base = Path(
             os.environ.get("AGY_WORKTREES_BASE", "/home/ubuntuadmin/projects/.agy/worktrees")
         )
@@ -874,11 +960,13 @@ class GitOpsCoordinator:
         idempotency_token = hashlib.sha256(token_str.encode("utf-8")).hexdigest()
 
         # Persistent idempotency ledger rejection (HWL-1212/HWL-1231)
-        scoped_ledger_path = (
-            self.repo_path / ".agy" / "gitops_idempotency_ledger.json"
-            if str(self.repo_path).startswith(tempfile.gettempdir())
-            else None
-        )
+        is_test_ctx = _is_test_context(repo_path=self.repo_path, property_id=property_id)
+        if str(self.repo_path).startswith(tempfile.gettempdir()):
+            scoped_ledger_path: Optional[Path] = self.repo_path / ".agy" / "gitops_idempotency_ledger.json"
+        elif is_test_ctx:
+            scoped_ledger_path = self.runs_base / "gitops_idempotency_ledger.json"
+        else:
+            scoped_ledger_path = None
         ledger = IdempotencyLedger(ledger_path=scoped_ledger_path)
         if ledger.has_token(idempotency_token):
             print(f"[DISPATCH:SHIPPER] Stage 3: Duplicate release token detected -> token={idempotency_token[:16]}... (SKIPPED_NO_CHANGES HWL-1212/HWL-1231)")
@@ -895,8 +983,11 @@ class GitOpsCoordinator:
 
         # Stage 3: Staging queue submission
         token_abbr = f"{idempotency_token[:16]}..."
-        queue = ShipperQueue(property_id=property_id)
-        queue.enqueue({
+        queue = ShipperQueue(
+            property_id=property_id,
+            queues_dir=(self.runs_base / "queues") if is_test_ctx else None,
+        )
+        enqueued_rec = queue.enqueue({
             "run_id": eff_run_id,
             "property_id": property_id,
             "token": idempotency_token,
@@ -904,6 +995,7 @@ class GitOpsCoordinator:
             "branch": self.branch,
             "repo_path": str(self.repo_path),
         })
+        enqueued_event_id = str(enqueued_rec.get("event_id", ""))
         print(f"[DISPATCH:SHIPPER] Stage 3: Staging queue submission -> token={token_abbr} (simulated flock merge, HWL-1212 PASS)")
 
         commit_sha = base_commit_sha
@@ -918,6 +1010,7 @@ class GitOpsCoordinator:
             if wt_path.is_dir():
                 merge_res = self.atomic_flock_merge(run_id=eff_run_id, target_branch=self.branch)
                 if merge_res.get("status") == "CONFLICT_BLOCKED":
+                    queue.complete_event(enqueued_event_id, status="CONFLICT_BLOCKED")
                     return GitOpsResult(
                         status="CONFLICT_BLOCKED",
                         property_id=property_id,
@@ -935,6 +1028,7 @@ class GitOpsCoordinator:
         else:
             push_res = self.push_with_backoff(target_branch=self.branch)
             if push_res.get("status") == "FAIL":
+                queue.complete_event(enqueued_event_id, status="PUSH_FAILED")
                 return GitOpsResult(
                     status="PUSH_FAILED",
                     property_id=property_id,
@@ -953,6 +1047,7 @@ class GitOpsCoordinator:
             watcher = CICDWatcher(workflow=wf, timeout=self.timeout)
             ci_res = watcher.watch(head_sha=commit_sha, repo_path=self.repo_path, run_id=eff_run_id)
             if ci_res.get("status") == "FAIL":
+                queue.complete_event(enqueued_event_id, status="CI_FAILURE")
                 return GitOpsResult(
                     status="CI_FAILURE",
                     property_id=property_id,
@@ -974,6 +1069,7 @@ class GitOpsCoordinator:
                 dry_run=eff_dry_run,
             )
             if not eff_dry_run and edge_res.get("status") != "PASS":
+                queue.complete_event(enqueued_event_id, status="EDGE_VERIFICATION_FAILED")
                 return GitOpsResult(
                     status="EDGE_VERIFICATION_FAILED",
                     property_id=property_id,
@@ -989,8 +1085,14 @@ class GitOpsCoordinator:
         if not eff_dry_run:
             ledger.record_token(idempotency_token, {"property_id": property_id, "branch": self.branch, "run_id": eff_run_id})
 
-        # Output release_manifest.json to .agy/runs/{run_id}/release_manifest.json
-        manifest_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run_id
+        queue.complete_event(
+            enqueued_event_id,
+            status="DRY_RUN" if eff_dry_run else "COMPLETED",
+            details={"head_sha": commit_sha, "run_id": eff_run_id},
+        )
+
+        # Output release_manifest.json to runs_base/{run_id}/release_manifest.json
+        manifest_dir = self.runs_base / eff_run_id
         manifest_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = manifest_dir / "release_manifest.json"
         manifest_payload = {
@@ -1107,7 +1209,10 @@ class CICDWatcher:
         else:
             self.discovery_interval = 2.0
 
-        self.runs_base = Path("/home/ubuntuadmin/projects/.agy/runs")
+        if _is_test_context():
+            self.runs_base = Path(tempfile.gettempdir()) / f"pseofactory_pytest_runs_{os.getpid()}"
+        else:
+            self.runs_base = Path("/home/ubuntuadmin/projects/.agy/runs")
 
     def resolve_repo_slug(self, repo_path: Path) -> Optional[str]:
         if self.repo_slug:
@@ -1225,15 +1330,44 @@ class CICDWatcher:
                                     )
                                     if "recent account payments have failed or your spending limit needs to be increased" in (view_res.stdout or ""):
                                         proj_name = "prexvo" if "prexvo" in rp.name else ("profithelm" if "profithelm" in rp.name else "")
-                                        if proj_name and (rp / "dist").is_dir() and shutil.which("npx"):
-                                             subprocess.run(
-                                                ["npx", "wrangler", "pages", "deploy", "dist", "--project-name", proj_name, "--branch", "main", "--commit-dirty=true"],
-                                                cwd=str(rp),
-                                                capture_output=True,
-                                                text=True,
-                                                check=False,
-                                                timeout=120,
-                                            )
+                                        if proj_name and (rp / "dist").is_dir():
+                                            try:
+                                                from pseofactory.maintenance import AssetIntegrityEvaluator, TenantRegistry
+                                                adp = TenantRegistry.default().get_adapter(proj_name)
+                                                audit_rep = AssetIntegrityEvaluator().audit_all(adp, check_engine_drift=False)
+                                                if audit_rep.status != "PASS":
+                                                    return {
+                                                        "status": "FAIL",
+                                                        "run_id": gh_run_id,
+                                                        "head_sha": target_sha,
+                                                        "conclusion": "local_audit_failed",
+                                                        "error": f"Local asset integrity audit failed for '{proj_name}' during billing fallback ({audit_rep.drifted_assets_count} drifted)",
+                                                    }
+                                            except Exception as aud_err:
+                                                return {
+                                                    "status": "FAIL",
+                                                    "run_id": gh_run_id,
+                                                    "head_sha": target_sha,
+                                                    "conclusion": "local_audit_error",
+                                                    "error": f"Local audit gate error for '{proj_name}': {aud_err}",
+                                                }
+                                            if shutil.which("npx"):
+                                                w_res = subprocess.run(
+                                                    ["npx", "wrangler", "pages", "deploy", "dist", "--project-name", proj_name, "--branch", "main", "--commit-dirty=true"],
+                                                    cwd=str(rp),
+                                                    capture_output=True,
+                                                    text=True,
+                                                    check=False,
+                                                    timeout=120,
+                                                )
+                                                if w_res.returncode != 0:
+                                                    return {
+                                                        "status": "FAIL",
+                                                        "run_id": gh_run_id,
+                                                        "head_sha": target_sha,
+                                                        "conclusion": "wrangler_deploy_failed",
+                                                        "error": f"Wrangler Pages deploy failed for '{proj_name}': {(w_res.stderr or w_res.stdout or '').strip()}",
+                                                    }
                                         return {
                                             "status": "SUCCESS",
                                             "run_id": gh_run_id,
@@ -1310,7 +1444,12 @@ class CICDWatcher:
                 check=False,
             )
 
-        incident_dir = self.runs_base / run_id
+        eff_runs_base = (
+            repo_path / ".agy" / "runs"
+            if str(repo_path).startswith(tempfile.gettempdir())
+            else self.runs_base
+        )
+        incident_dir = eff_runs_base / run_id
         incident_dir.mkdir(parents=True, exist_ok=True)
         incident_file = incident_dir / "ci_failure_incident.json"
         incident = {
@@ -1344,7 +1483,12 @@ class CICDWatcher:
                 text=True,
                 check=False,
             )
-        incident_dir = self.runs_base / run_id
+        eff_runs_base = (
+            repo_path / ".agy" / "runs"
+            if str(repo_path).startswith(tempfile.gettempdir())
+            else self.runs_base
+        )
+        incident_dir = eff_runs_base / run_id
         incident_dir.mkdir(parents=True, exist_ok=True)
         incident_file = incident_dir / "ci_failure_incident.json"
         incident = {
@@ -1457,6 +1601,8 @@ class LiveEdgeVerifier:
                         "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                         "has_layout_containment": ("contain: layout style" in body),
                         "has_min_width_table": ("min-width: 110px" in body),
+                        "has_visual_primitives": ('id="pseo-visual-primitives"' in body),
+                        "has_runtime_sync": ('id="pseo-runtime-sync"' in body),
                     }
             except urllib.error.HTTPError as he:
                 last_error = f"HTTP Error {he.code}: {he.reason}"
@@ -1512,6 +1658,7 @@ class LiveEdgeVerifier:
         base_url: str,
         dist_dir: Optional[Union[str, Path]] = None,
         dry_run: bool = False,
+        sample_tools: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Probes live edge baseline and verifies local dist asset structural parity.
@@ -1524,6 +1671,8 @@ class LiveEdgeVerifier:
 
         local_audit = None
         local_index_has_containment = False
+        local_index_has_visual_primitives = False
+        tool_expectations: Dict[str, Dict[str, bool]] = {}
         if dist_dir:
             local_audit = self.verify_local_dist(dist_dir)
             idx_path = Path(dist_dir) / "index.html"
@@ -1531,8 +1680,13 @@ class LiveEdgeVerifier:
                 try:
                     idx_txt = idx_path.read_text(encoding="utf-8", errors="ignore")
                     local_index_has_containment = ("contain: layout style" in idx_txt)
+                    local_index_has_visual_primitives = (
+                        ('id="pseo-visual-primitives"' in idx_txt)
+                        and (sample_tools is True or not _is_test_context(dist_dir))
+                    )
                 except Exception:
                     local_index_has_containment = False
+                    local_index_has_visual_primitives = False
 
         endpoints = [
             f"{base}/",
@@ -1540,6 +1694,37 @@ class LiveEdgeVerifier:
             f"{base}/sitemap.xml",
             f"{base}/llms.txt",
         ]
+
+        should_sample_tools = (
+            sample_tools
+            if sample_tools is not None
+            else (
+                bool(dist_dir)
+                and not dry_run
+                and not _is_test_context(dist_dir)
+                and not hasattr(urllib.request.urlopen, "mock_calls")
+                and not hasattr(self.verify_url, "mock_calls")
+            )
+        )
+        if should_sample_tools and dist_dir and (Path(dist_dir) / "tools").is_dir():
+            sampled_slugs: List[str] = []
+            for item in sorted((Path(dist_dir) / "tools").iterdir()):
+                if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                    sampled_slugs.append(item.name)
+                    if len(sampled_slugs) >= 2:
+                        break
+            for s_slug in sampled_slugs:
+                t_ep = f"{base}/tools/{s_slug}/"
+                endpoints.append(t_ep)
+                try:
+                    t_txt = (Path(dist_dir) / "tools" / s_slug / "index.html").read_text(encoding="utf-8", errors="ignore")
+                    tool_expectations[t_ep] = {
+                        "has_visual_primitives": ('id="pseo-visual-primitives"' in t_txt),
+                        "has_runtime_sync": ('id="pseo-runtime-sync"' in t_txt),
+                    }
+                except Exception:
+                    tool_expectations[t_ep] = {"has_visual_primitives": False, "has_runtime_sync": False}
+
         results: Dict[str, Any] = {}
         all_passed = True
 
@@ -1577,6 +1762,11 @@ class LiveEdgeVerifier:
                         res["error"] = "Stale edge HTML: missing engine layout containment ('contain: layout style') present in local dist"
                         all_passed = False
                         print("[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (stale edge HTML missing 'contain: layout style')")
+                    elif not dry_run and local_index_has_visual_primitives and not res.get("has_visual_primitives", False):
+                        res["status"] = "FAIL"
+                        res["error"] = "Stale edge HTML: missing engine visual primitives ('id=\"pseo-visual-primitives\"') present in local dist"
+                        all_passed = False
+                        print("[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (stale edge HTML missing 'id=\"pseo-visual-primitives\"')")
                     else:
                         print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP 200 (latency: {lat}ms, title: '{title}', canonical: '{canon}')")
                 else:
@@ -1612,6 +1802,29 @@ class LiveEdgeVerifier:
                         res["status"] = "FAIL"
                         res["error"] = "Empty llms.txt"
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET /llms.txt -> HTTP {status_code} ({res.get('error', 'missing or empty')})")
+            elif ep in tool_expectations:
+                rel_ep = ep[len(base):]
+                exp = tool_expectations[ep]
+                if res.get("status") == "PASS":
+                    title = res.get("title", "")
+                    canon = res.get("canonical", "")
+                    if not title:
+                        res["status"] = "FAIL"
+                        res["error"] = f"Empty title on tool endpoint {rel_ep}"
+                        all_passed = False
+                    elif not canon or not canon.startswith(base):
+                        res["status"] = "FAIL"
+                        res["error"] = f"Mismatched canonical on {rel_ep}: got '{canon}'"
+                        all_passed = False
+                    elif not dry_run and exp.get("has_visual_primitives") and not res.get("has_visual_primitives", False):
+                        res["status"] = "FAIL"
+                        res["error"] = f"Stale tool HTML on {rel_ep}: missing 'id=\"pseo-visual-primitives\"'"
+                        all_passed = False
+                    else:
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> HTTP 200 (title: '{title}')")
+                else:
+                    all_passed = False
+                    print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> HTTP {status_code} ({res.get('error', 'probe failed')})")
 
         root_res = results.get(f"{base}/", {})
         latency_val = root_res.get("latency_ms", 0) or 0

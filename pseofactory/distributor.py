@@ -16,6 +16,7 @@ import os
 import fcntl
 import uuid
 import time
+import tempfile
 from datetime import datetime, timezone
 
 CANONICAL_BASE = os.environ.get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
@@ -25,6 +26,32 @@ POST_URL_BASE = os.environ.get("FACTORY_POST_URL_BASE", CANONICAL_BASE)
 TOOLS: List[Dict[str, Any]] = []
 
 DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/distribution_idempotency.json")
+
+_TEST_PROPERTY_IDS = {
+    "test_property",
+    "recovery_app",
+    "probe_prop",
+    "profithelm_test",
+    "prop1",
+    "prop2",
+    "custom",
+    "test_repo",
+}
+
+
+def _is_test_context(
+    path_hint: Optional[Union[str, Path]] = None,
+    property_id: Optional[str] = None,
+) -> bool:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return True
+    if property_id and str(property_id).strip().lower() in _TEST_PROPERTY_IDS:
+        return True
+    if path_hint is not None:
+        rp_str = str(path_hint)
+        if rp_str.startswith("/tmp/") or "/pytest-" in rp_str:
+            return True
+    return False
 
 TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = {
     "profithelm": "143884102",
@@ -86,7 +113,12 @@ class DistributionIdempotencyLedger:
     """
 
     def __init__(self, ledger_path: Optional[Union[str, Path]] = None):
-        self.ledger_path = Path(ledger_path or DEFAULT_DISTRIBUTION_LEDGER_PATH)
+        if ledger_path is not None:
+            self.ledger_path = Path(ledger_path)
+        elif _is_test_context():
+            self.ledger_path = Path(tempfile.gettempdir()) / f"pseofactory_test_dist_idempotency_{os.getpid()}.json"
+        else:
+            self.ledger_path = DEFAULT_DISTRIBUTION_LEDGER_PATH
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.ledger_path.with_suffix(".lock")
 
@@ -226,7 +258,12 @@ class SyndicationWALQueue:
         max_attempts: int = 3,
     ):
         self.property_id = property_id.lower()
-        self.queues_dir = Path(queues_dir or self.DEFAULT_QUEUES_DIR)
+        if queues_dir is not None:
+            self.queues_dir = Path(queues_dir)
+        elif _is_test_context(property_id=self.property_id):
+            self.queues_dir = Path(tempfile.gettempdir()) / f"pseofactory_test_queues_{os.getpid()}"
+        else:
+            self.queues_dir = self.DEFAULT_QUEUES_DIR
         self.queues_dir.mkdir(parents=True, exist_ok=True)
         self.max_attempts = max_attempts
         self.queue_file = self.queues_dir / f"{self.property_id}_distribution_queue.jsonl"
@@ -252,6 +289,32 @@ class SyndicationWALQueue:
             f.flush()
             os.fsync(f.fileno())
         return record
+
+    def complete_event(self, event_id: str, status: str = "COMPLETED", details: Optional[Dict[str, Any]] = None) -> None:
+        """Marks an enqueued WAL event as COMPLETED/STAGED in the queue file."""
+        if not self.queue_file.exists():
+            return
+        lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+        updated_lines: List[str] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for line in lines:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                rec = json.loads(s)
+                if rec.get("event_id") == event_id:
+                    rec["status"] = status
+                    rec["completed_at"] = now_iso
+                    rec["attempts"] = max(int(rec.get("attempts", 0)), 1)
+                    if details:
+                        rec.update(details)
+                updated_lines.append(json.dumps(rec))
+            except Exception:
+                updated_lines.append(s)
+        tmp_q = self.queue_file.with_suffix(".tmp")
+        tmp_q.write_text("\n".join(updated_lines) + ("\n" if updated_lines else ""), encoding="utf-8")
+        tmp_q.replace(self.queue_file)
 
     def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
         """Quarantines exhausted event to Dead Letter Queue."""
@@ -4737,12 +4800,19 @@ def export_all_syndication_files(
     )
     if dry_run:
         eff_run = run_id or f"dryrun-{int(time.time())}"
-        output_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run / "syndication_dry_run"
+        if _is_test_context(output_dir, property_id):
+            runs_root = Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}"
+        else:
+            runs_root = Path("/home/ubuntuadmin/projects/.agy/runs")
+        output_dir = runs_root / eff_run / "syndication_dry_run"
     elif output_dir is None:
         from pseofactory.maintenance import TenantRegistry
         try:
             adapter = TenantRegistry.default().get_adapter(property_id)
-            output_dir = adapter.repo_path / "syndication" if adapter.repo_path else Path(f"/tmp/{property_id}_syndication")
+            if _is_test_context(getattr(adapter, "repo_path", None), property_id):
+                output_dir = Path(tempfile.gettempdir()) / f"pseofactory_test_syndication_{property_id}_{os.getpid()}"
+            else:
+                output_dir = adapter.repo_path / "syndication" if adapter.repo_path else Path(f"/tmp/{property_id}_syndication")
         except Exception:
             output_dir = None
             try:
@@ -4751,7 +4821,7 @@ def export_all_syndication_files(
                 output_dir = getattr(cfg, "SYNDICATION_DIR", None)
             except Exception:
                 pass
-            if output_dir is None:
+            if output_dir is None or _is_test_context(output_dir, property_id):
                 output_dir = Path(os.environ.get("FACTORY_SYNDICATION_DIR", f"/tmp/{property_id}_syndication"))
     else:
         output_dir = Path(output_dir)
@@ -4923,7 +4993,7 @@ def export_all_syndication_files(
         (tool_dir / "youtube_metadata.json").write_text(json.dumps(yt_pack, indent=2), encoding="utf-8")
 
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
-    if property_id == "profithelm":
+    if property_id == "profithelm" and not _is_test_context(output_dir, property_id):
         try:
             import sqlite3
             from profithelm.config import AFFILIATES, BASE_DIR as PH_BASE_DIR
@@ -5098,14 +5168,21 @@ def dispatch_to_distribution_lead(
                         })
                         known_slugs.add(item.name)
 
-    # Idempotency and WAL recording
+    # Idempotency and WAL recording (deterministic across tool slugs)
     import hashlib
-    dist_token = hashlib.sha256(f"{property_id}:{eff_run_id}:{len(target_tools)}".encode("utf-8")).hexdigest()
+    slug_list = sorted(
+        str(t["slug"] if isinstance(t, dict) else t)
+        for t in target_tools
+        if isinstance(t, (dict, str)) and (t.get("slug") if isinstance(t, dict) else t)
+    )
+    dist_token = hashlib.sha256(
+        f"{property_id}:{','.join(slug_list)}:{len(target_tools)}:{'dry' if dry_run else 'live'}".encode("utf-8")
+    ).hexdigest()
     ledger = DistributionIdempotencyLedger()
     ledger.record_token(dist_token, {"property_id": property_id, "run_id": eff_run_id, "tools_count": len(target_tools)})
 
     wal_queue = SyndicationWALQueue(property_id=property_id)
-    wal_queue.enqueue({"run_id": eff_run_id, "property_id": property_id, "tools_count": len(target_tools)})
+    wal_rec = wal_queue.enqueue({"run_id": eff_run_id, "property_id": property_id, "tools_count": len(target_tools)})
 
     # Phase 1: Asset discovery and multi-channel syndication generation across 10 channels
     all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
@@ -5257,7 +5334,11 @@ def dispatch_to_distribution_lead(
             b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
 
     # Save distribution_draft.json
-    draft_dir = Path("/home/ubuntuadmin/projects/.agy/runs") / eff_run_id
+    if _is_test_context(dist_dir, property_id):
+        runs_root = Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}"
+    else:
+        runs_root = Path("/home/ubuntuadmin/projects/.agy/runs")
+    draft_dir = runs_root / eff_run_id
     draft_dir.mkdir(parents=True, exist_ok=True)
     draft_file = draft_dir / "distribution_draft.json"
     result = {
@@ -5293,6 +5374,11 @@ def dispatch_to_distribution_lead(
         "timestamp": now_iso,
     }
     draft_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    wal_queue.complete_event(
+        wal_rec["event_id"],
+        status="STAGED" if dry_run else "COMPLETED",
+        details={"total_assets": total_assets, "draft_file": str(draft_file)},
+    )
 
     return result
 

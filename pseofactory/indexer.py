@@ -3734,17 +3734,25 @@ class PushIndexer:
         existing_assets = inspection["existing_assets"]
         all_urls = [a["url"] for a in inspection["assets"]]
 
+        rollover_pending = [
+            u for u in self.load_gsc_rollover_queue()
+            if isinstance(u, str) and self.domain.lower() in u.lower()
+        ]
+
         if force:
             candidate_urls = all_urls
             dispatch_type = "FORCED_FULL_SUBMISSION"
         elif urls:
             candidate_urls = [u for u in urls if isinstance(u, str)]
             dispatch_type = "EXPLICIT_URLS_SUBMITTED"
-        elif new_assets:
+        elif new_assets or rollover_pending:
             candidate_urls = [
                 a["url"] for a in new_assets
                 if a.get("asset_type") not in ("machine_endpoint", "leaf")
             ]
+            for ru in rollover_pending:
+                if ru not in candidate_urls:
+                    candidate_urls.append(ru)
             dispatch_type = "NEW_ASSETS_SUBMITTED" if candidate_urls else "IDEMPOTENT_NO_OP"
         else:
             candidate_urls = []
@@ -3772,6 +3780,11 @@ class PushIndexer:
             for bu in preflight_report.blocked_urls:
                 if bu not in blocked_urls:
                     blocked_urls.append(bu)
+            if rollover_pending and blocked_urls:
+                blocked_set = set(blocked_urls)
+                cleaned_rollover = [u for u in self.load_gsc_rollover_queue() if u not in blocked_set]
+                if len(cleaned_rollover) != len(rollover_pending):
+                    self.save_gsc_rollover_queue(cleaned_rollover)
             if blocked_urls:
                 blocked_log_path = self.base_dir / ".agy" / "indexing_preflight_blocked.json"
                 try:
@@ -3882,11 +3895,26 @@ class PushIndexer:
             indexnow_res = self.submit_indexnow_batch(urls=urls_to_submit, dry_run=not live, force=force, hubs_only=hubs_only)
             websub_res = self.ping_websub_hub(dry_run=not live)
             pingomatic_res = self.ping_pingomatic(dry_run=not live)
-            gsc_res = self.submit_gsc_indexing(urls=urls_to_submit, live=live, hubs_only=hubs_only)
+            gsc_res = self.submit_gsc_indexing(urls=urls_to_submit, live=live, hubs_only=hubs_only, drain_rollover=False)
             indexmysite_res = self.submit_indexmysite(urls=urls_to_submit, live=live, hubs_only=hubs_only, commercial=commercial)
             fast_idx_res = self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
             if live:
-                self.record_pushed_urls(urls_to_submit)
+                still_in_rollover = set(self.load_gsc_rollover_queue())
+                if indexnow_res.get("status") in ("DISPATCHED", "ACCEPTED", "SUCCESS", "IDEMPOTENT_NO_OP"):
+                    self.record_pushed_urls(urls_to_submit, engine="indexnow")
+                completed_all = [u for u in urls_to_submit if u not in still_in_rollover]
+                if completed_all:
+                    self.record_pushed_urls(completed_all)
+                if still_in_rollover:
+                    self.purge_pushed_urls(list(still_in_rollover), engine="google")
+                    ledger_now = self.load_pushed_ledger()
+                    ledger_changed = False
+                    for ru in still_in_rollover:
+                        if ru in ledger_now and isinstance(ledger_now[ru], dict):
+                            ledger_now[ru]["google_rollover_queued"] = True
+                            ledger_changed = True
+                    if ledger_changed:
+                        self.save_pushed_ledger(ledger_now)
             sitemap_reg = gsc_res.get("sitemap_registration") or self.submit_gsc_sitemaps(
                 urls=urls_to_submit,
                 live=live,

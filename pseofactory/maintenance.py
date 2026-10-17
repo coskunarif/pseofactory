@@ -2395,11 +2395,52 @@ class AssetIntegrityEvaluator:
                     )
                 )
 
+        # Reject 36-byte or unrendered stub video artifacts (<= 1024 bytes) in dist/videos/
+        videos_dir = adapter.dist_dir / "videos"
+        if videos_dir.is_dir():
+            stub_video_details: List[str] = []
+            for mp4_file in sorted(videos_dir.glob("*.mp4")):
+                try:
+                    if mp4_file.stat().st_size <= 1024:
+                        stub_video_details.append(
+                            f"Stub video file {mp4_file.name} ({mp4_file.stat().st_size} bytes <= 1024 bytes)"
+                        )
+                except OSError:
+                    pass
+            cat_file = videos_dir / "batch_seo_catalog.json"
+            if cat_file.is_file():
+                try:
+                    raw_cat = json.loads(cat_file.read_text(encoding="utf-8"))
+                    if isinstance(raw_cat, list):
+                        for item in raw_cat:
+                            if not isinstance(item, dict):
+                                continue
+                            vf_str = str(item.get("video_file", ""))
+                            vf_path = Path(vf_str) if vf_str else (videos_dir / f"{item.get('slug', '')}.mp4")
+                            if not vf_path.is_absolute():
+                                vf_path = adapter.dist_dir.parent / vf_path
+                            sz = int(item.get("size_bytes", 0) or 0)
+                            if sz <= 1024 or (vf_path.exists() and vf_path.stat().st_size <= 1024):
+                                stub_video_details.append(
+                                    f"Stub catalog entry '{item.get('slug')}' in batch_seo_catalog.json (size_bytes={sz})"
+                                )
+                except Exception:
+                    pass
+            if stub_video_details:
+                drifted.append(
+                    AssetDriftRecord(
+                        asset_path=str(videos_dir / "batch_seo_catalog.json"),
+                        slug=None,
+                        reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
+                        details=stub_video_details,
+                    )
+                )
+
         status = "PASS" if len(drifted) == 0 else "DRIFT"
         return AssetIntegrityReport(
             property_id=adapter.property_id,
             total_assets_checked=len(assets),
-            compliant_assets_count=len(assets) - len(drifted),
+            compliant_assets_count=max(len(assets) - len(drifted), 0),
             drifted_assets_count=len(drifted),
             drifted_assets=drifted,
             status=status,
@@ -3372,10 +3413,15 @@ class MaintenanceLifecycle:
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
                     try:
                         cur_sub_hash = compute_engine_hash()
+                        dist_fp_hasher = hashlib.sha256()
+                        for a_file in sorted(adapter.list_assets()):
+                            rel_a = a_file.relative_to(adapter.dist_dir).as_posix()
+                            dist_fp_hasher.update(f"{rel_a}:{compute_asset_fingerprint(a_file)}\n".encode("utf-8"))
                         lock_payload = {
                             "property_id": adapter.property_id,
                             "engine_hash": cur_sub_hash,
                             "substrate_hash": cur_sub_hash,
+                            "dist_fingerprint": dist_fp_hasher.hexdigest(),
                             "total_assets": post_report.total_assets_checked,
                         }
                         (t_repo / "substrate_lock.json").write_text(
@@ -4431,6 +4477,30 @@ class RetroReflectionEngine:
             if missing:
                 stale_pages[rel] = missing
 
+        videos_dir = d / "videos"
+        if videos_dir.is_dir():
+            has_stub_video = False
+            for mp4_file in sorted(videos_dir.glob("*.mp4")):
+                try:
+                    if mp4_file.stat().st_size <= 1024:
+                        has_stub_video = True
+                        break
+                except OSError:
+                    pass
+            cat_file = videos_dir / "batch_seo_catalog.json"
+            if not has_stub_video and cat_file.is_file():
+                try:
+                    raw_cat = json.loads(cat_file.read_text(encoding="utf-8"))
+                    if isinstance(raw_cat, list):
+                        for item in raw_cat:
+                            if isinstance(item, dict) and int(item.get("size_bytes", 0) or 0) <= 1024:
+                                has_stub_video = True
+                                break
+                except Exception:
+                    pass
+            if has_stub_video:
+                stale_pages["videos/batch_seo_catalog.json"] = ["stub_video_artifact"]
+
         return {
             "status": "PASS" if not stale_pages else "STALE",
             "property_id": property_id,
@@ -4508,6 +4578,48 @@ class RetroReflectionEngine:
             if repaired and updated_html != content:
                 html_file.write_text(updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
+
+        # Purge any <= 1024 byte stub .mp4 video artifacts and prune unrendered catalog entries
+        videos_dir = d / "videos"
+        if videos_dir.is_dir():
+            purged_any_stub = False
+            for mp4_file in sorted(videos_dir.glob("*.mp4")):
+                try:
+                    if mp4_file.stat().st_size <= 1024:
+                        vtt_pair = mp4_file.with_suffix(".vtt")
+                        mp4_file.unlink()
+                        if vtt_pair.is_file() and vtt_pair.stat().st_size <= 256:
+                            vtt_pair.unlink()
+                        purged_any_stub = True
+                except OSError:
+                    pass
+            cat_file = videos_dir / "batch_seo_catalog.json"
+            if cat_file.is_file():
+                try:
+                    raw_cat = json.loads(cat_file.read_text(encoding="utf-8"))
+                    if isinstance(raw_cat, list):
+                        valid_cat: List[Dict[str, Any]] = []
+                        for item in raw_cat:
+                            if not isinstance(item, dict):
+                                continue
+                            vf_str = str(item.get("video_file", ""))
+                            vf_path = Path(vf_str) if vf_str else (videos_dir / f"{item.get('slug', '')}.mp4")
+                            if not vf_path.is_absolute():
+                                vf_path = d.parent / vf_path
+                            if not vf_path.is_file():
+                                vf_path = videos_dir / f"{item.get('slug', '')}.mp4"
+                            if vf_path.is_file() and vf_path.stat().st_size > 1024:
+                                item["size_bytes"] = vf_path.stat().st_size
+                                valid_cat.append(item)
+                            else:
+                                purged_any_stub = True
+                        if len(valid_cat) != len(raw_cat) or purged_any_stub:
+                            cat_file.write_text(json.dumps(valid_cat, indent=2), encoding="utf-8")
+                            purged_any_stub = True
+                except Exception:
+                    pass
+            if purged_any_stub and "videos/batch_seo_catalog.json" not in retrofitted_paths:
+                retrofitted_paths.append("videos/batch_seo_catalog.json")
 
         return {
             "status": "PASS",
@@ -4610,12 +4722,13 @@ def _execute_autonomous_downstream_chain(
     dry_run: bool = False,
     run_id: Optional[str] = None,
     action_bus: Optional[Any] = None,
+    defer_live_indexing: bool = False,
 ) -> Dict[str, Any]:
     """
     Executes the full downstream growth and monetization chain for a tenant property:
     1. Indexing Preflight Airlock
     2. Multi-Channel Syndication Distribution & Broadcast Ledger Sync
-    3. Multi-Engine Push Indexing & Child Sitemap Registration
+    3. Multi-Engine Push Indexing & Child Sitemaps Registration
     4. Search Ranking Visibility Inspection & Metric Recovery Baseline Sync
     5. Partner Monetization Readiness & Standing Human Gate Sync
     Routes any genuine human-only dependency onto HumanActionBus while continuing
@@ -4718,30 +4831,67 @@ def _execute_autonomous_downstream_chain(
             dist_dir=adapter.dist_dir,
             tenant_id=adapter.property_id,
         )
-        # Clean any foreign-domain entries out of this tenant's push ledger
-        pushed_ledger = indexer.load_pushed_ledger()
-        cleaned_ledger = {
-            u: v for u, v in pushed_ledger.items()
-            if adapter.domain.lower() in u.lower()
+        # Clean foreign-domain, machine-endpoint, and dead/redirected tool entries out of push ledger & rollover queue
+        has_dist_tools = (adapter.dist_dir / "tools").is_dir()
+        valid_tool_slugs = {
+            t["slug"] for t in discovered_tools if isinstance(t, dict) and t.get("slug")
         }
-        if len(cleaned_ledger) != len(pushed_ledger) and not dry_run:
+        if has_dist_tools:
+            for item in (adapter.dist_dir / "tools").iterdir():
+                if item.is_dir() and (item / "index.html").is_file():
+                    valid_tool_slugs.add(item.name)
+
+        def _is_valid_push_url(u_str: str) -> bool:
+            if adapter.domain.lower() not in u_str.lower():
+                return False
+            low_u = u_str.lower()
+            if any(low_u.endswith(ext) for ext in ("/robots.txt", "/sitemap.xml", "/sitemap-index.xml", "/feed.xml", "/llms.txt", "/llms-full.txt")):
+                return False
+            if "/sitemap-" in low_u and low_u.endswith(".xml"):
+                return False
+            if has_dist_tools and "/tools/" in u_str:
+                tail = u_str.split("/tools/", 1)[1].strip("/")
+                if tail and "/" not in tail and tail not in valid_tool_slugs:
+                    return False
+            return True
+
+        rollover_now = indexer.load_gsc_rollover_queue()
+        cleaned_rollover = [u for u in rollover_now if isinstance(u, str) and _is_valid_push_url(u)]
+        if len(cleaned_rollover) != len(rollover_now) and not dry_run:
+            indexer.save_gsc_rollover_queue(cleaned_rollover)
+
+        rollover_set = set(cleaned_rollover)
+        pushed_ledger = indexer.load_pushed_ledger()
+        cleaned_ledger: Dict[str, Any] = {}
+        ledger_dirty = False
+        for u, v in pushed_ledger.items():
+            if not _is_valid_push_url(u):
+                ledger_dirty = True
+                continue
+            if isinstance(v, dict) and u in rollover_set:
+                engs = v.get("engines")
+                if isinstance(engs, dict) and "google" in engs:
+                    engs.pop("google", None)
+                    ledger_dirty = True
+                if not v.get("google_rollover_queued"):
+                    v["google_rollover_queued"] = True
+                    ledger_dirty = True
+            cleaned_ledger[u] = v
+        if (len(cleaned_ledger) != len(pushed_ledger) or ledger_dirty) and not dry_run:
             indexer.save_pushed_ledger(cleaned_ledger)
 
-        idx_res = indexer.dispatch_automated_indexing(
-            urls=None,
-            live=not dry_run,
-        )
-        # Ensure all built tool hub URLs that passed preflight are recorded in the push ledger
-        if not dry_run:
-            tool_hub_urls = [
-                f"{canon_base}/tools/{t['slug']}/"
-                for t in discovered_tools
-                if isinstance(t, dict) and t.get("slug")
-            ]
-            passed_hubs, _ = indexer.preflight_airlock([f"{canon_base}/"] + tool_hub_urls)
-            if passed_hubs:
-                indexer.record_pushed_urls(list(passed_hubs), tenant_id=adapter.property_id)
-        summary["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+        if defer_live_indexing and not dry_run:
+            idx_res = indexer.dispatch_automated_indexing(
+                urls=None,
+                live=False,
+            )
+            summary["indexing_status"] = "DEFERRED_TO_POST_DEPLOY"
+        else:
+            idx_res = indexer.dispatch_automated_indexing(
+                urls=None,
+                live=not dry_run,
+            )
+            summary["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
     except Exception as idx_err:
         summary["indexing_status"] = "EXCEPTION_ROUTED"
         act = bus.route_stage_exception(
@@ -4906,6 +5056,7 @@ def reflect_and_recompile_all_assets(
     run_downstream: bool = True,
     registry: Optional[TenantRegistry] = None,
     workspace_root: Optional[Union[str, Path]] = None,
+    defer_live_indexing: bool = False,
 ) -> Dict[str, Any]:
     """
     Scans workspace properties and audits existing static assets using
@@ -4975,6 +5126,35 @@ def reflect_and_recompile_all_assets(
             except Exception as edge_err:
                 if verbose:
                     print(f"Warning: Edge redirect sync error for '{p_id}': {edge_err}")
+
+        if (
+            getattr(adapter, "repo_path", None)
+            and adapter.property_id == "profithelm"
+            and not is_foreign_pytest
+        ):
+            try:
+                vg_file = Path(adapter.repo_path) / "profithelm" / "video_gen.py"
+                if vg_file.is_file():
+                    vg_src = vg_file.read_text(encoding="utf-8")
+                    old_stub_block = (
+                        '    if not video_file.exists():\n'
+                        '        # Minimal valid MP4 container header stub\n'
+                        '        video_file.write_bytes(b"\\x00\\x00\\x00 ftypisom\\x00\\x00\\x02\\x00isomiso2mp41\\x00\\x00\\x00\\x08free")\n'
+                        '    if not vtt_file.exists():\n'
+                        '        vtt_file.write_text(f"WEBVTT\\n\\n00:00:00.000 --> 00:00:15.000\\nProfitHelm {title}\\n", encoding="utf-8")\n'
+                    )
+                    new_no_stub_block = (
+                        '    if not video_file.exists() or video_file.stat().st_size <= 1024:\n'
+                        '        if video_file.exists() and video_file.stat().st_size <= 1024:\n'
+                        '            video_file.unlink()\n'
+                        '        return {"slug": slug, "status": "SKIPPED_NO_RENDERED_VIDEO", "size_bytes": 0}\n'
+                        '    if not vtt_file.exists():\n'
+                        '        vtt_file.write_text(f"WEBVTT\\n\\n00:00:00.000 --> 00:00:15.000\\nProfitHelm {title}\\n", encoding="utf-8")\n'
+                    )
+                    if old_stub_block in vg_src:
+                        vg_file.write_text(vg_src.replace(old_stub_block, new_no_stub_block, 1), encoding="utf-8")
+            except Exception:
+                pass
 
         retro_audit = RetroReflectionEngine.audit_estate(adapter.dist_dir, adapter.property_id)
         stale_mechanic_count = retro_audit.get("stale_count", 0)
@@ -5088,7 +5268,11 @@ def reflect_and_recompile_all_assets(
             and (recompiled_count > 0 or retrofitted_count > 0 or _has_pending_downstream_work(adapter))
         ):
             try:
-                downstream_summary = _execute_autonomous_downstream_chain(adapter, dry_run=False)
+                downstream_summary = _execute_autonomous_downstream_chain(
+                    adapter,
+                    dry_run=False,
+                    defer_live_indexing=defer_live_indexing,
+                )
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
 
@@ -5098,10 +5282,15 @@ def reflect_and_recompile_all_assets(
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
                     try:
                         cur_sub_hash = compute_engine_hash()
+                        dist_fp_hasher = hashlib.sha256()
+                        for a_file in sorted(adapter.list_assets()):
+                            rel_a = a_file.relative_to(adapter.dist_dir).as_posix()
+                            dist_fp_hasher.update(f"{rel_a}:{compute_asset_fingerprint(a_file)}\n".encode("utf-8"))
                         lock_payload = {
                             "property_id": adapter.property_id,
                             "engine_hash": cur_sub_hash,
                             "substrate_hash": cur_sub_hash,
+                            "dist_fingerprint": dist_fp_hasher.hexdigest(),
                             "total_assets": build_verified.total_assets_checked,
                         }
                         (t_repo / "substrate_lock.json").write_text(
@@ -5155,6 +5344,14 @@ def reflect_and_recompile_all_assets(
                                     pass
                         except Exception:
                             pass
+                    try:
+                        subprocess.run(
+                            ["systemctl", "--user", "reset-failed", f"{adapter.property_id}-factory.service"],
+                            capture_output=True,
+                            check=False,
+                        )
+                    except Exception:
+                        pass
 
                     try:
                         streak_file = scanner.workspace_root / ".agy" / "supervisor_failure_streak.json"
@@ -5226,7 +5423,7 @@ def reflect_and_recompile_all_assets(
             "compliant_assets": post_report.compliant_assets_count,
             "downstream": downstream_summary,
         }
-        if post_report.status != "PASS" and not force:
+        if post_report.status != "PASS":
             results["status"] = "DRIFT"
 
     return results
