@@ -4619,6 +4619,16 @@ class RetroReflectionEngine:
                 slug=slug,
                 dist_dir=d,
             )
+            if "/r/" in updated_html:
+                try:
+                    from pseofactory.affiliates import normalize_html_callout_message_match
+                    norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)
+                    if norm_tool_html != updated_html:
+                        updated_html = norm_tool_html
+                        if "callout_message_match" not in repaired:
+                            repaired.append("callout_message_match")
+                except Exception:
+                    pass
             if repaired and updated_html != content:
                 html_file.write_text(updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
@@ -5317,6 +5327,14 @@ def reflect_and_recompile_all_assets(
                     dry_run=False,
                     defer_live_indexing=defer_live_indexing,
                 )
+                from pseofactory.affiliates import normalize_html_callout_message_match
+                for html_f in sorted(adapter.dist_dir.rglob("*.html")):
+                    if html_f.name.startswith("."):
+                        continue
+                    raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
+                    norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
+                    if norm_c != raw_c:
+                        html_f.write_text(norm_c, encoding="utf-8")
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
 

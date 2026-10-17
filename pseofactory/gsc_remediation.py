@@ -578,9 +578,9 @@ def _resolve_partner_offer_and_manual_gate(
             "cta_text": "Open a 1031 Exchange Escrow Account with IPX1031",
         },
         "kalshi": {
-            "name": "Moby Investment Research & Market Intelligence",
+            "name": "Kalshi CFTC-Regulated Event Contract Exchange",
             "url": "/r/kalshi",
-            "cta_text": "Analyze Market Odds & Event Research on Moby",
+            "cta_text": "Trade Regulated Event Contracts on Kalshi",
         },
         "taxslayer": {
             "name": "TaxSlayer Online Tax Filing",
