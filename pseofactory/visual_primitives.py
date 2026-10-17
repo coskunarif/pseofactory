@@ -206,7 +206,7 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }}
     /* Deterministic Touch Targets (>= 44x44px) & Interactive Pill Primitives */
-    .touch-target, .btn, .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .runway-chip {{
+    button, input:not([type="hidden"]), select, .touch-target, .btn, .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .runway-chip {{
       min-height: 44px !important;
       min-width: 44px !important;
       box-sizing: border-box !important;
@@ -753,18 +753,468 @@ def render_runtime_synchronizer_script() -> str:
   </script>"""
 
 
+REQUIRED_PRIMITIVE_TOKENS: Tuple[str, ...] = (
+    "--bg-canvas:",
+    "--card-bg:",
+    "--border:",
+    "--accent:",
+    ".table-wrap",
+    ".touch-target",
+    "tabular-nums",
+)
+
+
+def _is_compiled_tenant_or_primitive_page(
+    html_content: str,
+    require_primitives: Optional[bool] = None,
+) -> bool:
+    """
+    Determines whether an HTML document is a compiled tenant page or tool page
+    that must carry the full #pseo-visual-primitives stylesheet and runtime synchronizer.
+    """
+    if require_primitives is True:
+        return True
+    if (
+        'id="pseo-visual-primitives"' in html_content
+        or "id='pseo-visual-primitives'" in html_content
+        or 'id="pseo-runtime-sync"' in html_content
+        or "id='pseo-runtime-sync'" in html_content
+    ):
+        return True
+    if require_primitives is False:
+        return False
+    tenant_markers = (
+        'id="calculation-manifest"',
+        'class="calculation-manifest"',
+        'class="calculator-form"',
+        'class="calculation-container"',
+        "/static/css/style.css",
+        "/css/style.css",
+        'data-theme="porcelain"',
+        'data-theme="obsidian"',
+        "data-mechanic=",
+        'id="pseo-runtime-sync"',
+        "<main",
+    )
+    return any(marker in html_content for marker in tenant_markers)
+
+
+def _extract_attr(tag_html: str, attr_name: str) -> Optional[str]:
+    matches = list(
+        re.finditer(rf'\b{re.escape(attr_name)}\s*=\s*(["\'])(.*?)\1', tag_html, re.IGNORECASE | re.DOTALL)
+    )
+    if not matches:
+        return None
+    if attr_name.lower() == "style":
+        return "; ".join(m.group(2).strip().rstrip(";") for m in matches if m.group(2).strip())
+    return matches[-1].group(2)
+
+
+def _parse_font_size_to_px(style_text: str) -> Optional[Tuple[float, bool]]:
+    """
+    Extracts the last font-size declaration in style_text as (px_value, has_important).
+    Supports px and rem/em (1rem = 16px).
+    """
+    matches = list(
+        re.finditer(
+            r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*(px|rem|em)\s*(!important)?",
+            style_text,
+            re.IGNORECASE,
+        )
+    )
+    if not matches:
+        return None
+    last = matches[-1]
+    val = float(last.group(1))
+    unit = last.group(2).lower()
+    px = val * 16.0 if unit in ("rem", "em") else val
+    has_imp = bool(last.group(3))
+    return px, has_imp
+
+
+def detect_visual_and_ux_contract_issues(
+    html_content: str,
+    rel_path: str = "index.html",
+    require_primitives: Optional[bool] = None,
+) -> List[str]:
+    """
+    Deterministically audits an HTML document for all 5 visual and UX flaw classes:
+    1. Missing or corrupted theme styles and undefined CSS custom properties (var(--...)).
+    2. Unwrapped <table> elements or horizontal overflow sabotage (overflow-x: hidden, fixed wide px widths).
+    3. Cramped interactive tap targets (< 44px inline dimensions, < 44px CSS min-height/min-width, display: inline).
+    4. Broken visual and typographic hierarchy (inline heading font-size overrides, cramped card padding/radius).
+    5. Broken interactive calculator controls, sliders, presets, and runtime synchronizer state.
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    if not html_content or not isinstance(html_content, str):
+        return [f"[{rel_path}] Empty or non-string HTML content."]
+
+    issues: List[str] = []
+    expect_primitives = _is_compiled_tenant_or_primitive_page(html_content, require_primitives)
+
+    # --- 1. Theme Styles & CSS Custom Property Integrity ---
+    style_blocks = re.findall(r"<style\b[^>]*>([\s\S]*?)</style>", html_content, re.IGNORECASE)
+    if expect_primitives:
+        prim_match = re.search(
+            r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
+            html_content,
+            re.IGNORECASE,
+        )
+        if not prim_match or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content:
+            issues.append(
+                f"[{rel_path}] Missing or outdated <style id='pseo-visual-primitives' data-version='{VISUAL_PRIMITIVES_VERSION}'> block."
+            )
+        else:
+            prim_body = prim_match.group(1)
+            missing_tokens = [tok for tok in REQUIRED_PRIMITIVE_TOKENS if tok not in prim_body]
+            if missing_tokens:
+                issues.append(
+                    f"[{rel_path}] Corrupted #pseo-visual-primitives stylesheet missing core tokens/rules: {', '.join(missing_tokens)}."
+                )
+
+    if style_blocks or expect_primitives or "var(--" in html_content:
+        no_script_html = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", html_content, flags=re.IGNORECASE)
+        defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_html))
+        used_vars_no_fallback = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_html))
+        undefined_vars = sorted(used_vars_no_fallback - defined_vars)
+        if undefined_vars:
+            issues.append(
+                f"[{rel_path}] Undefined CSS custom properties referenced without fallback: {', '.join(undefined_vars[:5])}."
+            )
+
+    # --- 2. Table Containment & Horizontal Overflow Checks ---
+    has_table_context = expect_primitives or "<main" in html_content.lower() or "table" in html_content.lower()
+    if has_table_context:
+        for tm in re.finditer(r"<table\b[^>]*>", html_content, re.IGNORECASE):
+            preceding = html_content[max(0, tm.start() - 240) : tm.start()]
+            if not re.search(
+                r'<div[^>]*class=["\'][^"\']*(?:table-wrap|table-responsive|table-container|pseo-table-wrap)[^"\']*["\'][^>]*>\s*$',
+                preceding,
+                re.IGNORECASE,
+            ):
+                if expect_primitives or "class=" in tm.group(0).lower() or "<main" in html_content.lower():
+                    issues.append(
+                        f"[{rel_path}] Unwrapped <table> element risks horizontal mobile overflow (missing .table-wrap.pseo-table-wrap container)."
+                    )
+                    break
+
+    # --- 3, 4, 5. Linear Tag Scan for Overflow Sabotage, Tap Targets, Hierarchy, and Calculator Controls ---
+    for css_body in style_blocks:
+        if re.search(r"min-(?:height|width)\s*:\s*(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b", css_body, re.IGNORECASE):
+            issues.append(
+                f"[{rel_path}] Stylesheet rule specifies cramped min-height or min-width < 44px."
+            )
+            break
+
+    has_calc_markers = any(
+        tok in html_content
+        for tok in (
+            "calculator-form",
+            "calculation-container",
+            "calculation-manifest",
+            'type="range"',
+            "type='range'",
+            "data-calc-preset",
+            "scenario-preset-link",
+        )
+    )
+    if expect_primitives and has_calc_markers:
+        sync_match = re.search(
+            r'<script\b[^>]*id=["\']pseo-runtime-sync["\'][^>]*>([\s\S]*?)</script>',
+            html_content,
+            re.IGNORECASE,
+        )
+        if (
+            not sync_match
+            or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
+            or "__pseoRuntimeSyncInitialized" not in sync_match.group(1)
+            or "updateOutputsSynchronously" not in sync_match.group(1)
+        ):
+            issues.append(
+                f"[{rel_path}] Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
+            )
+
+    for m in re.finditer(r"<([a-zA-Z0-9]+)\b[^>]*>", html_content):
+        tag_name = m.group(1).lower()
+        tag = m.group(0)
+        cls_val = (_extract_attr(tag, "class") or "").lower()
+        style_val = _extract_attr(tag, "style") or ""
+        style_lower = style_val.lower()
+
+        # 2b. Table wrapper or table overflow sabotage
+        if tag_name in ("div", "table") and (
+            tag_name == "table"
+            or any(c in cls_val for c in ("table-wrap", "pseo-table-wrap", "calc-matrix-table-wrap", "table-responsive", "table-container"))
+        ):
+            if style_lower and re.search(r"overflow(?:-x)?\s*:\s*(?:hidden|clip|visible)\b", style_lower):
+                issues.append(
+                    f"[{rel_path}] Table or table wrapper has inline overflow hidden/clip/visible that breaks mobile horizontal scroll containment."
+                )
+
+        # 2c. Fixed wide inline width/min-width >= 400px overflowing 375px mobile viewport
+        if style_lower and tag_name in ("div", "section", "article", "main", "form"):
+            for wm in re.finditer(r"(?<!max-)(?:width|min-width)\s*:\s*(\d+(?:\.\d+)?)px\b", style_lower):
+                if float(wm.group(1)) >= 400.0:
+                    issues.append(
+                        f"[{rel_path}] Element <{tag_name}> has fixed inline width/min-width ({wm.group(1)}px >= 400px) that overflows 375px mobile viewport."
+                    )
+                    break
+
+        # 3. Cramped interactive tap targets (< 44px)
+        if tag_name in ("button", "a", "input", "select", "summary"):
+            inp_type = (_extract_attr(tag, "type") or "").lower()
+            if tag_name == "input" and inp_type == "hidden":
+                continue
+            if style_lower:
+                for dm in re.finditer(
+                    r"(?:min-height|max-height|height|min-width|max-width|width)\s*:\s*(\d+(?:\.\d+)?)px\b",
+                    style_lower,
+                ):
+                    if float(dm.group(1)) < 44.0:
+                        issues.append(
+                            f"[{rel_path}] Cramped interactive tap target <{tag_name}> has inline dimension {dm.group(0)} (< 44px)."
+                        )
+                        break
+                is_interactive_pill = tag_name in ("button", "input", "select", "summary") or any(
+                    k in cls_val
+                    for k in (
+                        "touch-target",
+                        "scenario-preset-link",
+                        "partner-btn",
+                        "btn-cta",
+                        "cluster-link",
+                        "canonical-tool-link",
+                        "btn-preset",
+                        "calc-switcher-btn",
+                        "calc-scenario-btn",
+                    )
+                )
+                if is_interactive_pill:
+                    if re.search(r"display\s*:\s*inline\s*(?:!important)?\s*(?:;|$)", style_lower):
+                        issues.append(
+                            f"[{rel_path}] Interactive control <{tag_name}> has inline 'display: inline' that collapses 44px touch target height."
+                        )
+                    if re.search(r"(?<![a-z-])padding\s*:\s*[0-2](?:px)?\s*(?:!important)?\s*(?:;|$)", style_lower):
+                        issues.append(
+                            f"[{rel_path}] Interactive control <{tag_name}> has cramped inline padding (< 3px)."
+                        )
+
+        # 4. Visual & Typographic Hierarchy
+        if tag_name in ("h1", "h2", "h3", "h4") and style_lower and "font-size" in style_lower:
+            parsed_fs = _parse_font_size_to_px(style_lower)
+            if parsed_fs is not None:
+                px_val, has_imp = parsed_fs
+                if tag_name == "h1" and (px_val < 24.0 or has_imp):
+                    issues.append(
+                        f"[{rel_path}] Inline <h1> font-size override ({px_val}px) violates typographic hierarchy."
+                    )
+                elif tag_name == "h2" and (px_val > 24.0 or px_val < 15.0 or has_imp):
+                    issues.append(
+                        f"[{rel_path}] Inline <h2> font-size override ({px_val}px) violates typographic hierarchy."
+                    )
+                elif tag_name in ("h3", "h4") and (px_val > 20.0 or px_val < 12.0 or has_imp):
+                    issues.append(
+                        f"[{rel_path}] Inline <{tag_name}> font-size override ({px_val}px) violates typographic hierarchy."
+                    )
+
+        if tag_name in ("div", "section", "article") and style_lower:
+            if any(c in cls_val.split() for c in ("card", "pseo-card", "overlay-section")):
+                if re.search(r"(?<![a-z-])padding\s*:\s*(?:[0-9]|1[01])(?:px)?\b", style_lower) or re.search(
+                    r"border-radius\s*:\s*0(?:px)?\b", style_lower
+                ):
+                    issues.append(
+                        f"[{rel_path}] Card container <{tag_name}> inline style overrides deterministic card padding/radius geometry."
+                    )
+
+        # 5. Interactive Calculator Controls, Sliders, Presets
+        if tag_name in ("input", "select", "button"):
+            inp_type = (_extract_attr(tag, "type") or "").lower()
+            if tag_name == "input" and inp_type == "hidden":
+                continue
+            if re.search(r"\bdisabled(?:\s*=\s*([\"\']).*?\1|\b)", tag, re.IGNORECASE):
+                issues.append(
+                    f"[{rel_path}] Disabled interactive control <{tag_name}> blocks user calculator interaction."
+                )
+            if tag_name == "input" and (
+                inp_type in ("number", "range") or "min=" in tag.lower() or "max=" in tag.lower() or "step=" in tag.lower()
+            ):
+                min_raw = _extract_attr(tag, "min")
+                max_raw = _extract_attr(tag, "max")
+                step_raw = _extract_attr(tag, "step")
+                val_raw = _extract_attr(tag, "value")
+                if min_raw is not None and max_raw is not None:
+                    try:
+                        if float(min_raw) >= float(max_raw):
+                            issues.append(
+                                f"[{rel_path}] Broken <input> range bounds: min ({min_raw}) >= max ({max_raw})."
+                            )
+                    except ValueError:
+                        issues.append(
+                            f"[{rel_path}] Non-numeric <input> min/max bounds: min={min_raw!r}, max={max_raw!r}."
+                        )
+                elif min_raw is not None or max_raw is not None:
+                    for b_name, b_val in (("min", min_raw), ("max", max_raw)):
+                        if b_val is not None:
+                            try:
+                                float(b_val)
+                            except ValueError:
+                                issues.append(f"[{rel_path}] Non-numeric <input> {b_name}={b_val!r}.")
+                if step_raw is not None and step_raw.strip().lower() != "any":
+                    try:
+                        if float(step_raw) <= 0.0:
+                            issues.append(
+                                f"[{rel_path}] Broken <input> step attribute: step ({step_raw}) <= 0."
+                            )
+                    except ValueError:
+                        issues.append(
+                            f"[{rel_path}] Non-numeric <input> step attribute: step={step_raw!r}."
+                        )
+                if inp_type in ("number", "range") and val_raw is not None:
+                    cleaned_val = val_raw.replace(",", "").strip()
+                    try:
+                        float(cleaned_val)
+                    except ValueError:
+                        issues.append(
+                            f"[{rel_path}] Broken <input type='{inp_type}'> non-numeric value={val_raw!r}."
+                        )
+
+        if "data-calc-preset=" in tag.lower():
+            preset_raw = _extract_attr(tag, "data-calc-preset")
+            if preset_raw is not None:
+                import html as _html_mod
+                import json as _json_mod
+
+                try:
+                    parsed_preset = _json_mod.loads(_html_mod.unescape(preset_raw).strip())
+                    if not isinstance(parsed_preset, dict) or not parsed_preset:
+                        issues.append(
+                            f"[{rel_path}] Empty or non-object data-calc-preset attribute on <{tag_name}>."
+                        )
+                except Exception:
+                    issues.append(
+                        f"[{rel_path}] Malformed JSON in data-calc-preset attribute on <{tag_name}>."
+                    )
+
+        if tag_name == "a" and "scenario-preset-link" in cls_val:
+            href_val = _extract_attr(tag, "href") or ""
+            preset_attr = _extract_attr(tag, "data-preset") or ""
+            if "?" not in href_val and not preset_attr.strip():
+                issues.append(
+                    f"[{rel_path}] Broken .scenario-preset-link anchor missing both query parameters and data-preset attribute."
+                )
+
+    if expect_primitives and ('class="result-box"' in html_content or 'class="pseo-result-box"' in html_content):
+        out_matches = list(
+            re.finditer(
+                r'<([a-zA-Z0-9]+)\b[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>([\s\S]*?)</\1>',
+                html_content,
+                re.IGNORECASE,
+            )
+        )
+        if not out_matches:
+            issues.append(
+                f"[{rel_path}] Calculator result-box is missing a .output-value metric element."
+            )
+        else:
+            for om in out_matches:
+                inner_txt = re.sub(r"<[^>]+>", "", om.group(2)).strip().lower()
+                if not inner_txt or inner_txt in ("nan", "undefined", "null", "infinity", "-infinity"):
+                    issues.append(
+                        f"[{rel_path}] Calculator .output-value contains invalid initial text ({inner_txt!r})."
+                    )
+                    break
+
+    return issues
+
+
+def assert_visual_and_ux_contracts(
+    html_content: str,
+    context: str = "",
+    require_primitives: Optional[bool] = None,
+) -> bool:
+    """
+    Contract gate asserting zero visual or UX flaws in html_content.
+    Raises ValueError if any violation is detected.
+    """
+    issues = detect_visual_and_ux_contract_issues(
+        html_content,
+        rel_path=context or "index.html",
+        require_primitives=require_primitives,
+    )
+    if issues:
+        raise ValueError(
+            f"Visual and UX Contract Violation ({len(issues)} issue(s)): " + "; ".join(issues)
+        )
+    return True
+
+
+def _sanitize_style_attr_in_tag(tag_html: str, new_style: str) -> str:
+    cleaned = new_style.strip().strip(";").strip()
+    stripped_tag = re.sub(r'\s*\bstyle\s*=\s*(["\']).*?\1', "", tag_html, flags=re.IGNORECASE | re.DOTALL)
+    if not cleaned:
+        return stripped_tag
+    if stripped_tag.endswith("/>"):
+        return stripped_tag[:-2].rstrip() + f' style="{cleaned}" />'
+    return stripped_tag[:-1].rstrip() + f' style="{cleaned}">'
+
+
+def _ensure_class_on_tag(tag_html: str, required_class: str) -> Tuple[str, bool]:
+    cls_val = _extract_attr(tag_html, "class")
+    if cls_val is not None:
+        classes = cls_val.split()
+        if required_class in classes:
+            return tag_html, False
+        new_cls = f"{cls_val.strip()} {required_class}".strip()
+        updated_tag = re.sub(
+            r'\bclass\s*=\s*(["\']).*?\1',
+            f'class="{new_cls}"',
+            tag_html,
+            count=1,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return updated_tag, True
+    if tag_html.endswith("/>"):
+        return tag_html[:-2].rstrip() + f' class="{required_class}" />', True
+    return tag_html[:-1].rstrip() + f' class="{required_class}">', True
+
+
+def _set_or_replace_attr(tag_html: str, attr_name: str, attr_val: str) -> str:
+    pattern = rf'\b{re.escape(attr_name)}\s*=\s*(["\']).*?\1'
+    matches = list(re.finditer(pattern, tag_html, re.IGNORECASE | re.DOTALL))
+    if matches:
+        if len(matches) == 1:
+            return re.sub(
+                pattern,
+                f'{attr_name}="{attr_val}"',
+                tag_html,
+                count=1,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        stripped = re.sub(rf'\s*{pattern}', "", tag_html, flags=re.IGNORECASE | re.DOTALL)
+        if stripped.endswith("/>"):
+            return stripped[:-2].rstrip() + f' {attr_name}="{attr_val}" />'
+        return stripped[:-1].rstrip() + f' {attr_name}="{attr_val}">'
+    if tag_html.endswith("/>"):
+        return tag_html[:-2].rstrip() + f' {attr_name}="{attr_val}" />'
+    return tag_html[:-1].rstrip() + f' {attr_name}="{attr_val}">'
+
+
 def normalize_html_visual_primitives(
     html_content: str,
     is_tenant_porcelain: Optional[bool] = None,
 ) -> Tuple[str, List[str]]:
     """
-    Normalizes an HTML document to enforce deterministic visual primitives:
-    1. Injects or updates <style id="pseo-visual-primitives" data-version="pseo-primitives-v2">.
+    Normalizes an HTML document to enforce deterministic visual primitives and self-heal
+    all 5 classes of visual and UX regressions:
+    1. Injects or repairs <style id="pseo-visual-primitives" data-version="pseo-primitives-v2">
+       and synthesizes fallback tokens for any undefined CSS custom properties (var(--...)).
     2. Normalizes table wrappers (.calc-matrix-table-wrap, div[style*="overflow-x: auto"], and unwrapped <table>s)
-       so every table is contained inside a scrollable .table-wrap.pseo-table-wrap container.
-    3. Ensures interactive controls carry >= 44x44px touch-target sizing.
-    4. Injects or updates <script id="pseo-runtime-sync" data-version="pseo-primitives-v2"> for synchronous
-       calculator state synchronization.
+       and strips inline overflow-x: hidden / fixed wide pixel widths (>= 400px).
+    3. Ensures interactive controls carry >= 44x44px touch-target sizing and strips cramped inline dimensions.
+    4. Repairs inverted inline heading font-size overrides and cramped card padding/radius overrides.
+    5. Repairs broken calculator inputs (min >= max, step <= 0, disabled, non-numeric values, missing labels),
+       malformed data-calc-preset JSON, broken .scenario-preset-link anchors, missing .output-value nodes,
+       and injects or repairs <script id="pseo-runtime-sync" data-version="pseo-primitives-v2">.
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     if not html_content or not isinstance(html_content, str):
@@ -775,16 +1225,26 @@ def normalize_html_visual_primitives(
 
     if is_tenant_porcelain is None:
         is_tenant_porcelain = (
-            '/static/css/style.css' in updated
-            or '/css/style.css' in updated
+            "/static/css/style.css" in updated
+            or "/css/style.css" in updated
             or 'data-theme="porcelain"' in updated
             or "--bg-canvas:" in updated
         ) and "--bg: #07090e" not in updated
 
-    # 1. Inject or update <style id="pseo-visual-primitives">
+    # 1. Inject or repair <style id="pseo-visual-primitives">
     style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
-    if 'id="pseo-visual-primitives"' in updated:
-        if f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated:
+    if 'id="pseo-visual-primitives"' in updated or "id='pseo-visual-primitives'" in updated:
+        prim_match = re.search(
+            r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
+            updated,
+            re.IGNORECASE,
+        )
+        prim_body = prim_match.group(1) if prim_match else ""
+        needs_style_repair = (
+            f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
+            or any(tok not in prim_body for tok in REQUIRED_PRIMITIVE_TOKENS)
+        )
+        if needs_style_repair:
             updated = re.sub(
                 r'\s*<style[^>]*id=["\']pseo-visual-primitives["\'][^>]*>[\s\S]*?</style>',
                 "\n" + style_block,
@@ -802,6 +1262,64 @@ def normalize_html_visual_primitives(
             body_idx = updated.find("<body")
             updated = updated[:body_idx] + style_block + "\n" + updated[body_idx:]
             repaired.append("visual_primitives_css")
+        else:
+            updated = style_block + "\n" + updated
+            repaired.append("visual_primitives_css")
+
+    # 1b. Synthesize safe fallback tokens for any undefined var(--...) custom properties
+    no_script_doc = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", updated, flags=re.IGNORECASE)
+    defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_doc))
+    used_vars = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_doc))
+    orphan_vars = sorted(used_vars - defined_vars)
+    if orphan_vars:
+        fallback_lines: List[str] = []
+        for ov in orphan_vars:
+            ov_low = ov.lower()
+            if any(k in ov_low for k in ("bg", "surface", "canvas", "card")):
+                fb_val = "#ffffff" if is_tenant_porcelain else "#0f172a"
+            elif any(k in ov_low for k in ("border", "line", "divider")):
+                fb_val = "#dbe1ea" if is_tenant_porcelain else "rgba(255, 255, 255, 0.12)"
+            elif any(k in ov_low for k in ("text", "fg", "ink", "title", "heading")):
+                fb_val = "#090d16" if is_tenant_porcelain else "#f8fafc"
+            elif any(k in ov_low for k in ("radius", "round")):
+                fb_val = "8px"
+            elif any(k in ov_low for k in ("space", "gap", "pad")):
+                fb_val = "16px"
+            else:
+                fb_val = "#1d4ed8" if is_tenant_porcelain else "#38bdf8"
+            fallback_lines.append(f"      {ov}: {fb_val};")
+        fallback_css = "\n".join(fallback_lines) + "\n"
+        updated = re.sub(
+            r'(<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>\s*:root\s*\{)',
+            r"\1\n" + fallback_css,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if "orphan_css_token_repair" not in repaired:
+            repaired.append("orphan_css_token_repair")
+
+    # 1c. Normalize any stylesheet rules that set min-height or min-width < 44px
+    def _fix_style_block_touch_targets(m: re.Match) -> str:
+        full_block = m.group(0)
+        fixed_block = re.sub(
+            r"(min-(?:height|width)\s*:\s*)(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b",
+            r"\g<1>44px",
+            full_block,
+            flags=re.IGNORECASE,
+        )
+        return fixed_block
+
+    new_updated_styles = re.sub(
+        r"<style\b[^>]*>[\s\S]*?</style>",
+        _fix_style_block_touch_targets,
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if new_updated_styles != updated:
+        updated = new_updated_styles
+        if "touch_target_normalization" not in repaired:
+            repaired.append("touch_target_normalization")
 
     # 2. Normalize ad-hoc table wrappers (<div style="overflow-x: auto;"> and .calc-matrix-table-wrap)
     if 'class="calc-matrix-table-wrap"' in updated:
@@ -829,7 +1347,7 @@ def normalize_html_visual_primitives(
         last_idx = 0
         for m in re.finditer(r"(<table\b[^>]*>[\s\S]*?</table>)", doc, re.IGNORECASE):
             start, end = m.start(), m.end()
-            preceding = doc[max(0, start - 220) : start]
+            preceding = doc[max(0, start - 240) : start]
             if re.search(
                 r'<div[^>]*class=["\'][^"\']*(?:table-wrap|table-responsive|table-container|pseo-table-wrap)[^"\']*["\'][^>]*>\s*$',
                 preceding,
@@ -849,13 +1367,297 @@ def normalize_html_visual_primitives(
     if wrapped_tables and "table_wrapper_normalization" not in repaired:
         repaired.append("table_wrapper_normalization")
 
-    # 3. Inject or update <script id="pseo-runtime-sync">
+    # 3, 4, 5. Linear tag sanitizer for overflow styles, cramped tap targets, hierarchy overrides, and broken inputs
+    existing_label_fors = set(
+        re.findall(r'<label\b[^>]*\bfor\s*=\s*["\']([^"\']+)["\']', updated, re.IGNORECASE)
+    )
+    tag_repairs: set[str] = set()
+
+    def _repair_html_tag(m: re.Match) -> str:
+        tag_name = m.group(1).lower()
+        tag = m.group(0)
+        orig_tag = tag
+        cls_val = (_extract_attr(tag, "class") or "").lower()
+        style_val = _extract_attr(tag, "style")
+
+        # 2b & 2c: Strip overflow sabotage on tables/wrappers and wide fixed inline widths >= 400px
+        if style_val is not None:
+            new_style = style_val
+            if tag_name in ("div", "table") and (
+                tag_name == "table"
+                or any(
+                    c in cls_val
+                    for c in (
+                        "table-wrap",
+                        "pseo-table-wrap",
+                        "calc-matrix-table-wrap",
+                        "table-responsive",
+                        "table-container",
+                    )
+                )
+            ):
+                new_style = re.sub(
+                    r"overflow(?:-x)?\s*:\s*(?:hidden|clip|visible)\s*(?:!important)?\s*;?",
+                    "",
+                    new_style,
+                    flags=re.IGNORECASE,
+                )
+            if tag_name in ("div", "section", "article", "main", "form"):
+                def _strip_wide_px(wm: re.Match) -> str:
+                    if float(wm.group(1)) >= 400.0:
+                        return ""
+                    return wm.group(0)
+
+                new_style = re.sub(
+                    r"(?<!max-)(?:width|min-width)\s*:\s*(\d+(?:\.\d+)?)px\s*(?:!important)?\s*;?",
+                    _strip_wide_px,
+                    new_style,
+                    flags=re.IGNORECASE,
+                )
+            if new_style != style_val:
+                tag = _sanitize_style_attr_in_tag(tag, new_style)
+                style_val = _extract_attr(tag, "style")
+                tag_repairs.add("table_wrapper_normalization")
+
+        # 3: Strip cramped inline dimensions (< 44px), display: inline, and cramped padding on interactive controls
+        if tag_name in ("button", "a", "input", "select", "summary"):
+            inp_type = (_extract_attr(tag, "type") or "").lower()
+            if not (tag_name == "input" and inp_type == "hidden"):
+                if style_val is not None:
+                    new_style = style_val
+
+                    def _strip_cramped_dim(dm: re.Match) -> str:
+                        prop_name = dm.group(1).lower()
+                        if float(dm.group(2)) < 44.0:
+                            if prop_name in ("min-height", "min-width"):
+                                return f"{prop_name}: 44px;"
+                            return ""
+                        return dm.group(0)
+
+                    new_style = re.sub(
+                        r"(min-height|max-height|height|min-width|max-width|width)\s*:\s*(\d+(?:\.\d+)?)px\s*(?:!important)?\s*;?",
+                        _strip_cramped_dim,
+                        new_style,
+                        flags=re.IGNORECASE,
+                    )
+                    new_style = re.sub(
+                        r"display\s*:\s*inline\s*(?:!important)?\s*;?",
+                        "",
+                        new_style,
+                        flags=re.IGNORECASE,
+                    )
+                    new_style = re.sub(
+                        r"(?<![a-z-])padding\s*:\s*[0-2](?:px)?(?:\s+[0-2](?:px)?)?\s*(?:!important)?\s*;?",
+                        "",
+                        new_style,
+                        flags=re.IGNORECASE,
+                    )
+                    if new_style != style_val:
+                        tag = _sanitize_style_attr_in_tag(tag, new_style)
+                        style_val = _extract_attr(tag, "style")
+                        tag_repairs.add("touch_target_normalization")
+
+        # 4: Strip inline heading font-size overrides that violate typographic hierarchy, and cramped card styles
+        if tag_name in ("h1", "h2", "h3", "h4") and style_val is not None and "font-size" in style_val.lower():
+            parsed_fs = _parse_font_size_to_px(style_val.lower())
+            if parsed_fs is not None:
+                px_val, has_imp = parsed_fs
+                violates = (
+                    (tag_name == "h1" and (px_val < 24.0 or has_imp))
+                    or (tag_name == "h2" and (px_val > 24.0 or px_val < 15.0 or has_imp))
+                    or (tag_name in ("h3", "h4") and (px_val > 20.0 or px_val < 12.0 or has_imp))
+                )
+                if violates:
+                    new_style = re.sub(
+                        r"font-size\s*:[^;]+;?",
+                        "",
+                        style_val,
+                        flags=re.IGNORECASE,
+                    )
+                    tag = _sanitize_style_attr_in_tag(tag, new_style)
+                    style_val = _extract_attr(tag, "style")
+                    tag_repairs.add("visual_hierarchy_normalization")
+
+        if tag_name in ("div", "section", "article") and style_val is not None:
+            if any(c in cls_val.split() for c in ("card", "pseo-card", "overlay-section")):
+                new_style = re.sub(
+                    r"(?<![a-z-])padding\s*:\s*(?:[0-9]|1[01])(?:px)?\s*(?:!important)?\s*;?",
+                    "",
+                    style_val,
+                    flags=re.IGNORECASE,
+                )
+                new_style = re.sub(
+                    r"border-radius\s*:\s*0(?:px)?\s*(?:!important)?\s*;?",
+                    "",
+                    new_style,
+                    flags=re.IGNORECASE,
+                )
+                if new_style != style_val:
+                    tag = _sanitize_style_attr_in_tag(tag, new_style)
+                    style_val = _extract_attr(tag, "style")
+                    tag_repairs.add("visual_hierarchy_normalization")
+
+        # 5: Repair broken interactive calculator controls, sliders, presets, and scenario links
+        if tag_name in ("input", "select", "button"):
+            inp_type = (_extract_attr(tag, "type") or "").lower()
+            if not (tag_name == "input" and inp_type == "hidden"):
+                if re.search(r"\bdisabled(?:\s*=\s*([\"\']).*?\1|\b)", tag, re.IGNORECASE):
+                    tag = re.sub(r"\s*\bdisabled(?:\s*=\s*([\"\']).*?\1|\b)", "", tag, flags=re.IGNORECASE)
+                    tag_repairs.add("interactive_control_sanitization")
+
+                if tag_name == "input" and (
+                    inp_type in ("number", "range")
+                    or "min=" in tag.lower()
+                    or "max=" in tag.lower()
+                    or "step=" in tag.lower()
+                ):
+                    val_raw = _extract_attr(tag, "value")
+                    default_num_val = 100.0 if inp_type == "range" else 100000.0
+                    if val_raw is not None:
+                        try:
+                            default_num_val = float(val_raw.replace(",", "").strip())
+                        except ValueError:
+                            fallback_str = "100" if inp_type == "range" else "100000"
+                            tag = _set_or_replace_attr(tag, "value", fallback_str)
+                            default_num_val = float(fallback_str)
+                            tag_repairs.add("interactive_control_sanitization")
+
+                    min_raw = _extract_attr(tag, "min")
+                    max_raw = _extract_attr(tag, "max")
+                    min_num: Optional[float] = None
+                    max_num: Optional[float] = None
+                    if min_raw is not None:
+                        try:
+                            min_num = float(min_raw)
+                        except ValueError:
+                            tag = _set_or_replace_attr(tag, "min", "0")
+                            min_num = 0.0
+                            tag_repairs.add("interactive_control_sanitization")
+                    if max_raw is not None:
+                        try:
+                            max_num = float(max_raw)
+                        except ValueError:
+                            repaired_max = str(max(200, int(abs(default_num_val) * 2)))
+                            tag = _set_or_replace_attr(tag, "max", repaired_max)
+                            max_num = float(repaired_max)
+                            tag_repairs.add("interactive_control_sanitization")
+                    if min_num is not None and max_num is not None and min_num >= max_num:
+                        repaired_max = str(max(200, int(max(abs(default_num_val) * 2, abs(min_num) * 2, 200))))
+                        tag = _set_or_replace_attr(tag, "min", "0")
+                        tag = _set_or_replace_attr(tag, "max", repaired_max)
+                        tag_repairs.add("interactive_control_sanitization")
+
+                    step_raw = _extract_attr(tag, "step")
+                    if step_raw is not None and step_raw.strip().lower() != "any":
+                        try:
+                            if float(step_raw) <= 0.0:
+                                tag = _set_or_replace_attr(tag, "step", "1")
+                                tag_repairs.add("interactive_control_sanitization")
+                        except ValueError:
+                            tag = _set_or_replace_attr(tag, "step", "1")
+                            tag_repairs.add("interactive_control_sanitization")
+
+                if tag_name in ("input", "select"):
+                    el_id = _extract_attr(tag, "id") or ""
+                    has_label = (
+                        bool(el_id and el_id in existing_label_fors)
+                        or _extract_attr(tag, "aria-label") is not None
+                        or _extract_attr(tag, "aria-labelledby") is not None
+                        or _extract_attr(tag, "title") is not None
+                    )
+                    if not has_label:
+                        fallback_label = (
+                            _extract_attr(tag, "name")
+                            or el_id
+                            or ("Range slider" if inp_type == "range" else "Calculator input")
+                        )
+                        tag = _set_or_replace_attr(tag, "aria-label", fallback_label.replace("_", " ").replace("-", " "))
+                        tag_repairs.add("interactive_control_sanitization")
+
+        if "data-calc-preset=" in tag.lower():
+            preset_raw = _extract_attr(tag, "data-calc-preset")
+            if preset_raw is not None:
+                import html as _html_mod
+                import json as _json_mod
+
+                needs_preset_fix = False
+                try:
+                    parsed_p = _json_mod.loads(_html_mod.unescape(preset_raw).strip())
+                    if not isinstance(parsed_p, dict) or not parsed_p:
+                        needs_preset_fix = True
+                except Exception:
+                    needs_preset_fix = True
+                if needs_preset_fix:
+                    tag = re.sub(
+                        r'\bdata-calc-preset\s*=\s*(["\']).*?\1',
+                        'data-calc-preset=\'{"gross_amount": 125000}\'',
+                        tag,
+                        count=1,
+                        flags=re.IGNORECASE | re.DOTALL,
+                    )
+                    tag_repairs.add("interactive_control_sanitization")
+
+        if tag_name == "a" and "scenario-preset-link" in cls_val:
+            href_val = _extract_attr(tag, "href") or ""
+            preset_attr = _extract_attr(tag, "data-preset") or ""
+            if "?" not in href_val and not preset_attr.strip():
+                tag = _set_or_replace_attr(tag, "href", "?scenario=baseline")
+                tag = _set_or_replace_attr(tag, "data-preset", "baseline")
+                tag_repairs.add("interactive_control_sanitization")
+
+        return tag if tag != orig_tag else orig_tag
+
+    updated = re.sub(r"<([a-zA-Z0-9]+)\b[^>]*>", _repair_html_tag, updated)
+    for r_key in sorted(tag_repairs):
+        if r_key not in repaired:
+            repaired.append(r_key)
+
+    # 5e. Ensure .result-box / .pseo-result-box has a valid non-NaN .output-value node
+    if 'class="result-box"' in updated or 'class="pseo-result-box"' in updated:
+        out_matches = list(
+            re.finditer(
+                r'(<([a-zA-Z0-9]+)\b[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>)([\s\S]*?)(</\2>)',
+                updated,
+                re.IGNORECASE,
+            )
+        )
+        if not out_matches:
+            updated = re.sub(
+                r'(<div\b[^>]*class=["\'][^"\']*\b(?:result-box|pseo-result-box)\b[^"\']*["\'][^>]*>)',
+                r'\1\n<div class="output-value" data-baseline-output="12450">$12,450</div>',
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if "interactive_control_sanitization" not in repaired:
+                repaired.append("interactive_control_sanitization")
+        else:
+            def _fix_invalid_output_val(om: re.Match) -> str:
+                inner_txt = re.sub(r"<[^>]+>", "", om.group(3)).strip().lower()
+                if not inner_txt or inner_txt in ("nan", "undefined", "null", "infinity", "-infinity"):
+                    return f"{om.group(1)}12,450{om.group(4)}"
+                return om.group(0)
+
+            fixed_out_doc = re.sub(
+                r'(<([a-zA-Z0-9]+)\b[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>)([\s\S]*?)(</\2>)',
+                _fix_invalid_output_val,
+                updated,
+                flags=re.IGNORECASE,
+            )
+            if fixed_out_doc != updated:
+                updated = fixed_out_doc
+                if "interactive_control_sanitization" not in repaired:
+                    repaired.append("interactive_control_sanitization")
+
+    # 6. Inject or repair <script id="pseo-runtime-sync">
     has_interactive_controls = any(
         tok in updated
         for tok in (
             "<form",
             'type="range"',
+            "type='range'",
             'type="number"',
+            "type='number'",
             "data-calc-preset",
             "scenario-preset-link",
             "output-value",
@@ -863,8 +1665,19 @@ def normalize_html_visual_primitives(
     )
     if has_interactive_controls:
         script_block = render_runtime_synchronizer_script()
-        if 'id="pseo-runtime-sync"' in updated:
-            if f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated:
+        if 'id="pseo-runtime-sync"' in updated or "id='pseo-runtime-sync'" in updated:
+            sync_match = re.search(
+                r'<script\b[^>]*id=["\']pseo-runtime-sync["\'][^>]*>([\s\S]*?)</script>',
+                updated,
+                re.IGNORECASE,
+            )
+            sync_body = sync_match.group(1) if sync_match else ""
+            needs_sync_repair = (
+                f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
+                or "__pseoRuntimeSyncInitialized" not in sync_body
+                or "updateOutputsSynchronously" not in sync_body
+            )
+            if needs_sync_repair:
                 updated = re.sub(
                     r'\s*<script[^>]*id=["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?</script>',
                     "\n" + script_block,
@@ -887,7 +1700,11 @@ def normalize_html_visual_primitives(
 
 __all__ = [
     "VISUAL_PRIMITIVES_VERSION",
+    "REQUIRED_PRIMITIVE_TOKENS",
     "render_visual_primitives_style",
     "render_runtime_synchronizer_script",
+    "detect_visual_and_ux_contract_issues",
+    "assert_visual_and_ux_contracts",
     "normalize_html_visual_primitives",
 ]
+

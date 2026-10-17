@@ -686,9 +686,21 @@ def _audit_schema_and_fact_gates(
             g10_ok = False
             violations.append(f"Gate 10 (Touch Target): #calculate-btn min-width {w_m.group(1)}px < 44px")
     else:
-        if not re.search(r'\.touch-target\s*\{[^}]*min-height:\s*44px', html_content, re.IGNORECASE):
+        if not re.search(r'\.touch-target[^{]*\{[^}]*min-height:\s*44px', html_content, re.IGNORECASE):
             g10_ok = False
             violations.append("Gate 10 (Touch Target): #calculate-btn missing 44x44px touch target specification")
+
+    from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
+
+    visual_ux_issues = detect_visual_and_ux_contract_issues(
+        html_content,
+        rel_path=slug or "index.html",
+        require_primitives=None,
+    )
+    if visual_ux_issues:
+        g10_ok = False
+        for vui in visual_ux_issues:
+            violations.append(f"Gate 10 (Visual/UX Contract): {vui}")
 
     gate_results["antislop_and_touch_target"] = g10_ok
 

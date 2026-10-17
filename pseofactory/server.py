@@ -98,8 +98,9 @@ class EphemeralDistServer:
         class BoundQuietHandler(QuietHTTPRequestHandler):
             server_root_dir = directory_str
 
-        class EphemeralTCPServer(socketserver.TCPServer):
+        class EphemeralTCPServer(socketserver.ThreadingTCPServer):
             allow_reuse_address = True
+            daemon_threads = True
 
             def handle_error(self, request, client_address):
                 pass

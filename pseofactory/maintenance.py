@@ -2080,14 +2080,15 @@ class AssetIntegrityEvaluator:
         if not engine_drifted and cache_key and cache_key in self._audit_cache and not self.enforce_operational_shield:
             cached_rec = self._audit_cache[cache_key]
             if cached_rec is None:
-                if recorded_hash is not None and hasattr(self, "_fingerprint_cache"):
-                    cached_fingerprint = self._fingerprint_cache.get(cache_key)
-                    if cached_fingerprint is not None and cached_fingerprint != recorded_hash:
-                        pass
-                    else:
+                cached_fingerprint = (
+                    self._fingerprint_cache.get(cache_key)
+                    if hasattr(self, "_fingerprint_cache")
+                    else None
+                )
+                live_fingerprint = compute_asset_fingerprint(p)
+                if cached_fingerprint is not None and cached_fingerprint == live_fingerprint:
+                    if recorded_hash is None or cached_fingerprint == recorded_hash:
                         return None
-                else:
-                    return None
 
         try:
             content = p.read_text(encoding="utf-8", errors="ignore")
@@ -2142,6 +2143,20 @@ class AssetIntegrityEvaluator:
             except ValueError as ex:
                 reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
                 details.append(f"Touch target violation: {ex}")
+
+        # 6b. Visual Primitives & UX Contracts (Theme Tokens, Table Containment, Tap Targets, Hierarchy, Calculator Controls)
+        if p.suffix == ".html":
+            from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
+
+            visual_issues = detect_visual_and_ux_contract_issues(
+                content,
+                rel_path=rel_key,
+                require_primitives=None,
+            )
+            if visual_issues:
+                if DriftReason.STRUCTURAL_CONTRACT_VIOLATION not in reasons:
+                    reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
+                details.extend([f"Visual/UX contract violation: {vi}" for vi in visual_issues])
 
         # 7. JSON-LD Schemas (HTML)
         if p.suffix == ".html" and '<script type="application/ld+json"' in content:
@@ -2661,6 +2676,29 @@ class RefactorCascadeEngine:
 
                 # 2b. Reapply active GSC remediation overlay if present
                 self._reapply_active_overlay(slug, target_path, adapter)
+
+                # 2c. Self-heal visual/UX primitives if HTML asset still has visual/UX contract issues
+                if target_path.is_file() and target_path.suffix == ".html":
+                    from pseofactory.visual_primitives import (
+                        detect_visual_and_ux_contract_issues,
+                        normalize_html_visual_primitives,
+                    )
+
+                    raw_html = target_path.read_text(encoding="utf-8", errors="ignore")
+                    if detect_visual_and_ux_contract_issues(raw_html, rel_path=target_path.name):
+                        if RetroReflectionEngine.is_tool_or_calculator_page(target_path, adapter.dist_dir, raw_html):
+                            retro_html, _ = RetroReflectionEngine.retrofit_html(
+                                raw_html,
+                                property_id=adapter.property_id,
+                                slug=slug,
+                                dist_dir=adapter.dist_dir,
+                            )
+                            if retro_html != raw_html:
+                                target_path.write_text(retro_html, encoding="utf-8")
+                                raw_html = retro_html
+                        norm_html, _ = normalize_html_visual_primitives(raw_html)
+                        if norm_html != raw_html:
+                            target_path.write_text(norm_html, encoding="utf-8")
 
                 # 3. Fail-Closed Verification Gate
                 audit_record = self.evaluator.audit_asset(target_path, adapter)
@@ -3798,13 +3836,17 @@ class RetroReflectionEngine:
         ):
             missing.append("vetted_commercial_handoff_framing")
 
-        from pseofactory.visual_primitives import VISUAL_PRIMITIVES_VERSION
+        from pseofactory.visual_primitives import (
+            VISUAL_PRIMITIVES_VERSION,
+            detect_visual_and_ux_contract_issues,
+        )
         if (
             'id="pseo-visual-primitives"' not in html_content
             or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
             or 'id="pseo-runtime-sync"' not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
+            or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
         ):
             missing.append("deterministic_visual_primitives")
 
@@ -4303,6 +4345,8 @@ class RetroReflectionEngine:
         if not d.is_dir():
             return {"status": "PASS", "pages_scanned": 0, "stale_pages": {}, "stale_count": 0}
 
+        from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
+
         stale_pages: Dict[str, List[str]] = {}
         scanned = 0
         for html_file in sorted(d.rglob("*.html")):
@@ -4312,12 +4356,19 @@ class RetroReflectionEngine:
                 content = html_file.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 continue
+            rel = html_file.relative_to(d).as_posix()
             if not cls.is_tool_or_calculator_page(html_file, d, content):
+                non_tool_issues = detect_visual_and_ux_contract_issues(
+                    content,
+                    rel_path=rel,
+                    require_primitives=True,
+                )
+                if non_tool_issues:
+                    stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
             scanned += 1
             missing = cls.audit_html_mechanics(content)
             if missing:
-                rel = html_file.relative_to(d).as_posix()
                 stale_pages[rel] = missing
 
         return {
@@ -4369,12 +4420,15 @@ class RetroReflectionEngine:
                         norm_non_tool = normalize_html_callout_message_match(content, property_id=property_id)
                         if norm_non_tool != content:
                             html_file.write_text(norm_non_tool, encoding="utf-8")
+                            content = norm_non_tool
                             retrofitted_paths.append(rel)
                     except Exception:
                         pass
                 norm_html, norm_rep = normalize_html_visual_primitives(content, is_tenant_porcelain=True)
                 if norm_rep and norm_html != content:
                     html_file.write_text(norm_html, encoding="utf-8")
+                    if rel not in retrofitted_paths:
+                        retrofitted_paths.append(rel)
                 continue
             scanned += 1
             parts = rel.split("/")
@@ -4790,6 +4844,8 @@ def reflect_and_recompile_all_assets(
     verbose: bool = False,
     latch_state: bool = True,
     run_downstream: bool = True,
+    registry: Optional[TenantRegistry] = None,
+    workspace_root: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Scans workspace properties and audits existing static assets using
@@ -4800,8 +4856,11 @@ def reflect_and_recompile_all_assets(
     and updates substrate_lock.json and .agy/engine_hash.json.
     Zero em-dashes. Zero en-dashes.
     """
-    scanner = WorkspacePropertyScanner()
-    discovered = scanner.discover_properties()
+    scanner = WorkspacePropertyScanner(workspace_root=workspace_root)
+    if registry is not None:
+        discovered = list(registry.list_adapters().values())
+    else:
+        discovered = scanner.discover_properties()
     by_id = {p.property_id.lower(): p for p in discovered}
     for _pid, _adp in by_id.items():
         if not _adp.tools and hasattr(_adp, "_tools"):

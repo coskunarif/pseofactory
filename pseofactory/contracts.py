@@ -572,17 +572,36 @@ def assert_technical_seo_spec(spec: Dict[str, Any]) -> bool:
 
 def assert_touch_targets(css_or_html: str, is_css: bool = False, context: str = "") -> bool:
     """
-    Validates that interactive controls (buttons, inputs, select) satisfy
-    the 44x44px minimum touch target invariant.
+    Validates that interactive controls (buttons, inputs, select, summary, links) satisfy
+    the 44x44px minimum touch target invariant across both stylesheet rules and inline styles.
     """
-    undersized_height = re.findall(r'min-height:\s*(?:[0-9]|[1-3][0-9]|4[0-3])px', css_or_html)
-    undersized_width = re.findall(r'min-width:\s*(?:[0-9]|[1-3][0-9]|4[0-3])px', css_or_html)
+    ctx = f" in {context}" if context else ""
+    undersized_height = re.findall(r"min-height:\s*(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b", css_or_html, re.IGNORECASE)
+    undersized_width = re.findall(r"min-width:\s*(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b", css_or_html, re.IGNORECASE)
     if undersized_height:
-        ctx = f" in {context}" if context else ""
         raise ValueError(f"Touch target min-height < 44px found{ctx}: {undersized_height}")
     if undersized_width:
-        ctx = f" in {context}" if context else ""
         raise ValueError(f"Touch target min-width < 44px found{ctx}: {undersized_width}")
+
+    if not is_css and "<" in css_or_html:
+        for m in re.finditer(r"<(button|a|input|select|summary)\b[^>]*>", css_or_html, re.IGNORECASE):
+            tag_name = m.group(1).lower()
+            tag = m.group(0)
+            if tag_name == "input" and re.search(r'\btype\s*=\s*["\']hidden["\']', tag, re.IGNORECASE):
+                continue
+            sm = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE | re.DOTALL)
+            if not sm:
+                continue
+            st = sm.group(2)
+            for dm in re.finditer(
+                r"(?:min-height|max-height|height|min-width|max-width|width)\s*:\s*(\d+(?:\.\d+)?)px\b",
+                st,
+                re.IGNORECASE,
+            ):
+                if float(dm.group(1)) < 44.0:
+                    raise ValueError(
+                        f"Touch target inline dimension < 44px on <{tag_name}>{ctx}: {dm.group(0)}"
+                    )
     return True
 
 
@@ -7926,6 +7945,13 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
         issues.append(
             f"Page {rel_path}: Missing submit CTA button (<button type='submit'> or equivalent)"
         )
+
+    # 4. Check visual primitives, table overflow, tap target geometry, hierarchy, and calculator input/preset bounds
+    from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
+
+    for v_issue in detect_visual_and_ux_contract_issues(html_text, rel_path=rel_path, require_primitives=False):
+        if v_issue not in issues:
+            issues.append(f"Page {rel_path}: {v_issue}")
 
     return issues
 
