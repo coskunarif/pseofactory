@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-17T07:42:00+00:00",
+    "updated_at": "2026-10-17T08:50:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -29,11 +29,20 @@
       "name": "Impact.com",
       "account_id": "7932737",
       "account_user": "Arif COSKUN",
-      "marketplace_status": "pending_approval",
+      "marketplace_status": "active",
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
-      "pending_advertiser_contracts": 13
+      "active_advertiser_contracts": 1,
+      "pending_advertiser_contracts": 17
+    },
+    "cj_affiliate": {
+      "name": "CJ Affiliate",
+      "company_cid": "7792582",
+      "publisher_id": "8101803",
+      "account_user": "Arif Coskun",
+      "onboarding_progress": "5_of_9_completed",
+      "enabled": true
     }
   },
   "sub_affiliate_master": {
@@ -104,9 +113,9 @@
         "MARKET_ARBITRAGE": {
           "primary_partner": "kalshi",
           "fallback_partner": "interactive_brokers",
-          "direct_url": "https://kalshi.com/",
-          "status": "pending",
-          "bounty": "$80-$150"
+          "direct_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+          "status": "live",
+          "bounty": "$40-$150"
         }
       },
       "agentic_api_programs": {
@@ -136,11 +145,13 @@
         "impact_rest_api": {
           "provider": "Impact.com Publisher REST API",
           "account_id": "7932737",
+          "active_campaigns": [
+            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770)"
+          ],
           "submitted_campaigns": [
             "gusto (#15154 - Inbox #967)",
-            "next_insurance_b2b (#14516 / ERGO NEXT - Inbox #982)",
+            "next_insurance_b2b (#14516 / ERGO NEXT - Inbox #982 & Marketplace PENDING_CAMPAIGN_APPROVAL)",
             "sofi (#11190 / #8084 - Inbox #988, pendAdvContracts=2)",
-            "kalshi (#37770 - pendAdvContracts 2->3)",
             "national_funding_med (#15709 / IO 400810 - pendAdvContracts 3->4)",
             "splash_financial (#9516 - pendAdvContracts 4->5)",
             "credible (#3874 / IO 25024 - pendAdvContracts 5->6)",
@@ -151,11 +162,13 @@
             "groundfloor (#11975 / IO 84162 - pendAdvContracts 10->11)",
             "zacks (#39258 / IO 332588 - pendAdvContracts 11->12)",
             "dlp_capital (#20525 / IO 191764 - pendAdvContracts 12->13)",
-            "simply_business (#49719 / IO 368837 - Sent #260 & Zendesk Ticket #6270665 in Inbox #990)"
+            "simply_business (#49719 / IO 368837 & #50138 - Marketplace PENDING_CAMPAIGN_APPROVAL + Zendesk Ticket #6270665 in Inbox #990)",
+            "ramp (#51436 - Marketplace PENDING_CAMPAIGN_APPROVAL, $100-$4,000 Closed Won / $50-$2,000 SQL)",
+            "xendoo (#16354 - Marketplace PENDING_CAMPAIGN_APPROVAL, $500 Onboarded)"
           ],
           "role": "Programmatic contract status polling and Insertion Order verification",
           "member_id": "8871615",
-          "platform_approval_state": "PENDING (Branded Account 3161796 under Gusto #15154 review; pendAdvContracts=13 across Account 7932737 / Member 8871615)",
+          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 + pendAdvContracts=17 across Account 7932737 / Member 8871615)",
           "discovered_promo_signup_campaigns": [
             "sofi (#11190 - https://app.impact.com/campaign-promo-signup/SoFi.brand)",
             "lendkey (#3276 - https://app.impact.com/campaign-promo-signup/LendKey.brand)",
@@ -164,7 +177,9 @@
             "surepayroll (#16532 - https://app.impact.com/campaign-promo-signup/SurePayroll.brand)",
             "stax (#15236 - https://app.impact.com/campaign-promo-signup/Stax.brand)",
             "groundfloor (#11975 - https://app.impact.com/campaign-promo-signup/Groundfloor-Finance.brand)",
-            "zacks (#39258 - https://app.impact.com/campaign-promo-signup/Zacks-Investment-Research.brand)"
+            "zacks (#39258 - https://app.impact.com/campaign-promo-signup/Zacks-Investment-Research.brand)",
+            "ramp (#51436 - Impact Brand Marketplace)",
+            "xendoo (#16354 - Impact Brand Marketplace)"
           ]
         },
         "dub_partners_api": {
@@ -179,7 +194,8 @@
           "koinly",
           "rippling",
           "ipx1031",
-          "mercury"
+          "mercury",
+          "kalshi"
         ],
         "answered_action_required": [
           "rho",
@@ -191,7 +207,6 @@
           "crest_capital",
           "exeter1031",
           "first_american",
-          "kalshi",
           "simply_business",
           "next_insurance_b2b",
           "national_funding_med",
@@ -315,9 +330,10 @@
           "direct_url": "https://ramp.com/",
           "edge_route": "/r/ramp",
           "category": "CORPORATE_SPEND",
-          "network": "In-House / PartnerStack",
-          "bounty": "$500",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #237 to hi@ramp.com on 2026-10-13 + ramp.com/technology-partnerships form on 2026-10-14T22:04Z + follow-up nudge Sent #254 on 2026-10-16T22:56Z; awaiting vendor reply)",
+          "network": "Impact.com / In-House",
+          "campaign_id": "51436",
+          "bounty": "$100-$4000",
+          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Direct Follow-Up (Impact Account 7932737 Campaign #51436 Ramp submitted on 2026-10-17T08:40Z in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL]; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
@@ -329,9 +345,9 @@
           "direct_url": "https://www.crestcapital.com/",
           "edge_route": "/r/crest_capital",
           "category": "COMMERCIAL_REAL_ESTATE",
-          "network": "In-House Direct",
-          "bounty": "$100-$300",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #241 on 2026-10-13 + follow-up nudge Sent #255 on 2026-10-16T22:56Z to info@crestcapital.com; awaiting vendor reply)"
+          "network": "In-House Direct / Impact.com",
+          "bounty": "$100-$500",
+          "correspondence_status": "Application Submitted & Followed Up (Sent #241 on 2026-10-13 + follow-up nudge Sent #255 on 2026-10-16T22:56Z to info@crestcapital.com; Impact Xendoo Online Accounting #16354 [$500 Onboarded] also submitted on 2026-10-17T08:40Z in PENDING_CAMPAIGN_APPROVAL)"
         },
         "exeter1031": {
           "status": "awaiting_response",
@@ -370,9 +386,9 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$45-$120",
-          "correspondence_status": "Gated by CJ Affiliate Google reCAPTCHA (TaxAct CJ Advertiser ID #4110283 at https://public.cj.com/signup/publisher?advertiserId=4110283#/branded; requires operator completion of .g-recaptcha challenge; wrapped via Sovrn Commerce /r/turbotax)",
+          "correspondence_status": "CJ Publisher Account Created & 5/9 Onboarded (Company CID 7792582 / Publisher ID 8101803 confirmed via Inbox #991 & Inbox #992; TaxAct CJ Advertiser ID #4110283 [10% Sale, $43.64 3m EPC] located in CJ catalog; awaiting operator W-9 EIN/SSN tax certification on members.cj.com to unlock advertiser application; wrapped via Sovrn Commerce /r/turbotax)",
           "cj_advertiser_id": "4110283",
-          "direct_apply_url": "https://public.cj.com/signup/publisher?advertiserId=4110283#/branded"
+          "direct_apply_url": "https://members.cj.com/member/publisher/onboarding.cj"
         },
         "taxslayer": {
           "status": "pending",
@@ -383,22 +399,22 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "Gated by CJ Affiliate Google reCAPTCHA (TaxSlayer CJ Advertiser ID #5273914 at https://public.cj.com/signup/publisher?advertiserId=5273914#/branded; requires operator completion of .g-recaptcha challenge; wrapped via Sovrn Commerce /r/taxslayer)",
+          "correspondence_status": "CJ Publisher Account Created & TaxSlayer Special Terms Accepted (Company CID 7792582 / Publisher ID 8101803 confirmed via Inbox #991 & Inbox #992; TaxSlayer CJ Advertiser ID #5273914 Special Terms accepted and 5/9 onboarding steps completed; awaiting operator W-9 EIN/SSN tax certification on members.cj.com; wrapped via Sovrn Commerce /r/taxslayer)",
           "cj_advertiser_id": "5273914",
-          "direct_apply_url": "https://public.cj.com/signup/publisher?advertiserId=5273914#/branded"
+          "direct_apply_url": "https://members.cj.com/member/publisher/onboarding.cj"
         },
         "kalshi": {
-          "status": "awaiting_response",
-          "pipeline_tier": "awaiting_vendor_response",
-          "url": "https://kalshi.com/",
-          "direct_url": "https://kalshi.com/",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+          "direct_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
           "edge_route": "/r/kalshi",
           "category": "MARKET_ARBITRAGE",
           "network": "Impact.com",
           "campaign_id": "37770",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Kalshi.brand",
           "bounty": "$40-$150",
-          "correspondence_status": "Impact Application Confirmed in Portal (Account 7932737; Campaign #37770 Kalshi submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 2 -> 3; Insertion Order payout: $40.00 USD per Trade; active Sovrn Commerce fallback via /r/kalshi)"
+          "correspondence_status": "Approved & Live on Impact.com (Account 7932737; Campaign #37770 Kalshi Contract Active since 2026-10-17 with pendAdvContracts transition 2 -> 3 -> Active; live tracking URL https://kalshi.pxf.io/c/7932737/3078072/37770 verified at $40.00 USD CPA with Deep Linking enabled)"
         },
         "interactive_brokers": {
           "status": "awaiting_response",
@@ -423,7 +439,7 @@
           "applied_io_id": "368837",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Simply-Business.brand",
           "bounty": "$30-$100",
-          "correspondence_status": "Application Submitted & Ticket Confirmed (Impact Campaign #49719 IO #368837 e1s1 promo-signup gated by Account #7932737 PENDING marketplace state [pendAdvContracts 13 -> 13]; direct affiliate inquiry dispatched in Sent #260 to contactus@simplybusiness.com and confirmed by Simply Business Inc Zendesk in Inbox #990 on 2026-10-17T07:39Z under Ticket ID 6270665 [KVEV1K-DK9DV]; active Sovrn Commerce fallback via /r/simply_business)"
+          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Zendesk Ticket Confirmed (Impact Account #7932737 Campaign #49719 Simply Business [$30.00 RFQ Quoted] & Campaign #50138 Simply Business Creator verified in PENDING_CAMPAIGN_APPROVAL + direct inquiry Sent #260 confirmed by Simply Business Inc Zendesk in Inbox #990 under Ticket ID 6270665 [KVEV1K-DK9DV])"
         },
         "suretybonds_direct": {
           "status": "awaiting_response",

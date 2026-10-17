@@ -630,7 +630,7 @@ def test_edge_redirect_generation_profithelm_and_prexvo():
     assert 'defaultUrl: "https://www.xendoo.com/"' in ph_js
     assert 'defaultUrl: "https://www.invoicesimple.com/"' in ph_js
     assert 'defaultUrl: "https://dlpcapital.com/"' in ph_js
-    assert 'defaultUrl: "https://www.moby.co/"' in ph_js
+    assert 'defaultUrl: "https://kalshi.pxf.io/c/7932737/3078072/37770"' in ph_js
 
     px_js = generate_edge_redirect_function("prexvo")
     assert 'defaultUrl: "https://www.splashfinancial.com/"' in px_js

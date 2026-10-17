@@ -406,17 +406,17 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
     "kalshi": AffiliatePartner(
         key="kalshi",
-        name="Moby Institutional Investment & Market Research Platform",
+        name="Kalshi CFTC-Regulated Event Contract Exchange",
         category="Market Arbitrage",
         property_id="profithelm",
-        status="pending",
+        status="live",
         env_var="AFFILIATE_KALSHI_URL",
-        default_url="https://www.moby.co/",
-        badge="Institutional Market Intelligence",
-        commission_est="$30-$90/subscription",
-        bounty_est="$30-$90",
-        network="Sovrn Commerce",
-        description="Verified U.S. financial research publisher (moby.co, 5M+ subscribers) delivering SEC-compliant institutional equity, macroeconomic event contract, and tax-aware quantitative research from former Morgan Stanley and Goldman Sachs analysts.",
+        default_url="https://kalshi.pxf.io/c/7932737/3078072/37770",
+        badge="CFTC-Regulated Event Contracts",
+        commission_est="$40/qualified trade",
+        bounty_est="$40-$150",
+        network="Impact.com",
+        description="Trade CFTC-regulated event contracts on macroeconomic indicators, Federal Reserve rate decisions, and tax policy outcomes on Kalshi.",
         target_tools=[
             "prediction-market-tax",
             "prediction-market-odds",
@@ -429,7 +429,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
             "prediction-market-break-even",
         ],
         supported_params=["ph_tier"],
-        cta_text="Analyze Market Odds & Event Research on Moby",
+        cta_text="Trade Regulated Event Contracts on Kalshi",
     ),
     "interactive_brokers": AffiliatePartner(
         key="interactive_brokers",
@@ -2404,7 +2404,7 @@ def get_affiliate_route(
     elif partner_obj.key == "first_american":
         cta_text = "Build Institutional Real Estate Portfolios on GROUNDFLOOR" if is_premium else "Invest in Real Estate Debt on GROUNDFLOOR"
     elif partner_obj.key == "kalshi":
-        cta_text = "Unlock Institutional Market Intelligence on Moby Pro" if is_premium else "Analyze Market Odds & Event Research on Moby"
+        cta_text = "Trade Institutional Event Contracts on Kalshi" if is_premium else "Trade Regulated Event Contracts on Kalshi"
     elif partner_obj.key == "interactive_brokers":
         cta_text = "Unlock Institutional Yield Models on Zacks Pro" if is_premium else "Access Quantitative Yield Research on Zacks"
     elif partner_obj.key == "splash_financial":
@@ -3452,15 +3452,13 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
     },
     "kalshi": {
         "partner_key": "kalshi",
-        "sovrn_merchant_id": 788412,
-        "verified_merchant_name": "Moby Investment Research",
-        "verified_url": "https://www.moby.co/",
-        "is_direct": False,
+        "verified_merchant_name": "Kalshi Event Contract Exchange",
+        "verified_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+        "is_direct": True,
         "approved": True,
-        "payout_rate": "$30.00 USD Base",
-        "network": "Sovrn Commerce",
-        "swapped_from_non_paying": True,
-        "replaced_domain": "kalshi.com",
+        "payout_rate": "$40.00 USD CPA",
+        "network": "Impact.com",
+        "swapped_from_non_paying": False,
     },
     # 4. Canonical Verified Sovrn Merchant Keys
     "taxact": {
@@ -3680,7 +3678,7 @@ EXPECTED_PARTNER_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "exeter1031": ("dlp capital", "dlp"),
     "first_american": ("groundfloor",),
     "first_american_1031": ("groundfloor",),
-    "kalshi": ("moby",),
+    "kalshi": ("kalshi",),
     "interactive_brokers": ("zacks",),
     "wealthfront": ("valley",),
     "public_com": ("quontic",),
@@ -3721,7 +3719,7 @@ FORBIDDEN_REPLACED_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "exeter1031": ("exeter",),
     "first_american": ("first american",),
     "first_american_1031": ("first american",),
-    "kalshi": ("kalshi",),
+    "kalshi": ("moby",),
     "interactive_brokers": ("interactive brokers", "ibkr"),
     "wealthfront": ("wealthfront",),
     "public_com": ("public.com",),
@@ -3934,7 +3932,16 @@ def normalize_html_callout_message_match(
             return match.group(0)
         p_name, _, _ = resolved
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
-        if any(f_tok in h_text.lower() for f_tok in forbidden_tokens):
+        if any(f_tok in h_text.lower() or f_tok in between.lower() for f_tok in forbidden_tokens):
+            partner = registry.get(pk)
+            if partner and partner.description:
+                between = re.sub(
+                    r'(<p[^>]*>)(.*?)(</p>)',
+                    rf"\g<1>{html_lib.escape(partner.description)}\g<3>",
+                    between,
+                    count=1,
+                    flags=re.S | re.I,
+                )
             return f"{h_open}{html_lib.escape(p_name)}{h_close}{between}{href_attr}"
         return match.group(0)
 
@@ -4056,6 +4063,11 @@ def normalize_html_callout_message_match(
                 and any(tok in html_lower for tok in ("section-174", "section 174", "r-and-d-tax-credit", "r&d tax credit"))
             ):
                 extra_cards += _build_profithelm_partner_card("rippling")
+            if (
+                "/r/kalshi" not in sec_html
+                and any(tok in html_lower for tok in ("prediction-market", "prediction market", "kalshi"))
+            ):
+                extra_cards += _build_profithelm_partner_card("kalshi")
             if not extra_cards:
                 return sec_html
             if re.search(r"</div>\s*</section>\s*$", sec_html, re.S | re.I):

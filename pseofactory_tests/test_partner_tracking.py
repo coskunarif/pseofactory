@@ -840,7 +840,14 @@ def test_unified_vault_roster_tiers_completeness():
     assert set(px_prop["partners"].keys()) == canonical_px_keys
 
     ph_tiers = ph_prop["roster_tiers"]
-    assert set(ph_tiers["live_revenue_ready"]) == {"coinledger", "koinly", "rippling", "ipx1031", "mercury"}
+    assert set(ph_tiers["live_revenue_ready"]) == {
+        "coinledger",
+        "koinly",
+        "rippling",
+        "ipx1031",
+        "mercury",
+        "kalshi",
+    }
     all_ph_tiered = (
         set(ph_tiers["live_revenue_ready"])
         | set(ph_tiers["answered_action_required"])
@@ -1145,10 +1152,21 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
             sender_email="support@simplybusinessinc.zendesk.com",
             body_snippet="Thank you for contacting Simply Business. This email is an automated response to let you know that we have received your inquiry.",
         ),
+        EmailMessage(
+            id="992",
+            message_id="msg-992",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-17T08:37:46Z",
+            subject="Changes made to account - CID 8101803",
+            sender_name="",
+            sender_email="no-response@cj.com",
+            body_snippet="Hello Arif Coskun, We're letting you know that you have been added to a CJ Affiliate account.",
+        ),
     ]
 
     classifications = engine.classify_partner_emails(messages)
-    assert len(classifications) == 6
+    assert len(classifications) == 7
 
     sb_c = next(c for c in classifications if c.partner_key == "suretybonds_direct")
     assert sb_c.classification_type == "APPLICATION_SUBMITTED"
@@ -1177,13 +1195,19 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
     assert simp_c.classification_type == "APPLICATION_SUBMITTED"
     assert simp_c.network == "Impact.com"
 
+    cj_c = next(c for c in classifications if c.partner_key == "taxslayer")
+    assert cj_c.property_id == "profithelm"
+    assert cj_c.classification_type == "APPLICATION_SUBMITTED"
+    assert cj_c.network == "CJ Affiliate"
+
 
 def test_all_partners_have_verified_external_receipt_in_vault():
     """
     Asserts that every partner entry in monetization_vault.json across ProfitHelm and Prexvo
     contains a concrete external verification proof token (Inbox #, Sent #, Newsletter #,
-    pendAdvContracts, FirstPromoter token, FormAssembly, freightos.com/contact-us,
-    earnest.com/partner-sign-up, or CJ Advertiser ID) and that Impact pending_advertiser_contracts == 13.
+    pendAdvContracts, PENDING_CAMPAIGN_APPROVAL, FirstPromoter token, FormAssembly,
+    freightos.com/contact-us, earnest.com/partner-sign-up, or CJ Advertiser ID) and that
+    Impact has 1 active contract (Kalshi #37770) and 17 pending advertiser contracts.
     """
     vault_path = os.path.join(
         os.path.dirname(__file__), "..", "pseofactory", "monetization_vault.json"
@@ -1191,13 +1215,23 @@ def test_all_partners_have_verified_external_receipt_in_vault():
     with open(vault_path, "r", encoding="utf-8") as f:
         vault = json.load(f)
 
-    assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 13
+    assert vault["master_networks"]["impact"]["marketplace_status"] == "active"
+    assert vault["master_networks"]["impact"]["active_advertiser_contracts"] == 1
+    assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 17
+    assert vault["master_networks"]["cj_affiliate"]["company_cid"] == "7792582"
+    assert vault["master_networks"]["cj_affiliate"]["publisher_id"] == "8101803"
+    assert vault["properties"]["profithelm"]["partners"]["kalshi"]["status"] == "live"
+    assert (
+        vault["properties"]["profithelm"]["partners"]["kalshi"]["url"]
+        == "https://kalshi.pxf.io/c/7932737/3078072/37770"
+    )
 
     proof_tokens = (
         "Inbox #",
         "Sent #",
         "Newsletter #",
         "pendAdvContracts",
+        "PENDING_CAMPAIGN_APPROVAL",
         "FirstPromoter token",
         "FormAssembly",
         "freightos.com/contact-us",

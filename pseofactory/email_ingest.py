@@ -854,6 +854,34 @@ class EmailIngestionEngine:
                 )
                 continue
 
+            if msg.mailbox != "Sent" and (
+                "no-response@cj.com" in sender_lower
+                or "cj affiliate" in combined_text
+                or "cid 8101803" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="taxslayer",
+                        partner_name="TaxSlayer",
+                        category="TAX_INTELLIGENCE",
+                        classification_type="APPLICATION_SUBMITTED",
+                        requires_operator_decision=False,
+                        summary="CJ Affiliate publisher account created and email verified (Company CID 7792582 / Publisher ID 8101803, Inbox #991 & #992); 5 of 9 onboarding steps and TaxSlayer (#5273914) Special Terms completed.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=["Complete W-9 EIN/SSN tax certification on members.cj.com"],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://members.cj.com/member/publisher/onboarding.cj",
+                        network="CJ Affiliate",
+                    )
+                )
+                continue
+
             if msg.mailbox != "Sent" and "rho.co" in sender_lower and "thank you for confirming" in body_lower:
                 classifications.append(
                     PartnerEmailClassification(
