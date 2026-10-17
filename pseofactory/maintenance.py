@@ -5491,7 +5491,7 @@ def reflect_and_recompile_all_assets(
     if latch_state and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
         try:
             from pseofactory.gitops import reconcile_workspace_tracking_state
-            reconcile_workspace_tracking_state()
+            reconcile_workspace_tracking_state(restore_tenant_dist=False)
         except Exception:
             pass
 

@@ -2396,6 +2396,7 @@ def reconcile_workspace_tracking_state(
     ledger_path: Optional[Union[str, Path]] = None,
     repo_heads: Optional[Dict[str, str]] = None,
     max_pending_age_seconds: float = 900.0,
+    restore_tenant_dist: bool = True,
 ) -> Dict[str, Any]:
     """
     Automatic self-reconciliation of workspace tracking state (.agy/queues, .agy/runs,
@@ -2665,29 +2666,39 @@ def reconcile_workspace_tracking_state(
                                     pass
 
                             # Restore any uncommitted/staged mutations in read-only compiled dist/
-                            dist_st = subprocess.run(
-                                ["git", "-C", str(rp), "status", "--porcelain", "--", "dist"],
-                                capture_output=True,
-                                text=True,
-                                check=False,
-                                timeout=5,
-                            )
-                            if dist_st.returncode == 0 and dist_st.stdout.strip():
-                                subprocess.run(
-                                    ["git", "-C", str(rp), "reset", "HEAD", "--", "dist"],
+                            # only when restore_tenant_dist=True and substrate_lock.json is not pending release
+                            if restore_tenant_dist:
+                                lock_st = subprocess.run(
+                                    ["git", "-C", str(rp), "status", "--porcelain", "--", "substrate_lock.json"],
                                     capture_output=True,
                                     text=True,
                                     check=False,
-                                    timeout=10,
+                                    timeout=5,
                                 )
-                                subprocess.run(
-                                    ["git", "-C", str(rp), "checkout", "HEAD", "--", "dist"],
+                                lock_dirty = bool(lock_st.returncode == 0 and lock_st.stdout.strip())
+                                dist_st = subprocess.run(
+                                    ["git", "-C", str(rp), "status", "--porcelain", "--", "dist"],
                                     capture_output=True,
                                     text=True,
                                     check=False,
-                                    timeout=10,
+                                    timeout=5,
                                 )
-                                healed_tenant_trees += 1
+                                if not lock_dirty and dist_st.returncode == 0 and dist_st.stdout.strip():
+                                    subprocess.run(
+                                        ["git", "-C", str(rp), "reset", "HEAD", "--", "dist"],
+                                        capture_output=True,
+                                        text=True,
+                                        check=False,
+                                        timeout=10,
+                                    )
+                                    subprocess.run(
+                                        ["git", "-C", str(rp), "checkout", "HEAD", "--", "dist"],
+                                        capture_output=True,
+                                        text=True,
+                                        check=False,
+                                        timeout=10,
+                                    )
+                                    healed_tenant_trees += 1
                         finally:
                             try:
                                 if lock_fd is not None:
