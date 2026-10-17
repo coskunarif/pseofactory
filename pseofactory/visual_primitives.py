@@ -1003,14 +1003,18 @@ def _detect_visual_and_ux_contract_issues_cached(
                     )
                 )
                 if is_interactive_pill:
-                    if re.search(r"display\s*:\s*inline\s*(?:!important)?\s*(?:;|$)", style_lower):
+                    if re.search(r"display\s*:\s*inline(?!-[a-z])\s*(?:!important)?\s*(?:;|$)", style_lower):
                         issues.append(
                             f"[{rel_path}] Interactive control <{tag_name}> has inline 'display: inline' that collapses 44px touch target height."
                         )
-                    if re.search(r"(?<![a-z-])padding\s*:\s*[0-2](?:px)?\s*(?:!important)?\s*(?:;|$)", style_lower):
+                    if re.search(r"(?<![a-z-])padding\s*:\s*[0-2](?:px)?(?![0-9.a-z%])\s*(?:!important)?\s*(?:;|$)", style_lower):
                         issues.append(
                             f"[{rel_path}] Interactive control <{tag_name}> has cramped inline padding (< 3px)."
                         )
+                if any(frag.strip() and ":" not in frag for frag in style_lower.split(";")):
+                    issues.append(
+                        f"[{rel_path}] Interactive control <{tag_name}> contains corrupted inline style declaration ({style_val!r})."
+                    )
 
         # 4. Visual & Typographic Hierarchy
         if tag_name in ("h1", "h2", "h3", "h4") and style_lower and "font-size" in style_lower:
@@ -1032,8 +1036,10 @@ def _detect_visual_and_ux_contract_issues_cached(
 
         if tag_name in ("div", "section", "article") and style_lower:
             if any(c in cls_val.split() for c in ("card", "pseo-card", "overlay-section")):
-                if re.search(r"(?<![a-z-])padding\s*:\s*(?:[0-9]|1[01])(?:px)?\b", style_lower) or re.search(
-                    r"border-radius\s*:\s*0(?:px)?\b", style_lower
+                if (
+                    re.search(r"(?<![a-z-])padding\s*:\s*(?:[0-9]|1[01])(?:px)?(?![0-9.a-z%])", style_lower)
+                    or re.search(r"border-radius\s*:\s*0(?:px)?(?![0-9.a-z%])", style_lower)
+                    or any(frag.strip() and ":" not in frag for frag in style_lower.split(";"))
                 ):
                     issues.append(
                         f"[{rel_path}] Card container <{tag_name}> inline style overrides deterministic card padding/radius geometry."
@@ -1169,6 +1175,70 @@ def _sanitize_style_attr_in_tag(tag_html: str, new_style: str) -> str:
     if stripped_tag.endswith("/>"):
         return stripped_tag[:-2].rstrip() + f' style="{cleaned}" />'
     return stripped_tag[:-1].rstrip() + f' style="{cleaned}">'
+
+
+def _heal_and_normalize_interactive_inline_style(style_val: str) -> str:
+    """Heals previously truncated inline-flex / padding fragments and strips cramped inline dimensions (<44px)."""
+    new_style = style_val
+    new_style = re.sub(r"(?:^|(?<=;))\s*-flex\b", " display: inline-flex", new_style, flags=re.IGNORECASE)
+    new_style = re.sub(
+        r"(?:^|(?<=;))\s*([02]px\s+1[0-9]px)\b",
+        r" padding: 1\1",
+        new_style,
+        flags=re.IGNORECASE,
+    )
+    new_style = re.sub(
+        r"(?:^|(?<=;))\s*(\.[0-9]+rem(?:\s+[0-9.]+rem)?)\b",
+        r" padding: 0\1",
+        new_style,
+        flags=re.IGNORECASE,
+    )
+
+    def _strip_cramped_dim(dm: re.Match) -> str:
+        prop_name = dm.group(1).lower()
+        if float(dm.group(2)) < 44.0:
+            if prop_name in ("min-height", "min-width"):
+                return f"{prop_name}: 44px;"
+            return ""
+        return dm.group(0)
+
+    new_style = re.sub(
+        r"(min-height|max-height|height|min-width|max-width|width)\s*:\s*(\d+(?:\.\d+)?)px\s*(?:!important)?\s*;?",
+        _strip_cramped_dim,
+        new_style,
+        flags=re.IGNORECASE,
+    )
+    new_style = re.sub(
+        r"display\s*:\s*inline(?!-[a-z])\s*(?:!important)?\s*(?:;|$)",
+        "",
+        new_style,
+        flags=re.IGNORECASE,
+    )
+    new_style = re.sub(
+        r"(?<![a-z-])padding\s*:\s*[0-2](?:px)?(?![0-9.a-z%])(?:\s+[0-2](?:px)?(?![0-9.a-z%]))?\s*(?:!important)?\s*(?:;|$)",
+        "",
+        new_style,
+        flags=re.IGNORECASE,
+    )
+    return new_style.lstrip()
+
+
+def _heal_and_normalize_card_inline_style(style_val: str) -> str:
+    """Heals dangling 'rem' fragments and strips cramped (<12px) card padding/radius overrides."""
+    new_style = re.sub(r"(?:^|(?<=;))\s*rem\s*(?:;|$)", "", style_val, flags=re.IGNORECASE)
+    new_style = re.sub(
+        r"(?<![a-z-])padding\s*:\s*(?:[0-9]|1[01])(?:px)?(?![0-9.a-z%])\s*(?:!important)?\s*(?:;|$)",
+        "",
+        new_style,
+        flags=re.IGNORECASE,
+    )
+    new_style = re.sub(
+        r"border-radius\s*:\s*0(?:px)?(?![0-9.a-z%])\s*(?:!important)?\s*(?:;|$)",
+        "",
+        new_style,
+        flags=re.IGNORECASE,
+    )
+    return new_style.lstrip()
 
 
 def _ensure_class_on_tag(tag_html: str, required_class: str) -> Tuple[str, bool]:
@@ -1437,35 +1507,8 @@ def normalize_html_visual_primitives(
             inp_type = (_extract_attr(tag, "type") or "").lower()
             if not (tag_name == "input" and inp_type == "hidden"):
                 if style_val is not None:
-                    new_style = style_val
-
-                    def _strip_cramped_dim(dm: re.Match) -> str:
-                        prop_name = dm.group(1).lower()
-                        if float(dm.group(2)) < 44.0:
-                            if prop_name in ("min-height", "min-width"):
-                                return f"{prop_name}: 44px;"
-                            return ""
-                        return dm.group(0)
-
-                    new_style = re.sub(
-                        r"(min-height|max-height|height|min-width|max-width|width)\s*:\s*(\d+(?:\.\d+)?)px\s*(?:!important)?\s*;?",
-                        _strip_cramped_dim,
-                        new_style,
-                        flags=re.IGNORECASE,
-                    )
-                    new_style = re.sub(
-                        r"display\s*:\s*inline\s*(?:!important)?\s*;?",
-                        "",
-                        new_style,
-                        flags=re.IGNORECASE,
-                    )
-                    new_style = re.sub(
-                        r"(?<![a-z-])padding\s*:\s*[0-2](?:px)?(?:\s+[0-2](?:px)?)?\s*(?:!important)?\s*;?",
-                        "",
-                        new_style,
-                        flags=re.IGNORECASE,
-                    )
-                    if new_style != style_val:
+                    new_style = _heal_and_normalize_interactive_inline_style(style_val)
+                    if new_style != style_val.lstrip():
                         tag = _sanitize_style_attr_in_tag(tag, new_style)
                         style_val = _extract_attr(tag, "style")
                         tag_repairs.add("touch_target_normalization")
@@ -1492,20 +1535,12 @@ def normalize_html_visual_primitives(
                     tag_repairs.add("visual_hierarchy_normalization")
 
         if tag_name in ("div", "section", "article") and style_val is not None:
-            if any(c in cls_val.split() for c in ("card", "pseo-card", "overlay-section")):
-                new_style = re.sub(
-                    r"(?<![a-z-])padding\s*:\s*(?:[0-9]|1[01])(?:px)?\s*(?:!important)?\s*;?",
-                    "",
-                    style_val,
-                    flags=re.IGNORECASE,
-                )
-                new_style = re.sub(
-                    r"border-radius\s*:\s*0(?:px)?\s*(?:!important)?\s*;?",
-                    "",
-                    new_style,
-                    flags=re.IGNORECASE,
-                )
-                if new_style != style_val:
+            if (
+                any(c in cls_val.split() for c in ("card", "pseo-card", "overlay-section"))
+                or bool(re.search(r"(?:^|(?<=;))\s*rem\s*(?:;|$)", style_val, re.IGNORECASE))
+            ):
+                new_style = _heal_and_normalize_card_inline_style(style_val)
+                if new_style != style_val.lstrip():
                     tag = _sanitize_style_attr_in_tag(tag, new_style)
                     style_val = _extract_attr(tag, "style")
                     tag_repairs.add("visual_hierarchy_normalization")

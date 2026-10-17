@@ -52,13 +52,25 @@ def _count_words(text: str) -> int:
 
 def _slug_from_url_or_query(target_url: str = "", query: str = "", default_slug: str = "") -> str:
     if default_slug:
-        clean = re.sub(r"[^a-z0-9-]+", "-", default_slug.strip().lower()).strip("-")
-        if clean:
-            return clean
+        clean_parts = [
+            re.sub(r"[^a-z0-9-]+", "-", p.strip().lower()).strip("-")
+            for p in default_slug.strip().split("/")
+            if p.strip() and p.strip().lower() not in ("tools", "index.html")
+        ]
+        clean_parts = [p for p in clean_parts if p]
+        if len(clean_parts) >= 2 and clean_parts[-2] in ("irs-2027-tax-brackets", "section-1031-calculator"):
+            return f"{clean_parts[-2]}/{clean_parts[-1]}"
+        if clean_parts:
+            return clean_parts[-1]
     if target_url:
         parsed = urllib.parse.urlparse(str(target_url))
-        parts = [p for p in parsed.path.split("/") if p and p != "tools"]
+        parts = [p for p in parsed.path.split("/") if p and p.lower() not in ("tools", "index.html")]
         if parts:
+            if len(parts) >= 2 and parts[-2].lower() in ("irs-2027-tax-brackets", "section-1031-calculator"):
+                parent = re.sub(r"[^a-z0-9-]+", "-", parts[-2].lower()).strip("-")
+                child = re.sub(r"[^a-z0-9-]+", "-", parts[-1].lower()).strip("-")
+                if parent and child:
+                    return f"{parent}/{child}"
             cand = re.sub(r"[^a-z0-9-]+", "-", parts[-1].lower()).strip("-")
             if cand:
                 return cand
@@ -215,23 +227,23 @@ def _resolve_contextual_internal_links(
                 {"anchor": "SAVE Plan Litigation & Transition Guide", "href": "/tools/save-plan-litigation-transition/"},
                 {"anchor": "IBR Financial Hardship Cap Calculator", "href": "/tools/ibr-hardship-cap-calculator/"},
                 {"anchor": "Married Filing Separately Student Loan Calculator", "href": "/tools/married-filing-separately-student-loan-calculator/"},
-                {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
+                {"anchor": "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
             ]
         elif any(k in combined for k in ("parent-plus", "parent plus", "consolidation", "icr", "double")):
             cluster = [
                 {"anchor": "Parent PLUS Double Consolidation Loop Analyzer", "href": "/tools/parent-plus-double-consolidation/"},
                 {"anchor": "ICR Income-Contingent Repayment Calculator", "href": "/tools/icr-repayment-calculator/"},
                 {"anchor": "Grad PLUS Borrowing Cap Calculator", "href": "/tools/grad-plus-borrowing-cap-calculator/"},
-                {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
+                {"anchor": "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
                 {"anchor": "Tiered Standard Repayment Schedule Calculator", "href": "/tools/tiered-standard-calculator/"},
             ]
         else:
             cluster = [
+                {"anchor": "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
                 {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
                 {"anchor": "PSLF 120 Qualifying Payment Simulator", "href": "/tools/pslf-qualifying-payment-simulator/"},
+                {"anchor": "ICR Income-Contingent Repayment Calculator", "href": "/tools/icr-repayment-calculator/"},
                 {"anchor": "PAYE Sunset & IBR Transition Calculator", "href": "/tools/paye-sunset-calculator/"},
-                {"anchor": "Student Loan Repayment Master Calculator", "href": "/tools/student-loan-repayment-calculator/"},
-                {"anchor": "Student Loan Refinance Break-Even Calculator", "href": "/tools/student-loan-refinance-break-even-calculator/"},
             ]
     else:
         base_hub = {"anchor": "Statutory Tax & Financial Calculators Directory", "href": "/tools/"}
@@ -251,6 +263,26 @@ def _resolve_contextual_internal_links(
                 {"anchor": "Workers Comp & Payroll Burden Calculator", "href": "/tools/workers-comp-and-payroll-burden-calculator/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
             ]
+        elif any(k in combined for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal")):
+            cluster = [
+                {"anchor": "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator", "href": "/tools/irs-2027-tax-brackets/"},
+                {"anchor": "California 2027 Tax Brackets & Marginal Rate Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
+                {"anchor": "IRS Capital Gains Statutory Tax Calculator", "href": "/tools/irs-capital-gains-statutory-tax/"},
+                {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
+                {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+            ]
+            if "/" in s_norm:
+                sp_parts = [p for p in s_norm.split("/") if p]
+                if len(sp_parts) == 2 and sp_parts[0] == "irs-2027-tax-brackets":
+                    st_slug = sp_parts[1]
+                    st_label = st_slug.replace("-", " ").title()
+                    cluster.insert(
+                        1,
+                        {
+                            "anchor": f"{st_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
+                            "href": f"/tools/section-1031-calculator/{st_slug}/",
+                        },
+                    )
         elif any(k in combined for k in ("1031", "cost-segregation", "cost segregation", "bonus-depreciation", "opportunity-zone", "dst", "721", "real-estate", "cap-rate")):
             cluster = [
                 {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
@@ -1829,6 +1861,14 @@ def _build_vertical_profithelm_overlay_blocks(
                 },
             ],
         }
+    if any(k in comb for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal")):
+        return _build_tax_bracket_profithelm_overlay_blocks(
+            heading_label=heading_label,
+            query_clean=query_clean,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+        )
     return {
         "h2_headings": [
             f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
@@ -1885,6 +1925,77 @@ def _build_vertical_profithelm_overlay_blocks(
                 "answer": (
                     "Taxpayers must retain contemporaneous placed-in-service logs, closing statements, and "
                     "reconciled federal schedules (Form 4562, Form 8824, or Form 8949) for audit verification."
+                ),
+            },
+        ],
+    }
+
+
+def _build_tax_bracket_profithelm_overlay_blocks(
+    heading_label: str,
+    query_clean: str,
+    pos: float,
+    ctr: float,
+    impr: int,
+) -> Dict[str, Any]:
+    """Builds vertical-isolated overlay blocks for IRS/state tax brackets, TCJA sunset, and capital gains models."""
+    return {
+        "h2_headings": [
+            f"{heading_label}: IRC Section 1(j) Marginal Rate Tiers & TCJA Sunset Rules",
+            f"Audit-Ready {heading_label} Scenarios & Combined Effective Tax Rate",
+        ],
+        "preset_scenarios": [
+            {
+                "id": "preset-tax-bracket-baseline",
+                "label": f"{heading_label} Single Filer Baseline ($150k Taxable Income)",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"income": 150000, "deduction": 15000, "bracket": 24, "state_rate": 9.3},
+                "description": "Single filer at $150,000 gross income modeling piecewise federal IRC Section 1(j) and state marginal brackets.",
+            },
+            {
+                "id": "preset-tax-bracket-high-earner",
+                "label": f"{heading_label} High-Earner Joint Filing ($450k Taxable Income)",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"income": 450000, "deduction": 30000, "bracket": 35, "state_rate": 11.3},
+                "description": "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and post-TCJA sunset rate schedules.",
+            },
+        ],
+        "comparison_rows": [
+            {
+                "scenario": "$150,000 Gross Income (Single Filer Piecewise Tiers)",
+                "baseline": "$36,000 Flat Top-Rate Misapplication",
+                "optimized": "$25,420 Piecewise Marginal Tax Liability",
+                "delta": "-$10,580 Effective vs Marginal Spread",
+                "authority": "IRC Section 1(j) & Rev. Proc. 2025-32",
+            },
+            {
+                "scenario": "$450,000 Pass-Through Income with PTET & Section 199A",
+                "baseline": "$148,500 Unoptimized Federal + State Tax",
+                "optimized": "$124,200 After PTET & QBI Elections",
+                "delta": "+$24,300 Tax Shield Preserved",
+                "authority": "IRC Section 1(j), Section 199A & IRS Notice 2020-75",
+            },
+        ],
+        "faq_entries": [
+            {
+                "question": f"How is {query_clean} calculated under IRC Section 1(j) progressive brackets?",
+                "answer": (
+                    f"Deterministic calculation of {query_clean} subtracts standard or itemized deductions from gross "
+                    f"income and applies each statutory marginal tax rate tier piecewise rather than as a flat percentage."
+                ),
+            },
+            {
+                "question": f"How does the TCJA sunset and SALT cap affect {query_clean}?",
+                "answer": (
+                    "When evaluating combined federal and state tax exposure, taxpayers must account for the IRC "
+                    "Section 164(b)(6) SALT deduction limitation, state Pass-Through Entity Tax (PTET) elections "
+                    "under IRS Notice 2020-75, and IRC Section 1(j) inflation adjustments."
                 ),
             },
         ],
@@ -2893,6 +3004,40 @@ def evaluate_expired_overlays(
     return results
 
 
+_OVERLAY_TELEMETRY_KEYS = frozenset({
+    "label",
+    "description",
+    "params",
+    "query",
+    "target_position",
+    "position",
+    "impressions",
+    "baseline_ctr",
+    "ctr",
+    "clicks",
+    "id",
+    "slug",
+    "target_url",
+})
+
+
+def _sanitize_overlay_scenario_preset(sc: Dict[str, Any], idx: int) -> Tuple[str, Dict[str, Any], str]:
+    """Sanitizes overlay scenario preset parameters and description so raw GSC telemetry never leaks into DOM or JSON."""
+    raw_label = _strip_forbidden_dashes(str(sc.get("label", f"Preset Scenario {idx + 1}")))
+    label = html_lib.escape(raw_label)
+    raw_params = sc.get("params") if isinstance(sc.get("params"), dict) else sc
+    params_obj: Dict[str, Any] = {}
+    for k, v in raw_params.items():
+        if k not in _OVERLAY_TELEMETRY_KEYS and isinstance(v, (int, float, str)):
+            params_obj[str(k)] = v
+    if not params_obj:
+        params_obj = {"amount": 100000, "rate": 24}
+    desc_raw = _strip_forbidden_dashes(str(sc.get("description") or "")).strip()
+    if not desc_raw or "target position:" in desc_raw.lower() or "impressions:" in desc_raw.lower():
+        desc_raw = f"Interactive statutory scenario preset for {raw_label} using verified baseline calculator parameters."
+    return label, params_obj, desc_raw
+
+
 def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     """
     Non-destructively injects remediated overlay components into rendered page HTML:
@@ -2997,19 +3142,12 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         for idx, sc in enumerate(scenarios):
             if not isinstance(sc, dict):
                 continue
-            label = html_lib.escape(_strip_forbidden_dashes(str(sc.get("label", f"Preset Scenario {idx + 1}"))))
-            params_obj = sc.get("params") if isinstance(sc.get("params"), dict) else {
-                k: v for k, v in sc.items() if k not in ("label", "description")
-            }
+            label, params_obj, desc_str = _sanitize_overlay_scenario_preset(sc, idx)
             preset_json = html_lib.escape(json.dumps(params_obj))
             sc_parts.append(
                 f'    <div class="card pseo-card scenario-card" data-calc-preset="{preset_json}">'
             )
             sc_parts.append(f'      <h4>{label}</h4>')
-            desc_str = _strip_forbidden_dashes(str(sc.get("description") or ""))
-            if not desc_str:
-                details = [f"{k.replace('_', ' ').title()}: {v}" for k, v in sc.items() if k not in ("label", "params")]
-                desc_str = ", ".join(details)
             if desc_str:
                 sc_parts.append(f'      <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">{html_lib.escape(desc_str)}</p>')
             sc_parts.append(

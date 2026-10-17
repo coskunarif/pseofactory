@@ -1265,9 +1265,10 @@ class IndexingFeedbackLoop:
         brand = "Prexvo" if self.property_id == "prexvo" else "ProfitHelm"
         auth_tag = "Title IV 34 CFR Part 685" if self.property_id == "prexvo" else "Internal Revenue Code 2026"
 
-        linkedin_path = synd_dir / f"{slug}-linkedin.md"
-        newsletter_path = synd_dir / f"{slug}-newsletter.md"
-        substack_path = synd_dir / f"{slug}-Substack Notes-post.txt"
+        file_slug = slug.replace("/", "-")
+        linkedin_path = synd_dir / f"{file_slug}-linkedin.md"
+        newsletter_path = synd_dir / f"{file_slug}-newsletter.md"
+        substack_path = synd_dir / f"{file_slug}-Substack Notes-post.txt"
 
         written_files: List[str] = []
         if not linkedin_path.is_file():
@@ -1575,6 +1576,7 @@ class IndexingFeedbackLoop:
                         },
                         tenant_id=self.property_id,
                     )
+                    overlay_file.parent.mkdir(parents=True, exist_ok=True)
                     overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
                     if d_slug not in overlays_written:
                         overlays_written.append(d_slug)

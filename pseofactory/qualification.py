@@ -408,6 +408,7 @@ def check_search_intent_cannibalization(
         return f"/tools/{t_slug}/"
 
     # 1. Deterministic evaluation against existing tools catalog
+    best_slug_match = None
     if existing_tools:
         for tool in existing_tools:
             if not isinstance(tool, dict):
@@ -504,7 +505,8 @@ def check_search_intent_cannibalization(
                         or jaccard >= token_overlap_threshold
                         or (jaccard >= 0.40 and len(overlap) >= 2)
                     ):
-                        return {
+                        score = (tool_slug_words.issubset(query_words), round(jaccard, 6), len(overlap))
+                        cand_res = {
                             "cannibalized": True,
                             "is_cannibalized": True,
                             "is_cannibalizing": True,
@@ -513,6 +515,9 @@ def check_search_intent_cannibalization(
                             "reason": "high_slug_token_overlap",
                             "matched_tool": tool,
                         }
+                        if best_slug_match is None or score > best_slug_match[0]:
+                            best_slug_match = (score, cand_res)
+                        continue
 
             # Tool URL match if present
             tool_url = str(tool.get("url") or tool.get("canonical_url") or "").lower()
@@ -525,7 +530,8 @@ def check_search_intent_cannibalization(
                     jaccard = len(overlap) / len(union) if union else 0.0
                     if (len(overlap) >= 3 and len(query_words) <= 4) or jaccard >= token_overlap_threshold:
                         eff_slug = tool_slug or slug_part.replace(" ", "-")
-                        return {
+                        score = (u_words.issubset(query_words), round(jaccard, 6), len(overlap))
+                        cand_res = {
                             "cannibalized": True,
                             "is_cannibalized": True,
                             "is_cannibalizing": True,
@@ -534,6 +540,11 @@ def check_search_intent_cannibalization(
                             "reason": "matches_tool_url",
                             "matched_tool": tool,
                         }
+                        if best_slug_match is None or score > best_slug_match[0]:
+                            best_slug_match = (score, cand_res)
+
+        if best_slug_match is not None:
+            return best_slug_match[1]
 
         # 1b. Normalized intent pass: scenario-comparison clones, state sub-routes, synonyms, filing/year modifiers
         if clean_q:

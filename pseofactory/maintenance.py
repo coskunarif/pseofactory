@@ -3834,6 +3834,93 @@ def list_dlq(
     return engine.list_dlq(property_id=property_id)
 
 
+def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tuple[str, str]:
+    """Resolves vertical-accurate statutory authority and economic dataset for ProfitHelm pages, ignoring Section 179 pollution on non-179 verticals."""
+    s_low = slug.lower()
+    is_non_179_vertical = (
+        any(
+            k in s_low
+            for k in (
+                "tax-bracket",
+                "tax-rate",
+                "tcja",
+                "capital-gains",
+                "s-corp",
+                "1202",
+                "qsbs",
+                "amt",
+                "niit",
+                "1031",
+                "like-kind",
+                "exchange",
+                "ftb-3840",
+                "crypto",
+                "staking",
+                "8949",
+                "1099-da",
+                "wash",
+                "prediction",
+                "kalshi",
+                "polymarket",
+                "kelly",
+                "implied",
+                "arbitrage",
+                "odds",
+                "vig",
+            )
+        )
+        and "179" not in s_low
+    )
+    stat_m = re.search(r'data-statutory-(?:source|provenance)=["\']([^"\']+)["\']', html_content)
+    econ_m = re.search(r'data-economic-source=["\']([^"\']+)["\']', html_content)
+    stat_src = stat_m.group(1).strip() if stat_m else ""
+    econ_src = econ_m.group(1).strip() if econ_m else ""
+    if is_non_179_vertical and "Section 179" in stat_src:
+        stat_src = ""
+        econ_src = ""
+
+    if any(k in s_low for k in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "1202", "qsbs", "amt", "niit")):
+        default_stat = "IRC Section 1(j); IRC Section 199A; IRS Rev. Proc. 2025-32"
+        default_econ = "IRS SOI Individual Tax Statistics and BLS Consumer Price Index (CPI-U)"
+    elif any(k in s_low for k in ("1031", "like-kind", "exchange", "ftb-3840")):
+        default_stat = "IRC Section 1031(a)(3); Treas. Reg. 1.1031(k)-1; IRS Form 8824"
+        default_econ = "Federal Reserve Z.1 Commercial Real Estate Series and FHFA House Price Index"
+    elif any(k in s_low for k in ("crypto", "staking", "8949", "1099-da", "wash")):
+        default_stat = "IRS Rev. Proc. 2024-28; Rev. Rul. 2023-14; IRC Section 6045"
+        default_econ = "CFTC Commitments of Traders (COT) and Treasury Digital Asset Series"
+    elif any(k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig")):
+        default_stat = "CFTC 17 CFR Part 40; IRC Section 1256; IRC Section 165(d)"
+        default_econ = "FRED 3-Month Treasury Bill (DTB3) and CFTC DCM Volume Series"
+    else:
+        default_stat = "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40"
+        default_econ = "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
+    return stat_src or default_stat, econ_src or default_econ
+
+
+def _has_vertical_competitor_pollution(html_content: str) -> bool:
+    """Detects when a non-Section-179 tool page (such as irs-2027-tax-brackets) was polluted with Section 179 Heavy SUV content."""
+    if "heavy SUV (6,000 to 14,000 lbs GVWR)" not in html_content:
+        return False
+    canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+    if not canon_m:
+        canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
+    if canon_m:
+        canon_url = canon_m.group(1).strip().lower()
+        if "/tools/" not in canon_url or "179" in canon_url:
+            return False
+        ident_txt = canon_url
+    else:
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", html_content, re.IGNORECASE | re.DOTALL)
+        h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html_content, re.IGNORECASE | re.DOTALL)
+        ident_txt = f"{title_m.group(1) if title_m else ''} {h1_m.group(1) if h1_m else ''}".lower()
+        if "179" in ident_txt:
+            return False
+    return any(
+        k in ident_txt
+        for k in ("tax-bracket", "tax bracket", "tax-rate", "tcja", "capital-gains", "capital gains", "s-corp", "1202", "qsbs", "amt", "niit", "1031", "crypto", "prediction")
+    )
+
+
 class RetroReflectionEngine:
     """
     Autonomous Retro-Reflection Engine for pseofactory.
@@ -3965,26 +4052,68 @@ class RetroReflectionEngine:
         if 'type="range"' not in html_content and "type='range'" not in html_content:
             missing.append("range_slider")
 
-        if 'data-mechanic="instant_edge_case_trap_immediacy"' not in html_content or "(1 - P)" in html_content:
-            missing.append("instant_edge_case_trap_immediacy")
-
-        if 'data-mechanic="statutory_compliance_framing"' not in html_content or "<h3 id=\"statutory-pitfalls-matrix\"" in html_content:
-            missing.append("statutory_compliance_framing")
+        has_v_pollution = _has_vertical_competitor_pollution(html_content)
+        if has_v_pollution:
+            if "calculation_manifest" not in missing:
+                missing.append("calculation_manifest")
+            if "multi_dataset_join" not in missing:
+                missing.append("multi_dataset_join")
 
         if (
-            'data-mechanic="three_tier_topic_cluster_nav"' not in html_content
+            'data-mechanic="instant_edge_case_trap_immediacy"' not in html_content
+            or "(1 - P)" in html_content
+            or has_v_pollution
+        ):
+            missing.append("instant_edge_case_trap_immediacy")
+
+        if (
+            'data-mechanic="statutory_compliance_framing"' not in html_content
+            or "<h3 id=\"statutory-pitfalls-matrix\"" in html_content
+            or has_v_pollution
+        ):
+            missing.append("statutory_compliance_framing")
+
+        canon_m = re.search(
+            r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+            html_content,
+            re.IGNORECASE,
+        )
+        if not canon_m:
+            canon_m = re.search(
+                r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+                html_content,
+                re.IGNORECASE,
+            )
+        canon_href = canon_m.group(1) if canon_m else ""
+        spoke_state_m = re.search(r"/tools/[^/]+/([a-z0-9-]+)/?$", canon_href.split("?")[0].lower())
+        spoke_state = spoke_state_m.group(1) if spoke_state_m else ""
+        cluster_m = re.search(
+            r'<section[^>]+data-mechanic="three_tier_topic_cluster_nav"[\s\S]*?</section>',
+            html_content,
+            re.IGNORECASE,
+        )
+        cluster_body = cluster_m.group(0) if cluster_m else ""
+        if (
+            not cluster_body
+            or has_v_pollution
             or 'data-mechanic="on_this_page_jump_nav"' not in html_content
             or "<h2>3-Tier Statutory Topic Cluster" in html_content
             or 'href="#calculator-workspace-anchor"' in html_content
             or "student-loan-interest-subsidy-calculator" in html_content
             or "california-1031-exchange-clawback-ftb-3840-calculator" in html_content
             or "/tools/1031-exchange-rules-arizona/" in html_content
+            or (
+                "/tools/irs-2027-tax-brackets/" not in cluster_body
+                and "Income-Based" not in cluster_body
+            )
+            or (spoke_state and f"/{spoke_state}/" not in cluster_body)
         ):
             missing.append("three_tier_topic_cluster_nav")
 
         if (
             'data-mechanic="vetted_commercial_handoff_framing"' not in html_content
             or 'id="vetted-commercial-handoff"' not in html_content
+            or has_v_pollution
         ):
             missing.append("vetted_commercial_handoff_framing")
 
@@ -4065,32 +4194,33 @@ class RetroReflectionEngine:
                         raw = {}
 
         is_prexvo = property_id.lower() == "prexvo"
+        default_stat, default_econ = (
+            (
+                "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
+                "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
+            )
+            if is_prexvo
+            else _resolve_profithelm_statutory_provenance(slug, html_content)
+        )
+        slug_title = slug.replace("/", " ").replace("-", " ").title()
         if not raw or not raw.get("formula"):
             if is_prexvo:
                 preset = cls.PREXVO_FALLBACK_MANIFESTS.get(slug) or cls.PREXVO_FALLBACK_MANIFESTS["rap-payment-calculator"]
                 raw = dict(preset)
             else:
-                stat_m = re.search(r'data-statutory-source=["\']([^"\']+)["\']', html_content)
-                econ_m = re.search(r'data-economic-source=["\']([^"\']+)["\']', html_content)
-                stat_src = (
-                    stat_m.group(1).strip()
-                    if stat_m
-                    else "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40"
-                )
-                econ_src = (
-                    econ_m.group(1).strip()
-                    if econ_m
-                    else "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
-                )
                 raw = {
-                    "model_name": f"{slug.replace('-', ' ').title()} Quantitative Model",
+                    "model_name": f"{slug_title} Quantitative Model",
                     "formula": "gross_amount * (1.0 - effective_rate)",
                     "inputs": {"gross_amount": 100000.0, "effective_rate": 0.24},
                     "published_output": 76000.0,
-                    "statutory_authority": stat_src,
-                    "economic_dataset": econ_src,
+                    "statutory_authority": default_stat,
+                    "economic_dataset": default_econ,
                     "sample_calculation": "Deterministic baseline evaluation at $100,000 gross input and 24% effective rate yields $76,000.00.",
                 }
+        elif not is_prexvo and "179" not in slug.lower() and "Section 179" in str(raw.get("statutory_authority") or ""):
+            raw["statutory_authority"] = default_stat
+            raw["economic_dataset"] = default_econ
+            raw["model_name"] = f"{slug_title} Quantitative Model"
 
         formula = str(raw.get("formula") or "gross_amount * (1.0 - effective_rate)").strip()
         inputs_raw = raw.get("inputs") if isinstance(raw.get("inputs"), dict) else {"gross_amount": 100000.0, "effective_rate": 0.24}
@@ -4111,35 +4241,23 @@ class RetroReflectionEngine:
             clamped_inputs = {"gross_amount": 100000.0, "effective_rate": 0.24}
             eval_out = 76000.0
 
-        statutory_authority = str(
-            raw.get("statutory_authority")
-            or (
-                "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685"
-                if is_prexvo
-                else "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40"
-            )
-        ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
-
-        economic_dataset = str(
-            raw.get("economic_dataset")
-            or (
-                "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)"
-                if is_prexvo
-                else "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
-            )
-        ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
-
-        model_name = str(
-            raw.get("model_name") or f"{slug.replace('-', ' ').title()} Model"
-        ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
-
+        statutory_authority = str(raw.get("statutory_authority") or default_stat).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
+        economic_dataset = str(raw.get("economic_dataset") or default_econ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
+        model_name = str(raw.get("model_name") or f"{slug_title} Model").replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
         sample_calc = str(
             raw.get("sample_calculation")
             or f"Deterministic evaluation of {formula} produces {eval_out:,.2f}."
         ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
+        slug_id = slug.replace("/", "-")
+        resolved_manifest_id = (
+            f"{slug_id}-manifest"
+            if "/" in slug
+            else str(raw.get("manifest_id") or f"{slug_id}-manifest").replace("/", "-")
+        )
 
         return {
-            "manifest_id": str(raw.get("manifest_id") or f"{slug}-manifest"),
+            "manifest_id": resolved_manifest_id,
+            "slug": slug,
             "model_name": model_name,
             "entity_type": str(raw.get("entity_type") or "calculator"),
             "formula": formula,
@@ -4247,12 +4365,13 @@ class RetroReflectionEngine:
             repaired.append("dataset_schema_ispartof")
 
         # 1. Range slider repair if missing
+        slug_id = slug.replace("/", "-")
         if "range_slider" in missing:
             range_input_html = (
                 '<div class="range-slider-retro-wrap" style="margin-top: 8px;">'
-                f'<label for="retro-range-{slug}" style="font-size: 13px; display: block; margin-bottom: 4px;">'
+                f'<label for="retro-range-{slug_id}" style="font-size: 13px; display: block; margin-bottom: 4px;">'
                 'Interactive Parameter Sensitivity Slider</label>'
-                f'<input type="range" id="retro-range-{slug}" class="form-range range-slider touch-target" '
+                f'<input type="range" id="retro-range-{slug_id}" class="form-range range-slider touch-target" '
                 'min="0" max="200" step="1" value="100" aria-label="Interactive Parameter Sensitivity Slider" '
                 'style="min-height: 44px; min-width: 44px; width: 100%;" />'
                 '</div>'
@@ -4297,6 +4416,26 @@ class RetroReflectionEngine:
         injected_parts: List[str] = []
 
         if "multi_dataset_join" in missing:
+            updated = re.sub(
+                r'\s*<section[^>]*class=["\'][^"\']*\bmulti-dataset-join\b[^"\']*["\'][\s\S]*?</section>',
+                "",
+                updated,
+                flags=re.IGNORECASE,
+            )
+            updated = re.sub(
+                r'(<table[^>]*class=["\'][^"\']*\bscenario-table\b[^>]*data-statutory-source=["\'])[^"\']*(["\'][^>]*data-economic-source=["\'])[^"\']*(["\'])',
+                rf'\g<1>{stat_auth}\g<2>{econ_ds}\g<3>',
+                updated,
+                flags=re.IGNORECASE,
+            )
+            if "179" not in slug.lower():
+                updated = updated.replace(
+                    "<td>26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40</td>",
+                    f"<td>{stat_auth}</td>",
+                ).replace(
+                    "<td>BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)</td>",
+                    f"<td>{econ_ds}</td>",
+                )
             injected_parts.append(
                 f'    <section class="multi-dataset-join card" data-statutory-source="{stat_auth}" '
                 f'data-economic-source="{econ_ds}" style="margin-top: 24px;">\n'
@@ -4338,8 +4477,8 @@ class RetroReflectionEngine:
             if "range_slider" in missing and "range_slider" not in repaired:
                 range_fallback_str = (
                     f'\n      <div class="range-slider-retro-wrap" style="margin-top: 12px;">\n'
-                    f'        <label for="retro-range-{slug}" style="font-size: 13px; display: block; margin-bottom: 4px;">Interactive Parameter Sensitivity Slider</label>\n'
-                    f'        <input type="range" id="retro-range-{slug}" class="form-range range-slider touch-target" min="0" max="200" step="1" value="100" aria-label="Interactive Parameter Sensitivity Slider" style="min-height: 44px; min-width: 44px; width: 100%;" />\n'
+                    f'        <label for="retro-range-{slug_id}" style="font-size: 13px; display: block; margin-bottom: 4px;">Interactive Parameter Sensitivity Slider</label>\n'
+                    f'        <input type="range" id="retro-range-{slug_id}" class="form-range range-slider touch-target" min="0" max="200" step="1" value="100" aria-label="Interactive Parameter Sensitivity Slider" style="min-height: 44px; min-width: 44px; width: 100%;" />\n'
                     f'      </div>'
                 )
                 repaired.append("range_slider")
@@ -4421,6 +4560,12 @@ class RetroReflectionEngine:
                 repaired.append("three_tier_topic_cluster_nav")
 
         if "calculation_manifest" in missing:
+            updated = re.sub(
+                r'\s*<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>[\s\S]*?</script>',
+                "",
+                updated,
+                flags=re.IGNORECASE,
+            )
             manifest_json_str = json.dumps(manifest, ensure_ascii=False, indent=2)
             injected_parts.append(
                 f'    <script type="application/json" id="calculation-manifest" class="calculation-manifest">\n'
@@ -4609,7 +4754,7 @@ class RetroReflectionEngine:
             scanned += 1
             parts = rel.split("/")
             if len(parts) >= 3 and parts[0] == "tools" and parts[-1] == "index.html":
-                slug = parts[-2]
+                slug = "/".join(parts[1:-1])
             elif html_file.stem != "index":
                 slug = html_file.stem
             else:
@@ -5292,16 +5437,47 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
-            # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them
+            # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,
+            # and heal any legacy cross-vertical polluted overlay specs in .agy/overlays/
             try:
                 repo_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
-                from pseofactory.gsc_remediation import inject_overlay_into_html
+                from pseofactory.gsc_remediation import (
+                    compile_remediation_overlay_spec,
+                    inject_overlay_into_html,
+                )
+                agy_ov_dir = repo_root / ".agy" / "overlays"
+                if agy_ov_dir.is_dir() and not is_foreign_pytest:
+                    for agy_ov in sorted(agy_ov_dir.rglob("*.json")):
+                        try:
+                            raw_ov = json.loads(agy_ov.read_text(encoding="utf-8"))
+                            if not isinstance(raw_ov, dict):
+                                continue
+                            ov_s = str(raw_ov.get("slug") or agy_ov.stem)
+                            raw_dump = json.dumps(raw_ov)
+                            needs_ov_heal = (
+                                ("179" not in ov_s.lower() and "Section 179" in raw_dump)
+                                or (ov_s == "student-loan-repayment-calculator" and "Tiered Standard" in raw_dump)
+                            )
+                            if needs_ov_heal:
+                                healed_ov = compile_remediation_overlay_spec(
+                                    {
+                                        "slug": ov_s,
+                                        "target_url": raw_ov.get("target_url") or f"{adapter.canonical_base}/tools/{ov_s}/",
+                                        "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                                        "position": raw_ov.get("baseline_position", 12.0),
+                                        "impressions": raw_ov.get("baseline_impressions", 50),
+                                    },
+                                    tenant_id=adapter.property_id,
+                                )
+                                agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
                 seen_ov_slugs = set()
                 for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
                     if not overlays_dir.is_dir():
                         continue
-                    for ov_file in sorted(overlays_dir.glob("*.json")):
-                        ov_slug = ov_file.stem
+                    for ov_file in sorted(overlays_dir.rglob("*.json")):
+                        ov_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix()
                         if ov_slug in ("statutory-calculator", "index", "tools") or ov_slug in seen_ov_slugs:
                             continue
                         seen_ov_slugs.add(ov_slug)

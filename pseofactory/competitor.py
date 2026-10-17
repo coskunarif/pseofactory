@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.affiliates import (
     PREXVO_DISCLOSURES,
@@ -1556,6 +1556,107 @@ def run_blind_spot_pass(
     )
 
 
+def _resolve_tax_bracket_and_entity_competitor_content(s_low: str) -> Optional[Dict[str, Any]]:
+    """Resolves vertical-isolated statutory trap, checklist, pitfalls, and handoff content for Tax Brackets, TCJA, Capital Gains, and S-Corp models."""
+    if not any(
+        tok in s_low
+        for tok in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "1202", "qsbs", "amt", "niit")
+    ):
+        return None
+    return {
+        "trap_title": "Immediate TCJA Sunset and Marginal vs Effective Tax Rate Trap Alert (IRC Section 1(j) & 199A)",
+        "trap_body": (
+            "Under IRC Section 1(j), marginal tax brackets apply progressively to each taxable income tier after "
+            "subtracting the standard or itemized deduction, not as a flat rate across gross income. Furthermore, "
+            "taxpayers in high-tax states (California, New York, New Jersey, Connecticut) face the IRC Section 164(b)(6) "
+            "SALT deduction cap, the 3.8% Net Investment Income Tax (IRC Section 1411), and IRC Section 199A QBI "
+            "phase-outs that create hidden effective marginal rate spikes."
+        ),
+        "checklist_items": [
+            "Subtract federal standard or itemized deductions and pre-tax 401(k)/HSA contributions from Adjusted Gross Income (AGI) before applying IRC Section 1(j) marginal rate tiers.",
+            "Model state-specific income tax brackets alongside the federal IRC Section 164(b)(6) SALT cap and Pass-Through Entity Tax (PTET) election workarounds under IRS Notice 2020-75.",
+            "Account for the 3.8% Net Investment Income Tax (IRC Section 1411) and 0.9% Additional Medicare Tax above statutory MAGI thresholds ($200,000 single / $250,000 married filing jointly).",
+            "Verify IRC Section 199A Qualified Business Income (QBI) deduction phase-out ranges and W-2 wage or UBIA limitations for pass-through entities.",
+        ],
+        "pitfalls": [
+            (
+                "Applying the top marginal tax bracket percentage as a flat rate across total gross income",
+                "Overstates federal and state tax liability by ignoring progressive bracket tiers and standard deductions",
+                "Compute tax liability piecewise across each statutory IRC Section 1(j) bracket after deductions",
+            ),
+            (
+                "Ignoring state non-conformity and SALT cap interaction in California, New York, Connecticut, or New Jersey",
+                "Underestimates combined federal-plus-state effective marginal tax rate by 500 to 1,330 basis points",
+                "Model state-level PTET elections (IRS Notice 2020-75) and combined federal/state marginal tax schedules",
+            ),
+            (
+                "Realizing long-term capital gains without checking ordinary income bracket stacking and IRC Section 1411 NIIT",
+                "Pushes capital gains across the 15%-to-20% threshold and triggers the 3.8% Net Investment Income Tax surtax",
+                "Coordinate capital gain harvesting and Section 1031/installment deferrals against total MAGI thresholds",
+            ),
+        ],
+        "handoff_title": "CPA, Tax Strategy & Payroll Compliance Vetting Checklist",
+        "handoff_items": [
+            "Verify automated multi-state withholding, quarterly Form 1040-ES safe-harbor calculation (100%/110% prior-year tax under IRC Section 6654), and PTET election support.",
+            "Confirm S-Corp reasonable compensation benchmarking and W-2/K-1 payroll split integration for FICA and Section 199A optimization.",
+            "Check year-end tax-loss harvesting, capital gains bracket stacking, and state residency domicile audit documentation.",
+        ],
+    }
+
+
+def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
+    """Builds context-aware 3-tier topic cluster links with modifier-qualified state and vertical anchors."""
+    tier_1 = [
+        ("irs-2027-tax-brackets", "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator"),
+        ("section-179-calculator", "Section 179 Equipment Expense & Phaseout Calculator"),
+        ("section-1031-calculator", "Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
+        ("s-corp-reasonable-salary-tax-calculator", "S-Corp Reasonable Salary & FICA Tax Savings Calculator"),
+    ]
+    tier_2 = [
+        ("equipment-lease-vs-buy-section-179-calculator", "Equipment Lease vs Buy Section 179 Cash Flow Matrix"),
+        ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
+        ("invoice-factoring-vs-business-line-of-credit-calculator", "Invoice Factoring vs Business Line of Credit APR Matrix"),
+    ]
+    tier_3: List[Tuple[str, str]] = []
+    if "/" in s_low:
+        parts = [p for p in s_low.split("/") if p]
+        if len(parts) == 2 and parts[0] in ("irs-2027-tax-brackets", "section-1031-calculator"):
+            state_slug = parts[1]
+            state_label = state_slug.replace("-", " ").title()
+            tier_3.append(
+                (
+                    f"irs-2027-tax-brackets/{state_slug}",
+                    f"{state_label} 2027 Tax Brackets & Marginal Income Tax Rate Calculator",
+                )
+            )
+            tier_3.append(
+                (
+                    f"section-1031-calculator/{state_slug}",
+                    f"{state_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
+                )
+            )
+    striking_state_spokes = [
+        ("irs-2027-tax-brackets/california", "California 2027 Tax Brackets & Marginal Tax Rate Calculator"),
+        ("irs-2027-tax-brackets/connecticut", "Connecticut 2027 Tax Brackets & Marginal Tax Rate Calculator"),
+        ("irs-2027-tax-brackets/maine", "Maine 2027 Tax Brackets & Marginal Tax Rate Calculator"),
+        ("irs-2027-tax-brackets/new-jersey", "New Jersey 2027 Tax Brackets & Marginal Tax Rate Calculator"),
+        ("irs-2027-tax-brackets/new-york", "New York 2027 Tax Brackets & Marginal Tax Rate Calculator"),
+        ("tcja-sunset-capital-gains", "TCJA Sunset & Long-Term Capital Gains Tax Calculator"),
+        ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
+        ("crypto-tax-calculator", "Digital Asset Form 8949 & Rev. Proc. 2024-28 Tax Calculator"),
+    ]
+    existing_slugs = {slug_key for slug_key, _ in tier_3}
+    for sp_slug, sp_label in striking_state_spokes:
+        if sp_slug not in existing_slugs:
+            tier_3.append((sp_slug, sp_label))
+            existing_slugs.add(sp_slug)
+    return [
+        ("Tier 1: Core Statutory Tax & Capital Pillar Hubs", tier_1),
+        ("Tier 2: Comparative Financing, Entity & Arbitrage Matrices", tier_2),
+        ("Tier 3: Specialized Compliance, Jurisdiction & Asset Spokes", tier_3),
+    ]
+
+
 def _resolve_vertical_competitor_content(
     slug: str,
     property_id: str,
@@ -1690,8 +1791,8 @@ def _resolve_vertical_competitor_content(
             (
                 "Tier 1: Core Title IV Statutory Pillar Models",
                 [
-                    ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs IBR Payment Model"),
-                    ("student-loan-repayment-calculator", "Title IV Federal Student Loan Repayment Calculator"),
+                    ("student-loan-repayment-calculator", "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)"),
+                    ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs Income-Based Repayment (IBR) Calculator"),
                     ("rap-payment-calculator", "Repayment Assistance Plan (RAP) Monthly Payment Calculator"),
                 ],
             ),
@@ -1706,7 +1807,8 @@ def _resolve_vertical_competitor_content(
             (
                 "Tier 3: Filing Status, Consolidation and Specialty Borrower Spokes",
                 [
-                    ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint IDR Tax Model"),
+                    ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint Income-Driven Repayment Tax Model"),
+                    ("icr-repayment-calculator", "Income-Contingent Repayment (ICR) & Parent PLUS Statutory Calculator"),
                     ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
                     ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
                 ],
@@ -1714,7 +1816,15 @@ def _resolve_vertical_competitor_content(
         ]
     else:
         # ProfitHelm vertical resolution
-        if any(tok in s_low for tok in ("1031", "like-kind", "exchange", "ftb-3840")):
+        tax_bracket_ctx = _resolve_tax_bracket_and_entity_competitor_content(s_low)
+        if tax_bracket_ctx is not None:
+            trap_title = tax_bracket_ctx["trap_title"]
+            trap_body = tax_bracket_ctx["trap_body"]
+            checklist_items = tax_bracket_ctx["checklist_items"]
+            pitfalls = tax_bracket_ctx["pitfalls"]
+            handoff_title = tax_bracket_ctx["handoff_title"]
+            handoff_items = tax_bracket_ctx["handoff_items"]
+        elif any(tok in s_low for tok in ("1031", "like-kind", "exchange", "ftb-3840")):
             trap_title = "Immediate Statutory Deadline and Mortgage Boot Trap Alert (IRC Section 1031(a)(3)(B)(ii))"
             trap_body = (
                 "Under IRC Section 1031(a)(3)(B)(ii), your exchange completion deadline is the EARLIER of 180 "
@@ -1865,32 +1975,7 @@ def _resolve_vertical_competitor_content(
                 "Review UCC-1 equipment-only lien terms, zero-prepayment-penalty clauses, and IRS Form 4562 asset classification schedules.",
             ]
 
-        tier_clusters = [
-            (
-                "Tier 1: Core Statutory Tax & Capital Pillar Hubs",
-                [
-                    ("section-179-calculator", "Section 179 Equipment Expense & Phaseout Calculator"),
-                    ("section-1031-calculator", "Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
-                    ("s-corp-reasonable-salary-tax-calculator", "S-Corp Reasonable Salary & FICA Tax Savings Calculator"),
-                ],
-            ),
-            (
-                "Tier 2: Comparative Financing, Entity & Arbitrage Matrices",
-                [
-                    ("equipment-lease-vs-buy-section-179-calculator", "Equipment Lease vs Buy Section 179 Cash Flow Matrix"),
-                    ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
-                    ("invoice-factoring-vs-business-line-of-credit-calculator", "Invoice Factoring vs Business Line of Credit APR Matrix"),
-                ],
-            ),
-            (
-                "Tier 3: Specialized Compliance, Jurisdiction & Asset Spokes",
-                [
-                    ("tcja-sunset-capital-gains", "TCJA Sunset & Long-Term Capital Gains Tax Calculator"),
-                    ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
-                    ("crypto-tax-calculator", "Digital Asset Form 8949 & Rev. Proc. 2024-28 Tax Calculator"),
-                ],
-            ),
-        ]
+        tier_clusters = _resolve_profithelm_tier_clusters(s_low)
 
     return {
         "trap_title": trap_title,
