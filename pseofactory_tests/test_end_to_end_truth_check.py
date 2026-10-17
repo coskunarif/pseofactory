@@ -571,8 +571,10 @@ def test_failed_deployment_rolls_back_substrate_lock_and_completes_wal(tmp_path)
 def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path):
     """
     Replays a pending GSC rollover queue (when overall_status is PASS and candidate queue is empty)
-    during DailyIndexingInspector.run_inspection(auto_remediate=True) and verifies that
-    auto-remediation runs and drains the rollover queue to 0 when child sitemaps pass.
+    during DailyIndexingInspector.run_inspection(auto_remediate=True) and verifies that:
+    1. Auto-remediation runs and drains the rollover queue to 0 when child sitemaps pass.
+    2. Rollover-only reconciliation does NOT write untracked content/overlays/*.json files
+       or mutate existing dist/tools/*/index.html canonical tags in place.
     """
     from unittest.mock import patch
     from pseofactory.indexing_inspector import DailyIndexingInspector
@@ -580,9 +582,24 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
 
     agy_dir = tmp_path / ".agy"
     agy_dir.mkdir(parents=True, exist_ok=True)
+    dist_tool_dir = tmp_path / "dist" / "tools" / "saas-runway-calculator"
+    dist_tool_dir.mkdir(parents=True, exist_ok=True)
+    original_html = (
+        '<!DOCTYPE html><html lang="en"><head>\n'
+        '  <meta charset="utf-8">\n'
+        '  <link rel="canonical" href="https://profithelm.com/tools/saas-runway-calculator">\n'
+        '  <title>SaaS Runway Calculator | ProfitHelm</title>\n'
+        '</head><body><main><h1>SaaS Runway Calculator</h1></main></body></html>\n'
+    )
+    tool_html_file = dist_tool_dir / "index.html"
+    tool_html_file.write_text(original_html, encoding="utf-8")
+
     rollover_path = agy_dir / "gsc_rollover_queue.json"
     rollover_path.write_text(
-        json.dumps(["https://profithelm.com/", "https://profithelm.com/tools/"]),
+        json.dumps([
+            "https://profithelm.com/",
+            "https://profithelm.com/tools/saas-runway-calculator",
+        ]),
         encoding="utf-8",
     )
     quarantine_path = agy_dir / "indexing_quarantine_ledger.json"
@@ -607,9 +624,6 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
         inspector,
         "audit_child_sitemaps_and_section_coverage",
         return_value={"status": "PASS", "section_coverage": {}},
-    ), patch(
-        "pseofactory.indexing.feedback_loop.IndexingFeedbackLoop.run_feedback_cycle",
-        return_value={"status": "NO_ACTION_REQUIRED"},
     ):
         rep = inspector.run_inspection(dry_run=False, auto_remediate=True)
 
@@ -617,5 +631,7 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
     assert rep["gsc_rollover"]["queue_size"] == 0
     assert rep["gsc_rollover"]["reconciled_urls_count"] == 2
     assert json.loads(rollover_path.read_text(encoding="utf-8")) == []
+    assert not (tmp_path / "content" / "overlays").exists()
+    assert tool_html_file.read_text(encoding="utf-8") == original_html
 
 

@@ -3095,17 +3095,22 @@ class MaintenanceLifecycle:
                 not dry_run
                 and getattr(adapter, "repo_path", None)
                 and adapter.property_id in ("profithelm", "prexvo")
-                and (Path(adapter.repo_path) / "functions" / "r").is_dir()
                 and not (
                     "PYTEST_CURRENT_TEST" in os.environ
                     and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
                 )
             ):
                 try:
-                    from pseofactory.edge import sync_tenant_edge_redirect_function
-                    sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
-                except Exception as edge_err:
-                    print(f"Warning: Edge redirect sync error for '{adapter.property_id}': {edge_err}")
+                    from pseofactory.gitops import reconcile_workspace_tracking_state
+                    reconcile_workspace_tracking_state()
+                except Exception:
+                    pass
+                if (Path(adapter.repo_path) / "functions" / "r").is_dir():
+                    try:
+                        from pseofactory.edge import sync_tenant_edge_redirect_function
+                        sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
+                    except Exception as edge_err:
+                        print(f"Warning: Edge redirect sync error for '{adapter.property_id}': {edge_err}")
 
             # Stage 1: Preflight Asset Integrity Audit
             passed_s_file = Path(state_file).resolve() if state_file else None

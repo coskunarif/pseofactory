@@ -722,12 +722,27 @@ class DailyIndexingInspector:
                     telemetry_logger=self.telemetry_logger,
                 )
                 live_cycle = (not dry_run) and not bool(rollover_report.get("quota_exhausted"))
-                auto_rem_res = loop.run_feedback_cycle(
-                    dry_run=dry_run,
-                    live=live_cycle,
-                    unindexed_urls=synthesized_unindexed if synthesized_unindexed else None,
-                    skip_recompile=False,
+                only_rollover = (
+                    overall_status == "PASS"
+                    and not coverage_records
+                    and not synthesized_unindexed
+                    and has_pending_rollover
                 )
+                try:
+                    auto_rem_res = loop.run_feedback_cycle(
+                        dry_run=dry_run,
+                        live=live_cycle,
+                        unindexed_urls=[] if only_rollover else (synthesized_unindexed if synthesized_unindexed else None),
+                        query_records=[] if only_rollover else None,
+                        skip_recompile=only_rollover,
+                    )
+                except TypeError:
+                    auto_rem_res = loop.run_feedback_cycle(
+                        dry_run=dry_run,
+                        live=live_cycle,
+                        unindexed_urls=[] if only_rollover else (synthesized_unindexed if synthesized_unindexed else None),
+                        skip_recompile=only_rollover,
+                    )
 
                 # If child sitemaps and feedback loop pass in live mode, reconcile rollover URLs covered by child sitemaps
                 if (

@@ -2619,13 +2619,80 @@ def reconcile_workspace_tracking_state(
                 except Exception:
                     pass
 
-    # 5. Drop stale automated factory stashes in clean repositories when running in production
+    # 5. Self-heal read-only tenant working trees and drop stale automated factory stashes in production
+    healed_tenant_trees = 0
     if not in_test and not is_explicit:
         for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
             rp = Path("/home/ubuntuadmin/projects") / repo_name
             if not (rp / ".git").exists():
                 continue
             try:
+                if repo_name in ("profithelm-platform", "prexvo"):
+                    lock_name = "profithelm_factory.lock" if repo_name == "profithelm-platform" else "prexvo_factory.lock"
+                    lock_path = Path("/tmp") / lock_name
+                    lock_fd = None
+                    lock_acquired = False
+                    try:
+                        lock_fd = open(lock_path, "a+", encoding="utf-8")
+                        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        lock_acquired = True
+                    except OSError:
+                        lock_acquired = False
+
+                    if lock_acquired:
+                        try:
+                            # Relocate any legacy untracked content/overlays/*.json into .agy/overlays/
+                            legacy_ov_dir = rp / "content" / "overlays"
+                            if legacy_ov_dir.is_dir():
+                                target_ov_dir = rp / ".agy" / "overlays"
+                                target_ov_dir.mkdir(parents=True, exist_ok=True)
+                                for ov_file in list(legacy_ov_dir.glob("*.json")):
+                                    shutil.move(str(ov_file), str(target_ov_dir / ov_file.name))
+                                    healed_tenant_trees += 1
+                                try:
+                                    legacy_ov_dir.rmdir()
+                                    if (rp / "content").is_dir() and not any((rp / "content").iterdir()):
+                                        (rp / "content").rmdir()
+                                except OSError:
+                                    pass
+
+                            # Restore any uncommitted/staged mutations in read-only compiled dist/
+                            dist_st = subprocess.run(
+                                ["git", "-C", str(rp), "status", "--porcelain", "--", "dist"],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            if dist_st.returncode == 0 and dist_st.stdout.strip():
+                                subprocess.run(
+                                    ["git", "-C", str(rp), "reset", "HEAD", "--", "dist"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=10,
+                                )
+                                subprocess.run(
+                                    ["git", "-C", str(rp), "checkout", "HEAD", "--", "dist"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=10,
+                                )
+                                healed_tenant_trees += 1
+                        finally:
+                            try:
+                                if lock_fd is not None:
+                                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                                    lock_fd.close()
+                            except OSError:
+                                pass
+                    elif lock_fd is not None:
+                        try:
+                            lock_fd.close()
+                        except OSError:
+                            pass
+
                 st_res = subprocess.run(
                     ["git", "-C", str(rp), "status", "--porcelain"],
                     capture_output=True,
@@ -2634,6 +2701,11 @@ def reconcile_workspace_tracking_state(
                     timeout=5,
                 )
                 if st_res.returncode == 0 and not st_res.stdout.strip():
+                    for failed_marker in (rp / ".agy").glob("FAILED.*_factory"):
+                        try:
+                            failed_marker.unlink()
+                        except OSError:
+                            pass
                     stash_res = subprocess.run(
                         ["git", "-C", str(rp), "stash", "list"],
                         capture_output=True,
@@ -2648,6 +2720,7 @@ def reconcile_workspace_tracking_state(
                                 tag in line
                                 for tag in (
                                     "agy-failed-run-factory",
+                                    "agy-aborted-factory",
                                     "agy-success-cleanup-factory",
                                     "agy-pre-merge-stash-",
                                 )
@@ -2674,5 +2747,6 @@ def reconcile_workspace_tracking_state(
         "repaired_manifests": repaired_manifests,
         "resolved_incidents": resolved_incidents,
         "dropped_stashes": dropped_stashes,
+        "healed_tenant_trees": healed_tenant_trees,
     }
 

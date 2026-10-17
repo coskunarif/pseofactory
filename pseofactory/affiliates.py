@@ -217,7 +217,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
     "stripe": AffiliatePartner(
         key="stripe",
-        name="Stax Commercial Payments & Merchant Processing",
+        name="Stax Commercial Payments & Corporate Financial Infrastructure",
         category="B2B Treasury / Commercial Banking",
         property_id="profithelm",
         status="pending",
@@ -227,8 +227,13 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         commission_est="$500/closed won",
         bounty_est="$500",
         network="Sovrn Commerce",
-        description="All-in-one commercial payment processing, automated billing, and flat-rate merchant infrastructure for scaling SaaS platforms and B2B enterprises.",
-        target_tools=["saas-runway-calculator", "saas-burn-multiple-benchmarks-2026"],
+        description="Institutional commercial payment processing, C-Corp revenue billing, corporate tax reporting, and financial treasury infrastructure for QSBS-qualified startups, SaaS platforms, and B2B enterprises.",
+        target_tools=[
+            "saas-runway-calculator",
+            "saas-burn-multiple-benchmarks-2026",
+            "qsbs-section-1202-tax-calculator",
+            "qsbs-83b-tax-calculator",
+        ],
         supported_params=["ph_tier"],
         cta_text="Lower Payment Processing Costs with Stax",
     ),
@@ -236,7 +241,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     # High-Bounty B2B Opportunities
     "ramp": AffiliatePartner(
         key="ramp",
-        name="Mercury IO Corporate Card & Spend Control",
+        name="Mercury IO Corporate Card & R&D Spend Control",
         category="Corporate Finance",
         property_id="profithelm",
         status="pending_expansion",
@@ -246,8 +251,12 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         commission_est="$250 flat",
         bounty_est="$250 flat",
         network="In-House Direct",
-        description="Zero-fee commercial banking, 1.5% cashback IO corporate credit cards, and automated expense controls to extend startup runway.",
-        target_tools=["saas-runway-calculator", "section-179-calculator"],
+        description="Zero-fee commercial banking, 1.5% cashback IO corporate credit cards, automated R&D Section 174 software expense categorization, and CPA-ready tax accounting controls for startups.",
+        target_tools=[
+            "saas-runway-calculator",
+            "section-179-calculator",
+            "r-and-d-tax-credit-section-174-amortization-calculator",
+        ],
         supported_params=["ph_tier"],
         cta_text="Apply for Mercury IO Corporate Spend",
     ),
