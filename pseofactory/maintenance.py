@@ -4085,7 +4085,10 @@ class RetroReflectionEngine:
                 re.IGNORECASE,
             )
         canon_href = canon_m.group(1) if canon_m else ""
-        spoke_state_m = re.search(r"/tools/[^/]+/([a-z0-9-]+)/?$", canon_href.split("?")[0].lower())
+        spoke_state_m = re.search(
+            r"/tools/(?:irs-2027-tax-brackets|section-1031-calculator)/([a-z0-9-]+)/?$",
+            canon_href.split("?")[0].lower(),
+        )
         spoke_state = spoke_state_m.group(1) if spoke_state_m else ""
         cluster_m = re.search(
             r'<section[^>]+data-mechanic="three_tier_topic_cluster_nav"[\s\S]*?</section>',

@@ -156,6 +156,21 @@ def test_prexvo_compound_modifier_qualified_anchors_and_cannibalization():
     )
     assert res["parent_slug"] == "tiered-standard-calculator"
 
+    veh_html = """<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
+    <title>BMW X5 Section 179 Calculator</title>
+    <link rel="canonical" href="https://profithelm.com/tools/section-179-calculator/bmw-x5-xdrive40i/" />
+    </head><body><main>
+    <h1>BMW X5 Section 179 Calculator</h1>
+    <input type="number" id="cost" value="80000" />
+    </main></body></html>"""
+    retro_veh, _ = RetroReflectionEngine.retrofit_html(
+        veh_html,
+        property_id="profithelm",
+        slug="section-179-calculator/bmw-x5-xdrive40i",
+        canonical_url="https://profithelm.com/tools/section-179-calculator/bmw-x5-xdrive40i/",
+    )
+    assert RetroReflectionEngine.audit_html_mechanics(retro_veh) == []
+
 
 def test_visual_primitives_preserves_and_heals_inline_flex_and_padding():
     html_with_styles = """<!DOCTYPE html><html lang="en" data-theme="porcelain"><head><title>T</title></head><body><main>
