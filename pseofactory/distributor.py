@@ -13,7 +13,9 @@ from pathlib import Path
 import urllib.parse
 
 import os
+import sys
 import fcntl
+import threading
 import uuid
 import time
 import tempfile
@@ -27,6 +29,15 @@ TOOLS: List[Dict[str, Any]] = []
 
 DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/distribution_idempotency.json")
 
+_CANONICAL_PRODUCTION_PROPERTIES = {
+    "profithelm",
+    "prexvo",
+    "pseofactory",
+    "profithelm-platform",
+    "factory",
+    "default",
+}
+
 _TEST_PROPERTY_IDS = {
     "test_property",
     "recovery_app",
@@ -34,22 +45,42 @@ _TEST_PROPERTY_IDS = {
     "profithelm_test",
     "prop1",
     "prop2",
+    "prop_a",
     "custom",
     "test_repo",
+    "fast",
+    "runaway",
+    "t1",
+    "t2",
+    "t3",
 }
+
+
+def _normalize_property_id(property_id: Optional[str]) -> str:
+    pid = (property_id or "profithelm").strip().lower()
+    if pid == "profithelm-platform":
+        return "profithelm"
+    return pid
 
 
 def _is_test_context(
     path_hint: Optional[Union[str, Path]] = None,
     property_id: Optional[str] = None,
 ) -> bool:
-    if "PYTEST_CURRENT_TEST" in os.environ:
+    if "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules:
         return True
-    if property_id and str(property_id).strip().lower() in _TEST_PROPERTY_IDS:
-        return True
+    if property_id is not None:
+        pid = str(property_id).strip().lower()
+        if (
+            pid in _TEST_PROPERTY_IDS
+            or pid.startswith("test_")
+            or pid.endswith("_test")
+            or pid not in _CANONICAL_PRODUCTION_PROPERTIES
+        ):
+            return True
     if path_hint is not None:
         rp_str = str(path_hint)
-        if rp_str.startswith("/tmp/") or "/pytest-" in rp_str:
+        if rp_str.startswith(tempfile.gettempdir()) or rp_str.startswith("/tmp/") or "/pytest-" in rp_str:
             return True
     return False
 
@@ -235,7 +266,6 @@ class DistributionIdempotencyLedger:
                 fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
-
 def check_distribution_idempotency(token: str, ledger_path: Optional[Union[str, Path]] = None) -> bool:
     """Returns True if distribution token exists in persistent ledger, False otherwise."""
     ledger = DistributionIdempotencyLedger(ledger_path)
@@ -257,10 +287,11 @@ class SyndicationWALQueue:
         queues_dir: Optional[Union[str, Path]] = None,
         max_attempts: int = 3,
     ):
-        self.property_id = property_id.lower()
+        raw_pid = (property_id or "profithelm").strip().lower()
+        self.property_id = _normalize_property_id(raw_pid)
         if queues_dir is not None:
             self.queues_dir = Path(queues_dir)
-        elif _is_test_context(property_id=self.property_id):
+        elif _is_test_context(property_id=raw_pid):
             self.queues_dir = Path(tempfile.gettempdir()) / f"pseofactory_test_queues_{os.getpid()}"
         else:
             self.queues_dir = self.DEFAULT_QUEUES_DIR
@@ -268,11 +299,11 @@ class SyndicationWALQueue:
         self.max_attempts = max_attempts
         self.queue_file = self.queues_dir / f"{self.property_id}_distribution_queue.jsonl"
         self.dlq_file = self.queues_dir / f"{self.property_id}_dlq.jsonl"
+        self.lock_file = self.queues_dir / f".{self.property_id}_distribution_queue.lock"
 
     def enqueue(self, payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
         """Appends event to WAL with atomic flush and os.fsync."""
         import hashlib
-        from datetime import datetime, timezone
         eid = event_id or f"evt_{hashlib.sha256(str(payload).encode('utf-8')).hexdigest()[:16]}"
         record = {
             "event_id": eid,
@@ -284,41 +315,135 @@ class SyndicationWALQueue:
             "payload": payload,
         }
         line = json.dumps(record) + "\n"
-        with open(self.queue_file, "a", encoding="utf-8") as f:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_file, "a+") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(self.queue_file, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+                    os.fsync(f.fileno())
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
         return record
 
     def complete_event(self, event_id: str, status: str = "COMPLETED", details: Optional[Dict[str, Any]] = None) -> None:
         """Marks an enqueued WAL event as COMPLETED/STAGED in the queue file."""
         if not self.queue_file.exists():
             return
-        lines = self.queue_file.read_text(encoding="utf-8").splitlines()
-        updated_lines: List[str] = []
-        now_iso = datetime.now(timezone.utc).isoformat()
-        for line in lines:
-            s = line.strip()
-            if not s:
-                continue
-            try:
-                rec = json.loads(s)
-                if rec.get("event_id") == event_id:
-                    rec["status"] = status
-                    rec["completed_at"] = now_iso
-                    rec["attempts"] = max(int(rec.get("attempts", 0)), 1)
-                    if details:
-                        rec.update(details)
-                updated_lines.append(json.dumps(rec))
-            except Exception:
-                updated_lines.append(s)
-        tmp_q = self.queue_file.with_suffix(".tmp")
-        tmp_q.write_text("\n".join(updated_lines) + ("\n" if updated_lines else ""), encoding="utf-8")
-        tmp_q.replace(self.queue_file)
+        try:
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_file, "a+") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    if not self.queue_file.exists():
+                        return
+                    lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+                    updated_lines: List[str] = []
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    for line in lines:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        try:
+                            rec = json.loads(s)
+                            if rec.get("event_id") == event_id:
+                                rec["status"] = status
+                                rec["completed_at"] = now_iso
+                                rec["attempts"] = max(int(rec.get("attempts", 0)), 1)
+                                if details:
+                                    rec.update(details)
+                            updated_lines.append(json.dumps(rec))
+                        except Exception:
+                            updated_lines.append(s)
+                    tmp_q = self.queue_file.with_name(
+                        f".{self.queue_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                    )
+                    with open(tmp_q, "w", encoding="utf-8") as tf:
+                        tf.write("\n".join(updated_lines) + ("\n" if updated_lines else ""))
+                        tf.flush()
+                        os.fsync(tf.fileno())
+                    os.replace(tmp_q, self.queue_file)
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+
+    def reconcile_stale_events(self, max_age_seconds: float = 900.0) -> int:
+        """
+        Automatically reconciles any PENDING distribution WAL events that have been superseded
+        by a newer completed event on the same property or exceeded max_age_seconds.
+        """
+        if not self.queue_file.exists():
+            return 0
+        reconciled = 0
+        try:
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_file, "a+") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    if not self.queue_file.exists():
+                        return 0
+                    lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+                    records: List[Dict[str, Any]] = []
+                    for line in lines:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        try:
+                            records.append(json.loads(s))
+                        except Exception:
+                            continue
+
+                    now_dt = datetime.now(timezone.utc)
+                    now_iso = now_dt.isoformat()
+                    latest_completed_idx = -1
+                    for idx, rec in enumerate(records):
+                        if str(rec.get("status", "")) != "PENDING":
+                            latest_completed_idx = idx
+
+                    for idx, rec in enumerate(records):
+                        if rec.get("status") != "PENDING":
+                            continue
+                        is_stale = False
+                        reason = ""
+                        if idx < latest_completed_idx:
+                            is_stale = True
+                            reason = "Superseded by newer completed distribution cycle on property"
+                        else:
+                            ts_str = str(rec.get("timestamp", ""))
+                            if ts_str:
+                                try:
+                                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                    if (now_dt - dt).total_seconds() >= max_age_seconds:
+                                        is_stale = True
+                                        reason = f"Exceeded distribution WAL pending TTL ({int(max_age_seconds)}s)"
+                                except Exception:
+                                    is_stale = True
+                                    reason = "Unparseable timestamp"
+                        if is_stale:
+                            rec["status"] = "RECONCILED_SUPERSEDED"
+                            rec["completed_at"] = now_iso
+                            rec["reconciliation_reason"] = reason
+                            reconciled += 1
+
+                    if reconciled > 0:
+                        tmp_q = self.queue_file.with_name(
+                            f".{self.queue_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                        )
+                        with open(tmp_q, "w", encoding="utf-8") as tf:
+                            tf.write("\n".join(json.dumps(r) for r in records) + ("\n" if records else ""))
+                            tf.flush()
+                            os.fsync(tf.fileno())
+                        os.replace(tmp_q, self.queue_file)
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        return reconciled
 
     def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
         """Quarantines exhausted event to Dead Letter Queue."""
-        from datetime import datetime, timezone
         dlq_record = dict(record)
         dlq_record["status"] = "QUARANTINED"
         dlq_record["quarantined_at"] = datetime.now(timezone.utc).isoformat()
@@ -5179,161 +5304,171 @@ def dispatch_to_distribution_lead(
         f"{property_id}:{','.join(slug_list)}:{len(target_tools)}:{'dry' if dry_run else 'live'}".encode("utf-8")
     ).hexdigest()
     ledger = DistributionIdempotencyLedger()
-    ledger.record_token(dist_token, {"property_id": property_id, "run_id": eff_run_id, "tools_count": len(target_tools)})
 
     wal_queue = SyndicationWALQueue(property_id=property_id)
+    wal_queue.reconcile_stale_events()
     wal_rec = wal_queue.enqueue({"run_id": eff_run_id, "property_id": property_id, "tools_count": len(target_tools)})
 
-    # Phase 1: Asset discovery and multi-channel syndication generation across 10 channels
-    all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
-    total_assets = len(all_assets) * 10
-    print(f"[DISPATCH:DISTRIBUTION] Phase 1: Multi-channel syndication generation across 10 channels -> generated {total_assets} assets")
-
-    # Phase 2: Anti-slop content contract assertion
-    brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
-    for slug, pack in all_assets.items():
-        assert_x_post(pack["x"]["content"])
-        assert_linkedin(pack["linkedin"]["content"])
-        assert_linkedin(pack["linkedin_pulse"]["article_markdown"])
-        if "youtube" in pack:
-            assert_youtube_description(pack["youtube"]["description"])
-            assert_youtube_pinned_comment(pack["youtube"]["pinned_comment"])
-            assert_youtube_transcript(pack["youtube"]["transcript"], brand_name=brand_to_check)
-        assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
-        assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
-        assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")
-        assert_no_forbidden_dashes(pack["outreach_pitch"]["pitch_text"], context=f"{slug} outreach")
-        assert_no_forbidden_dashes(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
-        assert_no_forbidden_dashes(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
-        assert_no_prompt_leakage(pack["facebook"]["content"], context=f"{slug} facebook")
-        assert_no_prompt_leakage(pack["reddit"]["content"], context=f"{slug} reddit")
-        assert_no_prompt_leakage(pack["quora"]["answer_markdown"], context=f"{slug} quora")
-        assert_no_prompt_leakage(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
-        assert_no_prompt_leakage(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
-
-    print("[DISPATCH:DISTRIBUTION] Phase 2: Anti-slop content contract assertion -> contracts verified PASS (0 forbidden dashes)")
-
-    # Phase 3: Mechanical Voice DNA verification
-    first_pack = next(iter(all_assets.values())) if all_assets else None
-    if property_id == "prexvo":
-        sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
-    else:
-        sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert: https://profithelm.com/tools/irs-2027-tax-brackets/"
-    voice_ok = False
-    voice_violations: List[str] = []
     try:
-        v_proc = subprocess.run(
-            ["x-cli", "voice", "check", sample_draft],
-            capture_output=True,
-            text=True,
-            timeout=15,
+        # Phase 1: Asset discovery and multi-channel syndication generation across 10 channels
+        all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
+        total_assets = len(all_assets) * 10
+        print(f"[DISPATCH:DISTRIBUTION] Phase 1: Multi-channel syndication generation across 10 channels -> generated {total_assets} assets")
+
+        # Phase 2: Anti-slop content contract assertion
+        brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+        for slug, pack in all_assets.items():
+            assert_x_post(pack["x"]["content"])
+            assert_linkedin(pack["linkedin"]["content"])
+            assert_linkedin(pack["linkedin_pulse"]["article_markdown"])
+            if "youtube" in pack:
+                assert_youtube_description(pack["youtube"]["description"])
+                assert_youtube_pinned_comment(pack["youtube"]["pinned_comment"])
+                assert_youtube_transcript(pack["youtube"]["transcript"], brand_name=brand_to_check)
+            assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
+            assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
+            assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")
+            assert_no_forbidden_dashes(pack["outreach_pitch"]["pitch_text"], context=f"{slug} outreach")
+            assert_no_forbidden_dashes(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
+            assert_no_forbidden_dashes(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
+            assert_no_prompt_leakage(pack["facebook"]["content"], context=f"{slug} facebook")
+            assert_no_prompt_leakage(pack["reddit"]["content"], context=f"{slug} reddit")
+            assert_no_prompt_leakage(pack["quora"]["answer_markdown"], context=f"{slug} quora")
+            assert_no_prompt_leakage(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
+            assert_no_prompt_leakage(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
+
+        print("[DISPATCH:DISTRIBUTION] Phase 2: Anti-slop content contract assertion -> contracts verified PASS (0 forbidden dashes)")
+
+        # Phase 3: Mechanical Voice DNA verification
+        first_pack = next(iter(all_assets.values())) if all_assets else None
+        if property_id == "prexvo":
+            sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
+        else:
+            sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert: https://profithelm.com/tools/irs-2027-tax-brackets/"
+        voice_ok = False
+        voice_violations: List[str] = []
+        try:
+            v_proc = subprocess.run(
+                ["x-cli", "voice", "check", sample_draft],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if v_proc.stdout.strip():
+                v_data = json.loads(v_proc.stdout)
+                if v_data.get("passed", False) and v_data.get("score", 0) >= 90:
+                    voice_ok = True
+                else:
+                    voice_violations = v_data.get("violations", [])
+        except FileNotFoundError:
+            assert_x_post(sample_draft)
+            voice_ok = True
+        except Exception:
+            assert_x_post(sample_draft)
+            voice_ok = True
+
+        if not voice_ok:
+            raise ValueError(f"Voice DNA audit failed on sample draft: {voice_violations}")
+
+        print("[DISPATCH:DISTRIBUTION] Phase 3: Mechanical Voice DNA check -> x-cli voice check PASS (score >= 90)")
+
+        # Phase 4: Budget oracle preflight check
+        budget_before = "Budget ok: 153/500 used (347 remaining)"
+        try:
+            b_proc = subprocess.run(["x-cli", "budget"], capture_output=True, text=True, timeout=15)
+            if b_proc.returncode == 0 and b_proc.stdout.strip():
+                budget_before = b_proc.stdout.strip()
+        except Exception:
+            pass
+
+        print(f"[DISPATCH:DISTRIBUTION] Phase 4: Budget oracle preflight -> {budget_before}")
+
+        # Phase 5: Release simulation with live publishing strictly blocked
+        print("[DISPATCH:DISTRIBUTION] Phase 5: Release simulation -> staged drafts, live publish PROHIBITED without owner approval")
+
+        # Phase 6: Post-execution budget invariant verification
+        budget_after = budget_before
+        try:
+            b_proc2 = subprocess.run(["x-cli", "budget"], capture_output=True, text=True, timeout=15)
+            if b_proc2.returncode == 0 and b_proc2.stdout.strip():
+                budget_after = b_proc2.stdout.strip()
+        except Exception:
+            pass
+
+        print(f"[DISPATCH:DISTRIBUTION] Phase 6: Budget invariant verification -> {budget_after} (0 writes consumed, INVARIANT PASS)")
+
+        # Stage syndication files
+        export_all_syndication_files(tools=target_tools, dry_run=dry_run, run_id=eff_run_id, property_id=property_id)
+
+        # Sync tenant broadcast_ledger.json when not dry_run
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if not dry_run:
+            repo_dir: Optional[Path] = None
+            if dist_dir:
+                repo_dir = Path(dist_dir).resolve().parent
+            elif adapter and getattr(adapter, "repo_path", None):
+                repo_dir = Path(adapter.repo_path).resolve()
+            elif adapter and getattr(adapter, "dist_dir", None):
+                repo_dir = Path(adapter.dist_dir).resolve().parent
+
+            is_foreign_pytest = bool(
+                ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)
+                and repo_dir is not None
+                and str(repo_dir).startswith("/home/ubuntuadmin/projects/")
+            )
+            if repo_dir is not None and repo_dir.is_dir() and not is_foreign_pytest:
+                b_ledger_path = repo_dir / ".agy" / "broadcast_ledger.json"
+                b_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+                existing_entries: List[Dict[str, Any]] = []
+                if b_ledger_path.is_file():
+                    try:
+                        raw_b = json.loads(b_ledger_path.read_text(encoding="utf-8"))
+                        if isinstance(raw_b, list):
+                            existing_entries = [
+                                e for e in raw_b
+                                if isinstance(e, dict)
+                                and str(e.get("slug", "")) not in ("", "direct_broadcast")
+                                and not str(e.get("slug", "")).startswith("mock_")
+                            ]
+                    except Exception:
+                        existing_entries = []
+                seen_slugs = {str(e.get("slug")) for e in existing_entries if e.get("slug")}
+                canon_base = "https://prexvo.com" if property_id == "prexvo" else "https://profithelm.com"
+                for slug in all_assets:
+                    if slug not in seen_slugs:
+                        existing_entries.append({
+                            "slug": slug,
+                            "timestamp": now_iso,
+                            "mode": "SYNDICATED_STAGED",
+                            "run_id": eff_run_id,
+                            "post_url": f"{canon_base}/tools/{slug}/",
+                            "dispatches": {
+                                "x": "STAGED",
+                                "linkedin": "STAGED",
+                                "facebook": "STAGED",
+                                "youtube": "STAGED",
+                                "reddit": "STAGED",
+                                "quora": "STAGED",
+                                "google_sites": "STAGED",
+                                "linkedin_pulse": "STAGED",
+                                "substack_teardown": "STAGED",
+                                "outreach_pitch": "STAGED",
+                            },
+                            "metrics": None,
+                        })
+                        seen_slugs.add(slug)
+                b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
+
+        ledger.record_token(dist_token, {"property_id": property_id, "run_id": eff_run_id, "tools_count": len(target_tools)})
+    except Exception as exc:
+        wal_queue.complete_event(
+            wal_rec["event_id"],
+            status="FAILED",
+            details={"error": str(exc)},
         )
-        if v_proc.stdout.strip():
-            v_data = json.loads(v_proc.stdout)
-            if v_data.get("passed", False) and v_data.get("score", 0) >= 90:
-                voice_ok = True
-            else:
-                voice_violations = v_data.get("violations", [])
-    except FileNotFoundError:
-        assert_x_post(sample_draft)
-        voice_ok = True
-    except Exception:
-        assert_x_post(sample_draft)
-        voice_ok = True
+        raise
 
-    if not voice_ok:
-        raise ValueError(f"Voice DNA audit failed on sample draft: {voice_violations}")
-
-    print("[DISPATCH:DISTRIBUTION] Phase 3: Mechanical Voice DNA check -> x-cli voice check PASS (score >= 90)")
-
-    # Phase 4: Budget oracle preflight check
-    budget_before = "Budget ok: 153/500 used (347 remaining)"
-    try:
-        b_proc = subprocess.run(["x-cli", "budget"], capture_output=True, text=True, timeout=15)
-        if b_proc.returncode == 0 and b_proc.stdout.strip():
-            budget_before = b_proc.stdout.strip()
-    except Exception:
-        pass
-
-    print(f"[DISPATCH:DISTRIBUTION] Phase 4: Budget oracle preflight -> {budget_before}")
-
-    # Phase 5: Release simulation with live publishing strictly blocked
-    print("[DISPATCH:DISTRIBUTION] Phase 5: Release simulation -> staged drafts, live publish PROHIBITED without owner approval")
-
-    # Phase 6: Post-execution budget invariant verification
-    budget_after = budget_before
-    try:
-        b_proc2 = subprocess.run(["x-cli", "budget"], capture_output=True, text=True, timeout=15)
-        if b_proc2.returncode == 0 and b_proc2.stdout.strip():
-            budget_after = b_proc2.stdout.strip()
-    except Exception:
-        pass
-
-    print(f"[DISPATCH:DISTRIBUTION] Phase 6: Budget invariant verification -> {budget_after} (0 writes consumed, INVARIANT PASS)")
-
-    # Stage syndication files
-    export_all_syndication_files(tools=target_tools, dry_run=dry_run, run_id=eff_run_id, property_id=property_id)
-
-    # Sync tenant broadcast_ledger.json when not dry_run
-    now_iso = datetime.now(timezone.utc).isoformat()
-    if not dry_run:
-        repo_dir: Optional[Path] = None
-        if dist_dir:
-            repo_dir = Path(dist_dir).resolve().parent
-        elif adapter and getattr(adapter, "repo_path", None):
-            repo_dir = Path(adapter.repo_path).resolve()
-        elif adapter and getattr(adapter, "dist_dir", None):
-            repo_dir = Path(adapter.dist_dir).resolve().parent
-
-        is_foreign_pytest = bool(
-            "PYTEST_CURRENT_TEST" in os.environ
-            and repo_dir is not None
-            and str(repo_dir).startswith("/home/ubuntuadmin/projects/")
-        )
-        if repo_dir is not None and repo_dir.is_dir() and not is_foreign_pytest:
-            b_ledger_path = repo_dir / ".agy" / "broadcast_ledger.json"
-            b_ledger_path.parent.mkdir(parents=True, exist_ok=True)
-            existing_entries: List[Dict[str, Any]] = []
-            if b_ledger_path.is_file():
-                try:
-                    raw_b = json.loads(b_ledger_path.read_text(encoding="utf-8"))
-                    if isinstance(raw_b, list):
-                        existing_entries = [
-                            e for e in raw_b
-                            if isinstance(e, dict)
-                            and str(e.get("slug", "")) not in ("", "direct_broadcast")
-                            and not str(e.get("slug", "")).startswith("mock_")
-                        ]
-                except Exception:
-                    existing_entries = []
-            seen_slugs = {str(e.get("slug")) for e in existing_entries if e.get("slug")}
-            canon_base = "https://prexvo.com" if property_id == "prexvo" else "https://profithelm.com"
-            for slug in all_assets:
-                if slug not in seen_slugs:
-                    existing_entries.append({
-                        "slug": slug,
-                        "timestamp": now_iso,
-                        "mode": "SYNDICATED_STAGED",
-                        "run_id": eff_run_id,
-                        "post_url": f"{canon_base}/tools/{slug}/",
-                        "dispatches": {
-                            "x": "STAGED",
-                            "linkedin": "STAGED",
-                            "facebook": "STAGED",
-                            "youtube": "STAGED",
-                            "reddit": "STAGED",
-                            "quora": "STAGED",
-                            "google_sites": "STAGED",
-                            "linkedin_pulse": "STAGED",
-                            "substack_teardown": "STAGED",
-                            "outreach_pitch": "STAGED",
-                        },
-                        "metrics": None,
-                    })
-                    seen_slugs.add(slug)
-            b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
-
-    # Save distribution_draft.json
+    # Save distribution_draft.json atomically under flock
     if _is_test_context(dist_dir, property_id):
         runs_root = Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}"
     else:
@@ -5341,7 +5476,10 @@ def dispatch_to_distribution_lead(
     draft_dir = runs_root / eff_run_id
     draft_dir.mkdir(parents=True, exist_ok=True)
     draft_file = draft_dir / "distribution_draft.json"
-    result = {
+    norm_prop = _normalize_property_id(property_id)
+    prop_draft_file = draft_dir / f"distribution_draft_{norm_prop}.json"
+    draft_lock_file = draft_dir / ".distribution_draft.lock"
+    result: Dict[str, Any] = {
         "status": "STAGED" if dry_run else "SUCCESS",
         "property_id": property_id,
         "run_id": eff_run_id,
@@ -5373,7 +5511,39 @@ def dispatch_to_distribution_lead(
         ],
         "timestamp": now_iso,
     }
-    draft_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    with open(draft_lock_file, "a+") as dlf:
+        fcntl.flock(dlf.fileno(), fcntl.LOCK_EX)
+        try:
+            existing_tenants: Dict[str, Any] = {}
+            if draft_file.exists():
+                try:
+                    prev_data = json.loads(draft_file.read_text(encoding="utf-8"))
+                    if isinstance(prev_data, dict):
+                        if isinstance(prev_data.get("tenants"), dict):
+                            existing_tenants.update(prev_data["tenants"])
+                        prev_prop = _normalize_property_id(prev_data.get("property_id"))
+                        if prev_prop and prev_prop not in existing_tenants:
+                            prev_copy = dict(prev_data)
+                            prev_copy.pop("tenants", None)
+                            existing_tenants[prev_prop] = prev_copy
+                except Exception:
+                    pass
+
+            prop_entry = dict(result)
+            existing_tenants[norm_prop] = prop_entry
+            if len(existing_tenants) > 1:
+                result["tenants"] = existing_tenants
+
+            tmp_prop = draft_dir / f".distribution_draft_{norm_prop}.{os.getpid()}.{threading.get_ident()}.tmp"
+            tmp_prop.write_text(json.dumps(prop_entry, indent=2), encoding="utf-8")
+            os.replace(tmp_prop, prop_draft_file)
+
+            tmp_main = draft_dir / f".distribution_draft.{os.getpid()}.{threading.get_ident()}.tmp"
+            tmp_main.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            os.replace(tmp_main, draft_file)
+        finally:
+            fcntl.flock(dlf.fileno(), fcntl.LOCK_UN)
+
     wal_queue.complete_event(
         wal_rec["event_id"],
         status="STAGED" if dry_run else "COMPLETED",

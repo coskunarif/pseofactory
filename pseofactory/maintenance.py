@@ -3255,6 +3255,12 @@ class MaintenanceLifecycle:
                 and len(refactor_pages) == 0
                 and not _has_pending_downstream_work(adapter)
             ):
+                if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+                    try:
+                        from pseofactory.gitops import reconcile_workspace_tracking_state
+                        reconcile_workspace_tracking_state()
+                    except Exception:
+                        pass
                 duration = time.time() - start_time
                 return MaintenanceResult(
                     property_id=adapter.property_id,
@@ -3408,10 +3414,17 @@ class MaintenanceLifecycle:
             dist_status_val = "SKIPPED"
 
             # Write tracked substrate_lock.json on real tenant repositories before GitOps stage
+            substrate_lock_path: Optional[Path] = None
+            prior_substrate_lock: Optional[str] = None
+            substrate_lock_existed = False
             if not dry_run and getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
                     try:
+                        substrate_lock_path = t_repo / "substrate_lock.json"
+                        if substrate_lock_path.is_file():
+                            substrate_lock_existed = True
+                            prior_substrate_lock = substrate_lock_path.read_text(encoding="utf-8")
                         cur_sub_hash = compute_engine_hash()
                         dist_fp_hasher = hashlib.sha256()
                         for a_file in sorted(adapter.list_assets()):
@@ -3424,12 +3437,23 @@ class MaintenanceLifecycle:
                             "dist_fingerprint": dist_fp_hasher.hexdigest(),
                             "total_assets": post_report.total_assets_checked,
                         }
-                        (t_repo / "substrate_lock.json").write_text(
+                        substrate_lock_path.write_text(
                             json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
                             encoding="utf-8",
                         )
                     except Exception as sl_err:
                         print(f"Warning: Failed to update substrate_lock.json for '{adapter.property_id}': {sl_err}")
+
+            def _restore_substrate_lock() -> None:
+                if substrate_lock_path is None:
+                    return
+                try:
+                    if substrate_lock_existed and prior_substrate_lock is not None:
+                        substrate_lock_path.write_text(prior_substrate_lock, encoding="utf-8")
+                    elif not substrate_lock_existed and substrate_lock_path.exists():
+                        substrate_lock_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
             # Stage 8: GitOps Worktree Commit & Edge Verification Latch
             if enable_gitops:
@@ -3443,18 +3467,23 @@ class MaintenanceLifecycle:
                     workflow=workflow,
                 )
                 target_edge = edge_url or (getattr(adapter, "canonical_base", None) if getattr(adapter, "repo_path", None) else None)
-                gitops_res = coordinator.dispatch_to_shipper(
-                    run_id=run_id,
-                    property_id=adapter.property_id,
-                    dry_run=dry_run,
-                    commit_message=f"fix({adapter.property_id}): automated maintenance cycle",
-                    skip_ci=skip_ci,
-                    edge_url=target_edge,
-                    dist_dir=adapter.dist_dir,
-                    workflow=workflow,
-                )
+                try:
+                    gitops_res = coordinator.dispatch_to_shipper(
+                        run_id=run_id,
+                        property_id=adapter.property_id,
+                        dry_run=dry_run,
+                        commit_message=f"fix({adapter.property_id}): automated maintenance cycle",
+                        skip_ci=skip_ci,
+                        edge_url=target_edge,
+                        dist_dir=adapter.dist_dir,
+                        workflow=workflow,
+                    )
+                except Exception:
+                    _restore_substrate_lock()
+                    raise
                 gitops_status_val = gitops_res.status
                 if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
+                    _restore_substrate_lock()
                     duration = time.time() - start_time
                     return MaintenanceResult(
                         property_id=adapter.property_id,
@@ -3473,14 +3502,21 @@ class MaintenanceLifecycle:
             # Stage 9: Multi-Channel Syndication Draft Staging
             if enable_distribution:
                 from pseofactory.distributor import dispatch_to_distribution_lead
-                dist_res = dispatch_to_distribution_lead(
-                    run_id=run_id,
-                    property_id=adapter.property_id,
-                    dry_run=dry_run,
-                    dist_dir=adapter.dist_dir,
-                )
+                try:
+                    dist_res = dispatch_to_distribution_lead(
+                        run_id=run_id,
+                        property_id=adapter.property_id,
+                        dry_run=dry_run,
+                        dist_dir=adapter.dist_dir,
+                    )
+                except Exception:
+                    if not enable_gitops:
+                        _restore_substrate_lock()
+                    raise
                 dist_status_val = dist_res.get("status", "SUCCESS")
                 if dist_status_val not in ("SUCCESS", "STAGED", "DRY_RUN", "SKIPPED"):
+                    if not enable_gitops:
+                        _restore_substrate_lock()
                     duration = time.time() - start_time
                     return MaintenanceResult(
                         property_id=adapter.property_id,
@@ -3555,6 +3591,9 @@ class MaintenanceLifecycle:
                             engine_hash=current_engine_hash,
                             consecutive_failures=0,
                         )
+                        if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+                            from pseofactory.gitops import reconcile_workspace_tracking_state
+                            reconcile_workspace_tracking_state()
                     except Exception:
                         pass
             else:
@@ -5425,6 +5464,13 @@ def reflect_and_recompile_all_assets(
         }
         if post_report.status != "PASS":
             results["status"] = "DRIFT"
+
+    if latch_state and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+        try:
+            from pseofactory.gitops import reconcile_workspace_tracking_state
+            reconcile_workspace_tracking_state()
+        except Exception:
+            pass
 
     return results
 

@@ -3224,7 +3224,8 @@ class PushIndexer:
             for idx, u in enumerate(to_push):
                 try:
                     cmd = [gsccli_bin, "index", "publish", u, "--type", "URL_UPDATED"]
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+                    gsc_env = {**os.environ, "GSCCLI_MAX_RETRIES": os.environ.get("GSCCLI_MAX_RETRIES", "0")}
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12, env=gsc_env)
                     status = "ACCEPTED" if proc.returncode == 0 else "FAIL"
                     output_text = (proc.stdout or "").strip() or (proc.stderr or "").strip()
                     api_results.append({
@@ -3915,11 +3916,13 @@ class PushIndexer:
                             ledger_changed = True
                     if ledger_changed:
                         self.save_pushed_ledger(ledger_now)
-            sitemap_reg = gsc_res.get("sitemap_registration") or self.submit_gsc_sitemaps(
-                urls=urls_to_submit,
-                live=live,
-                force=force,
-            )
+            sitemap_reg = gsc_res.get("sitemap_registration")
+            if not sitemap_reg or sitemap_reg.get("status") == "SKIPPED_INTERRUPTED":
+                sitemap_reg = self.submit_gsc_sitemaps(
+                    urls=urls_to_submit,
+                    live=live,
+                    force=force,
+                )
         else:
             airlock_all, _ = self.preflight_airlock(all_urls) if all_urls else ([], [])
             safe_all_urls = list(airlock_all)

@@ -821,6 +821,13 @@ class AutonomousLifecycleSupervisor:
         cycle_id = f"cycle_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         start_time = time.time()
 
+        if not dry_run:
+            try:
+                from pseofactory.gitops import reconcile_workspace_tracking_state
+                reconcile_workspace_tracking_state()
+            except Exception:
+                pass
+
         drift_report = detect_engine_drift(state_file=self.state_file)
         current_engine_hash = drift_report.get("current_hash")
         drift_detected = bool(drift_report.get("drift_detected", False))

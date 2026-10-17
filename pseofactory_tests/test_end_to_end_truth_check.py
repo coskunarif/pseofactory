@@ -286,3 +286,336 @@ def test_stub_video_artifacts_detected_and_purged_by_reflection_and_audit(tmp_pa
     assert len(cleaned_cat) == 1
     assert cleaned_cat[0]["slug"] == "real-rendered-tool"
 
+
+def test_concurrent_multi_tenant_cycle_manifest_and_draft_atomicity(tmp_path):
+    """
+    Replays the cycle_1791956856_26bd85 concurrent multi-tenant write overlap:
+    runs profithelm and prexvo concurrently in a ThreadPoolExecutor sharing a single
+    cycle_id and verifies zero JSON corruption, preserved per-tenant manifests under
+    'tenants', and zero leakage into production /home/ubuntuadmin/projects/.agy/runs.
+    """
+    import concurrent.futures
+    from pseofactory.gitops import GitOpsCoordinator
+    from pseofactory.distributor import dispatch_to_distribution_lead
+
+    shared_cycle_id = "cycle_stress_concurrent_overlap"
+    runs_dir = tmp_path / "runs"
+
+    def _run_tenant(prop: str) -> dict:
+        t_repo = tmp_path / prop
+        t_dist = t_repo / "dist"
+        t_dist.mkdir(parents=True, exist_ok=True)
+        coord = GitOpsCoordinator(repo_path=t_repo, run_id=shared_cycle_id, dry_run=True)
+        coord.runs_base = runs_dir
+        g_res = coord.dispatch_to_shipper(
+            run_id=shared_cycle_id,
+            property_id=prop,
+            dry_run=True,
+            skip_ci=True,
+            skip_edge=True,
+            dist_dir=t_dist,
+        )
+        slug = "student-loan-rap-calculator" if prop == "prexvo" else "irs-2027-tax-brackets"
+        d_res = dispatch_to_distribution_lead(
+            run_id=shared_cycle_id,
+            property_id=prop,
+            dry_run=True,
+            dist_dir=t_dist,
+            tools=[{"slug": slug, "title": slug.replace("-", " ").title()}],
+        )
+        return {"gitops": g_res.status, "dist": d_res["status"]}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        f_ph = pool.submit(_run_tenant, "profithelm")
+        f_px = pool.submit(_run_tenant, "prexvo")
+        res_ph = f_ph.result()
+        res_px = f_px.result()
+
+    assert res_ph["gitops"] == "DRY_RUN"
+    assert res_px["gitops"] == "DRY_RUN"
+    assert res_ph["dist"] == "STAGED"
+    assert res_px["dist"] == "STAGED"
+
+    manifest_file = runs_dir / shared_cycle_id / "release_manifest.json"
+    assert manifest_file.exists()
+    manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert "tenants" in manifest_data
+    assert "profithelm" in manifest_data["tenants"]
+    assert "prexvo" in manifest_data["tenants"]
+    assert (runs_dir / shared_cycle_id / "release_manifest_profithelm.json").exists()
+    assert (runs_dir / shared_cycle_id / "release_manifest_prexvo.json").exists()
+    from pathlib import Path
+    assert not Path(f"/home/ubuntuadmin/projects/.agy/runs/{shared_cycle_id}").exists()
+
+
+def test_automatic_workspace_tracking_reconciliation_without_manual_scripts(tmp_path):
+    """
+    Replays all historical tracking state corruption patterns:
+    - Non-canonical test queue files (fast_distribution_queue.jsonl, profithelm-platform_release_queue.jsonl, prop_a_release_queue.jsonl)
+    - Aborted PENDING WAL records in ShipperQueue and SyndicationWALQueue
+    - Concatenated multi-writer JSON manifest (Extra data), 0-byte manifest, and test-leaked /tmp/pytest-... run dir
+    - Superseded ci_failure_incident.json and UNHEALTHY_DEPLOY manifests
+    Verifies reconcile_workspace_tracking_state() heals all of them automatically.
+    """
+    from pseofactory.gitops import ShipperQueue, reconcile_workspace_tracking_state
+    from pseofactory.distributor import SyndicationWALQueue
+
+    runs_dir = tmp_path / "runs"
+    queues_dir = tmp_path / "queues"
+    ledger_path = runs_dir / "gitops_idempotency_ledger.json"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    queues_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Seed non-canonical test queue files
+    for bad_q in (
+        "fast_distribution_queue.jsonl",
+        "profithelm-platform_release_queue.jsonl",
+        "prop_a_release_queue.jsonl",
+        "t1_distribution_queue.jsonl",
+    ):
+        (queues_dir / bad_q).write_text("", encoding="utf-8")
+
+    # 2. Seed aborted PENDING WAL events followed by a completed event
+    sq = ShipperQueue(property_id="profithelm", queues_dir=queues_dir)
+    aborted_evt = sq.enqueue({"run_id": "crashed-run-1", "token": "tok_aborted"})
+    completed_evt = sq.enqueue({"run_id": "ok-run-2", "token": "tok_ok"})
+    sq.complete_event(completed_evt["event_id"], status="COMPLETED")
+    assert aborted_evt["status"] == "PENDING"
+
+    dq = SyndicationWALQueue(property_id="prexvo", queues_dir=queues_dir)
+    aborted_dist = dq.enqueue({"run_id": "crashed-dist-1"})
+    completed_dist = dq.enqueue({"run_id": "ok-dist-2"})
+    dq.complete_event(completed_dist["event_id"], status="COMPLETED")
+    assert aborted_dist["status"] == "PENDING"
+
+    # 3. Seed test-contaminated idempotency ledger
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "tok_test_1": {"property_id": "test_property"},
+                "tok_prod_1": {"property_id": "profithelm"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # 4. Seed test-leaked run directory (/tmp/pytest-...)
+    leaked_dir = runs_dir / "cycle_leaked_pytest"
+    leaked_dir.mkdir(parents=True, exist_ok=True)
+    (leaked_dir / "release_manifest.json").write_text(
+        json.dumps({"project": "/tmp/pytest-of-ubuntuadmin/test_e2e/prexvo", "property_id": "prexvo"}),
+        encoding="utf-8",
+    )
+
+    # 5. Seed concatenated JSON manifest (Extra data) and 0-byte manifest
+    concat_dir = runs_dir / "cycle_concat_prod"
+    concat_dir.mkdir(parents=True, exist_ok=True)
+    obj1 = json.dumps({"status": "SUCCESS", "project": "/home/ubuntuadmin/projects/prexvo", "property_id": "prexvo"}, indent=2)
+    obj2 = json.dumps({"status": "SUCCESS", "project": "/home/ubuntuadmin/projects/profithelm-platform", "property_id": "profithelm"}, indent=2)
+    (concat_dir / "release_manifest.json").write_text(obj1 + "\n" + obj2, encoding="utf-8")
+
+    empty_dir = runs_dir / "coldstart-proof-e2e"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    (empty_dir / "release_manifest.json").write_text("", encoding="utf-8")
+
+    # 6. Seed superseded ci_failure_incident.json and UNHEALTHY_DEPLOY manifest
+    inc_dir = runs_dir / "cycle_old_ci_fail"
+    inc_dir.mkdir(parents=True, exist_ok=True)
+    (inc_dir / "ci_failure_incident.json").write_text(
+        json.dumps(
+            {
+                "run_id": "cycle_old_ci_fail",
+                "project": "/home/ubuntuadmin/projects/profithelm-platform",
+                "status": "CI_FAILURE",
+                "failed_sha": "old_sha_111111",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (inc_dir / "release_manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "cycle_old_ci_fail",
+                "project": "/home/ubuntuadmin/projects/profithelm-platform",
+                "status": "UNHEALTHY_DEPLOY",
+                "head_sha": "old_sha_111111",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rec_summary = reconcile_workspace_tracking_state(
+        runs_dir=runs_dir,
+        queues_dir=queues_dir,
+        ledger_path=ledger_path,
+        repo_heads={"profithelm-platform": "new_healthy_sha_999999"},
+    )
+    assert rec_summary["status"] == "PASS"
+    assert rec_summary["pruned_queue_files"] == 4
+    assert rec_summary["reconciled_wal_events"] >= 2
+    assert rec_summary["pruned_ledger_tokens"] == 1
+    assert rec_summary["pruned_test_runs"] == 1
+    assert rec_summary["repaired_manifests"] >= 2
+    assert rec_summary["resolved_incidents"] == 1
+
+    # Verify zero PENDING WAL records remain
+    for q_file in queues_dir.glob("*.jsonl"):
+        for line in q_file.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                assert json.loads(line)["status"] != "PENDING"
+
+    # Verify concatenated manifest is now valid JSON with both tenants preserved
+    repaired_concat = json.loads((concat_dir / "release_manifest.json").read_text(encoding="utf-8"))
+    assert "tenants" in repaired_concat
+    assert "prexvo" in repaired_concat["tenants"]
+    assert "profithelm" in repaired_concat["tenants"]
+
+    # Verify incident and unhealthy manifest marked resolved
+    resolved_inc = json.loads((inc_dir / "ci_failure_incident.json").read_text(encoding="utf-8"))
+    assert resolved_inc["status"] == "RESOLVED_BY_SUBSEQUENT_RELEASE"
+    resolved_man = json.loads((inc_dir / "release_manifest.json").read_text(encoding="utf-8"))
+    assert resolved_man["status"] == "RECONCILED_BY_SUBSEQUENT_RELEASE"
+
+
+def test_failed_deployment_rolls_back_substrate_lock_and_completes_wal(tmp_path):
+    """
+    Replays a delayed/failed GitOps deployment during MaintenanceLifecycle.run on a tenant
+    git repository (profithelm-platform) and verifies that substrate_lock.json is rolled back
+    to its exact prior bytes (leaving zero dirty files in git status) and WAL records are
+    completed with PUSH_FAILED (never left PENDING).
+    """
+    import subprocess
+    from unittest.mock import patch
+    from pseofactory.gitops import GitOpsResult
+    from pseofactory.maintenance import (
+        AssetIntegrityEvaluator,
+        ConfigurablePropertyAdapter,
+        MaintenanceLifecycle,
+        TenantRegistry,
+    )
+
+    tenant_repo = tmp_path / "profithelm-platform"
+    dist_dir = tenant_repo / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(tenant_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "config", "user.email", "test@profithelm.com"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "config", "user.name", "Test Runner"], check=True)
+
+    original_lock_content = json.dumps(
+        {
+            "dist_fingerprint": "0000000000000000",
+            "engine_hash": "1111111111111111",
+            "property_id": "profithelm",
+            "substrate_hash": "1111111111111111",
+            "total_assets": 1,
+        },
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    lock_file = tenant_repo / "substrate_lock.json"
+    lock_file.write_text(original_lock_content, encoding="utf-8")
+    subprocess.run(["git", "-C", str(tenant_repo), "add", "substrate_lock.json"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "commit", "-m", "chore: initial lock"], check=True, capture_output=True)
+
+    (dist_dir / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        "<title>ProfitHelm Tax & Financial Calculators</title>"
+        "<meta name='description' content='Deterministic tax and financial modeling calculators for founders.'>"
+        "<link rel='canonical' href='https://profithelm.com/'></head>"
+        "<body><main><h1>ProfitHelm Financial Modeling</h1>"
+        "<div class='quick-answer'><p>Calculate exact federal and state tax liabilities in seconds.</p></div>"
+        "<p>" + ("Quantitative statutory analysis across federal and state brackets. " * 30) + "</p>"
+        "</main></body></html>",
+        encoding="utf-8",
+    )
+
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+        repo_path=tenant_repo,
+    )
+    reg = TenantRegistry()
+    reg.register_adapter(adapter)
+
+    lifecycle = MaintenanceLifecycle(
+        registry=reg,
+        evaluator=AssetIntegrityEvaluator(enforce_master_seo=False),
+    )
+    with patch(
+        "pseofactory.gitops.GitOpsCoordinator.dispatch_to_shipper",
+        return_value=GitOpsResult(status="PUSH_FAILED", property_id="profithelm", error="Simulated network failure"),
+    ):
+        res = lifecycle.run(
+            adapter,
+            force=True,
+            dry_run=False,
+            enable_gitops=True,
+            enable_distribution=False,
+        )
+
+    assert res.status == "FAILED"
+    assert res.gitops_status == "FAILED"
+    assert lock_file.read_text(encoding="utf-8") == original_lock_content
+    st_out = subprocess.run(
+        ["git", "-C", str(tenant_repo), "status", "--porcelain", "-uno"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert st_out == ""
+
+
+def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path):
+    """
+    Replays a pending GSC rollover queue (when overall_status is PASS and candidate queue is empty)
+    during DailyIndexingInspector.run_inspection(auto_remediate=True) and verifies that
+    auto-remediation runs and drains the rollover queue to 0 when child sitemaps pass.
+    """
+    from unittest.mock import patch
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.telemetry import AtomicTelemetryLogger
+
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    rollover_path = agy_dir / "gsc_rollover_queue.json"
+    rollover_path.write_text(
+        json.dumps(["https://profithelm.com/", "https://profithelm.com/tools/"]),
+        encoding="utf-8",
+    )
+    quarantine_path = agy_dir / "indexing_quarantine_ledger.json"
+    quarantine_path.write_text(json.dumps({}), encoding="utf-8")
+    velocity_path = agy_dir / "indexing_velocity_ledger.json"
+    velocity_path.write_text(json.dumps({"routes": []}), encoding="utf-8")
+    recovery_path = agy_dir / "metric_recovery_ledger.json"
+    telemetry_path = agy_dir / "telemetry.jsonl"
+
+    inspector = DailyIndexingInspector(
+        tenant_id="profithelm",
+        base_dir=tmp_path,
+        agy_dir=agy_dir,
+        recovery_ledger_path=recovery_path,
+        quarantine_ledger_path=quarantine_path,
+        velocity_ledger_path=velocity_path,
+        rollover_queue_path=rollover_path,
+        telemetry_logger=AtomicTelemetryLogger(log_path=telemetry_path),
+    )
+
+    with patch.object(
+        inspector,
+        "audit_child_sitemaps_and_section_coverage",
+        return_value={"status": "PASS", "section_coverage": {}},
+    ), patch(
+        "pseofactory.indexing.feedback_loop.IndexingFeedbackLoop.run_feedback_cycle",
+        return_value={"status": "NO_ACTION_REQUIRED"},
+    ):
+        rep = inspector.run_inspection(dry_run=False, auto_remediate=True)
+
+    assert rep["audit_status"] == "PASS"
+    assert rep["gsc_rollover"]["queue_size"] == 0
+    assert rep["gsc_rollover"]["reconciled_urls_count"] == 2
+    assert json.loads(rollover_path.read_text(encoding="utf-8")) == []
+
+

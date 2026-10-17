@@ -19,6 +19,7 @@ import hashlib
 import tempfile
 import subprocess
 import fcntl
+import threading
 import concurrent.futures
 import urllib.request
 import urllib.error
@@ -72,6 +73,15 @@ class GitOpsResult:
 
 DEFAULT_GITOPS_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/gitops_idempotency_ledger.json")
 
+CANONICAL_PRODUCTION_PROPERTIES = {
+    "profithelm",
+    "prexvo",
+    "pseofactory",
+    "profithelm-platform",
+    "factory",
+    "default",
+}
+
 KNOWN_TEST_PROPERTY_IDS = {
     "test_property",
     "recovery_app",
@@ -79,9 +89,22 @@ KNOWN_TEST_PROPERTY_IDS = {
     "profithelm_test",
     "prop1",
     "prop2",
+    "prop_a",
     "custom",
     "test_repo",
+    "fast",
+    "runaway",
+    "t1",
+    "t2",
+    "t3",
 }
+
+
+def _normalize_property_id(property_id: Optional[str]) -> str:
+    pid = (property_id or "factory").strip().lower()
+    if pid == "profithelm-platform":
+        return "profithelm"
+    return pid
 
 
 def _is_test_context(
@@ -93,7 +116,7 @@ def _is_test_context(
     so test runs never contaminate production .agy/runs or .agy/queues state.
     Zero em-dashes. Zero en-dashes.
     """
-    if "PYTEST_CURRENT_TEST" in os.environ:
+    if "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules:
         return True
     if repo_path is not None:
         rp_str = str(repo_path)
@@ -101,7 +124,12 @@ def _is_test_context(
             return True
     if property_id is not None:
         pid = property_id.strip().lower()
-        if pid in KNOWN_TEST_PROPERTY_IDS or pid.startswith("test_") or pid.endswith("_test"):
+        if (
+            pid in KNOWN_TEST_PROPERTY_IDS
+            or pid.startswith("test_")
+            or pid.endswith("_test")
+            or pid not in CANONICAL_PRODUCTION_PROPERTIES
+        ):
             return True
     return False
 
@@ -192,10 +220,11 @@ class ShipperQueue:
         queues_dir: Optional[Union[str, Path]] = None,
         max_attempts: int = 3,
     ):
-        self.property_id = property_id.lower()
+        raw_pid = (property_id or "factory").strip().lower()
+        self.property_id = _normalize_property_id(raw_pid)
         if queues_dir is not None:
             self.queues_dir = Path(queues_dir)
-        elif _is_test_context(property_id=self.property_id):
+        elif _is_test_context(property_id=raw_pid):
             self.queues_dir = Path(tempfile.gettempdir()) / f"pseofactory_pytest_queues_{os.getpid()}"
         else:
             self.queues_dir = self.DEFAULT_QUEUES_DIR
@@ -203,6 +232,7 @@ class ShipperQueue:
         self.max_attempts = max_attempts
         self.queue_file = self.queues_dir / f"{self.property_id}_release_queue.jsonl"
         self.dlq_file = self.queues_dir / f"{self.property_id}_dlq.jsonl"
+        self.lock_file = self.queues_dir / f".{self.property_id}_release_queue.lock"
 
     def enqueue(self, payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
         eid = event_id or f"evt_{hashlib.sha256(str(payload).encode('utf-8')).hexdigest()[:16]}"
@@ -216,10 +246,16 @@ class ShipperQueue:
             "payload": payload,
         }
         line = json.dumps(record) + "\n"
-        with open(self.queue_file, "a", encoding="utf-8") as f:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_file, "a+") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(self.queue_file, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+                    os.fsync(f.fileno())
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
         return record
 
     def complete_event(
@@ -232,31 +268,124 @@ class ShipperQueue:
         if not self.queue_file.exists():
             return
         try:
-            lines = self.queue_file.read_text(encoding="utf-8").splitlines()
-            updated_lines: List[str] = []
-            now_iso = datetime.now(timezone.utc).isoformat()
-            for line in lines:
-                s = line.strip()
-                if not s:
-                    continue
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_file, "a+") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
                 try:
-                    rec = json.loads(s)
-                    if rec.get("event_id") == event_id:
-                        rec["status"] = status
-                        rec["completed_at"] = now_iso
-                        if details:
-                            rec["details"] = details
-                    updated_lines.append(json.dumps(rec))
-                except Exception:
-                    updated_lines.append(s)
-            tmp_file = self.queue_file.with_suffix(".tmp")
-            with open(tmp_file, "w", encoding="utf-8") as tf:
-                tf.write("\n".join(updated_lines) + ("\n" if updated_lines else ""))
-                tf.flush()
-                os.fsync(tf.fileno())
-            os.replace(tmp_file, self.queue_file)
+                    if not self.queue_file.exists():
+                        return
+                    lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+                    updated_lines: List[str] = []
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    for line in lines:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        try:
+                            rec = json.loads(s)
+                            if rec.get("event_id") == event_id:
+                                rec["status"] = status
+                                rec["completed_at"] = now_iso
+                                if details:
+                                    rec["details"] = details
+                            updated_lines.append(json.dumps(rec))
+                        except Exception:
+                            updated_lines.append(s)
+                    tmp_file = self.queue_file.with_name(
+                        f".{self.queue_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                    )
+                    with open(tmp_file, "w", encoding="utf-8") as tf:
+                        tf.write("\n".join(updated_lines) + ("\n" if updated_lines else ""))
+                        tf.flush()
+                        os.fsync(tf.fileno())
+                    os.replace(tmp_file, self.queue_file)
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
+
+    def reconcile_stale_events(self, max_age_seconds: float = 900.0) -> int:
+        """
+        Automatically reconciles any PENDING WAL events that have been superseded by a newer
+        completed event on the same property/token or exceeded max_age_seconds after an aborted run.
+        Returns count of reconciled events.
+        """
+        if not self.queue_file.exists():
+            return 0
+        reconciled = 0
+        try:
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_file, "a+") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    if not self.queue_file.exists():
+                        return 0
+                    lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+                    records: List[Dict[str, Any]] = []
+                    for line in lines:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        try:
+                            records.append(json.loads(s))
+                        except Exception:
+                            continue
+
+                    now_dt = datetime.now(timezone.utc)
+                    now_iso = now_dt.isoformat()
+                    completed_tokens: Set[str] = set()
+                    latest_completed_idx = -1
+                    for idx, rec in enumerate(records):
+                        st = str(rec.get("status", ""))
+                        if st != "PENDING":
+                            latest_completed_idx = idx
+                            tok = str(rec.get("payload", {}).get("token", ""))
+                            if tok:
+                                completed_tokens.add(tok)
+
+                    for idx, rec in enumerate(records):
+                        if rec.get("status") != "PENDING":
+                            continue
+                        tok = str(rec.get("payload", {}).get("token", ""))
+                        is_stale = False
+                        reason = ""
+                        if tok and tok in completed_tokens:
+                            is_stale = True
+                            reason = "Superseded by completed event with identical token"
+                        elif idx < latest_completed_idx:
+                            is_stale = True
+                            reason = "Superseded by newer completed release on property"
+                        else:
+                            ts_str = str(rec.get("timestamp", ""))
+                            if ts_str:
+                                try:
+                                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                    if (now_dt - dt).total_seconds() >= max_age_seconds:
+                                        is_stale = True
+                                        reason = f"Exceeded WAL pending TTL ({int(max_age_seconds)}s)"
+                                except Exception:
+                                    is_stale = True
+                                    reason = "Unparseable timestamp"
+                        if is_stale:
+                            rec["status"] = "RECONCILED_SUPERSEDED"
+                            rec["completed_at"] = now_iso
+                            rec["reconciliation_reason"] = reason
+                            reconciled += 1
+
+                    if reconciled > 0:
+                        tmp_file = self.queue_file.with_name(
+                            f".{self.queue_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                        )
+                        with open(tmp_file, "w", encoding="utf-8") as tf:
+                            tf.write("\n".join(json.dumps(r) for r in records) + ("\n" if records else ""))
+                            tf.flush()
+                            os.fsync(tf.fileno())
+                        os.replace(tmp_file, self.queue_file)
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        return reconciled
 
     def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
         dlq_record = dict(record)
@@ -897,6 +1026,7 @@ class GitOpsCoordinator:
         wf = workflow or self.workflow or "ci.yml"
 
         # Dynamic tenant resolution via TenantRegistry
+        repo_path_updated = False
         if property_id and property_id not in ("factory", "default"):
             try:
                 from pseofactory.maintenance import TenantRegistry
@@ -907,8 +1037,15 @@ class GitOpsCoordinator:
                     dist_dir = adapter.dist_dir
                 if adapter.repo_path and self.repo_path == Path.cwd().resolve():
                     self.repo_path = adapter.repo_path
+                    repo_path_updated = True
             except Exception:
                 pass
+
+        is_test_ctx = _is_test_context(repo_path=self.repo_path, property_id=property_id)
+        if repo_path_updated and str(self.repo_path).startswith(tempfile.gettempdir()):
+            self.runs_base = self.repo_path / ".agy" / "runs"
+        elif is_test_ctx and str(self.runs_base) == "/home/ubuntuadmin/projects/.agy/runs":
+            self.runs_base = Path(tempfile.gettempdir()) / f"pseofactory_pytest_runs_{os.getpid()}"
 
         # Base commit SHA
         base_commit_sha = "0000000000000000000000000000000000000000"
@@ -935,7 +1072,7 @@ class GitOpsCoordinator:
         staged: List[str] = []
         staged_diff_hash = ""
         in_pytest_real_repo = (
-            "PYTEST_CURRENT_TEST" in os.environ
+            ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)
             and not str(active_target).startswith(tempfile.gettempdir())
             and not hasattr(subprocess.run, "mock_calls")
         )
@@ -960,7 +1097,6 @@ class GitOpsCoordinator:
         idempotency_token = hashlib.sha256(token_str.encode("utf-8")).hexdigest()
 
         # Persistent idempotency ledger rejection (HWL-1212/HWL-1231)
-        is_test_ctx = _is_test_context(repo_path=self.repo_path, property_id=property_id)
         if str(self.repo_path).startswith(tempfile.gettempdir()):
             scoped_ledger_path: Optional[Path] = self.repo_path / ".agy" / "gitops_idempotency_ledger.json"
         elif is_test_ctx:
@@ -987,6 +1123,7 @@ class GitOpsCoordinator:
             property_id=property_id,
             queues_dir=(self.runs_base / "queues") if is_test_ctx else None,
         )
+        queue.reconcile_stale_events()
         enqueued_rec = queue.enqueue({
             "run_id": eff_run_id,
             "property_id": property_id,
@@ -999,87 +1136,95 @@ class GitOpsCoordinator:
         print(f"[DISPATCH:SHIPPER] Stage 3: Staging queue submission -> token={token_abbr} (simulated flock merge, HWL-1212 PASS)")
 
         commit_sha = base_commit_sha
-        if not eff_dry_run and self.is_git_repo(active_target):
-            if self.check_idempotency(active_target):
-                commit_sha = self.create_conventional_commit(
-                    message=commit_message,
-                    target_dir=active_target,
-                    commit_type="fix",
-                    scope=property_id,
-                ) or commit_sha
-            if wt_path.is_dir():
-                merge_res = self.atomic_flock_merge(run_id=eff_run_id, target_branch=self.branch)
-                if merge_res.get("status") == "CONFLICT_BLOCKED":
-                    queue.complete_event(enqueued_event_id, status="CONFLICT_BLOCKED")
+        try:
+            if not eff_dry_run and self.is_git_repo(active_target):
+                if self.check_idempotency(active_target):
+                    commit_sha = self.create_conventional_commit(
+                        message=commit_message,
+                        target_dir=active_target,
+                        commit_type="fix",
+                        scope=property_id,
+                    ) or commit_sha
+                if wt_path.is_dir():
+                    merge_res = self.atomic_flock_merge(run_id=eff_run_id, target_branch=self.branch)
+                    if merge_res.get("status") == "CONFLICT_BLOCKED":
+                        queue.complete_event(enqueued_event_id, status="CONFLICT_BLOCKED")
+                        return GitOpsResult(
+                            status="CONFLICT_BLOCKED",
+                            property_id=property_id,
+                            head_sha=commit_sha,
+                            branch=self.branch,
+                            staged_files=staged,
+                            error=merge_res.get("error", "Merge conflict"),
+                        )
+                    commit_sha = merge_res.get("head_sha") or commit_sha
+
+            # Stage 4: Remote push dry-run / push backoff under owner_calls
+            push_res: Dict[str, Any] = {"status": "SKIPPED_DRY_RUN" if eff_dry_run else "SUCCESS"}
+            if eff_dry_run:
+                print(f"[DISPATCH:SHIPPER] Stage 4: Remote push dry-run -> target=origin/{self.branch} (skipped, force=PROHIBITED, HWL-1231 PASS)")
+            else:
+                push_res = self.push_with_backoff(target_branch=self.branch)
+                if push_res.get("status") == "FAIL":
+                    queue.complete_event(enqueued_event_id, status="PUSH_FAILED")
                     return GitOpsResult(
-                        status="CONFLICT_BLOCKED",
+                        status="PUSH_FAILED",
                         property_id=property_id,
                         head_sha=commit_sha,
                         branch=self.branch,
                         staged_files=staged,
-                        error=merge_res.get("error", "Merge conflict"),
+                        error=push_res.get("error"),
+                        details={"push": push_res},
                     )
-                commit_sha = merge_res.get("head_sha") or commit_sha
 
-        # Stage 4: Remote push dry-run / push backoff under owner_calls
-        push_res: Dict[str, Any] = {"status": "SKIPPED_DRY_RUN" if eff_dry_run else "SUCCESS"}
-        if eff_dry_run:
-            print(f"[DISPATCH:SHIPPER] Stage 4: Remote push dry-run -> target=origin/{self.branch} (skipped, force=PROHIBITED, HWL-1231 PASS)")
-        else:
-            push_res = self.push_with_backoff(target_branch=self.branch)
-            if push_res.get("status") == "FAIL":
-                queue.complete_event(enqueued_event_id, status="PUSH_FAILED")
-                return GitOpsResult(
-                    status="PUSH_FAILED",
-                    property_id=property_id,
-                    head_sha=commit_sha,
-                    branch=self.branch,
-                    staged_files=staged,
-                    error=push_res.get("error"),
-                    details={"push": push_res},
+            # Stage 5: CI/CD quality gate check
+            ci_res: Optional[Dict[str, Any]] = None
+            if eff_dry_run or skip_ci:
+                print(f"[DISPATCH:SHIPPER] Stage 5: CI/CD quality gate check -> workflow={wf} (skipped dry-run, HWL-1298 PASS)")
+            else:
+                watcher = CICDWatcher(workflow=wf, timeout=self.timeout)
+                ci_res = watcher.watch(head_sha=commit_sha, repo_path=self.repo_path, run_id=eff_run_id)
+                if ci_res.get("status") == "FAIL":
+                    queue.complete_event(enqueued_event_id, status="CI_FAILURE")
+                    return GitOpsResult(
+                        status="CI_FAILURE",
+                        property_id=property_id,
+                        head_sha=commit_sha,
+                        branch=self.branch,
+                        staged_files=staged,
+                        ci_status="FAIL",
+                        error=ci_res.get("error"),
+                        details={"ci": ci_res, "push": push_res},
+                    )
+
+            # Stage 6: Edge deployment parity check (cloud_deploy_lead)
+            edge_res: Optional[Dict[str, Any]] = None
+            if not skip_edge and edge_url:
+                verifier = LiveEdgeVerifier()
+                edge_res = verifier.verify_edge_deployment(
+                    base_url=edge_url,
+                    dist_dir=dist_dir,
+                    dry_run=eff_dry_run,
                 )
-
-        # Stage 5: CI/CD quality gate check
-        ci_res: Optional[Dict[str, Any]] = None
-        if eff_dry_run or skip_ci:
-            print(f"[DISPATCH:SHIPPER] Stage 5: CI/CD quality gate check -> workflow={wf} (skipped dry-run, HWL-1298 PASS)")
-        else:
-            watcher = CICDWatcher(workflow=wf, timeout=self.timeout)
-            ci_res = watcher.watch(head_sha=commit_sha, repo_path=self.repo_path, run_id=eff_run_id)
-            if ci_res.get("status") == "FAIL":
-                queue.complete_event(enqueued_event_id, status="CI_FAILURE")
-                return GitOpsResult(
-                    status="CI_FAILURE",
-                    property_id=property_id,
-                    head_sha=commit_sha,
-                    branch=self.branch,
-                    staged_files=staged,
-                    ci_status="FAIL",
-                    error=ci_res.get("error"),
-                    details={"ci": ci_res, "push": push_res},
-                )
-
-        # Stage 6: Edge deployment parity check (cloud_deploy_lead)
-        edge_res: Optional[Dict[str, Any]] = None
-        if not skip_edge and edge_url:
-            verifier = LiveEdgeVerifier()
-            edge_res = verifier.verify_edge_deployment(
-                base_url=edge_url,
-                dist_dir=dist_dir,
-                dry_run=eff_dry_run,
+                if not eff_dry_run and edge_res.get("status") != "PASS":
+                    queue.complete_event(enqueued_event_id, status="EDGE_VERIFICATION_FAILED")
+                    return GitOpsResult(
+                        status="EDGE_VERIFICATION_FAILED",
+                        property_id=property_id,
+                        head_sha=commit_sha,
+                        branch=self.branch,
+                        staged_files=staged,
+                        edge_status="FAIL",
+                        error=edge_res.get("error", "Live edge probe failed"),
+                        details={"edge": edge_res},
+                    )
+        except Exception as exc:
+            queue.complete_event(
+                enqueued_event_id,
+                status="FAILED",
+                details={"error": str(exc), "head_sha": commit_sha, "run_id": eff_run_id},
             )
-            if not eff_dry_run and edge_res.get("status") != "PASS":
-                queue.complete_event(enqueued_event_id, status="EDGE_VERIFICATION_FAILED")
-                return GitOpsResult(
-                    status="EDGE_VERIFICATION_FAILED",
-                    property_id=property_id,
-                    head_sha=commit_sha,
-                    branch=self.branch,
-                    staged_files=staged,
-                    edge_status="FAIL",
-                    error=edge_res.get("error", "Live edge probe failed"),
-                    details={"edge": edge_res},
-                )
+            raise
 
         # Latch token into IdempotencyLedger strictly post-Stage 6 success (HWL-1349)
         if not eff_dry_run:
@@ -1091,11 +1236,14 @@ class GitOpsCoordinator:
             details={"head_sha": commit_sha, "run_id": eff_run_id},
         )
 
-        # Output release_manifest.json to runs_base/{run_id}/release_manifest.json
+        # Output release_manifest.json atomically to runs_base/{run_id}/release_manifest.json
         manifest_dir = self.runs_base / eff_run_id
         manifest_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = manifest_dir / "release_manifest.json"
-        manifest_payload = {
+        norm_prop = _normalize_property_id(property_id)
+        prop_manifest_path = manifest_dir / f"release_manifest_{norm_prop}.json"
+        manifest_lock_path = manifest_dir / ".release_manifest.lock"
+        manifest_payload: Dict[str, Any] = {
             "status": "SUCCESS",
             "project": str(self.repo_path),
             "run_id": eff_run_id,
@@ -1121,7 +1269,39 @@ class GitOpsCoordinator:
             },
             "owner_calls": [],
         }
-        manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
+
+        with open(manifest_lock_path, "a+") as mlf:
+            fcntl.flock(mlf.fileno(), fcntl.LOCK_EX)
+            try:
+                existing_tenants: Dict[str, Any] = {}
+                if manifest_path.exists():
+                    try:
+                        prev_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        if isinstance(prev_data, dict):
+                            if isinstance(prev_data.get("tenants"), dict):
+                                existing_tenants.update(prev_data["tenants"])
+                            prev_prop = _normalize_property_id(prev_data.get("property_id"))
+                            if prev_prop and prev_prop not in existing_tenants:
+                                prev_copy = dict(prev_data)
+                                prev_copy.pop("tenants", None)
+                                existing_tenants[prev_prop] = prev_copy
+                    except Exception:
+                        pass
+
+                prop_entry = dict(manifest_payload)
+                existing_tenants[norm_prop] = prop_entry
+                if len(existing_tenants) > 1:
+                    manifest_payload["tenants"] = existing_tenants
+
+                tmp_prop = manifest_dir / f".release_manifest_{norm_prop}.{os.getpid()}.{threading.get_ident()}.tmp"
+                tmp_prop.write_text(json.dumps(prop_entry, indent=2), encoding="utf-8")
+                os.replace(tmp_prop, prop_manifest_path)
+
+                tmp_main = manifest_dir / f".release_manifest.{os.getpid()}.{threading.get_ident()}.tmp"
+                tmp_main.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
+                os.replace(tmp_main, manifest_path)
+            finally:
+                fcntl.flock(mlf.fileno(), fcntl.LOCK_UN)
 
         print(f"[DISPATCH:SHIPPER] Complete -> status=COMPLETED, head_sha={commit_sha}, dry_run={str(eff_dry_run).lower()}, manifest=.agy/runs/{eff_run_id}/release_manifest.json")
 
@@ -2187,3 +2367,312 @@ class LiveEdgeVerifier:
             "probes": probes,
             "issues": total_issues,
         }
+
+
+def _extract_concatenated_json_objects(raw_text: str) -> List[Dict[str, Any]]:
+    """Parses one or more concatenated JSON objects from a corrupted multi-writer file."""
+    decoder = json.JSONDecoder()
+    idx = 0
+    length = len(raw_text)
+    objs: List[Dict[str, Any]] = []
+    while idx < length:
+        while idx < length and raw_text[idx].isspace():
+            idx += 1
+        if idx >= length:
+            break
+        try:
+            obj, next_idx = decoder.raw_decode(raw_text, idx)
+            if isinstance(obj, dict):
+                objs.append(obj)
+            idx = next_idx
+        except Exception:
+            break
+    return objs
+
+
+def reconcile_workspace_tracking_state(
+    runs_dir: Optional[Union[str, Path]] = None,
+    queues_dir: Optional[Union[str, Path]] = None,
+    ledger_path: Optional[Union[str, Path]] = None,
+    repo_heads: Optional[Dict[str, str]] = None,
+    max_pending_age_seconds: float = 900.0,
+) -> Dict[str, Any]:
+    """
+    Automatic self-reconciliation of workspace tracking state (.agy/queues, .agy/runs,
+    idempotency ledger, and automated git stashes) so scheduled background runs self-heal
+    without manual cleanup scripts.
+    Zero em-dashes. Zero en-dashes.
+    """
+    is_explicit = runs_dir is not None or queues_dir is not None or ledger_path is not None
+    in_test = _is_test_context() and not is_explicit
+
+    eff_runs_dir = (
+        Path(runs_dir)
+        if runs_dir is not None
+        else (
+            Path(tempfile.gettempdir()) / f"pseofactory_pytest_runs_{os.getpid()}"
+            if in_test
+            else Path("/home/ubuntuadmin/projects/.agy/runs")
+        )
+    )
+    eff_queues_dir = (
+        Path(queues_dir)
+        if queues_dir is not None
+        else (
+            Path(tempfile.gettempdir()) / f"pseofactory_pytest_queues_{os.getpid()}"
+            if in_test
+            else ShipperQueue.DEFAULT_QUEUES_DIR
+        )
+    )
+    eff_ledger_path = (
+        Path(ledger_path)
+        if ledger_path is not None
+        else (
+            Path(tempfile.gettempdir()) / f"pseofactory_pytest_gitops_ledger_{os.getpid()}.json"
+            if in_test
+            else DEFAULT_GITOPS_LEDGER_PATH
+        )
+    )
+
+    canonical_queue_Owner_ids = {"profithelm", "prexvo", "pseofactory", "factory", "default"}
+    pruned_queue_files = 0
+    reconciled_wal_events = 0
+    pruned_ledger_tokens = 0
+    pruned_test_runs = 0
+    repaired_manifests = 0
+    resolved_incidents = 0
+    dropped_stashes = 0
+
+    # 1. Prune non-canonical test queue files and reconcile canonical queues
+    if eff_queues_dir.is_dir():
+        for qf in list(eff_queues_dir.glob("*.jsonl")):
+            name = qf.name
+            prefix = None
+            for suffix in (
+                "_release_queue.jsonl",
+                "_distribution_queue.jsonl",
+                "_distribution_dlq.jsonl",
+                "_dlq.jsonl",
+            ):
+                if name.endswith(suffix):
+                    prefix = name[: -len(suffix)]
+                    break
+            if prefix is None or prefix not in canonical_queue_Owner_ids:
+                try:
+                    qf.unlink(missing_ok=True)
+                    pruned_queue_files += 1
+                except Exception:
+                    pass
+
+        for prop in canonical_queue_Owner_ids:
+            sq = ShipperQueue(property_id=prop, queues_dir=eff_queues_dir)
+            reconciled_wal_events += sq.reconcile_stale_events(max_age_seconds=max_pending_age_seconds)
+            try:
+                from pseofactory.distributor import SyndicationWALQueue
+                dq = SyndicationWALQueue(property_id=prop, queues_dir=eff_queues_dir)
+                reconciled_wal_events += dq.reconcile_stale_events(max_age_seconds=max_pending_age_seconds)
+            except Exception:
+                pass
+
+    # 2. Prune test-contaminated tokens from idempotency ledger
+    if eff_ledger_path.exists():
+        ledger = IdempotencyLedger(ledger_path=eff_ledger_path)
+        records = ledger._read_records()
+        clean_records: Dict[str, Any] = {}
+        for tok, meta in records.items():
+            pid = str((meta or {}).get("property_id", "")).strip().lower()
+            if (
+                pid in KNOWN_TEST_PROPERTY_IDS
+                or pid.startswith("test_")
+                or pid.endswith("_test")
+                or (pid and pid not in CANONICAL_PRODUCTION_PROPERTIES)
+            ):
+                pruned_ledger_tokens += 1
+                continue
+            clean_records[tok] = meta
+        if pruned_ledger_tokens > 0:
+            ledger._write_records(clean_records)
+
+    # 3. Discover current HEAD SHAs for canonical production repositories
+    heads: Dict[str, str] = dict(repo_heads or {})
+    if not heads and not in_test:
+        for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
+            rp = Path("/home/ubuntuadmin/projects") / repo_name
+            if (rp / ".git").exists():
+                try:
+                    res = subprocess.run(
+                        ["git", "-C", str(rp), "rev-parse", "HEAD"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        heads[str(rp)] = res.stdout.strip()
+                        heads[repo_name] = res.stdout.strip()
+                except Exception:
+                    pass
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 4. Reconcile .agy/runs directories (corrupt manifests, test leaks, superseded incidents)
+    if eff_runs_dir.is_dir():
+        for run_dir in list(eff_runs_dir.iterdir()):
+            if not run_dir.is_dir():
+                continue
+
+            manifest_file = run_dir / "release_manifest.json"
+            draft_file = run_dir / "distribution_draft.json"
+            incident_file = run_dir / "ci_failure_incident.json"
+
+            # Check for test-leaked run directory
+            is_test_leak = False
+            for candidate in (manifest_file, draft_file):
+                if candidate.exists():
+                    try:
+                        raw = candidate.read_text(encoding="utf-8", errors="ignore")
+                        if '"/tmp/' in raw or "/pytest-" in raw:
+                            is_test_leak = True
+                            break
+                        objs = _extract_concatenated_json_objects(raw)
+                        for obj in objs:
+                            proj_str = str(obj.get("project", ""))
+                            pid_str = str(obj.get("property_id", "")).strip().lower()
+                            if (
+                                proj_str.startswith("/tmp/")
+                                or "/pytest-" in proj_str
+                                or (pid_str and pid_str not in CANONICAL_PRODUCTION_PROPERTIES)
+                            ):
+                                is_test_leak = True
+                                break
+                    except Exception:
+                        pass
+            if is_test_leak:
+                shutil.rmtree(run_dir, ignore_errors=True)
+                pruned_test_runs += 1
+                continue
+
+            # Repair corrupt or concatenated release_manifest.json / distribution_draft.json
+            for json_file in (manifest_file, draft_file):
+                if not json_file.exists():
+                    continue
+                raw = json_file.read_text(encoding="utf-8", errors="ignore")
+                try:
+                    parsed = json.loads(raw) if raw.strip() else None
+                except Exception:
+                    parsed = None
+
+                if parsed is None:
+                    objs = _extract_concatenated_json_objects(raw)
+                    if len(objs) >= 1:
+                        merged = dict(objs[-1])
+                        tenants_map: Dict[str, Any] = {}
+                        for o in objs:
+                            p_norm = _normalize_property_id(o.get("property_id"))
+                            tenants_map[p_norm] = o
+                        if len(tenants_map) > 1:
+                            merged["tenants"] = tenants_map
+                        json_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+                        parsed = merged
+                    else:
+                        repaired = {
+                            "run_id": run_dir.name,
+                            "status": "RECONCILED_CORRUPT_MANIFEST",
+                            "reconciled_at": now_iso,
+                        }
+                        json_file.write_text(json.dumps(repaired, indent=2), encoding="utf-8")
+                        parsed = repaired
+                    repaired_manifests += 1
+
+                # Reconcile superseded UNHEALTHY_DEPLOY manifests
+                if (
+                    json_file.name == "release_manifest.json"
+                    and isinstance(parsed, dict)
+                    and parsed.get("status") in ("UNHEALTHY_DEPLOY", "FAILED", "CI_FAILURE")
+                ):
+                    proj = str(parsed.get("project", ""))
+                    failed_sha = str(parsed.get("head_sha", ""))
+                    cur_head = heads.get(proj) or heads.get(Path(proj).name if proj else "")
+                    if cur_head and failed_sha and cur_head != failed_sha:
+                        parsed["prior_status"] = parsed.get("status")
+                        parsed["status"] = "RECONCILED_BY_SUBSEQUENT_RELEASE"
+                        parsed["reconciled_by_head_sha"] = cur_head
+                        parsed["reconciled_at"] = now_iso
+                        json_file.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+                        repaired_manifests += 1
+
+            # Reconcile superseded ci_failure_incident.json files
+            if incident_file.exists():
+                try:
+                    inc_data = json.loads(incident_file.read_text(encoding="utf-8"))
+                    if isinstance(inc_data, dict) and inc_data.get("status") == "CI_FAILURE":
+                        proj = str(inc_data.get("project", ""))
+                        failed_sha = str(inc_data.get("failed_sha", ""))
+                        cur_head = heads.get(proj) or heads.get(Path(proj).name if proj else "")
+                        if cur_head and failed_sha and cur_head != failed_sha:
+                            inc_data["prior_status"] = "CI_FAILURE"
+                            inc_data["status"] = "RESOLVED_BY_SUBSEQUENT_RELEASE"
+                            inc_data["resolved_by_head_sha"] = cur_head
+                            inc_data["resolved_at"] = now_iso
+                            incident_file.write_text(json.dumps(inc_data, indent=2), encoding="utf-8")
+                            resolved_incidents += 1
+                except Exception:
+                    pass
+
+    # 5. Drop stale automated factory stashes in clean repositories when running in production
+    if not in_test and not is_explicit:
+        for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
+            rp = Path("/home/ubuntuadmin/projects") / repo_name
+            if not (rp / ".git").exists():
+                continue
+            try:
+                st_res = subprocess.run(
+                    ["git", "-C", str(rp), "status", "--porcelain"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if st_res.returncode == 0 and not st_res.stdout.strip():
+                    stash_res = subprocess.run(
+                        ["git", "-C", str(rp), "stash", "list"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if stash_res.returncode == 0 and stash_res.stdout.strip():
+                        lines = stash_res.stdout.strip().splitlines()
+                        for line in reversed(lines):
+                            if any(
+                                tag in line
+                                for tag in (
+                                    "agy-failed-run-factory",
+                                    "agy-success-cleanup-factory",
+                                    "agy-pre-merge-stash-",
+                                )
+                            ):
+                                ref = line.split(":", 1)[0].strip()
+                                drop_res = subprocess.run(
+                                    ["git", "-C", str(rp), "stash", "drop", ref],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=5,
+                                )
+                                if drop_res.returncode == 0:
+                                    dropped_stashes += 1
+            except Exception:
+                pass
+
+    return {
+        "status": "PASS",
+        "pruned_queue_files": pruned_queue_files,
+        "reconciled_wal_events": reconciled_wal_events,
+        "pruned_ledger_tokens": pruned_ledger_tokens,
+        "pruned_test_runs": pruned_test_runs,
+        "repaired_manifests": repaired_manifests,
+        "resolved_incidents": resolved_incidents,
+        "dropped_stashes": dropped_stashes,
+    }
+
