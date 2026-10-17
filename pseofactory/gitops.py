@@ -2641,6 +2641,14 @@ def reconcile_workspace_tracking_state(
 
                     if lock_acquired:
                         try:
+                            # Ensure content/overlays/ is in .git/info/exclude so runtime GSC overlay staging never dirties git status
+                            exclude_file = rp / ".git" / "info" / "exclude"
+                            if exclude_file.parent.is_dir():
+                                existing_ex = exclude_file.read_text(encoding="utf-8") if exclude_file.exists() else ""
+                                if "content/overlays/" not in existing_ex.splitlines():
+                                    sep = "" if (not existing_ex or existing_ex.endswith("\n")) else "\n"
+                                    exclude_file.write_text(existing_ex + sep + "content/overlays/\n", encoding="utf-8")
+
                             # Relocate any legacy untracked content/overlays/*.json into .agy/overlays/
                             legacy_ov_dir = rp / "content" / "overlays"
                             if legacy_ov_dir.is_dir():
