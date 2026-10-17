@@ -254,10 +254,10 @@ def _resolve_contextual_internal_links(
         elif any(k in combined for k in ("1031", "cost-segregation", "cost segregation", "bonus-depreciation", "opportunity-zone", "dst", "721", "real-estate", "cap-rate")):
             cluster = [
                 {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
-                {"anchor": "1031 Exchange Statutory Rules Guide", "href": "/tools/1031-exchange-rules-arizona/"},
-                {"anchor": "Section 1031 Scenario Comparison Model", "href": "/tools/section-1031-calculator-scenario-comparison-model/"},
+                {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
-                {"anchor": "IRS Capital Gains Statutory Tax Calculator", "href": "/tools/irs-capital-gains-statutory-tax/"},
+                {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
+                {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
             ]
         else:
             cluster = [
@@ -2287,6 +2287,50 @@ def prioritize_gsc_signals(
         merged_cand["idempotency_key"] = idemp_key
         prioritized.append(merged_cand)
 
+    # Detect competing URLs for the same normalized query and group queries per target_url
+    by_norm_query: Dict[str, List[Dict[str, Any]]] = {}
+    queries_by_url: Dict[str, List[str]] = {}
+    for cand in prioritized:
+        q_raw = str(cand.get("query") or "").strip()
+        q_norm = re.sub(r"\s+", " ", q_raw.lower())
+        t_url = str(cand.get("target_url") or "").strip()
+        if q_norm:
+            by_norm_query.setdefault(q_norm, []).append(cand)
+        if t_url and q_raw:
+            url_q_list = queries_by_url.setdefault(t_url, [])
+            if q_raw.lower() not in {x.lower() for x in url_q_list}:
+                url_q_list.append(q_raw)
+
+    for q_norm, recs in by_norm_query.items():
+        distinct_urls: List[str] = []
+        # Sort records by (-impressions, position, target_url) so canonical URL is strongest
+        sorted_recs = sorted(
+            recs,
+            key=lambda r: (
+                -int(float(r.get("impressions", 0) or 0)),
+                float(r.get("position", 100.0) or 100.0),
+                str(r.get("target_url") or ""),
+            ),
+        )
+        for r in sorted_recs:
+            u = str(r.get("target_url") or "").strip()
+            if u and u not in distinct_urls:
+                distinct_urls.append(u)
+        if len(distinct_urls) > 1:
+            for r in recs:
+                r.setdefault("competing_pages", list(distinct_urls))
+                r.setdefault("canonical_url", distinct_urls[0])
+                r.setdefault("redirect_candidates", distinct_urls[1:])
+                r["consolidation_needed"] = True
+
+    for cand in prioritized:
+        t_url = str(cand.get("target_url") or "").strip()
+        grouped_qs = list(queries_by_url.get(t_url) or [])
+        if grouped_qs:
+            cand["grouped_queries"] = grouped_qs
+            if isinstance(cand.get("overlay_spec"), dict):
+                cand["overlay_spec"]["grouped_queries"] = grouped_qs
+
     prioritized.sort(
         key=lambda x: (
             -float(x.get("roi_score", 0.0)),
@@ -2441,11 +2485,39 @@ def is_overlay_locked(overlay_data: Dict[str, Any]) -> bool:
         return False
 
 
+def _extract_overlay_queries(data: Dict[str, Any]) -> List[str]:
+    """Extracts ordered unique query strings from an overlay dict."""
+    if not isinstance(data, dict):
+        return []
+    queries: List[str] = []
+    seen = set()
+    for k in ("query", "target_query"):
+        val = str(data.get(k) or "").strip()
+        if val and val.lower() not in seen:
+            queries.append(val)
+            seen.add(val.lower())
+    for gq in data.get("grouped_queries") or []:
+        val = str(gq or "").strip()
+        if val and val.lower() not in seen:
+            queries.append(val)
+            seen.add(val.lower())
+    for sc in data.get("preset_scenarios") or []:
+        if isinstance(sc, dict):
+            val = str(sc.get("query") or "").strip()
+            if val and val.lower() not in seen:
+                queries.append(val)
+                seen.add(val.lower())
+    return queries
+
+
 def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     """
     Writes a remediation overlay unless the existing overlay still holds an active
-    measurement lock. Rewriting a locked overlay restarts its observation window, so
-    evaluate_expired_overlays would never reach a verdict. Returns (effective_spec, written).
+    measurement lock for the same query set. When an existing overlay is locked AND
+    `spec` introduces genuinely new distinct queries for the same page, appends those
+    new queries/scenarios/FAQs into `grouped_queries` while strictly preserving
+    `created_at`, `locked_until`, and `baseline_position`.
+    Returns (effective_spec, written).
     Zero em-dashes. Zero en-dashes.
     """
     path = Path(overlay_file)
@@ -2454,8 +2526,6 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
             existing = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             existing = None
-        if isinstance(existing, dict) and is_overlay_locked(existing):
-            return existing, False
         if isinstance(existing, dict) and existing.get("status") == "DEGRADED_ROLLED_BACK":
             # Cooldown: do not immediately re-apply a rewrite that was just measured as degrading
             try:
@@ -2467,9 +2537,74 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                     return existing, False
             except (TypeError, ValueError):
                 pass
+        if isinstance(existing, dict) and is_overlay_locked(existing):
+            existing_qs = _extract_overlay_queries(existing)
+            existing_qs_lower = {q.lower() for q in existing_qs}
+            incoming_qs = _extract_overlay_queries(spec)
+            new_qs = [q for q in incoming_qs if q.lower() not in existing_qs_lower]
+
+            if not existing_qs or not new_qs:
+                return existing, False
+
+            # Merge new distinct queries into the locked overlay without resetting its lock or baseline
+            merged = dict(existing)
+            merged["grouped_queries"] = existing_qs + new_qs
+
+            # Merge h2_headings
+            merged_h2 = list(merged.get("h2_headings") or [])
+            seen_h2 = {str(h).strip().lower() for h in merged_h2 if h}
+            for h in spec.get("h2_headings") or []:
+                h_str = str(h or "").strip()
+                if h_str and h_str.lower() not in seen_h2:
+                    merged_h2.append(h_str)
+                    seen_h2.add(h_str.lower())
+            if merged_h2:
+                merged["h2_headings"] = merged_h2
+
+            # Merge preset_scenarios
+            merged_sc = list(merged.get("preset_scenarios") or [])
+            seen_sc = {
+                str(s.get("query") or s.get("label") or "").strip().lower()
+                for s in merged_sc
+                if isinstance(s, dict)
+            }
+            for sc in spec.get("preset_scenarios") or []:
+                if isinstance(sc, dict):
+                    sc_key = str(sc.get("query") or sc.get("label") or "").strip().lower()
+                    if sc_key and sc_key not in seen_sc:
+                        merged_sc.append(sc)
+                        seen_sc.add(sc_key)
+            if merged_sc:
+                merged["preset_scenarios"] = merged_sc
+
+            # Merge faq_entries / faq_additions / faq_schema
+            for faq_key in ("faq_entries", "faq_additions", "faq_schema"):
+                cur_faqs = list(merged.get(faq_key) or [])
+                seen_q = {
+                    str(f.get("question") or "").strip().lower()
+                    for f in cur_faqs
+                    if isinstance(f, dict)
+                }
+                for f in spec.get(faq_key) or []:
+                    if isinstance(f, dict):
+                        fq = str(f.get("question") or "").strip().lower()
+                        if fq and fq not in seen_q:
+                            cur_faqs.append(f)
+                            seen_q.add(fq)
+                if cur_faqs:
+                    merged[faq_key] = cur_faqs
+
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+            return merged, True
+
+    spec_to_write = dict(spec)
+    all_qs = _extract_overlay_queries(spec_to_write)
+    if all_qs and "grouped_queries" not in spec_to_write:
+        spec_to_write["grouped_queries"] = all_qs
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
-    return spec, True
+    path.write_text(json.dumps(spec_to_write, indent=2), encoding="utf-8")
+    return spec_to_write, True
 
 
 def evaluate_expired_overlays(
@@ -2482,12 +2617,13 @@ def evaluate_expired_overlays(
     """
     Closed-Loop Outcome Evaluation Engine for expired measurement locks.
     Compares post-overlay position, CTR, and click performance against baseline
-    metrics. Automatically rolls back degraded overlays (status=DEGRADED_ROLLED_BACK)
+    metrics across both content/overlays and .agy/overlays.
+    Automatically rolls back degraded overlays (status=DEGRADED_ROLLED_BACK)
     and confirms accretive overlays (status=ACCRETIVE_CONFIRMED).
     Zero em-dashes. Zero en-dashes.
     """
     root = Path(base_dir) if base_dir else (default_base_dir or Path.cwd())
-    overlays_dir = root / "content" / "overlays"
+    candidate_dirs = [root / "content" / "overlays", root / ".agy" / "overlays"]
 
     results: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2504,7 +2640,13 @@ def evaluate_expired_overlays(
         },
     }
 
-    if not overlays_dir.is_dir():
+    paths_by_slug: Dict[str, List[Path]] = {}
+    for ov_dir in candidate_dirs:
+        if ov_dir.is_dir():
+            for p in sorted(ov_dir.glob("*.json")):
+                paths_by_slug.setdefault(p.stem, []).append(p)
+
+    if not paths_by_slug:
         return results
 
     live_by_query: Dict[str, Dict[str, Any]] = {}
@@ -2515,13 +2657,15 @@ def evaluate_expired_overlays(
                 live_by_query[q] = item
 
     now = datetime.now(timezone.utc)
-    for overlay_path in sorted(overlays_dir.glob("*.json")):
+    for stem_slug in sorted(paths_by_slug.keys()):
+        slug_paths = paths_by_slug[stem_slug]
+        overlay_path = slug_paths[0]
         try:
             overlay_data = json.loads(overlay_path.read_text(encoding="utf-8"))
         except Exception:
             continue
 
-        slug = str(overlay_data.get("slug") or overlay_path.stem)
+        slug = str(overlay_data.get("slug") or stem_slug)
         locked = is_overlay_locked(overlay_data)
         lock_until_str = overlay_data.get("locked_until") or overlay_data.get("lock_until")
 
@@ -2574,6 +2718,7 @@ def evaluate_expired_overlays(
         )
         query = str(
             overlay_data.get("query")
+            or overlay_data.get("target_query")
             or baseline_sc.get("query")
             or slug.replace("-", " ")
         )
@@ -2632,10 +2777,11 @@ def evaluate_expired_overlays(
                 "faq_additions",
             ):
                 overlay_data.pop(active_key, None)
-            try:
-                overlay_path.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+            for p_write in slug_paths:
+                try:
+                    p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
 
             eval_item = {
                 "slug": slug,
@@ -2662,10 +2808,11 @@ def evaluate_expired_overlays(
         ):
             overlay_data["status"] = "ACCRETIVE_CONFIRMED"
             overlay_data["confirmed_at"] = now.isoformat()
-            try:
-                overlay_path.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+            for p_write in slug_paths:
+                try:
+                    p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
 
             eval_item = {
                 "slug": slug,

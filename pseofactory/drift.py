@@ -439,14 +439,21 @@ def trigger_drift_cascade(
                 kw = tool.get("primary_keyword") or slug.replace("-", " ")
                 if kw:
                     try:
-                        q_res = qualify_search_intent(
-                            query=kw,
-                            impressions=tool.get("impressions", 100),
-                            position=tool.get("position", 15.0),
-                        )
-                        if q_res.status == "PRUNE":
+                        q_res = qualify_search_intent({
+                            "query": kw,
+                            "slug": slug,
+                            "impressions": tool.get("impressions", 100),
+                            "position": tool.get("position", 15.0),
+                            "days": tool.get("days", tool.get("period_days", 0)),
+                        })
+                        q_status = getattr(q_res, "status", None) or q_res.get("action")
+                        if q_status in ("PRUNE", "PRUNE_PAGE", "REJECT_SYNTHETIC"):
                             prop_res["issues"].append(
                                 f"Tool {slug} flagged for PRUNE during qualification"
+                            )
+                        elif q_status == "CONSOLIDATE_PAGES":
+                            prop_res["issues"].append(
+                                f"Tool {slug} flagged for CONSOLIDATE_PAGES during qualification"
                             )
                     except Exception as q_ex:
                         prop_res["issues"].append(f"Qualification error on {slug}: {q_ex}")
@@ -539,4 +546,3 @@ def trigger_drift_cascade(
 
 
 cascade_drift_lifecycle = trigger_drift_cascade
-

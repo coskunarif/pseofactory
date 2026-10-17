@@ -3301,9 +3301,6 @@ class MaintenanceLifecycle:
                             persist_overlay_respecting_lock,
                         )
                         base_dir = getattr(adapter, "base_dir", None) or adapter.dist_dir.parent
-                        overlay_dir = base_dir / "content" / "overlays"
-                        overlay_dir.mkdir(parents=True, exist_ok=True)
-                        overlay_file = overlay_dir / f"{r_slug}.json"
                         cand_dict = dict(item) if isinstance(item, dict) else {"slug": r_slug}
                         cand_dict.setdefault("slug", r_slug)
                         cand_dict.setdefault("property_id", adapter.property_id)
@@ -3317,7 +3314,11 @@ class MaintenanceLifecycle:
                                 if v and k not in overlay_payload:
                                     overlay_payload[k] = v
                         overlay_payload["action"] = "REFACTOR_PAGE"
-                        persist_overlay_respecting_lock(overlay_file, overlay_payload)
+                        for rel_ov_dir in (("content", "overlays"), (".agy", "overlays")):
+                            overlay_dir = base_dir.joinpath(*rel_ov_dir)
+                            overlay_dir.mkdir(parents=True, exist_ok=True)
+                            overlay_file = overlay_dir / f"{r_slug}.json"
+                            persist_overlay_respecting_lock(overlay_file, overlay_payload)
                     except Exception as o_err:
                         print(f"Warning: Failed to persist overlay for slug '{r_slug}': {o_err}")
 
@@ -5210,6 +5211,26 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 pass
 
+        topical_reconciliation_changed = False
+        if getattr(adapter, "repo_path", None) and not is_foreign_pytest:
+            try:
+                from pseofactory.qualification import reconcile_tenant_topical_authority_and_cannibalization
+                rec_summary = reconcile_tenant_topical_authority_and_cannibalization(
+                    repo_root=Path(adapter.repo_path),
+                    property_id=adapter.property_id,
+                    dist_dir=adapter.dist_dir,
+                )
+                if (
+                    rec_summary.get("consolidated_clones")
+                    or rec_summary.get("removed_synthetic_slugs")
+                    or rec_summary.get("cleaned_mixed_signal_slugs")
+                    or rec_summary.get("redirects_updated", 0) > 0
+                    or rec_summary.get("stale_dist_dirs_removed", 0) > 0
+                ):
+                    topical_reconciliation_changed = True
+            except Exception:
+                pass
+
         retro_audit = RetroReflectionEngine.audit_estate(adapter.dist_dir, adapter.property_id)
         stale_mechanic_count = retro_audit.get("stale_count", 0)
         callout_mismatch_count = 0
@@ -5234,9 +5255,10 @@ def reflect_and_recompile_all_assets(
             for d_rec in drifted_records
         )
 
-        if drifted_records or stale_mechanic_count > 0 or callout_mismatch_count > 0 or force:
+        if drifted_records or stale_mechanic_count > 0 or callout_mismatch_count > 0 or topical_reconciliation_changed or force:
             should_run_full_build = (
                 force
+                or topical_reconciliation_changed
                 or has_structural_drift
                 or not isinstance(adapter, SubprocessPropertyAdapter)
             )
@@ -5269,20 +5291,23 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
-            # Re-apply any non-hub remediation overlays from content/overlays/ so full builds preserve them
+            # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them
             try:
                 repo_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
-                overlays_dir = repo_root / "content" / "overlays"
-                if overlays_dir.is_dir():
-                    from pseofactory.gsc_remediation import inject_overlay_into_html
+                from pseofactory.gsc_remediation import inject_overlay_into_html
+                seen_ov_slugs = set()
+                for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+                    if not overlays_dir.is_dir():
+                        continue
                     for ov_file in sorted(overlays_dir.glob("*.json")):
                         ov_slug = ov_file.stem
-                        if ov_slug in ("statutory-calculator", "index", "tools"):
+                        if ov_slug in ("statutory-calculator", "index", "tools") or ov_slug in seen_ov_slugs:
                             continue
+                        seen_ov_slugs.add(ov_slug)
                         target_html = adapter.dist_dir / "tools" / ov_slug / "index.html"
                         if target_html.is_file():
                             ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                            if isinstance(ov_spec, dict):
+                            if isinstance(ov_spec, dict) and ov_spec.get("status") != "DEGRADED_ROLLED_BACK":
                                 raw_h = target_html.read_text(encoding="utf-8")
                                 updated_h = inject_overlay_into_html(raw_h, ov_spec)
                                 if updated_h != raw_h:
@@ -5536,6 +5561,3 @@ __all__ = [
 ]
 
 parse_subprocess_envelope = SubprocessPropertyAdapter.parse_subprocess_envelope
-
-
-

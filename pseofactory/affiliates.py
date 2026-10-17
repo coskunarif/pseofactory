@@ -1557,7 +1557,7 @@ def resolve_optimal_partner_for_slug(
                 live_candidates.append((p, eff_status))
 
         if live_candidates:
-            if matched_bucket_name == "crypto" and not engagement_metrics:
+            if matched_bucket_name in ("crypto", "prediction-market-tax") and not engagement_metrics:
                 for p, eff_st in live_candidates:
                     if p.key == "coinledger" and not (explicit_vault_live_keys - {"coinledger"}):
                         return p
