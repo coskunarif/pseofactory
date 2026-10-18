@@ -4274,14 +4274,18 @@ def normalize_html_callout_message_match(
         if injected_inline and "</head>" in updated:
             fold_css = (
                 '  <style id="pseo-inline-cta-fold">\n'
-                '    .hero-section, .tool-header.hero-section { padding-top: 0.625rem !important; padding-bottom: 0.625rem !important; margin-bottom: 0.625rem !important; }\n'
+                '    .hero-section, .tool-header.hero-section { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; margin-bottom: 0.5rem !important; }\n'
                 '    .hero-section p, .tool-header.hero-section p { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }\n'
-                '    .byline-wrap { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; padding-top: 0.25rem !important; padding-bottom: 0.25rem !important; }\n'
-                '    .direct-answer-block, .quick-answer { padding: 0.625rem 1rem !important; margin-bottom: 0.625rem !important; }\n'
+                '    .byline-wrap, .breadcrumbs { margin-top: 0.25rem !important; margin-bottom: 0.375rem !important; padding-top: 0.125rem !important; padding-bottom: 0.125rem !important; }\n'
+                '    .direct-answer-block, .quick-answer { padding: 0.5rem 0.875rem !important; margin-bottom: 0.5rem !important; font-size: 0.875rem !important; line-height: 1.45 !important; }\n'
                 '    .ftc-disclosure-banner { padding: 0.375rem 0.75rem !important; margin-bottom: 0.5rem !important; }\n'
+                '    .above-the-fold-compliance { margin-bottom: 0.5rem !important; display: grid !important; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important; gap: 0.5rem !important; }\n'
+                '    .ymyl-warning-card, .ftc-disclosure-card { margin-bottom: 0 !important; padding: 0.375rem 0.625rem !important; font-size: 0.7rem !important; line-height: 1.3 !important; }\n'
+                '    .interactive-calculator-container { padding: 0.875rem 1.25rem !important; margin-top: 0.5rem !important; margin-bottom: 1rem !important; }\n'
                 '    .calc-header { margin-bottom: 0.375rem !important; padding-bottom: 0.25rem !important; }\n'
-                '    .calc-switcher-panel { padding: 0.5rem 0.875rem !important; margin-bottom: 0.625rem !important; }\n'
+                '    .calc-switcher-panel { padding: 0.375rem 0.75rem !important; margin-bottom: 0.5rem !important; }\n'
                 '    .calc-switcher-header { margin-bottom: 0.25rem !important; }\n'
+                '    .calc-column-title { margin-bottom: 0.5rem !important; font-size: 0.95rem !important; }\n'
                 '    .calc-panel-header, .card-header { margin-bottom: 0.625rem !important; padding-bottom: 0.5rem !important; }\n'
                 '  </style>\n'
             )
