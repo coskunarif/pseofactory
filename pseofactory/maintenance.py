@@ -4410,6 +4410,9 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if "saves $9,180 in annual FICA self-employment taxes with a $95,000." in html_content:
         return True
 
+    if "31-U.S.C." in html_content or '<h3 style="margin-bottom: 8px;">Tier ' in html_content:
+        return True
+
     if re.search(r'<div\s+class=["\']faq-card["\']', html_content, re.IGNORECASE):
         return True
 
@@ -4597,11 +4600,21 @@ def _normalize_page_structure_and_geo_parity(
         updated = updated[: meth_m.start()] + new_meth_section + updated[meth_m.end() :]
         changed = True
 
-    # 4. Fix truncated S-Corp FAQ sentence
+    # 4. Fix truncated S-Corp FAQ sentence and 31-U.S.C. citation hyphenation
     broken_scorp = "saves $9,180 in annual FICA self-employment taxes with a $95,000."
     fixed_scorp = "saves $9,180 in annual FICA self-employment taxes with a $95,000 reasonable W-2 salary and $60,000 K-1 distribution."
     if broken_scorp in updated:
         updated = updated.replace(broken_scorp, fixed_scorp)
+        changed = True
+    if "31-U.S.C." in updated:
+        updated = updated.replace("31-U.S.C.", "31 U.S.C.")
+        changed = True
+    if '<h3 style="margin-bottom: 8px;">Tier ' in updated:
+        updated = re.sub(
+            r'<h3 style="margin-bottom: 8px;">(Tier [123]:[^<]+)</h3>',
+            r'<div style="font-size: 15px; font-weight: 700; margin-bottom: 8px;">\1</div>',
+            updated,
+        )
         changed = True
 
     # 5. Convert static <div class="faq-card"> and Prexvo FAQ <div class="calc-scenario-card"> into interactive <details>

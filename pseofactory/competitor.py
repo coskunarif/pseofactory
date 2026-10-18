@@ -2509,7 +2509,7 @@ def render_competitor_winning_pattern_blocks(
             joined_li = "\n".join(links_li)
             tier_blocks.append(
                 f'      <div class="topic-cluster-tier" style="margin-bottom: 16px;">\n'
-                f'        <h3 style="margin-bottom: 8px;">{tier_heading}</h3>\n'
+                f'        <div style="font-size: 15px; font-weight: 700; margin-bottom: 8px;">{tier_heading}</div>\n'
                 f'        <ul style="list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px;">\n'
                 f'{joined_li}\n'
                 f'        </ul>\n'
