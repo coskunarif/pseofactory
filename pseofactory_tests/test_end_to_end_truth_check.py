@@ -790,4 +790,177 @@ def test_tenant_tracked_test_repair_records_and_test_isolation_self_healing(tmp_
     assert final_status == ""
 
 
+def test_midnight_factory_build_dist_stash_and_redirect_rollup_self_healing(tmp_path, monkeypatch):
+    """
+    Replays the exact midnight 2026-10-18 failure chain in profithelm-platform:
+    1. Stage 3 compiled date rollovers into dist/sitemap.xml and dist/tools/irs-2027-tax-brackets/<state>/index.html.
+    2. Stage 5 pytest failed on test_gsc_traffic_insights_parsing_and_status because
+       rollup_redirected_gsc_rows overwrote non-redirected row['page'] ('https://profithelm.com/vs/test')
+       with 'https://profithelm.com/vs/test/'.
+    3. scripts/run_factory.sh ran 'git stash push --include-untracked -- dist/' on a repo where 'dist/'
+       is in .gitignore while files inside dist/ are force-tracked, causing git stash to stage all
+       modified dist/ files ('M  dist/...'), create a stash entry, and abort with exit code 1 before
+       resetting the working tree and index.
+    4. reconcile_workspace_tracking_state failed with NameError ('ws' is not defined) when called
+       in production mode (tenant_repos=None).
+    """
+    import subprocess
+    from pseofactory.qualification import rollup_redirected_gsc_rows, sync_tenant_redirect_rollup_adapters
+    from pseofactory.gitops import reconcile_workspace_tracking_state, sync_tenant_test_isolation_guards
+
+    # 1. Verify rollup_redirected_gsc_rows preserves non-redirected page URL while rolling up redirected URLs
+    non_red_res = rollup_redirected_gsc_rows(
+        [{"page": "https://profithelm.com/vs/test", "impressions": "12", "position": "3.2"}],
+        property_id="profithelm",
+    )
+    assert len(non_red_res["rows"]) == 1
+    assert non_red_res["rows"][0]["page"] == "https://profithelm.com/vs/test"
+    assert non_red_res["rows"][0]["canonical_url"] == "https://profithelm.com/vs/test/"
+    assert non_red_res["redirected_rows_count"] == 0
+
+    red_res = rollup_redirected_gsc_rows(
+        [
+            {"page": "https://profithelm.com/tools/2027-california-tax-brackets/", "query": "ca tax", "impressions": 20, "clicks": 2, "position": 7.0},
+            {"page": "https://profithelm.com/tools/irs-2027-tax-brackets/california", "query": "ca tax", "impressions": 10, "clicks": 1, "position": 9.0},
+        ],
+        property_id="profithelm",
+    )
+    assert len(red_res["rows"]) == 1
+    assert red_res["rows"][0]["page"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert red_res["rows"][0]["impressions"] == 30
+    assert red_res["rows"][0]["redirected_impressions"] == 20
+    assert red_res["rows"][0]["direct_impressions"] == 10
+
+    # 2. Simulate tenant repo with dist/ in .gitignore and force-tracked dist/sitemap.xml & state tax page
+    tenant_repo = tmp_path / "profithelm-platform"
+    tenant_repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(tenant_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "config", "user.email", "test@profithelm.com"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "config", "user.name", "Test Runner"], check=True)
+
+    (tenant_repo / ".gitignore").write_text(".agy/\ndist/\n", encoding="utf-8")
+    sitemap_f = tenant_repo / "dist" / "sitemap.xml"
+    state_f = tenant_repo / "dist" / "tools" / "irs-2027-tax-brackets" / "california" / "index.html"
+    sitemap_f.parent.mkdir(parents=True, exist_ok=True)
+    state_f.parent.mkdir(parents=True, exist_ok=True)
+    sitemap_f.write_text("<urlset><url><lastmod>2026-10-17</lastmod></url></urlset>\n", encoding="utf-8")
+    state_f.write_text('<html><script type="application/ld+json">{"dateModified": "2026-10-17"}</script></html>\n', encoding="utf-8")
+
+    scripts_dir = tenant_repo / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    run_factory_sh = scripts_dir / "run_factory.sh"
+    run_factory_sh.write_text(
+        '#!/bin/bash\n'
+        'cleanup() {\n'
+        '    if [ -d "$PROJECT_DIR/.git" ] && [ -f "$FAILED_MARKER" ]; then\n'
+        '        local dist_dirty\n'
+        '        dist_dirty=$(git -C "$PROJECT_DIR" status --porcelain dist/ 2>/dev/null || true)\n'
+        '        if [ -n "$dist_dirty" ]; then\n'
+        '            git -C "$PROJECT_DIR" stash push --include-untracked -m "agy-aborted-factory-dist-$(date +%s)" -- dist/ 2>/dev/null || true\n'
+        '        fi\n'
+        '    fi\n'
+        '}\n'
+        'on_error() {\n'
+        '    if [ -d "$PROJECT_DIR/.git" ]; then\n'
+        '        local dist_dirty\n'
+        '        dist_dirty=$(git -C "$PROJECT_DIR" status --porcelain dist/ 2>/dev/null || true)\n'
+        '        if [ -n "$dist_dirty" ]; then\n'
+        '            git -C "$PROJECT_DIR" stash push --include-untracked -m "agy-failed-run-factory-dist-$(date +%s)" -- dist/ 2>/dev/null || true\n'
+        '        fi\n'
+        '    fi\n'
+        '}\n'
+        '    if [ -d "$WORKTREE_SANDBOX" ]; then\n'
+        '        mkdir -p "$WORKTREE_SANDBOX/.agy"\n'
+        '        [ -f "$PROJECT_DIR/.agy/engine_hash.json" ] && cp -f "$PROJECT_DIR/.agy/engine_hash.json" "$WORKTREE_SANDBOX/.agy/engine_hash.json"\n'
+        '        cd "$WORKTREE_SANDBOX"\n'
+        '    fi\n',
+        encoding="utf-8",
+    )
+
+    ph_dir = tenant_repo / "profithelm"
+    ph_dir.mkdir(parents=True, exist_ok=True)
+    factory_py = ph_dir / "factory.py"
+    factory_py.write_text(
+        'import os, sys, subprocess\n'
+        'from pathlib import Path\n'
+        'BASE_DIR = Path(__file__).resolve().parent.parent\n'
+        'if __name__ == "__main__":\n'
+        '    verdict = "FAILED_AT_TESTS"\n'
+        '    is_live = True\n'
+        '    clean_verdicts = {"FACTORY_PIPELINE_COMPLETE_100_PERCENT_GREEN"}\n'
+        '    if verdict not in clean_verdicts:\n'
+        '        sys.exit(1)\n'
+        '    sys.exit(0)\n',
+        encoding="utf-8",
+    )
+
+    prexvo_dir = tenant_repo / "prexvo"
+    prexvo_dir.mkdir(parents=True, exist_ok=True)
+    prexvo_obs = prexvo_dir / "observer.py"
+    prexvo_obs.write_text(
+        'def fetch_gsc_traffic_insights():\n'
+        '    insights = {"status": "UNAVAILABLE", "top_pages": []}\n'
+        '    has_valid_data = True\n'
+        '    if has_valid_data:\n'
+        '        insights["status"] = "CONNECTED"\n'
+        '\n'
+        '    return insights\n',
+        encoding="utf-8",
+    )
+
+    subprocess.run(["git", "-C", str(tenant_repo), "add", ".gitignore", "scripts/", "profithelm/", "prexvo/"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "add", "-f", "dist/"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "commit", "-m", "Initial tracked dist"], check=True, capture_output=True)
+
+    # Simulate midnight build modifying dist/ followed by git stash push --include-untracked -- dist/
+    sitemap_f.write_text("<urlset><url><lastmod>2026-10-18</lastmod></url></urlset>\n", encoding="utf-8")
+    state_f.write_text('<html><script type="application/ld+json">{"dateModified": "2026-10-18"}</script></html>\n', encoding="utf-8")
+    stash_Attempt = subprocess.run(
+        ["git", "-C", str(tenant_repo), "stash", "push", "--include-untracked", "-m", "agy-failed-run-factory-dist-1792307933", "--", "dist/"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # Because dist/ is in .gitignore, git stash push --include-untracked -- dist/ exits 1 after staging dist/ into index!
+    assert stash_Attempt.returncode != 0
+    staged_status = subprocess.run(
+        ["git", "-C", str(tenant_repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "M  dist/sitemap.xml" in staged_status
+    assert "M  dist/tools/irs-2027-tax-brackets/california/index.html" in staged_status
+
+    # 3. Verify reconcile_workspace_tracking_state heals staged dist/ and drops the aborted stash without NameError
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+    rec = reconcile_workspace_tracking_state(
+        runs_dir=tmp_path / "runs",
+        queues_dir=tmp_path / "queues",
+        ledger_path=tmp_path / "ledger.json",
+        tenant_repos=[tenant_repo],
+    )
+    assert rec["status"] == "PASS"
+    assert rec["healed_tenant_trees"] >= 1
+    assert rec["dropped_stashes"] >= 1
+    assert subprocess.run(["git", "-C", str(tenant_repo), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip() == ""
+    assert subprocess.run(["git", "-C", str(tenant_repo), "stash", "list"], capture_output=True, text=True, check=True).stdout.strip() == ""
+
+    # 4. Verify sync_tenant_test_isolation_guards hardens scripts/run_factory.sh and profithelm/factory.py
+    guard_res = sync_tenant_test_isolation_guards(tenant_repo)
+    assert guard_res["updated_files"] >= 2
+    rf_after = run_factory_sh.read_text(encoding="utf-8")
+    assert "--include-untracked" not in rf_after
+    assert 'git -C "$PROJECT_DIR" reset -q HEAD -- dist/' in rf_after
+    assert 'git -C "$PROJECT_DIR" checkout -q HEAD -- dist/' in rf_after
+    assert 'export PROFITHELM_DIST_DIR="$WORKTREE_SANDBOX/dist"' in rf_after
+    assert '"reset", "-q", "HEAD", "--", "dist"' in factory_py.read_text(encoding="utf-8")
+
+    # 5. Verify sync_tenant_redirect_rollup_adapters wires prexvo/observer.py
+    updated_px = sync_tenant_redirect_rollup_adapters(tenant_repo, property_id="prexvo")
+    assert updated_px >= 1
+    assert "rollup_redirected_gsc_rows" in prexvo_obs.read_text(encoding="utf-8")
+
+
+
 

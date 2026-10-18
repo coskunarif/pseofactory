@@ -2570,9 +2570,92 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             if old_synd_call in f_new:
                 f_new = f_new.replace(old_synd_call, new_synd_call, 1)
 
+            old_main_exit = (
+                '    if verdict not in clean_verdicts:\n'
+                '        sys.exit(1)\n'
+                '    sys.exit(0)'
+            )
+            new_main_exit = (
+                '    if (\n'
+                '        (verdict not in ("FACTORY_PIPELINE_COMPLETE_100_PERCENT_GREEN", "FACTORY_PIPELINE_COMPLETE_WITH_WARNINGS") or not is_live)\n'
+                '        and not os.getenv("PYTEST_CURRENT_TEST")\n'
+                '        and os.getenv("PROFITHELM_IN_TEST") != "1"\n'
+                '        and (BASE_DIR / ".git").exists()\n'
+                '    ):\n'
+                '        try:\n'
+                '            lock_st = subprocess.run(["git", "-C", str(BASE_DIR), "status", "--porcelain", "--", "substrate_lock.json"], capture_output=True, text=True, check=False, timeout=5)\n'
+                '            if lock_st.returncode == 0 and not lock_st.stdout.strip():\n'
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "reset", "-q", "HEAD", "--", "dist"], capture_output=True, check=False, timeout=10)\n'
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "checkout", "-q", "HEAD", "--", "dist"], capture_output=True, check=False, timeout=10)\n'
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "clean", "-fdq", "--", "dist"], capture_output=True, check=False, timeout=10)\n'
+                '        except Exception:\n'
+                '            pass\n'
+                '    if verdict not in clean_verdicts:\n'
+                '        sys.exit(1)\n'
+                '    sys.exit(0)'
+            )
+            if old_main_exit in f_new and '"reset", "-q", "HEAD", "--", "dist"' not in f_new:
+                f_new = f_new.replace(old_main_exit, new_main_exit, 1)
+
             if f_new != f_src:
                 factory_py.write_text(f_new, encoding="utf-8")
                 updated_files.append(str(factory_py))
+        except Exception:
+            pass
+
+    # 4. Harden scripts/run_factory.sh so failed or aborted runs reset/checkout dist/ instead of git stash --include-untracked -- dist/ (which stages ignored-parent dist/ files and fails with exit 1)
+    run_factory_sh = repo / "scripts" / "run_factory.sh"
+    if run_factory_sh.is_file():
+        try:
+            rf_src = run_factory_sh.read_text(encoding="utf-8")
+            rf_new = rf_src
+            old_aborted_stash = '            git -C "$PROJECT_DIR" stash push --include-untracked -m "agy-aborted-factory-dist-$(date +%s)" -- dist/ 2>/dev/null || true'
+            new_aborted_reset = (
+                '            git -C "$PROJECT_DIR" reset -q HEAD -- dist/ 2>/dev/null || true\n'
+                '            git -C "$PROJECT_DIR" checkout -q HEAD -- dist/ 2>/dev/null || true\n'
+                '            git -C "$PROJECT_DIR" clean -fdq -- dist/ 2>/dev/null || true'
+            )
+            if old_aborted_stash in rf_new:
+                rf_new = rf_new.replace(old_aborted_stash, new_aborted_reset)
+
+            old_failed_stash = '            git -C "$PROJECT_DIR" stash push --include-untracked -m "agy-failed-run-factory-dist-$(date +%s)" -- dist/ 2>/dev/null || true'
+            new_failed_reset = (
+                '            git -C "$PROJECT_DIR" reset -q HEAD -- dist/ 2>/dev/null || true\n'
+                '            git -C "$PROJECT_DIR" checkout -q HEAD -- dist/ 2>/dev/null || true\n'
+                '            git -C "$PROJECT_DIR" clean -fdq -- dist/ 2>/dev/null || true'
+            )
+            if old_failed_stash in rf_new:
+                rf_new = rf_new.replace(old_failed_stash, new_failed_reset)
+
+            old_wt_cd = (
+                '        [ -f "$PROJECT_DIR/.agy/engine_hash.json" ] && cp -f "$PROJECT_DIR/.agy/engine_hash.json" "$WORKTREE_SANDBOX/.agy/engine_hash.json"\n'
+                '        cd "$WORKTREE_SANDBOX"'
+            )
+            new_wt_cd = (
+                '        [ -f "$PROJECT_DIR/.agy/engine_hash.json" ] && cp -f "$PROJECT_DIR/.agy/engine_hash.json" "$WORKTREE_SANDBOX/.agy/engine_hash.json"\n'
+                '        export PYTHONPATH="$WORKTREE_SANDBOX:${PYTHONPATH:-}"\n'
+                '        export PROFITHELM_DIST_DIR="$WORKTREE_SANDBOX/dist"\n'
+                '        cd "$WORKTREE_SANDBOX"'
+            )
+            if old_wt_cd in rf_new and 'PROFITHELM_DIST_DIR="$WORKTREE_SANDBOX/dist"' not in rf_new:
+                rf_new = rf_new.replace(old_wt_cd, new_wt_cd, 1)
+
+            old_prexvo_err = '    touch "$FAILED_MARKER"\n    echo "Prexvo factory error encountered'
+            new_prexvo_err = (
+                '    touch "$FAILED_MARKER"\n'
+                '    if [ -d "$PROJECT_DIR/.git" ]; then\n'
+                '        git -C "$PROJECT_DIR" reset -q HEAD -- dist/ 2>/dev/null || true\n'
+                '        git -C "$PROJECT_DIR" checkout -q HEAD -- dist/ 2>/dev/null || true\n'
+                '        git -C "$PROJECT_DIR" clean -fdq -- dist/ 2>/dev/null || true\n'
+                '    fi\n'
+                '    echo "Prexvo factory error encountered'
+            )
+            if old_prexvo_err in rf_new and 'reset -q HEAD -- dist/' not in rf_new:
+                rf_new = rf_new.replace(old_prexvo_err, new_prexvo_err, 1)
+
+            if rf_new != rf_src:
+                run_factory_sh.write_text(rf_new, encoding="utf-8")
+                updated_files.append(str(run_factory_sh))
         except Exception:
             pass
 
@@ -2600,6 +2683,7 @@ def reconcile_workspace_tracking_state(
     without manual cleanup scripts.
     Zero em-dashes. Zero en-dashes.
     """
+    ws = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
     is_explicit = (
         runs_dir is not None
         or queues_dir is not None
@@ -2972,6 +3056,13 @@ def reconcile_workspace_tracking_state(
                                 )
                                 subprocess.run(
                                     ["git", "-C", str(rp), "checkout", "HEAD", "--", "dist"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=10,
+                                )
+                                subprocess.run(
+                                    ["git", "-C", str(rp), "clean", "-fdq", "--", "dist"],
                                     capture_output=True,
                                     text=True,
                                     check=False,

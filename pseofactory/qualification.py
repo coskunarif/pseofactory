@@ -3112,7 +3112,7 @@ def rollup_redirected_gsc_rows(
         bucket_key = (c_path, raw_query.lower().strip())
         if bucket_key not in merged_buckets:
             base_row = dict(row)
-            base_row["page"] = c_url if raw_page else base_row.get("page", "")
+            base_row["page"] = c_url if (is_red or not base_row.get("page")) else base_row.get("page", "")
             base_row["target_url"] = c_url
             base_row["canonical_url"] = c_url
             base_row["canonical_path"] = c_path
@@ -3134,6 +3134,8 @@ def rollup_redirected_gsc_rows(
             merged_buckets[bucket_key] = base_row
         else:
             b = merged_buckets[bucket_key]
+            if is_red or row_redir_impr > 0 or b.get("redirected_impressions", 0) > 0:
+                b["page"] = c_url
             b["impressions"] += impr
             b["clicks"] += clicks
             b["direct_impressions"] += row_direct_impr
@@ -3824,6 +3826,41 @@ def sync_tenant_redirect_rollup_adapters(
             if old_pf_ret in pf_txt:
                 pf_txt = pf_txt.replace(old_pf_ret, new_pf_ret, 1)
                 prexvo_freshness.write_text(pf_txt, encoding="utf-8")
+                updated_files += 1
+
+        prexvo_obs = root / "prexvo" / "observer.py"
+        if prexvo_obs.is_file():
+            po_txt = prexvo_obs.read_text(encoding="utf-8")
+            old_po = """    if has_valid_data:
+        insights["status"] = "CONNECTED"
+
+    return insights"""
+            new_po = """    try:
+        from pseofactory.qualification import rollup_redirected_gsc_rows
+        if insights["top_pages"]:
+            rollup_res = rollup_redirected_gsc_rows(
+                insights["top_pages"],
+                property_id="prexvo",
+                repo_root=BASE_DIR,
+            )
+            insights["top_pages"] = rollup_res.get("rows", insights["top_pages"])
+            insights["redirect_signal_rollup"] = {
+                "redirected_rows_count": rollup_res.get("redirected_rows_count", 0),
+                "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0),
+                "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0),
+                "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0),
+                "canonical_targets_summary": rollup_res.get("canonical_targets_summary", {}),
+            }
+    except Exception:
+        pass
+
+    if has_valid_data:
+        insights["status"] = "CONNECTED"
+
+    return insights"""
+            if old_po in po_txt and "rollup_redirected_gsc_rows" not in po_txt:
+                po_txt = po_txt.replace(old_po, new_po, 1)
+                prexvo_obs.write_text(po_txt, encoding="utf-8")
                 updated_files += 1
 
     return updated_files
