@@ -2387,7 +2387,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         for parent_hub in ("irs-2027-tax-brackets", "section-1031-calculator"):
             if slug.startswith(f"{parent_hub}-"):
                 leaf_part = slug[len(parent_hub) + 1:]
-                if leaf_part in _US_STATE_ABBREV_TO_NAME.values():
+                if leaf_part in US_STATE_NAME_TO_SLUG.values():
                     merged_ov["target_url"] = f"https://profithelm.com/tools/{parent_hub}/{leaf_part}/"
                     merged_ov["canonical_slug"] = parent_hub
 
@@ -2700,7 +2700,7 @@ def resolve_redirected_gsc_target(
                 check_s = p_parts[1].lower()
         if check_s.startswith(f"{parent_hub}-"):
             sub_leaf = check_s[len(parent_hub) + 1:]
-            if sub_leaf in _US_STATE_ABBREV_TO_NAME.values():
+            if sub_leaf in US_STATE_NAME_TO_SLUG.values():
                 c_path = f"/tools/{parent_hub}/{sub_leaf}/"
                 return {
                     "is_redirected": norm_path == f"/tools/{check_s}/",
@@ -3340,6 +3340,17 @@ def sync_tenant_redirect_rollup_adapters(
     }"""
             if old_ret in f_txt:
                 f_txt = f_txt.replace(old_ret, new_ret, 1)
+            old_rep_tail = """        "zero_impression_handling": zero_impression_audit,
+        "seo_checklist": seo_checklist_audit,
+        "statutory_accuracy": statutory_audit,
+    }"""
+            new_rep_tail = """        "zero_impression_handling": zero_impression_audit,
+        "redirect_signal_rollup": zero_impression_audit.get("redirect_signal_rollup", {}),
+        "seo_checklist": seo_checklist_audit,
+        "statutory_accuracy": statutory_audit,
+    }"""
+            if old_rep_tail in f_txt:
+                f_txt = f_txt.replace(old_rep_tail, new_rep_tail, 1)
             if f_txt != freshness_py.read_text(encoding="utf-8"):
                 freshness_py.write_text(f_txt, encoding="utf-8")
                 updated_files += 1
@@ -3347,25 +3358,24 @@ def sync_tenant_redirect_rollup_adapters(
         gsc_py = root / "profithelm" / "gsc_adapter.py"
         if gsc_py.is_file():
             g_txt = gsc_py.read_text(encoding="utf-8")
-            old_match = """        # Find matching tool if any
-        matching_tool = None
-        for t in existing_tools:
-            slug = str(t.get("slug", "")).lower()
-            kw = str(t.get("primary_keyword", "")).lower()
-            if slug and (slug in q_lower.replace(" ", "-") or q_lower.replace(" ", "-") in slug):
+            old_match = """        matching_tool = None
+        q_lower = q_text.lower()
+        for t in tools_catalog:
+            slug = t.get("slug", "")
+            kw = t.get("primary_keyword", "")
+            if slug and slug in q_lower.replace(" ", "-"):
                 matching_tool = slug
                 break
             if kw and (kw in q_lower or q_lower in kw):
                 matching_tool = slug
                 break"""
-            new_match = """        # Find matching tool if any (including redirect/consolidation map & secondary keywords)
-        matching_tool = None
-        canonical_target_path = None
-        for t in existing_tools:
-            slug = str(t.get("slug", "")).lower()
-            kw = str(t.get("primary_keyword", "")).lower()
+            new_match = """        matching_tool = None
+        q_lower = q_text.lower()
+        for t in tools_catalog:
+            slug = t.get("slug", "")
+            kw = t.get("primary_keyword", "")
             sec_kws = [str(sk).lower() for sk in (t.get("secondary_keywords") or []) if sk]
-            if slug and (slug in q_lower.replace(" ", "-") or q_lower.replace(" ", "-") in slug):
+            if slug and slug in q_lower.replace(" ", "-"):
                 matching_tool = slug
                 break
             if kw and (kw in q_lower or q_lower in kw):
@@ -3374,27 +3384,59 @@ def sync_tenant_redirect_rollup_adapters(
             if q_lower in sec_kws:
                 matching_tool = slug
                 break
-        if not matching_tool or is_retired_or_consolidated_slug_check(matching_tool):
-            try:
-                from pseofactory.qualification import resolve_redirected_gsc_target
-                res_t = resolve_redirected_gsc_target(
-                    query=q_text,
-                    slug=str(matching_tool or ""),
-                    property_id="profithelm",
-                    repo_root=BASE_DIR,
-                    existing_tools=existing_tools,
-                )
-                if res_t.get("canonical_slug"):
-                    matching_tool = res_t["canonical_slug"]
-                    canonical_target_path = res_t.get("canonical_path")
-            except Exception:
-                pass"""
+        try:
+            from pseofactory.qualification import resolve_redirected_gsc_target
+            res_t = resolve_redirected_gsc_target(
+                target_url=page_val,
+                query=q_text,
+                slug=str(matching_tool or ""),
+                property_id="profithelm",
+                repo_root=root,
+                existing_tools=tools_catalog,
+            )
+            if res_t.get("canonical_slug"):
+                matching_tool = res_t["canonical_slug"]
+            if res_t.get("canonical_url") and not page_val:
+                page_val = res_t["canonical_url"]
+        except Exception:
+            pass"""
             if old_match in g_txt:
-                g_txt = g_txt.replace("is_retired_or_consolidated_slug_check(matching_tool)", "False", 1) if "is_retired_or_consolidated_slug_check" not in g_txt else g_txt
-                new_match_clean = new_match.replace("is_retired_or_consolidated_slug_check(matching_tool)", "False")
-                g_txt = g_txt.replace(old_match, new_match_clean, 1)
+                g_txt = g_txt.replace(old_match, new_match, 1)
                 if g_txt != gsc_py.read_text(encoding="utf-8"):
                     gsc_py.write_text(g_txt, encoding="utf-8")
+                    updated_files += 1
+
+        obs_py = root / "profithelm" / "observer.py"
+        if obs_py.is_file():
+            o_txt = obs_py.read_text(encoding="utf-8")
+            old_obs = """    # 3. Detect unserved query impressions (ghost paths)
+    existing_slugs = {t["slug"] for t in TOOLS}
+    for p in insights["top_pages"]:"""
+            new_obs = """    # 3. Roll up redirected top_pages into canonical targets and detect ghost paths
+    try:
+        from pseofactory.qualification import rollup_redirected_gsc_rows
+        if insights["top_pages"]:
+            rollup_res = rollup_redirected_gsc_rows(
+                insights["top_pages"],
+                property_id="profithelm",
+                repo_root=BASE_DIR,
+            )
+            insights["top_pages"] = rollup_res.get("rows", insights["top_pages"])
+            insights["redirect_signal_rollup"] = {
+                "redirected_rows_count": rollup_res.get("redirected_rows_count", 0),
+                "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0),
+                "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0),
+                "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0),
+                "canonical_targets_summary": rollup_res.get("canonical_targets_summary", {}),
+            }
+    except Exception:
+        pass
+    existing_slugs = {t["slug"] for t in TOOLS}
+    for p in insights["top_pages"]:"""
+            if old_obs in o_txt:
+                o_txt = o_txt.replace(old_obs, new_obs, 1)
+                if o_txt != obs_py.read_text(encoding="utf-8"):
+                    obs_py.write_text(o_txt, encoding="utf-8")
                     updated_files += 1
     else:
         prexvo_freshness = root / "prexvo" / "freshness.py"

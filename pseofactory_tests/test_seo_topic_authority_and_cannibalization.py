@@ -689,9 +689,22 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     rollup_redirected_gsc_rows = getattr(qual_mod, "rollup_redirected_gsc_rows", None)
     reconcile_metric_recovery_ledger = getattr(qual_mod, "reconcile_metric_recovery_ledger", None)
     reconcile_factory_execution_log = getattr(qual_mod, "reconcile_factory_execution_log", None)
+    resolve_redirected_gsc_target = getattr(qual_mod, "resolve_redirected_gsc_target", None)
     assert callable(rollup_redirected_gsc_rows)
     assert callable(reconcile_metric_recovery_ledger)
     assert callable(reconcile_factory_execution_log)
+    assert callable(resolve_redirected_gsc_target)
+
+    try:
+        state_leaf_res = resolve_redirected_gsc_target(
+            slug="irs-2027-tax-brackets-california",
+            property_id="profithelm",
+        )
+    except Exception:
+        state_leaf_res = {}
+    assert state_leaf_res.get("canonical_path") == "/tools/irs-2027-tax-brackets/california/"
+    assert state_leaf_res.get("canonical_slug") == "irs-2027-tax-brackets"
+    assert state_leaf_res.get("resolved_via") == "hyphenated_state_leaf"
 
     # 1. Verify rollup_redirected_gsc_rows rolls up retired 301 URLs into canonical targets and ignores off-topic sinks
     raw_gsc_rows = [
