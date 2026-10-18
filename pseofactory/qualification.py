@@ -142,6 +142,7 @@ US_STATE_ABBR_TO_SLUG: Dict[str, str] = {
 }
 
 SYNONYM_TOKEN_MAP: Dict[str, str] = {
+    "bracket": "brackets",
     "rates": "brackets",
     "rate": "brackets",
     "tables": "brackets",
@@ -2449,10 +2450,11 @@ def reconcile_tenant_topical_authority_and_cannibalization(
     for vc_p in vc_candidates:
         summary["void_candidates_reconciled"] += reconcile_void_candidates_queue(vc_p)
 
-    # 9. Reconcile .agy/metric_recovery_ledger.json and .agy/factory_execution_log.json
+    # 9. Reconcile .agy/metric_recovery_ledger.json, .agy/factory_execution_log.json, and statutory.db
     summary["metric_recovery_ledger_reconciled"] = reconcile_metric_recovery_ledger(root, prop)
     summary["factory_execution_log_reconciled"] = reconcile_factory_execution_log(root, prop)
     if "PYTEST_CURRENT_TEST" not in os.environ and str(root).startswith("/home/ubuntuadmin/projects/"):
+        summary["statutory_db_reconciled"] = reconcile_statutory_db_gsc_snapshots(root, prop)
         summary["tenant_adapters_synced"] = sync_tenant_redirect_rollup_adapters(root, prop)
 
     return summary
@@ -2468,6 +2470,33 @@ _GENERIC_REDIRECT_SINKS: Set[str] = {
     "/contact/",
     "/terms/",
 }
+
+_DEFAULT_PROFITHELM_CORE_TOOLS: List[Dict[str, Any]] = [
+    {"slug": "irs-2027-tax-brackets", "primary_keyword": "irs 2027 tax brackets"},
+    {"slug": "crypto-tax-calculator", "primary_keyword": "crypto tax calculator"},
+    {"slug": "saas-runway-calculator", "primary_keyword": "saas runway calculator"},
+    {"slug": "prediction-market-odds", "primary_keyword": "prediction market odds"},
+    {"slug": "tcja-sunset-capital-gains", "primary_keyword": "tcja sunset capital gains"},
+    {"slug": "section-179-calculator", "primary_keyword": "section 179 calculator"},
+    {"slug": "treasury-yield-calculator", "primary_keyword": "treasury yield calculator"},
+    {"slug": "section-1031-calculator", "primary_keyword": "section 1031 calculator"},
+    {"slug": "prediction-market-tax", "primary_keyword": "prediction market tax"},
+]
+
+_DEFAULT_PREXVO_CORE_TOOLS: List[Dict[str, Any]] = [
+    {"slug": "rap-vs-ibr-calculator", "primary_keyword": "rap vs ibr calculator"},
+    {"slug": "tiered-standard-calculator", "primary_keyword": "tiered standard calculator"},
+    {"slug": "paye-sunset-calculator", "primary_keyword": "paye sunset calculator"},
+    {"slug": "icr-repayment-calculator", "primary_keyword": "icr repayment calculator"},
+    {"slug": "pslf-qualifying-payment-simulator", "primary_keyword": "pslf qualifying payment simulator"},
+    {"slug": "grad-plus-borrowing-cap-calculator", "primary_keyword": "grad plus borrowing cap calculator"},
+    {"slug": "ibr-hardship-cap-calculator", "primary_keyword": "ibr hardship cap calculator"},
+    {"slug": "married-filing-separately-student-loan-calculator", "primary_keyword": "married filing separately student loan calculator"},
+    {"slug": "parent-plus-double-consolidation", "primary_keyword": "parent plus double consolidation"},
+    {"slug": "rap-payment-calculator", "primary_keyword": "rap payment calculator"},
+    {"slug": "save-plan-litigation-transition", "primary_keyword": "save plan litigation transition"},
+    {"slug": "student-loan-refinance-break-even-calculator", "primary_keyword": "student loan refinance break even calculator"},
+]
 
 
 def load_property_redirect_map(
@@ -2620,6 +2649,7 @@ def resolve_redirected_gsc_target(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
+    page_url: str = "",
 ) -> Dict[str, Any]:
     """
     Resolves a Search Console URL, slug, or query against the active redirect map and canonical
@@ -2629,14 +2659,15 @@ def resolve_redirected_gsc_target(
     """
     import urllib.parse
 
+    eff_url = str(target_url or page_url or "").strip()
     prop = str(property_id or "profithelm").strip().lower()
-    if "prexvo" in prop or "prexvo.com" in str(target_url).lower():
+    if "prexvo" in prop or "prexvo.com" in eff_url.lower():
         prop = "prexvo"
     else:
         prop = "profithelm"
 
     domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
-    raw_url = str(target_url or "").strip()
+    raw_url = eff_url
     raw_slug = str(slug or "").strip().strip("/").lower()
     raw_query = str(query or "").strip()
 
@@ -2763,7 +2794,23 @@ def resolve_redirected_gsc_target(
 
     # 4. Query-only or slug-only resolution
     if raw_query:
-        q_slug = re.sub(r"[^a-z0-9]+", "-", raw_query.lower()).strip("-")
+        q_lower = raw_query.lower().strip()
+        if "site:" in q_lower:
+            return {
+                "is_redirected": True,
+                "is_off_topic_sink": True,
+                "ignored_off_topic": True,
+                "original_url": "",
+                "original_path": "",
+                "original_slug": "",
+                "canonical_path": "",
+                "canonical_url": "",
+                "canonical_slug": "",
+                "leaf_overlay_slug": "",
+                "resolved_via": "scraper_query_sink",
+            }
+
+        q_slug = re.sub(r"[^a-z0-9]+", "-", q_lower).strip("-")
         q_entry = redirect_map.get(f"slug:{q_slug}") or redirect_map.get(f"/tools/{q_slug}/")
         if q_entry is not None:
             c_path = str(q_entry["redirect_target"])
@@ -2783,18 +2830,27 @@ def resolve_redirected_gsc_target(
                 "resolved_via": "query_redirect_map",
             }
 
-        # Check existing_tools (including secondary_keywords) and intent cannibalization
+        # Check existing_tools (including default core catalog + dynamic_tools.json)
         tools_list = list(existing_tools or [])
-        if not tools_list and repo_root is not None:
+        seen_t_slugs = {str(t.get("slug") or "").strip().lower() for t in tools_list if isinstance(t, dict)}
+        default_core = _DEFAULT_PREXVO_CORE_TOOLS if prop == "prexvo" else _DEFAULT_PROFITHELM_CORE_TOOLS
+        for dt in default_core:
+            if dt["slug"] not in seen_t_slugs:
+                tools_list.append(dt)
+                seen_t_slugs.add(dt["slug"])
+        if repo_root is not None:
             dyn_f = Path(repo_root) / "profithelm" / "data" / "dynamic_tools.json"
             if dyn_f.is_file():
                 try:
                     loaded_t = json.loads(dyn_f.read_text(encoding="utf-8"))
                     if isinstance(loaded_t, list):
-                        tools_list = loaded_t
+                        for lt in loaded_t:
+                            if isinstance(lt, dict) and str(lt.get("slug") or "").lower() not in seen_t_slugs:
+                                tools_list.append(lt)
+                                seen_t_slugs.add(str(lt.get("slug") or "").lower())
                 except Exception:
                     pass
-        q_lower = raw_query.lower().strip()
+
         norm_tokens = normalize_search_intent_tokens(q_lower)
         state_slug = norm_tokens.get("state_slug")
         for t in tools_list:
@@ -2847,6 +2903,71 @@ def resolve_redirected_gsc_target(
                 "resolved_via": "intent_cannibalization",
             }
 
+        # Domain query-family fallback for ProfitHelm core clusters when page URL is omitted
+        if prop == "profithelm":
+            q_words = norm_tokens.get("raw_tokens", set())
+            matched_family_slug = ""
+            matched_family_path = ""
+            if ({"crypto", "cryptocurrency", "bitcoin", "hyperliquid"} & q_words) and (
+                {"tax", "taxes", "taxable", "gains", "income", "calculator", "calculators", "calculation", "revenue"} & q_words
+            ):
+                matched_family_slug = (
+                    "crypto-tax-form-1099-da-mandatory-reporting"
+                    if ({"1099", "da"} & q_words)
+                    else "crypto-tax-calculator"
+                )
+                matched_family_path = f"/tools/{matched_family_slug}/"
+            elif "1031" in q_words or ({"tax", "deferral"} <= q_words):
+                matched_family_slug = "section-1031-calculator"
+                matched_family_path = (
+                    f"/tools/section-1031-calculator/{state_slug}/"
+                    if state_slug
+                    else "/tools/section-1031-calculator/"
+                )
+            elif {"capital", "gains"} <= q_words:
+                matched_family_slug = "tcja-sunset-capital-gains"
+                matched_family_path = "/tools/tcja-sunset-capital-gains/"
+            elif "179" in q_words:
+                matched_family_slug = "section-179-calculator"
+                matched_family_path = "/tools/section-179-calculator/"
+            elif {"yukon", "xl"} <= q_words:
+                matched_family_slug = "section-179-calculator"
+                matched_family_path = "/tools/section-179-calculator/gmc-yukon-xl/"
+            elif {"lincoln", "navigator"} <= q_words:
+                matched_family_slug = "section-179-calculator"
+                matched_family_path = "/tools/section-179-calculator/lincoln-navigator-l/"
+            elif {"ford", "vans"} <= q_words or {"ford", "cargo"} <= q_words:
+                matched_family_slug = "section-179-calculator"
+                matched_family_path = "/tools/section-179-calculator/ford-transit-cargo-van/"
+            elif ({"treasury", "tbill", "yield", "hysa"} & q_words) and ({"tax", "yield", "bills", "hysa"} & q_words):
+                matched_family_slug = "treasury-yield-calculator"
+                matched_family_path = "/tools/treasury-yield-calculator/"
+            elif {"bid", "bond"} <= q_words or {"surety", "bond"} <= q_words:
+                matched_family_slug = "contractor-surety-bond-cost-calculator"
+                matched_family_path = "/tools/contractor-surety-bond-cost-calculator/"
+            elif {"entity", "choice", "tax"} <= q_words:
+                matched_family_slug = "s-corp-reasonable-salary-tax-calculator"
+                matched_family_path = "/tools/s-corp-reasonable-salary-tax-calculator/"
+            elif ({"tax", "bracket"} <= q_words or {"tax", "brackets"} <= q_words) and state_slug:
+                matched_family_slug = "irs-2027-tax-brackets"
+                matched_family_path = f"/tools/irs-2027-tax-brackets/{state_slug}/"
+
+            if matched_family_slug and matched_family_path:
+                m_parts = [p for p in matched_family_path.split("/") if p]
+                leaf_ov = f"{m_parts[1]}-{m_parts[2]}" if (len(m_parts) >= 3 and m_parts[0] == "tools") else matched_family_slug
+                return {
+                    "is_redirected": False,
+                    "is_off_topic_sink": False,
+                    "original_url": "",
+                    "original_path": matched_family_path,
+                    "original_slug": matched_family_slug,
+                    "canonical_path": matched_family_path,
+                    "canonical_url": f"https://{domain}{matched_family_path}",
+                    "canonical_slug": matched_family_slug,
+                    "leaf_overlay_slug": leaf_ov,
+                    "resolved_via": "query_family_match",
+                }
+
     if raw_slug:
         c_path = f"/tools/{raw_slug}/"
         return {
@@ -2887,6 +3008,7 @@ def rollup_redirected_gsc_rows(
     across active 301 redirect rules so impressions, clicks, CTR, and impression-weighted
     rankings reported under retired URLs are attributed to their surviving canonical targets.
     Ignores off-topic hub-redirect sinks (e.g. retired e-commerce routes -> /tools/).
+    Idempotent when invoked on rows that already carry rolled_up_from metadata.
     Zero em-dashes. Zero en-dashes.
     """
     prop = str(property_id or "profithelm").strip().lower()
@@ -2960,10 +3082,32 @@ def rollup_redirected_gsc_rows(
         c_slug = resolved["canonical_slug"]
         is_red = bool(resolved["is_redirected"])
 
+        prior_from = [str(u) for u in (row.get("rolled_up_from") or []) if str(u).strip()]
+        has_prior_rollup = bool(not is_red and (prior_from or int(row.get("redirected_impressions", 0) or 0) > 0))
         if is_red:
+            row_direct_impr = 0
+            row_redir_impr = impr
+            row_direct_clicks = 0
+            row_redir_clicks = clicks
+            row_from_refs = [resolved["original_url"] or resolved["original_path"]]
             redirected_rows_count += 1
             rolled_up_impressions += impr
             rolled_up_clicks += clicks
+        elif has_prior_rollup:
+            row_redir_impr = max(0, int(float(row.get("redirected_impressions", 0) or 0)))
+            row_direct_impr = max(0, int(float(row.get("direct_impressions", max(0, impr - row_redir_impr)) or 0)))
+            row_redir_clicks = max(0, int(float(row.get("redirected_clicks", 0) or 0)))
+            row_direct_clicks = max(0, int(float(row.get("direct_clicks", max(0, clicks - row_redir_clicks)) or 0)))
+            row_from_refs = list(prior_from)
+            redirected_rows_count += max(1, len(prior_from))
+            rolled_up_impressions += row_redir_impr
+            rolled_up_clicks += row_redir_clicks
+        else:
+            row_direct_impr = impr
+            row_redir_impr = 0
+            row_direct_clicks = clicks
+            row_redir_clicks = 0
+            row_from_refs = []
 
         bucket_key = (c_path, raw_query.lower().strip())
         if bucket_key not in merged_buckets:
@@ -2978,31 +3122,29 @@ def rollup_redirected_gsc_rows(
             base_row["query"] = raw_query
             base_row["impressions"] = impr
             base_row["clicks"] = clicks
-            base_row["direct_impressions"] = 0 if is_red else impr
-            base_row["redirected_impressions"] = impr if is_red else 0
-            base_row["direct_clicks"] = 0 if is_red else clicks
-            base_row["redirected_clicks"] = clicks if is_red else 0
+            base_row["direct_impressions"] = row_direct_impr
+            base_row["redirected_impressions"] = row_redir_impr
+            base_row["direct_clicks"] = row_direct_clicks
+            base_row["redirected_clicks"] = row_redir_clicks
             base_row["_weighted_pos_sum"] = pos * impr if impr > 0 else 0.0
             base_row["_pos_weight"] = impr if impr > 0 else 0
             base_row["position"] = round(pos, 2)
             base_row["ctr"] = round(clicks / impr, 4) if impr > 0 else float(row.get("ctr", 0.0) or 0.0)
-            base_row["rolled_up_from"] = [resolved["original_url"] or resolved["original_path"]] if is_red else []
+            base_row["rolled_up_from"] = list(row_from_refs)
             merged_buckets[bucket_key] = base_row
         else:
             b = merged_buckets[bucket_key]
             b["impressions"] += impr
             b["clicks"] += clicks
-            if is_red:
-                b["redirected_impressions"] += impr
-                b["redirected_clicks"] += clicks
-                orig_ref = resolved["original_url"] or resolved["original_path"]
+            b["direct_impressions"] += row_direct_impr
+            b["redirected_impressions"] += row_redir_impr
+            b["direct_clicks"] += row_direct_clicks
+            b["redirected_clicks"] += row_redir_clicks
+            for orig_ref in row_from_refs:
                 if orig_ref and orig_ref not in b["rolled_up_from"]:
                     b["rolled_up_from"].append(orig_ref)
-            else:
-                b["direct_impressions"] += impr
-                b["direct_clicks"] += clicks
-                if not b.get("dead_route") and row.get("dead_route"):
-                    b["dead_route"] = row.get("dead_route")
+            if not is_red and not b.get("dead_route") and row.get("dead_route"):
+                b["dead_route"] = row.get("dead_route")
             if impr > 0:
                 b["_weighted_pos_sum"] += pos * impr
                 b["_pos_weight"] += impr
@@ -3019,7 +3161,6 @@ def rollup_redirected_gsc_rows(
             for p_variant in {c_no_slash, c_with_slash}:
                 impressions_by_path[p_variant] = impressions_by_path.get(p_variant, 0) + impr
                 clicks_by_path[p_variant] = clicks_by_path.get(p_variant, 0) + clicks
-            # If c_path is a state/vehicle leaf (/tools/<slug>/<leaf>/), also credit parent tool hub
             c_parts = [p for p in c_no_slash.split("/") if p]
             if len(c_parts) >= 3 and c_parts[0] == "tools":
                 hub_no_slash = f"/tools/{c_parts[1]}"
@@ -3044,15 +3185,17 @@ def rollup_redirected_gsc_rows(
             )
             t_sum["total_impressions"] += impr
             t_sum["total_clicks"] += clicks
-            if is_red:
-                t_sum["redirected_impressions"] += impr
-                t_sum["redirected_clicks"] += clicks
-                orig_p = resolved["original_path"] or resolved["original_url"]
-                if orig_p and orig_p not in t_sum["rolled_up_from"]:
-                    t_sum["rolled_up_from"].append(orig_p)
-            else:
-                t_sum["direct_impressions"] += impr
-                t_sum["direct_clicks"] += clicks
+            t_sum["direct_impressions"] += row_direct_impr
+            t_sum["redirected_impressions"] += row_redir_impr
+            t_sum["direct_clicks"] += row_direct_clicks
+            t_sum["redirected_clicks"] += row_redir_clicks
+            for orig_ref in row_from_refs:
+                norm_orig_p = orig_ref
+                if norm_orig_p.startswith("http://") or norm_orig_p.startswith("https://"):
+                    import urllib.parse
+                    norm_orig_p = urllib.parse.urlsplit(norm_orig_p).path or norm_orig_p
+                if norm_orig_p and norm_orig_p not in t_sum["rolled_up_from"]:
+                    t_sum["rolled_up_from"].append(norm_orig_p)
 
     rolled_rows: List[Dict[str, Any]] = []
     for b in merged_buckets.values():
@@ -3067,6 +3210,7 @@ def rollup_redirected_gsc_rows(
     return {
         "property_id": prop,
         "rows": rolled_rows,
+        "rolled_up_rows": rolled_rows,
         "impressions_by_path": impressions_by_path,
         "clicks_by_path": clicks_by_path,
         "canonical_targets_summary": enriched_targets,
@@ -3251,6 +3395,113 @@ def reconcile_factory_execution_log(
     return summary
 
 
+def reconcile_statutory_db_gsc_snapshots(
+    repo_root: Union[str, Path],
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Reconciles historical gsc_performance_snapshots in statutory.db so rows recorded with
+    empty page ('') or retired 301-redirected URLs are attributed to their surviving canonical URLs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import shutil
+    import sqlite3
+    import subprocess
+
+    root = Path(repo_root)
+    prop = "prexvo" if "prexvo" in str(property_id).lower() or "prexvo" in root.name.lower() else "profithelm"
+    db_file = root / "profithelm" / "data" / "statutory.db"
+    summary = {"rows_updated": 0, "queries_mapped": 0}
+    if not db_file.is_file():
+        return summary
+
+    best_by_q: Dict[str, str] = {}
+    if prop == "profithelm" and "PYTEST_CURRENT_TEST" not in os.environ:
+        gsccli_bin = shutil.which("gsccli") or "/home/ubuntuadmin/.npm-global/bin/gsccli"
+        if Path(gsccli_bin).is_file():
+            try:
+                proc = subprocess.run(
+                    [
+                        gsccli_bin, "query", "run",
+                        "-s", "sc-domain:profithelm.com",
+                        "-d", "query", "-d", "page",
+                        "--start-date", "90daysAgo",
+                        "--data-state", "all",
+                        "-f", "json",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    raw = proc.stdout
+                    s_i, e_i = raw.find("{"), raw.rfind("}")
+                    if s_i != -1 and e_i > s_i:
+                        qp_rows = json.loads(raw[s_i : e_i + 1]).get("data", [])
+                        rollup_qp = rollup_redirected_gsc_rows(
+                            qp_rows, property_id=prop, repo_root=root
+                        )
+                        best_impr: Dict[str, int] = {}
+                        for r in rollup_qp.get("rows", []):
+                            qk = str(r.get("query") or "").strip().lower()
+                            c_u = str(r.get("canonical_url") or r.get("page") or "").strip()
+                            im = int(r.get("impressions", 0) or 0)
+                            if qk and c_u and im >= best_impr.get(qk, -1):
+                                best_impr[qk] = im
+                                best_by_q[qk] = c_u
+            except Exception:
+                pass
+
+    try:
+        conn = sqlite3.connect(str(db_file))
+        cur = conn.cursor()
+        tables = [
+            r[0] for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='gsc_performance_snapshots'"
+            ).fetchall()
+        ]
+        if not tables:
+            conn.close()
+            return summary
+
+        distinct_pairs = cur.execute(
+            "SELECT DISTINCT query, COALESCE(page, '') FROM gsc_performance_snapshots"
+        ).fetchall()
+        for q_val, p_val in distinct_pairs:
+            q_str = str(q_val or "").strip()
+            p_str = str(p_val or "").strip()
+            target_canonical_url = ""
+            if p_str:
+                res = resolve_redirected_gsc_target(
+                    target_url=p_str, query=q_str, property_id=prop, repo_root=root
+                )
+                if res.get("is_redirected") and not res.get("is_off_topic_sink") and res.get("canonical_url"):
+                    target_canonical_url = str(res["canonical_url"])
+            else:
+                target_canonical_url = best_by_q.get(q_str.lower(), "")
+                if not target_canonical_url and q_str:
+                    res = resolve_redirected_gsc_target(
+                        query=q_str, property_id=prop, repo_root=root
+                    )
+                    if not res.get("is_off_topic_sink") and res.get("canonical_url"):
+                        target_canonical_url = str(res["canonical_url"])
+
+            if target_canonical_url and target_canonical_url != p_str:
+                cur.execute(
+                    "UPDATE gsc_performance_snapshots SET page = ? WHERE query = ? AND COALESCE(page, '') = ?",
+                    (target_canonical_url, q_val, p_str),
+                )
+                summary["rows_updated"] += max(0, cur.rowcount)
+                summary["queries_mapped"] += 1
+
+        if summary["rows_updated"] > 0:
+            conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    return summary
+
+
 def sync_tenant_redirect_rollup_adapters(
     repo_root: Union[str, Path],
     property_id: str = "profithelm",
@@ -3296,12 +3547,13 @@ def sync_tenant_redirect_rollup_adapters(
             repo_root=dist_dir.parent if dist_dir else BASE_DIR,
         )
         gsc_impressions_by_path = dict(rollup_res.get("impressions_by_path", {}))
+        prior_meta = gsc_insights.get("redirect_signal_rollup", {}) if isinstance(gsc_insights, dict) else {}
         redirect_rollup_meta = {
-            "redirected_rows_count": rollup_res.get("redirected_rows_count", 0),
-            "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0),
-            "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0),
-            "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0),
-            "canonical_targets_summary": rollup_res.get("canonical_targets_summary", {}),
+            "redirected_rows_count": rollup_res.get("redirected_rows_count", 0) or prior_meta.get("redirected_rows_count", 0),
+            "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0) or prior_meta.get("rolled_up_impressions", 0),
+            "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0) or prior_meta.get("rolled_up_clicks", 0),
+            "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0) or prior_meta.get("ignored_off_topic_rows_count", 0),
+            "canonical_targets_summary": rollup_res.get("canonical_targets_summary") or prior_meta.get("canonical_targets_summary", {}),
         }
     except Exception:
         for item in top_pages:
@@ -3317,8 +3569,27 @@ def sync_tenant_redirect_rollup_adapters(
                 impr = int(item.get("impressions", 0))
                 gsc_impressions_by_path[norm] = gsc_impressions_by_path.get(norm, 0) + impr"""
 
+            prev_meta = """        redirect_rollup_meta = {
+            "redirected_rows_count": rollup_res.get("redirected_rows_count", 0),
+            "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0),
+            "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0),
+            "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0),
+            "canonical_targets_summary": rollup_res.get("canonical_targets_summary", {}),
+        }"""
+            new_meta = """        prior_meta = gsc_insights.get("redirect_signal_rollup", {}) if isinstance(gsc_insights, dict) else {}
+        redirect_rollup_meta = {
+            "redirected_rows_count": rollup_res.get("redirected_rows_count", 0) or prior_meta.get("redirected_rows_count", 0),
+            "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0) or prior_meta.get("rolled_up_impressions", 0),
+            "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0) or prior_meta.get("rolled_up_clicks", 0),
+            "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0) or prior_meta.get("ignored_off_topic_rows_count", 0),
+            "canonical_targets_summary": rollup_res.get("canonical_targets_summary") or prior_meta.get("canonical_targets_summary", {}),
+        }"""
+
             if old_block in f_txt:
                 f_txt = f_txt.replace(old_block, new_block, 1)
+            elif prev_meta in f_txt:
+                f_txt = f_txt.replace(prev_meta, new_meta, 1)
+
             old_ret = """    return {
         "status": "PASS",
         "max_age_days": max_age_days,
@@ -3358,6 +3629,65 @@ def sync_tenant_redirect_rollup_adapters(
         gsc_py = root / "profithelm" / "gsc_adapter.py"
         if gsc_py.is_file():
             g_txt = gsc_py.read_text(encoding="utf-8")
+            old_harvest_ret = """                    for row in data:
+                        normalized.append({
+                            "query": str(row.get("query", "")),
+                            "clicks": int(float(row.get("clicks", 0))),
+                            "impressions": int(float(row.get("impressions", 0))),
+                            "ctr": float(row.get("ctr", 0.0)),
+                            "position": float(row.get("position", 100.0)),
+                        })
+                    return normalized"""
+            new_harvest_ret = """                    for row in data:
+                        normalized.append({
+                            "query": str(row.get("query", "")),
+                            "page": str(row.get("page", "")),
+                            "clicks": int(float(row.get("clicks", 0))),
+                            "impressions": int(float(row.get("impressions", 0))),
+                            "ctr": float(row.get("ctr", 0.0)),
+                            "position": float(row.get("position", 100.0)),
+                        })
+                    if normalized and "PYTEST_CURRENT_TEST" not in os.environ:
+                        try:
+                            from pseofactory.qualification import rollup_redirected_gsc_rows
+                            qp_cmd = [
+                                gsccli_bin, "query", "run", "-s", site,
+                                "-d", "query", "-d", "page",
+                                "--start-date", f"{days}daysAgo",
+                                "--data-state", "all", "-f", "json",
+                            ]
+                            qp_proc = subprocess.run(qp_cmd, capture_output=True, text=True, timeout=25)
+                            if qp_proc.returncode == 0 and qp_proc.stdout.strip():
+                                qp_raw = qp_proc.stdout
+                                s_i, e_i = qp_raw.find("{"), qp_raw.rfind("}")
+                                if s_i != -1 and e_i > s_i:
+                                    qp_rows = json.loads(qp_raw[s_i : e_i + 1]).get("data", [])
+                                    rollup_qp = rollup_redirected_gsc_rows(
+                                        qp_rows, property_id="profithelm", repo_root=BASE_DIR
+                                    )
+                                    best_by_q: Dict[str, Dict[str, Any]] = {}
+                                    for r_qp in rollup_qp.get("rows", []):
+                                        qk = str(r_qp.get("query", "")).strip().lower()
+                                        if not qk:
+                                            continue
+                                        prev_r = best_by_q.get(qk)
+                                        if prev_r is None or int(r_qp.get("impressions", 0)) > int(prev_r.get("impressions", 0)):
+                                            best_by_q[qk] = r_qp
+                                    for n_row in normalized:
+                                        m_qp = best_by_q.get(n_row["query"].strip().lower())
+                                        if m_qp:
+                                            n_row["page"] = str(m_qp.get("canonical_url") or m_qp.get("page") or "")
+                                            n_row["canonical_slug"] = str(m_qp.get("canonical_slug") or "")
+                                            if m_qp.get("rolled_up_from"):
+                                                n_row["rolled_up_from"] = list(m_qp["rolled_up_from"])
+                                                n_row["direct_impressions"] = int(m_qp.get("direct_impressions", 0))
+                                                n_row["redirected_impressions"] = int(m_qp.get("redirected_impressions", 0))
+                        except Exception:
+                            pass
+                    return normalized"""
+            if old_harvest_ret in g_txt:
+                g_txt = g_txt.replace(old_harvest_ret, new_harvest_ret, 1)
+
             old_match = """        matching_tool = None
         q_lower = q_text.lower()
         for t in tools_catalog:
@@ -3402,9 +3732,9 @@ def sync_tenant_redirect_rollup_adapters(
             pass"""
             if old_match in g_txt:
                 g_txt = g_txt.replace(old_match, new_match, 1)
-                if g_txt != gsc_py.read_text(encoding="utf-8"):
-                    gsc_py.write_text(g_txt, encoding="utf-8")
-                    updated_files += 1
+            if g_txt != gsc_py.read_text(encoding="utf-8"):
+                gsc_py.write_text(g_txt, encoding="utf-8")
+                updated_files += 1
 
         obs_py = root / "profithelm" / "observer.py"
         if obs_py.is_file():

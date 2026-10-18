@@ -762,6 +762,22 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     assert ca_row["direct_impressions"] == 19
     assert ca_row["redirected_impressions"] == 73
     assert len(ca_row["rolled_up_from"]) == 2
+    assert "rolled_up_rows" in rollup
+
+    # 1b. Verify rollup_redirected_gsc_rows is idempotent when called on already-rolled-up rows
+    rollup_second_pass = rollup_redirected_gsc_rows(rollup["rows"], property_id="profithelm")
+    assert rollup_second_pass["redirected_rows_count"] == 3
+    assert rollup_second_pass["rolled_up_impressions"] == 82
+    assert rollup_second_pass["rolled_up_clicks"] == 4
+    assert (
+        rollup_second_pass["canonical_targets_summary"]["/tools/irs-2027-tax-brackets/california/"]["redirected_impressions"]
+        == 73
+    )
+
+    nj_res = resolve_redirected_gsc_target(query="nj tax bracket", property_id="profithelm")
+    assert nj_res["canonical_path"] == "/tools/irs-2027-tax-brackets/new-jersey/"
+    crypto_res = resolve_redirected_gsc_target(query="calculate crypto taxes", property_id="profithelm")
+    assert crypto_res["canonical_path"] == "/tools/crypto-tax-calculator/"
 
     # 2. Verify prioritize_gsc_signals rolls up retired URL even when retired URL has higher impressions than canonical
     signals = [
