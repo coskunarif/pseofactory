@@ -605,3 +605,82 @@ def test_content_accuracy_audit_stage_strict_raises_error(profithelm_spec):
     assert "Content accuracy audit failed" in str(exc_info.value)
     assert exc_info.value.report is not None
     assert exc_info.value.report.passed is False
+
+
+def test_page_structure_geo_immediacy_and_vertical_isolation(profithelm_spec):
+    """
+    Verifies financial tool page structure and GEO answer-delivery invariants:
+    1. H1 -> .quick-answer -> #calculator-workspace-anchor precedes .multi-dataset-join above the fold.
+    2. H2 and H3 subheadings are contextualized with entity/model labels and use semantic tags (no <div id="statutory-pitfalls-matrix">).
+    3. Methodology section uses concise paragraphs, a scannable <ul> list, and contextual in-prose /tools/ links.
+    4. Non-179 B2B verticals (174, 301, surety, factoring, workers-comp, treasury) never receive Section 179 SUV pitfalls.
+    5. GSC overlays never truncate meta descriptions at 'and audit-ready.' and synchronize FAQPage JSON-LD 1:1 with <details> FAQs.
+    """
+    import re
+    from pseofactory.competitor import render_competitor_winning_pattern_blocks
+    from pseofactory.gsc_remediation import compile_remediation_overlay_spec, inject_overlay_into_html
+    from pseofactory.maintenance import RetroReflectionEngine, _extract_faq_schema_and_body_counts
+
+    res = compile_high_effort_page(profithelm_spec)
+    html_out = res["html"]
+
+    calc_pos = html_out.find('id="calculator-workspace-anchor"')
+    mdj_m = re.search(r'<(?:div|section)[^>]*class=["\'][^"\']*\bmulti-dataset-join\b', html_out)
+    assert calc_pos != -1 and mdj_m is not None
+    assert calc_pos < mdj_m.start(), "#calculator-workspace-anchor must appear before .multi-dataset-join"
+    assert '<h3 id="statutory-pitfalls-matrix"' in html_out
+    assert '<div id="statutory-pitfalls-matrix"' not in html_out
+
+    for non_179_slug in (
+        "r-and-d-tax-credit-section-174-amortization-calculator",
+        "section-301-tariff-landed-cost-calculator",
+        "contractor-surety-bond-cost-calculator",
+        "invoice-factoring-vs-line-of-credit-apr-calculator",
+        "workers-comp-and-payroll-burden-calculator",
+        "treasury-bill-vs-high-yield-savings-tax-equivalent-yield-calculator",
+    ):
+        blocks = render_competitor_winning_pattern_blocks(
+            slug=non_179_slug,
+            title=non_179_slug.replace("-", " ").title(),
+            property_id="profithelm",
+            canonical_base="https://profithelm.com",
+            statutory_authority="IRC Section 174",
+            economic_dataset="BLS PPI Series",
+        )
+        combined = " ".join(blocks.values())
+        assert "heavy SUV (6,000 to 14,000 lbs GVWR)" not in combined, f"Section 179 SUV pollution on {non_179_slug}"
+
+        ov = compile_remediation_overlay_spec(
+            {
+                "slug": non_179_slug,
+                "target_url": f"https://profithelm.com/tools/{non_179_slug}/",
+                "query": non_179_slug.replace("-", " "),
+                "position": 11.2,
+                "impressions": 120,
+            },
+            tenant_id="profithelm",
+        )
+        assert 120 <= len(ov["meta_description"]) <= 155
+        assert not ov["meta_description"].endswith("and audit-ready.")
+        assert 40 <= len(ov["quick_answer"].split()) <= 60
+
+    ov_scorp = compile_remediation_overlay_spec(
+        {
+            "slug": "s-corp-reasonable-salary-tax-calculator",
+            "target_url": "https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/",
+            "query": "s corp reasonable salary tax calculator",
+            "position": 10.5,
+            "impressions": 200,
+        },
+        tenant_id="profithelm",
+    )
+    with_ov = inject_overlay_into_html(html_out, ov_scorp)
+    retro_html, _ = RetroReflectionEngine.retrofit_html(
+        with_ov,
+        property_id="profithelm",
+        slug="s-corp-reasonable-salary-tax-calculator",
+    )
+    schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(retro_html)
+    assert len(schema_faqs) == len(body_faqs)
+    assert [q for q, _ in schema_faqs] == [q for q, _ in body_faqs]
+

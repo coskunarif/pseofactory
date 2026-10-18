@@ -528,7 +528,7 @@ def audit_rendered_asset(
     required_components = [
         ("calculator-form", r'<form[^>]*class=["\'][^"\']*calculator-form[^"\']*["\']'),
         ("result-box", r'<div[^>]*class=["\'][^"\']*result-box[^"\']*["\']'),
-        ("multi-dataset-join", r'<div[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']'),
+        ("multi-dataset-join", r'<(?:div|section)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']'),
         ("methodology", r'<section[^>]*class=["\'][^"\']*methodology[^"\']*["\']'),
         ("calculation-manifest", r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\']'),
     ]
@@ -536,6 +536,40 @@ def audit_rendered_asset(
         if not re.search(comp_pat, html_content, re.IGNORECASE):
             g8_ok = False
             violations.append(f"Gate 8 (Structural Components): Missing mandatory component '{comp_name}'")
+
+    qa_m = re.search(r'<aside[^>]*class=["\'][^"\']*\bquick-answer\b', html_content, re.IGNORECASE)
+    first_h2_m = re.search(r"<h2\b", html_content, re.IGNORECASE)
+    if qa_m and first_h2_m and qa_m.start() > first_h2_m.start():
+        g8_ok = False
+        violations.append("Gate 8 (Structural Components): .quick-answer must appear before the first <h2> heading")
+
+    calc_anchor_idx = html_content.find('id="calculator-workspace-anchor"')
+    mdj_dom_m = re.search(
+        r'<(?:div|section)[^>]*class=["\'][^"\']*\bmulti-dataset-join\b',
+        html_content,
+        re.IGNORECASE,
+    )
+    mdj_idx = mdj_dom_m.start() if mdj_dom_m else -1
+    if calc_anchor_idx != -1 and mdj_idx != -1 and calc_anchor_idx > mdj_idx:
+        g8_ok = False
+        violations.append(
+            "Gate 8 (Structural Components): #calculator-workspace-anchor must appear before .multi-dataset-join above the fold"
+        )
+
+    meth_sec_m = re.search(
+        r'<section[^>]*class=["\'][^"\']*\bmethodology\b[^"\']*["\'][^>]*>([\s\S]*?)</section>',
+        html_content,
+        re.IGNORECASE,
+    )
+    if meth_sec_m:
+        meth_inner = meth_sec_m.group(1)
+        if "<ul" not in meth_inner.lower() and "<ol" not in meth_inner.lower():
+            g8_ok = False
+            violations.append("Gate 8 (Structural Components): methodology section missing scannable list (<ul> or <ol>)")
+        if "/tools/" not in meth_inner:
+            g8_ok = False
+            violations.append("Gate 8 (Structural Components): methodology section missing contextual internal /tools/ links")
+
     gate_results["structural_components"] = g8_ok
 
     _audit_schema_and_fact_gates(

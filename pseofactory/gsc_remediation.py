@@ -1436,57 +1436,75 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
     """
     clean = _strip_forbidden_dashes(raw_meta).strip()
     clean = re.sub(r"\s+", " ", clean)
-    if 120 <= len(clean) <= 155:
+    if 120 <= len(clean) <= 155 and not clean.endswith("and audit-ready."):
         return clean
 
-    q_low = query_label.lower()
+    q_words = [w for w in _strip_forbidden_dashes(query_label).split() if w.strip()]
+    short_label = " ".join(q_words[:6]) if len(" ".join(q_words)) > 44 else " ".join(q_words)
+    if not short_label:
+        short_label = "Title IV student loan repayment" if tenant_id == "prexvo" else "statutory tax liability"
+    q_low = f"{query_label.lower()} {short_label.lower()}"
+
     if tenant_id == "prexvo":
         default_meta = (
-            f"Calculate {query_label} under Title IV 34 CFR Part 685 using 225% HHS Poverty "
+            f"Calculate {short_label} under Title IV 34 CFR Part 685 using 225% HHS Poverty "
             f"Guidelines, discretionary income caps, and forgiveness schedules."
         )
         tail_pad = " Verified under Title IV 34 CFR Part 685 statutory rules."
     elif "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
         default_meta = (
-            f"Calculate {query_label} under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
+            f"Calculate {short_label} under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
             f"Section 1250 recapture, boot, and state clawback rules."
         )
         tail_pad = " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824."
     elif "crypto" in q_low or "8949" in q_low or "1099-da" in q_low:
         default_meta = (
-            f"Calculate {query_label} under IRC Section 1012 and Form 1099-DA, modeling short-term "
+            f"Calculate {short_label} under IRC Section 1012 and Form 1099-DA, modeling short-term "
             f"vs long-term capital gains, staking yield, and 3.8% NIIT."
         )
         tail_pad = " Grounded in IRS Form 8949 and Schedule D compliance rules."
     elif "saas" in q_low or "runway" in q_low or "burn" in q_low:
         default_meta = (
-            f"Calculate {query_label} under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
+            f"Calculate {short_label} under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
             f"collected MRR growth, and exact Zero Cash Date horizons."
         )
         tail_pad = " Grounded in institutional corporate treasury benchmarks."
     elif "treasury" in q_low or "tbill" in q_low or "hysa" in q_low or "3124" in q_low:
         default_meta = (
-            f"Calculate {query_label} under 31 U.S.C. Section 3124 state tax exemption rules, "
+            f"Calculate {short_label} under 31 U.S.C. Section 3124 state tax exemption rules, "
             f"comparing US Treasury Bill Tax-Equivalent Yield against HYSA APY."
         )
         tail_pad = " Grounded in federal statutory yield exemption formulas."
+    elif "s-corp" in q_low or "reasonable salary" in q_low or "199a" in q_low:
+        default_meta = (
+            f"Calculate {short_label} under IRC Section 1366 and Section 199A, modeling W-2 FICA "
+            f"payroll tax splits, K-1 distributions, and QBI deduction limits."
+        )
+        tail_pad = " Grounded in IRS reasonable compensation audit benchmarks."
     else:
         default_meta = (
-            f"Calculate {query_label} using deterministic IRC statutory formulas, federal "
-            f"brackets, depreciation limits, and audit-ready financial benchmarks."
+            f"Calculate {short_label} using deterministic IRC statutory formulas, federal "
+            f"brackets, depreciation limits, and IRS compliance benchmarks."
         )
         tail_pad = " Grounded in deterministic IRS and federal statutory schedules."
 
-    cand = clean if len(clean) >= 60 else default_meta
+    cand = clean if (len(clean) >= 60 and not clean.endswith("and audit-ready.")) else default_meta
     while len(cand) < 120:
         cand = f"{cand.rstrip('.')}." + tail_pad
 
     if len(cand) > 155:
-        trimmed = cand[:154]
-        if " " in trimmed and len(trimmed.rsplit(" ", 1)[0]) >= 120:
-            trimmed = trimmed.rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
-        else:
-            trimmed = cand[:154].rstrip(" ,;:-") + "."
+        words = cand[:154].split()
+        while len(words) > 6 and (
+            len(" ".join(words)) > 154
+            or words[-1].lower().rstrip(".,;:-") in (
+                "and", "or", "with", "for", "to", "in", "of", "by", "on", "under",
+                "the", "a", "an", "audit-ready", "statutory", "federal", "empirical",
+            )
+        ):
+            words.pop()
+        trimmed = " ".join(words).rstrip(" ,;:-") + "."
+        if len(trimmed) < 120:
+            trimmed = cand[:154].rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
         cand = trimmed
 
     return _strip_forbidden_dashes(cand)
@@ -1569,6 +1587,83 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         filler_pool = [
             "Includes", "Section", "1212(c)", "three-year", "loss", "carryback",
             "and", "Half-Kelly", "arbitrage", "allocation", "benchmarks.",
+        ]
+    elif any(k in combined_low for k in ("s-corp", "s corp", "reasonable-salary", "reasonable salary", "199a")):
+        base_words = (
+            f"Under IRC Section 1366, Section 3111, and Section 199A, {short_q} splits pass-through "
+            f"operating profit between W-2 officer salary subject to 15.3 percent FICA payroll tax "
+            f"($176,100 Social Security wage base) and K-1 shareholder distributions exempt from "
+            f"self-employment tax while preserving the 20 percent Qualified Business Income deduction."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "Internal", "Revenue", "Service", "reasonable",
+            "compensation", "guidelines", "and", "Additional", "Medicare", "thresholds.",
+        ]
+    elif any(k in combined_low for k in ("174", "r-and-d", "r&d", "6765", "research")):
+        base_words = (
+            f"Under IRC Section 41 and Section 174, {short_q} computes the 20 percent regular or "
+            f"14 percent Alternative Simplified Research Credit on IRS Form 6765 (79 percent net after "
+            f"Section 280C(c) reduction) alongside 5-year domestic and 15-year foreign software "
+            f"development amortization schedules and $500,000 Form 8974 payroll tax offsets."
+        ).split()
+        filler_pool = [
+            "Substantiated", "under", "IRC", "Section", "41(d)", "four-part",
+            "technological", "uncertainty", "and", "experimentation", "standards.",
+        ]
+    elif any(k in combined_low for k in ("301", "tariff", "landed-cost", "htsus")):
+        base_words = (
+            f"Under Trade Act Section 301 (19 U.S.C. 2411) and CBP Form 7501 customs valuation rules, "
+            f"{short_q} computes total import landed cost by stacking ad valorem HTSUS base duty, "
+            f"List 1-4A Section 301 surcharges (7.5 to 100 percent), 0.3464 percent Merchandise "
+            f"Processing Fee, and 0.125 percent Harbor Maintenance Fee."
+        ).split()
+        filler_pool = [
+            "Grounded", "in", "United", "States", "International", "Trade",
+            "Commission", "HTSUS", "schedules", "and", "customs", "rulings.",
+        ]
+    elif any(k in combined_low for k in ("surety", "bond", "contractor-surety")):
+        base_words = (
+            f"Under the federal Miller Act (40 U.S.C. 3131) and state licensing statutes, {short_q} "
+            f"estimates annual commercial and contract surety bond premiums by multiplying the required "
+            f"statutory bond penalty ($10,000 to $1,000,000+) by credit-tiered underwriting rates "
+            f"ranging from 0.5 percent (preferred tier) to 10 percent (high-risk tier)."
+        ).split()
+        filler_pool = [
+            "Benchmarked", "against", "Treasury", "Circular", "570", "surety",
+            "underwriting", "tiers", "and", "indemnity", "standards.",
+        ]
+    elif any(k in combined_low for k in ("factoring", "line-of-credit")):
+        base_words = (
+            f"Under Truth in Lending Act Regulation Z and commercial financing disclosure rules, "
+            f"{short_q} converts flat 30-to-90-day invoice factoring discount fees (1.5 to 4.5 percent "
+            f"per receivable turnover cycle) plus wire and lockbox charges into an annualized Effective "
+            f"APR (18 to 54+ percent) for comparison against revolving credit lines."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "commercial", "treasury", "working", "capital",
+            "cost", "of", "capital", "and", "DSO", "benchmarks.",
+        ]
+    elif any(k in combined_low for k in ("workers-comp", "payroll-burden", "payroll burden", "futa", "suta")):
+        base_words = (
+            f"Under IRC Section 3111, Section 3301, and NCCI classification schedules, {short_q} "
+            f"computes fully burdened employer hourly and annual labor cost by stacking 7.65 percent "
+            f"FICA, federal FUTA, state SUTA wage bases, and occupational Workers' Compensation "
+            f"class rates adjusted by your Experience Modification Rate (EMR)."
+        ).split()
+        filler_pool = [
+            "Benchmarked", "against", "Bureau", "of", "Labor", "Statistics",
+            "Employer", "Costs", "for", "Employee", "Compensation", "series.",
+        ]
+    elif any(k in combined_low for k in ("1202", "qsbs")):
+        base_words = (
+            f"Under IRC Section 1202(a)(4) and OBBBA tiered exclusion schedules, {short_q} calculates "
+            f"federal capital gains exclusion (50, 75, or 100 percent) up to the greater of $10,000,000 "
+            f"($15,000,000 post-OBBBA) or 10 times aggregate adjusted basis for original-issue C-Corp "
+            f"Qualified Small Business Stock held 3 to 5+ years."
+        ).split()
+        filler_pool = [
+            "Includes", "state", "conformity", "analysis", "and", "IRC",
+            "Section", "1045", "tax-free", "rollover", "thresholds.",
         ]
     elif any(k in combined_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")):
         base_words = (
@@ -1912,7 +2007,7 @@ def _build_vertical_profithelm_overlay_blocks(
                 },
             ],
         }
-    if any(k in comb for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal")):
+    if any(k in comb for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal", "s-corp", "s corp", "reasonable-salary", "199a", "1202", "qsbs")):
         return _build_tax_bracket_profithelm_overlay_blocks(
             heading_label=heading_label,
             query_clean=query_clean,
@@ -1920,6 +2015,69 @@ def _build_vertical_profithelm_overlay_blocks(
             ctr=ctr,
             impr=impr,
         )
+    if any(k in comb for k in ("174", "r-and-d", "r&d", "6765", "research")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 41 R&D Credit & Section 174 Amortization Rules",
+                f"Audit-Ready {heading_label} Scenarios & Form 6765 Section 280C(c) Compliance",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-rd-domestic",
+                    "label": f"{heading_label} Domestic Software QRE Baseline ($500k Wages)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"domestic_qre": 500000, "foreign_qre": 0, "prior_qre": 350000, "tax_rate": 21},
+                    "description": "Domestic U.S. engineering payroll evaluating IRC Section 41 ASC credit (Form 6765) and 5-year Section 174 amortization.",
+                },
+                {
+                    "id": "preset-rd-hybrid",
+                    "label": f"{heading_label} Hybrid Domestic + Offshore Engineering ($1.2M QRE)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"domestic_qre": 800000, "foreign_qre": 400000, "prior_qre": 600000, "tax_rate": 24},
+                    "description": "Contrasting 5-year domestic vs 15-year foreign Section 174(a)(2)(B) capitalization and Section 280C(c) reduced credit election.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$500,000 Domestic Software QRE (ASC 14% Method)",
+                    "baseline": "$0 Research Credit Claimed (Unoptimized)",
+                    "optimized": "$39,500 Net Cash Tax Credit (After Section 280C(c) 79% Election)",
+                    "delta": "+$39,500 Direct Dollar-for-Dollar Tax Offset",
+                    "authority": "IRC Section 41(c)(4), Section 280C(c) & Form 6765",
+                },
+                {
+                    "scenario": "Qualified Small Business (<$5M Gross Receipts) Payroll Offset",
+                    "baseline": "Carryforward Locked Against Future Income Tax",
+                    "optimized": "Up to $500,000 Immediate FICA Payroll Tax Offset",
+                    "delta": "+$500,000 Non-Dilutive Payroll Cash Shield",
+                    "authority": "IRC Section 41(h) & IRS Form 8974",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How does IRC Section 174 amortization interact with {query_clean}?",
+                    "answer": (
+                        "Under IRC Section 174, specified research and experimental expenditures must be capitalized and "
+                        "amortized ratably over 5 years for domestic U.S. research (10% Year 1 mid-year convention) and "
+                        "15 years for foreign research (3.33% Year 1)."
+                    ),
+                },
+                {
+                    "question": "Why should taxpayers elect the IRC Section 280C(c)(3) reduced credit on Form 6765?",
+                    "answer": (
+                        "Making a timely IRC Section 280C(c)(3) election on an original return applies a 79% statutory "
+                        "multiplier to the gross R&D credit in exchange for preserving 100% of your allowable Section 174 "
+                        "deductions and simplifying state tax return adjustments."
+                    ),
+                },
+            ],
+        }
     return {
         "h2_headings": [
             f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
@@ -3374,6 +3532,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             h2_norm = re.sub(r"\bR\s+(?:And|&)\s+D\b", "R&D", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bK\s+1\b", "K-1", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bW\s+([249])\b", r"W-\1", h2_norm, flags=re.IGNORECASE)
+            h2_norm = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", h2_norm)
+            h2_norm = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])\b", r"\1-\2", h2_norm)
             clean_h2 = html_lib.escape(h2_norm)
             h2_parts.append(f'  <h2 class="section-title">{clean_h2}</h2>')
             h2_parts.append(f'  <p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 1.5rem;">Statutory analysis and compliance guidelines for {clean_h2}.</p>')
@@ -3383,6 +3543,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     # 4b. Injected Interactive Preset Scenarios (with data-calc-preset)
     scenarios = overlay_data.get("preset_scenarios", [])
+    sc_section_markup = ""
     if scenarios:
         sc_parts = ['<section class="overlay-section overlay-scenarios card pseo-card">']
         sc_parts.append('  <h3 class="section-subtitle">Target Scenarios</h3>')
@@ -3406,10 +3567,12 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             sc_parts.append("    </div>")
         sc_parts.append("  </div>")
         sc_parts.append("</section>")
-        injected_sections.append("\n".join(sc_parts))
+        sc_section_markup = "\n".join(sc_parts)
+        injected_sections.append(sc_section_markup)
 
     # 4c. Injected Comparison Table Rows
     comparison_rows = overlay_data.get("comparison_rows", [])
+    tbl_section_markup = ""
     if comparison_rows:
         tbl_parts = [
             '<section class="overlay-section overlay-comparison card pseo-card">',
@@ -3446,7 +3609,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             "  </div>",
             "</section>",
         ])
-        injected_sections.append("\n".join(tbl_parts))
+        tbl_section_markup = "\n".join(tbl_parts)
+        injected_sections.append(tbl_section_markup)
 
     # 4d. Injected Hub Links (for crawl budget signal lag / internal linking)
     hub_links = overlay_data.get("hub_links", [])
@@ -3580,6 +3744,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         "answer": _strip_forbidden_dashes(str(a_text)),
                     })
 
+    faq_section_markup = ""
     if faq_items:
         faq_parts = ['<section class="overlay-section overlay-faqs">']
         faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
@@ -3588,10 +3753,10 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         for f in faq_items:
             q = f["question"]
             a = f["answer"]
-            faq_parts.append('    <div class="faq-card" style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-inset, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">')
-            faq_parts.append(f'      <h4>{html_lib.escape(q)}</h4>')
-            faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary, #475569);">{html_lib.escape(a)}</p>')
-            faq_parts.append("    </div>")
+            faq_parts.append('    <details class="faq-item faq-card" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">')
+            faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
+            faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary, #475569); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
+            faq_parts.append("    </details>")
             schema_entities.append({
                 "@type": "Question",
                 "name": q,
@@ -3602,7 +3767,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             })
         faq_parts.append("  </div>")
         faq_parts.append("</section>")
-        injected_sections.append("\n".join(faq_parts))
+        faq_section_markup = "\n".join(faq_parts)
+        injected_sections.append(faq_section_markup)
 
         if schema_entities:
             faq_ld_json = {
@@ -3663,7 +3829,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         if 'id="gsc-striking-overlay"' in html:
             incremental_parts: List[str] = []
-            if h2_section_markup and 'class="overlay-section overlay-headings"' in html:
+            if h2_section_markup and 'class="overlay-section overlay-headings' in html:
                 html = re.sub(
                     r'<section\s+class=["\']overlay-section\s+overlay-headings[^>]*>.*?</section>',
                     h2_section_markup,
@@ -3671,8 +3837,32 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     count=1,
                     flags=re.DOTALL | re.IGNORECASE,
                 )
+            if sc_section_markup and 'class="overlay-section overlay-scenarios' in html:
+                html = re.sub(
+                    r'<section\s+class=["\']overlay-section\s+overlay-scenarios[^>]*>.*?</section>',
+                    sc_section_markup,
+                    html,
+                    count=1,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
+            if tbl_section_markup and 'class="overlay-section overlay-comparison' in html:
+                html = re.sub(
+                    r'<section\s+class=["\']overlay-section\s+overlay-comparison[^>]*>.*?</section>',
+                    tbl_section_markup,
+                    html,
+                    count=1,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
+            if faq_section_markup and 'class="overlay-section overlay-faqs' in html:
+                html = re.sub(
+                    r'<section\s+class=["\']overlay-section\s+overlay-faqs[^>]*>.*?</section>',
+                    faq_section_markup,
+                    html,
+                    count=1,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
             if hub_links_markup:
-                if 'class="overlay-section overlay-hub-links"' in html:
+                if 'class="overlay-section overlay-hub-links' in html:
                     html = re.sub(
                         r'<section\s+class=["\']overlay-section\s+overlay-hub-links[^>]*>.*?</section>',
                         hub_links_markup,

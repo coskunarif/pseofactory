@@ -3878,6 +3878,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
                 "tcja",
                 "capital-gains",
                 "s-corp",
+                "reasonable-salary",
                 "1202",
                 "qsbs",
                 "amt",
@@ -3899,6 +3900,32 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
                 "arbitrage",
                 "odds",
                 "vig",
+                "174",
+                "r-and-d",
+                "r&d",
+                "amortization",
+                "301",
+                "tariff",
+                "landed-cost",
+                "customs",
+                "import",
+                "surety",
+                "bond",
+                "contractor",
+                "factoring",
+                "line-of-credit",
+                "runway",
+                "burn",
+                "saas",
+                "working-capital",
+                "cash-flow",
+                "treasury",
+                "hysa",
+                "yield",
+                "workers-comp",
+                "payroll",
+                "classification",
+                "1099-vs-w2",
             )
         )
         and "179" not in s_low
@@ -3911,7 +3938,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
         stat_src = ""
         econ_src = ""
 
-    if any(k in s_low for k in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "1202", "qsbs", "amt", "niit")):
+    if any(k in s_low for k in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "reasonable-salary", "1202", "qsbs", "amt", "niit")):
         default_stat = "IRC Section 1(j); IRC Section 199A; IRS Rev. Proc. 2025-32"
         default_econ = "IRS SOI Individual Tax Statistics and BLS Consumer Price Index (CPI-U)"
     elif any(k in s_low for k in ("1031", "like-kind", "exchange", "ftb-3840")):
@@ -3923,6 +3950,21 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
     elif any(k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig")):
         default_stat = "CFTC 17 CFR Part 40; IRC Section 1256; IRC Section 165(d)"
         default_econ = "FRED 3-Month Treasury Bill (DTB3) and CFTC DCM Volume Series"
+    elif any(k in s_low for k in ("174", "r-and-d", "r&d", "amortization")):
+        default_stat = "IRC Section 174; IRC Section 41; IRS Notice 2023-63"
+        default_econ = "NSF Business Enterprise R&D Series and BLS Producer Price Index (PPI)"
+    elif any(k in s_low for k in ("301", "tariff", "landed-cost", "customs", "import")):
+        default_stat = "19 U.S.C. 2411 (Section 301); HTSUS Chapter 99; 19 CFR Part 141"
+        default_econ = "USITC DataWeb Import Series and BLS Import/Export Price Indexes"
+    elif any(k in s_low for k in ("surety", "bond", "contractor")):
+        default_stat = "40 U.S.C. 3131 (Miller Act); FAR Part 28; SBA Surety Bond Guarantee Rules"
+        default_econ = "U.S. Census Bureau Construction Spending (VIP) Series"
+    elif any(k in s_low for k in ("factoring", "line-of-credit", "runway", "burn", "saas", "working-capital", "cash-flow", "treasury", "hysa", "yield")):
+        default_stat = "UCC Article 9; 12 CFR Part 1026 (Reg Z); IRC Section 163(j)"
+        default_econ = "Federal Reserve H.15 Selected Interest Rates and Senior Loan Officer Survey (SLOOS)"
+    elif any(k in s_low for k in ("workers-comp", "payroll", "classification", "1099-vs-w2")):
+        default_stat = "IRC Section 3111; IRC Section 3301; 29 CFR Part 795 (FLSA Classification)"
+        default_econ = "BLS Employer Costs for Employee Compensation (ECEC) Series"
     else:
         default_stat = "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40"
         default_econ = "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
@@ -3930,7 +3972,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
 
 
 def _has_vertical_competitor_pollution(html_content: str) -> bool:
-    """Detects when a non-Section-179 tool page (such as irs-2027-tax-brackets) was polluted with Section 179 Heavy SUV content."""
+    """Detects when a non-Section-179 tool page or homepage was polluted with Section 179 Heavy SUV content."""
     if "heavy SUV (6,000 to 14,000 lbs GVWR)" not in html_content:
         return False
     canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
@@ -3938,6 +3980,8 @@ def _has_vertical_competitor_pollution(html_content: str) -> bool:
         canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
     if canon_m:
         canon_url = canon_m.group(1).strip().lower()
+        if canon_url.rstrip("/") == "https://profithelm.com":
+            return True
         if "/tools/" not in canon_url or "179" in canon_url:
             return False
         ident_txt = canon_url
@@ -3949,8 +3993,447 @@ def _has_vertical_competitor_pollution(html_content: str) -> bool:
             return False
     return any(
         k in ident_txt
-        for k in ("tax-bracket", "tax bracket", "tax-rate", "tcja", "capital-gains", "capital gains", "s-corp", "1202", "qsbs", "amt", "niit", "1031", "crypto", "prediction")
+        for k in (
+            "tax-bracket",
+            "tax bracket",
+            "tax-rate",
+            "tcja",
+            "capital-gains",
+            "capital gains",
+            "s-corp",
+            "reasonable-salary",
+            "1202",
+            "qsbs",
+            "amt",
+            "niit",
+            "1031",
+            "crypto",
+            "prediction",
+            "174",
+            "r-and-d",
+            "301",
+            "tariff",
+            "landed-cost",
+            "surety",
+            "bond",
+            "factoring",
+            "line-of-credit",
+            "runway",
+            "burn",
+            "saas",
+            "workers-comp",
+            "payroll",
+            "treasury",
+            "hysa",
+            "yield",
+        )
     )
+
+
+def _extract_faq_schema_and_body_counts(html_content: str) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """Extracts (schema_faq_pairs, body_details_faq_pairs) to verify 1:1 FAQPage JSON-LD <-> visible DOM parity."""
+    schema_pairs: List[Tuple[str, str]] = []
+    for m in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html_content,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        try:
+            data = json.loads(m.group(1).strip())
+            nodes = data.get("@graph", [data]) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for node in nodes:
+                if isinstance(node, dict) and node.get("@type") == "FAQPage":
+                    for q_item in node.get("mainEntity", []):
+                        if isinstance(q_item, dict):
+                            q_txt = str(q_item.get("name") or "").strip()
+                            acc = q_item.get("acceptedAnswer")
+                            a_txt = str(acc.get("text") if isinstance(acc, dict) else "").strip()
+                            if q_txt and a_txt:
+                                schema_pairs.append((q_txt, a_txt))
+        except Exception:
+            pass
+
+    body_pairs: List[Tuple[str, str]] = []
+    seen_body_q: set = set()
+    for dm in re.finditer(r"<details\b[^>]*>([\s\S]*?)</details>", html_content, re.IGNORECASE):
+        d_inner = dm.group(1)
+        sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", d_inner, re.IGNORECASE)
+        pm = re.search(r"<p\b[^>]*>([\s\S]*?)</p>", d_inner, re.IGNORECASE)
+        if sm and pm:
+            q_clean = re.sub(r"<[^>]+>", "", sm.group(1)).replace("&amp;", "&").strip()
+            a_clean = re.sub(r"<[^>]+>", "", pm.group(1)).replace("&amp;", "&").strip()
+            q_key = q_clean.lower()
+            if q_clean and a_clean and q_key not in seen_body_q:
+                seen_body_q.add(q_key)
+                body_pairs.append((q_clean, a_clean))
+    return schema_pairs, body_pairs
+
+
+def _needs_page_structure_geo_normalization(html_content: str) -> bool:
+    """Checks whether an HTML document has structural or GEO answer-delivery gaps requiring normalization."""
+    if any(
+        generic_h2 in html_content
+        for generic_h2 in (
+            "<h2>Dual Dataset Provenance and Statutory Corroboration</h2>",
+            "<h2>Parameterized Scenario Presets and Baseline Verification</h2>",
+            "<h2>Sensitivity Scenario Modeling (0.8x to 1.2x Parameter Matrix)</h2>",
+            "<h2>Statutory Analysis and Computational Methodology</h2>",
+            "<h2>Frequently Asked Questions</h2>",
+        )
+    ):
+        return True
+
+    mdj_idx = html_content.find('class="multi-dataset-join')
+    calc_idx = html_content.find('id="calculator-workspace-anchor"')
+    if mdj_idx != -1 and calc_idx != -1 and mdj_idx < calc_idx:
+        return True
+
+    if "saves $9,180 in annual FICA self-employment taxes with a $95,000." in html_content:
+        return True
+
+    if re.search(r'<div\s+class=["\']faq-card["\']', html_content, re.IGNORECASE):
+        return True
+
+    if re.search(
+        r'<h2[^>]*>\s*Frequently Asked Questions[\s\S]{0,400}?<div\s+class=["\']calc-scenario-card["\']',
+        html_content,
+        re.IGNORECASE,
+    ):
+        return True
+
+    if '<details class="faq-accordion faq-item"' in html_content and '<summary class="touch-target"' not in html_content:
+        return True
+
+    meth_m = re.search(r'<section\s+class=["\']methodology\s+card["\'][^>]*>([\s\S]*?)</section>', html_content, re.IGNORECASE)
+    if meth_m and ("<ul" not in meth_m.group(1) or "/tools/" not in meth_m.group(1)):
+        return True
+
+    canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+    if not canon_m:
+        canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
+    canon_url = canon_m.group(1).strip().lower() if canon_m else ""
+    if (
+        "prexvo.com/tools/" in canon_url
+        and not any(
+            root_s in canon_url
+            for root_s in (
+                "/tools/student-loan-repayment-calculator/",
+                "/tools/rap-vs-ibr-calculator/",
+                "/tools/rap-payment-calculator/",
+            )
+        )
+        and bool(
+            re.search(
+                r'<h2\b[^>]*class=["\'][^"\']*\bcalc-title\b[^"\']*["\'][^>]*>\s*Federal Student Loan Repayment',
+                html_content,
+                re.IGNORECASE,
+            )
+        )
+    ):
+        return True
+
+    schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(html_content)
+    if schema_faqs or body_faqs:
+        schema_q_set = {q.replace("&amp;", "&").strip().lower() for q, _ in schema_faqs}
+        body_q_set = {q.replace("&amp;", "&").strip().lower() for q, _ in body_faqs}
+        if schema_q_set != body_q_set or len(schema_faqs) != len(body_faqs):
+            return True
+
+    return False
+
+
+def _normalize_page_structure_and_geo_parity(
+    html_content: str,
+    property_id: str,
+    slug: str,
+    topic_label: str,
+    canonical_url: str,
+    stat_auth: str,
+    econ_ds: str,
+) -> Tuple[str, bool]:
+    """
+    Normalizes page structure and GEO extractability across compiled HTML pages:
+    1. Contextualizes generic <h2> subheadings with the page's entity topic label.
+    2. Moves .multi-dataset-join below #calculator-workspace-anchor so H1 -> Quick Answer -> Calculator is immediate above the fold.
+    3. Upgrades <section class="methodology card"> into concise 2-sentence paragraphs, a bulleted statutory list, and 2 contextual in-prose links.
+    4. Repairs truncated S-Corp FAQ prose and converts static FAQ cards into accessible <details>/<summary class="touch-target"> accordions.
+    5. Enforces 1:1 parity between FAQPage JSON-LD in <head> and visible <details> FAQs in <body>.
+    """
+    updated = html_content
+    changed = False
+
+    # 1. Contextualize generic <h2> headings
+    h2_replacements = [
+        (
+            "<h2>Dual Dataset Provenance and Statutory Corroboration</h2>",
+            f"<h2>Dual Dataset Provenance and Statutory Corroboration: {topic_label}</h2>",
+        ),
+        (
+            "<h2>Parameterized Scenario Presets and Baseline Verification</h2>",
+            f"<h2>Parameterized Scenario Presets and Baseline Verification: {topic_label}</h2>",
+        ),
+        (
+            "<h2>Sensitivity Scenario Modeling (0.8x to 1.2x Parameter Matrix)</h2>",
+            f"<h2>Sensitivity Scenario Modeling: {topic_label}</h2>",
+        ),
+        (
+            "<h2>Statutory Analysis and Computational Methodology</h2>",
+            f"<h2>Statutory Analysis and Computational Methodology: {topic_label}</h2>",
+        ),
+        (
+            "<h2>Frequently Asked Questions</h2>",
+            f"<h2>Frequently Asked Questions: {topic_label}</h2>",
+        ),
+    ]
+    for old_h2, new_h2 in h2_replacements:
+        if old_h2 in updated:
+            updated = updated.replace(old_h2, new_h2)
+            changed = True
+
+    if (
+        property_id.lower() == "prexvo"
+        and slug not in ("index", "student-loan-repayment-calculator", "rap-vs-ibr-calculator", "rap-payment-calculator")
+        and bool(
+            re.search(
+                r'<h2\b[^>]*class=["\'][^"\']*\bcalc-title\b[^"\']*["\'][^>]*>\s*Federal Student Loan Repayment',
+                updated,
+                re.IGNORECASE,
+            )
+        )
+    ):
+        updated_calc_h2 = re.sub(
+            r'<h2\b[^>]*class=["\'][^"\']*\bcalc-title\b[^"\']*["\'][^>]*>\s*Federal Student Loan Repayment\s*(?:&amp;|&)\s*RAP Comparison Calculator\s*</h2>',
+            f'<h2 class="calc-title">Interactive {topic_label} &amp; Title IV Repayment Simulator</h2>',
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if updated_calc_h2 != updated:
+            updated = updated_calc_h2
+            changed = True
+
+    # 2. Move .multi-dataset-join below #calculator-workspace-anchor if it appears above it
+    mdj_m = re.search(
+        r'(\s*<section[^>]*class=["\'][^"\']*\bmulti-dataset-join\b[^"\']*["\'][^>]*>[\s\S]*?</section>)',
+        updated,
+        re.IGNORECASE,
+    )
+    calc_idx = updated.find('id="calculator-workspace-anchor"')
+    if mdj_m and calc_idx != -1 and mdj_m.start() < calc_idx:
+        mdj_block = mdj_m.group(1).strip()
+        without_mdj = updated[: mdj_m.start()] + updated[mdj_m.end() :]
+        anchor_Match = re.search(
+            r'(<section\s+class=["\'](?:scenario-presets-section|sensitivity-grid-section|methodology)\b)',
+            without_mdj,
+            re.IGNORECASE,
+        )
+        if anchor_Match:
+            ins_idx = anchor_Match.start()
+            updated = without_mdj[:ins_idx] + mdj_block + "\n\n    " + without_mdj[ins_idx:]
+            changed = True
+
+    # 3. Upgrade legacy <section class="methodology card"> if missing <ul> or contextual /tools/ links
+    meth_m = re.search(
+        r'<section\s+class=["\']methodology\s+card["\'][^>]*>([\s\S]*?)</section>',
+        updated,
+        re.IGNORECASE,
+    )
+    if meth_m and ("<ul" not in meth_m.group(1) or "/tools/" not in meth_m.group(1)):
+        base_dom = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+        if canonical_url and "/tools/" in canonical_url:
+            base_dom = canonical_url.split("/tools/")[0].rstrip("/")
+        if property_id.lower() == "prexvo":
+            m_peers = [
+                ("student-loan-repayment-calculator", "Title IV Repayment Calculator"),
+                ("rap-vs-ibr-calculator", "RAP vs IBR Comparison Model"),
+                ("pslf-buyback-calculator", "PSLF Buyback Settlement Model"),
+            ]
+        else:
+            m_peers = [
+                ("irs-2027-tax-brackets", "Federal Tax Bracket Model"),
+                ("section-179-calculator", "Section 179 Depreciation Model"),
+                ("section-1031-calculator", "Section 1031 Exchange Model"),
+            ]
+        m_filtered = [(s, lbl) for s, lbl in m_peers if s != slug][:2]
+        while len(m_filtered) < 2:
+            m_filtered.append(m_peers[0])
+        (mp1_s, mp1_l), (mp2_s, mp2_l) = m_filtered[0], m_filtered[1]
+        new_meth_section = (
+            f'<section class="methodology card">\n'
+            f'      <h2>Statutory Analysis and Computational Methodology: {topic_label}</h2>\n'
+            f'      <p>This quantitative model executes a deterministic mathematical evaluation of {topic_label} '
+            f'using client-side sensitivity controls and pre-rendered verification matrices. Every baseline output '
+            f'is verified at build time against statutory formulas and federal macroeconomic series.</p>\n'
+            f'      <ul style="margin: 12px 0 16px; padding-left: 20px; line-height: 1.6;">\n'
+            f'        <li><strong>Primary Statutory Authority:</strong> {stat_auth} governs threshold limits, phase-outs, and filing rules.</li>\n'
+            f'        <li><strong>Empirical Economic Dataset:</strong> {econ_ds} anchors inflation indexing and benchmark rate assumptions.</li>\n'
+            f'        <li><strong>Sensitivity Bounds:</strong> 5-point stress testing (0.8x to 1.2x) isolates marginal rate exposure before execution.</li>\n'
+            f'      </ul>\n'
+            f'      <p>Cross-verify adjacent statutory exposure with our '
+            f'<a href="{base_dom}/tools/{mp1_s}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-weight: 600; text-decoration: underline;">{mp1_l}</a> '
+            f'and <a href="{base_dom}/tools/{mp2_s}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-weight: 600; text-decoration: underline;">{mp2_l}</a> '
+            f'to prevent cross-provision compliance traps.</p>\n'
+            f'    </section>'
+        )
+        updated = updated[: meth_m.start()] + new_meth_section + updated[meth_m.end() :]
+        changed = True
+
+    # 4. Fix truncated S-Corp FAQ sentence
+    broken_scorp = "saves $9,180 in annual FICA self-employment taxes with a $95,000."
+    fixed_scorp = "saves $9,180 in annual FICA self-employment taxes with a $95,000 reasonable W-2 salary and $60,000 K-1 distribution."
+    if broken_scorp in updated:
+        updated = updated.replace(broken_scorp, fixed_scorp)
+        changed = True
+
+    # 5. Convert static <div class="faq-card"> and Prexvo FAQ <div class="calc-scenario-card"> into interactive <details>
+    def _faq_div_to_details(m: re.Match) -> str:
+        q_txt = m.group(1).strip()
+        a_txt = m.group(2).strip()
+        return (
+            '<details class="faq-item faq-card" style="margin-bottom: 10px; padding: 12px; '
+            'border: 1px solid var(--border, #e2e8f0); border-radius: 6px;">'
+            '<summary class="touch-target" style="font-weight: 600; cursor: pointer; '
+            'min-height: 44px; min-width: 44px; display: flex; align-items: center;">'
+            f"{q_txt}</summary>"
+            f'<p style="margin: 8px 0 0; line-height: 1.55;">{a_txt}</p></details>'
+        )
+
+    conv_faq_cards = re.sub(
+        r'<div\s+class=["\']faq-card["\'][^>]*>\s*<h[34][^>]*>([\s\S]*?)</h[34]>\s*<p[^>]*>([\s\S]*?)</p>\s*</div>',
+        _faq_div_to_details,
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if conv_faq_cards != updated:
+        updated = conv_faq_cards
+        changed = True
+
+    def _prexvo_faq_section_to_details(sec_m: re.Match) -> str:
+        sec_html = sec_m.group(0)
+        return re.sub(
+            r'<div\s+class=["\']calc-scenario-card["\'][^>]*>\s*<h3[^>]*>([\s\S]*?)</h3>\s*<p[^>]*>([\s\S]*?)</p>\s*</div>',
+            _faq_div_to_details,
+            sec_html,
+            flags=re.IGNORECASE,
+        )
+
+    conv_prexvo_faqs = re.sub(
+        r'<section[^>]*>\s*<div\s+class=["\']calc-section-header["\']>\s*<h2[^>]*>\s*Frequently Asked Questions[\s\S]*?</section>',
+        _prexvo_faq_section_to_details,
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if conv_prexvo_faqs != updated:
+        updated = conv_prexvo_faqs
+        changed = True
+
+    if '<details class="faq-accordion faq-item"><summary>' in updated:
+        updated = updated.replace(
+            '<details class="faq-accordion faq-item"><summary>',
+            '<details class="faq-accordion faq-item"><summary class="touch-target" style="min-height: 44px; min-width: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer;">',
+        )
+        changed = True
+
+    # 6. Deduplicate visible <details> FAQs in <body> and synchronize 1:1 with FAQPage JSON-LD in <head>
+    seen_dom_q: set = set()
+
+    def _dedup_details_faq(dm: re.Match) -> str:
+        d_full = dm.group(0)
+        sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", d_full, re.IGNORECASE)
+        if not sm:
+            return d_full
+        q_norm = re.sub(r"<[^>]+>", "", sm.group(1)).replace("&amp;", "&").strip().lower()
+        if q_norm in seen_dom_q:
+            return ""
+        seen_dom_q.add(q_norm)
+        return d_full
+
+    deduped_dom = re.sub(r"<details\b[^>]*>[\s\S]*?</details>", _dedup_details_faq, updated, flags=re.IGNORECASE)
+    if deduped_dom != updated:
+        updated = deduped_dom
+        changed = True
+
+    schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(updated)
+    if schema_faqs and not body_faqs:
+        # Render schema FAQs into visible <details> section before </main>
+        details_items = "\n".join(
+            f'      <details class="faq-item faq-card" style="margin-bottom: 10px; padding: 12px; border: 1px solid var(--border, #e2e8f0); border-radius: 6px;">\n'
+            f'        <summary class="touch-target" style="font-weight: 600; cursor: pointer; min-height: 44px; min-width: 44px; display: flex; align-items: center;">{q}</summary>\n'
+            f'        <p style="margin: 8px 0 0; line-height: 1.55;">{a}</p>\n'
+            f'      </details>'
+            for q, a in schema_faqs
+        )
+        faq_sec_html = (
+            f'    <section class="faq-section card pseo-card" id="faq" style="margin-top: 24px;">\n'
+            f'      <h2>Frequently Asked Questions: {topic_label}</h2>\n'
+            f'{details_items}\n'
+            f'    </section>'
+        )
+        main_close = updated.rfind("</main>")
+        if main_close != -1:
+            updated = updated[:main_close] + "\n" + faq_sec_html + "\n  " + updated[main_close:]
+        else:
+            footer_open = updated.rfind("<footer")
+            if footer_open != -1:
+                updated = updated[:footer_open] + faq_sec_html + "\n\n    " + updated[footer_open:]
+        changed = True
+        schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(updated)
+
+    if body_faqs:
+        schema_q_list = [q.replace("&amp;", "&").strip() for q, _ in schema_faqs]
+        body_q_list = [q.replace("&amp;", "&").strip() for q, _ in body_faqs]
+        if schema_q_list != body_q_list:
+            faq_entities = [
+                {
+                    "@type": "Question",
+                    "name": q_txt,
+                    "acceptedAnswer": {
+                        "@type": "Answer",
+                        "text": a_txt,
+                    },
+                }
+                for q_txt, a_txt in body_faqs
+            ]
+
+            def _sync_faq_ld_json(match: re.Match) -> str:
+                open_t, raw_j, close_t = match.group(1), match.group(2), match.group(3)
+                try:
+                    data = json.loads(raw_j.strip())
+                    if isinstance(data, dict):
+                        if "@graph" in data and isinstance(data["@graph"], list):
+                            found_faq = False
+                            for node in data["@graph"]:
+                                if isinstance(node, dict) and node.get("@type") == "FAQPage":
+                                    node["mainEntity"] = faq_entities
+                                    found_faq = True
+                            if not found_faq:
+                                data["@graph"].append(
+                                    {
+                                        "@type": "FAQPage",
+                                        "@id": f"{canonical_url.split('#')[0]}#faqpage",
+                                        "mainEntity": faq_entities,
+                                    }
+                                )
+                            return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
+                        elif data.get("@type") == "FAQPage":
+                            data["mainEntity"] = faq_entities
+                            return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
+                except Exception:
+                    pass
+                return match.group(0)
+
+            synced_ld = re.sub(
+                r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+                _sync_faq_ld_json,
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if synced_ld != updated:
+                updated = synced_ld
+                changed = True
+
+    return updated, changed
 
 
 class RetroReflectionEngine:
@@ -4094,13 +4577,15 @@ class RetroReflectionEngine:
         if (
             'data-mechanic="instant_edge_case_trap_immediacy"' not in html_content
             or "(1 - P)" in html_content
+            or "calendar days after closing relinquished property OR the due date (including extensions)" in html_content
             or has_v_pollution
         ):
             missing.append("instant_edge_case_trap_immediacy")
 
         if (
             'data-mechanic="statutory_compliance_framing"' not in html_content
-            or "<h3 id=\"statutory-pitfalls-matrix\"" in html_content
+            or '<div id="statutory-pitfalls-matrix"' in html_content
+            or "<h2>Beyond the Calculator: Statutory Compliance and Procedural Verification</h2>" in html_content
             or has_v_pollution
         ):
             missing.append("statutory_compliance_framing")
@@ -4138,6 +4623,7 @@ class RetroReflectionEngine:
             or has_v_pollution
             or 'data-mechanic="on_this_page_jump_nav"' not in html_content
             or "<h2>3-Tier Statutory Topic Cluster" in html_content
+            or "<h2>Connected Statutory Topic Cluster and Decision Architecture</h2>" in html_content
             or 'href="#calculator-workspace-anchor"' in html_content
             or "student-loan-interest-subsidy-calculator" in html_content
             or "california-1031-exchange-clawback-ftb-3840-calculator" in html_content
@@ -4176,6 +4662,8 @@ class RetroReflectionEngine:
         if (
             'data-mechanic="vetted_commercial_handoff_framing"' not in html_content
             or 'id="vetted-commercial-handoff"' not in html_content
+            or '<div style="font-size: 16px; font-weight: 700;' in html_content
+            or "Execution Protocol:" in html_content
             or has_v_pollution
         ):
             missing.append("vetted_commercial_handoff_framing")
@@ -4191,6 +4679,7 @@ class RetroReflectionEngine:
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
+            or _needs_page_structure_geo_normalization(html_content)
         ):
             missing.append("deterministic_visual_primitives")
 
@@ -4372,6 +4861,13 @@ class RetroReflectionEngine:
                 base_dom = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
                 canonical_url = f"{base_dom}/tools/{slug}/"
 
+        if (
+            property_id.lower() != "prexvo"
+            and canonical_url.split("?")[0].rstrip("/").lower() == "https://profithelm.com"
+            and slug in ("section-179-deduction-calculator", "index", "tool")
+        ):
+            slug = "tax-bracket-capital-allocation-hub"
+
         manifest = cls._resolve_manifest_for_page(
             updated,
             property_id=property_id,
@@ -4379,6 +4875,9 @@ class RetroReflectionEngine:
             dist_dir=dist_dir,
             manifest_override=manifest_override,
         )
+        from pseofactory.competitor import _format_safe_heading_topic
+
+        topic_label = _format_safe_heading_topic(manifest["model_name"], slug)
         pub_out = float(manifest["published_output"])
         display_out = f"{pub_out:,.2f}" if not pub_out.is_integer() else f"{pub_out:,.0f}"
         stat_auth = manifest["statutory_authority"]
@@ -4502,7 +5001,7 @@ class RetroReflectionEngine:
             injected_parts.append(
                 f'    <section class="multi-dataset-join card" data-statutory-source="{stat_auth}" '
                 f'data-economic-source="{econ_ds}" style="margin-top: 24px;">\n'
-                f'      <h2>Dual Dataset Provenance and Statutory Corroboration</h2>\n'
+                f'      <h2>Dual Dataset Provenance and Statutory Corroboration: {topic_label}</h2>\n'
                 f'      <p>Primary statutory authority: <strong>{stat_auth}</strong> establishes the governing regulatory rules, thresholds, and schedules for this calculation.</p>\n'
                 f'      <p>Empirical economic dataset: <strong>{econ_ds}</strong> provides macroeconomic benchmark series corroboration.</p>\n'
                 f'    </section>'
@@ -4547,7 +5046,7 @@ class RetroReflectionEngine:
                 repaired.append("range_slider")
             injected_parts.append(
                 f'    <section class="scenario-presets-section card" style="margin-top: 24px;">\n'
-                f'      <h2>Parameterized Scenario Presets and Baseline Verification</h2>\n'
+                f'      <h2>Parameterized Scenario Presets and Baseline Verification: {topic_label}</h2>\n'
                 f'      <p>Select a pre-configured parameter scenario below. Verified baseline model output: '
                 f'<strong class="output-value" data-baseline-output="{pub_out}">{display_out}</strong>.</p>\n'
                 f'      <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" '
@@ -4575,6 +5074,7 @@ class RetroReflectionEngine:
                     display_output=display_out,
                     statutory_authority=stat_auth,
                     economic_dataset=econ_ds,
+                    model_name=topic_label,
                 )
             )
             repaired.append("server_rendered_sensitivity_grid")
@@ -4686,9 +5186,19 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
+        updated, geo_norm_changed = _normalize_page_structure_and_geo_parity(
+            updated,
+            property_id=property_id,
+            slug=slug,
+            topic_label=topic_label,
+            canonical_url=canonical_url,
+            stat_auth=stat_auth,
+            econ_ds=econ_ds,
+        )
+
         from pseofactory.visual_primitives import normalize_html_visual_primitives
         updated, vp_repaired = normalize_html_visual_primitives(updated)
-        if "deterministic_visual_primitives" in missing or vp_repaired:
+        if "deterministic_visual_primitives" in missing or vp_repaired or geo_norm_changed:
             if "deterministic_visual_primitives" not in repaired:
                 repaired.append("deterministic_visual_primitives")
 
@@ -4716,18 +5226,43 @@ class RetroReflectionEngine:
         if heal_legacy:
             try:
                 from pseofactory.gsc_remediation import compile_remediation_overlay_spec
-                agy_ov_dir = repo_root / ".agy" / "overlays"
-                if agy_ov_dir.is_dir():
-                    for agy_ov in sorted(agy_ov_dir.rglob("*.json")):
+                for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+                    if not ov_dir.is_dir():
+                        continue
+                    for ov_path in sorted(ov_dir.rglob("*.json")):
                         try:
-                            raw_ov = json.loads(agy_ov.read_text(encoding="utf-8"))
+                            raw_ov = json.loads(ov_path.read_text(encoding="utf-8"))
                             if not isinstance(raw_ov, dict):
                                 continue
-                            ov_s = str(raw_ov.get("slug") or agy_ov.stem)
+                            ov_s = str(raw_ov.get("slug") or ov_path.stem)
                             raw_dump = json.dumps(raw_ov)
+                            qa_str = str(raw_ov.get("quick_answer") or "")
                             needs_ov_heal = (
                                 ("179" not in ov_s.lower() and "Section 179" in raw_dump)
                                 or (ov_s == "student-loan-repayment-calculator" and "Tiered Standard" in raw_dump)
+                                or ("and audit-ready." in raw_dump)
+                                or not qa_str.strip()
+                                or (
+                                    any(
+                                        k in ov_s.lower()
+                                        for k in (
+                                            "s-corp",
+                                            "reasonable-salary",
+                                            "174",
+                                            "r-and-d",
+                                            "301",
+                                            "tariff",
+                                            "surety",
+                                            "bond",
+                                            "factoring",
+                                            "workers-comp",
+                                            "payroll",
+                                            "1202",
+                                            "qsbs",
+                                        )
+                                    )
+                                    and "IRC Section 1, Section 1(h), and Section 1411" in qa_str
+                                )
                             )
                             if needs_ov_heal:
                                 healed_ov = compile_remediation_overlay_spec(
@@ -4740,7 +5275,17 @@ class RetroReflectionEngine:
                                     },
                                     tenant_id=property_id,
                                 )
-                                agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
+                                for preserve_key in (
+                                    "partner_offer",
+                                    "restricted_public_service",
+                                    "commercial_offers_allowed",
+                                    "locked_until",
+                                    "created_at",
+                                    "status",
+                                ):
+                                    if preserve_key in raw_ov:
+                                        healed_ov[preserve_key] = raw_ov[preserve_key]
+                                ov_path.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
                         except Exception:
                             pass
             except Exception:
@@ -4819,7 +5364,7 @@ class RetroReflectionEngine:
                     rel_path=rel,
                     require_primitives=True,
                 )
-                if non_tool_issues:
+                if non_tool_issues or _needs_page_structure_geo_normalization(content):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
             scanned += 1
@@ -4828,7 +5373,7 @@ class RetroReflectionEngine:
                 if (
                     'id="gsc-striking-overlay"' not in content
                     and 'class="gsc-remediation-overlay"' not in content
-                ):
+                ) or "and audit-ready." in content or bool(re.search(r'<div\s+class=["\']faq-card["\']', content, re.IGNORECASE)):
                     if "gsc_striking_overlay" not in missing:
                         missing.append("gsc_striking_overlay")
             if missing:
@@ -4918,6 +5463,24 @@ class RetroReflectionEngine:
                             retrofitted_paths.append(rel)
                     except Exception:
                         pass
+                canon_nt = (
+                    canonical_base
+                    or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+                ).rstrip("/") + "/" + ("" if rel == "index.html" else rel.replace("index.html", ""))
+                nt_geo_html, nt_geo_changed = _normalize_page_structure_and_geo_parity(
+                    content,
+                    property_id=property_id,
+                    slug="tools-directory",
+                    topic_label="Statutory Financial Calculators and Decision Tools",
+                    canonical_url=canon_nt,
+                    stat_auth="IRC Section 1(j); IRC Section 179; IRC Section 1031",
+                    econ_ds="IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series",
+                )
+                if nt_geo_changed and nt_geo_html != content:
+                    html_file.write_text(nt_geo_html, encoding="utf-8")
+                    content = nt_geo_html
+                    if rel not in retrofitted_paths:
+                        retrofitted_paths.append(rel)
                 norm_html, norm_rep = normalize_html_visual_primitives(content, is_tenant_porcelain=True)
                 if norm_rep and norm_html != content:
                     html_file.write_text(norm_html, encoding="utf-8")
@@ -4931,7 +5494,7 @@ class RetroReflectionEngine:
             elif html_file.stem != "index":
                 slug = html_file.stem
             else:
-                slug = "rap-payment-calculator" if property_id.lower() == "prexvo" else "section-179-deduction-calculator"
+                slug = "rap-payment-calculator" if property_id.lower() == "prexvo" else "tax-bracket-capital-allocation-hub"
 
             working_content = content
             overlay_injected = False

@@ -422,6 +422,7 @@ def _render_5point_sensitivity_table_html(
     display_output: str,
     statutory_authority: str,
     economic_dataset: str,
+    model_name: str = "",
 ) -> str:
     """
     Renders a 5-point server-side sensitivity scenario table (0.8x to 1.2x)
@@ -432,11 +433,13 @@ def _render_5point_sensitivity_table_html(
     mod_con_output = _format_scenario_number(published_output * 0.9)
     mod_exp_output = _format_scenario_number(published_output * 1.1)
     aggressive_output = _format_scenario_number(published_output * 1.2)
+    clean_model = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", str(model_name or "").strip())
+    sens_h2 = f"Sensitivity Scenario Modeling: {clean_model}" if clean_model else "Sensitivity Scenario Modeling"
 
     return (
         f'    <div class="scenario-container comparison-container card pseo-card" '
         f'data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid">\n'
-        f'      <h2>Sensitivity Scenario Modeling</h2>\n'
+        f'      <h2>{sens_h2}</h2>\n'
         f'      <p>SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>\n'
         f'      <div class="table-wrap pseo-table-wrap">\n'
         f'        <table class="scenario-table comparison-table" data-entity-type="scenario" '
@@ -839,6 +842,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         display_output=display_output,
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
+        model_name=model_name,
     )
 
     spec_tenant_signals = " ".join(
@@ -930,6 +934,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     sibling_links = [(s_slug, s_title) for (s_slug, s_title) in cluster if s_slug != slug]
     if not sibling_links:
         sibling_links = cluster
+
+    primary_sibling_slug, primary_sibling_title = sibling_links[0]
+    secondary_sibling_slug, secondary_sibling_title = sibling_links[1 % len(sibling_links)]
+    safe_model_h2 = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", model_name)
 
     cluster_items_html = []
     for s_slug, s_title in sibling_links:
@@ -1042,7 +1050,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         a_text = faq_item.get("acceptedAnswer", {}).get("text", "")
         faq_accordions_list.append(
             f'      <details class="faq-accordion">\n'
-            f'        <summary>{q_text}</summary>\n'
+            f'        <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; cursor: pointer; font-weight: 600;">{q_text}</summary>\n'
             f'        <p>{a_text}</p>\n'
             f'      </details>'
         )
@@ -1427,22 +1435,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </div>
     </header>
 
-{on_this_page_nav_html}
-
-    <div class="multi-dataset-join card" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
-      <h2>Dual Dataset Provenance and Statutory Corroboration</h2>
-      <p>
-        Primary statutory authority: <strong>{statutory_authority}</strong> provides the legal basis, statutory deduction thresholds,
-        phaseout schedules, and mandatory compliance rules for this calculation.
-      </p>
-      <p>
-        Empirical economic benchmark dataset: <strong>{economic_dataset}</strong> provides empirical series validation,
-        cost indexes, and macroeconomic context from the Bureau of Labor Statistics and Federal Reserve systems.
-      </p>
-    </div>
-
     <div id="calculator-workspace-anchor" class="calculation-container card">
-      <h2>Interactive Quantitative Model: {model_name}</h2>
+      <h2>Interactive Quantitative Model: {safe_model_h2}</h2>
       <p>
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
         (greater than or equal to zero) per HWL-1263 to prevent crawler or user state corruption.
@@ -1482,6 +1476,20 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </figure>
     </div>
 
+{on_this_page_nav_html}
+
+    <div class="multi-dataset-join card" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
+      <h2>Dual Dataset Provenance and Statutory Corroboration: {safe_model_h2}</h2>
+      <p>
+        Primary statutory authority: <strong>{statutory_authority}</strong> provides the legal basis, statutory deduction thresholds,
+        phaseout schedules, and mandatory compliance rules for this calculation.
+      </p>
+      <p>
+        Empirical economic benchmark dataset: <strong>{economic_dataset}</strong> provides empirical series validation,
+        cost indexes, and macroeconomic context from the Bureau of Labor Statistics and Federal Reserve systems.
+      </p>
+    </div>
+
 {scenario_table_html}
 
 {monetization_section_html}
@@ -1491,19 +1499,23 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 {statutory_compliance_html}
 
     <section class="methodology card">
-      <h2>Statutory Analysis and Computational Methodology</h2>
+      <h2>Statutory Analysis and Computational Methodology: {safe_model_h2}</h2>
       <p>
-        This computational tool was engineered to satisfy strict high-effort content qualification requirements.
-        Rather than relying on speculative estimates or stochastic language model generations, every metric on this page
-        is evaluated through abstract syntax tree mathematical interpretation.
-        The governing statutory authority {statutory_authority} sets the exact legal formulas, phaseout rates, and deduction caps.
-        Simultaneously, empirical dataset series from {economic_dataset} provide independent validation for inflation adjustments,
-        cost basis indices, and market trends.
+        This computational tool satisfies strict high-effort content qualification requirements by evaluating every metric through abstract syntax tree mathematical interpretation rather than speculative estimates.
+        Operators can cross-reference adjacent scenarios using the <a href="{canonical_base}/tools/{primary_sibling_slug}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">{primary_sibling_title}</a> to compare multi-tier cash flow outcomes.
       </p>
+      <p>
+        Governing statutory authority {statutory_authority} establishes the exact legal formulas, phaseout rates, and deduction caps, while empirical dataset series from {economic_dataset} validate inflation adjustments and cost basis indices:
+      </p>
+      <ul style="padding-left: 20px; margin-top: 10px; margin-bottom: 0;">
+        <li style="margin-bottom: 6px;"><strong>Deterministic Formula Execution:</strong> Evaluates <code>{formula}</code> with non-negative parameter clamping to produce the verified baseline output of <strong>{display_output}</strong>.</li>
+        <li style="margin-bottom: 6px;"><strong>Statutory Authority Grounding:</strong> Enforces regulatory thresholds, phaseout schedules, and compliance limits established under {statutory_authority}.</li>
+        <li style="margin-bottom: 6px;"><strong>Empirical Benchmark Corroboration:</strong> Anchors macroeconomic and inflation assumptions to {economic_dataset} alongside the <a href="{canonical_base}/tools/{secondary_sibling_slug}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">{secondary_sibling_title}</a>.</li>
+      </ul>
     </section>
 
     <section class="faq-section card">
-      <h2>Frequently Asked Questions</h2>
+      <h2>Frequently Asked Questions: {safe_model_h2}</h2>
 {faq_accordions_html}
     </section>
 
