@@ -4778,9 +4778,9 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 fed_val = fed_m.group(1).strip()
                 st_val = st_m.group(1).strip()
                 spoke_1031_qa = (
-                    f"On a $2,500,000 {st_name} commercial property exchange ($650,000 basis, $400,000 depreciation), "
-                    f"an IRC Section 1031 like-kind exchange defers {def_val} in total capital gains tax ({fed_val} "
-                    f"federal and {st_val} {st_name} state tax) when proceeds transfer via a Qualified Intermediary "
+                    f"On a $2,500,000 {st_name} property exchange ($650,000 basis, $400,000 depreciation), "
+                    f"an IRC Section 1031 exchange defers {def_val} in capital gains tax ({fed_val} "
+                    f"federal and {st_val} state tax) when proceeds transfer via a Qualified Intermediary "
                     f"within the 45-day identification and 180-day closing windows on IRS Form 8824."
                 )
                 qa_pat = re.compile(
@@ -4788,7 +4788,8 @@ def _normalize_spoke_and_synthesized_body_bloat(
                     re.IGNORECASE,
                 )
                 qa_m = qa_pat.search(updated)
-                if qa_m and def_val not in qa_m.group(2):
+                qa_existing_words = len(re.sub(r"<[^>]+>", " ", qa_m.group(2)).split()) if qa_m else 0
+                if qa_m and (def_val not in qa_m.group(2) or qa_existing_words > 60):
                     updated = qa_pat.sub(
                         rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {st_name} Section 1031 Capital Gains Deferral</div>\n  <div class="quick-answer-body"><p>{spoke_1031_qa}</p></div>\n\g<3>',
                         updated,
