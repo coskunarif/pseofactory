@@ -6003,7 +6003,9 @@ class RetroReflectionEngine:
         qa_str = str(raw_ov.get("quick_answer") or "")
         q_str = str(raw_ov.get("query") or "").lower().strip()
         vehicle_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
-        is_vehicle_slug = ov_s_low in vehicle_slugs or "section-179-calculator" in ov_s_low
+        is_179_or_equip_slug = ov_s_low in vehicle_slugs or any(
+            k in ov_s_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")
+        )
         is_spoke = (
             "/" in ov_s_low
             or ov_s_low in vehicle_slugs
@@ -6016,7 +6018,7 @@ class RetroReflectionEngine:
                 )
             )
         )
-        if not is_vehicle_slug and "179" not in ov_s_low and "Section 179" in ov_body_dump:
+        if not is_179_or_equip_slug and "Section 179" in ov_body_dump:
             return True
         if ov_s_low == "student-loan-repayment-calculator" and "Tiered Standard" in ov_body_dump:
             return True
@@ -6042,10 +6044,12 @@ class RetroReflectionEngine:
         ):
             return True
         if is_spoke:
+            qa_low = qa_str.lower().replace("-", " ")
             has_state_or_vehicle_name = any(
-                st.replace("-", " ").title().replace("Of", "of") in qa_str for st in PROFITHELM_US_STATES
+                st.replace("-", " ") in qa_low for st in PROFITHELM_US_STATES
             ) or any(
-                vn.split(" Section 179")[0] in qa_str for _, vn in PROFITHELM_SECTION_179_VEHICLES
+                " ".join(vn.split()[:2]).lower().replace("-", " ") in qa_low
+                for _, vn in PROFITHELM_SECTION_179_VEHICLES
             )
             if "This page models " in qa_str or not has_state_or_vehicle_name:
                 return True
