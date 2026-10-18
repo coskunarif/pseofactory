@@ -23,7 +23,12 @@ from pseofactory.distributor import (
     _generate_dynamic_distribution_copy,
     _generate_youtube_transcript,
 )
-from pseofactory.contracts import assert_youtube_transcript
+from pseofactory.contracts import (
+    assert_youtube_title,
+    assert_youtube_description,
+    assert_youtube_pinned_comment,
+    assert_youtube_transcript,
+)
 
 __all__ = [
     "generate_linkedin_company_post",
@@ -49,5 +54,8 @@ __all__ = [
     "_sanitize_youtube_text",
     "_generate_dynamic_distribution_copy",
     "_generate_youtube_transcript",
+    "assert_youtube_title",
+    "assert_youtube_description",
+    "assert_youtube_pinned_comment",
     "assert_youtube_transcript",
 ]

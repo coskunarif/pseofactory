@@ -520,10 +520,57 @@ from pseofactory.contracts import (
     assert_x_post,
     assert_no_forbidden_dashes,
     assert_linkedin,
+    assert_youtube_title,
     assert_youtube_description,
     assert_youtube_pinned_comment,
     assert_youtube_transcript,
 )
+
+
+def _clean_tool_title_and_short(raw_title: Any, slug: str, raw_short: Any = "") -> tuple:
+    """
+    Normalizes tool title and short_title:
+    - Unescapes HTML entities (&amp; -> &)
+    - Strips '| ProfitHelm', '| Prexvo', and '2026 Model Tool Guide' suffixes
+    - Removes duplicate 'Calculator Calculator'
+    - Computes a clean word-boundary short_title (<= 30 chars, never slicing mid-word)
+    """
+    import html as _html
+    base_title = _html.unescape(str(raw_title or "")).split("|")[0].strip()
+    base_title = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", base_title, flags=re.IGNORECASE).strip()
+    base_title = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", base_title, flags=re.IGNORECASE).strip()
+    if not base_title:
+        base_title = str(slug or "").replace("-", " ").title()
+
+    cand_short = _html.unescape(str(raw_short or "")).split("|")[0].split(":")[0].strip()
+    cand_short = re.sub(r"\s+\(\d{4}\)\s*$", "", cand_short).strip()
+    cand_short = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", cand_short, flags=re.IGNORECASE).strip()
+    cand_short = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", cand_short, flags=re.IGNORECASE).strip()
+
+    # Reject legacy mid-word 24-char or 48-char slices
+    is_legacy_slice = (
+        not cand_short
+        or len(cand_short) > 32
+        or (len(cand_short) in (24, 48) and base_title.startswith(cand_short) and len(base_title) > len(cand_short) and base_title[len(cand_short)] not in (" ", ":", "-", "|"))
+    )
+    if is_legacy_slice:
+        source_for_short = base_title.split(":")[0].strip()
+        if len(source_for_short) <= 30:
+            cand_short = source_for_short
+        else:
+            words = source_for_short.split()
+            acc: List[str] = []
+            for w in words:
+                nxt = " ".join(acc + [w])
+                if len(nxt) <= 30:
+                    acc.append(w)
+                else:
+                    break
+            if acc and acc[-1].lower() in ("&", "and", "vs", "or", "for", "to", "in", "of", "on", "with", "section"):
+                acc.pop()
+            cand_short = " ".join(acc) if acc else source_for_short[:30].strip()
+
+    return base_title, cand_short
 
 
 def _classify_tool_domain(tool_or_slug: Any) -> str:
@@ -607,6 +654,13 @@ def _classify_tool_domain(tool_or_slug: Any) -> str:
 
 def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
     """Resolves tool dictionary from either slug string or dictionary representation."""
+    from pseofactory.maintenance import (
+        PREXVO_DEFAULT_TOOLS,
+        PROFITHELM_DEFAULT_TOOLS,
+        PREXVO_EXTENDED_TOOLS,
+        PROFITHELM_EXTENDED_TOOLS,
+    )
+
     default_slug = os.environ.get("FACTORY_DEFAULT_TOOL_SLUG", "irs-2027-tax-brackets")
     default_title = os.environ.get("FACTORY_DEFAULT_TOOL_TITLE", "IRS 2027 Federal Income Tax Brackets & TCJA Sunset Rates")
     default_category = os.environ.get("FACTORY_DEFAULT_TOOL_CATEGORY", "Tax Intelligence")
@@ -615,14 +669,15 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
     if not tool_or_slug:
         if TOOLS:
             return dict(TOOLS[0])
+        clean_t, short_t = _clean_tool_title_and_short(default_title, default_slug)
         return {
             "slug": default_slug,
-            "title": default_title,
-            "short_title": default_title[:24],
-            "nav_label": default_title[:14],
-            "description": f"Deterministic quantitative model and planning calculator for {default_title}.",
-            "primary_keyword": default_title.lower(),
-            "quick_answer": f"The {default_title} model provides deterministic projections and statutory analysis.",
+            "title": clean_t,
+            "short_title": short_t,
+            "nav_label": short_t[:14],
+            "description": f"Deterministic quantitative model and planning calculator for {clean_t}.",
+            "primary_keyword": clean_t.lower(),
+            "quick_answer": f"The {clean_t} model provides deterministic projections and statutory analysis.",
             "category": default_category,
             "affiliates": ["turbotax", "taxslayer"],
         }
@@ -631,17 +686,24 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
         if tool_or_slug.get("slug"):
             tool_dict = dict(tool_or_slug)
             slug = str(tool_dict["slug"]).strip()
-            match = next((t for t in TOOLS if t["slug"] == slug), None)
+            match = (
+                next((t for t in TOOLS if t.get("slug") == slug), None)
+                or next((t for t in PROFITHELM_EXTENDED_TOOLS if t.get("slug") == slug), None)
+                or next((t for t in PREXVO_EXTENDED_TOOLS if t.get("slug") == slug), None)
+            )
             if match:
                 for k, v in match.items():
                     if k not in tool_dict or not tool_dict[k]:
                         tool_dict[k] = v
-            clean_title = tool_dict.get("title") or slug.replace("-", " ").title()
-            tool_dict.setdefault("title", clean_title)
-            tool_dict.setdefault("short_title", clean_title[:24])
-            tool_dict.setdefault("nav_label", clean_title[:14])
+                if match.get("short_title"):
+                    tool_dict["short_title"] = match["short_title"]
+            raw_title = tool_dict.get("title") or (match.get("title") if match else None) or slug.replace("-", " ").title()
+            clean_title, clean_short = _clean_tool_title_and_short(raw_title, slug, tool_dict.get("short_title", ""))
+            tool_dict["title"] = clean_title
+            tool_dict["short_title"] = clean_short
+            tool_dict.setdefault("nav_label", clean_short[:14])
             tool_dict.setdefault("description", f"Quantitative model and planning calculator for {clean_title}.")
-            tool_dict.setdefault("primary_keyword", clean_title.lower())
+            tool_dict.setdefault("primary_keyword", slug.replace("-", " ").lower())
             tool_dict.setdefault("quick_answer", f"The {clean_title} model provides deterministic projections and statutory analysis.")
             tool_dict.setdefault("category", default_category)
             tool_dict.setdefault("affiliates", default_affiliates)
@@ -657,12 +719,13 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
             slug = default_slug
             clean_title = default_title
 
+        clean_title, clean_short = _clean_tool_title_and_short(clean_title, slug, tool_or_slug.get("short_title", ""))
         tool_dict = dict(tool_or_slug)
         tool_dict["slug"] = slug
-        tool_dict.setdefault("title", clean_title)
-        tool_dict.setdefault("short_title", clean_title[:24])
-        tool_dict.setdefault("nav_label", clean_title[:14])
-        tool_dict.setdefault("description", f"Quantitative model and planning calculator for {clean_title}.",)
+        tool_dict["title"] = clean_title
+        tool_dict["short_title"] = clean_short
+        tool_dict.setdefault("nav_label", clean_short[:14])
+        tool_dict.setdefault("description", f"Quantitative model and planning calculator for {clean_title}.")
         tool_dict.setdefault("primary_keyword", clean_title.lower())
         tool_dict.setdefault("quick_answer", f"The {clean_title} model provides deterministic projections and statutory analysis.")
         tool_dict.setdefault("category", default_category)
@@ -670,35 +733,44 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
         return tool_dict
 
     tool_slug = str(tool_or_slug).strip()
-    match = next((t for t in TOOLS if t["slug"] == tool_slug), None)
+    match = (
+        next((t for t in PROFITHELM_EXTENDED_TOOLS if t.get("slug") == tool_slug), None)
+        or next((t for t in PREXVO_EXTENDED_TOOLS if t.get("slug") == tool_slug), None)
+        or next((t for t in TOOLS if t.get("slug") == tool_slug), None)
+    )
     if match:
-        return match
-
-    from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
-    match = next((t for t in PREXVO_DEFAULT_TOOLS if t.get("slug") == tool_slug), None)
-    if match:
-        return dict(match)
-    match = next((t for t in PROFITHELM_DEFAULT_TOOLS if t.get("slug") == tool_slug), None)
-    if match:
-        return dict(match)
+        res = dict(match)
+        c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
+        res["title"] = c_title
+        res["short_title"] = c_short
+        return res
 
     try:
         from profithelm.config import load_dynamic_tools
         load_dynamic_tools()
         match = next((t for t in TOOLS if t["slug"] == tool_slug), None)
         if match:
-            return match
+            res = dict(match)
+            c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
+            res["title"] = c_title
+            res["short_title"] = c_short
+            return res
     except Exception:
         pass
 
-    clean_title = tool_slug.replace("-", " ").title()
+    raw_from_slug = tool_slug.replace("-", " ").title()
+    if any(tok in raw_from_slug.lower() for tok in ("calculator", "model", "simulator", "engine")):
+        fallback_title = raw_from_slug
+    else:
+        fallback_title = f"{raw_from_slug} Calculator"
+    clean_title, clean_short = _clean_tool_title_and_short(fallback_title, tool_slug)
     return {
         "slug": tool_slug,
-        "title": f"{clean_title} Calculator & Decision Model",
-        "short_title": clean_title[:24],
-        "nav_label": clean_title[:14],
+        "title": clean_title,
+        "short_title": clean_short,
+        "nav_label": clean_short[:14],
         "description": f"Deterministic quantitative model and planning calculator for {clean_title}.",
-        "primary_keyword": clean_title.lower(),
+        "primary_keyword": tool_slug.replace("-", " ").lower(),
         "quick_answer": f"The {clean_title} model provides deterministic projections and statutory analysis based on federal guidelines.",
         "category": default_category,
         "affiliates": default_affiliates,
@@ -3176,7 +3248,7 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
     Satisfies Google contentEffort standards and institutional distribution guidelines.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS
+    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS
     if (
         property_id == "prexvo"
         or any(t.get("slug") == tool_slug for t in PREXVO_DEFAULT_TOOLS)
@@ -3510,9 +3582,15 @@ TOOL_YOUTUBE_METADATA = {
     "irs-2027-tax-brackets": {
         "title": "IRS 2027 Tax Brackets & TCJA Sunset [Post-2025 Rates]",
         "preset_query": "income=125000&status=single&state=CA",
+        "chapters": [
+            "IRC Section 1 Post-TCJA Sunset Bracket Reversion",
+            "Standard Deduction Halving & Marginal Rate Jumps",
+            "State Tax Overlays & Effective Rate Comparison",
+            "Interactive 2027 Tax Bracket Walkthrough",
+        ],
         "pinned_comment": (
             "📌 CALCULATE YOUR 2027 TAX BRACKET:\n"
-            "A single filer earning $125k faces an immediate +$4,349 (+22.7%) increase in federal tax liability on Jan 1, 2026, as marginal rates revert to pre-2018 schedules.\n\n"
+            "A single filer earning $125k faces an immediate +$4,349 (+22.7%) increase in federal tax liability as marginal rates revert to pre-2018 schedules.\n\n"
             "👉 Run your exact income through our deterministic 2027 model (free, zero login):\n"
             f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=youtube&utm_medium=video&utm_campaign=irs-2027-tax-brackets-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under P.L. 115-97 (TCJA Sunset) and IRS Statistics of Income (SOI) baseline data."
@@ -3532,6 +3610,12 @@ TOOL_YOUTUBE_METADATA = {
     "crypto-tax-calculator": {
         "title": "Crypto Tax Calculator 2027 [Form 8949 & 1099-DA Rules]",
         "preset_query": "short=15000&long=45000&staking=5000&ordinary=85000&status=single&state=CA",
+        "chapters": [
+            "IRS Notice 2014-21 & Form 8949 Digital Asset Rules",
+            "Short-Term vs Long-Term Crypto Capital Gains Math",
+            "DeFi Staking Income & 3.8% NIIT Surtax Thresholds",
+            "Interactive Crypto Tax Calculator Walkthrough",
+        ],
         "pinned_comment": (
             "📌 PROJECT YOUR CRYPTO CAPITAL GAINS:\n"
             "Trading $60k across short-term swaps and DeFi staking yields an estimated $15,000 federal and state tax liability under IRS Form 1099-DA broker reporting.\n\n"
@@ -3554,6 +3638,12 @@ TOOL_YOUTUBE_METADATA = {
     "saas-runway-calculator": {
         "title": "SaaS Runway & Net Burn Calculator [Zero Cash Date]",
         "preset_query": "cash=1200000&burn=65000&rev=25000&growth=5",
+        "chapters": [
+            "FASB ASC 205-40 Going-Concern & Cash Runway Scope",
+            "Gross Burn vs Compounded Net Burn Math",
+            "MRR Growth Cohorts & Zero-Cash-Date Forecasting",
+            "Interactive SaaS Runway Calculator Walkthrough",
+        ],
         "pinned_comment": (
             "📌 CALCULATE YOUR TRUE ZERO CASH DATE:\n"
             "Dividing gross cash by average burn overstates runway by 4.2 months. Model true net burn factoring customer contraction and hiring cohorts.\n\n"
@@ -3576,6 +3666,12 @@ TOOL_YOUTUBE_METADATA = {
     "prediction-market-odds": {
         "title": "Kalshi vs Polymarket Arbitrage [Kelly Sizing Tool]",
         "preset_query": "yes=52&no=44&capital=10000",
+        "chapters": [
+            "CFTC Rule 40.11 Binary Event Contract Mechanics",
+            "Cross-Exchange Implied Probability & Spread Math",
+            "Half-Kelly Criterion Capital Allocation Formula",
+            "Interactive Prediction Market Arbitrage Walkthrough",
+        ],
         "pinned_comment": (
             "📌 LOCK RISK-FREE ARBITRAGE SPREADS:\n"
             "When complementary binary contracts on Kalshi and Polymarket sum to under 100 cents, capture a 4.0% to 8.5% net arbitrage spread via Half-Kelly allocation.\n\n"
@@ -3597,6 +3693,12 @@ TOOL_YOUTUBE_METADATA = {
     "tcja-sunset-capital-gains": {
         "title": "2027 Capital Gains Tax Simulator [NIIT 3.8% Surtax]",
         "preset_query": "cggain=100000&ordinary=150000&period=long_term&status=single&state=CA",
+        "chapters": [
+            "IRC Section 1(h) Capital Gains Brackets Post-TCJA",
+            "Unindexed Section 1411 3.8% NIIT Surtax Stacking",
+            "State Capital Gains Additions & Combined Rates",
+            "Interactive Capital Gains Sunset Walkthrough",
+        ],
         "pinned_comment": (
             "📌 PROJECT YOUR CAPITAL GAINS REVERSION:\n"
             "Realizing $250k in capital gains triggers a combined 34.0% marginal rate in CA/NY post-2025 as ordinary brackets expand around unindexed NIIT thresholds.\n\n"
@@ -3618,6 +3720,12 @@ TOOL_YOUTUBE_METADATA = {
     "section-179-calculator": {
         "title": "Section 179 Deduction Calculator [2026 Rules & Limits]",
         "preset_query": "cost=125000&year=2026&bracket=35&use=100",
+        "chapters": [
+            "IRC Section 179 Statutory Deduction Caps & Phase-Outs",
+            "Section 168(k) Bonus Depreciation Schedule Integration",
+            "First-Year Cash Tax Savings vs MACRS Recovery",
+            "Interactive Section 179 Deduction Walkthrough",
+        ],
         "pinned_comment": (
             "📌 CALCULATE YOUR SECTION 179 WRITE-OFF:\n"
             "Acquiring $500k in business equipment in 2026 captures an immediate $105,000 cash tax reduction before bonus depreciation expires in 2027.\n\n"
@@ -3639,6 +3747,12 @@ TOOL_YOUTUBE_METADATA = {
     "treasury-yield-calculator": {
         "title": "Treasury Bill Yield vs HYSA [Tax-Equivalent Yield]",
         "preset_query": "principal=250000&tbill=4.80&hysa=4.25&state=CA&fed=35&niit=true",
+        "chapters": [
+            "31 U.S.C. Section 3124 State Tax Exemption Rules",
+            "Tax-Equivalent Yield (TEY) Formula vs Taxable HYSA",
+            "High-Tax State Cash Arbitrage (CA, NY, NJ)",
+            "Interactive Treasury Yield vs HYSA Walkthrough",
+        ],
         "pinned_comment": (
             "📌 ELIMINATE STATE TAX DRAG ON CASH:\n"
             "Moving $2M from a taxable HYSA to 4-week Treasury Bills saves $26,600/yr in state taxes in CA (13.3%) and NY (10.9%) under 31 U.S.C. Section 3124.\n\n"
@@ -3661,6 +3775,12 @@ TOOL_YOUTUBE_METADATA = {
     "section-1031-calculator": {
         "title": "Section 1031 Exchange Calculator [Capital Gains & Recapture]",
         "preset_query": "sale=1500000&basis=600000&depr=250000&rep=1800000&from=CA&to=TX",
+        "chapters": [
+            "IRC Section 1031 Like-Kind Deferral & Boot Rules",
+            "Strict 45-Day Identification & 180-Day Closing Windows",
+            "Section 1250 25% Unrecaptured Depreciation Math",
+            "Interactive Section 1031 Exchange Walkthrough",
+        ],
         "pinned_comment": (
             "📌 DEFER CAPITAL GAINS ON PROPERTY SALES:\n"
             "Exchanging a $1.2M commercial property under IRC Section 1031 defers $354,000 in immediate capital gains and 25% depreciation recapture taxes.\n\n"
@@ -3682,6 +3802,12 @@ TOOL_YOUTUBE_METADATA = {
     "prediction-market-tax": {
         "title": "Prediction Market Tax Calculator [Section 1256 vs 1099-DA]",
         "preset_query": "pmgain=35000&income=120000&status=single&state=NY&venue=kalshi",
+        "chapters": [
+            "IRC Section 1256 Regulated Contracts vs Ordinary Swaps",
+            "60/40 Blended Capital Gains Rate Calculation (26.8%)",
+            "Kalshi CFTC Form 1099-B vs Polymarket Form 8949",
+            "Interactive Prediction Market Tax Walkthrough",
+        ],
         "pinned_comment": (
             "📌 OPTIMIZE YOUR PREDICTION MARKET TAXES:\n"
             "Trading CFTC-regulated event contracts on Kalshi yields an 8.9% effective tax savings ($8,900 per $100k gain) via Section 1256 60/40 blended rates versus Polymarket.\n\n"
@@ -3698,6 +3824,658 @@ TOOL_YOUTUBE_METADATA = {
             "prediction market taxes 2026",
             "profithelm",
             "profithelm tools",
+        ],
+    },
+    "commercial-heavy-vehicle-section-179-weight-calculator": {
+        "title": "Heavy Vehicle 6,000 lb GVWR Section 179 Tax Calculator",
+        "preset_query": "vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35",
+        "chapters": [
+            "IRC Section 179(b)(5) & 6,000 lb GVWR Thresholds",
+            "Heavy SUV $31,300 Cap vs Cargo Work Truck Full Write-Off",
+            "60% Bonus Depreciation & 50% Business-Use Recapture",
+            "Interactive Heavy Vehicle Section 179 Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR HEAVY VEHICLE WRITE-OFF:\n"
+            "Placing a $95,000 commercial vehicle over 6,000 lbs GVWR in service at 90% business use unlocks up to $29,925 in immediate Year-1 federal tax savings.\n\n"
+            "Run your exact vehicle cost and GVWR class on ProfitHelm (free, zero login):\n"
+            f"{POST_URL_BASE}/tools/commercial-heavy-vehicle-section-179-weight-calculator/?vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35&utm_source=youtube&utm_medium=video&utm_campaign=commercial-heavy-vehicle-section-179-weight-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 179(b)(5), Section 280F(d)(7), and Section 168(k)."
+        ),
+        "tags": [
+            "heavy vehicle section 179 calculator",
+            "6000 lb gvwr tax deduction",
+            "section 179 suv cap 2026",
+            "commercial truck tax write off",
+            "irc section 280f luxury auto limits",
+            "bonus depreciation work truck",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "contractor-surety-bond-cost-calculator": {
+        "title": "Contractor License & Miller Act Surety Bond Cost Calculator",
+        "preset_query": "bond_penalty_amount=50000&credit_tier_rate_pct=1.5",
+        "chapters": [
+            "40 U.S.C. Section 3131 Miller Act Surety Bond Rules",
+            "FICO Credit Tiers & Underwriting Premium Rates",
+            "License vs Performance & Payment Bond Cost Scaling",
+            "Interactive Contractor Surety Bond Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR CONTRACTOR SURETY BOND PREMIUM:\n"
+            "A $50,000 contractor surety bond costs $750/yr at a 1.5% preferred underwriting rate versus $2,500/yr in standard high-risk tiers.\n\n"
+            "Model your exact bond penalty and credit tier live on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/contractor-surety-bond-cost-calculator/?bond_penalty_amount=50000&credit_tier_rate_pct=1.5&utm_source=youtube&utm_medium=video&utm_campaign=contractor-surety-bond-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under the Federal Miller Act (40 U.S.C. Sections 3131-3134) and 31 U.S.C. Section 9304."
+        ),
+        "tags": [
+            "contractor surety bond cost calculator",
+            "surety bond premium calculator",
+            "miller act performance bond",
+            "contractor license bond rates",
+            "construction bid bond cost",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "crypto-tax-form-1099-da-mandatory-reporting": {
+        "title": "IRS Form 1099-DA Crypto Broker Reporting & Tax Calculator",
+        "preset_query": "proceeds=50000&cost_basis=30000",
+        "chapters": [
+            "IRC Section 6045 & Treasury Decision 10000 Broker Rules",
+            "Form 1099-DA Gross Proceeds vs Verified Cost Basis",
+            "24% Backup Withholding & Unhosted Wallet Transfers",
+            "Interactive Form 1099-DA Crypto Tax Walkthrough",
+        ],
+        "pinned_comment": (
+            "AUDIT YOUR FORM 1099-DA CRYPTO TAX EXPOSURE:\n"
+            "When a custodial exchange reports $50,000 in gross proceeds on IRS Form 1099-DA with missing transfer basis, verifying your $30,000 cost basis prevents $7,000+ in excess tax.\n\n"
+            "Reconcile your Form 1099-DA proceeds and cost basis on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/crypto-tax-form-1099-da-mandatory-reporting/?proceeds=50000&cost_basis=30000&utm_source=youtube&utm_medium=video&utm_campaign=crypto-tax-form-1099-da-mandatory-reporting-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 6045, Section 3406, and Treasury Decision 10000."
+        ),
+        "tags": [
+            "form 1099 da crypto calculator",
+            "irs form 1099 da mandatory reporting",
+            "crypto broker cost basis rules",
+            "irc section 6045 digital assets",
+            "crypto backup withholding 24 percent",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "equipment-lease-tax-deduction": {
+        "title": "Commercial Equipment Lease Tax Deduction Calculator [IRC 162]",
+        "preset_query": "lease_annual_payment=24000&business_use_pct=0.85",
+        "chapters": [
+            "IRC Section 162(a)(3) Operating Lease Deduction Rules",
+            "FASB ASC 842 Operating vs Finance Lease Classification",
+            "Business-Use Allocation & After-Tax Cash Savings",
+            "Interactive Equipment Lease Deduction Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR EQUIPMENT LEASE WRITE-OFF:\n"
+            "Deducting $24,000 in annual commercial equipment lease payments at 85% business use under IRC Section 162(a)(3) shields $20,400 of ordinary business income.\n\n"
+            "Model your exact lease payments and marginal tax bracket on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=youtube&utm_medium=video&utm_campaign=equipment-lease-tax-deduction-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 162(a)(3) and FASB ASC 842 lease accounting standards."
+        ),
+        "tags": [
+            "equipment lease tax deduction calculator",
+            "irc section 162 lease write off",
+            "commercial equipment leasing taxes",
+            "operating lease vs capital lease tax",
+            "fasb asc 842 tax deduction",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "equipment-lease-vs-buy-section-179-calculator": {
+        "title": "Equipment Lease vs Buy Calculator [Section 179 vs IRC 162]",
+        "preset_query": "equipment_cost=180000&marginal_tax_rate=0.32&year_one_financing_payments=39600",
+        "chapters": [
+            "IRC Section 179 Upfront Expensing vs Section 162 Lease",
+            "Year-1 Cash Tax Shield vs Working Capital Preservation",
+            "Discounted After-Tax Net Present Value Breakeven",
+            "Interactive Equipment Lease vs Buy Walkthrough",
+        ],
+        "pinned_comment": (
+            "COMPARE EQUIPMENT LEASING VS SECTION 179 BUYING:\n"
+            "On $180,000 of commercial machinery at a 32% tax rate, purchasing captures a $57,600 Year-1 Section 179 tax shield while leasing preserves working capital.\n\n"
+            "Run your exact equipment cost and lease terms live on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/equipment-lease-vs-buy-section-179-calculator/?equipment_cost=180000&marginal_tax_rate=0.32&year_one_financing_payments=39600&utm_source=youtube&utm_medium=video&utm_campaign=equipment-lease-vs-buy-section-179-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 179, Section 168(k), and Section 162(a)(3)."
+        ),
+        "tags": [
+            "equipment lease vs buy calculator",
+            "section 179 lease vs buy",
+            "equipment financing tax deduction",
+            "irc section 179 vs section 162",
+            "capex vs opex equipment tax",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "invoice-factoring-vs-business-line-of-credit-calculator": {
+        "title": "Invoice Factoring vs Business Line of Credit APR Calculator",
+        "preset_query": "invoice_face_value=100000&factor_fee_rate=0.025",
+        "chapters": [
+            "UCC Article 9 Receivables Factoring vs Revolving Credit",
+            "Converting 30-Day Factoring Fees into Annualized APR",
+            "Advance Rates, Reserve Holdbacks & IRC 163(j) Interest",
+            "Interactive Factoring vs Line of Credit Walkthrough",
+        ],
+        "pinned_comment": (
+            "BENCHMARK YOUR WORKING CAPITAL APR:\n"
+            "A 2.5% 30-day invoice factoring fee on $100,000 in B2B receivables equates to a 30.4% annualized APR compared to 9% to 12% on a commercial line of credit.\n\n"
+            "Compare factoring fees against revolving credit live on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/invoice-factoring-vs-business-line-of-credit-calculator/?invoice_face_value=100000&factor_fee_rate=0.025&utm_source=youtube&utm_medium=video&utm_campaign=invoice-factoring-vs-business-line-of-credit-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under UCC Article 9, Truth in Lending APR math, and IRC Section 163(j)."
+        ),
+        "tags": [
+            "invoice factoring calculator",
+            "factoring vs line of credit",
+            "invoice factoring apr formula",
+            "accounts receivable financing cost",
+            "b2b working capital calculator",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "medical-and-dental-equipment-section-179-roi-calculator": {
+        "title": "Medical & Dental Equipment Section 179 Tax ROI Calculator",
+        "preset_query": "equipment_cost=150000&marginal_tax_rate=0.35&annual_procedure_net_revenue=96000",
+        "chapters": [
+            "IRC Section 179 Expensing for Clinical & Dental Practices",
+            "Year-1 Tax Shield Reduction on $150k Imaging & CBCT Gear",
+            "Procedure Revenue Payback & After-Tax Practice ROI",
+            "Interactive Medical Section 179 ROI Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR CLINICAL EQUIPMENT TAX ROI:\n"
+            "Acquiring $150,000 in dental or medical imaging equipment at a 35% marginal rate generates a $52,500 Year-1 Section 179 tax savings, cutting net cost to $97,500.\n\n"
+            "Model your practice equipment write-off and procedure payback on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/medical-and-dental-equipment-section-179-roi-calculator/?equipment_cost=150000&marginal_tax_rate=0.35&annual_procedure_net_revenue=96000&utm_source=youtube&utm_medium=video&utm_campaign=medical-and-dental-equipment-section-179-roi-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 179 and Section 168(k) clinical capital recovery rules."
+        ),
+        "tags": [
+            "medical equipment section 179 calculator",
+            "dental equipment tax deduction",
+            "cbct section 179 roi",
+            "medical practice capex tax write off",
+            "section 179 healthcare equipment",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "r-and-d-tax-credit-section-174-amortization-calculator": {
+        "title": "R&D Tax Credit (Section 41) & Section 174 Amortization Tool",
+        "preset_query": "current_qre_spend=800000&prior_three_year_avg_qre=500000&asc_credit_rate=0.14",
+        "chapters": [
+            "IRC Section 174 Mandatory 5-Year Domestic Amortization",
+            "IRC Section 41(c)(4) 14% Alternative Simplified Credit",
+            "Section 280C(c) Credit Reduction vs Net Cash Impact",
+            "Interactive R&D Credit & Section 174 Walkthrough",
+        ],
+        "pinned_comment": (
+            "MODEL YOUR R&D TAX CREDIT & SECTION 174 AMORTIZATION:\n"
+            "On $800,000 in domestic software QREs ($500k prior 3-year average), the 14% ASC formula yields a $77,000 gross R&D credit alongside 5-year Section 174 capitalization.\n\n"
+            "Calculate your net Section 41 credit and Section 174 schedule on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/r-and-d-tax-credit-section-174-amortization-calculator/?current_qre_spend=800000&prior_three_year_avg_qre=500000&asc_credit_rate=0.14&utm_source=youtube&utm_medium=video&utm_campaign=r-and-d-tax-credit-section-174-amortization-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 41, Section 174, and Section 280C(c)."
+        ),
+        "tags": [
+            "r and d tax credit calculator",
+            "section 174 amortization calculator",
+            "irc section 41 asc credit",
+            "software development section 174",
+            "qre r and d tax credit 2026",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "s-corp-reasonable-salary-tax-calculator": {
+        "title": "S-Corp Reasonable Salary & FICA Tax Savings Calculator",
+        "preset_query": "net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153",
+        "chapters": [
+            "IRC Section 1366 & Revenue Ruling 74-44 Salary Rules",
+            "15.3% FICA Payroll Tax Savings on K-1 Distributions",
+            "IRC Section 199A 20% QBI Deduction Wage Trade-Offs",
+            "Interactive S-Corp Reasonable Salary Walkthrough",
+        ],
+        "pinned_comment": (
+            "OPTIMIZE YOUR S-CORP SALARY VS DISTRIBUTION SPLIT:\n"
+            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves up to $19,125 in self-employment tax.\n\n"
+            "Model your exact S-Corp FICA savings and QBI impact on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=youtube&utm_medium=video&utm_campaign=s-corp-reasonable-salary-tax-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 1366, Section 3111, Section 199A, and IRS Rev. Rul. 74-44."
+        ),
+        "tags": [
+            "s corp reasonable salary calculator",
+            "s corp tax calculator",
+            "s corp salary vs distribution",
+            "self employment tax savings s corp",
+            "section 199a qbi s corp",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "section-179-vehicle-equipment-deduction": {
+        "title": "Section 179 Commercial Vehicle & Equipment Deduction Tool",
+        "preset_query": "lease_annual_payment=24000&business_use_pct=0.85",
+        "chapters": [
+            "IRC Section 179 Commercial Vehicle & Machinery Scope",
+            "Section 280F Passenger Auto Caps vs Heavy Fleet Assets",
+            "Business-Use Percentage & MACRS Recapture Rules",
+            "Interactive Section 179 Vehicle & Equip Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR COMMERCIAL FLEET & EQUIPMENT WRITE-OFF:\n"
+            "Combining IRC Section 179 expensing with 60% bonus depreciation maximizes first-year deductions across qualifying commercial vehicles and machinery.\n\n"
+            "Run your commercial vehicle and equipment numbers on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/section-179-vehicle-equipment-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=youtube&utm_medium=video&utm_campaign=section-179-vehicle-equipment-deduction-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Section 179, Section 168(k), and Section 280F."
+        ),
+        "tags": [
+            "section 179 vehicle equipment deduction",
+            "commercial vehicle tax write off",
+            "section 179 machinery deduction",
+            "irc section 280f business use",
+            "fleet depreciation calculator",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "section-301-tariff-landed-cost-calculator": {
+        "title": "Section 301 Tariff & Import Landed Cost Calculator [HTSUS]",
+        "preset_query": "customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800",
+        "chapters": [
+            "19 U.S.C. Section 2411 Trade Act Section 301 Tariffs",
+            "HTSUS Base Duty Stacking & FOB Customs Valuation",
+            "CBP Merchandise Processing (MPF) & Harbor (HMF) Fees",
+            "Interactive Section 301 Landed Cost Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR TRUE IMPORT LANDED COST:\n"
+            "On a $120,000 FOB shipment subject to a 28.5% combined HTSUS and Section 301 tariff plus $6,800 freight/MPF/HMF, total landed cost reaches $161,000.\n\n"
+            "Model your HTSUS duty, Section 301 surcharges, and unit margins on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800&utm_source=youtube&utm_medium=video&utm_campaign=section-301-tariff-landed-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 19 U.S.C. Section 2411 (Section 301), 19 CFR Part 24, and USITC HTSUS schedules."
+        ),
+        "tags": [
+            "section 301 tariff calculator",
+            "import landed cost calculator",
+            "china tariff calculator 301",
+            "customs duty mpf hmf calculator",
+            "htsus landed cost formula",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    "workers-comp-and-payroll-burden-calculator": {
+        "title": "Workers Comp & Employer Payroll Tax Burden Calculator",
+        "preset_query": "annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45",
+        "chapters": [
+            "IRC Sections 3111 & 3301 Employer FICA & FUTA Rules",
+            "NCCI Class-Code Workers Comp Rates per $100 Payroll",
+            "Experience Modification Rate (EMR) & True Labor Burden",
+            "Interactive Payroll & Workers Comp Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR TRUE EMPLOYER LABOR BURDEN:\n"
+            "On $500,000 in annual payroll with an 8.65% statutory payroll tax rate and $3.45/$100 workers comp class rate, employer burden adds $60,500 (+12.1%) above base wages.\n\n"
+            "Run your payroll and NCCI class rates live on ProfitHelm:\n"
+            f"{POST_URL_BASE}/tools/workers-comp-and-payroll-burden-calculator/?annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45&utm_source=youtube&utm_medium=video&utm_campaign=workers-comp-and-payroll-burden-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under IRC Sections 3111 and 3301, BLS ECEC benchmarks, and NCCI rating manuals."
+        ),
+        "tags": [
+            "workers comp calculator",
+            "payroll burden calculator",
+            "employer payroll tax calculator",
+            "ncci workers compensation rate",
+            "fully burdened labor cost formula",
+            "profithelm",
+            "profithelm tools",
+        ],
+    },
+    # Prexvo Title IV Student Loan Calculators (13)
+    "student-loan-repayment-calculator": {
+        "title": "Federal Student Loan Repayment Calculator [2026 Title IV Rules]",
+        "preset_query": "balance=60000&agi=65000&rate=6.5&deps=1",
+        "chapters": [
+            "Title IV 34 CFR Part 685 Repayment Plan Architecture",
+            "225% Poverty Line Exemption & Discretionary Income",
+            "RAP vs IBR, PAYE, ICR & Tiered Standard Comparison",
+            "Interactive Repayment Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR 2026 STUDENT LOAN REPAYMENT:\n"
+            "On $60,000 in federal student debt at $65,000 AGI (family of 2), the 2026 RAP plan cuts payments to $248.23/mo and subsidizes $76.77/mo in unpaid interest.\n\n"
+            "Run your exact loan balance and AGI in sub-100ms on Prexvo (free, zero login):\n"
+            "https://prexvo.com/tools/student-loan-repayment-calculator/?balance=60000&agi=65000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=student-loan-repayment-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines."
+        ),
+        "tags": [
+            "student loan repayment calculator",
+            "federal student loan calculator 2026",
+            "rap vs ibr calculator",
+            "title iv student loan plans",
+            "34 cfr part 685 repayment",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "rap-vs-ibr-calculator": {
+        "title": "RAP vs IBR Student Loan Calculator [225% FPL vs 10-Yr Cap]",
+        "preset_query": "balance=60000&agi=95000&rate=6.5&deps=1",
+        "chapters": [
+            "RAP 225% Poverty Floor vs IBR 150% Discretionary Math",
+            "Uncapped RAP Escalation vs HEA Section 493C IBR Ceiling",
+            "100% Unpaid Interest Subsidy & Forgiveness Horizons",
+            "Interactive RAP vs IBR Comparison Walkthrough",
+        ],
+        "pinned_comment": (
+            "COMPARE 2026 RAP VS IBR MONTHLY PAYMENTS:\n"
+            "At $95,000 AGI on $60,000 debt, uncapped RAP climbs to $498.23/mo ($119,575 total) while IBR caps payments at the 10-year Standard ceiling ($78,617 total).\n\n"
+            "Find your exact AGI crossover point live on Prexvo (free, zero login):\n"
+            "https://prexvo.com/tools/rap-vs-ibr-calculator/?balance=60000&agi=95000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=rap-vs-ibr-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under HEA Section 493C, 34 CFR Part 685, and HHS Poverty Guidelines."
+        ),
+        "tags": [
+            "rap vs ibr calculator",
+            "repayment assistance plan vs ibr",
+            "student loan payment cap ibr",
+            "hea section 493c ibr",
+            "225 poverty line student loans",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "tiered-standard-calculator": {
+        "title": "Tiered Standard Repayment Calculator [10 to 30 Year Terms]",
+        "preset_query": "balance=65000&agi=85000&rate=6.5&deps=0",
+        "chapters": [
+            "34 CFR 685.208(c) Consolidation Balance Tier Schedule",
+            "10-Year vs 20-Year vs 30-Year Fixed Amortization Math",
+            "The $60,000 Balance Threshold & Monthly Cash Relief",
+            "Interactive Tiered Standard Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR TIERED STANDARD AMORTIZATION:\n"
+            "Crossing the $60,000 Direct Consolidation balance threshold under 34 CFR 685.208 unlocks a 30-year fixed term, cutting a $65k loan payment from $738/mo to $411/mo.\n\n"
+            "Model your exact consolidation balance tier live on Prexvo:\n"
+            "https://prexvo.com/tools/tiered-standard-calculator/?balance=65000&agi=85000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=tiered-standard-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR 685.208(c) fixed amortization schedules."
+        ),
+        "tags": [
+            "tiered standard repayment calculator",
+            "34 cfr 685 208 consolidation",
+            "30 year student loan repayment",
+            "direct consolidation loan terms",
+            "standard repayment balance tiers",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "paye-sunset-calculator": {
+        "title": "PAYE Sunset Calculator [20-Year Graduate Forgiveness Rules]",
+        "preset_query": "balance=85000&agi=90000&rate=6.5&deps=0",
+        "chapters": [
+            "34 CFR 685.209 PAYE Sunset & Grandfathering Rules",
+            "20-Year PAYE vs 25-Year Legacy IBR Graduate Forgiveness",
+            "10% Interest Capitalization Cap vs RAP Interest Waiver",
+            "Interactive PAYE Sunset Transition Walkthrough",
+        ],
+        "pinned_comment": (
+            "MODEL YOUR PAYE SUNSET TRANSITION:\n"
+            "Graduate borrowers with $85,000 in Direct Loans preserve 20-year forgiveness (240 payments) in grandfathered PAYE versus 25 years (300 payments) in legacy IBR.\n\n"
+            "Compare staying in PAYE versus switching to RAP on Prexvo:\n"
+            "https://prexvo.com/tools/paye-sunset-calculator/?balance=85000&agi=90000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=paye-sunset-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR 685.209 PAYE and RAP statutory rules."
+        ),
+        "tags": [
+            "paye sunset calculator",
+            "pay as you earn vs rap",
+            "paye vs ibr graduate loans",
+            "20 year student loan forgiveness",
+            "34 cfr 685 209 paye",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "icr-repayment-calculator": {
+        "title": "Income-Contingent Repayment (ICR) Calculator [34 CFR 685.209]",
+        "preset_query": "balance=75000&agi=80000&rate=7.5&deps=0",
+        "chapters": [
+            "34 CFR 685.209(b) ICR Dual Statutory Formula Explained",
+            "20% Discretionary Income above 100% FPL Calculation",
+            "12-Year Fixed Amortization & Income Percentage Factor",
+            "Interactive ICR Repayment Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR ICR MONTHLY PAYMENT:\n"
+            "Under 34 CFR 685.209(b), ICR charges the lesser of 20% of discretionary income above 100% FPL or a 12-year fixed payment adjusted by an income multiplier.\n\n"
+            "Model your exact Parent PLUS or Direct Consolidation ICR payment on Prexvo:\n"
+            "https://prexvo.com/tools/icr-repayment-calculator/?balance=75000&agi=80000&rate=7.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=icr-repayment-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR 685.209(b) and HHS Poverty Guidelines."
+        ),
+        "tags": [
+            "icr repayment calculator",
+            "income contingent repayment formula",
+            "parent plus icr calculator",
+            "12 year income percentage factor",
+            "34 cfr 685 209 icr",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "pslf-qualifying-payment-simulator": {
+        "title": "PSLF Qualifying Payment & Buyback Simulator [34 CFR 685.219]",
+        "preset_query": "balance=92000&agi=78000&rate=6.8&deps=0",
+        "chapters": [
+            "34 CFR 685.219 120-Payment PSLF Qualification Rules",
+            "34 CFR 685.219(g) Hold Harmless Deferment Buyback Math",
+            "IRC Section 108(f) 100% Tax-Free Forgiveness Valuation",
+            "Interactive PSLF Simulator Walkthrough",
+        ],
+        "pinned_comment": (
+            "SIMULATE YOUR 120 PSLF PAYMENTS & BUYBACK:\n"
+            "Public-sector borrowers with $92,000 debt at $78,000 AGI save $11,737 across 120 PSLF payments on RAP and can buy back eligible forbearance months under 34 CFR 685.219(g).\n\n"
+            "Model your PSLF forgiveness date and buyback lump sum on Prexvo:\n"
+            "https://prexvo.com/tools/pslf-qualifying-payment-simulator/?balance=92000&agi=78000&rate=6.8&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=pslf-qualifying-payment-simulator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 34 CFR 685.219 and IRC Section 108(f) tax-free discharge rules."
+        ),
+        "tags": [
+            "pslf qualifying payment simulator",
+            "pslf buyback calculator",
+            "34 cfr 685 219 pslf",
+            "public service loan forgiveness 2026",
+            "irc section 108f student loans",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "parent-plus-double-consolidation": {
+        "title": "Parent PLUS Double Consolidation Calculator [ICR vs 10% IDR]",
+        "preset_query": "balance=110000&agi=88000&rate=7.6&deps=0",
+        "chapters": [
+            "Title IV Parent PLUS Single Consolidation ICR Restriction",
+            "Two-Step Direct Consolidation Statutory Pathway",
+            "20% ICR ($1,196/mo) vs 10% RAP/IBR ($430/mo) Savings",
+            "Interactive Double Consolidation Walkthrough",
+        ],
+        "pinned_comment": (
+            "UNLOCK 10% IDR ON PARENT PLUS LOANS:\n"
+            "On $110,000 in Parent PLUS debt at $88,000 AGI, completing a two-step Direct Consolidation drops payments from $1,196.67/mo (20% ICR) to $430.42/mo (10% RAP).\n\n"
+            "Calculate your Parent PLUS double consolidation savings on Prexvo:\n"
+            "https://prexvo.com/tools/parent-plus-double-consolidation/?balance=110000&agi=88000&rate=7.6&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=parent-plus-double-consolidation-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR 685.209 and 34 CFR 685.220 consolidation rules."
+        ),
+        "tags": [
+            "parent plus double consolidation calculator",
+            "parent plus loan repayment options",
+            "icr vs ibr parent plus",
+            "34 cfr 685 220 consolidation",
+            "parent plus pslf loophole",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "save-plan-litigation-transition": {
+        "title": "SAVE Plan to 2026 RAP Transition Calculator [34 CFR Part 685]",
+        "preset_query": "balance=55000&agi=62000&rate=6.2&deps=1",
+        "chapters": [
+            "Exiting Administrative SAVE Forbearance into Active IDR",
+            "5% to 10% Assessment Shift & 225% Poverty Exemption",
+            "100% Unpaid Monthly Interest Subsidy Preservation",
+            "Interactive SAVE to RAP Transition Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR POST-SAVE MONTHLY PAYMENT:\n"
+            "Moving from administrative SAVE forbearance into 2026 RAP on $55,000 debt ($62,000 AGI, family of 2) sets payments at $223.23/mo and waives $60.94/mo in unpaid interest.\n\n"
+            "Model your exact SAVE-to-RAP transition payment live on Prexvo:\n"
+            "https://prexvo.com/tools/save-plan-litigation-transition/?balance=55000&agi=62000&rate=6.2&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=save-plan-litigation-transition-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR Part 685 and HHS Poverty Guidelines."
+        ),
+        "tags": [
+            "save plan transition calculator",
+            "save to rap student loan calculator",
+            "save forbearance transition 2026",
+            "student loan interest subsidy rap",
+            "34 cfr part 685 save plan",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "student-loan-refinance-break-even-calculator": {
+        "title": "Student Loan Refinance Break-Even Calculator [Federal vs Private]",
+        "preset_query": "balance=75000&agi=110000&rate=7.2&deps=0",
+        "chapters": [
+            "Title IV Statutory Protections vs Private Refinance Rates",
+            "Quantifying Forfeited IDR Interest Subsidies & PSLF Value",
+            "Net Present Value Break-Even Rate Spread Calculation",
+            "Interactive Refinance Break-Even Walkthrough",
+        ],
+        "pinned_comment": (
+            "AUDIT YOUR REFINANCE BREAK-EVEN SPREAD:\n"
+            "Refinancing $75,000 in 7.2% federal loans to a 5.2% private note saves $9,140 in interest only if your AGI exceeds the threshold where Title IV subsidies and forgiveness drop to $0.\n\n"
+            "Run your federal vs private break-even audit live on Prexvo:\n"
+            "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/?balance=75000&agi=110000&rate=7.2&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=student-loan-refinance-break-even-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR Part 685, Truth in Lending (12 CFR Part 1026), and IRC Section 221."
+        ),
+        "tags": [
+            "student loan refinance break even calculator",
+            "refinance federal student loans vs idr",
+            "student loan refinance calculator",
+            "private vs federal student loans",
+            "title iv subsidy valuation",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "rap-payment-calculator": {
+        "title": "2026 Repayment Assistance Plan (RAP) Calculator [225% FPL]",
+        "preset_query": "balance=60000&agi=65000&rate=6.5&deps=1",
+        "chapters": [
+            "2026 Repayment Assistance Plan (RAP) Statutory Formula",
+            "225% HHS Poverty Line Deduction by Household Size",
+            "100% Unpaid Interest Waiver & Principal Protection",
+            "Interactive RAP Payment Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR 2026 RAP PAYMENT & INTEREST SUBSIDY:\n"
+            "Under the 2026 Repayment Assistance Plan, a 2-person household at $65,000 AGI deducts $47,587.50 (225% FPL) and pays $145.10 to $248.23/mo with 100% unpaid interest waived.\n\n"
+            "Calculate your exact 2026 RAP obligation live on Prexvo:\n"
+            "https://prexvo.com/tools/rap-payment-calculator/?balance=60000&agi=65000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=rap-payment-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR Part 685 and 2026 HHS Poverty Guidelines."
+        ),
+        "tags": [
+            "rap payment calculator",
+            "2026 repayment assistance plan calculator",
+            "rap student loan formula",
+            "225 federal poverty line calculator",
+            "34 cfr part 685 rap",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "grad-plus-borrowing-cap-calculator": {
+        "title": "Grad PLUS Sunset & Borrowing Cap Calculator [HEA Section 455]",
+        "preset_query": "balance=85000&agi=70000&rate=7.9&deps=0",
+        "chapters": [
+            "HEA Section 455 & 34 CFR 685.203 Annual Borrowing Caps",
+            "$20,500 Unsubsidized Limit vs $138,500 Aggregate Ceiling",
+            "Grad PLUS Sunset Funding Gap & Origination Fee Math",
+            "Interactive Grad PLUS Cap Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "MODEL YOUR GRADUATE BORROWING CAP & FUNDING GAP:\n"
+            "With Direct Unsubsidized graduate loans capped at $20,500/yr ($138,500 aggregate) under 34 CFR 685.203, modeling Grad PLUS sunset caps prevents mid-degree funding shortfalls.\n\n"
+            "Calculate your exact graduate borrowing limits live on Prexvo:\n"
+            "https://prexvo.com/tools/grad-plus-borrowing-cap-calculator/?balance=85000&agi=70000&rate=7.9&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=grad-plus-borrowing-cap-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under HEA Section 455 and Title IV 34 CFR 685.203 borrowing limits."
+        ),
+        "tags": [
+            "grad plus borrowing cap calculator",
+            "grad plus sunset 2026",
+            "graduate student loan limits",
+            "34 cfr 685 203 loan limits",
+            "direct unsubsidized graduate cap",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "married-filing-separately-student-loan-calculator": {
+        "title": "Married Filing Separately (MFS) Student Loan IDR Calculator",
+        "preset_query": "balance=75000&agi=72000&rate=6.8&deps=1",
+        "chapters": [
+            "34 CFR 685.209 Spousal Income Exclusion under MFS",
+            "IDR Monthly Payment Reduction vs Joint AGI Inclusion",
+            "IRC Section 1(d) MFS Tax Penalty vs Net Household Savings",
+            "Interactive MFS IDR Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "COMPARE MARRIED FILING SEPARATELY VS JOINTLY ON IDR:\n"
+            "Excluding a spouse's $80,000 income by filing Married Separately under 34 CFR 685.209 cuts annual IDR student loan payments by $8,000, far outweighing the MFS tax differential.\n\n"
+            "Model your household MFS vs MFJ student loan math live on Prexvo:\n"
+            "https://prexvo.com/tools/married-filing-separately-student-loan-calculator/?balance=75000&agi=72000&rate=6.8&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=married-filing-separately-student-loan-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under Title IV 34 CFR 685.209 and IRC Section 1(d) filing status rules."
+        ),
+        "tags": [
+            "married filing separately student loan calculator",
+            "mfs vs mfj student loans",
+            "exclude spouse income idr",
+            "34 cfr 685 209 married filing separately",
+            "student loan tax filing status",
+            "prexvo",
+            "prexvo tools",
+        ],
+    },
+    "ibr-hardship-cap-calculator": {
+        "title": "IBR 10-Year Standard Payment Cap & Hardship Calculator",
+        "preset_query": "balance=65000&agi=95000&rate=6.5&deps=0",
+        "chapters": [
+            "HEA Section 493C Partial Financial Hardship Qualification",
+            "How the 10-Year Standard Payment Ceiling Locks at Entry",
+            "Income Growth Protection: Why IBR Beats Uncapped RAP",
+            "Interactive IBR Payment Cap Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR IBR 10-YEAR STANDARD PAYMENT CEILING:\n"
+            "Under HEA Section 493C, Income-Based Repayment strictly caps your monthly bill at the 10-year Standard amount ($738.06/mo on $65k at 6.5%) even if your income triples.\n\n"
+            "Check your Partial Financial Hardship and IBR cap live on Prexvo:\n"
+            "https://prexvo.com/tools/ibr-hardship-cap-calculator/?balance=65000&agi=95000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=ibr-hardship-cap-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under HEA Section 493C and Title IV 34 CFR 685.209."
+        ),
+        "tags": [
+            "ibr hardship cap calculator",
+            "ibr 10 year standard payment cap",
+            "partial financial hardship calculator",
+            "hea section 493c ibr cap",
+            "income based repayment ceiling",
+            "prexvo",
+            "prexvo tools",
         ],
     },
 }
@@ -3793,12 +4571,13 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     Conforms strictly to zero forbidden dashes, zero personal attribution, and zero conversational filler.
     """
     from pseofactory.contracts import assert_youtube_transcript
-    from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS
+    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
-    title = tool.get("title", slug.replace("-", " ").title())
-    short_title = tool.get("short_title", title[:24])
+    raw_title = tool.get("title", slug.replace("-", " ").title())
+    raw_short = tool.get("short_title", "")
+    title, short_title = _clean_tool_title_and_short(slug, raw_title, raw_short)
     desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
     query = tool.get("primary_keyword", short_title.lower())
 
@@ -3809,15 +4588,22 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     else:
         is_prexvo = any(t.get("slug") == slug for t in PREXVO_DEFAULT_TOOLS)
 
+    curated = TOOL_YOUTUBE_METADATA.get(slug, {})
+    curated_chapters = curated.get("chapters") or []
+
     if is_prexvo:
         brand_name = "Prexvo"
         canonical_base = "https://prexvo.com"
+        ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Title IV Statutory Framework"
+        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "225% Poverty Line Exemption & Discretionary Formula"
+        ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Repayment Plan Comparison & Interest Subsidies"
+        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on Prexvo"
         segments = [
             {
                 "timestamp": "00:00",
                 "seconds": 0,
                 "speaker": "[Narrator]",
-                "section_title": f"{short_title} Title IV Statutory Framework",
+                "section_title": ch0,
                 "target_query": query,
                 "spoken_script": (
                     f"The {short_title} model evaluates federal student loan repayment obligations under Title IV of the Higher Education Act and 34 CFR Part 685. "
@@ -3830,7 +4616,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "timestamp": "00:30",
                 "seconds": 30,
                 "speaker": "[Narrator]",
-                "section_title": "225% Poverty Line Exemption & Discretionary Formula",
+                "section_title": ch1,
                 "target_query": f"{query} poverty line",
                 "spoken_script": (
                     "Under HEA Section 493C and Department of Education regulations, income-driven repayment plans protect discretionary income above the HHS Poverty Guidelines. "
@@ -3843,7 +4629,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "timestamp": "01:00",
                 "seconds": 60,
                 "speaker": "[Narrator]",
-                "section_title": "Repayment Plan Comparison & Interest Subsidies",
+                "section_title": ch2,
                 "target_query": f"{query} repayment plans",
                 "spoken_script": (
                     "Federal student loan borrowers compare standard tiered amortization against income-driven repayment under 34 CFR Part 685. "
@@ -3856,7 +4642,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "timestamp": "01:30",
                 "seconds": 90,
                 "speaker": "[Narrator]",
-                "section_title": f"Interactive {short_title} Walkthrough on Prexvo",
+                "section_title": ch3,
                 "target_query": f"prexvo {short_title.lower()}",
                 "spoken_script": (
                     f"Deterministic mathematical models deliver immediate clarity across complex Title IV student loan repayment regulations. "
@@ -3869,12 +4655,16 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     else:
         brand_name = "ProfitHelm"
         canonical_base = "https://profithelm.com"
+        ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
+        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Core Mathematical Modeling & Rate Calculations"
+        ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Tier Scenario Forecasting & Thresholds"
+        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on ProfitHelm"
         segments = [
             {
                 "timestamp": "00:00",
                 "seconds": 0,
                 "speaker": "[Narrator]",
-                "section_title": f"{short_title} Statutory Framework & Scope",
+                "section_title": ch0,
                 "target_query": query,
                 "spoken_script": (
                     f"The {short_title} model calculates quantitative financial metrics pursuant to official IRC statutory codes and 26 CFR regulations. "
@@ -3887,7 +4677,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "timestamp": "00:30",
                 "seconds": 30,
                 "speaker": "[Narrator]",
-                "section_title": "Core Mathematical Modeling & Rate Calculations",
+                "section_title": ch1,
                 "target_query": f"{query} modeling",
                 "spoken_script": (
                     "Empirical economic benchmarks from FRED series and BLS dataset indices provide foundational baseline data for quantitative calculations. "
@@ -3900,7 +4690,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "timestamp": "01:00",
                 "seconds": 60,
                 "speaker": "[Narrator]",
-                "section_title": "Multi-Tier Scenario Forecasting & Thresholds",
+                "section_title": ch2,
                 "target_query": f"{query} scenarios",
                 "spoken_script": (
                     "Corporate planning standards governed by GAAP ASC 205-40 mandate deterministic verification of cash flows and going-concern liquidity. "
@@ -3913,7 +4703,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "timestamp": "01:30",
                 "seconds": 90,
                 "speaker": "[Narrator]",
-                "section_title": f"Interactive {short_title} Walkthrough on ProfitHelm",
+                "section_title": ch3,
                 "target_query": f"profithelm {short_title.lower()}",
                 "spoken_script": (
                     f"Deterministic mathematical engines eliminate guesswork when navigating intricate statutory provisions and financial frameworks. "
@@ -3937,10 +4727,11 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     )
     full_text = _sanitize_youtube_text(full_text)
 
+    schema_name = curated.get("title") or f"{title} Walkthrough"
     schema = {
         "@context": "https://schema.org",
         "@type": "VideoObject",
-        "name": _sanitize_youtube_text(f"{title} Quantitative Analysis & Walkthrough"),
+        "name": _sanitize_youtube_text(schema_name),
         "description": _sanitize_youtube_text(desc),
         "uploadDate": "2026-01-01T08:00:00Z",
         "transcript": full_text,
@@ -3984,18 +4775,20 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
     Conforms strictly to zero forbidden dashes, zero personal attribution, and contracts.py invariants.
     """
     from pseofactory.contracts import (
+        assert_youtube_title,
         assert_youtube_description,
         assert_youtube_pinned_comment,
         assert_youtube_transcript,
         assert_no_forbidden_dashes,
         assert_no_personal_attribution,
     )
-    from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS
+    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
-    title = tool.get("title", slug.replace("-", " ").title())
-    short_title = tool.get("short_title", title[:24])
+    raw_title = tool.get("title", slug.replace("-", " ").title())
+    raw_short = tool.get("short_title", "")
+    title, short_title = _clean_tool_title_and_short(slug, raw_title, raw_short)
     desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
     qa = tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis.")
     query = tool.get("primary_keyword", short_title.lower())
@@ -4013,33 +4806,71 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
 
     transcript_pack = _generate_youtube_transcript(tool, property_id=effective_prop)
 
-    curated = TOOL_YOUTUBE_METADATA.get(slug, {}) if not is_prexvo else {}
-    preset_query = curated.get("preset_query", "")
+    curated = TOOL_YOUTUBE_METADATA.get(slug, {})
+    curated_chapters = curated.get("chapters") or []
+    preset_query = curated.get("preset_query") or (
+        PREXVO_TOOL_SCENARIOS.get(slug, {}).get("query", "balance=60000&agi=65000&rate=6.5&deps=1")
+        if is_prexvo
+        else "income=125000&status=single&state=CA"
+    )
     query_prefix = f"{preset_query}&" if preset_query else ""
     desc_cta_url = f"{canonical_base}/tools/{slug}/?{query_prefix}utm_source=youtube&utm_medium=video&utm_campaign={slug}-demo&utm_content=description_cta"
     pinned_cta_url = f"{canonical_base}/tools/{slug}/?{query_prefix}utm_source=youtube&utm_medium=video&utm_campaign={slug}-demo&utm_content=pinned_comment"
 
+    def _build_safe_youtube_title(candidate: str, fallback_short: str, is_prexvo_tenant: bool) -> str:
+        cleaned = _sanitize_youtube_text(candidate).replace("...", "").strip()
+        cleaned = re.sub(r"\b([Cc]alculator)\s+[Cc]alculator\b", r"\1", cleaned)
+        if len(cleaned) <= 100:
+            return cleaned
+        suffix = "[Title IV Model]" if is_prexvo_tenant else "[2026 Model]"
+        alt = f"{fallback_short} {suffix}".strip()
+        if len(alt) <= 100:
+            return alt
+        words = cleaned.split()
+        out = []
+        for w in words:
+            trial = " ".join(out + [w])
+            if len(trial) > 95:
+                break
+            out.append(w)
+        return " ".join(out)
+
+    def _dedupe_tags(raw_tags: List[str]) -> List[str]:
+        seen = set()
+        deduped = []
+        for t_val in raw_tags:
+            clean_t = _sanitize_youtube_text(t_val).strip()
+            clean_t = re.sub(r"\b([Cc]alculator)\s+[Cc]alculator\b", r"\1", clean_t)
+            low = clean_t.lower()
+            if clean_t and low not in seen:
+                seen.add(low)
+                deduped.append(clean_t)
+        return deduped
+
     nl = chr(10)
     if is_prexvo:
-        clean_title = f"{title} Statutory Analysis & Walkthrough"
-        clean_title = _sanitize_youtube_text(clean_title)
-        if len(clean_title) > 100:
-            clean_title = clean_title[:97] + "..."
+        fallback_title = f"{title} [Title IV Walkthrough]" if "calculator" in title.lower() else f"{title} Calculator [Title IV Walkthrough]"
+        clean_title = _build_safe_youtube_title(curated.get("title") or fallback_title, short_title, True)
+
+        ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
+        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Title IV Discretionary Income & Exemption Formula"
+        ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Repayment Plan Comparison & Interest Subsidies"
+        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough"
 
         desc_lines = [
             f"Calculate deterministic student loan repayment projections under Title IV and 34 CFR Part 685 for {title}.",
             f"Model your exact repayment scenario live: {desc_cta_url}",
             "",
             "Key Takeaways & Methodologies:",
-            "• Statutory Basis: Computed under Title IV Higher Education Act Section 493C and 34 CFR Part 685.",
+            f"• Statutory Basis: {qa}",
             "• Economic Benchmarks: Evaluated against official HHS Poverty Guidelines and Department of Education data.",
             "• Real-time Modeling: Sub-100ms deterministic math engines with live parameter synchronization.",
             "",
             "Timestamps (Key Moments):",
-            f"0:00 - {short_title} Statutory Framework & Scope",
-            "0:30 - 225% Poverty Line Exemption & Discretionary Income",
-            "1:00 - Repayment Plan Comparison & Interest Subsidies",
-            f"1:30 - Interactive {short_title} Walkthrough",
+            f"0:00 - {ch0}",
+            f"0:30 - {ch1}",
+            f"1:00 - {ch2}",
+            f"1:30 - {ch3}",
             "",
             "RESOURCES & INTERACTIVE TOOLS:",
             f"Model Your Scenario Live on Prexvo: {desc_cta_url}",
@@ -4052,20 +4883,27 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         ]
         clean_desc = _sanitize_youtube_text(nl.join(desc_lines))
 
-        pinned_lines = [
-            "CALCULATE YOUR MONTHLY REPAYMENT:",
-            f"Model quantitative Title IV obligations and 225% poverty exemption rules for {short_title}.",
-            "",
-            "Run your exact numbers in sub-100ms on Prexvo (free, deterministic, zero login required):",
-            f"{pinned_cta_url}",
-            "",
-            "Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines.",
-        ]
-        clean_pinned_comment = _sanitize_youtube_text(nl.join(pinned_lines))
+        default_pinned = curated.get("pinned_comment")
+        if not default_pinned:
+            pinned_lines = [
+                "CALCULATE YOUR MONTHLY REPAYMENT:",
+                f"Model quantitative Title IV obligations and statutory repayment rules for {short_title}.",
+                "",
+                "Run your exact numbers in sub-100ms on Prexvo (free, deterministic, zero login required):",
+                f"{pinned_cta_url}",
+                "",
+                "Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines.",
+            ]
+            clean_pinned_comment = nl.join(pinned_lines)
+        else:
+            clean_pinned_comment = default_pinned
+        clean_pinned_comment = _sanitize_youtube_text(clean_pinned_comment)
 
-        tags = [
-            slug.replace("-", " "),
-            f"{slug.replace('-', ' ')} calculator",
+        slug_phrase = slug.replace("-", " ")
+        slug_calc_tag = slug_phrase if "calculator" in slug_phrase.lower() else f"{slug_phrase} calculator"
+        fallback_tags = [
+            slug_phrase,
+            slug_calc_tag,
             query,
             f"{query} model",
             "student loan repayment",
@@ -4074,12 +4912,10 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             "prexvo",
             "prexvo tools",
         ]
-        tags = [_sanitize_youtube_text(tag) for tag in tags]
+        tags = _dedupe_tags(curated.get("tags") or fallback_tags)
     else:
-        clean_title = curated.get("title") or f"{title} [Deterministic Model & Calculator]"
-        clean_title = _sanitize_youtube_text(clean_title)
-        if len(clean_title) > 100:
-            clean_title = clean_title[:97] + "..."
+        fallback_title = f"{title} [2026 Deterministic Model]" if "calculator" in title.lower() else f"{title} [Deterministic Model & Calculator]"
+        clean_title = _build_safe_youtube_title(curated.get("title") or fallback_title, short_title, False)
 
         domain = _classify_tool_domain(tool)
         if domain == "saas":
@@ -4091,6 +4927,11 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         else:
             basis_label = "Statutory Basis"
 
+        ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
+        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Core Mathematical Modeling & Rate Calculations"
+        ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Tier Scenario Forecasting"
+        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough"
+
         desc_lines = [
             f"Calculate deterministic projections and statutory analysis for {title}.",
             f"Model your exact scenario live: {desc_cta_url}",
@@ -4101,10 +4942,10 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             "• Scenario Analysis: Dynamic evaluation across income tiers and holding periods.",
             "",
             "Timestamps (Key Moments):",
-            f"0:00 - {short_title} Statutory Framework & Scope",
-            "0:30 - Core Mathematical Modeling & Rate Calculations",
-            "1:00 - Multi-Tier Scenario Forecasting",
-            f"1:30 - Interactive {short_title} Walkthrough",
+            f"0:00 - {ch0}",
+            f"0:30 - {ch1}",
+            f"1:00 - {ch2}",
+            f"1:30 - {ch3}",
             "",
             "RESOURCES & INTERACTIVE TOOLS:",
             f"Model Your Scenario Live on ProfitHelm: {desc_cta_url}",
@@ -4133,9 +4974,11 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             clean_pinned_comment = default_pinned
         clean_pinned_comment = _sanitize_youtube_text(clean_pinned_comment)
 
-        tags = curated.get("tags") or [
-            slug.replace("-", " "),
-            f"{slug.replace('-', ' ')} calculator",
+        slug_phrase = slug.replace("-", " ")
+        slug_calc_tag = slug_phrase if "calculator" in slug_phrase.lower() else f"{slug_phrase} calculator"
+        fallback_tags = [
+            slug_phrase,
+            slug_calc_tag,
             query,
             f"{query} model",
             "financial model",
@@ -4143,8 +4986,9 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             "profithelm",
             "profithelm tools",
         ]
-        tags = [_sanitize_youtube_text(tag) for tag in tags]
+        tags = _dedupe_tags(curated.get("tags") or fallback_tags)
 
+    assert_youtube_title(clean_title, context=f"{slug} youtube title")
     assert_no_forbidden_dashes(clean_title, context=f"{slug} youtube title")
     assert_no_personal_attribution(clean_title, context=f"{slug} youtube title")
     assert_youtube_description(clean_desc)
@@ -4212,7 +5056,7 @@ def generate_social_syndication_pack(
         "linkedin": li_pack,
         "x": x_pack,
         "facebook": fb_pack,
-        "youtube": generate_youtube_syndication(slug),
+        "youtube": generate_youtube_syndication(tool),
     }
 
 
@@ -4733,6 +5577,81 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
             "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% IDR/RAP formulas ($430.42/month, saving $9,195/year). Grounded in statutory Title IV 34 CFR 685.209 rules."
         ),
     },
+    "student-loan-refinance-break-even-calculator": {
+        "query": "balance=75000&agi=110000&rate=7.2&deps=0",
+        "x_hook": "refinancing $75k in 7.2% federal loans to 5.2% private saves $9,140 only if Title IV IDR subsidies and PSLF value equal $0.",
+        "li_hook": "Refinancing $75,000 in 7.2% Direct Loans into a 5.2% private note saves $9,140 in interest only when your AGI exceeds the Title IV subsidy threshold.",
+        "li_body": (
+            "Evaluating a federal-to-private student loan refinance under Title IV (34 CFR Part 685) and Truth in Lending (12 CFR Part 1026) requires pricing three statutory forfeitures:\n\n"
+            "• Unpaid Interest Subsidy Value: Under 2026 RAP, the Department of Education waives 100% of unpaid monthly interest above your 225% FPL payment.\n"
+            "• Tax-Free PSLF & IDR Forgiveness: Private refinancing permanently forfeits IRC Section 108(f) public service discharge and 240/300-month IDR forgiveness.\n"
+            "• Net Present Value Break-Even Spread: A private APR must beat your effective subsidy-adjusted federal rate by at least 150 to 200 bps to justify losing statutory forbearance."
+        ),
+        "fb_body": (
+            "Before refinancing $75,000 in 7.2% federal student loans into a 5.2% private rate, borrowers must price the exact dollar value of forfeited Title IV protections.\n\n"
+            "If your AGI qualifies you for 225% FPL RAP interest subsidies or 120-payment PSLF forgiveness under 34 CFR 685.219, a lower private rate can still increase your net lifetime out-of-pocket cost. Grounded in statutory Title IV 34 CFR Part 685 and 12 CFR Part 1026 rules."
+        ),
+    },
+    "rap-payment-calculator": {
+        "query": "balance=60000&agi=65000&rate=6.5&deps=1",
+        "x_hook": "under 2026 RAP (225% FPL), a 2-person household at $65k AGI on $60k debt pays $248.23/mo with $76.77/mo interest waived.",
+        "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a 2-person household at $65,000 AGI deducts $47,587.50 (225% FPL) and receives a 100% unpaid interest waiver.",
+        "li_body": (
+            "The 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685 restructures Title IV discretionary income math around three core rules:\n\n"
+            "• 225% HHS Poverty Exemption: Shields $33,975 for a single filer and $47,587.50 for a 2-person household before assessing discretionary income.\n"
+            "• 100% Unpaid Interest Subsidy: When your required RAP payment ($248.23/mo) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $76.77/mo is waived.\n"
+            "• Principal Balance Protection: Zero negative amortization ensures your loan balance never increases while making on-time RAP payments."
+        ),
+        "fb_body": (
+            "The 2026 Repayment Assistance Plan (RAP) protects 225% of the HHS Federal Poverty Guideline ($47,587.50 for a family of 2) before calculating your monthly student loan bill.\n\n"
+            "On a $60,000 balance at 6.5% interest and $65,000 AGI, RAP sets your monthly payment at $248.23 and waives the remaining $76.77 in monthly interest under 34 CFR Part 685. Grounded in statutory Title IV and HHS Poverty Guidelines."
+        ),
+    },
+    "grad-plus-borrowing-cap-calculator": {
+        "query": "balance=85000&agi=70000&rate=7.9&deps=0",
+        "x_hook": "with Direct Unsubsidized graduate loans capped at $20,500/yr ($138,500 aggregate) under 34 CFR 685.203, Grad PLUS sunset caps create funding gaps.",
+        "li_hook": "Under HEA Section 455 and 34 CFR 685.203, Direct Unsubsidized graduate borrowing is capped at $20,500/year ($138,500 aggregate), exposing Grad PLUS sunset gaps.",
+        "li_body": (
+            "Graduate and professional students planning multi-year degree financing under Title IV HEA Section 455 and 34 CFR 685.203 must model three statutory limits:\n\n"
+            "• $20,500 Annual Unsubsidized Cap: Direct Unsubsidized graduate borrowing is strictly capped at $20,500 per academic year (up to $40,500/year for eligible health professions).\n"
+            "• $138,500 Aggregate Ceiling: Combined undergraduate and graduate Direct Subsidized and Unsubsidized principal cannot exceed $138,500.\n"
+            "• Origination Fee & Sunset Math: Accounting for the 4.228% PLUS vs 1.057% Unsubsidized origination fee deduction under HEA Section 455(c) prevents net disbursement shortfalls."
+        ),
+        "fb_body": (
+            "Graduate students relying on federal student aid face strict statutory borrowing ceilings under 34 CFR 685.203: Direct Unsubsidized loans cap at $20,500 per year and $138,500 in aggregate debt.\n\n"
+            "Modeling your total cost of attendance against statutory Direct Loan caps and origination fee deductions early prevents mid-degree funding shortfalls. Grounded in statutory Title IV HEA Section 455 and 34 CFR 685.203 rules."
+        ),
+    },
+    "married-filing-separately-student-loan-calculator": {
+        "query": "balance=75000&agi=72000&rate=6.8&deps=1",
+        "x_hook": "excluding a spouse's $80k income via Married Filing Separately under 34 CFR 685.209 cuts IDR student loan bills by $8,000/yr.",
+        "li_hook": "Excluding a spouse's $80,000 income by filing Married Separately under 34 CFR 685.209 cuts annual IDR payments by $8,000, outweighing the MFS tax penalty.",
+        "li_body": (
+            "Married borrowers on income-driven repayment plans under 34 CFR 685.209 and IRC Section 1(d) must solve a two-variable household optimization problem:\n\n"
+            "• Spousal Income Exclusion (MFS): Filing Married Separately excludes your spouse's AGI from your RAP, IBR, or PAYE calculation, reducing annual payments by 10% of the excluded income ($8,000/yr on $80k spousal AGI).\n"
+            "• Family Size Trade-Off: Under separate filing rules, your spouse is excluded from household size for the HHS Poverty Guideline deduction.\n"
+            "• IRC Section 1(d) Tax Spread: Comparing the incremental federal tax from separate brackets and lost credits against the annual IDR payment savings determines net household cash flow."
+        ),
+        "fb_body": (
+            "Under 34 CFR 685.209, filing Married Filing Separately (MFS) allows you to exclude your spouse's income from your federal student loan IDR payment calculation.\n\n"
+            "When a spouse earns $80,000, excluding that income saves up to $8,000/year ($666.67/month) on a 10% IDR plan, which often outweighs the higher federal income tax from filing separately under IRC Section 1(d). Grounded in statutory 34 CFR 685.209 rules."
+        ),
+    },
+    "ibr-hardship-cap-calculator": {
+        "query": "balance=65000&agi=95000&rate=6.5&deps=0",
+        "x_hook": "under HEA Section 493C, IBR locks a 10-year Standard payment ceiling ($738.06/mo on $65k at 6.5%) even if your AGI triples.",
+        "li_hook": "Under HEA Section 493C, Income-Based Repayment strictly caps monthly bills at the 10-year Standard amount ($738.06/month on $65k at 6.5%) even when income surges.",
+        "li_body": (
+            "Borrowers expecting steep career income growth must compare HEA Section 493C Partial Financial Hardship (PFH) rules against uncapped plans:\n\n"
+            "• Entry Hardship Test: You qualify to enter IBR when 10% (new IBR) or 15% (legacy IBR) of discretionary income above 150% FPL is less than the 10-year Standard payment calculated at entry.\n"
+            "• Permanent 10-Year Standard Ceiling: Once enrolled in IBR, your monthly payment can never exceed that locked 10-year Standard amount ($738.06/month on $65k at 6.5%), even if your AGI later rises to $200,000.\n"
+            "• Uncapped RAP Contrast: Because 2026 RAP lacks a 10-year Standard cap, high-earning borrowers pay substantially less per month by locking the IBR ceiling."
+        ),
+        "fb_body": (
+            "Income-Based Repayment (IBR) under HEA Section 493C includes a critical protection that the 2026 RAP plan does not: a permanent 10-year Standard payment ceiling.\n\n"
+            "Once you qualify for Partial Financial Hardship and enter IBR on a $65,000 balance at 6.5%, your monthly payment is capped at $738.06/month even if your income triples later in your career. Grounded in statutory HEA Section 493C and 34 CFR 685.209 rules."
+        ),
+    },
 }
 
 
@@ -4953,12 +5872,9 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     normalized_tools = []
     for t in (target_tools or []):
         if isinstance(t, str):
-            normalized_tools.append({"slug": t, "title": t.replace("-", " ").title()})
+            normalized_tools.append(_resolve_tool(t))
         elif isinstance(t, dict):
-            item = dict(t)
-            if "slug" in item and "title" not in item:
-                item["title"] = str(item["slug"]).replace("-", " ").title()
-            normalized_tools.append(item)
+            normalized_tools.append(_resolve_tool(t))
         else:
             normalized_tools.append(t)
     target_tools = normalized_tools
@@ -4995,7 +5911,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     distribution_pack = {}
     for t in target_tools:
         slug = t["slug"]
-        social_pack = generate_social_syndication_pack(slug)
+        social_pack = generate_social_syndication_pack(t)
         distribution_pack[slug] = {
             "title": t["title"],
             "url": f"{POST_URL_BASE}/tools/{slug}/",
@@ -5069,6 +5985,8 @@ def export_all_syndication_files(
     else:
         output_dir = Path(output_dir)
 
+    from pseofactory.qualification import is_retired_or_consolidated_slug
+
     if tools is None:
         from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
         try:
@@ -5091,7 +6009,6 @@ def export_all_syndication_files(
             else:
                 target_tools = TOOLS
 
-        from pseofactory.qualification import is_retired_or_consolidated_slug
         target_tools = [
             t for t in (target_tools or [])
             if not is_retired_or_consolidated_slug(
@@ -5116,49 +6033,46 @@ def export_all_syndication_files(
         if not dry_run and (output_dir.parent / "dist" / "tools").is_dir():
             candidate_dist_tools.append(output_dir.parent / "dist" / "tools")
 
+        built_slugs = set()
         for dt_dir in candidate_dist_tools:
             if dt_dir.is_dir():
                 for item in sorted(dt_dir.iterdir()):
                     if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
                         if is_retired_or_consolidated_slug(item.name, property_id):
                             continue
+                        built_slugs.add(item.name)
                         if item.name not in known_slugs:
-                            target_tools.append({
-                                "slug": item.name,
-                                "title": item.name.replace("-", " ").title(),
-                            })
+                            target_tools.append(_resolve_tool(item.name))
                             known_slugs.add(item.name)
 
-        # Dynamically discover existing tool directories in target_dir
-        # (excluding hidden folders, files, 'ai_benchmarks', and retired/consolidated slugs)
-        if output_dir.exists():
-            import shutil as _shutil
-            for item in sorted(output_dir.iterdir()):
-                if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
-                    if is_retired_or_consolidated_slug(item.name, property_id):
-                        if not dry_run:
-                            _shutil.rmtree(item, ignore_errors=True)
-                        continue
-                    if item.name not in known_slugs:
-                        target_tools.append({
-                            "slug": item.name,
-                            "title": item.name.replace("-", " ").title(),
-                        })
-                        known_slugs.add(item.name)
+        if built_slugs:
+            target_tools = [
+                t for t in target_tools
+                if (t["slug"] if isinstance(t, dict) else str(t)) in built_slugs
+            ]
     else:
-        from pseofactory.qualification import is_retired_or_consolidated_slug
-        target_tools = tools
-        if output_dir.exists() and not dry_run:
-            import shutil as _shutil
-            for item in sorted(output_dir.iterdir()):
-                if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
-                    if is_retired_or_consolidated_slug(item.name, property_id):
-                        _shutil.rmtree(item, ignore_errors=True)
+        target_tools = [
+            t for t in (tools or [])
+            if not is_retired_or_consolidated_slug(
+                t["slug"] if isinstance(t, dict) else str(t),
+                property_id,
+            )
+        ]
 
     target_tools = [
-        {"slug": t, "title": t.replace("-", " ").title()} if isinstance(t, str) else t
+        _resolve_tool(t) if isinstance(t, (str, dict)) else t
         for t in (target_tools or [])
     ]
+    active_slugs = {t["slug"] for t in target_tools if isinstance(t, dict) and "slug" in t}
+
+    # Prune retired or non-active orphan tool directories in output_dir when tools was inferred
+    # (or always prune retired/consolidated slugs when tools was explicitly passed)
+    if output_dir.exists() and not dry_run:
+        import shutil as _shutil
+        for item in sorted(output_dir.iterdir()):
+            if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
+                if is_retired_or_consolidated_slug(item.name, property_id) or (tools is None and item.name not in active_slugs):
+                    _shutil.rmtree(item, ignore_errors=True)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
@@ -5234,22 +6148,22 @@ def export_all_syndication_files(
         (tool_dir / "regulatory_lead_magnet.txt").write_text(pack["regulatory_lead_magnet"]["content"], encoding="utf-8")
 
         # 10. YouTube Syndication Copy & Metadata (HWL-1202)
-        yt_pack = pack.get("youtube") or generate_youtube_syndication(slug, property_id=property_id)
+        yt_pack = pack.get("youtube") or generate_youtube_syndication(tool_spec, property_id=property_id)
         pinned_comment = yt_pack.get("pinned_comment", "")
 
         from pseofactory.contracts import (
+            assert_youtube_title,
             assert_youtube_description,
             assert_youtube_pinned_comment,
             assert_youtube_transcript,
             assert_no_forbidden_dashes,
         )
         brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+        assert_youtube_title(yt_pack["title"], context=f"{slug} youtube title")
         assert_youtube_description(yt_pack["description"])
         assert_youtube_pinned_comment(pinned_comment)
         assert_youtube_transcript(yt_pack["transcript"], brand_name=brand_to_check)
         assert_no_forbidden_dashes(yt_pack["title"], context=f"{slug} youtube title")
-        if "<" in yt_pack["title"] or ">" in yt_pack["title"]:
-            raise ValueError(f"Angle brackets forbidden in YouTube title: {yt_pack['title']}")
 
         (tool_dir / "youtube_description.txt").write_text(yt_pack["description"], encoding="utf-8")
         (tool_dir / "youtube_pinned_comment.txt").write_text(pinned_comment, encoding="utf-8")
@@ -5351,13 +6265,76 @@ Calculations and statutory rules derived from:
 """
     (output_dir / "github_seed_discovery.md").write_text(github_seed_md, encoding="utf-8")
 
-    # Write AI Citation Benchmark Nodes
+    # Write AI Citation Benchmark Nodes and prune orphan *_matrix.md files
+    ai_bench_dir = output_dir / "ai_benchmarks"
+    if ai_bench_dir.is_dir() and not dry_run:
+        for bm_file in sorted(ai_bench_dir.glob("*_matrix.md")):
+            bm_slug = bm_file.name[:-len("_matrix.md")]
+            if is_retired_or_consolidated_slug(bm_slug, property_id) or (tools is None and bm_slug not in active_slugs):
+                bm_file.unlink(missing_ok=True)
+
     if property_id == "profithelm":
         ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools)
-        ai_bench_dir = output_dir / "ai_benchmarks"
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+    elif property_id == "prexvo":
+        ai_bench_dir.mkdir(parents=True, exist_ok=True)
+        for t in target_tools:
+            t_res = _resolve_tool(t)
+            s_val = t_res["slug"]
+            t_val = t_res["title"]
+            matrix_md = (
+                f"# {t_val} - Statutory & Empirical Benchmark Matrix\n\n"
+                f"**Canonical URL:** https://prexvo.com/tools/{s_val}/\n"
+                f"**Statutory Authority:** Title IV of the Higher Education Act (20 U.S.C. 1070 et seq.; 34 CFR Part 685)\n"
+                f"**Empirical Data Sources:** HHS Federal Poverty Guidelines & Department of Education Federal Student Aid Portfolio\n\n"
+                f"## Repayment Plan Statutory Comparison Matrix (2026 Baseline)\n\n"
+                f"| Plan Name | Discretionary Income Exemption | Monthly Payment Rate | Unpaid Interest Subsidy | Forgiveness Horizon |\n"
+                f"| :--- | :--- | :--- | :--- | :--- |\n"
+                f"| **2026 RAP** | 225% of Federal Poverty Line | 10% of Discretionary Income | 100% Unpaid Interest Waived | 240 - 300 Months |\n"
+                f"| **New IBR (Post-2014)** | 150% of Federal Poverty Line | 10% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 240 Months (20 Yrs) |\n"
+                f"| **Legacy IBR (Pre-2014)** | 150% of Federal Poverty Line | 15% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 300 Months (25 Yrs) |\n"
+                f"| **PAYE** | 150% of Federal Poverty Line | 10% (Capped at 10-Yr Standard) | 10% Capitalization Cap | 240 Months (20 Yrs) |\n"
+                f"| **ICR** | 100% of Federal Poverty Line | 20% or 12-Yr Income-Adjusted | None | 300 Months (25 Yrs) |\n"
+                f"| **Tiered Standard** | N/A (Fixed Amortization) | Fixed by Principal Tier | N/A | 120 - 360 Months |\n\n"
+                f"## Verification & Deterministic Execution\n"
+                f"All figures and amortizations are verified against federal Title IV regulations at https://prexvo.com/tools/{s_val}/.\n"
+            )
+            assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
+            (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")
+
+    # Sync central pseofactory/syndication/<property_id> mirror when exporting to a real tenant repo
+    if not dry_run and not _is_test_context(output_dir, property_id):
+        central_synd_dir = Path(__file__).resolve().parent.parent / "syndication" / _normalize_property_id(property_id)
+        try:
+            if central_synd_dir.resolve() != output_dir.resolve() and central_synd_dir.parent.is_dir():
+                import shutil as _shutil
+                central_synd_dir.mkdir(parents=True, exist_ok=True)
+                if tools is None:
+                    for c_item in sorted(central_synd_dir.iterdir()):
+                        if c_item.is_dir() and not c_item.name.startswith(".") and c_item.name != "ai_benchmarks":
+                            if is_retired_or_consolidated_slug(c_item.name, property_id) or c_item.name not in active_slugs:
+                                _shutil.rmtree(c_item, ignore_errors=True)
+                for slug in all_assets:
+                    src_tool_dir = output_dir / slug
+                    dst_tool_dir = central_synd_dir / slug
+                    if src_tool_dir.is_dir():
+                        _shutil.copytree(src_tool_dir, dst_tool_dir, dirs_exist_ok=True)
+                for top_file in ("github_seed_discovery.md", "affiliate_routes_verified.json"):
+                    if (output_dir / top_file).is_file():
+                        _shutil.copy2(output_dir / top_file, central_synd_dir / top_file)
+                if ai_bench_dir.is_dir():
+                    dst_bench = central_synd_dir / "ai_benchmarks"
+                    dst_bench.mkdir(parents=True, exist_ok=True)
+                    if tools is None:
+                        for c_bm in sorted(dst_bench.glob("*_matrix.md")):
+                            bm_slug = c_bm.name[:-len("_matrix.md")]
+                            if is_retired_or_consolidated_slug(bm_slug, property_id) or bm_slug not in active_slugs:
+                                c_bm.unlink(missing_ok=True)
+                    _shutil.copytree(ai_bench_dir, dst_bench, dirs_exist_ok=True)
+        except Exception:
+            pass
 
     return output_dir
 
@@ -5389,6 +6366,7 @@ def dispatch_to_distribution_lead(
         assert_linkedin,
         assert_no_forbidden_dashes,
         assert_no_prompt_leakage,
+        assert_youtube_title,
         assert_youtube_description,
         assert_youtube_pinned_comment,
         assert_youtube_transcript,
@@ -5431,16 +6409,20 @@ def dispatch_to_distribution_lead(
         }
         eff_dist = Path(dist_dir) if dist_dir else (Path(adapter.dist_dir) if (adapter and getattr(adapter, "dist_dir", None)) else None)
         if eff_dist and (eff_dist / "tools").is_dir():
+            built_slugs = set()
             for item in sorted((eff_dist / "tools").iterdir()):
                 if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
                     if is_retired_or_consolidated_slug(item.name, property_id):
                         continue
+                    built_slugs.add(item.name)
                     if item.name not in known_slugs:
-                        target_tools.append({
-                            "slug": item.name,
-                            "title": item.name.replace("-", " ").title(),
-                        })
+                        target_tools.append(_resolve_tool(item.name))
                         known_slugs.add(item.name)
+            if built_slugs:
+                target_tools = [
+                    t for t in target_tools
+                    if (t["slug"] if isinstance(t, dict) else str(t)) in built_slugs
+                ]
 
     # Idempotency and WAL recording (deterministic across tool slugs)
     import hashlib
@@ -5471,6 +6453,7 @@ def dispatch_to_distribution_lead(
             assert_linkedin(pack["linkedin"]["content"])
             assert_linkedin(pack["linkedin_pulse"]["article_markdown"])
             if "youtube" in pack:
+                assert_youtube_title(pack["youtube"]["title"], context=f"{slug} youtube title")
                 assert_youtube_description(pack["youtube"]["description"])
                 assert_youtube_pinned_comment(pack["youtube"]["pinned_comment"])
                 assert_youtube_transcript(pack["youtube"]["transcript"], brand_name=brand_to_check)
@@ -5566,22 +6549,32 @@ def dispatch_to_distribution_lead(
                 and str(repo_dir).startswith("/home/ubuntuadmin/projects/")
             )
             if repo_dir is not None and repo_dir.is_dir() and not is_foreign_pytest:
+                from pseofactory.qualification import is_retired_or_consolidated_slug
                 b_ledger_path = repo_dir / ".agy" / "broadcast_ledger.json"
                 b_ledger_path.parent.mkdir(parents=True, exist_ok=True)
                 existing_entries: List[Dict[str, Any]] = []
+                seen_slugs = set()
                 if b_ledger_path.is_file():
                     try:
                         raw_b = json.loads(b_ledger_path.read_text(encoding="utf-8"))
                         if isinstance(raw_b, list):
-                            existing_entries = [
-                                e for e in raw_b
-                                if isinstance(e, dict)
-                                and str(e.get("slug", "")) not in ("", "direct_broadcast")
-                                and not str(e.get("slug", "")).startswith("mock_")
-                            ]
+                            for e in raw_b:
+                                if not isinstance(e, dict):
+                                    continue
+                                e_slug = str(e.get("slug", ""))
+                                if e_slug in ("", "direct_broadcast") or e_slug.startswith("mock_"):
+                                    continue
+                                if is_retired_or_consolidated_slug(e_slug, property_id):
+                                    continue
+                                if tools is None and e_slug not in all_assets:
+                                    continue
+                                if e_slug in seen_slugs:
+                                    continue
+                                seen_slugs.add(e_slug)
+                                existing_entries.append(e)
                     except Exception:
                         existing_entries = []
-                seen_slugs = {str(e.get("slug")) for e in existing_entries if e.get("slug")}
+                        seen_slugs = set()
                 canon_base = "https://prexvo.com" if property_id == "prexvo" else "https://profithelm.com"
                 for slug in all_assets:
                     if slug not in seen_slugs:

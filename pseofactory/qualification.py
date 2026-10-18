@@ -202,6 +202,7 @@ SYNTHETIC_CANDIDATE_PATTERNS = (
     r"^custom-test-calculator$",
     r"^poison-pill-test$",
     r"^irs-1031-exchange-tax-deferral-test$",
+    r"^dynamic-saas-benchmark-calculator$",
 )
 
 
@@ -1960,14 +1961,50 @@ def _clean_syndication_directories_and_ledgers(
         if central_synd.is_dir() and central_synd not in synd_dirs:
             synd_dirs.append(central_synd)
 
+    active_built_slugs: Set[str] = set()
+    dist_tools_dir = root / "dist" / "tools"
+    if not is_foreign_pytest and dist_tools_dir.is_dir():
+        for dt_entry in dist_tools_dir.iterdir():
+            if dt_entry.is_dir() and not dt_entry.name.startswith(".") and (dt_entry / "index.html").is_file():
+                if not is_retired_or_consolidated_slug(dt_entry.name, prop):
+                    active_built_slugs.add(dt_entry.name)
+
     for synd_dir in synd_dirs:
         if not synd_dir.is_dir():
             continue
         for item in sorted(synd_dir.iterdir()):
-            if item.name.startswith(".") or item.name == "ai_benchmarks":
+            if item.name.startswith("."):
+                continue
+            if item.name == "ai_benchmarks" and item.is_dir():
+                for b_item in sorted(item.iterdir()):
+                    if not b_item.is_file():
+                        continue
+                    b_stem = b_item.name
+                    if b_stem.endswith("_matrix.md"):
+                        prefix = b_stem[: -len("_matrix.md")]
+                    elif b_stem.endswith("_benchmarks.md"):
+                        prefix = b_stem[: -len("_benchmarks.md")].replace("_", "-")
+                    elif b_stem.endswith("_benchmarks.json"):
+                        prefix = b_stem[: -len("_benchmarks.json")].replace("_", "-")
+                    else:
+                        continue
+                    if (
+                        prefix in slugs_to_purge
+                        or is_retired_or_consolidated_slug(prefix, prop)
+                        or (b_stem.endswith("_matrix.md") and active_built_slugs and prefix not in active_built_slugs)
+                    ):
+                        try:
+                            b_item.unlink()
+                            removed_count += 1
+                        except Exception:
+                            pass
                 continue
             if item.is_dir():
-                if item.name in slugs_to_purge or is_retired_or_consolidated_slug(item.name, prop):
+                if (
+                    item.name in slugs_to_purge
+                    or is_retired_or_consolidated_slug(item.name, prop)
+                    or (active_built_slugs and item.name not in active_built_slugs)
+                ):
                     shutil.rmtree(item, ignore_errors=True)
                     removed_count += 1
             elif item.is_file():
@@ -2016,19 +2053,126 @@ def _clean_syndication_directories_and_ledgers(
             except Exception:
                 pass
 
-    # Clean .agy/broadcast_ledger.json and .agy/facebook_groups_catalog*.json
+    # Clean .agy/reddit_drafts
+    reddit_drafts_dir = root / ".agy" / "reddit_drafts"
+    if reddit_drafts_dir.is_dir():
+        for r_file in sorted(reddit_drafts_dir.iterdir()):
+            if not r_file.is_file():
+                continue
+            r_slug = r_file.stem
+            if (
+                r_slug in slugs_to_purge
+                or is_retired_or_consolidated_slug(r_slug, prop)
+                or (active_built_slugs and r_slug not in active_built_slugs)
+            ):
+                try:
+                    r_file.unlink()
+                    removed_count += 1
+                except Exception:
+                    pass
+
+    # Clean .agy/urls_to_index.txt
+    urls_idx_file = root / ".agy" / "urls_to_index.txt"
+    if urls_idx_file.is_file():
+        try:
+            u_lines = [ln.strip() for ln in urls_idx_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            kept_u: List[str] = []
+            seen_u: Set[str] = set()
+            for ln in u_lines:
+                m_u = re.search(r"/tools/([^/?#]+)", ln)
+                if m_u:
+                    u_slug = m_u.group(1).strip()
+                    if (
+                        u_slug in slugs_to_purge
+                        or is_retired_or_consolidated_slug(u_slug, prop)
+                        or (active_built_slugs and u_slug not in active_built_slugs)
+                    ):
+                        continue
+                if ln not in seen_u:
+                    seen_u.add(ln)
+                    kept_u.append(ln)
+            if kept_u != u_lines:
+                urls_idx_file.write_text("\n".join(kept_u) + ("\n" if kept_u else ""), encoding="utf-8")
+                removed_count += 1
+        except Exception:
+            pass
+
+    # Clean .agy/gsc_remediation_queue.json and .agy/indexing_audit_log.json
+    for agy_json_name in ("gsc_remediation_queue.json", "indexing_audit_log.json"):
+        agy_json_path = root / ".agy" / agy_json_name
+        if not agy_json_path.is_file():
+            continue
+        try:
+            raw_j = json.loads(agy_json_path.read_text(encoding="utf-8"))
+            j_changed = False
+            if isinstance(raw_j, dict):
+                for list_key in ("items", "remediations", "queue", "urls", "entries", "targets", "audit_results"):
+                    val_list = raw_j.get(list_key)
+                    if isinstance(val_list, list):
+                        new_list = []
+                        for entry in val_list:
+                            entry_str = json.dumps(entry) if not isinstance(entry, str) else entry
+                            m_tools = re.findall(r"/tools/([^/?#\"'\s]+)", entry_str)
+                            if any(
+                                ts in slugs_to_purge
+                                or is_retired_or_consolidated_slug(ts, prop)
+                                or (active_built_slugs and ts not in active_built_slugs)
+                                for ts in m_tools
+                            ):
+                                j_changed = True
+                                continue
+                            new_list.append(entry)
+                        if len(new_list) != len(val_list):
+                            raw_j[list_key] = new_list
+                            if "total_items" in raw_j and list_key == "items":
+                                raw_j["total_items"] = len(new_list)
+            elif isinstance(raw_j, list):
+                new_list = []
+                for entry in raw_j:
+                    entry_str = json.dumps(entry) if not isinstance(entry, str) else entry
+                    m_tools = re.findall(r"/tools/([^/?#\"'\s]+)", entry_str)
+                    if any(
+                        ts in slugs_to_purge
+                        or is_retired_or_consolidated_slug(ts, prop)
+                        or (active_built_slugs and ts not in active_built_slugs)
+                        for ts in m_tools
+                    ):
+                        j_changed = True
+                        continue
+                    new_list.append(entry)
+                raw_j = new_list
+            if j_changed:
+                agy_json_path.write_text(json.dumps(raw_j, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                removed_count += 1
+        except Exception:
+            pass
+
+    # Clean and deduplicate .agy/broadcast_ledger.json and .agy/facebook_groups_catalog*.json
     b_ledger = root / ".agy" / "broadcast_ledger.json"
     if b_ledger.is_file():
         try:
             b_data = json.loads(b_ledger.read_text(encoding="utf-8"))
             if isinstance(b_data, list):
-                filtered_b = [
-                    entry for entry in b_data
-                    if isinstance(entry, dict)
-                    and str(entry.get("slug") or "") not in slugs_to_purge
-                    and not is_retired_or_consolidated_slug(str(entry.get("slug") or ""), prop)
-                ]
-                if len(filtered_b) != len(b_data):
+                dedup_by_slug: Dict[str, Dict[str, Any]] = {}
+                ordered_b_slugs: List[str] = []
+                for entry in b_data:
+                    if not isinstance(entry, dict):
+                        continue
+                    eslug = str(entry.get("slug") or "").strip()
+                    if (
+                        not eslug
+                        or eslug in ("direct_broadcast",)
+                        or eslug.startswith("mock_")
+                        or eslug in slugs_to_purge
+                        or is_retired_or_consolidated_slug(eslug, prop)
+                        or (active_built_slugs and eslug not in active_built_slugs)
+                    ):
+                        continue
+                    if eslug not in dedup_by_slug:
+                        ordered_b_slugs.append(eslug)
+                    dedup_by_slug[eslug] = entry
+                filtered_b = [dedup_by_slug[s] for s in ordered_b_slugs]
+                if len(filtered_b) != len(b_data) or filtered_b != b_data:
                     b_ledger.write_text(json.dumps(filtered_b, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                     removed_count += 1
         except Exception:
@@ -2262,6 +2406,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         "custom-test-calculator",
         "poison-pill-test",
         "irs-1031-exchange-tax-deferral-test",
+        "dynamic-saas-benchmark-calculator",
     }
     for off_path in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP.keys():
         clean_off = off_path.strip("/")

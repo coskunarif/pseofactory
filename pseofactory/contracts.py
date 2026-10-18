@@ -228,6 +228,34 @@ def assert_x_post(text: str) -> bool:
     return True
 
 
+def assert_youtube_title(title: str, context: str = "") -> bool:
+    """
+    Validates YouTube video title:
+    1. Length between 15 and 100 characters.
+    2. Zero forbidden dashes (\\u2014, \\u2013).
+    3. Zero angle brackets (< or >) to prevent YouTube API rejection (HWL-1202).
+    4. Zero prompt leakage and zero personal attribution.
+    5. Zero duplicate 'Calculator Calculator' wording, trailing '...' truncation, or raw '|' HTML title pipes.
+    """
+    ctx = f" ({context})" if context else ""
+    if not title or len(title.strip()) < 15:
+        raise ValueError(f"YouTube title too short{ctx} ({len(title) if title else 0} chars, min 15)")
+    if len(title) > 100:
+        raise ValueError(f"YouTube title exceeds 100 characters{ctx} ({len(title)} chars, max 100)")
+    assert_no_forbidden_dashes(title, context=f"YouTube title{ctx}")
+    assert_no_prompt_leakage(title, context=f"YouTube title{ctx}")
+    assert_no_personal_attribution(title, context=f"YouTube title{ctx}")
+    if "<" in title or ">" in title:
+        raise ValueError(f"Angle brackets (< or >) are forbidden in YouTube title{ctx}")
+    if title.rstrip().endswith("..."):
+        raise ValueError(f"Truncated ellipsis ('...') is forbidden in YouTube title{ctx}: {title}")
+    if re.search(r"\bcalculator\s+calculator\b", title, re.IGNORECASE):
+        raise ValueError(f"Duplicate 'Calculator Calculator' is forbidden in YouTube title{ctx}: {title}")
+    if " | " in title:
+        raise ValueError(f"Raw HTML title pipe (' | ') brand suffix is forbidden in YouTube title{ctx}: {title}")
+    return True
+
+
 def assert_youtube_pinned_comment(text: str) -> bool:
     """
     Validates YouTube pinned comment template:
@@ -235,7 +263,7 @@ def assert_youtube_pinned_comment(text: str) -> bool:
     2. Zero em-dashes (\\u2014) and zero en-dashes (\\u2013).
     3. Zero angle brackets (< or >) to prevent YouTube API rejection (HWL-1202).
     4. Must include conversion tracking parameter 'utm_content=pinned_comment'.
-    5. Zero prompt leakage.
+    5. Zero prompt leakage, duplicate 'Calculator Calculator', or raw '|' title pipes.
     """
     if not text or len(text) < 50:
         raise ValueError(f"YouTube pinned comment too short ({len(text) if text else 0} chars, min 50)")
@@ -247,7 +275,22 @@ def assert_youtube_pinned_comment(text: str) -> bool:
         raise ValueError("Angle brackets (< or >) are forbidden in YouTube pinned comment")
     if "utm_content=pinned_comment" not in text:
         raise ValueError("YouTube pinned comment must include conversion tracking parameter 'utm_content=pinned_comment'")
+    if re.search(r"\bcalculator\s+calculator\b", text, re.IGNORECASE):
+        raise ValueError("Duplicate 'Calculator Calculator' is forbidden in YouTube pinned comment")
+    if " | " in text:
+        raise ValueError("Raw HTML title pipe (' | ') is forbidden in YouTube pinned comment")
     return True
+
+
+_MIDWORD_TRUNCATED_CHAPTER_PATTERNS: List[str] = [
+    r"\bSecti\b",
+    r"\bCalculato\b",
+    r"\bLande\b",
+    r"\bEqui\b",
+    r"\bBond C\b",
+    r"\bCalculator 202\b",
+    r"\b Weight\s+Statutory\b",
+]
 
 
 def assert_youtube_description(text: str) -> bool:
@@ -257,7 +300,8 @@ def assert_youtube_description(text: str) -> bool:
     2. Zero forbidden dashes (\\u2014, \\u2013).
     3. Zero angle brackets (< or >) to prevent YouTube API rejection (HWL-1202).
     4. Must include conversion tracking parameter ('utm_content=').
-    5. Zero prompt leakage.
+    5. Zero prompt leakage, duplicate 'Calculator Calculator', or raw '|' title pipes.
+    6. At least 4 timestamped chapters starting at 0:00 with zero mid-word truncated chapter titles.
     """
     if not text or len(text) < 100:
         raise ValueError(f"YouTube description too short ({len(text) if text else 0} chars, min 100)")
@@ -269,6 +313,22 @@ def assert_youtube_description(text: str) -> bool:
         raise ValueError("Angle brackets (< or >) are forbidden in YouTube description")
     if "utm_content=" not in text:
         raise ValueError("YouTube description must include conversion tracking parameter ('utm_content=')")
+    if re.search(r"\bcalculator\s+calculator\b", text, re.IGNORECASE):
+        raise ValueError("Duplicate 'Calculator Calculator' is forbidden in YouTube description")
+    if " | " in text:
+        raise ValueError("Raw HTML title pipe (' | ') is forbidden in YouTube description")
+    chapters = re.findall(r"(?m)^(\d{1,2}:\d{2})\s+-\s+(.+)$", text)
+    if len(chapters) < 4:
+        raise ValueError(f"YouTube description must include at least 4 timestamped chapters (found {len(chapters)})")
+    if chapters[0][0] not in ("0:00", "00:00"):
+        raise ValueError(f"YouTube description first chapter must start at 0:00 (found {chapters[0][0]})")
+    for ts, ch_title in chapters:
+        ch_clean = ch_title.strip()
+        if len(ch_clean) < 10 or len(ch_clean) > 95:
+            raise ValueError(f"YouTube chapter '{ts} - {ch_clean}' length ({len(ch_clean)}) outside 10-95 char bounds")
+        for pat in _MIDWORD_TRUNCATED_CHAPTER_PATTERNS:
+            if re.search(pat, ch_clean):
+                raise ValueError(f"Mid-word truncated chapter title detected in YouTube description: '{ts} - {ch_clean}'")
     return True
 
 
@@ -8410,6 +8470,7 @@ __all__ = [
     "PERSONAL_ATTRIBUTION_FORBIDDEN_TERMS",
     "assert_no_personal_attribution",
     "assert_x_post",
+    "assert_youtube_title",
     "assert_youtube_pinned_comment",
     "assert_youtube_description",
     "assert_youtube_transcript",

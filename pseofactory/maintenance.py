@@ -1443,13 +1443,35 @@ class WorkspacePropertyScanner:
     discover = discover_properties
 
 
+def _word_boundary_short_title(raw_title: str, max_len: int = 30) -> str:
+    """Computes a clean, word-boundary short title without brand pipes or mid-word truncation."""
+    import html as _html
+    cleaned = _html.unescape(str(raw_title or "")).split("|")[0].split(":")[0].strip()
+    cleaned = re.sub(r"\s+\(\d{4}\)\s*$", "", cleaned).strip()
+    cleaned = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", cleaned, flags=re.IGNORECASE).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    words = cleaned.split()
+    acc: List[str] = []
+    for w in words:
+        cand = " ".join(acc + [w])
+        if len(cand) <= max_len:
+            acc.append(w)
+        else:
+            break
+    if acc and acc[-1].lower() in ("&", "and", "vs", "or", "for", "to", "in", "of", "on", "with"):
+        acc.pop()
+    return " ".join(acc) if acc else cleaned[:max_len].strip()
+
+
 PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
         "slug": "student-loan-repayment-calculator",
-        "title": "Federal Student Loan Repayment Calculator (2026) | Prexvo",
+        "title": "Federal Student Loan Repayment Plan Calculator",
         "short_title": "Repayment Calculator",
         "description": "Compare 2026 Federal Student Loan Repayment Plans: RAP, IBR, PAYE, ICR, and Tiered Standard under Title IV 34 CFR Part 685 statutory rules.",
         "primary_keyword": "federal student loan repayment plan comparison",
+        "quick_answer": "Under Title IV Higher Education Act Section 493C and 34 CFR Part 685, the 2026 Repayment Assistance Plan (RAP) exempts 225% of the HHS Poverty Guideline and waives 100% of unpaid monthly interest.",
     },
     {
         "slug": "rap-vs-ibr-calculator",
@@ -1457,6 +1479,7 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "RAP vs IBR",
         "description": "Compare monthly obligations, 225% poverty exemption rules, interest subsidies, and statutory forgiveness schedules between the 2026 RAP and IBR plans.",
         "primary_keyword": "rap vs ibr",
+        "quick_answer": "Under 34 CFR Part 685 and HEA Section 493C, RAP lowers payments for moderate earners via a 225% poverty floor, while IBR caps payments at the 10-year Standard schedule for higher incomes.",
     },
     {
         "slug": "tiered-standard-calculator",
@@ -1464,6 +1487,7 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Tiered Standard",
         "description": "Calculate 10 to 30 year standard amortization schedules across federal consolidation balance tiers pursuant to Title IV 34 CFR 685.208 regulations.",
         "primary_keyword": "tiered standard repayment plan",
+        "quick_answer": "Pursuant to 34 CFR 685.208(c), Direct Consolidation Loans assign fixed amortization windows from 10 to 30 years based on total balance tiers, unlocking 30-year terms at $60,000 and above.",
     },
     {
         "slug": "paye-sunset-calculator",
@@ -1471,6 +1495,7 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "PAYE Sunset",
         "description": "Analyze 2026 PAYE sunset rules, grandfathering protections, and 10-year standard payment caps to model whether switching to RAP reduces total repayment.",
         "primary_keyword": "paye vs ibr",
+        "quick_answer": "Under 34 CFR 685.209, grandfathered PAYE borrowers retain a 20-year graduate forgiveness horizon and 10-year Standard payment cap, whereas legacy IBR extends graduate forgiveness to 25 years.",
     },
     {
         "slug": "icr-repayment-calculator",
@@ -1478,13 +1503,76 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "ICR Calculator",
         "description": "Model Income-Contingent Repayment under dual statutory formulas: 20% discretionary income vs 12-year income-adjusted payments for Parent PLUS debt.",
         "primary_keyword": "icr vs ibr",
+        "quick_answer": "Under 34 CFR 685.209(b), Income-Contingent Repayment charges the lesser of 20% of discretionary income above 100% of the federal poverty line or a 12-year fixed payment adjusted by an income factor.",
     },
     {
         "slug": "pslf-qualifying-payment-simulator",
-        "title": "PSLF Qualifying Payment & Buyback Simulator (2026) | Prexvo",
+        "title": "PSLF Qualifying Payment & Forgiveness Simulator",
         "short_title": "PSLF Simulator",
         "description": "Calculate qualifying Public Service Loan Forgiveness payments and evaluate buyback eligibility under 34 CFR 685.219 statutory regulations.",
         "primary_keyword": "pslf qualifying payment simulator",
+        "quick_answer": "Under 34 CFR 685.219 and IRC Section 108(f), Public Service Loan Forgiveness discharges 100% of remaining Direct Loan debt tax-free after 120 qualifying monthly payments in eligible employment.",
+    },
+]
+
+
+PREXVO_EXTENDED_TOOLS: List[Dict[str, Any]] = [
+    *PREXVO_DEFAULT_TOOLS,
+    {
+        "slug": "parent-plus-double-consolidation",
+        "title": "Parent PLUS Double Consolidation Repayment Calculator",
+        "short_title": "Double Consolidation",
+        "description": "Model the statutory two-step Direct Consolidation pathway for Parent PLUS loans to compare 20% ICR obligations against 10% RAP and IBR repayment.",
+        "primary_keyword": "parent plus double consolidation calculator",
+        "quick_answer": "Under Title IV 34 CFR 685.209, single-consolidated Parent PLUS loans are restricted to 20% ICR, whereas completing a two-step Direct Consolidation unlocks 10% RAP and IBR formulas.",
+    },
+    {
+        "slug": "save-plan-litigation-transition",
+        "title": "SAVE Plan to RAP Repayment Transition Calculator",
+        "short_title": "SAVE to RAP Transition",
+        "description": "Calculate monthly payment changes, 225% poverty line deductions, and 100% unpaid interest subsidies when transitioning from SAVE forbearance to RAP.",
+        "primary_keyword": "save plan transition to rap calculator",
+        "quick_answer": "Borrowers transitioning from administrative SAVE forbearance into the 2026 Repayment Assistance Plan under 34 CFR Part 685 retain the 225% poverty exemption and 100% unpaid monthly interest waiver.",
+    },
+    {
+        "slug": "student-loan-refinance-break-even-calculator",
+        "title": "Student Loan Refinance Break-Even Calculator",
+        "short_title": "Refinance Break-Even",
+        "description": "Compare private student loan refinancing interest savings against the statutory value of forfeited Title IV IDR subsidies and PSLF forgiveness.",
+        "primary_keyword": "student loan refinance break even calculator",
+        "quick_answer": "Refinancing federal Title IV loans into private credit permanently forfeits 34 CFR Part 685 interest subsidies and IRC Section 108(f) tax-free PSLF discharge, requiring a net present value break-even audit.",
+    },
+    {
+        "slug": "rap-payment-calculator",
+        "title": "2026 Repayment Assistance Plan (RAP) Calculator",
+        "short_title": "RAP Payment Calculator",
+        "description": "Calculate exact monthly obligations, 225% poverty line exemptions, and federal interest subsidies under the 2026 Repayment Assistance Plan (RAP).",
+        "primary_keyword": "repayment assistance plan calculator",
+        "quick_answer": "Under 34 CFR Part 685, the 2026 Repayment Assistance Plan assesses 10% of discretionary income above 225% of the HHS Poverty Guideline while subsidizing 100% of unpaid monthly interest.",
+    },
+    {
+        "slug": "grad-plus-borrowing-cap-calculator",
+        "title": "Grad PLUS Sunset & Borrowing Cap Calculator",
+        "short_title": "Grad PLUS Cap",
+        "description": "Model graduate school funding gaps, Direct Unsubsidized annual limits, and aggregate Title IV borrowing caps under HEA Section 455 statutory rules.",
+        "primary_keyword": "grad plus borrowing cap calculator",
+        "quick_answer": "Under HEA Section 455 and 34 CFR 685.203, graduate Direct Unsubsidized borrowing is capped at $20,500 annually ($138,500 aggregate), requiring careful modeling of Grad PLUS sunset funding gaps.",
+    },
+    {
+        "slug": "married-filing-separately-student-loan-calculator",
+        "title": "Married Filing Separately IDR Student Loan Calculator",
+        "short_title": "MFS IDR Calculator",
+        "description": "Compare Married Filing Separately (MFS) income-driven student loan payment savings against the Married Filing Jointly (MFJ) federal tax penalty.",
+        "primary_keyword": "married filing separately student loan calculator",
+        "quick_answer": "Under 34 CFR 685.209 and IRC Section 1(d), filing Married Filing Separately excludes spousal AGI from IDR payment calculations, trading lower monthly loan bills against lost joint tax deductions.",
+    },
+    {
+        "slug": "ibr-hardship-cap-calculator",
+        "title": "IBR 10-Year Standard Payment Cap Calculator",
+        "short_title": "IBR Payment Cap",
+        "description": "Calculate Partial Financial Hardship thresholds and the statutory 10-year Standard payment ceiling under HEA Section 493C Income-Based Repayment.",
+        "primary_keyword": "ibr hardship cap calculator",
+        "quick_answer": "Under HEA Section 493C and 34 CFR 685.209, Income-Based Repayment caps monthly bills at the 10-year Standard amount determined at plan entry, protecting borrowers whose income rises later.",
     },
 ]
 
@@ -1492,10 +1580,11 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
 PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
         "slug": "irs-2027-tax-brackets",
-        "title": "IRS 2027 Tax Brackets & TCJA Sunset Calculator 2027",
+        "title": "IRS 2027 Tax Brackets & TCJA Sunset Calculator",
         "short_title": "IRS 2027 Tax Brackets",
         "description": "Calculate your federal income tax bracket, statutory marginal rates (10% to 37%), and compare against post-TCJA sunset scenarios.",
         "primary_keyword": "irs 2027 tax bracket projections",
+        "quick_answer": "Under IRC Section 1 and Public Law 115-97 (TCJA Sunset), federal marginal tax brackets revert to pre-2018 statutory rates (10%, 15%, 25%, 28%, 33%, 35%, and 39.6%) alongside a halved standard deduction.",
         "category": "Tax Intelligence",
     },
     {
@@ -1504,6 +1593,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Crypto Tax Calculator",
         "description": "Compute estimated federal and state capital gains liabilities on crypto trades, staking yield, and DeFi transfers.",
         "primary_keyword": "crypto tax calculator 2027",
+        "quick_answer": "Under IRS Notice 2014-21, IRC Section 1012, and Section 1411, digital asset dispositions trigger short-term or long-term capital gains plus the 3.8% Net Investment Income Tax reported on Form 8949 and Form 1099-DA.",
         "category": "Digital Assets",
     },
     {
@@ -1512,6 +1602,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "SaaS Runway Calculator",
         "description": "Interactive runway projection model for tech startups, factoring net monthly burn, revenue CAGR, and hiring cohorts.",
         "primary_keyword": "saas burn rate runway calculator",
+        "quick_answer": "Under FASB GAAP ASC 205-40 going-concern standards, SaaS cash runway is modeled by dividing liquid treasury reserves by compounded monthly net burn (gross operating expenses minus recurring revenue).",
         "category": "Corporate Finance",
     },
     {
@@ -1520,6 +1611,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Prediction Market Arbitrage",
         "description": "Calculate true implied probabilities, contract spreads, and Kelly Criterion bet sizing across Kalshi and Polymarket.",
         "primary_keyword": "prediction market arbitrage calculator",
+        "quick_answer": "Under CFTC Rule 40.11 and Commodity Exchange Act 7 U.S.C. Section 1a(19), cross-exchange binary arbitrage locks a guaranteed spread whenever complementary YES and NO contracts sum below $1.00 after fees.",
         "category": "Market Arbitrage",
     },
     {
@@ -1528,6 +1620,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Capital Gains Sunset",
         "description": "Project long-term and short-term capital gains taxes, Section 1411 NIIT surtax thresholds, and state additions following the 2025 TCJA sunset.",
         "primary_keyword": "tcja sunset capital gains rates",
+        "quick_answer": "Under IRC Section 1(h) and Section 1411, long-term capital gains are taxed at 0%, 15%, or 20% plus the unindexed 3.8% Net Investment Income Tax above $200,000 single or $250,000 joint MAGI.",
         "category": "Tax Intelligence",
     },
     {
@@ -1536,6 +1629,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Section 179 Deduction",
         "description": "Calculate immediate equipment expensing, bonus depreciation phase-down, and tax savings under IRC Section 179.",
         "primary_keyword": "section 179 deduction calculator",
+        "quick_answer": "Under IRC Section 179 and Section 168(k), businesses immediately expense qualifying equipment up to the statutory cap, combining first-year bonus depreciation and MACRS recovery schedules.",
         "category": "Tax Intelligence",
     },
     {
@@ -1544,6 +1638,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Treasury Yield vs HYSA",
         "description": "Calculate after-tax interest and Tax-Equivalent Yield (TEY) between state-tax-exempt US Treasury Bills and taxable HYSAs.",
         "primary_keyword": "treasury bill yield vs hysa calculator",
+        "quick_answer": "Pursuant to 31 U.S.C. Section 3124, U.S. Treasury Bill interest is 100% exempt from state and local income taxes, producing a higher Tax-Equivalent Yield than taxable high-yield savings accounts.",
         "category": "Yield Arbitrage",
     },
     {
@@ -1552,6 +1647,7 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Section 1031 Exchange",
         "description": "Calculate capital gains tax deferral, Section 1250 depreciation recapture, and 45-day/180-day deadlines under IRC Section 1031 for 2026-2027.",
         "primary_keyword": "section 1031 exchange calculator",
+        "quick_answer": "Under IRC Section 1031(a)(3) and Section 1250, real estate investors defer 100% of federal capital gains and 25% depreciation recapture by identifying replacement property within 45 days and closing within 180 days.",
         "category": "Commercial Real Estate",
     },
     {
@@ -1560,7 +1656,121 @@ PROFITHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Prediction Market Tax",
         "description": "Compare statutory tax liabilities between CFTC-regulated event contracts under IRC Section 1256 (60/40 rate) and unregulated decentralized markets.",
         "primary_keyword": "prediction market tax calculator",
+        "quick_answer": "Under IRC Section 1256, regulated futures and eligible CFTC event contracts receive 60% long-term and 40% short-term capital gains treatment (26.8% maximum blended federal rate) vs 37% ordinary short-term rates.",
         "category": "Tax Intelligence",
+    },
+]
+
+
+PROFITHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = [
+    *PROFITHELM_DEFAULT_TOOLS,
+    {
+        "slug": "commercial-heavy-vehicle-section-179-weight-calculator",
+        "title": "Heavy Vehicle 6,000 lb GVWR Section 179 Tax Calculator",
+        "short_title": "Heavy Vehicle Section 179",
+        "description": "Calculate first-year tax write-offs for commercial trucks and heavy SUVs over 6,000 lbs GVWR under IRC Section 179 and Section 280F.",
+        "primary_keyword": "heavy vehicle section 179 weight calculator",
+        "quick_answer": "Under IRC Section 179(b)(5) and Section 280F(d)(7), commercial vehicles exceeding 6,000 lbs GVWR bypass passenger auto luxury caps, unlocking heavy SUV and work truck first-year expensing.",
+        "category": "Corporate Tax & CapEx",
+    },
+    {
+        "slug": "contractor-surety-bond-cost-calculator",
+        "title": "Contractor License & Performance Surety Bond Cost Calculator",
+        "short_title": "Contractor Surety Bond",
+        "description": "Calculate annual surety bond premiums for contractor license, bid, and Miller Act performance bonds across FICO credit tiers.",
+        "primary_keyword": "contractor surety bond cost calculator",
+        "quick_answer": "Under the Federal Miller Act (40 U.S.C. Sections 3131-3134) and 31 U.S.C. Section 9304, contractor surety bond premiums equal the statutory bond penalty multiplied by underwriting credit tier rates (0.75% to 5.0%).",
+        "category": "Corporate Finance",
+    },
+    {
+        "slug": "crypto-tax-form-1099-da-mandatory-reporting",
+        "title": "IRS Form 1099-DA Crypto Broker Tax & Basis Calculator",
+        "short_title": "Form 1099-DA Crypto Tax",
+        "description": "Calculate digital asset capital gains, cost-basis discrepancy exposure, and backup withholding under IRS Form 1099-DA mandatory broker reporting.",
+        "primary_keyword": "crypto tax form 1099-da mandatory reporting",
+        "quick_answer": "Pursuant to IRC Section 6045 and Treasury Decision 10000, custodial digital asset brokers report gross proceeds and cost basis on IRS Form 1099-DA, exposing unverified wallet transfers to 24% backup withholding.",
+        "category": "Digital Assets",
+    },
+    {
+        "slug": "equipment-lease-tax-deduction",
+        "title": "Commercial Equipment Lease Tax Deduction Calculator",
+        "short_title": "Equipment Lease Deduction",
+        "description": "Calculate annual IRC Section 162 operating lease deductions, business-use allocations, and after-tax cash flow savings for commercial equipment.",
+        "primary_keyword": "equipment lease tax deduction calculator",
+        "quick_answer": "Under IRC Section 162(a)(3) and FASB ASC 842, true commercial operating lease payments are 100% deductible against ordinary business income in the tax year paid, proportional to qualified business use.",
+        "category": "Corporate Tax & CapEx",
+    },
+    {
+        "slug": "equipment-lease-vs-buy-section-179-calculator",
+        "title": "Equipment Lease vs Buy Section 179 Tax Comparison Calculator",
+        "short_title": "Equipment Lease vs Buy",
+        "description": "Compare net after-tax cash flow between immediate IRC Section 179 equipment purchase write-offs and Section 162 operating lease deductions.",
+        "primary_keyword": "equipment lease vs buy section 179 calculator",
+        "quick_answer": "Comparing IRC Section 179 upfront capital expensing against IRC Section 162 operating lease write-offs quantifies whether immediate Year-1 tax shields outweigh preserved working capital liquidity.",
+        "category": "Corporate Tax & CapEx",
+    },
+    {
+        "slug": "invoice-factoring-vs-business-line-of-credit-calculator",
+        "title": "Invoice Factoring vs Business Line of Credit APR Calculator",
+        "short_title": "Factoring vs Line of Credit",
+        "description": "Compare effective annualized APR, discount fees, and net cash advance proceeds between B2B invoice factoring and a revolving line of credit.",
+        "primary_keyword": "invoice factoring vs business line of credit calculator",
+        "quick_answer": "Under UCC Article 9 and IRC Section 163(j), B2B invoice factoring discount fees (1.5% to 3.5% per 30-day cycle) convert to an effective annualized APR that must be benchmarked against commercial revolving credit.",
+        "category": "Corporate Finance",
+    },
+    {
+        "slug": "medical-and-dental-equipment-section-179-roi-calculator",
+        "title": "Medical & Dental Equipment Section 179 Tax ROI Calculator",
+        "short_title": "Medical Section 179 ROI",
+        "description": "Calculate first-year IRC Section 179 tax savings, clinical procedure revenue payback, and net after-tax ROI for medical and dental equipment.",
+        "primary_keyword": "medical and dental equipment section 179 roi calculator",
+        "quick_answer": "Under IRC Section 179 and Section 168(k), medical and dental practices deduct qualifying diagnostic and operatory equipment in Year 1, reducing net acquisition cost by up to 37% against clinical revenue.",
+        "category": "Corporate Tax & CapEx",
+    },
+    {
+        "slug": "r-and-d-tax-credit-section-174-amortization-calculator",
+        "title": "R&D Tax Credit (Section 41) & Section 174 Amortization Calculator",
+        "short_title": "R&D Credit & Section 174",
+        "description": "Calculate IRC Section 41 Alterative Simplified R&D tax credits, Section 280C adjustments, and mandatory 5-year Section 174 amortization schedules.",
+        "primary_keyword": "r and d tax credit section 174 amortization calculator",
+        "quick_answer": "Under IRC Section 41(c)(4) and Section 174, domestic research expenditures must be capitalized over 5 years (10% Year-1 mid-year convention) while generating a 14% Alternative Simplified Credit above 50% prior QREs.",
+        "category": "Corporate Tax & CapEx",
+    },
+    {
+        "slug": "s-corp-reasonable-salary-tax-calculator",
+        "title": "S-Corp Reasonable Salary & Self-Employment Tax Calculator",
+        "short_title": "S-Corp Salary Tax",
+        "description": "Calculate FICA payroll tax savings, IRC Section 199A QBI deduction impact, and IRS reasonable compensation splits for S-Corporation owners.",
+        "primary_keyword": "s corp reasonable salary tax calculator",
+        "quick_answer": "Under IRC Section 1366, Section 3111, and Revenue Ruling 74-44, S-Corporation shareholder-employees pay 15.3% FICA tax only on reasonable W-2 wages while K-1 pass-through distributions avoid self-employment tax.",
+        "category": "Tax Intelligence",
+    },
+    {
+        "slug": "section-179-vehicle-equipment-deduction",
+        "title": "Section 179 Commercial Vehicle & Equipment Deduction Calculator",
+        "short_title": "Section 179 Vehicle & Equip",
+        "description": "Model combined IRC Section 179 expensing, 60% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+        "primary_keyword": "section 179 vehicle equipment deduction",
+        "quick_answer": "Under IRC Section 179 and Section 280F, commercial vehicles and machinery used over 50% for qualified business operations capture immediate first-year expensing plus 60% bonus depreciation on remaining basis.",
+        "category": "Corporate Tax & CapEx",
+    },
+    {
+        "slug": "section-301-tariff-landed-cost-calculator",
+        "title": "Section 301 Tariff & Import Landed Cost Calculator",
+        "short_title": "Section 301 Landed Cost",
+        "description": "Calculate customs duty, Section 301 China tariffs, Merchandise Processing Fees (MPF), Harbor Maintenance Fees (HMF), and unit landed cost.",
+        "primary_keyword": "section 301 tariff landed cost calculator",
+        "quick_answer": "Under 19 U.S.C. Section 2411 (Trade Act Section 301) and 19 CFR Part 24, total import landed cost combines FOB customs value, HTSUS base duty, Section 301 surcharges, 0.3464% MPF, and 0.125% HMF.",
+        "category": "Corporate Finance",
+    },
+    {
+        "slug": "workers-comp-and-payroll-burden-calculator",
+        "title": "Workers Comp & Employer Payroll Tax Burden Calculator",
+        "short_title": "Payroll & Workers Comp",
+        "description": "Calculate fully burdened employee labor cost including FICA, FUTA, SUTA, and NCCI class-code workers compensation insurance premiums.",
+        "primary_keyword": "workers comp and payroll burden calculator",
+        "quick_answer": "Under IRC Sections 3111 and 3301 plus NCCI payroll classification standards, true employer labor burden combines 7.65% FICA, federal/state unemployment taxes, and workers compensation rates per $100 of payroll.",
+        "category": "Corporate Finance",
     },
 ]
 
@@ -1574,17 +1784,28 @@ def _discover_tenant_tools(
     without importing any tenant Python modules into host sys.modules.
     Zero em-dashes. Zero en-dashes.
     """
+    import html as _html
     from pseofactory.qualification import is_retired_or_consolidated_slug
 
     merged: Dict[str, Dict[str, Any]] = {}
     ordered_slugs: List[str] = []
+    extended_catalog = {
+        t["slug"]: t
+        for t in (PREXVO_EXTENDED_TOOLS if adapter.property_id == "prexvo" else PROFITHELM_EXTENDED_TOOLS)
+        if isinstance(t, dict) and t.get("slug")
+    }
 
     for item in default_tools:
         if isinstance(item, dict) and item.get("slug"):
             s = str(item["slug"]).strip()
             if is_retired_or_consolidated_slug(s, adapter.property_id):
                 continue
-            merged[s] = dict(item)
+            clean_item = dict(item)
+            if clean_item.get("title"):
+                clean_item["title"] = _html.unescape(str(clean_item["title"])).split("|")[0].strip()
+            if not clean_item.get("short_title") or len(str(clean_item["short_title"])) > 32:
+                clean_item["short_title"] = _word_boundary_short_title(clean_item.get("title", s), max_len=30)
+            merged[s] = clean_item
             ordered_slugs.append(s)
 
     repo_root = getattr(adapter, "repo_path", None) or (
@@ -1612,9 +1833,23 @@ def _discover_tenant_tools(
                                 continue
                             if has_built_tools_dir and not (Path(dist_dir) / "tools" / s / "index.html").is_file():
                                 continue
+                            clean_dyn = dict(t_obj)
+                            if s in extended_catalog:
+                                for ek, ev in extended_catalog[s].items():
+                                    clean_dyn[ek] = ev
+                            if clean_dyn.get("title"):
+                                clean_dyn["title"] = _html.unescape(str(clean_dyn["title"])).split("|")[0].strip()
+                            clean_dyn["short_title"] = _word_boundary_short_title(
+                                clean_dyn.get("short_title") or clean_dyn.get("title") or s,
+                                max_len=30,
+                            )
                             if s not in merged:
-                                merged[s] = dict(t_obj)
+                                merged[s] = clean_dyn
                                 ordered_slugs.append(s)
+                            else:
+                                for k, v in clean_dyn.items():
+                                    if k not in merged[s] or not merged[s][k]:
+                                        merged[s][k] = v
                 except Exception:
                     pass
 
@@ -1628,23 +1863,30 @@ def _discover_tenant_tools(
             s = entry.name
             if s in merged or is_retired_or_consolidated_slug(s, adapter.property_id):
                 continue
+            if s in extended_catalog:
+                merged[s] = dict(extended_catalog[s])
+                ordered_slugs.append(s)
+                continue
             title_val = s.replace("-", " ").title()
             desc_val = f"Interactive {title_val} statutory model and financial benchmark tool."
             try:
                 html_text = idx_html.read_text(encoding="utf-8", errors="ignore")[:8192]
                 m_title = re.search(r"<title>(.*?)</title>", html_text, re.IGNORECASE | re.DOTALL)
                 if m_title and m_title.group(1).strip():
-                    title_val = m_title.group(1).strip()
+                    raw_html_title = _html.unescape(m_title.group(1).strip()).split("|")[0].strip()
+                    raw_html_title = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", raw_html_title, flags=re.IGNORECASE).strip()
+                    if raw_html_title:
+                        title_val = raw_html_title
                 m_desc = re.search(
                     r'<meta\s+[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
                     html_text,
                     re.IGNORECASE,
                 )
                 if m_desc and m_desc.group(1).strip():
-                    desc_val = m_desc.group(1).strip()
+                    desc_val = _html.unescape(m_desc.group(1).strip())
             except Exception:
                 pass
-            short_t = title_val.split("|")[0].split(":")[0].strip()[:48] or s.replace("-", " ").title()
+            short_t = _word_boundary_short_title(title_val, max_len=30) or s.replace("-", " ").title()
             merged[s] = {
                 "slug": s,
                 "title": title_val,
@@ -1653,6 +1895,15 @@ def _discover_tenant_tools(
                 "primary_keyword": s.replace("-", " "),
             }
             ordered_slugs.append(s)
+
+    if has_built_tools_dir:
+        built_set = {
+            entry.name
+            for entry in (Path(dist_dir) / "tools").iterdir()
+            if entry.is_dir() and not entry.name.startswith(".") and (entry / "index.html").is_file()
+        }
+        if built_set:
+            return [merged[s] for s in ordered_slugs if s in merged and s in built_set]
 
     return [merged[s] for s in ordered_slugs if s in merged]
 
@@ -2449,6 +2700,74 @@ class AssetIntegrityEvaluator:
                         slug=None,
                         reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
                         details=stub_video_details,
+                    )
+                )
+
+        # Audit syndication/<slug>/youtube_metadata.json and orphan syndication assets when syndication/ exists
+        repo_root_cand = getattr(adapter, "repo_path", None) or (
+            adapter.dist_dir.parent if getattr(adapter, "dist_dir", None) else None
+        )
+        synd_dir_cand = Path(repo_root_cand) / "syndication" if repo_root_cand else None
+        tools_dir_cand = adapter.dist_dir / "tools" if getattr(adapter, "dist_dir", None) else None
+        if synd_dir_cand and synd_dir_cand.is_dir() and tools_dir_cand and tools_dir_cand.is_dir():
+            from pseofactory.qualification import is_retired_or_consolidated_slug
+            from pseofactory.contracts import (
+                assert_youtube_title,
+                assert_youtube_description,
+                assert_youtube_pinned_comment,
+                assert_youtube_transcript,
+            )
+            built_tool_slugs = {
+                d.name
+                for d in tools_dir_cand.iterdir()
+                if d.is_dir() and not d.name.startswith(".") and (d / "index.html").is_file()
+            }
+            synd_issues: List[str] = []
+            brand_chk = "Prexvo" if str(adapter.property_id).lower() == "prexvo" else "ProfitHelm"
+            for s_item in sorted(synd_dir_cand.iterdir()):
+                if s_item.name.startswith("."):
+                    continue
+                if s_item.name == "ai_benchmarks" and s_item.is_dir():
+                    for b_file in sorted(s_item.iterdir()):
+                        if b_file.is_file() and b_file.name.endswith("_matrix.md"):
+                            b_slug = b_file.name[: -len("_matrix.md")]
+                            if (
+                                is_retired_or_consolidated_slug(b_slug, adapter.property_id)
+                                or (built_tool_slugs and b_slug not in built_tool_slugs)
+                            ):
+                                synd_issues.append(f"Orphan AI benchmark matrix file: {b_file.name}")
+                    continue
+                if s_item.is_dir():
+                    if (
+                        is_retired_or_consolidated_slug(s_item.name, adapter.property_id)
+                        or (built_tool_slugs and s_item.name not in built_tool_slugs)
+                    ):
+                        synd_issues.append(f"Orphan syndication tool directory: {s_item.name}")
+                        continue
+                    yt_meta_file = s_item / "youtube_metadata.json"
+                    if yt_meta_file.is_file():
+                        try:
+                            yt_data = json.loads(yt_meta_file.read_text(encoding="utf-8"))
+                            assert_youtube_title(str(yt_data.get("title") or ""), context=s_item.name)
+                            assert_youtube_description(str(yt_data.get("description") or ""))
+                            assert_youtube_pinned_comment(str(yt_data.get("pinned_comment") or ""))
+                            assert_youtube_transcript(
+                                yt_data.get("transcript_data") or str(yt_data.get("transcript") or ""),
+                                brand_name=brand_chk,
+                            )
+                            if f"/tools/{s_item.name}/" not in str(yt_data.get("description") or ""):
+                                synd_issues.append(
+                                    f"YouTube description in {s_item.name} missing canonical /tools/{s_item.name}/ link"
+                                )
+                        except Exception as yt_ex:
+                            synd_issues.append(f"YouTube metadata contract violation in {s_item.name}: {yt_ex}")
+            if synd_issues:
+                drifted.append(
+                    AssetDriftRecord(
+                        asset_path=str(synd_dir_cand),
+                        slug=None,
+                        reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
+                        details=synd_issues,
                     )
                 )
 
@@ -5403,6 +5722,50 @@ class RetroReflectionEngine:
             if has_stub_video:
                 stale_pages["videos/batch_seo_catalog.json"] = ["stub_video_artifact"]
 
+        synd_dir = d.parent / "syndication"
+        tools_dir = d / "tools"
+        if synd_dir.is_dir() and tools_dir.is_dir():
+            from pseofactory.qualification import is_retired_or_consolidated_slug
+            from pseofactory.contracts import (
+                assert_youtube_title,
+                assert_youtube_description,
+                assert_youtube_pinned_comment,
+                assert_youtube_transcript,
+            )
+            built_slugs = {
+                td.name
+                for td in tools_dir.iterdir()
+                if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file()
+            }
+            brand_chk = "Prexvo" if str(property_id).lower() == "prexvo" else "ProfitHelm"
+            for s_item in sorted(synd_dir.iterdir()):
+                if s_item.name.startswith("."):
+                    continue
+                if s_item.name == "ai_benchmarks" and s_item.is_dir():
+                    for b_file in sorted(s_item.iterdir()):
+                        if b_file.is_file() and b_file.name.endswith("_matrix.md"):
+                            b_slug = b_file.name[: -len("_matrix.md")]
+                            if is_retired_or_consolidated_slug(b_slug, property_id) or (built_slugs and b_slug not in built_slugs):
+                                stale_pages[f"syndication/ai_benchmarks/{b_file.name}"] = ["orphan_ai_benchmark_matrix"]
+                    continue
+                if s_item.is_dir():
+                    if is_retired_or_consolidated_slug(s_item.name, property_id) or (built_slugs and s_item.name not in built_slugs):
+                        stale_pages[f"syndication/{s_item.name}"] = ["orphan_syndication_directory"]
+                        continue
+                    yt_f = s_item / "youtube_metadata.json"
+                    if yt_f.is_file():
+                        try:
+                            yt_obj = json.loads(yt_f.read_text(encoding="utf-8"))
+                            assert_youtube_title(str(yt_obj.get("title") or ""), context=s_item.name)
+                            assert_youtube_description(str(yt_obj.get("description") or ""))
+                            assert_youtube_pinned_comment(str(yt_obj.get("pinned_comment") or ""))
+                            assert_youtube_transcript(
+                                yt_obj.get("transcript_data") or str(yt_obj.get("transcript") or ""),
+                                brand_name=brand_chk,
+                            )
+                        except Exception:
+                            stale_pages[f"syndication/{s_item.name}/youtube_metadata.json"] = ["youtube_metadata_contract"]
+
         return {
             "status": "PASS" if not stale_pages else "STALE",
             "property_id": property_id,
@@ -5547,9 +5910,11 @@ class RetroReflectionEngine:
             cat_file = videos_dir / "batch_seo_catalog.json"
             if cat_file.is_file():
                 try:
+                    from pseofactory.distributor import generate_youtube_syndication
                     raw_cat = json.loads(cat_file.read_text(encoding="utf-8"))
                     if isinstance(raw_cat, list):
                         valid_cat: List[Dict[str, Any]] = []
+                        cat_updated = False
                         for item in raw_cat:
                             if not isinstance(item, dict):
                                 continue
@@ -5561,16 +5926,57 @@ class RetroReflectionEngine:
                                 vf_path = videos_dir / f"{item.get('slug', '')}.mp4"
                             if vf_path.is_file() and vf_path.stat().st_size > 1024:
                                 item["size_bytes"] = vf_path.stat().st_size
+                                islu = str(item.get("slug") or "").strip()
+                                if islu:
+                                    try:
+                                        yt_sync = generate_youtube_syndication(islu, property_id=property_id)
+                                        if (
+                                            item.get("youtube_title") != yt_sync["title"]
+                                            or item.get("youtube_description") != yt_sync["description"]
+                                            or item.get("pinned_comment") != yt_sync["pinned_comment"]
+                                        ):
+                                            item["youtube_title"] = yt_sync["title"]
+                                            item["youtube_description"] = yt_sync["description"]
+                                            item["pinned_comment"] = yt_sync["pinned_comment"]
+                                            item["tags"] = yt_sync["tags"]
+                                            item["transcript"] = yt_sync["transcript"]
+                                            cat_updated = True
+                                    except Exception:
+                                        pass
                                 valid_cat.append(item)
                             else:
                                 purged_any_stub = True
-                        if len(valid_cat) != len(raw_cat) or purged_any_stub:
+                        if len(valid_cat) != len(raw_cat) or purged_any_stub or cat_updated:
                             cat_file.write_text(json.dumps(valid_cat, indent=2), encoding="utf-8")
                             purged_any_stub = True
                 except Exception:
                     pass
             if purged_any_stub and "videos/batch_seo_catalog.json" not in retrofitted_paths:
                 retrofitted_paths.append("videos/batch_seo_catalog.json")
+
+        synd_dir = d.parent / "syndication"
+        tools_dir = d / "tools"
+        if synd_dir.is_dir() and tools_dir.is_dir():
+            try:
+                from pseofactory.qualification import reconcile_tenant_topical_authority_and_cannibalization
+                from pseofactory.distributor import export_all_syndication_files
+                reconcile_tenant_topical_authority_and_cannibalization(
+                    repo_root=d.parent,
+                    property_id=property_id,
+                    dist_dir=d,
+                )
+                is_real_tenant_repo = (
+                    str(d.parent).startswith("/home/ubuntuadmin/projects/")
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                )
+                if is_real_tenant_repo:
+                    export_all_syndication_files(
+                        output_dir=synd_dir,
+                        dry_run=False,
+                        property_id=property_id,
+                    )
+            except Exception:
+                pass
 
         return {
             "status": "PASS",

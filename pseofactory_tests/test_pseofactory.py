@@ -729,4 +729,117 @@ def test_indexer_dispatch_automated_indexing_quarantined_all_no_outbound(tmp_pat
     assert all("QUARANTINED_ALL" in str(r.get("status", "")) for r in gsc.get("results", []))
 
 
+def test_youtube_syndication_cross_tenant_quality_and_contracts():
+    """
+    Verifies that every built tool across ProfitHelm (21 tools) and Prexvo (13 tools)
+    generates a complete, search-optimized YouTube syndication package passing
+    assert_youtube_title, assert_youtube_description, assert_youtube_pinned_comment,
+    and assert_youtube_transcript, with parameterized deep-link CTAs, tool-specific
+    chapters, zero 'calculator calculator' tag/title duplication, zero '...' truncation,
+    and zero raw HTML title pipes (' | ').
+    """
+    import pseofactory.contracts as contracts_mod
+    import pseofactory.maintenance as maintenance_mod
+    from pseofactory.distributor import generate_youtube_syndication
 
+    assert_youtube_description = contracts_mod.assert_youtube_description
+    assert_youtube_pinned_comment = contracts_mod.assert_youtube_pinned_comment
+    assert_youtube_transcript = contracts_mod.assert_youtube_transcript
+    assert_youtube_title = getattr(contracts_mod, "assert_youtube_title", None)
+
+    ph_tools = getattr(maintenance_mod, "PROFITHELM_EXTENDED_TOOLS", maintenance_mod.PROFITHELM_DEFAULT_TOOLS)
+    px_tools = getattr(maintenance_mod, "PREXVO_EXTENDED_TOOLS", maintenance_mod.PREXVO_DEFAULT_TOOLS)
+
+    for tool in ph_tools:
+        slug = tool["slug"]
+        pack = generate_youtube_syndication(tool, property_id="profithelm")
+        assert "..." not in pack["title"], f"Truncated YouTube title for {slug}: {pack['title']}"
+        assert " | " not in pack["title"], f"Raw HTML title pipe in {slug}: {pack['title']}"
+        assert "calculator calculator" not in pack["title"].lower()
+        assert " | " not in pack["description"]
+        assert f"https://profithelm.com/tools/{slug}/?" in pack["description"]
+        assert "utm_source=youtube" in pack["description"]
+        cta_prefix = pack["description"].split(f"https://profithelm.com/tools/{slug}/?")[1].split("utm_source=youtube")[0]
+        assert "=" in cta_prefix and "&" in cta_prefix, f"Missing preset query params for {slug}: {cta_prefix}"
+        for tag in pack["tags"]:
+            assert "calculator calculator" not in tag.lower(), f"Duplicate calculator tag in {slug}: {tag}"
+        if assert_youtube_title is not None:
+            assert assert_youtube_title(pack["title"], context=slug) is True
+        assert assert_youtube_description(pack["description"]) is True
+        assert assert_youtube_pinned_comment(pack["pinned_comment"]) is True
+        assert assert_youtube_transcript(pack["transcript_data"], brand_name="ProfitHelm") is True
+
+    for tool in px_tools:
+        slug = tool["slug"]
+        pack = generate_youtube_syndication(tool, property_id="prexvo")
+        assert "..." not in pack["title"], f"Truncated YouTube title for {slug}: {pack['title']}"
+        assert " | " not in pack["title"], f"Raw HTML title pipe in {slug}: {pack['title']}"
+        assert "calculator calculator" not in pack["title"].lower()
+        assert " | " not in pack["description"]
+        assert f"https://prexvo.com/tools/{slug}/?" in pack["description"]
+        assert "utm_source=youtube" in pack["description"]
+        cta_prefix = pack["description"].split(f"https://prexvo.com/tools/{slug}/?")[1].split("utm_source=youtube")[0]
+        assert "=" in cta_prefix and "&" in cta_prefix, f"Missing preset query params for {slug}: {cta_prefix}"
+        for tag in pack["tags"]:
+            assert "calculator calculator" not in tag.lower(), f"Duplicate calculator tag in {slug}: {tag}"
+        if assert_youtube_title is not None:
+            assert assert_youtube_title(pack["title"], context=slug) is True
+        assert assert_youtube_description(pack["description"]) is True
+        assert assert_youtube_pinned_comment(pack["pinned_comment"]) is True
+        assert assert_youtube_transcript(pack["transcript_data"], brand_name="Prexvo") is True
+
+    assert len(ph_tools) >= 21
+    assert len(px_tools) >= 13
+    assert assert_youtube_title is not None
+
+
+def test_export_all_syndication_files_purges_orphans_and_audits_drift(tmp_path):
+    """
+    Verifies that export_all_syndication_files purges retired/orphan tool directories
+    (such as dynamic-saas-benchmark-calculator) and orphan ai_benchmarks/*_matrix.md
+    files (such as loans_matrix.md), and that AssetIntegrityEvaluator flags orphan
+    syndication directories and broken YouTube metadata as DRIFT.
+    """
+    from pseofactory.distributor import export_all_syndication_files
+    from pseofactory.maintenance import AssetIntegrityEvaluator, ConfigurablePropertyAdapter
+
+    repo_dir = tmp_path / "tenant_repo"
+    dist_dir = repo_dir / "dist"
+    synd_dir = repo_dir / "syndication"
+    (dist_dir / "tools" / "rap-vs-ibr-calculator").mkdir(parents=True)
+    (dist_dir / "tools" / "rap-vs-ibr-calculator" / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>RAP vs IBR Calculator</title></head><body></body></html>",
+        encoding="utf-8",
+    )
+
+    # Plant orphan syndication directory and orphan ai_benchmarks matrix
+    orphan_dir = synd_dir / "dynamic-saas-benchmark-calculator"
+    orphan_dir.mkdir(parents=True)
+    (orphan_dir / "youtube_metadata.json").write_text("{}", encoding="utf-8")
+    ai_bench = synd_dir / "ai_benchmarks"
+    ai_bench.mkdir(parents=True)
+    (ai_bench / "loans_matrix.md").write_text("# Orphan Loans Matrix", encoding="utf-8")
+
+    # Audit before export must detect orphan syndication directory and orphan matrix
+    adapter = ConfigurablePropertyAdapter(
+        property_id="prexvo",
+        brand_name="Prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        dist_dir=dist_dir,
+        repo_path=repo_dir,
+        tools=[{"slug": "rap-vs-ibr-calculator", "title": "RAP vs IBR Student Loan Plan Comparison Engine"}],
+    )
+    evaluator = AssetIntegrityEvaluator(enforce_master_seo=False, enforce_operational_shield=False)
+    pre_audit = evaluator.audit_all(adapter, check_engine_drift=False)
+    assert pre_audit.status == "DRIFT"
+    all_details = [d for rec in pre_audit.drifted_assets for d in rec.details]
+    assert any("dynamic-saas-benchmark-calculator" in d for d in all_details)
+    assert any("loans_matrix.md" in d for d in all_details)
+
+    # Export syndication files with inferred tools (tools=None) and verify orphans are purged
+    export_all_syndication_files(output_dir=synd_dir, tools=None, dry_run=False, property_id="prexvo")
+    assert not orphan_dir.exists(), "Orphan dynamic-saas-benchmark-calculator directory was not purged"
+    assert not (ai_bench / "loans_matrix.md").exists(), "Orphan loans_matrix.md was not purged"
+    assert (synd_dir / "rap-vs-ibr-calculator" / "youtube_metadata.json").is_file()
+    assert (ai_bench / "rap-vs-ibr-calculator_matrix.md").is_file()
