@@ -684,13 +684,28 @@ def test_tenant_tracked_test_repair_records_and_test_isolation_self_healing(tmp_
     factory_py = ph_pkg / "factory.py"
     factory_py.write_text(
         'import subprocess\n'
-        'def sync_git_and_deploy(BASE_DIR, env):\n'
+        'def run_pipeline(redirect_mappings, redirects_file, gsc_actions, synthesized_spec, dist_tools, BASE_DIR, env, in_test):\n'
+        '        if redirect_mappings:\n'
+        '            redirects_file.parent.mkdir(parents=True, exist_ok=True)\n'
+        '            redirects_file.write_text(json.dumps(redirect_mappings, indent=2), encoding="utf-8")\n'
+        '            from profithelm.config import register_tool\n'
+        '            if synthesized_spec:\n'
+        '                register_tool(synthesized_spec, persist=True)\n'
+        '        synd_dir = export_all_syndication_files(tools=dist_tools)\n'
         '    subprocess.run(\n'
         '        ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
         '        cwd=BASE_DIR,\n'
         '        env=env,\n'
         '        check=False,\n'
         '    )\n',
+        encoding="utf-8",
+    )
+    generator_py = ph_pkg / "generator.py"
+    generator_py.write_text(
+        'from datetime import datetime, timezone\n'
+        'import json\n'
+        'def check_env():\n'
+        '    return "PYTEST_CURRENT_TEST" in os.environ\n',
         encoding="utf-8",
     )
 
@@ -746,10 +761,13 @@ def test_tenant_tracked_test_repair_records_and_test_isolation_self_healing(tmp_
     # 2. Sync tenant test isolation guards and stage via GitOpsCoordinator
     sync_fn = getattr(gitops_mod, "sync_tenant_test_isolation_guards", lambda _p: {"updated_files": 0})
     guard_res = sync_fn(tenant_repo)
-    assert guard_res["updated_files"] >= 2
+    assert guard_res["updated_files"] >= 3
     assert "not is_test_run" in repair_py.read_text(encoding="utf-8")
     assert '"git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/"' in factory_py.read_text(encoding="utf-8")
     assert '".agy/runs"' in factory_py.read_text(encoding="utf-8")
+    assert 'if redirect_mappings and gsc_actions.get("consolidate_pages") and not os.getenv("PYTEST_CURRENT_TEST"):' in factory_py.read_text(encoding="utf-8")
+    assert 'if synthesized_spec and not in_test:' in factory_py.read_text(encoding="utf-8")
+    assert 'import os\n' in generator_py.read_text(encoding="utf-8")
 
     coord = GitOpsCoordinator(repo_path=tenant_repo)
     staged = coord.stage_tracked(tenant_repo)

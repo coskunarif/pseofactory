@@ -2448,6 +2448,9 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
     if gen_py.is_file():
         try:
             g_src = gen_py.read_text(encoding="utf-8")
+            g_new = g_src
+            if "import os\n" not in g_new and "import json\n" in g_new:
+                g_new = g_new.replace("import json\n", "import json\nimport os\n", 1)
             g_target = (
                 '    if output_path is None:\n'
                 '        output_path = BASE_DIR / ".agy" / f"tool_spec_{spec[\'slug\']}.json"'
@@ -2459,70 +2462,116 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 '        else:\n'
                 '            output_path = BASE_DIR / ".agy" / f"tool_spec_{spec[\'slug\']}.json"'
             )
-            if g_target in g_src and 'Path("/tmp") / f"tool_spec_' not in g_src:
-                gen_py.write_text(g_src.replace(g_target, g_replacement, 1), encoding="utf-8")
+            if g_target in g_new and 'Path("/tmp") / f"tool_spec_' not in g_new:
+                g_new = g_new.replace(g_target, g_replacement, 1)
+            if g_new != g_src:
+                gen_py.write_text(g_new, encoding="utf-8")
                 updated_files.append(str(gen_py))
         except Exception:
             pass
 
-    # 3. Ensure tenant factory Stage 6 never commits .agy/runs into git
+    # 3. Ensure tenant factory Stage 6 never commits .agy/runs into git and pytest runs never mutate tracked workspace files
     for factory_rel in ("profithelm/factory.py", "prexvo/factory.py"):
         factory_py = repo / factory_rel
         if not factory_py.is_file():
             continue
         try:
             f_src = factory_py.read_text(encoding="utf-8")
-            if '"rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"' in f_src:
-                continue
-            ph_stage_block = (
-                '                subprocess.run(\n'
-                '                    ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
-                '                    cwd=BASE_DIR,\n'
-                '                    env=env,\n'
-                '                    check=False,\n'
-                '                )'
-            )
-            ph_stage_minified = (
-                '    subprocess.run(\n'
-                '        ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
-                '        cwd=BASE_DIR,\n'
-                '        env=env,\n'
-                '        check=False,\n'
-                '    )'
-            )
-            px_stage_block = '                subprocess.run(["git", "add", "-f", "dist/", ".agy/runs/"], cwd=BASE_DIR, env=env, check=False)'
-            if ph_stage_block in f_src:
-                unstage_call = (
-                    ph_stage_block
-                    + '\n                subprocess.run(\n'
-                    '                    ["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],\n'
+            f_new = f_src
+            if '"rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"' not in f_new:
+                ph_stage_block = (
+                    '                subprocess.run(\n'
+                    '                    ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
                     '                    cwd=BASE_DIR,\n'
                     '                    env=env,\n'
-                    '                    capture_output=True,\n'
                     '                    check=False,\n'
                     '                )'
                 )
-                factory_py.write_text(f_src.replace(ph_stage_block, unstage_call, 1), encoding="utf-8")
-                updated_files.append(str(factory_py))
-            elif ph_stage_minified in f_src:
-                unstage_min = (
-                    ph_stage_minified
-                    + '\n    subprocess.run(\n'
-                    '        ["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],\n'
+                ph_stage_minified = (
+                    '    subprocess.run(\n'
+                    '        ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
                     '        cwd=BASE_DIR,\n'
                     '        env=env,\n'
-                    '        capture_output=True,\n'
                     '        check=False,\n'
                     '    )'
                 )
-                factory_py.write_text(f_src.replace(ph_stage_minified, unstage_min, 1), encoding="utf-8")
-                updated_files.append(str(factory_py))
-            elif px_stage_block in f_src:
-                unstage_px = (
-                    px_stage_block
-                    + '\n                subprocess.run(["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"], cwd=BASE_DIR, env=env, capture_output=True, check=False)'
-                )
-                factory_py.write_text(f_src.replace(px_stage_block, unstage_px, 1), encoding="utf-8")
+                px_stage_block = '                subprocess.run(["git", "add", "-f", "dist/", ".agy/runs/"], cwd=BASE_DIR, env=env, check=False)'
+                if ph_stage_block in f_new:
+                    unstage_call = (
+                        ph_stage_block
+                        + '\n                subprocess.run(\n'
+                        '                    ["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],\n'
+                        '                    cwd=BASE_DIR,\n'
+                        '                    env=env,\n'
+                        '                    capture_output=True,\n'
+                        '                    check=False,\n'
+                        '                )'
+                    )
+                    f_new = f_new.replace(ph_stage_block, unstage_call, 1)
+                elif ph_stage_minified in f_new:
+                    unstage_min = (
+                        ph_stage_minified
+                        + '\n    subprocess.run(\n'
+                        '        ["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],\n'
+                        '        cwd=BASE_DIR,\n'
+                        '        env=env,\n'
+                        '        capture_output=True,\n'
+                        '        check=False,\n'
+                        '    )'
+                    )
+                    f_new = f_new.replace(ph_stage_minified, unstage_min, 1)
+                elif px_stage_block in f_new:
+                    unstage_px = (
+                        px_stage_block
+                        + '\n                subprocess.run(["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"], cwd=BASE_DIR, env=env, capture_output=True, check=False)'
+                    )
+                    f_new = f_new.replace(px_stage_block, unstage_px, 1)
+
+            old_red_block = (
+                '        if redirect_mappings:\n'
+                '            redirects_file.parent.mkdir(parents=True, exist_ok=True)\n'
+                '            redirects_file.write_text(json.dumps(redirect_mappings, indent=2), encoding="utf-8")'
+            )
+            new_red_block = (
+                '        if redirect_mappings and gsc_actions.get("consolidate_pages") and not os.getenv("PYTEST_CURRENT_TEST"):\n'
+                '            redirects_file.parent.mkdir(parents=True, exist_ok=True)\n'
+                '            redirects_file.write_text(json.dumps(redirect_mappings, indent=2) + "\\n", encoding="utf-8")'
+            )
+            if old_red_block in f_new:
+                f_new = f_new.replace(old_red_block, new_red_block, 1)
+
+            old_vid_block = (
+                '                from profithelm.video_gen import sync_video_catalog_for_tool\n'
+                '                sync_video_catalog_for_tool(synthesized_spec, dist_dir=DIST_DIR)'
+            )
+            new_vid_block = (
+                '                from profithelm.video_gen import sync_video_catalog_for_tool\n'
+                '                if not os.getenv("PYTEST_CURRENT_TEST"):\n'
+                '                    sync_video_catalog_for_tool(synthesized_spec, dist_dir=DIST_DIR)'
+            )
+            if old_vid_block in f_new:
+                f_new = f_new.replace(old_vid_block, new_vid_block, 1)
+
+            old_reg_block = (
+                '            from profithelm.config import register_tool\n'
+                '            if synthesized_spec:\n'
+                '                register_tool(synthesized_spec, persist=True)'
+            )
+            new_reg_block = (
+                '            from profithelm.config import register_tool\n'
+                '            if synthesized_spec and not in_test:\n'
+                '                register_tool(synthesized_spec, persist=True)'
+            )
+            if old_reg_block in f_new:
+                f_new = f_new.replace(old_reg_block, new_reg_block, 1)
+
+            old_synd_call = '        synd_dir = export_all_syndication_files(tools=dist_tools)'
+            new_synd_call = '        synd_dir = export_all_syndication_files(output_dir=Path("/tmp/profithelm_test_syndication") if in_test else None, tools=dist_tools)'
+            if old_synd_call in f_new:
+                f_new = f_new.replace(old_synd_call, new_synd_call, 1)
+
+            if f_new != f_src:
+                factory_py.write_text(f_new, encoding="utf-8")
                 updated_files.append(str(factory_py))
         except Exception:
             pass
