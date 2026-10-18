@@ -954,6 +954,11 @@ class IndexingFeedbackLoop:
             candidates.append(self.dist_dir / "tools" / slug / "index.html")
             candidates.append(self.dist_dir / slug / "index.html")
             candidates.append(self.dist_dir / f"{slug}.html")
+            for parent_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                if slug.startswith(f"{parent_hub}-"):
+                    leaf_part = slug[len(parent_hub) + 1:]
+                    if leaf_part:
+                        candidates.append(self.dist_dir / "tools" / parent_hub / leaf_part / "index.html")
 
         target_file: Optional[Path] = None
         for cand_p in candidates:
@@ -1153,6 +1158,8 @@ class IndexingFeedbackLoop:
                 except Exception:
                     pass
 
+        from pseofactory.qualification import resolve_redirected_gsc_target
+
         enriched_records: List[Dict[str, Any]] = []
         conversion_gap_slugs: List[str] = []
         distribution_gap_slugs: List[str] = []
@@ -1160,16 +1167,73 @@ class IndexingFeedbackLoop:
         manual_gate_slugs: List[str] = []
         yield_optimized_slugs: List[str] = []
 
+        # Resolve retired 301-redirected URLs/slugs and merge duplicate (slug, query) records
+        merged_source_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for rec in source_records:
-            if has_eng_signal and "engagement_metrics" not in rec:
-                rec["engagement_metrics"] = eff_engagement
-            t_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
-            q_str = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
+            rec_copy = dict(rec)
+            if has_eng_signal and "engagement_metrics" not in rec_copy:
+                rec_copy["engagement_metrics"] = eff_engagement
+            t_url = str(rec_copy.get("target_url") or rec_copy.get("page") or rec_copy.get("url") or "").strip()
+            q_str = str(rec_copy.get("query") or rec_copy.get("primary_keyword") or "").strip()
             slug = _slug_from_url_or_query(
                 target_url=t_url,
                 query=q_str,
-                default_slug=str(rec.get("slug") or ""),
+                default_slug=str(rec_copy.get("slug") or ""),
             )
+            if self.property_id in ("profithelm", "prexvo"):
+                res_t = resolve_redirected_gsc_target(
+                    target_url=t_url,
+                    slug=slug,
+                    query=q_str,
+                    property_id=self.property_id,
+                    repo_root=self.base_dir,
+                )
+                if res_t.get("is_redirected") and res_t.get("is_off_topic_sink"):
+                    continue
+                if res_t.get("is_redirected") and res_t.get("canonical_url"):
+                    orig_u = t_url or str(res_t.get("original_url") or "")
+                    t_url = str(res_t["canonical_url"])
+                    slug = _slug_from_url_or_query(
+                        target_url=t_url,
+                        query=q_str,
+                    )
+                    rec_copy["target_url"] = t_url
+                    rec_copy["canonical_url"] = t_url
+                    rec_copy["rolled_up_from"] = [orig_u] if orig_u else []
+                elif res_t.get("resolved_via") == "hyphenated_state_leaf" and res_t.get("canonical_url"):
+                    t_url = str(res_t["canonical_url"])
+                    slug = _slug_from_url_or_query(target_url=t_url, query=q_str)
+                    rec_copy["target_url"] = t_url
+
+            rec_copy["slug"] = slug
+            impr = int(float(rec_copy.get("impressions", 0) or 0))
+            pos = float(rec_copy.get("position", 0.0) or 0.0)
+            m_key = (slug, q_str.lower().strip())
+            if m_key not in merged_source_by_key:
+                rec_copy["_w_pos"] = pos * impr if impr > 0 else 0.0
+                rec_copy["_w_impr"] = impr if impr > 0 else 0
+                merged_source_by_key[m_key] = rec_copy
+            else:
+                ex_r = merged_source_by_key[m_key]
+                ex_r["impressions"] = int(float(ex_r.get("impressions", 0) or 0)) + impr
+                if "clicks" in rec_copy or "clicks" in ex_r:
+                    ex_r["clicks"] = int(float(ex_r.get("clicks", 0) or 0)) + int(float(rec_copy.get("clicks", 0) or 0))
+                if impr > 0:
+                    ex_r["_w_pos"] = float(ex_r.get("_w_pos", 0.0)) + (pos * impr)
+                    ex_r["_w_impr"] = int(ex_r.get("_w_impr", 0)) + impr
+                if int(ex_r.get("_w_impr", 0)) > 0:
+                    ex_r["position"] = round(float(ex_r["_w_pos"]) / float(ex_r["_w_impr"]), 2)
+                for r_from in rec_copy.get("rolled_up_from", []):
+                    ex_rolled = ex_r.setdefault("rolled_up_from", [])
+                    if r_from not in ex_rolled:
+                        ex_rolled.append(r_from)
+
+        for rec in merged_source_by_key.values():
+            rec.pop("_w_pos", None)
+            rec.pop("_w_impr", None)
+            t_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
+            q_str = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
+            slug = str(rec.get("slug") or "")
             impr = int(float(rec.get("impressions", 0) or 0))
             pos = float(rec.get("position", 0.0) or 0.0)
             readiness = evaluate_asset_conversion_and_distribution_readiness(
@@ -1496,6 +1560,8 @@ class IndexingFeedbackLoop:
             overlays_dir.mkdir(parents=True, exist_ok=True)
             allow_html_mutation = not is_prod_tenant_repo or self.gitops_coordinator is not None
 
+            from pseofactory.qualification import resolve_redirected_gsc_target
+
             # Write overlays for prioritized candidates if provided
             for cand in (prioritized_candidates or []):
                 if not isinstance(cand, dict):
@@ -1511,8 +1577,31 @@ class IndexingFeedbackLoop:
                 if not isinstance(spec, dict) or "title_rewrite" not in spec:
                     spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
                 t_url = str(cand.get("target_url") or spec.get("target_url") or "")
+                if self.property_id in ("profithelm", "prexvo"):
+                    res_c = resolve_redirected_gsc_target(
+                        target_url=t_url,
+                        slug=c_slug,
+                        query=str(cand.get("query") or ""),
+                        property_id=self.property_id,
+                        repo_root=self.base_dir,
+                    )
+                    if res_c.get("is_redirected") and res_c.get("is_off_topic_sink"):
+                        continue
+                    if res_c.get("is_redirected") and res_c.get("canonical_url"):
+                        t_url = str(res_c["canonical_url"])
+                        c_slug = _slug_from_url_or_query(
+                            target_url=t_url,
+                            query=str(cand.get("query") or ""),
+                        )
+                        cand["target_url"] = t_url
+                        cand["slug"] = c_slug
+                        if isinstance(spec, dict):
+                            spec["target_url"] = t_url
+                            spec["slug"] = c_slug
+
                 if not self._is_protected_hub_route(c_slug, t_url):
-                    overlay_file = overlays_dir / f"{c_slug}.json"
+                    ov_stem = c_slug.replace("/", "-")
+                    overlay_file = overlays_dir / f"{ov_stem}.json"
                     spec, written = persist_overlay_respecting_lock(overlay_file, spec)
                     if written and c_slug not in overlays_written:
                         overlays_written.append(c_slug)
@@ -1548,10 +1637,24 @@ class IndexingFeedbackLoop:
             for d in diagnoses:
                 if d.classification == RootCauseClassification.DEAD_ROUTE_IN_SITEMAP.value:
                     continue
-                d_slug = _slug_from_url_or_query(target_url=d.url)
-                if self._is_protected_hub_route(d_slug, d.url):
+                d_url = d.url
+                d_slug = _slug_from_url_or_query(target_url=d_url)
+                if self.property_id in ("profithelm", "prexvo"):
+                    res_d = resolve_redirected_gsc_target(
+                        target_url=d_url,
+                        slug=d_slug,
+                        property_id=self.property_id,
+                        repo_root=self.base_dir,
+                    )
+                    if res_d.get("is_redirected") and res_d.get("is_off_topic_sink"):
+                        continue
+                    if res_d.get("is_redirected") and res_d.get("canonical_url"):
+                        d_url = str(res_d["canonical_url"])
+                        d_slug = _slug_from_url_or_query(target_url=d_url)
+                if self._is_protected_hub_route(d_slug, d_url):
                     continue
-                overlay_file = overlays_dir / f"{d_slug}.json"
+                ov_stem_d = d_slug.replace("/", "-")
+                overlay_file = overlays_dir / f"{ov_stem_d}.json"
                 if overlay_file.exists():
                     try:
                         spec = json.loads(overlay_file.read_text(encoding="utf-8"))
@@ -1564,7 +1667,7 @@ class IndexingFeedbackLoop:
                         {
                             "tenant_id": self.property_id,
                             "slug": d_slug,
-                            "target_url": d.url,
+                            "target_url": d_url,
                             "anomaly_type": d.classification,
                             "section": d.section,
                             "child_sitemap": d.child_sitemap,
@@ -1580,7 +1683,7 @@ class IndexingFeedbackLoop:
                     overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
                     if d_slug not in overlays_written:
                         overlays_written.append(d_slug)
-                if allow_html_mutation and d_slug not in repaired_slugs and self._apply_html_repairs_for_slug(d_slug, d.url, spec):
+                if allow_html_mutation and d_slug not in repaired_slugs and self._apply_html_repairs_for_slug(d_slug, d_url, spec):
                     repaired_slugs.add(d_slug)
                     html_files_repaired += 1
 

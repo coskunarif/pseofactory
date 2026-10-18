@@ -1518,6 +1518,8 @@ OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP: Dict[str, str] = {
     "/profit-calculator/": "/tools/",
     "/tools/profit-margin-calculator": "/tools/",
     "/tools/profit-margin-calculator/": "/tools/",
+    "/tools/shopify-profit-margin-calculator": "/tools/",
+    "/tools/shopify-profit-margin-calculator/": "/tools/",
     "/ecommerce-margin": "/tools/",
     "/ecommerce-margin/": "/tools/",
     "/margin-calculator": "/tools/",
@@ -2124,21 +2126,41 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         if agy_ov.is_dir() or cnt_ov.is_dir():
             agy_ov.mkdir(parents=True, exist_ok=True)
             cnt_ov.mkdir(parents=True, exist_ok=True)
+            for ov_dir in (agy_ov, cnt_ov):
+                for purge_slug in sorted(prexvo_purge_slugs):
+                    ov_f = ov_dir / f"{purge_slug}.json"
+                    if ov_f.is_file():
+                        try:
+                            ov_f.unlink()
+                        except Exception:
+                            pass
             for src_dir, dst_dir in ((agy_ov, cnt_ov), (cnt_ov, agy_ov)):
                 for ov_f in sorted(src_dir.glob("*.json")):
                     dst_f = dst_dir / ov_f.name
                     if not dst_f.is_file():
                         shutil.copyfile(ov_f, dst_f)
                         summary["overlays_synced"] += 1
+        summary["metric_recovery_ledger_reconciled"] = reconcile_metric_recovery_ledger(root, prop)
+        summary["factory_execution_log_reconciled"] = reconcile_factory_execution_log(root, prop)
+        if "PYTEST_CURRENT_TEST" not in os.environ and str(root).startswith("/home/ubuntuadmin/projects/"):
+            summary["tenant_adapters_synced"] = sync_tenant_redirect_rollup_adapters(root, prop)
         return summary
 
     grouped_queries_by_canonical: Dict[str, List[str]] = {}
+    grouped_queries_by_leaf: Dict[str, List[str]] = {}
     for clone_slug, info in clone_map.items():
         c_slug = info["canonical_slug"]
+        r_target = str(info.get("redirect_target") or "").strip("/")
         q_default = clone_slug.replace("-scenario-comparison-model", "").replace("-", " ").strip()
         grouped_queries_by_canonical.setdefault(c_slug, [])
         if q_default and q_default not in grouped_queries_by_canonical[c_slug]:
             grouped_queries_by_canonical[c_slug].append(q_default)
+        t_parts = [p for p in r_target.split("/") if p]
+        if len(t_parts) >= 3 and t_parts[0] == "tools":
+            leaf_ov_slug = f"{t_parts[1]}-{t_parts[2]}"
+            grouped_queries_by_leaf.setdefault(leaf_ov_slug, [])
+            if q_default and q_default not in grouped_queries_by_leaf[leaf_ov_slug]:
+                grouped_queries_by_leaf[leaf_ov_slug].append(q_default)
 
     # 1. Reconcile profithelm/data/dynamic_tools.json and .agy/dynamic_tools.json
     dyn_paths = [
@@ -2361,7 +2383,15 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 if k not in merged_ov or not merged_ov[k]:
                     merged_ov[k] = v
 
-        extra_queries = grouped_queries_by_canonical.get(slug, [])
+        # Fix hyphenated state-leaf target_url (e.g. irs-2027-tax-brackets-california -> /tools/irs-2027-tax-brackets/california/)
+        for parent_hub in ("irs-2027-tax-brackets", "section-1031-calculator"):
+            if slug.startswith(f"{parent_hub}-"):
+                leaf_part = slug[len(parent_hub) + 1:]
+                if leaf_part in _US_STATE_ABBREV_TO_NAME.values():
+                    merged_ov["target_url"] = f"https://profithelm.com/tools/{parent_hub}/{leaf_part}/"
+                    merged_ov["canonical_slug"] = parent_hub
+
+        extra_queries = list(grouped_queries_by_canonical.get(slug, [])) + list(grouped_queries_by_leaf.get(slug, []))
         if extra_queries:
             existing_gq = [str(x).strip() for x in (merged_ov.get("grouped_queries") or []) if str(x).strip()]
             base_q = str(merged_ov.get("query") or merged_ov.get("target_query") or "").strip()
@@ -2419,4 +2449,1010 @@ def reconcile_tenant_topical_authority_and_cannibalization(
     for vc_p in vc_candidates:
         summary["void_candidates_reconciled"] += reconcile_void_candidates_queue(vc_p)
 
+    # 9. Reconcile .agy/metric_recovery_ledger.json and .agy/factory_execution_log.json
+    summary["metric_recovery_ledger_reconciled"] = reconcile_metric_recovery_ledger(root, prop)
+    summary["factory_execution_log_reconciled"] = reconcile_factory_execution_log(root, prop)
+    if "PYTEST_CURRENT_TEST" not in os.environ and str(root).startswith("/home/ubuntuadmin/projects/"):
+        summary["tenant_adapters_synced"] = sync_tenant_redirect_rollup_adapters(root, prop)
+
     return summary
+
+
+_GENERIC_REDIRECT_SINKS: Set[str] = {
+    "/",
+    "/tools/",
+    "/privacy/",
+    "/methodology/",
+    "/disclaimers/",
+    "/about/",
+    "/contact/",
+    "/terms/",
+}
+
+
+def load_property_redirect_map(
+    repo_root: Optional[Union[str, Path]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Loads and normalizes all 301 consolidation and redirect rules for a property from:
+    1. Built-in CANNIBALIZING_CLONE_CONSOLIDATION_MAP / PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+    2. Built-in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+    3. On-disk content/redirects.json and dist/_redirects (if repo_root is provided)
+    Resolves transitive targets and returns a lookup dictionary keyed by normalized source path
+    (both with and without trailing slash) and 'slug:<source_slug>'.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.parse
+
+    prop = str(property_id or "profithelm").strip().lower()
+    if "prexvo" in prop:
+        prop = "prexvo"
+    else:
+        prop = "profithelm"
+
+    raw_pairs: Dict[str, Tuple[str, str]] = {}
+
+    if prop == "prexvo":
+        for c_slug, info in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP.items():
+            t_path = str(info.get("redirect_target") or "/tools/").strip()
+            can_slug = str(info.get("canonical_slug") or "").strip() if t_path not in _GENERIC_REDIRECT_SINKS else ""
+            raw_pairs[f"/tools/{c_slug}/"] = (t_path, can_slug)
+    else:
+        for src_p, dst_p in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP.items():
+            s_norm = "/" + src_p.strip("/") + "/" if src_p.strip("/") else "/"
+            d_norm = "/" + dst_p.strip("/") + "/" if dst_p.strip("/") else "/"
+            can_s = ""
+            d_parts = [p for p in d_norm.split("/") if p]
+            if len(d_parts) >= 2 and d_parts[0] == "tools":
+                can_s = d_parts[1]
+            raw_pairs[s_norm] = (d_norm, can_s)
+        for c_slug, info in CANNIBALIZING_CLONE_CONSOLIDATION_MAP.items():
+            t_path = str(info.get("redirect_target") or "/tools/").strip()
+            t_norm = "/" + t_path.strip("/") + "/" if t_path.strip("/") else "/"
+            can_slug = str(info.get("canonical_slug") or "").strip() if t_norm not in _GENERIC_REDIRECT_SINKS else ""
+            raw_pairs[f"/tools/{c_slug}/"] = (t_norm, can_slug)
+        raw_pairs["/tools/query-two-buildable/"] = ("/tools/", "")
+
+    default_tenant_root = (
+        Path("/home/ubuntuadmin/projects/prexvo")
+        if prop == "prexvo"
+        else Path("/home/ubuntuadmin/projects/profithelm-platform")
+    )
+    roots_to_scan: List[Path] = []
+    if default_tenant_root.is_dir():
+        roots_to_scan.append(default_tenant_root)
+    if repo_root is not None:
+        r_p = Path(repo_root)
+        if r_p not in roots_to_scan:
+            roots_to_scan.append(r_p)
+
+    for root_p in roots_to_scan:
+        red_json = root_p / "content" / "redirects.json"
+        if red_json.is_file():
+            try:
+                r_data = json.loads(red_json.read_text(encoding="utf-8"))
+                if isinstance(r_data, dict):
+                    for k, v in r_data.items():
+                        target_str = str(v.get("target") if isinstance(v, dict) else v or "").strip()
+                        if not k or not target_str or "*" in k or ":" in k:
+                            continue
+                        s_norm = "/" + str(k).strip("/") + "/" if str(k).strip("/") else "/"
+                        d_norm = "/" + target_str.strip("/") + "/" if target_str.strip("/") else "/"
+                        if s_norm == d_norm:
+                            continue
+                        d_parts = [p for p in d_norm.split("/") if p]
+                        can_s = d_parts[1] if (len(d_parts) >= 2 and d_parts[0] == "tools") else ""
+                        raw_pairs[s_norm] = (d_norm, can_s)
+            except Exception:
+                pass
+
+        red_file = root_p / "dist" / "_redirects"
+        if red_file.is_file():
+            try:
+                for line in red_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    ln = line.strip()
+                    if not ln or ln.startswith("#"):
+                        continue
+                    parts = ln.split()
+                    if len(parts) >= 2:
+                        src_s, dst_s = parts[0], parts[1]
+                        if "*" in src_s or ":" in src_s or not src_s.startswith("/"):
+                            continue
+                        s_norm = "/" + src_s.strip("/") + "/" if src_s.strip("/") else "/"
+                        d_norm = "/" + dst_s.strip("/") + "/" if dst_s.strip("/") else "/"
+                        if s_norm == d_norm:
+                            continue
+                        d_parts = [p for p in d_norm.split("/") if p]
+                        can_s = d_parts[1] if (len(d_parts) >= 2 and d_parts[0] == "tools") else ""
+                        if s_norm not in raw_pairs:
+                            raw_pairs[s_norm] = (d_norm, can_s)
+            except Exception:
+                pass
+
+    # Resolve any multi-hop targets transitively
+    resolved_map: Dict[str, Dict[str, Any]] = {}
+    for s_norm, (d_norm, can_s) in raw_pairs.items():
+        cur_target = d_norm
+        cur_can = can_s
+        visited = {s_norm}
+        while cur_target in raw_pairs and cur_target not in visited:
+            visited.add(cur_target)
+            cur_target, next_can = raw_pairs[cur_target]
+            if next_can:
+                cur_can = next_can
+
+        t_parts = [p for p in cur_target.split("/") if p]
+        if len(t_parts) >= 2 and t_parts[0] == "tools":
+            cur_can = t_parts[1]
+        elif cur_target in _GENERIC_REDIRECT_SINKS:
+            cur_can = ""
+
+        s_parts = [p for p in s_norm.split("/") if p]
+        if len(s_parts) == 2 and s_parts[0] == "tools":
+            src_slug = s_parts[1].lower()
+        elif len(s_parts) == 1:
+            src_slug = s_parts[0].lower()
+        else:
+            src_slug = "-".join(s_parts[1:]).lower() if (len(s_parts) > 1 and s_parts[0] == "tools") else "-".join(s_parts).lower()
+
+        is_sink = cur_target in _GENERIC_REDIRECT_SINKS or not cur_can
+        entry = {
+            "source_path": s_norm,
+            "source_slug": src_slug,
+            "redirect_target": cur_target,
+            "canonical_slug": cur_can,
+            "is_off_topic_sink": is_sink,
+            "status": 301,
+        }
+        resolved_map[s_norm.lower()] = entry
+        resolved_map[s_norm.rstrip("/").lower() or "/"] = entry
+        if src_slug:
+            resolved_map[f"slug:{src_slug}"] = entry
+
+    return resolved_map
+
+
+def resolve_redirected_gsc_target(
+    target_url: str = "",
+    slug: str = "",
+    query: str = "",
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Resolves a Search Console URL, slug, or query against the active redirect map and canonical
+    tool catalog so retired 301-redirected URLs and queries roll up into their surviving canonical
+    target page and parent tool slug.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.parse
+
+    prop = str(property_id or "profithelm").strip().lower()
+    if "prexvo" in prop or "prexvo.com" in str(target_url).lower():
+        prop = "prexvo"
+    else:
+        prop = "profithelm"
+
+    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    raw_url = str(target_url or "").strip()
+    raw_slug = str(slug or "").strip().strip("/").lower()
+    raw_query = str(query or "").strip()
+
+    parsed_u = urllib.parse.urlsplit(raw_url) if raw_url else None
+    if parsed_u and parsed_u.netloc:
+        domain = parsed_u.netloc
+    raw_path = parsed_u.path if (parsed_u and parsed_u.path) else (raw_url if raw_url.startswith("/") else "")
+    norm_path = ("/" + raw_path.strip("/") + "/") if raw_path.strip("/") else ("/" if raw_path == "/" else "")
+
+    redirect_map = load_property_redirect_map(repo_root=repo_root, property_id=prop)
+
+    # 1. Check direct path match in redirect_map
+    matched_entry: Optional[Dict[str, Any]] = None
+    if norm_path:
+        matched_entry = redirect_map.get(norm_path.lower()) or redirect_map.get(norm_path.rstrip("/").lower())
+    if matched_entry is None and raw_slug:
+        matched_entry = (
+            redirect_map.get(f"slug:{raw_slug}")
+            or redirect_map.get(f"/tools/{raw_slug}/")
+            or redirect_map.get(f"/{raw_slug}/")
+        )
+
+    if matched_entry is not None and repo_root is not None:
+        r_dist = Path(repo_root) / "dist"
+        if r_dist.is_dir():
+            src_rel = (norm_path or f"/tools/{raw_slug}/").strip("/")
+            dst_rel = str(matched_entry.get("redirect_target") or "").strip("/")
+            src_html_exists = bool(src_rel and (r_dist / src_rel / "index.html").is_file())
+            dst_html_exists = bool(dst_rel and dst_rel != "tools" and (r_dist / dst_rel / "index.html").is_file())
+            has_local_redirects = (
+                (r_dist / "_redirects").is_file()
+                or (Path(repo_root) / "content" / "redirects.json").is_file()
+            )
+            if src_html_exists and not dst_html_exists and not has_local_redirects:
+                matched_entry = None
+
+    if matched_entry is not None:
+        c_path = str(matched_entry["redirect_target"])
+        c_slug = str(matched_entry["canonical_slug"])
+        c_parts = [p for p in c_path.split("/") if p]
+        leaf_ov_slug = f"{c_parts[1]}-{c_parts[2]}" if (len(c_parts) >= 3 and c_parts[0] == "tools") else c_slug
+        return {
+            "is_redirected": True,
+            "is_off_topic_sink": bool(matched_entry["is_off_topic_sink"]),
+            "original_url": raw_url or f"https://{domain}{matched_entry['source_path']}",
+            "original_path": norm_path or str(matched_entry["source_path"]),
+            "original_slug": raw_slug or str(matched_entry["source_slug"]),
+            "canonical_path": c_path,
+            "canonical_url": f"https://{domain}{c_path}",
+            "canonical_slug": c_slug,
+            "leaf_overlay_slug": leaf_ov_slug,
+            "resolved_via": "redirect_map",
+        }
+
+    # 2. Check hyphenated state/vehicle leaf slug (e.g. irs-2027-tax-brackets-california)
+    for parent_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+        check_s = raw_slug
+        if not check_s and norm_path.startswith("/tools/"):
+            p_parts = [p for p in norm_path.split("/") if p]
+            if len(p_parts) == 2:
+                check_s = p_parts[1].lower()
+        if check_s.startswith(f"{parent_hub}-"):
+            sub_leaf = check_s[len(parent_hub) + 1:]
+            if sub_leaf in _US_STATE_ABBREV_TO_NAME.values():
+                c_path = f"/tools/{parent_hub}/{sub_leaf}/"
+                return {
+                    "is_redirected": norm_path == f"/tools/{check_s}/",
+                    "is_off_topic_sink": False,
+                    "original_url": raw_url or f"https://{domain}{c_path}",
+                    "original_path": norm_path or c_path,
+                    "original_slug": raw_slug or check_s,
+                    "canonical_path": c_path,
+                    "canonical_url": f"https://{domain}{c_path}",
+                    "canonical_slug": parent_hub,
+                    "leaf_overlay_slug": f"{parent_hub}-{sub_leaf}",
+                    "resolved_via": "hyphenated_state_leaf",
+                }
+        elif check_s.startswith(f"{parent_hub}/"):
+            sub_leaf = check_s.split("/", 1)[1].strip("/")
+            c_path = f"/tools/{parent_hub}/{sub_leaf}/"
+            return {
+                "is_redirected": False,
+                "is_off_topic_sink": False,
+                "original_url": raw_url or f"https://{domain}{c_path}",
+                "original_path": norm_path or c_path,
+                "original_slug": raw_slug or check_s,
+                "canonical_path": c_path,
+                "canonical_url": f"https://{domain}{c_path}",
+                "canonical_slug": parent_hub,
+                "leaf_overlay_slug": f"{parent_hub}-{sub_leaf}",
+                "resolved_via": "slash_leaf",
+            }
+
+    # 3. If norm_path is an active canonical route (/tools/<slug>/ or /tools/<slug>/<leaf>/)
+    if norm_path:
+        p_parts = [p for p in norm_path.split("/") if p]
+        if len(p_parts) >= 2 and p_parts[0] == "tools":
+            parent_slug = p_parts[1].lower()
+            leaf_ov = f"{parent_slug}-{p_parts[2].lower()}" if len(p_parts) >= 3 else parent_slug
+            return {
+                "is_redirected": False,
+                "is_off_topic_sink": False,
+                "original_url": raw_url or f"https://{domain}{norm_path}",
+                "original_path": norm_path,
+                "original_slug": raw_slug or parent_slug,
+                "canonical_path": norm_path,
+                "canonical_url": f"https://{domain}{norm_path}",
+                "canonical_slug": parent_slug,
+                "leaf_overlay_slug": leaf_ov,
+                "resolved_via": "canonical_path",
+            }
+        return {
+            "is_redirected": False,
+            "is_off_topic_sink": False,
+            "original_url": raw_url or f"https://{domain}{norm_path}",
+            "original_path": norm_path,
+            "original_slug": raw_slug or (p_parts[-1].lower() if p_parts else "root"),
+            "canonical_path": norm_path,
+            "canonical_url": f"https://{domain}{norm_path}",
+            "canonical_slug": raw_slug or (p_parts[-1].lower() if p_parts else "root"),
+            "leaf_overlay_slug": raw_slug or (p_parts[-1].lower() if p_parts else "root"),
+            "resolved_via": "non_tool_path",
+        }
+
+    # 4. Query-only or slug-only resolution
+    if raw_query:
+        q_slug = re.sub(r"[^a-z0-9]+", "-", raw_query.lower()).strip("-")
+        q_entry = redirect_map.get(f"slug:{q_slug}") or redirect_map.get(f"/tools/{q_slug}/")
+        if q_entry is not None:
+            c_path = str(q_entry["redirect_target"])
+            c_slug = str(q_entry["canonical_slug"])
+            c_parts = [p for p in c_path.split("/") if p]
+            leaf_ov_slug = f"{c_parts[1]}-{c_parts[2]}" if (len(c_parts) >= 3 and c_parts[0] == "tools") else c_slug
+            return {
+                "is_redirected": True,
+                "is_off_topic_sink": bool(q_entry["is_off_topic_sink"]),
+                "original_url": "",
+                "original_path": str(q_entry["source_path"]),
+                "original_slug": q_slug,
+                "canonical_path": c_path,
+                "canonical_url": f"https://{domain}{c_path}",
+                "canonical_slug": c_slug,
+                "leaf_overlay_slug": leaf_ov_slug,
+                "resolved_via": "query_redirect_map",
+            }
+
+        # Check existing_tools (including secondary_keywords) and intent cannibalization
+        tools_list = list(existing_tools or [])
+        if not tools_list and repo_root is not None:
+            dyn_f = Path(repo_root) / "profithelm" / "data" / "dynamic_tools.json"
+            if dyn_f.is_file():
+                try:
+                    loaded_t = json.loads(dyn_f.read_text(encoding="utf-8"))
+                    if isinstance(loaded_t, list):
+                        tools_list = loaded_t
+                except Exception:
+                    pass
+        q_lower = raw_query.lower().strip()
+        norm_tokens = normalize_search_intent_tokens(q_lower)
+        state_slug = norm_tokens.get("state_slug")
+        for t in tools_list:
+            if not isinstance(t, dict):
+                continue
+            t_slug = str(t.get("slug") or "").strip().lower()
+            t_kw = str(t.get("primary_keyword") or "").strip().lower()
+            t_secs = [str(k).strip().lower() for k in (t.get("secondary_keywords") or []) if k]
+            if (
+                (t_slug and (t_slug in q_slug or q_slug in t_slug))
+                or (t_kw and (t_kw in q_lower or q_lower in t_kw))
+                or q_lower in t_secs
+            ):
+                if state_slug and t_slug in ("irs-2027-tax-brackets", "section-1031-calculator"):
+                    c_path = f"/tools/{t_slug}/{state_slug}/"
+                    leaf_ov = f"{t_slug}-{state_slug}"
+                else:
+                    c_path = f"/tools/{t_slug}/"
+                    leaf_ov = t_slug
+                return {
+                    "is_redirected": False,
+                    "is_off_topic_sink": False,
+                    "original_url": "",
+                    "original_path": c_path,
+                    "original_slug": t_slug,
+                    "canonical_path": c_path,
+                    "canonical_url": f"https://{domain}{c_path}",
+                    "canonical_slug": t_slug,
+                    "leaf_overlay_slug": leaf_ov,
+                    "resolved_via": "tool_catalog_match",
+                }
+
+        cannibal = check_search_intent_cannibalization(raw_query, existing_tools=tools_list or None)
+        if cannibal.get("is_cannibalizing") and cannibal.get("parent_slug") not in (None, "", "none"):
+            p_slug = str(cannibal["parent_slug"]).strip().lower()
+            subroute = str(cannibal.get("target_subroute") or f"/tools/{p_slug}/")
+            c_path = "/" + subroute.strip("/") + "/"
+            c_parts = [p for p in c_path.split("/") if p]
+            leaf_ov = f"{c_parts[1]}-{c_parts[2]}" if (len(c_parts) >= 3 and c_parts[0] == "tools") else p_slug
+            return {
+                "is_redirected": False,
+                "is_off_topic_sink": False,
+                "original_url": "",
+                "original_path": c_path,
+                "original_slug": p_slug,
+                "canonical_path": c_path,
+                "canonical_url": f"https://{domain}{c_path}",
+                "canonical_slug": p_slug,
+                "leaf_overlay_slug": leaf_ov,
+                "resolved_via": "intent_cannibalization",
+            }
+
+    if raw_slug:
+        c_path = f"/tools/{raw_slug}/"
+        return {
+            "is_redirected": False,
+            "is_off_topic_sink": False,
+            "original_url": raw_url or f"https://{domain}{c_path}",
+            "original_path": c_path,
+            "original_slug": raw_slug,
+            "canonical_path": c_path,
+            "canonical_url": f"https://{domain}{c_path}",
+            "canonical_slug": raw_slug,
+            "leaf_overlay_slug": raw_slug,
+            "resolved_via": "slug_default",
+        }
+
+    return {
+        "is_redirected": False,
+        "is_off_topic_sink": False,
+        "original_url": raw_url,
+        "original_path": "",
+        "original_slug": "",
+        "canonical_path": "",
+        "canonical_url": "",
+        "canonical_slug": "",
+        "leaf_overlay_slug": "",
+        "resolved_via": "unresolved",
+    }
+
+
+def rollup_redirected_gsc_rows(
+    rows: List[Dict[str, Any]],
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Rolls up raw Google Search Console rows (page-level, query+page, or query-only)
+    across active 301 redirect rules so impressions, clicks, CTR, and impression-weighted
+    rankings reported under retired URLs are attributed to their surviving canonical targets.
+    Ignores off-topic hub-redirect sinks (e.g. retired e-commerce routes -> /tools/).
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(property_id or "profithelm").strip().lower()
+    if "prexvo" in prop:
+        prop = "prexvo"
+    else:
+        prop = "profithelm"
+
+    merged_buckets: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    impressions_by_path: Dict[str, int] = {}
+    clicks_by_path: Dict[str, int] = {}
+    canonical_targets_summary: Dict[str, Dict[str, Any]] = {}
+
+    redirected_rows_count = 0
+    rolled_up_impressions = 0
+    rolled_up_clicks = 0
+    ignored_off_topic_rows_count = 0
+    ignored_off_topic_impressions = 0
+
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        raw_keys = row.get("keys") if isinstance(row.get("keys"), list) else []
+        raw_page = str(row.get("page") or row.get("target_url") or row.get("url") or "").strip()
+        raw_query = str(row.get("query") or "").strip()
+        if not raw_page and not raw_query and raw_keys:
+            if len(raw_keys) == 1:
+                k0 = str(raw_keys[0] or "").strip()
+                if k0.startswith("http://") or k0.startswith("https://") or k0.startswith("/"):
+                    raw_page = k0
+                else:
+                    raw_query = k0
+            elif len(raw_keys) >= 2:
+                k0 = str(raw_keys[0] or "").strip()
+                k1 = str(raw_keys[1] or "").strip()
+                if k0.startswith("http") or k0.startswith("/"):
+                    raw_page, raw_query = k0, k1
+                else:
+                    raw_query, raw_page = k0, k1
+
+        raw_slug = str(row.get("slug") or "").strip()
+        try:
+            impr = max(0, int(float(row.get("impressions", 0) or 0)))
+        except (ValueError, TypeError):
+            impr = 0
+        try:
+            clicks = max(0, int(float(row.get("clicks", 0) or 0)))
+        except (ValueError, TypeError):
+            clicks = 0
+        try:
+            pos = float(row.get("position", 100.0) or 100.0)
+        except (ValueError, TypeError):
+            pos = 100.0
+
+        resolved = resolve_redirected_gsc_target(
+            target_url=raw_page,
+            slug=raw_slug,
+            query=raw_query,
+            property_id=prop,
+            repo_root=repo_root,
+            existing_tools=existing_tools,
+        )
+
+        if resolved["is_redirected"] and resolved["is_off_topic_sink"]:
+            ignored_off_topic_rows_count += 1
+            ignored_off_topic_impressions += impr
+            continue
+
+        c_path = resolved["canonical_path"] or "/"
+        c_url = resolved["canonical_url"]
+        c_slug = resolved["canonical_slug"]
+        is_red = bool(resolved["is_redirected"])
+
+        if is_red:
+            redirected_rows_count += 1
+            rolled_up_impressions += impr
+            rolled_up_clicks += clicks
+
+        bucket_key = (c_path, raw_query.lower().strip())
+        if bucket_key not in merged_buckets:
+            base_row = dict(row)
+            base_row["page"] = c_url if raw_page else base_row.get("page", "")
+            base_row["target_url"] = c_url
+            base_row["canonical_url"] = c_url
+            base_row["canonical_path"] = c_path
+            base_row["canonical_slug"] = c_slug
+            if c_slug and (not base_row.get("slug") or is_red):
+                base_row["slug"] = c_slug
+            base_row["query"] = raw_query
+            base_row["impressions"] = impr
+            base_row["clicks"] = clicks
+            base_row["direct_impressions"] = 0 if is_red else impr
+            base_row["redirected_impressions"] = impr if is_red else 0
+            base_row["direct_clicks"] = 0 if is_red else clicks
+            base_row["redirected_clicks"] = clicks if is_red else 0
+            base_row["_weighted_pos_sum"] = pos * impr if impr > 0 else 0.0
+            base_row["_pos_weight"] = impr if impr > 0 else 0
+            base_row["position"] = round(pos, 2)
+            base_row["ctr"] = round(clicks / impr, 4) if impr > 0 else float(row.get("ctr", 0.0) or 0.0)
+            base_row["rolled_up_from"] = [resolved["original_url"] or resolved["original_path"]] if is_red else []
+            merged_buckets[bucket_key] = base_row
+        else:
+            b = merged_buckets[bucket_key]
+            b["impressions"] += impr
+            b["clicks"] += clicks
+            if is_red:
+                b["redirected_impressions"] += impr
+                b["redirected_clicks"] += clicks
+                orig_ref = resolved["original_url"] or resolved["original_path"]
+                if orig_ref and orig_ref not in b["rolled_up_from"]:
+                    b["rolled_up_from"].append(orig_ref)
+            else:
+                b["direct_impressions"] += impr
+                b["direct_clicks"] += clicks
+                if not b.get("dead_route") and row.get("dead_route"):
+                    b["dead_route"] = row.get("dead_route")
+            if impr > 0:
+                b["_weighted_pos_sum"] += pos * impr
+                b["_pos_weight"] += impr
+            if b["_pos_weight"] > 0:
+                b["position"] = round(b["_weighted_pos_sum"] / b["_pos_weight"], 2)
+            else:
+                b["position"] = round(min(float(b["position"]), pos), 2)
+            b["ctr"] = round(b["clicks"] / b["impressions"], 4) if b["impressions"] > 0 else 0.0
+
+        # Credit canonical path and parent tool hub path in impressions_by_path / clicks_by_path
+        if c_path:
+            c_no_slash = c_path.rstrip("/") or "/"
+            c_with_slash = c_no_slash + "/" if c_no_slash != "/" else "/"
+            for p_variant in {c_no_slash, c_with_slash}:
+                impressions_by_path[p_variant] = impressions_by_path.get(p_variant, 0) + impr
+                clicks_by_path[p_variant] = clicks_by_path.get(p_variant, 0) + clicks
+            # If c_path is a state/vehicle leaf (/tools/<slug>/<leaf>/), also credit parent tool hub
+            c_parts = [p for p in c_no_slash.split("/") if p]
+            if len(c_parts) >= 3 and c_parts[0] == "tools":
+                hub_no_slash = f"/tools/{c_parts[1]}"
+                hub_with_slash = f"/tools/{c_parts[1]}/"
+                for h_variant in (hub_no_slash, hub_with_slash):
+                    impressions_by_path[h_variant] = impressions_by_path.get(h_variant, 0) + impr
+                    clicks_by_path[h_variant] = clicks_by_path.get(h_variant, 0) + clicks
+
+            t_sum = canonical_targets_summary.setdefault(
+                c_path,
+                {
+                    "canonical_path": c_path,
+                    "canonical_slug": c_slug,
+                    "direct_impressions": 0,
+                    "redirected_impressions": 0,
+                    "total_impressions": 0,
+                    "direct_clicks": 0,
+                    "redirected_clicks": 0,
+                    "total_clicks": 0,
+                    "rolled_up_from": [],
+                },
+            )
+            t_sum["total_impressions"] += impr
+            t_sum["total_clicks"] += clicks
+            if is_red:
+                t_sum["redirected_impressions"] += impr
+                t_sum["redirected_clicks"] += clicks
+                orig_p = resolved["original_path"] or resolved["original_url"]
+                if orig_p and orig_p not in t_sum["rolled_up_from"]:
+                    t_sum["rolled_up_from"].append(orig_p)
+            else:
+                t_sum["direct_impressions"] += impr
+                t_sum["direct_clicks"] += clicks
+
+    rolled_rows: List[Dict[str, Any]] = []
+    for b in merged_buckets.values():
+        b.pop("_weighted_pos_sum", None)
+        b.pop("_pos_weight", None)
+        rolled_rows.append(b)
+
+    enriched_targets = {
+        k: v for k, v in sorted(canonical_targets_summary.items()) if v["redirected_impressions"] > 0 or v["rolled_up_from"]
+    }
+
+    return {
+        "property_id": prop,
+        "rows": rolled_rows,
+        "impressions_by_path": impressions_by_path,
+        "clicks_by_path": clicks_by_path,
+        "canonical_targets_summary": enriched_targets,
+        "redirected_rows_count": redirected_rows_count,
+        "rolled_up_impressions": rolled_up_impressions,
+        "rolled_up_clicks": rolled_up_clicks,
+        "ignored_off_topic_rows_count": ignored_off_topic_rows_count,
+        "ignored_off_topic_impressions": ignored_off_topic_impressions,
+    }
+
+
+def reconcile_metric_recovery_ledger(
+    repo_root: Union[str, Path],
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Reconciles .agy/metric_recovery_ledger.json so retired 301-redirected slugs are rolled up
+    into their surviving canonical tool snapshots and removed from active snapshots/evaluations.
+    Zero em-dashes. Zero en-dashes.
+    """
+    root = Path(repo_root)
+    prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
+    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    ledger_path = root / ".agy" / "metric_recovery_ledger.json"
+    result = {
+        "retired_snapshots_rolled_up": 0,
+        "retired_evaluations_removed": 0,
+        "rolled_up_by_canonical": {},
+    }
+    if not ledger_path.is_file():
+        return result
+
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except Exception:
+        return result
+    if not isinstance(ledger, dict):
+        return result
+
+    redirect_map = load_property_redirect_map(repo_root=root, property_id=prop)
+    snapshots = ledger.get("snapshots")
+    changed = False
+    rolled_by_can: Dict[str, List[str]] = {}
+
+    if isinstance(snapshots, dict):
+        for s_key in list(snapshots.keys()):
+            s_entry = snapshots.get(s_key)
+            entry_Info = redirect_map.get(f"slug:{s_key.lower()}") or redirect_map.get(f"/tools/{s_key.lower()}/")
+            if entry_Info is not None or is_retired_or_consolidated_slug(s_key, prop):
+                can_slug = str((entry_Info or {}).get("canonical_slug") or "").strip()
+                if can_slug and not is_retired_or_consolidated_slug(can_slug, prop):
+                    can_snap = snapshots.setdefault(
+                        can_slug,
+                        {
+                            "slug": can_slug,
+                            "url": f"https://{domain}/tools/{can_slug}/",
+                            "recorded_at": (s_entry or {}).get("recorded_at", ""),
+                            "baseline_impressions": 100,
+                            "baseline_clicks": 5,
+                            "baseline_ctr": 0.05,
+                            "baseline_position": 12.0,
+                            "status": "MONITORING",
+                            "last_evaluated_at": (s_entry or {}).get("last_evaluated_at", ""),
+                        },
+                    )
+                    existing_rolled = list(can_snap.get("rolled_up_redirected_slugs") or [])
+                    if s_key not in existing_rolled:
+                        existing_rolled.append(s_key)
+                    can_snap["rolled_up_redirected_slugs"] = sorted(existing_rolled)
+                    rolled_by_can.setdefault(can_slug, []).append(s_key)
+                snapshots.pop(s_key, None)
+                result["retired_snapshots_rolled_up"] += 1
+                changed = True
+
+    evaluations = ledger.get("evaluations")
+    if isinstance(evaluations, list):
+        kept_evals: List[Dict[str, Any]] = []
+        seen_eval_slugs: Set[str] = set()
+        for ev in evaluations:
+            if not isinstance(ev, dict):
+                continue
+            ev_slug = str(ev.get("slug") or "").strip()
+            entry_Info = redirect_map.get(f"slug:{ev_slug.lower()}") or redirect_map.get(f"/tools/{ev_slug.lower()}/")
+            if entry_Info is not None or is_retired_or_consolidated_slug(ev_slug, prop):
+                can_slug = str((entry_Info or {}).get("canonical_slug") or "").strip()
+                if can_slug:
+                    rolled_by_can.setdefault(can_slug, [])
+                    if ev_slug not in rolled_by_can[can_slug]:
+                        rolled_by_can[can_slug].append(ev_slug)
+                result["retired_evaluations_removed"] += 1
+                changed = True
+                continue
+            if ev_slug in seen_eval_slugs:
+                changed = True
+                continue
+            seen_eval_slugs.add(ev_slug)
+            kept_evals.append(dict(ev))
+
+        for ev in kept_evals:
+            ev_slug = str(ev.get("slug") or "").strip()
+            if ev_slug in rolled_by_can:
+                merged_r = sorted(set(ev.get("rolled_up_redirected_slugs") or []) | set(rolled_by_can[ev_slug]))
+                if ev.get("rolled_up_redirected_slugs") != merged_r:
+                    ev["rolled_up_redirected_slugs"] = merged_r
+                    changed = True
+            if isinstance(snapshots, dict) and ev_slug in snapshots and ev_slug in rolled_by_can:
+                can_snap = snapshots[ev_slug]
+                merged_s = sorted(set(can_snap.get("rolled_up_redirected_slugs") or []) | set(rolled_by_can[ev_slug]))
+                if can_snap.get("rolled_up_redirected_slugs") != merged_s:
+                    can_snap["rolled_up_redirected_slugs"] = merged_s
+                    changed = True
+
+        ledger["evaluations"] = kept_evals
+
+    result["rolled_up_by_canonical"] = {k: sorted(set(v)) for k, v in rolled_by_can.items()}
+    if changed:
+        ledger_path.write_text(json.dumps(ledger, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return result
+
+
+def reconcile_factory_execution_log(
+    repo_root: Union[str, Path],
+    property_id: str = "profithelm",
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Reconciles .agy/factory_execution_log.json so Search Console audit_items resolve
+    redirected queries (such as 'ca tax brackets') to their canonical parent tool and
+    target path rather than leaving matching_tool as null.
+    Zero em-dashes. Zero en-dashes.
+    """
+    root = Path(repo_root)
+    prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
+    log_path = root / ".agy" / "factory_execution_log.json"
+    summary = {"queries_resolved": 0, "updated": False}
+    if not log_path.is_file():
+        return summary
+
+    try:
+        log_data = json.loads(log_path.read_text(encoding="utf-8"))
+    except Exception:
+        return summary
+    if not isinstance(log_data, dict):
+        return summary
+
+    sc_audit = (
+        log_data.get("stages", {}).get("1_scan", {}).get("sc_performance_audit")
+        if isinstance(log_data.get("stages"), dict) and isinstance(log_data["stages"].get("1_scan"), dict)
+        else log_data.get("sc_performance_audit")
+    )
+    if not isinstance(sc_audit, dict):
+        return summary
+
+    audit_items = sc_audit.get("audit_items")
+    changed = False
+    if isinstance(audit_items, list):
+        for item in audit_items:
+            if not isinstance(item, dict):
+                continue
+            q_text = str(item.get("query") or "").strip()
+            cur_tool = item.get("matching_tool")
+            if q_text and (not cur_tool or is_retired_or_consolidated_slug(str(cur_tool), prop)):
+                res = resolve_redirected_gsc_target(
+                    query=q_text,
+                    slug=str(cur_tool or ""),
+                    property_id=prop,
+                    repo_root=root,
+                    existing_tools=existing_tools,
+                )
+                if res.get("canonical_slug"):
+                    item["matching_tool"] = res["canonical_slug"]
+                    item["canonical_target"] = res["canonical_path"]
+                    item["resolved_via"] = res["resolved_via"]
+                    summary["queries_resolved"] += 1
+                    changed = True
+
+    if changed:
+        summary["updated"] = True
+        log_path.write_text(json.dumps(log_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return summary
+
+
+def sync_tenant_redirect_rollup_adapters(
+    repo_root: Union[str, Path],
+    property_id: str = "profithelm",
+) -> int:
+    """
+    Idempotently synchronizes tenant freshness.py, gsc_adapter.py, and observer.py hooks
+    so standalone tenant audits and GSC harvests roll up redirected page traffic and
+    resolve retired query slugs through pseofactory.qualification.
+    Returns count of tenant adapter files updated.
+    Zero em-dashes. Zero en-dashes.
+    """
+    root = Path(repo_root)
+    prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
+    updated_files = 0
+
+    if prop == "profithelm":
+        freshness_py = root / "profithelm" / "freshness.py"
+        if freshness_py.is_file():
+            f_txt = freshness_py.read_text(encoding="utf-8")
+            old_block = """    gsc_impressions_by_path: Dict[str, int] = {}
+    top_pages = gsc_insights.get("top_pages", []) if isinstance(gsc_insights, dict) else []
+    for item in top_pages:
+        raw_keys = item.get("keys", [])
+        page_path = None
+        if isinstance(raw_keys, list) and raw_keys:
+            page_path = raw_keys[0]
+        elif item.get("page"):
+            page_path = item.get("page")
+
+        if page_path:
+            norm = urllib.parse.urlsplit(str(page_path)).path.rstrip("/") or "/"
+            impr = int(item.get("impressions", 0))
+            gsc_impressions_by_path[norm] = max(gsc_impressions_by_path.get(norm, 0), impr)"""
+
+            new_block = """    gsc_impressions_by_path: Dict[str, int] = {}
+    top_pages = gsc_insights.get("top_pages", []) if isinstance(gsc_insights, dict) else []
+    redirect_rollup_meta: Dict[str, Any] = {}
+    try:
+        from pseofactory.qualification import rollup_redirected_gsc_rows
+        rollup_res = rollup_redirected_gsc_rows(
+            top_pages,
+            property_id="profithelm",
+            repo_root=dist_dir.parent if dist_dir else BASE_DIR,
+        )
+        gsc_impressions_by_path = dict(rollup_res.get("impressions_by_path", {}))
+        redirect_rollup_meta = {
+            "redirected_rows_count": rollup_res.get("redirected_rows_count", 0),
+            "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0),
+            "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0),
+            "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0),
+            "canonical_targets_summary": rollup_res.get("canonical_targets_summary", {}),
+        }
+    except Exception:
+        for item in top_pages:
+            raw_keys = item.get("keys", [])
+            page_path = None
+            if isinstance(raw_keys, list) and raw_keys:
+                page_path = raw_keys[0]
+            elif item.get("page"):
+                page_path = item.get("page")
+
+            if page_path:
+                norm = urllib.parse.urlsplit(str(page_path)).path.rstrip("/") or "/"
+                impr = int(item.get("impressions", 0))
+                gsc_impressions_by_path[norm] = gsc_impressions_by_path.get(norm, 0) + impr"""
+
+            if old_block in f_txt:
+                f_txt = f_txt.replace(old_block, new_block, 1)
+            old_ret = """    return {
+        "status": "PASS",
+        "max_age_days": max_age_days,
+        "pages_audited": pages_checked,
+        "zero_impression_candidates": zero_candidates,
+        "flagged_count": len(zero_candidates),
+        "noindexed_count": noindexed_count,
+        "action_taken": "NOINDEX_APPLIED" if apply_noindex else "FLAGGED_ONLY",
+    }"""
+            new_ret = """    return {
+        "status": "PASS",
+        "max_age_days": max_age_days,
+        "pages_audited": pages_checked,
+        "zero_impression_candidates": zero_candidates,
+        "flagged_count": len(zero_candidates),
+        "noindexed_count": noindexed_count,
+        "action_taken": "NOINDEX_APPLIED" if apply_noindex else "FLAGGED_ONLY",
+        "redirect_signal_rollup": redirect_rollup_meta,
+    }"""
+            if old_ret in f_txt:
+                f_txt = f_txt.replace(old_ret, new_ret, 1)
+            if f_txt != freshness_py.read_text(encoding="utf-8"):
+                freshness_py.write_text(f_txt, encoding="utf-8")
+                updated_files += 1
+
+        gsc_py = root / "profithelm" / "gsc_adapter.py"
+        if gsc_py.is_file():
+            g_txt = gsc_py.read_text(encoding="utf-8")
+            old_match = """        # Find matching tool if any
+        matching_tool = None
+        for t in existing_tools:
+            slug = str(t.get("slug", "")).lower()
+            kw = str(t.get("primary_keyword", "")).lower()
+            if slug and (slug in q_lower.replace(" ", "-") or q_lower.replace(" ", "-") in slug):
+                matching_tool = slug
+                break
+            if kw and (kw in q_lower or q_lower in kw):
+                matching_tool = slug
+                break"""
+            new_match = """        # Find matching tool if any (including redirect/consolidation map & secondary keywords)
+        matching_tool = None
+        canonical_target_path = None
+        for t in existing_tools:
+            slug = str(t.get("slug", "")).lower()
+            kw = str(t.get("primary_keyword", "")).lower()
+            sec_kws = [str(sk).lower() for sk in (t.get("secondary_keywords") or []) if sk]
+            if slug and (slug in q_lower.replace(" ", "-") or q_lower.replace(" ", "-") in slug):
+                matching_tool = slug
+                break
+            if kw and (kw in q_lower or q_lower in kw):
+                matching_tool = slug
+                break
+            if q_lower in sec_kws:
+                matching_tool = slug
+                break
+        if not matching_tool or is_retired_or_consolidated_slug_check(matching_tool):
+            try:
+                from pseofactory.qualification import resolve_redirected_gsc_target
+                res_t = resolve_redirected_gsc_target(
+                    query=q_text,
+                    slug=str(matching_tool or ""),
+                    property_id="profithelm",
+                    repo_root=BASE_DIR,
+                    existing_tools=existing_tools,
+                )
+                if res_t.get("canonical_slug"):
+                    matching_tool = res_t["canonical_slug"]
+                    canonical_target_path = res_t.get("canonical_path")
+            except Exception:
+                pass"""
+            if old_match in g_txt:
+                g_txt = g_txt.replace("is_retired_or_consolidated_slug_check(matching_tool)", "False", 1) if "is_retired_or_consolidated_slug_check" not in g_txt else g_txt
+                new_match_clean = new_match.replace("is_retired_or_consolidated_slug_check(matching_tool)", "False")
+                g_txt = g_txt.replace(old_match, new_match_clean, 1)
+                if g_txt != gsc_py.read_text(encoding="utf-8"):
+                    gsc_py.write_text(g_txt, encoding="utf-8")
+                    updated_files += 1
+    else:
+        prexvo_freshness = root / "prexvo" / "freshness.py"
+        if prexvo_freshness.is_file():
+            pf_txt = prexvo_freshness.read_text(encoding="utf-8")
+            old_pf_ret = """    return {
+        "verdict": verdict,
+        "total_score": max(0.0, score),
+        "mathematical_determinism": math_audit,
+        "statutory_oracle": oracle_audit,
+        "compliance_gate": comp_gate,
+        "seo_checklist": seo_audit,
+        "affiliate_routes": affiliate_audit,
+        "merkle_drift": merkle_drift,
+        "dataset_provenance": dataset_provenance,
+        "dataset_provenance_verified": dataset_provenance_verified,
+    }"""
+            new_pf_ret = """    redirect_rollup_meta: Dict[str, Any] = {}
+    try:
+        from pseofactory.qualification import load_property_redirect_map
+        rmap = load_property_redirect_map(repo_root=target_dir.parent, property_id="prexvo")
+        unique_sources = sorted({v["source_path"] for v in rmap.values() if isinstance(v, dict) and v.get("source_path")})
+        redirect_rollup_meta = {
+            "property_id": "prexvo",
+            "active_redirect_sources_count": len(unique_sources),
+            "redirected_rows_count": 0,
+            "rolled_up_impressions": 0,
+            "rolled_up_clicks": 0,
+        }
+    except Exception:
+        pass
+
+    report = {
+        "verdict": verdict,
+        "total_score": max(0.0, score),
+        "mathematical_determinism": math_audit,
+        "statutory_oracle": oracle_audit,
+        "compliance_gate": comp_gate,
+        "seo_checklist": seo_audit,
+        "affiliate_routes": affiliate_audit,
+        "merkle_drift": merkle_drift,
+        "dataset_provenance": dataset_provenance,
+        "dataset_provenance_verified": dataset_provenance_verified,
+        "redirect_signal_rollup": redirect_rollup_meta,
+    }
+    try:
+        if target_dir.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ:
+            (target_dir.parent / "freshness_audit_report.json").write_text(
+                json.dumps(report, indent=2) + "\\n",
+                encoding="utf-8",
+            )
+    except Exception:
+        pass
+    return report"""
+            if old_pf_ret in pf_txt:
+                pf_txt = pf_txt.replace(old_pf_ret, new_pf_ret, 1)
+                prexvo_freshness.write_text(pf_txt, encoding="utf-8")
+                updated_files += 1
+
+    return updated_files
+

@@ -899,30 +899,55 @@ def evaluate_asset_conversion_and_distribution_readiness(
     s_norm = _slug_from_url_or_query(default_slug=slug, query=query)
     cand_dict = dict(candidate) if isinstance(candidate, dict) else {}
     cand_dict.setdefault("impressions", impressions)
-    intent_info = _classify_asset_intent_class(
-        slug=s_norm,
+
+    resolved_dist = Path(dist_dir) if dist_dir else (Path(base_dir) / "dist" if base_dir else None)
+    resolved_base = Path(base_dir) if base_dir else (resolved_dist.parent if resolved_dist else None)
+
+    from pseofactory.qualification import resolve_redirected_gsc_target
+
+    resolved_target = resolve_redirected_gsc_target(
         target_url=str(cand_dict.get("target_url") or cand_dict.get("url") or ""),
+        slug=s_norm,
+        query=query,
+        property_id=eff_tenant,
+        repo_root=resolved_base,
+    )
+    is_off_topic_sink = bool(resolved_target.get("is_redirected") and resolved_target.get("is_off_topic_sink"))
+    canonical_path = str(resolved_target.get("canonical_path") or "").strip("/")
+    canonical_slug = str(resolved_target.get("canonical_slug") or s_norm).strip()
+    effective_target_url = str(
+        cand_dict.get("target_url")
+        or cand_dict.get("url")
+        or resolved_target.get("canonical_url")
+        or ""
+    )
+
+    intent_info = _classify_asset_intent_class(
+        slug=canonical_slug or s_norm,
+        target_url=effective_target_url,
         query=query,
         section=str(cand_dict.get("section") or ""),
     )
     mon_info = _resolve_partner_offer_and_manual_gate(
         tenant_id=eff_tenant,
-        slug=s_norm,
+        slug=canonical_slug or s_norm,
         query=query,
         value_tier=intent_info["value_tier"],
         candidate=cand_dict,
     )
 
-    resolved_dist = Path(dist_dir) if dist_dir else (Path(base_dir) / "dist" if base_dir else None)
-    resolved_base = Path(base_dir) if base_dir else (resolved_dist.parent if resolved_dist else None)
-
     raw_html = html_content
     if raw_html is None and resolved_dist and resolved_dist.is_dir():
-        for p_cand in (
+        html_candidates = [
             resolved_dist / "tools" / s_norm / "index.html",
             resolved_dist / s_norm / "index.html",
             resolved_dist / f"{s_norm}.html",
-        ):
+        ]
+        if canonical_path:
+            html_candidates.append(resolved_dist / canonical_path / "index.html")
+        if canonical_slug and canonical_slug != s_norm:
+            html_candidates.append(resolved_dist / "tools" / canonical_slug / "index.html")
+        for p_cand in html_candidates:
             if p_cand.is_file():
                 try:
                     raw_html = p_cand.read_text(encoding="utf-8")
@@ -988,20 +1013,24 @@ def evaluate_asset_conversion_and_distribution_readiness(
             yield_optimization_needed = True
 
     has_strong_conversion_path = bool(has_partner_cta and has_preset_scenarios and has_internal_links)
-    conversion_gap_detected = bool(impressions > 0 and not has_strong_conversion_path)
+    conversion_gap_detected = bool(impressions > 0 and not has_strong_conversion_path and not is_off_topic_sink)
 
     # Check external syndication & distribution readiness
     has_external_distribution = True
     missing_syndication_files: List[str] = []
     if resolved_base and resolved_base.is_dir():
         synd_dir = resolved_base / "syndication"
-        expected_files = [
-            f"{s_norm}-linkedin.md",
-            f"{s_norm}-newsletter.md",
-            f"{s_norm}-Substack Notes-post.txt",
-        ]
-        for fname in expected_files:
-            if not (synd_dir / fname).is_file():
+        s_flat = s_norm.replace("/", "-")
+        for suffix in ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt"):
+            fname = f"{s_norm}{suffix}"
+            flat_fname = f"{s_flat}{suffix}"
+            can_fname = f"{canonical_slug}{suffix}" if canonical_slug else ""
+            exists_any = (
+                (synd_dir / fname).is_file()
+                or (synd_dir / flat_fname).is_file()
+                or (bool(can_fname) and (synd_dir / can_fname).is_file())
+            )
+            if not exists_any:
                 missing_syndication_files.append(fname)
         if missing_syndication_files:
             has_external_distribution = False
@@ -1015,10 +1044,16 @@ def evaluate_asset_conversion_and_distribution_readiness(
                 f"{s_norm}-Substack Notes-post.txt",
             ]
 
-    distribution_gap_detected = bool(impressions > 0 and not has_external_distribution)
+    distribution_gap_detected = bool(impressions > 0 and not has_external_distribution and not is_off_topic_sink)
+    if is_off_topic_sink:
+        yield_optimization_needed = False
 
     return {
         "slug": s_norm,
+        "canonical_slug": canonical_slug,
+        "canonical_url": str(resolved_target.get("canonical_url") or ""),
+        "is_redirected": bool(resolved_target.get("is_redirected")),
+        "is_off_topic_sink": is_off_topic_sink,
         "tenant_id": eff_tenant,
         "impressions": int(impressions),
         "position": float(position),
@@ -1039,8 +1074,8 @@ def evaluate_asset_conversion_and_distribution_readiness(
         "restricted_public_service": mon_info["restricted_public_service"],
         "commercial_offers_allowed": mon_info["commercial_offers_allowed"],
         "partner_offer": mon_info["partner_offer"],
-        "manual_requirement_detected": mon_info["manual_requirement_detected"],
-        "manual_requirement": mon_info["manual_requirement"],
+        "manual_requirement_detected": False if is_off_topic_sink else mon_info["manual_requirement_detected"],
+        "manual_requirement": None if is_off_topic_sink else mon_info["manual_requirement"],
     }
 
 
@@ -2294,8 +2329,16 @@ def prioritize_gsc_signals(
     base_dir_arg = kwargs.get("base_dir")
     dist_dir_arg = kwargs.get("dist_dir")
     eng_metrics_arg = kwargs.get("engagement_metrics")
+    repo_root_hint = Path(base_dir_arg) if base_dir_arg else (Path(dist_dir_arg).parent if dist_dir_arg else None)
 
-    prioritized: List[Dict[str, Any]] = []
+    from pseofactory.qualification import (
+        is_retired_or_consolidated_slug,
+        resolve_redirected_gsc_target,
+    )
+
+    # First pass: normalize items, resolve retired 301-redirected URLs/slugs to canonical targets,
+    # skip off-topic redirect sinks, and merge duplicate (tenant, canonical_target_url, norm_query, cls) rows
+    merged_raw_by_key: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
     for item in raw_items:
         if hasattr(item, "to_dict"):
             rec = dict(item.to_dict())
@@ -2308,6 +2351,7 @@ def prioritize_gsc_signals(
             rec["engagement_metrics"] = eng_metrics_arg
 
         item_tenant = str(rec.get("tenant_id") or rec.get("property_id") or eff_tenant).strip().lower()
+        item_domain = "prexvo.com" if item_tenant == "prexvo" else ("profithelm.com" if item_tenant == "profithelm" else domain)
         target_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
         query = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
         slug = _slug_from_url_or_query(
@@ -2316,13 +2360,19 @@ def prioritize_gsc_signals(
             default_slug=str(rec.get("slug") or ""),
         )
         if not target_url:
-            target_url = f"https://{domain}/tools/{slug}/"
+            target_url = f"https://{item_domain}/tools/{slug}/"
         if not query:
             query = slug.replace("-", " ")
 
+        cls_str = str(rec.get("classification") or rec.get("anomaly_type") or "").upper()
+        is_explicit_dead_route = (
+            "DEAD_ROUTE" in cls_str
+            or rec.get("dead_route") is True
+            or str(rec.get("status_code") or "") in ("404", "410")
+        )
+
         # Default impressions for unindexed diagnoses if not explicitly supplied
         if "impressions" not in rec or rec.get("impressions") is None:
-            cls_str = str(rec.get("classification") or rec.get("anomaly_type") or "").upper()
             if "CONTENT_QUALITY" in cls_str or "CANONICAL" in cls_str or "DEPTH" in cls_str:
                 rec["impressions"] = 240
                 rec.setdefault("position", 15.0)
@@ -2333,6 +2383,110 @@ def prioritize_gsc_signals(
                 rec.setdefault("ctr", 0.0)
             else:
                 rec["impressions"] = 60
+
+        is_redirected_row = False
+        orig_url = target_url
+        if not is_explicit_dead_route and item_tenant in ("profithelm", "prexvo"):
+            res_target = resolve_redirected_gsc_target(
+                target_url=target_url,
+                slug=slug,
+                query=query,
+                property_id=item_tenant,
+                repo_root=repo_root_hint,
+            )
+            if res_target.get("is_redirected") and res_target.get("is_off_topic_sink"):
+                continue
+            if res_target.get("is_redirected") and res_target.get("canonical_url"):
+                is_redirected_row = True
+                orig_url = target_url or str(res_target.get("original_url") or "")
+                target_url = str(res_target["canonical_url"])
+                slug = _slug_from_url_or_query(
+                    target_url=target_url,
+                    query=query,
+                )
+            elif res_target.get("resolved_via") == "hyphenated_state_leaf" and res_target.get("canonical_url"):
+                target_url = str(res_target["canonical_url"])
+                slug = _slug_from_url_or_query(target_url=target_url, query=query)
+
+        rec["tenant_id"] = item_tenant
+        rec["property_id"] = item_tenant
+        rec["slug"] = slug
+        rec["target_url"] = target_url
+        rec["query"] = query
+
+        impr_val = max(0, int(float(rec.get("impressions", 0) or 0)))
+        clicks_val = max(0, int(float(rec.get("clicks", 0) or 0)))
+        pos_val = float(rec.get("position", 0.0) or 0.0)
+        ctr_val = float(rec.get("ctr", 0.0) or 0.0)
+
+        q_norm_key = re.sub(r"\s+", " ", query.lower().strip())
+        merge_key = (item_tenant, target_url, q_norm_key, cls_str)
+
+        if merge_key not in merged_raw_by_key:
+            base_r = dict(rec)
+            base_r["impressions"] = impr_val
+            base_r["direct_impressions"] = 0 if is_redirected_row else impr_val
+            base_r["redirected_impressions"] = impr_val if is_redirected_row else 0
+            if "clicks" in rec or is_redirected_row:
+                base_r["clicks"] = clicks_val
+                base_r["direct_clicks"] = 0 if is_redirected_row else clicks_val
+                base_r["redirected_clicks"] = clicks_val if is_redirected_row else 0
+            base_r["_weighted_pos_sum"] = pos_val * impr_val if impr_val > 0 else 0.0
+            base_r["_weighted_ctr_sum"] = ctr_val * impr_val if impr_val > 0 else 0.0
+            base_r["_weight_impr"] = impr_val if impr_val > 0 else 0
+            if is_redirected_row and orig_url and orig_url != target_url:
+                base_r["canonical_url"] = target_url
+                base_r["redirect_candidates"] = [orig_url]
+                base_r["rolled_up_from"] = [orig_url]
+                base_r["competing_pages"] = [target_url, orig_url]
+                base_r["consolidation_needed"] = True
+            merged_raw_by_key[merge_key] = base_r
+        else:
+            existing_r = merged_raw_by_key[merge_key]
+            existing_r["impressions"] = int(existing_r.get("impressions", 0)) + impr_val
+            existing_r["direct_impressions"] = int(existing_r.get("direct_impressions", 0)) + (0 if is_redirected_row else impr_val)
+            existing_r["redirected_impressions"] = int(existing_r.get("redirected_impressions", 0)) + (impr_val if is_redirected_row else 0)
+            if "clicks" in rec or "clicks" in existing_r or is_redirected_row:
+                existing_r["clicks"] = int(existing_r.get("clicks", 0) or 0) + clicks_val
+                existing_r["direct_clicks"] = int(existing_r.get("direct_clicks", 0) or 0) + (0 if is_redirected_row else clicks_val)
+                existing_r["redirected_clicks"] = int(existing_r.get("redirected_clicks", 0) or 0) + (clicks_val if is_redirected_row else 0)
+            if impr_val > 0:
+                existing_r["_weighted_pos_sum"] = float(existing_r.get("_weighted_pos_sum", 0.0)) + (pos_val * impr_val)
+                existing_r["_weighted_ctr_sum"] = float(existing_r.get("_weighted_ctr_sum", 0.0)) + (ctr_val * impr_val)
+                existing_r["_weight_impr"] = int(existing_r.get("_weight_impr", 0)) + impr_val
+            w_impr = int(existing_r.get("_weight_impr", 0))
+            if w_impr > 0:
+                existing_r["position"] = round(float(existing_r["_weighted_pos_sum"]) / float(w_impr), 2)
+                tot_clicks = int(existing_r.get("clicks", 0) or 0)
+                if tot_clicks > 0:
+                    existing_r["ctr"] = round(tot_clicks / float(w_impr), 4)
+                else:
+                    existing_r["ctr"] = round(float(existing_r["_weighted_ctr_sum"]) / float(w_impr), 4)
+            if is_redirected_row and orig_url and orig_url != target_url:
+                existing_r["canonical_url"] = target_url
+                red_cands = list(existing_r.get("redirect_candidates") or [])
+                if orig_url not in red_cands:
+                    red_cands.append(orig_url)
+                existing_r["redirect_candidates"] = red_cands
+                rolled_from = list(existing_r.get("rolled_up_from") or [])
+                if orig_url not in rolled_from:
+                    rolled_from.append(orig_url)
+                existing_r["rolled_up_from"] = rolled_from
+                comp_pages = list(existing_r.get("competing_pages") or [target_url])
+                if orig_url not in comp_pages:
+                    comp_pages.append(orig_url)
+                existing_r["competing_pages"] = comp_pages
+                existing_r["consolidation_needed"] = True
+
+    prioritized: List[Dict[str, Any]] = []
+    for rec in merged_raw_by_key.values():
+        rec.pop("_weighted_pos_sum", None)
+        rec.pop("_weighted_ctr_sum", None)
+        rec.pop("_weight_impr", None)
+        item_tenant = str(rec.get("tenant_id") or eff_tenant).strip().lower()
+        target_url = str(rec.get("target_url") or "").strip()
+        query = str(rec.get("query") or "").strip()
+        slug = str(rec.get("slug") or "").strip()
 
         if (
             base_dir_arg is not None
@@ -2414,10 +2568,11 @@ def prioritize_gsc_signals(
 
     for q_norm, recs in by_norm_query.items():
         distinct_urls: List[str] = []
-        # Sort records by (-impressions, position, target_url) so canonical URL is strongest
+        # Sort records by (is_retired, -impressions, position, target_url) so canonical URL is strongest
         sorted_recs = sorted(
             recs,
             key=lambda r: (
+                1 if is_retired_or_consolidated_slug(str(r.get("slug") or ""), str(r.get("tenant_id") or eff_tenant)) else 0,
                 -int(float(r.get("impressions", 0) or 0)),
                 float(r.get("position", 100.0) or 100.0),
                 str(r.get("target_url") or ""),
@@ -2751,6 +2906,15 @@ def evaluate_expired_overlays(
         },
     }
 
+    from pseofactory.qualification import (
+        is_retired_or_consolidated_slug,
+        reconcile_metric_recovery_ledger,
+        resolve_redirected_gsc_target,
+        rollup_redirected_gsc_rows,
+    )
+
+    prop = "prexvo" if "prexvo" in f"{site_url or ''} {root}".lower() else "profithelm"
+
     paths_by_slug: Dict[str, List[Path]] = {}
     for ov_dir in candidate_dirs:
         if ov_dir.is_dir():
@@ -2758,14 +2922,23 @@ def evaluate_expired_overlays(
                 paths_by_slug.setdefault(p.stem, []).append(p)
 
     if not paths_by_slug:
+        reconcile_metric_recovery_ledger(root, property_id=prop)
         return results
 
     live_by_query: Dict[str, Dict[str, Any]] = {}
+    live_rows_by_path: Dict[str, List[Dict[str, Any]]] = {}
     if live_queries:
-        for item in live_queries:
+        rollup_res = rollup_redirected_gsc_rows(live_queries, property_id=prop, repo_root=root)
+        for item in list(live_queries) + list(rollup_res.get("rows") or []):
+            if not isinstance(item, dict):
+                continue
             q = str(item.get("query") or "").strip().lower()
             if q:
-                live_by_query[q] = item
+                if q not in live_by_query or int(float(item.get("impressions", 0) or 0)) >= int(float(live_by_query[q].get("impressions", 0) or 0)):
+                    live_by_query[q] = item
+            c_path = str(item.get("canonical_path") or "").strip()
+            if c_path:
+                live_rows_by_path.setdefault(c_path.rstrip("/") or "/", []).append(item)
 
     now = datetime.now(timezone.utc)
     for stem_slug in sorted(paths_by_slug.keys()):
@@ -2777,6 +2950,14 @@ def evaluate_expired_overlays(
             continue
 
         slug = str(overlay_data.get("slug") or stem_slug)
+        if is_retired_or_consolidated_slug(slug, prop):
+            for p_ret in slug_paths:
+                try:
+                    p_ret.unlink()
+                except Exception:
+                    pass
+            continue
+
         locked = is_overlay_locked(overlay_data)
         lock_until_str = overlay_data.get("locked_until") or overlay_data.get("lock_until")
 
@@ -2834,12 +3015,55 @@ def evaluate_expired_overlays(
             or slug.replace("-", " ")
         )
 
-        current_perf = (
-            overlay_data.get("post_eval_metrics")
-            or overlay_data.get("current_metrics")
-            or live_by_query.get(query.lower())
-            or {}
-        )
+        current_perf = overlay_data.get("post_eval_metrics") or overlay_data.get("current_metrics")
+        if not current_perf:
+            # Roll up across primary query, grouped_queries, and canonical path matches
+            candidate_qs: List[str] = []
+            for q_cand in [query] + list(overlay_data.get("grouped_queries") or []):
+                q_low = str(q_cand or "").strip().lower()
+                if q_low and q_low not in candidate_qs:
+                    candidate_qs.append(q_low)
+            matched_live_rows: List[Dict[str, Any]] = []
+            for q_low in candidate_qs:
+                if q_low in live_by_query:
+                    matched_live_rows.append(live_by_query[q_low])
+            if not matched_live_rows and live_rows_by_path:
+                res_ov = resolve_redirected_gsc_target(
+                    target_url=str(overlay_data.get("target_url") or ""),
+                    slug=slug,
+                    query=query,
+                    property_id=prop,
+                    repo_root=root,
+                )
+                c_p = str(res_ov.get("canonical_path") or "").rstrip("/") or "/"
+                if c_p in live_rows_by_path:
+                    matched_live_rows.extend(live_rows_by_path[c_p])
+
+            if len(matched_live_rows) == 1:
+                current_perf = matched_live_rows[0]
+            elif len(matched_live_rows) > 1:
+                tot_impr = 0
+                tot_clicks = 0
+                w_pos_sum = 0.0
+                w_ctr_sum = 0.0
+                for mr in matched_live_rows:
+                    m_impr = max(0, int(float(mr.get("impressions", 0) or 0)))
+                    m_clicks = max(0, int(float(mr.get("clicks", 0) or 0)))
+                    m_pos = float(mr.get("position", base_pos) or base_pos)
+                    m_ctr = float(mr.get("ctr", 0.0) or 0.0)
+                    tot_impr += m_impr
+                    tot_clicks += m_clicks
+                    w_pos_sum += m_pos * max(m_impr, 1)
+                    w_ctr_sum += m_ctr * max(m_impr, 1)
+                denom = max(tot_impr, len(matched_live_rows))
+                current_perf = {
+                    "impressions": tot_impr,
+                    "clicks": tot_clicks,
+                    "position": round(w_pos_sum / float(denom), 2),
+                    "ctr": round(tot_clicks / float(tot_impr), 4) if (tot_impr > 0 and tot_clicks > 0) else round(w_ctr_sum / float(denom), 4),
+                }
+            else:
+                current_perf = {}
         curr_pos = float(
             current_perf.get("position")
             if current_perf.get("position") is not None
@@ -3001,6 +3225,7 @@ def evaluate_expired_overlays(
         except Exception:
             pass
 
+    reconcile_metric_recovery_ledger(root, property_id=prop)
     return results
 
 

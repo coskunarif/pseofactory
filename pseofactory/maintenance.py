@@ -5332,6 +5332,19 @@ def _execute_autonomous_downstream_chain(
                 site_url=f"sc-domain:{adapter.property_id}.com",
                 base_dir=repo_root,
             )
+            try:
+                from pseofactory.qualification import (
+                    reconcile_factory_execution_log,
+                    reconcile_metric_recovery_ledger,
+                )
+                reconcile_metric_recovery_ledger(repo_root, property_id=adapter.property_id)
+                reconcile_factory_execution_log(
+                    repo_root,
+                    property_id=adapter.property_id,
+                    existing_tools=discovered_tools,
+                )
+            except Exception:
+                pass
             summary["overlay_evaluations_count"] = overlay_eval_res.get("total_evaluated", 0)
         summary["visibility_status"] = insp_report.get("overall_status", "PASS")
     except Exception as vis_err:
@@ -5683,6 +5696,14 @@ def reflect_and_recompile_all_assets(
                             continue
                         seen_ov_slugs.add(ov_slug)
                         target_html = adapter.dist_dir / "tools" / ov_slug / "index.html"
+                        if not target_html.is_file():
+                            for p_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                                if ov_slug.startswith(f"{p_hub}-"):
+                                    leaf_s = ov_slug[len(p_hub) + 1:]
+                                    cand_html = adapter.dist_dir / "tools" / p_hub / leaf_s / "index.html"
+                                    if cand_html.is_file():
+                                        target_html = cand_html
+                                        break
                         if target_html.is_file():
                             ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
                             if isinstance(ov_spec, dict) and ov_spec.get("status") != "DEGRADED_ROLLED_BACK":
@@ -5779,6 +5800,21 @@ def reflect_and_recompile_all_assets(
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
 
                 if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo"):
+                    try:
+                        from pseofactory.qualification import (
+                            reconcile_factory_execution_log,
+                            reconcile_metric_recovery_ledger,
+                        )
+                        reconcile_metric_recovery_ledger(
+                            adapter.dist_dir.parent,
+                            property_id=adapter.property_id,
+                        )
+                        reconcile_factory_execution_log(
+                            adapter.dist_dir.parent,
+                            property_id=adapter.property_id,
+                        )
+                    except Exception:
+                        pass
                     if adapter.property_id == "profithelm":
                         try:
                             import sqlite3
@@ -5789,6 +5825,16 @@ def reflect_and_recompile_all_assets(
                                     conn.commit()
                             from profithelm.freshness import run_freshness_audit
                             run_freshness_audit(dist_dir=adapter.dist_dir, in_pipeline=True)
+                        except Exception:
+                            pass
+                    elif adapter.property_id == "prexvo":
+                        try:
+                            from prexvo.freshness import run_freshness_audit as run_prexvo_freshness_audit
+                            px_rep = run_prexvo_freshness_audit(dist_dir=adapter.dist_dir)
+                            (adapter.dist_dir.parent / "freshness_audit_report.json").write_text(
+                                json.dumps(px_rep, indent=2) + "\n",
+                                encoding="utf-8",
+                            )
                         except Exception:
                             pass
 

@@ -816,7 +816,10 @@ class SinglePassSEODocumentParser(HTMLParser):
             self.current_table_rows = []
             self.current_table_attrs = {}
 
-        if self.in_quick_answer and len(self.tag_stack) <= self.quick_answer_depth:
+        if self.tag_stack and self.tag_stack[-1][0] == tag:
+            self.tag_stack.pop()
+
+        if self.in_quick_answer and len(self.tag_stack) < self.quick_answer_depth:
             self.in_quick_answer = False
             qa_block_text = "".join(self.current_quick_answer_parts).strip()
             self.quick_answer_blocks.append({
@@ -830,7 +833,7 @@ class SinglePassSEODocumentParser(HTMLParser):
             })
             self.current_quick_answer_parts = []
 
-        if self.in_calculation_variant and len(self.tag_stack) <= self.current_variant_depth:
+        if self.in_calculation_variant and len(self.tag_stack) < self.current_variant_depth:
             self.in_calculation_variant = False
             v_text = "".join(self.current_variant_text).strip()
             v_id = (
@@ -854,9 +857,6 @@ class SinglePassSEODocumentParser(HTMLParser):
             })
             self.current_variant_text = []
             self.current_variant_links = []
-
-        if self.tag_stack and self.tag_stack[-1][0] == tag:
-            self.tag_stack.pop()
 
     def handle_data(self, data: str):
         if self.current_tag in ("title", "h1", "h2", "h3", "script_json_ld", "script_manifest"):
@@ -2430,10 +2430,9 @@ class MasterSEOVerifier:
                     issues.append(f"Unhydrated JavaScript rendering artifact (NaN or [object Object]) in static HTML of {rel}")
 
                 # If quick-answer container is present, verify non-empty text directly in static HTML
-                m_qa = re.search(r'<(?:aside|div)[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>(.*?)</(?:aside|div)>', content, re.IGNORECASE | re.DOTALL)
-                if m_qa:
-                    qa_raw = m_qa.group(1)
-                    qa_text = re.sub(r'<[^>]+>', ' ', qa_raw).strip()
+                parser_qa = _parse_seo_doc_cached(content, self.brand_domain)
+                if parser_qa.quick_answer_blocks:
+                    qa_text = str(parser_qa.quick_answer_blocks[0].get("text") or "").strip()
                     qa_substantive = qa_text
                     for pat in placeholder_patterns:
                         qa_substantive = re.sub(pat, ' ', qa_substantive, flags=re.IGNORECASE).strip()
@@ -2485,15 +2484,14 @@ class MasterSEOVerifier:
                     continue
                 content = self._read_cached_html(p)
                 rel = p.relative_to(target).as_posix()
-                m_snippet = re.search(r'<(?:aside|div)[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>(.*?)</(?:aside|div)>', content, re.IGNORECASE | re.DOTALL)
-                if m_snippet:
+                parser = _parse_seo_doc_cached(content, self.brand_domain)
+                if parser.quick_answer_blocks:
                     boxes_checked += 1
-                    snippet_text = re.sub(r"<[^>]+>", " ", m_snippet.group(1))
+                    snippet_text = str(parser.quick_answer_blocks[0].get("text") or "")
                     words = [w for w in snippet_text.split() if w.strip()]
                     if not (40 <= len(words) <= 60):
                         issues.append(f"Quick-answer snippet has {len(words)} words (expected 40-60) in {rel}")
 
-                    parser = _parse_seo_doc_cached(content, self.brand_domain)
                     if parser.has_nosnippet:
                         issues.append(f"Page {rel} contains 'nosnippet' directive, revoking search and AI snippet eligibility")
                     if parser.max_snippet is not None:

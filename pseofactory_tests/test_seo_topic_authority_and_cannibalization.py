@@ -639,3 +639,287 @@ def test_crawl_budget_consolidation_queue_and_syndication_hygiene(tmp_path):
     assert any("points to redirected source" in issue for issue in red_gate["issues"])
 
 
+def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
+    from pseofactory import qualification as qual_mod
+    from pseofactory.indexing.feedback_loop import (
+        DiagnosisResult,
+        IndexingFeedbackLoop,
+        RootCauseClassification,
+    )
+
+    # 0. Verify prioritize_gsc_signals rolls up retired URL even when retired URL has higher impressions than canonical
+    signals = [
+        {
+            "query": "2027 california tax brackets",
+            "target_url": "https://profithelm.com/tools/2027-california-tax-brackets/",
+            "impressions": 300,
+            "clicks": 3,
+            "ctr": 0.01,
+            "position": 8.0,
+        },
+        {
+            "query": "2027 california tax brackets",
+            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "impressions": 50,
+            "clicks": 1,
+            "ctr": 0.02,
+            "position": 11.5,
+        },
+        {
+            "query": "shopify profit margin calculator",
+            "target_url": "https://profithelm.com/tools/shopify-profit-margin-calculator/",
+            "impressions": 200,
+            "clicks": 0,
+            "ctr": 0.0,
+            "position": 40.0,
+        },
+    ]
+    prioritized = prioritize_gsc_signals(signals, tenant_id="profithelm")
+    assert len(prioritized) == 1
+    can_cand = prioritized[0]
+    assert can_cand["target_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert can_cand["canonical_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert can_cand["impressions"] == 350
+    assert can_cand["direct_impressions"] == 50
+    assert can_cand["redirected_impressions"] == 300
+    assert can_cand["clicks"] == 4
+    assert can_cand["consolidation_needed"] is True
+    assert "https://profithelm.com/tools/2027-california-tax-brackets/" in can_cand["redirect_candidates"]
+
+    rollup_redirected_gsc_rows = getattr(qual_mod, "rollup_redirected_gsc_rows", None)
+    reconcile_metric_recovery_ledger = getattr(qual_mod, "reconcile_metric_recovery_ledger", None)
+    reconcile_factory_execution_log = getattr(qual_mod, "reconcile_factory_execution_log", None)
+    assert callable(rollup_redirected_gsc_rows)
+    assert callable(reconcile_metric_recovery_ledger)
+    assert callable(reconcile_factory_execution_log)
+
+    # 1. Verify rollup_redirected_gsc_rows rolls up retired 301 URLs into canonical targets and ignores off-topic sinks
+    raw_gsc_rows = [
+        {
+            "page": "https://profithelm.com/tools/2027-california-tax-brackets/",
+            "query": "2027 california tax brackets",
+            "impressions": 28,
+            "clicks": 3,
+            "position": 8.0,
+        },
+        {
+            "page": "https://profithelm.com/tools/california-tax-brackets-2027/",
+            "query": "2027 california tax brackets",
+            "impressions": 45,
+            "clicks": 1,
+            "position": 8.42,
+        },
+        {
+            "page": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "query": "2027 california tax brackets",
+            "impressions": 19,
+            "clicks": 0,
+            "position": 9.89,
+        },
+        {
+            "page": "https://profithelm.com/tools/prediction-market-odds-scenario-comparison-model/",
+            "query": "prediction market odds",
+            "impressions": 9,
+            "clicks": 0,
+            "position": 5.78,
+        },
+        {
+            "page": "https://profithelm.com/tools/shopify-profit-margin-calculator/",
+            "query": "shopify profit margin calculator",
+            "impressions": 11,
+            "clicks": 0,
+            "position": 52.0,
+        },
+    ]
+    rollup = rollup_redirected_gsc_rows(raw_gsc_rows, property_id="profithelm")
+    assert rollup["redirected_rows_count"] == 3
+    assert rollup["rolled_up_impressions"] == 82
+    assert rollup["rolled_up_clicks"] == 4
+    assert rollup["ignored_off_topic_rows_count"] == 1
+    assert rollup["ignored_off_topic_impressions"] == 11
+    # Both the state leaf and parent tool hub are credited in impressions_by_path
+    assert rollup["impressions_by_path"]["/tools/irs-2027-tax-brackets/california"] == 92
+    assert rollup["impressions_by_path"]["/tools/irs-2027-tax-brackets"] == 92
+    assert rollup["impressions_by_path"]["/tools/prediction-market-odds"] == 9
+    assert "/tools/shopify-profit-margin-calculator" not in rollup["impressions_by_path"]
+
+    ca_row = [r for r in rollup["rows"] if r["canonical_path"] == "/tools/irs-2027-tax-brackets/california/"][0]
+    assert ca_row["impressions"] == 92
+    assert ca_row["clicks"] == 4
+    assert ca_row["direct_impressions"] == 19
+    assert ca_row["redirected_impressions"] == 73
+    assert len(ca_row["rolled_up_from"]) == 2
+
+    # 2. Verify prioritize_gsc_signals rolls up retired URL even when retired URL has higher impressions than canonical
+    signals = [
+        {
+            "query": "2027 california tax brackets",
+            "target_url": "https://profithelm.com/tools/2027-california-tax-brackets/",
+            "impressions": 300,
+            "clicks": 3,
+            "ctr": 0.01,
+            "position": 8.0,
+        },
+        {
+            "query": "2027 california tax brackets",
+            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "impressions": 50,
+            "clicks": 1,
+            "ctr": 0.02,
+            "position": 11.5,
+        },
+        {
+            "query": "shopify profit margin calculator",
+            "target_url": "https://profithelm.com/tools/shopify-profit-margin-calculator/",
+            "impressions": 200,
+            "clicks": 0,
+            "ctr": 0.0,
+            "position": 40.0,
+        },
+    ]
+    prioritized = prioritize_gsc_signals(signals, tenant_id="profithelm")
+    assert len(prioritized) == 1
+    can_cand = prioritized[0]
+    assert can_cand["target_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert can_cand["canonical_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert can_cand["impressions"] == 350
+    assert can_cand["direct_impressions"] == 50
+    assert can_cand["redirected_impressions"] == 300
+    assert can_cand["clicks"] == 4
+    assert can_cand["consolidation_needed"] is True
+    assert "https://profithelm.com/tools/2027-california-tax-brackets/" in can_cand["redirect_candidates"]
+
+    # 3. Verify execute_engine_repairs remaps retired slugs to canonical target and never writes retired overlays
+    dist_dir = tmp_path / "dist"
+    ca_leaf_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "california"
+    ca_leaf_dir.mkdir(parents=True)
+    ca_leaf_html = ca_leaf_dir / "index.html"
+    ca_leaf_html.write_text(
+        '<!DOCTYPE html><html><head><title>CA Tax Brackets</title>'
+        '<link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/california/"></head>'
+        '<body><main><h1>California Tax Brackets</h1>'
+        '<aside class="quick-answer"><div class="quick-answer-title">Statutory Summary</div>'
+        '<p>Under IRC Section 1 and California Revenue and Taxation Code Section 17041, single and married '
+        'taxpayers calculate marginal state income tax rates across nine progressive brackets ranging from '
+        '1 percent to 13.3 percent with statutory inflation indexing.</p></aside>'
+        '</main></body></html>',
+        encoding="utf-8",
+    )
+
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+    )
+    retired_diag = DiagnosisResult(
+        url="https://profithelm.com/tools/ca-tax-brackets-2026/",
+        classification=RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value,
+        reason="Crawled - currently not indexed",
+        remediation_action="Enrich answer",
+        reflection_path="reflect",
+    )
+    sink_diag = DiagnosisResult(
+        url="https://profithelm.com/tools/shopify-profit-margin-calculator/",
+        classification=RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value,
+        reason="Crawled - currently not indexed",
+        remediation_action="Enrich answer",
+        reflection_path="reflect",
+    )
+    repair_res = loop.execute_engine_repairs(
+        diagnoses=[retired_diag, sink_diag],
+        force=False,
+        dry_run=False,
+        skip_recompile=True,
+    )
+    assert not (tmp_path / "content" / "overlays" / "ca-tax-brackets-2026.json").exists()
+    assert not (tmp_path / "content" / "overlays" / "shopify-profit-margin-calculator.json").exists()
+    assert (tmp_path / "content" / "overlays" / "irs-2027-tax-brackets-california.json").is_file()
+    assert "irs-2027-tax-brackets/california" in repair_res["repaired_slugs"]
+
+    # 4. Verify reconcile_metric_recovery_ledger & reconcile_factory_execution_log
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    (agy_dir / "metric_recovery_ledger.json").write_text(
+        json.dumps({
+            "snapshots": {
+                "ca-tax-brackets-2026": {
+                    "slug": "ca-tax-brackets-2026",
+                    "url": "https://profithelm.com/tools/ca-tax-brackets-2026/",
+                    "baseline_impressions": 100,
+                    "status": "ACCRETIVE_CONFIRMED",
+                },
+                "shopify-profit-margin-calculator": {
+                    "slug": "shopify-profit-margin-calculator",
+                    "url": "https://profithelm.com/tools/shopify-profit-margin-calculator/",
+                    "baseline_impressions": 100,
+                    "status": "ACCRETIVE_CONFIRMED",
+                },
+            },
+            "evaluations": [
+                {"slug": "ca-tax-brackets-2026", "status": "ACCRETIVE_CONFIRMED"},
+                {"slug": "shopify-profit-margin-calculator", "status": "ACCRETIVE_CONFIRMED"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    m_rec = reconcile_metric_recovery_ledger(tmp_path, property_id="profithelm")
+    assert m_rec["retired_snapshots_rolled_up"] == 2
+    assert m_rec["retired_evaluations_removed"] == 2
+    m_after = json.loads((agy_dir / "metric_recovery_ledger.json").read_text(encoding="utf-8"))
+    assert "ca-tax-brackets-2026" not in m_after["snapshots"]
+    assert "shopify-profit-margin-calculator" not in m_after["snapshots"]
+    assert "irs-2027-tax-brackets" in m_after["snapshots"]
+    assert "ca-tax-brackets-2026" in m_after["snapshots"]["irs-2027-tax-brackets"]["rolled_up_redirected_slugs"]
+
+    (agy_dir / "factory_execution_log.json").write_text(
+        json.dumps({
+            "stages": {
+                "1_scan": {
+                    "sc_performance_audit": {
+                        "audit_items": [
+                            {
+                                "query": "ca tax brackets",
+                                "impressions": 5,
+                                "position": 20.6,
+                                "matching_tool": None,
+                            }
+                        ]
+                    }
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    f_rec = reconcile_factory_execution_log(tmp_path, property_id="profithelm")
+    assert f_rec["queries_resolved"] == 1
+    f_after = json.loads((agy_dir / "factory_execution_log.json").read_text(encoding="utf-8"))
+    item_after = f_after["stages"]["1_scan"]["sc_performance_audit"]["audit_items"][0]
+    assert item_after["matching_tool"] == "irs-2027-tax-brackets"
+    assert item_after["canonical_target"] == "/tools/irs-2027-tax-brackets/california/"
+
+    # 5. Verify check_snippet_gate & check_no_js_rendering_gate accurately parse <aside class="quick-answer"> with inner <div>
+    from pseofactory.verifier import MasterSEOVerifier
+
+    sc_leaf_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "south-carolina"
+    sc_leaf_dir.mkdir(parents=True)
+    (sc_leaf_dir / "index.html").write_text(
+        '<!DOCTYPE html><html><head><title>SC Tax Brackets</title>'
+        '<link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/south-carolina/"></head>'
+        '<body><main><h1>South Carolina Tax Brackets</h1>'
+        '<aside class="quick-answer"><div class="quick-answer-title">Statutory Summary</div>'
+        '<p>Under IRC Section 1 and South Carolina Code Section 12-6-510, single and married '
+        'taxpayers calculate marginal state income tax rates across progressive statutory brackets '
+        'ranging from zero percent to 6.2 percent with annual inflation indexing and federal '
+        'taxable income conformity adjustments for the 2027 tax year.</p></aside>'
+        '<p>Additional statutory calculation methodology and bracket threshold tables for South Carolina residents.</p>'
+        '</main></body></html>',
+        encoding="utf-8",
+    )
+
+    v_leaf = MasterSEOVerifier(dist_dir=dist_dir, domain="profithelm.com")
+    snippet_res = v_leaf.check_snippet_gate(dist_dir)
+    assert snippet_res["status"] == "PASS"
+    assert snippet_res["issues"] == []
+    no_js_res = v_leaf.check_no_js_rendering_gate(dist_dir)
+    assert no_js_res["status"] == "PASS"
+    assert no_js_res["issues"] == []
