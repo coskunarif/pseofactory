@@ -304,7 +304,7 @@ class EmailIngestionEngine:
             "turbotax", "taxslayer", "kalshi", "interactive", "crest", "ipx1031",
             "partner", "affiliate", "startups", "prexvo", "ecosystem-governance@shopify.com",
             "otrsolutions", "otr solutions", "next insurance", "ergo next", "rho.co",
-            "suretybonds", "interactivebrokers",
+            "suretybonds", "interactivebrokers", "cj.com", "8101803", "firstpromoter", "xendoo",
         ]
 
         for env in envelopes:
@@ -366,6 +366,9 @@ class EmailIngestionEngine:
                 "suretybonds.com",
                 "ipx1031.com",
                 "simplybusiness.com",
+                "xendoo.com",
+                "katalystcomms.com",
+                "dlpcapital.com",
             )
             skipped_sent_recipients = (
                 "partnerships@rho.co",
@@ -466,6 +469,8 @@ class EmailIngestionEngine:
                 if not (
                     "rippling.com" in news_check
                     or "partnerstack" in news_check
+                    or "firstpromoter.com" in news_check
+                    or "xendoo" in news_check
                     or any(tok in news_check for tok in sent_partner_domains)
                 ):
                     continue
@@ -630,8 +635,11 @@ class EmailIngestionEngine:
             "apps.partnerships@rippling.com": ("profithelm", "rippling", "Rippling Unified Workforce Platform", "PartnerStack"),
             "app-partnerships+noreply@rippling.com": ("profithelm", "rippling", "Rippling Unified Workforce Platform", "PartnerStack"),
             "info@crestcapital.com": ("profithelm", "crest_capital", "Crest Capital Equipment Financing", "In-House Direct"),
+            "luanne.bryant@xendoo.com": ("profithelm", "crest_capital", "Xendoo Online Bookkeeping & Tax", "FirstPromoter / Impact.com"),
             "ask@exeterco.com": ("profithelm", "exeter1031", "The Exeter 1031 Exchange", "In-House Direct"),
+            "info@dlpcapital.com": ("profithelm", "exeter1031", "The Exeter 1031 Exchange", "In-House Direct"),
             "1031@firstam.com": ("profithelm", "first_american", "First American Exchange Company", "In-House Direct"),
+            "hela@katalystcomms.com": ("profithelm", "first_american", "First American Exchange Company", "In-House Direct"),
             "contact@splashfinancial.com": ("prexvo", "splash_financial", "Splash Financial", "Impact.com"),
             "publishers@interactivebrokers.com": ("profithelm", "interactive_brokers", "Interactive Brokers CPC Publisher Program", "In-House Direct"),
             "customercare@suretybonds.com": ("profithelm", "suretybonds_direct", "SuretyBonds.com", "In-House Direct"),
@@ -738,6 +746,33 @@ class EmailIngestionEngine:
                         date=msg.date,
                         candidate_url="https://try.rippling.com/mcfo1m09qiwt",
                         network="PartnerStack",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "promoter@firstpromoter.com" in sender_lower
+                or "welcome to xendoo" in subj_lower
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="crest_capital",
+                        partner_name="Xendoo Online Bookkeeping & Tax",
+                        category="COMMERCIAL_REAL_ESTATE",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="Xendoo Referral Partner Program approved and active on FirstPromoter (fp_ref=arif-4ac24e at $250 cash reward per referred client; PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.xendoo.com/?fp_ref=arif-4ac24e",
+                        network="FirstPromoter",
                     )
                 )
                 continue
@@ -859,24 +894,33 @@ class EmailIngestionEngine:
                 or "cj affiliate" in combined_text
                 or "cid 8101803" in combined_text
             ):
+                is_company_activation = "company information" in body_lower
                 classifications.append(
                     PartnerEmailClassification(
                         email_id=msg.id,
                         account=msg.account,
                         property_id="profithelm",
-                        partner_key="taxslayer",
-                        partner_name="TaxSlayer",
+                        partner_key="turbotax" if is_company_activation else "taxslayer",
+                        partner_name="TaxAct" if is_company_activation else "TaxSlayer",
                         category="TAX_INTELLIGENCE",
                         classification_type="APPLICATION_SUBMITTED",
                         requires_operator_decision=False,
-                        summary="CJ Affiliate publisher account created and email verified (Company CID 7792582 / Publisher ID 8101803, Inbox #991 & #992); 5 of 9 onboarding steps and TaxSlayer (#5273914) Special Terms completed.",
+                        summary=(
+                            "CJ Affiliate publisher account 9 of 9 onboarded and ACTIVE (Company CID 7792582 / Publisher ID 8101803, Inbox #995 & #996 after IRS Form W-9 and Direct Deposit ACH); 28 advertiser applications submitted including TurboTax (#1905878), TaxAct (#4110283), and TaxSlayer (#5273914)."
+                            if is_company_activation
+                            else "CJ Affiliate publisher account created and email verified (Company CID 7792582 / Publisher ID 8101803, Inbox #991 & #992); 9 of 9 onboarding steps and 28 advertiser applications including TaxSlayer (#5273914) and TaxAct (#4110283) submitted."
+                        ),
                         urgency="LOW",
                         deadline=None,
-                        missing_requirements=["Complete W-9 EIN/SSN tax certification on members.cj.com"],
+                        missing_requirements=[
+                            "Awaiting CJ Affiliate advertiser review for TurboTax (#1905878) and TaxAct (#4110283) on CID 8101803"
+                            if is_company_activation
+                            else "Awaiting CJ Affiliate advertiser review for TaxSlayer (#5273914) on CID 8101803"
+                        ],
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
-                        candidate_url="https://members.cj.com/member/publisher/onboarding.cj",
+                        candidate_url="https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj",
                         network="CJ Affiliate",
                     )
                 )

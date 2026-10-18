@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-17T08:50:00+00:00",
+    "updated_at": "2026-10-18T09:45:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -30,6 +30,8 @@
       "account_id": "7932737",
       "account_user": "Arif COSKUN",
       "marketplace_status": "active",
+      "identity_verification_status": "COMPLETE",
+      "tax_form_status": "Comply Exchange Form W-9 submitted and active (Confirmation Code L5CBN6, EIN 41-2311423)",
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
@@ -41,7 +43,12 @@
       "company_cid": "7792582",
       "publisher_id": "8101803",
       "account_user": "Arif Coskun",
-      "onboarding_progress": "5_of_9_completed",
+      "onboarding_progress": "9_of_9_completed",
+      "account_status": "ACTIVE",
+      "activation_date": "2026-10-18T09:36:19Z",
+      "tax_form_status": "IRS Form W-9 submitted and active (EIN ******1423)",
+      "payment_method": "Direct Deposit / CJ Payments (Choice Financial Group, Routing *****1229, Account ********1395)",
+      "pending_advertiser_applications": 28,
       "enabled": true
     }
   },
@@ -100,7 +107,7 @@
           "primary_partner": "crest_capital",
           "fallback_partner": "ipx1031",
           "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
-          "status": "pending",
+          "status": "live",
           "bounty": "$250-$500"
         },
         "SECTION_1031_EXCHANGE": {
@@ -139,7 +146,7 @@
           "active_partners": [
             "coinledger",
             "koinly",
-            "crest_capital (xendoo fp_ref=arif-4ac24e)"
+            "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576)"
           ],
           "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
         },
@@ -170,7 +177,7 @@
           ],
           "role": "Programmatic contract status polling and Insertion Order verification",
           "member_id": "8871615",
-          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 + 17 Pending Advertiser Contracts across Account 7932737 / Member 8871615)",
+          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 + 17 Pending Advertiser Contracts across Account 7932737 / Member 8871615; Identity COMPLETE; Comply Exchange Form W-9 submitted under Confirmation Code L5CBN6)",
           "discovered_promo_signup_campaigns": [
             "sofi (#11190 - https://app.impact.com/campaign-promo-signup/SoFi.brand)",
             "lendkey (#3276 - https://app.impact.com/campaign-promo-signup/LendKey.brand)",
@@ -198,7 +205,8 @@
           "rippling",
           "ipx1031",
           "mercury",
-          "kalshi"
+          "kalshi",
+          "crest_capital"
         ],
         "answered_action_required": [
           "rho",
@@ -207,9 +215,10 @@
         "awaiting_vendor_response": [
           "gusto",
           "ramp",
-          "crest_capital",
           "exeter1031",
           "first_american",
+          "turbotax",
+          "taxslayer",
           "simply_business",
           "next_insurance_b2b",
           "national_funding_med",
@@ -218,10 +227,7 @@
           "suretybonds_direct",
           "interactive_brokers"
         ],
-        "unapplied_expansion_queue": [
-          "turbotax",
-          "taxslayer"
-        ]
+        "unapplied_expansion_queue": []
       },
       "partners": {
         "coinledger": {
@@ -321,7 +327,7 @@
           "network": "Impact.com",
           "campaign_id": "15154",
           "bounty": "$300",
-          "correspondence_status": "Application Submitted & Confirmed by Email (Inbox #967 on 2026-10-12T17:17Z from notifications@app.impact.com confirming Gusto Campaign #15154 application on Impact Account 7932737 / Branded Account 3161796; Verified Insertion Order Payout: $300.00 USD per Sale)",
+          "correspondence_status": "Application Submitted & Confirmed by Email (Inbox #967 on 2026-10-12T17:17Z from notifications@app.impact.com confirming Gusto Campaign #15154 application on Impact Account 7932737 / Branded Account 3161796; Verified Insertion Order Payout: $300.00 USD per Sale; CJ Affiliate ADP #5275573 [3m EPC $1,776.97] & Intuit Small Business - QuickBooks, GoPayment, Payroll #2271086 also submitted on CID 8101803)",
           "active_fallback_merchant": "rippling",
           "active_fallback_url": "https://try.rippling.com/mcfo1m09qiwt",
           "active_fallback_payout": "$600-$1600 via PartnerStack + Sovrn Commerce /r/gusto"
@@ -342,15 +348,15 @@
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
         },
         "crest_capital": {
-          "status": "awaiting_response",
-          "pipeline_tier": "awaiting_vendor_response",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
           "url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
           "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
           "edge_route": "/r/crest_capital",
           "category": "COMMERCIAL_REAL_ESTATE",
           "network": "FirstPromoter / Impact.com",
           "bounty": "$250-$500",
-          "correspondence_status": "FirstPromoter Direct Link LIVE (https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client via xendoo.firstpromoter.com) + Impact #16354 uContractId 30705024 ($500 Onboarded) submitted on 2026-10-18 + HubSpot Partner form submitted on xendoo.com/become-a-partner/ + follow-up Sent #261 to luanne.bryant@xendoo.com"
+          "correspondence_status": "Approved & Live on FirstPromoter (Newsletter #1575 Welcome & #1576 PayPal payout verification code 679553 for arif.coskun@profithelm.com; FirstPromoter token fp_ref=arif-4ac24e active at https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client + Impact #16354 uContractId 30705024 [$500 Onboarded] submitted on 2026-10-18 + follow-up Sent #261 to luanne.bryant@xendoo.com)"
         },
         "exeter1031": {
           "status": "awaiting_response",
@@ -381,30 +387,30 @@
           "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/first_american"
         },
         "turbotax": {
-          "status": "pending",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://turbotax.intuit.com/",
           "direct_url": "https://turbotax.intuit.com/",
           "edge_route": "/r/turbotax",
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$45-$120",
-          "correspondence_status": "CJ Publisher Account Created & 5/9 Onboarded (Company CID 7792582 / Publisher ID 8101803 confirmed via Inbox #991 & Inbox #992; TaxAct CJ Advertiser ID #4110283 [10% Sale, $43.64 3m EPC] located in CJ catalog; awaiting operator W-9 EIN/SSN tax certification on members.cj.com to unlock advertiser application; wrapped via Sovrn Commerce /r/turbotax)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + Advertiser Applications Submitted (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z after IRS Form W-9 [EIN ******1423] and Direct Deposit ACH [Routing *****1229, Account ********1395] confirmed via Inbox #991, #992, #995 & #996; submitted CJ Advertiser ID #1905878 TurboTax [$284.78 7d EPC], #4110283 TaxAct [10% Sale, $43.64 3m EPC], #4526117 FreeTaxUSA, #4355234 E-file.com & #6874782 ezTaxReturn.com; wrapped via Sovrn Commerce /r/turbotax)",
           "cj_advertiser_id": "4110283",
-          "direct_apply_url": "https://members.cj.com/member/publisher/onboarding.cj"
+          "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
         "taxslayer": {
-          "status": "pending",
-          "pipeline_tier": "unapplied_expansion_queue",
+          "status": "awaiting_response",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.taxslayer.com/",
           "direct_url": "https://www.taxslayer.com/",
           "edge_route": "/r/taxslayer",
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "CJ Publisher Account Created & TaxSlayer Special Terms Accepted (Company CID 7792582 / Publisher ID 8101803 confirmed via Inbox #991 & Inbox #992; TaxSlayer CJ Advertiser ID #5273914 Special Terms accepted and 5/9 onboarding steps completed; awaiting operator W-9 EIN/SSN tax certification on members.cj.com; wrapped via Sovrn Commerce /r/taxslayer)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + TaxSlayer Application Submitted (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; TaxSlayer CJ Advertiser ID #5273914 [0%-10% Sale], LibertyTax #3835168 & Ownwell #6784655 submitted and verified in Status: Pending Applications [28 Results]; wrapped via Sovrn Commerce /r/taxslayer)",
           "cj_advertiser_id": "5273914",
-          "direct_apply_url": "https://members.cj.com/member/publisher/onboarding.cj"
+          "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
         "kalshi": {
           "status": "live",
@@ -442,7 +448,7 @@
           "applied_io_id": "368837",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Simply-Business.brand",
           "bounty": "$30-$100",
-          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Zendesk Ticket Confirmed (Impact Account #7932737 Campaign #49719 Simply Business [$30.00 RFQ Quoted] & Campaign #50138 Simply Business Creator verified in PENDING_CAMPAIGN_APPROVAL + direct inquiry Sent #260 confirmed by Simply Business Inc Zendesk in Inbox #990 under Ticket ID 6270665 [KVEV1K-DK9DV])"
+          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + CJ Affiliate Submitted + Zendesk Ticket Confirmed (Impact Account #7932737 Campaign #49719 Simply Business [$30.00 RFQ Quoted] & Campaign #50138 Simply Business Creator verified in PENDING_CAMPAIGN_APPROVAL + CJ Affiliate Simply Business US #5808859 [3m EPC $1,349.01] & Hiscox Small Business Insurance #4165310 [$15.00 Lead] submitted on CID 8101803 + Zendesk Ticket ID 6270665 in Inbox #990)"
         },
         "suretybonds_direct": {
           "status": "awaiting_response",
@@ -453,7 +459,7 @@
           "category": "COMMERCIAL_SURETY",
           "network": "In-House Direct",
           "bounty": "$75-$300",
-          "correspondence_status": "Application Submitted & Receipt Confirmed (Sent #251 to customercare@suretybonds.com on 2026-10-16T22:56Z; confirmed by SuretyBonds.com Customer Care in Inbox #987 on 2026-10-17T05:56Z; awaiting agency referral tracking URL)"
+          "correspondence_status": "Application Submitted & Receipt Confirmed (Sent #251 to customercare@suretybonds.com on 2026-10-16T22:56Z; confirmed by SuretyBonds.com Customer Care in Inbox #987 on 2026-10-17T05:56Z + CJ Affiliate Hiscox Small Business Insurance #4165310 & Simply Business US #5808859 submitted on CID 8101803; awaiting agency referral tracking URL)"
         },
         "next_insurance_b2b": {
           "status": "awaiting_response",

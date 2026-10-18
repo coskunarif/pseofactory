@@ -847,7 +847,9 @@ def test_unified_vault_roster_tiers_completeness():
         "ipx1031",
         "mercury",
         "kalshi",
+        "crest_capital",
     }
+    assert set(ph_tiers["unapplied_expansion_queue"]) == set()
     all_ph_tiered = (
         set(ph_tiers["live_revenue_ready"])
         | set(ph_tiers["answered_action_required"])
@@ -1163,10 +1165,32 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
             sender_email="no-response@cj.com",
             body_snippet="Hello Arif Coskun, We're letting you know that you have been added to a CJ Affiliate account.",
         ),
+        EmailMessage(
+            id="996",
+            message_id="msg-996",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-18T02:27:39-07:00",
+            subject="Changes made to account - CID 8101803",
+            sender_name="",
+            sender_email="no-response@cj.com",
+            body_snippet="Hello Arif Coskun, We're letting you know that the company information for CJ Affiliate account with CID 8101803 has been updated.",
+        ),
+        EmailMessage(
+            id="news-1575",
+            message_id="msg-news-1575",
+            account="zoho",
+            mailbox="Newsletter",
+            date="2026-10-17T02:51:53-07:00",
+            subject="Welcome to Xendoo Referral Partner Program!",
+            sender_name="Xendoo Referral Partner Program",
+            sender_email="promoter@firstpromoter.com",
+            body_snippet="Welcome to Xendoo Referral Partner Program! Your unique referral link is https://www.xendoo.com/?fp_ref=arif-4ac24e",
+        ),
     ]
 
     classifications = engine.classify_partner_emails(messages)
-    assert len(classifications) == 7
+    assert len(classifications) == 9
 
     sb_c = next(c for c in classifications if c.partner_key == "suretybonds_direct")
     assert sb_c.classification_type == "APPLICATION_SUBMITTED"
@@ -1200,6 +1224,16 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
     assert cj_c.classification_type == "APPLICATION_SUBMITTED"
     assert cj_c.network == "CJ Affiliate"
 
+    cj_tt = next(c for c in classifications if c.partner_key == "turbotax")
+    assert cj_tt.property_id == "profithelm"
+    assert cj_tt.classification_type == "APPLICATION_SUBMITTED"
+    assert cj_tt.network == "CJ Affiliate"
+
+    xen_c = next(c for c in classifications if c.partner_key == "crest_capital")
+    assert xen_c.property_id == "profithelm"
+    assert xen_c.classification_type == "APPLICATION_APPROVED"
+    assert xen_c.candidate_url == "https://www.xendoo.com/?fp_ref=arif-4ac24e"
+
 
 def test_all_partners_have_verified_external_receipt_in_vault():
     """
@@ -1207,7 +1241,8 @@ def test_all_partners_have_verified_external_receipt_in_vault():
     contains a concrete external verification proof token (Inbox #, Sent #, Newsletter #,
     pendAdvContracts, PENDING_CAMPAIGN_APPROVAL, FirstPromoter token, FormAssembly,
     freightos.com/contact-us, earnest.com/partner-sign-up, or CJ Advertiser ID) and that
-    Impact has 1 active contract (Kalshi #37770) and 17 pending advertiser contracts.
+    Impact has 1 active contract (Kalshi #37770) and 17 pending advertiser contracts,
+    and CJ Affiliate is 9_of_9_completed and ACTIVE with 28 pending advertiser applications.
     """
     vault_path = os.path.join(
         os.path.dirname(__file__), "..", "pseofactory", "monetization_vault.json"
@@ -1216,11 +1251,18 @@ def test_all_partners_have_verified_external_receipt_in_vault():
         vault = json.load(f)
 
     assert vault["master_networks"]["impact"]["marketplace_status"] == "active"
+    assert vault["master_networks"]["impact"]["identity_verification_status"] == "COMPLETE"
     assert vault["master_networks"]["impact"]["active_advertiser_contracts"] == 1
     assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 17
     assert vault["master_networks"]["cj_affiliate"]["company_cid"] == "7792582"
     assert vault["master_networks"]["cj_affiliate"]["publisher_id"] == "8101803"
+    assert vault["master_networks"]["cj_affiliate"]["onboarding_progress"] == "9_of_9_completed"
+    assert vault["master_networks"]["cj_affiliate"]["account_status"] == "ACTIVE"
+    assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 28
     assert vault["properties"]["profithelm"]["partners"]["kalshi"]["status"] == "live"
+    assert vault["properties"]["profithelm"]["partners"]["crest_capital"]["status"] == "live"
+    assert vault["properties"]["profithelm"]["partners"]["turbotax"]["status"] == "awaiting_response"
+    assert vault["properties"]["profithelm"]["partners"]["taxslayer"]["status"] == "awaiting_response"
     assert (
         vault["properties"]["profithelm"]["partners"]["kalshi"]["url"]
         == "https://kalshi.pxf.io/c/7932737/3078072/37770"

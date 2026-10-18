@@ -467,9 +467,14 @@ class PartnerTrackingEngine:
                 or (
                     act_item
                     and act_item.status in ("RESOLVED", "APPROVED")
-                    and act_item.action_type == "ONBOARDING_ACTION_REQUIRED"
+                    and act_item.action_type in (
+                        "ONBOARDING_ACTION_REQUIRED",
+                        "INTEGRATION_REQUIREMENT",
+                        "TERMS_UPDATE",
+                        "PARTNER_APPROVAL",
+                    )
                 )
-                or (vault_entry and vault_entry.get("status") == "awaiting_response")
+                or (vault_entry and vault_entry.get("status") in ("awaiting_response", "requires_followup"))
             ):
                 op_status = "AWAITING_RESPONSE"
                 awaiting_count += 1
