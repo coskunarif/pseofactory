@@ -332,12 +332,12 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         property_id="profithelm",
         status="pending",
         env_var="AFFILIATE_CREST_CAPITAL_URL",
-        default_url="https://www.xendoo.com/",
+        default_url="https://www.xendoo.com/?fp_ref=arif-4ac24e",
         badge="Section 179 & MACRS CPA Specialist",
-        commission_est="$500/onboarded client",
+        commission_est="$250-$500/onboarded client",
         bounty_est="$500",
-        network="Sovrn Commerce",
-        description="Dedicated online bookkeeping, IRS Form 4562 Section 179 depreciation schedules, and year-round CPA tax advisory for equipment-intensive businesses.",
+        network="FirstPromoter / Impact.com",
+        description="Dedicated online bookkeeping, federal and state CPA tax advisory, and IRS Form 4562 Section 179 depreciation schedules for businesses and high-income filers.",
         target_tools=[
             "section-179-calculator",
             "section-179-vehicle-equipment-deduction",
@@ -346,7 +346,7 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
             "commercial-heavy-vehicle-section-179-weight-calculator",
             "medical-and-dental-equipment-section-179-roi-calculator",
         ],
-        supported_params=["ph_tier"],
+        supported_params=["fp_ref", "ph_tier"],
         cta_text="Optimize Section 179 Accounting with Xendoo",
     ),
     "ipx1031": AffiliatePartner(
@@ -2192,6 +2192,49 @@ def rank_partner_offers_by_revenue_yield(
     return ranked
 
 
+GSC_EMPIRICAL_CLUSTER_TRAFFIC: Dict[str, Tuple[int, int]] = {
+    # ProfitHelm (sc-domain:profithelm.com empirical GSC cluster traffic)
+    "irs-2027-tax-brackets": (2566, 90),
+    "tcja-sunset-bracket-calculator": (174, 6),
+    "section-1031-calculator": (453, 0),
+    "section-179-calculator": (305, 0),
+    "crypto-tax-calculator": (248, 0),
+    "prediction-market-tax": (39, 1),
+    "treasury-yield-calculator": (26, 0),
+    "saas-runway-calculator": (22, 0),
+    "tcja-sunset-capital-gains": (16, 0),
+    "prediction-market-odds": (12, 1),
+    "commercial-heavy-vehicle-section-179-weight-calculator": (8, 0),
+    "equipment-lease-vs-buy-section-179-calculator": (6, 0),
+    "section-179-vehicle-equipment-deduction": (6, 0),
+    "crypto-tax-form-1099-da-mandatory-reporting": (3, 0),
+    "1031-exchange-rules-arizona": (2, 0),
+    "prediction-market-arbitrage": (2, 0),
+    "prediction-market-implied-probability": (1, 0),
+    "prediction-market-kelly-criterion": (1, 0),
+    "prediction-market-vig-spread": (1, 0),
+    "qsbs-section-1202-tax-calculator": (2, 0),
+    "s-corp-reasonable-salary-tax-calculator": (1, 0),
+    "r-and-d-tax-credit-section-174-amortization-calculator": (1, 0),
+    "invoice-factoring-vs-business-line-of-credit-calculator": (1, 0),
+    "section-301-tariff-landed-cost-calculator": (1, 0),
+    "workers-comp-and-payroll-burden-calculator": (1, 0),
+    "contractor-surety-bond-cost-calculator": (1, 0),
+    "medical-and-dental-equipment-section-179-roi-calculator": (1, 0),
+    # Prexvo (sc-domain:prexvo.com empirical GSC cluster traffic)
+    "student-loan-repayment-calculator": (133, 0),
+    "rap-vs-ibr-calculator": (19, 0),
+    "rap-payment-calculator": (18, 0),
+    "icr-repayment-calculator": (12, 0),
+    "paye-sunset-calculator": (8, 0),
+    "student-loan-refinance-break-even-calculator": (6, 0),
+    "parent-plus-double-consolidation": (5, 0),
+    "tiered-standard-calculator": (4, 0),
+    "married-filing-separately-student-loan-calculator": (2, 0),
+    "grad-plus-borrowing-cap-calculator": (2, 0),
+}
+
+
 def estimate_partner_approval_revenue_impact(
     property_id: str,
     partner_key: str,
@@ -2257,10 +2300,26 @@ def estimate_partner_approval_revenue_impact(
     emp_impressions = max(int(impressions or 0), agg_impressions)
     emp_clicks = max(int(outbound_clicks or 0), agg_clicks)
 
-    # Baseline monthly impressions across affected tools when live telemetry is not yet populated
+    # When explicit impressions are not passed, check empirical GSC cluster traffic first
+    gsc_impressions = 0
+    gsc_clicks = 0
+    if emp_impressions == 0 and slugs_set:
+        for s in slugs_set:
+            if s in GSC_EMPIRICAL_CLUSTER_TRAFFIC:
+                imp_v, clk_v = GSC_EMPIRICAL_CLUSTER_TRAFFIC[s]
+                gsc_impressions += imp_v
+                gsc_clicks += clk_v
+
+    # Baseline monthly impressions across affected tools when neither explicit nor GSC traffic is populated
     tool_count = max(1, len(slugs_set))
     baseline_impressions = tool_count * (650 if prop == "profithelm" else 800)
-    effective_impressions = max(emp_impressions, baseline_impressions) if emp_impressions == 0 else emp_impressions
+    if emp_impressions > 0:
+        effective_impressions = emp_impressions
+    elif gsc_impressions > 0:
+        effective_impressions = gsc_impressions
+        emp_clicks = max(emp_clicks, gsc_clicks)
+    else:
+        effective_impressions = baseline_impressions
 
     # Estimate monthly outbound CTA clicks from impressions + empirical clicks
     expected_cta_ctr = 0.042 if prop == "profithelm" else 0.038
@@ -3194,11 +3253,11 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "crest_capital",
         "sovrn_merchant_id": 310373,
         "verified_merchant_name": "Xendoo Online Accounting",
-        "verified_url": "https://www.xendoo.com/",
-        "is_direct": False,
+        "verified_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+        "is_direct": True,
         "approved": True,
-        "payout_rate": "$500.00 USD Onboarded",
-        "network": "Sovrn Commerce",
+        "payout_rate": "$250.00 USD FirstPromoter CPA + $500.00 USD Onboarded",
+        "network": "FirstPromoter / Impact.com",
         "swapped_from_non_paying": True,
         "replaced_domain": "crestcapital.com",
     },
@@ -3206,11 +3265,11 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "equipment_macrs",
         "sovrn_merchant_id": 310373,
         "verified_merchant_name": "Xendoo Online Accounting",
-        "verified_url": "https://www.xendoo.com/",
-        "is_direct": False,
+        "verified_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+        "is_direct": True,
         "approved": True,
-        "payout_rate": "$500.00 USD Onboarded",
-        "network": "Sovrn Commerce",
+        "payout_rate": "$250.00 USD FirstPromoter CPA + $500.00 USD Onboarded",
+        "network": "FirstPromoter / Impact.com",
         "swapped_from_non_paying": True,
         "replaced_domain": "crestcapital.com",
     },
@@ -3586,11 +3645,11 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "xendoo",
         "sovrn_merchant_id": 310373,
         "verified_merchant_name": "Xendoo Online Accounting",
-        "verified_url": "https://www.xendoo.com/",
-        "is_direct": False,
+        "verified_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+        "is_direct": True,
         "approved": True,
-        "payout_rate": "$500.00 USD Onboarded",
-        "network": "Sovrn Commerce",
+        "payout_rate": "$250.00 USD FirstPromoter CPA + $500.00 USD Onboarded",
+        "network": "FirstPromoter / Impact.com",
         "swapped_from_non_paying": False,
     },
     "capitalize": {
@@ -3848,7 +3907,7 @@ def normalize_html_callout_message_match(
         "equipment_macrs": (
             "Xendoo Section 179 & Business Tax Accounting",
             "Optimize Section 179 Accounting with Xendoo",
-            "https://www.xendoo.com/",
+            "https://www.xendoo.com/?fp_ref=arif-4ac24e",
         ),
         "national_funding": (
             "Stax Commercial Payments & Working Capital",
@@ -3868,6 +3927,11 @@ def normalize_html_callout_message_match(
             return (partner.name, partner.cta_text, partner.default_url)
         return fallback_copy.get(pk)
 
+    def _effective_dom_status(pk: str, p_obj: Optional[AffiliatePartner]) -> str:
+        if (p_obj and p_obj.status == "live") or SOVRN_VERIFIED_PAYING_MERCHANTS.get(pk, {}).get("is_direct"):
+            return "live"
+        return p_obj.status if p_obj else "live"
+
     # Extract page-level identity (title, canonical, h1) excluding footer/related links
     title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
     canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
@@ -3886,13 +3950,23 @@ def normalize_html_callout_message_match(
     )
     is_prediction_odds_page = is_prediction_page and "tax" not in page_identity_lower
     is_1031_page = "1031" in page_identity_lower
-    is_crypto_or_tax_page = (
+    is_crypto_page = (
         not is_1031_page
         and any(
             tok in page_identity_lower
-            for tok in ("crypto", "1099-da", "8949", "tax-bracket", "tax bracket", "capital-gains", "capital gains", "tcja", "prediction-market-tax", "prediction market tax")
+            for tok in ("crypto", "1099-da", "8949", "staking", "token", "prediction-market-tax", "prediction market tax")
         )
     )
+    is_general_tax_page = (
+        not is_1031_page
+        and not is_crypto_page
+        and not is_prediction_page
+        and any(
+            tok in page_identity_lower
+            for tok in ("tax-bracket", "tax bracket", "irs-2027", "ca-tax-brackets", "capital-gains", "capital gains", "tcja")
+        )
+    )
+    is_capital_gains_page = any(tok in page_identity_lower for tok in ("capital-gains", "capital gains"))
     is_medical_page = any(
         tok in page_identity_lower
         for tok in ("medical", "dental", "healthcare", "practice")
@@ -3935,7 +4009,7 @@ def normalize_html_callout_message_match(
             return sec_html
         p_name, p_cta, p_url = resolved
         p_obj = registry.get(pk)
-        p_status = p_obj.status if p_obj else "live"
+        p_status = _effective_dom_status(pk, p_obj)
         expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         sec_text_lower = re.sub(r"<[^>]+>", " ", sec_html).lower()
@@ -4037,7 +4111,7 @@ def normalize_html_callout_message_match(
             return match.group(0)
         _, p_cta, _ = resolved
         p_obj = registry.get(pk)
-        p_status = p_obj.status if p_obj else "live"
+        p_status = _effective_dom_status(pk, p_obj)
         if 'data-status=' not in open_tag:
             open_tag = open_tag[:-1] + f' data-status="{html_lib.escape(p_status)}">'
         else:
@@ -4125,6 +4199,7 @@ def normalize_html_callout_message_match(
             p_obj = PROFITHELM_AFFILIATES.get(pk)
             if not p_obj:
                 return ""
+            eff_st = _effective_dom_status(pk, p_obj)
             return (
                 f'\n    <div class="affiliate-card partner-card">\n'
                 f'      <div class="affiliate-info">\n'
@@ -4134,7 +4209,7 @@ def normalize_html_callout_message_match(
                 f'        <p class="affiliate-desc">{html_lib.escape(p_obj.description)}</p>\n'
                 f'      </div>\n'
                 f'      <div>\n'
-                f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(p_obj.status)}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
+                f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
                 f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                 f'        </a>\n'
                 f'      </div>\n'
@@ -4156,14 +4231,25 @@ def normalize_html_callout_message_match(
             if not is_medical_page and "national_funding_med" in found_keys and len(found_keys) > 1:
                 found_keys = [k for k in found_keys if k != "national_funding_med"]
 
+            # On non-crypto general income tax bracket pages, strip previously injected crypto-only offers
+            # and lead with live Xendoo CPA Tax & Business Accounting (crest_capital) + TaxAct + TaxSlayer
+            if is_general_tax_page:
+                if not is_capital_gains_page:
+                    found_keys = [k for k in found_keys if k not in ("coinledger", "koinly")]
+                for tax_k in ("crest_capital", "turbotax", "taxslayer"):
+                    if tax_k not in found_keys:
+                        found_keys.append(tax_k)
+                if is_capital_gains_page and "coinledger" not in found_keys:
+                    found_keys.append("coinledger")
+
             # Enrich with approved live direct sponsors matched to page vertical
             if is_prediction_page and "kalshi" not in found_keys:
                 found_keys.append("kalshi")
             if (
                 not is_1031_page
-                and ("coinledger" in found_keys or is_crypto_or_tax_page)
+                and not is_general_tax_page
+                and ("coinledger" in found_keys or is_crypto_page)
                 and "koinly" not in found_keys
-                and any(tok in page_identity_lower for tok in ("crypto", "1099-da", "8949", "tax-bracket", "tax bracket", "capital-gains", "capital gains", "tcja", "prediction-market", "prediction market"))
             ):
                 if "coinledger" not in found_keys:
                     found_keys.append("coinledger")
@@ -4186,6 +4272,15 @@ def normalize_html_callout_message_match(
                 p_obj = PROFITHELM_AFFILIATES.get(k)
                 st = p_obj.status if p_obj else "pending"
                 st_rank = 0 if st == "live" else (1 if st == "pending_expansion" else 2)
+                if is_general_tax_page:
+                    if k == "crest_capital":
+                        return (-2, 0)
+                    if k == "turbotax":
+                        return (-1, 1)
+                    if k == "taxslayer":
+                        return (-1, 2)
+                    if k == "coinledger":
+                        return (0, 3)
                 if is_prediction_odds_page and k == "kalshi":
                     return (-1, 0)
                 if is_1031_page and k == "ipx1031":
@@ -4247,7 +4342,7 @@ def normalize_html_callout_message_match(
         safe_badge = html_lib.escape(p_inline.badge)
         safe_name = html_lib.escape(p_inline.name)
         safe_cta = html_lib.escape(p_inline.cta_text)
-        safe_status = html_lib.escape(p_inline.status)
+        safe_status = html_lib.escape(_effective_dom_status(primary_inline_pk, p_inline))
         inline_cta_html = (
             f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'

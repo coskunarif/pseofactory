@@ -99,9 +99,9 @@
         "COMMERCIAL_REAL_ESTATE": {
           "primary_partner": "crest_capital",
           "fallback_partner": "ipx1031",
-          "direct_url": "https://www.crestcapital.com/",
+          "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
           "status": "pending",
-          "bounty": "$300-$800"
+          "bounty": "$250-$500"
         },
         "SECTION_1031_EXCHANGE": {
           "primary_partner": "ipx1031",
@@ -138,9 +138,10 @@
           "provider": "FirstPromoter REST API",
           "active_partners": [
             "coinledger",
-            "koinly"
+            "koinly",
+            "crest_capital (xendoo fp_ref=arif-4ac24e)"
           ],
-          "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission)"
+          "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
         },
         "impact_rest_api": {
           "provider": "Impact.com Publisher REST API",
@@ -149,26 +150,27 @@
             "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770)"
           ],
           "submitted_campaigns": [
-            "gusto (#15154 - Inbox #967)",
-            "next_insurance_b2b (#14516 / ERGO NEXT - Inbox #982 & Marketplace PENDING_CAMPAIGN_APPROVAL)",
-            "sofi (#11190 / #8084 - Inbox #988, pendAdvContracts=2)",
-            "national_funding_med (#15709 / IO 400810 - pendAdvContracts 3->4)",
-            "splash_financial (#9516 - pendAdvContracts 4->5)",
-            "credible (#3874 / IO 25024 - pendAdvContracts 5->6)",
-            "invoice_simple (#24994 / IO 325053 - pendAdvContracts 6->7)",
-            "lendkey (#3276 / IO 20978 - pendAdvContracts 7->8)",
-            "surepayroll (#16532 / IO 153438 - pendAdvContracts 8->9)",
-            "stax (#15236 / IO 126473 - pendAdvContracts 9->10)",
-            "groundfloor (#11975 / IO 84162 - pendAdvContracts 10->11)",
-            "zacks (#39258 / IO 332588 - pendAdvContracts 11->12)",
-            "dlp_capital (#20525 / IO 191764 - pendAdvContracts 12->13)",
-            "simply_business (#49719 / IO 368837 & #50138 - Marketplace PENDING_CAMPAIGN_APPROVAL + Zendesk Ticket #6270665 in Inbox #990)",
-            "ramp (#51436 - Marketplace PENDING_CAMPAIGN_APPROVAL, $100-$4,000 Closed Won / $50-$2,000 SQL)",
-            "xendoo (#16354 - Marketplace PENDING_CAMPAIGN_APPROVAL, $500 Onboarded)"
+            "gusto (#15154 - uContractId 30477112, Inbox #967)",
+            "next_insurance_b2b (#14516 / ERGO NEXT - uContractId 30639514, Inbox #982 & Marketplace PENDING_CAMPAIGN_APPROVAL)",
+            "sofi (#11190 / #8084 - uContractId 30703716, Inbox #988)",
+            "national_funding_med (#15709 / IO 400810 - uContractId 30704393)",
+            "splash_financial (#9516 - uContractId 30704415, $300 Closed Loan)",
+            "credible (#3874 / IO 25024 - uContractId 30704420)",
+            "invoice_simple (#24994 / IO 325053 - uContractId 30704430)",
+            "lendkey (#3276 / IO 20978 - uContractId 30704425, $250 Loan Disbursed)",
+            "surepayroll (#16532 / IO 153438 - uContractId 30704472)",
+            "stax (#15236 / IO 126473 - uContractId 30704485, $500 Closed Won)",
+            "groundfloor (#11975 / IO 84162 - uContractId 30704492, $100 Invest + Sent #262)",
+            "zacks (#39258 / IO 332588 - uContractId 30704498, $120 Online Sale)",
+            "dlp_capital (#20525 / IO 191764 - uContractId 30704453, $250 Lead + Sent #263)",
+            "simply_business (#49719 / uContractId 30704352 & #50138 / uContractId 30705037 + Zendesk Ticket #6270665 in Inbox #990)",
+            "ramp (#51436 - uContractId 30705021, $100-$4,000 Closed Won / $50-$2,000 SQL)",
+            "xendoo (#16354 - uContractId 30705024, $500 Onboarded + Sent #261 + FirstPromoter LIVE fp_ref=arif-4ac24e)",
+            "relay (#28490 - uContractId 30705031, $100-$200 Funded Account)"
           ],
           "role": "Programmatic contract status polling and Insertion Order verification",
           "member_id": "8871615",
-          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 + pendAdvContracts=17 across Account 7932737 / Member 8871615)",
+          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 + 17 Pending Advertiser Contracts across Account 7932737 / Member 8871615)",
           "discovered_promo_signup_campaigns": [
             "sofi (#11190 - https://app.impact.com/campaign-promo-signup/SoFi.brand)",
             "lendkey (#3276 - https://app.impact.com/campaign-promo-signup/LendKey.brand)",
@@ -179,7 +181,8 @@
             "groundfloor (#11975 - https://app.impact.com/campaign-promo-signup/Groundfloor-Finance.brand)",
             "zacks (#39258 - https://app.impact.com/campaign-promo-signup/Zacks-Investment-Research.brand)",
             "ramp (#51436 - Impact Brand Marketplace)",
-            "xendoo (#16354 - Impact Brand Marketplace)"
+            "xendoo (#16354 - Impact Brand Marketplace)",
+            "relay (#28490 - Impact Brand Marketplace)"
           ]
         },
         "dub_partners_api": {
@@ -333,7 +336,7 @@
           "network": "Impact.com / In-House",
           "campaign_id": "51436",
           "bounty": "$100-$4000",
-          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Direct Follow-Up (Impact Account 7932737 Campaign #51436 Ramp submitted on 2026-10-17T08:40Z in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL]; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254)",
+          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Direct Follow-Up (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 submitted on 2026-10-18 in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL]; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
@@ -341,13 +344,13 @@
         "crest_capital": {
           "status": "awaiting_response",
           "pipeline_tier": "awaiting_vendor_response",
-          "url": "https://www.crestcapital.com/",
-          "direct_url": "https://www.crestcapital.com/",
+          "url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+          "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
           "edge_route": "/r/crest_capital",
           "category": "COMMERCIAL_REAL_ESTATE",
-          "network": "In-House Direct / Impact.com",
-          "bounty": "$100-$500",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #241 on 2026-10-13 + follow-up nudge Sent #255 on 2026-10-16T22:56Z to info@crestcapital.com; Impact Xendoo Online Accounting #16354 [$500 Onboarded] also submitted on 2026-10-17T08:40Z in PENDING_CAMPAIGN_APPROVAL)"
+          "network": "FirstPromoter / Impact.com",
+          "bounty": "$250-$500",
+          "correspondence_status": "FirstPromoter Direct Link LIVE (https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client via xendoo.firstpromoter.com) + Impact #16354 uContractId 30705024 ($500 Onboarded) submitted on 2026-10-18 + HubSpot Partner form submitted on xendoo.com/become-a-partner/ + follow-up Sent #261 to luanne.bryant@xendoo.com"
         },
         "exeter1031": {
           "status": "awaiting_response",
@@ -358,7 +361,7 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #243 on 2026-10-13 + follow-up nudge Sent #257 on 2026-10-16T22:56Z to ask@exeterco.com; Impact DLP Capital #20525 IO #191764 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 12 -> 13)",
+          "correspondence_status": "Application Submitted & Followed Up (Sent #243 on 2026-10-13 + Sent #257 on 2026-10-16T22:56Z to ask@exeterco.com; Impact DLP Capital #20525 IO #191764 uContractId 30704453 submitted on 2026-10-17T07:30Z + direct follow-up Sent #263 to info@dlpcapital.com on 2026-10-18)",
           "active_fallback_merchant": "ipx1031",
           "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
           "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/exeter1031"
@@ -372,7 +375,7 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #244 on 2026-10-13 + follow-up nudge Sent #256 on 2026-10-16T22:56Z to 1031@firstam.com; Impact Groundfloor Finance #11975 IO #84162 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 10 -> 11)",
+          "correspondence_status": "Application Submitted & Followed Up (Sent #244 on 2026-10-13 + Sent #256 on 2026-10-16T22:56Z to 1031@firstam.com; Impact Groundfloor Finance #11975 IO #84162 uContractId 30704492 submitted on 2026-10-17T07:30Z + direct follow-up Sent #262 to hela@katalystcomms.com on 2026-10-18)",
           "active_fallback_merchant": "ipx1031",
           "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
           "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/first_american"

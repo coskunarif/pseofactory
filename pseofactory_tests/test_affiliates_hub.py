@@ -805,3 +805,49 @@ def test_visitor_journey_cta_placement_and_live_first_ordering():
     assert r_179.index("mercury") < r_179.index("crest_capital")
     assert r_179.index("rippling") < r_179.index("crest_capital")
 
+
+def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
+    """Verifies Xendoo FirstPromoter direct routing, general tax bracket CTA alignment, and GSC traffic-weighted revenue ranking."""
+    import re
+    from pseofactory.affiliates import (
+        estimate_partner_approval_revenue_impact,
+        normalize_html_callout_message_match,
+    )
+    from pseofactory.edge import generate_edge_redirect_function
+
+    ph_js = generate_edge_redirect_function("profithelm")
+    assert 'defaultUrl: "https://www.xendoo.com/?fp_ref=arif-4ac24e"' in ph_js
+
+    tax_bracket_html = """<!DOCTYPE html>
+<html><head><title>2027 California Tax Brackets & Marginal Tax Calculator</title></head><body>
+  <div class="calculator-grid">
+    <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
+    <div class="card result-card"><div class="card-header"><h2>Combined 2027 Tax Projection</h2></div></div>
+  </div>
+  <section class="affiliate-section affiliates-section">
+    <h2>Verified Tax Execution Partners</h2>
+    <div class="affiliate-card partner-card"><a href="/r/coinledger" class="btn-cta">Calculate & Export Crypto Taxes with CoinLedger</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/koinly" class="btn-cta">Track Crypto Portfolios with Koinly</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/taxslayer" class="btn-cta">Calculate & File with TaxSlayer</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/turbotax" class="btn-cta">Calculate & File Taxes Online with TaxAct</a></div>
+  </section>
+</body></html>"""
+    norm_tax = normalize_html_callout_message_match(tax_bracket_html, property_id="profithelm")
+    r_tax = re.findall(r'href="/r/([a-z0-9_]+)"', norm_tax)
+    assert "coinledger" not in r_tax
+    assert "koinly" not in r_tax
+    assert r_tax[0] == "crest_capital"
+    assert r_tax[1] == "crest_capital"
+    assert r_tax.index("crest_capital") < r_tax.index("turbotax") < r_tax.index("taxslayer")
+    assert 'data-partner="crest_capital" data-status="live"' in norm_tax
+
+    imp_turbotax = estimate_partner_approval_revenue_impact("profithelm", "turbotax")
+    imp_taxslayer = estimate_partner_approval_revenue_impact("profithelm", "taxslayer")
+    imp_exeter = estimate_partner_approval_revenue_impact("profithelm", "exeter1031")
+    imp_surety = estimate_partner_approval_revenue_impact("profithelm", "suretybonds_direct")
+
+    assert imp_turbotax["affected_traffic_impressions"] == 2740
+    assert imp_taxslayer["affected_traffic_impressions"] == 2566
+    assert imp_turbotax["estimated_monthly_revenue_impact_usd"] > imp_taxslayer["estimated_monthly_revenue_impact_usd"]
+    assert imp_taxslayer["estimated_monthly_revenue_impact_usd"] > imp_exeter["estimated_monthly_revenue_impact_usd"]
+    assert imp_exeter["estimated_monthly_revenue_impact_usd"] > imp_surety["estimated_monthly_revenue_impact_usd"]
