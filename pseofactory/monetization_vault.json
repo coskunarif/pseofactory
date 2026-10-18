@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-18T09:45:00+00:00",
+    "updated_at": "2026-10-18T19:45:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -18,6 +18,7 @@
       "name": "PartnerStack",
       "api_key": "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP",
       "account_name": "ProfitHelm LLC",
+      "verified_clicks": 28,
       "enabled": true
     },
     "stripe": {
@@ -36,12 +37,14 @@
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
       "active_advertiser_contracts": 1,
-      "pending_advertiser_contracts": 17
+      "pending_advertiser_contracts": 17,
+      "verified_clicks": 3
     },
     "cj_affiliate": {
       "name": "CJ Affiliate",
       "company_cid": "7792582",
       "publisher_id": "8101803",
+      "promotional_property_id": "101725461",
       "account_user": "Arif Coskun",
       "onboarding_progress": "9_of_9_completed",
       "account_status": "ACTIVE",
@@ -139,14 +142,14 @@
             "rippling",
             "mercury"
           ],
-          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling)"
+          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 28 verified clicks recorded in PartnerStack Performance Overview)"
         },
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
           "active_partners": [
             "coinledger",
             "koinly",
-            "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576)"
+            "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576; 1 verified click recorded on FirstPromoter dashboard)"
           ],
           "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
         },
@@ -154,30 +157,30 @@
           "provider": "Impact.com Publisher REST API",
           "account_id": "7932737",
           "active_campaigns": [
-            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770)"
+            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770; 3 verified clicks recorded including referring domain profithelm.com)"
           ],
           "submitted_campaigns": [
-            "gusto (#15154 - uContractId 30477112, Inbox #967)",
+            "gusto (#15154 - uContractId 30477112, Inbox #967 + publisher intro Sent #271 to noelle.hyra@gusto.com)",
             "next_insurance_b2b (#14516 / ERGO NEXT - uContractId 30639514, Inbox #982 & Marketplace PENDING_CAMPAIGN_APPROVAL)",
-            "sofi (#11190 / #8084 - uContractId 30703716, Inbox #988)",
+            "sofi (#11190 / #8084 - uContractId 30703716, Inbox #988 + publisher intro Sent #273 to cfels@lqdigital.com)",
             "national_funding_med (#15709 / IO 400810 - uContractId 30704393)",
-            "splash_financial (#9516 - uContractId 30704415, $300 Closed Loan)",
+            "splash_financial (#9516 - uContractId 30704415, $300 Closed Loan + publisher intro Sent #272 to pleimkuehler@splashfinancial.com)",
             "credible (#3874 / IO 25024 - uContractId 30704420)",
             "invoice_simple (#24994 / IO 325053 - uContractId 30704430)",
-            "lendkey (#3276 / IO 20978 - uContractId 30704425, $250 Loan Disbursed)",
+            "lendkey (#3276 / IO 20978 - uContractId 30704425, $250 Loan Disbursed + publisher intro Sent #274 to accounting@lendkey.com)",
             "surepayroll (#16532 / IO 153438 - uContractId 30704472)",
             "stax (#15236 / IO 126473 - uContractId 30704485, $500 Closed Won)",
             "groundfloor (#11975 / IO 84162 - uContractId 30704492, $100 Invest + Sent #262)",
             "zacks (#39258 / IO 332588 - uContractId 30704498, $120 Online Sale)",
             "dlp_capital (#20525 / IO 191764 - uContractId 30704453, $250 Lead + Sent #263)",
             "simply_business (#49719 / uContractId 30704352 & #50138 / uContractId 30705037 + Zendesk Ticket #6270665 in Inbox #990)",
-            "ramp (#51436 - uContractId 30705021, $100-$4,000 Closed Won / $50-$2,000 SQL)",
-            "xendoo (#16354 - uContractId 30705024, $500 Onboarded + Sent #261 + FirstPromoter LIVE fp_ref=arif-4ac24e)",
+            "ramp (#51436 - uContractId 30705021, $100-$4,000 Closed Won / $50-$2,000 SQL + publisher intro Sent #270 to affiliate@ramp.com)",
+            "xendoo (#16354 - uContractId 30705024, $500 Onboarded + Sent #261 + Sent #269 to lil.roberts@xendoo.com + FirstPromoter LIVE fp_ref=arif-4ac24e)",
             "relay (#28490 - uContractId 30705031, $100-$200 Funded Account)"
           ],
           "role": "Programmatic contract status polling and Insertion Order verification",
           "member_id": "8871615",
-          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 + 17 Pending Advertiser Contracts across Account 7932737 / Member 8871615; Identity COMPLETE; Comply Exchange Form W-9 submitted under Confirmation Code L5CBN6)",
+          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 with 3 verified clicks + 17 Pending Advertiser Contracts across Account 7932737 / Member 8871615; Identity COMPLETE; Comply Exchange Form W-9 submitted under Confirmation Code L5CBN6)",
           "discovered_promo_signup_campaigns": [
             "sofi (#11190 - https://app.impact.com/campaign-promo-signup/SoFi.brand)",
             "lendkey (#3276 - https://app.impact.com/campaign-promo-signup/LendKey.brand)",
@@ -265,7 +268,7 @@
           "partnership_key": "part_jp9R0iYpPGriHu",
           "stack_key": "stck_lZgJHub85wwvkX",
           "tos_status": "active",
-          "correspondence_status": "Approved & Live (Newsletter #1552 Welcome, #1562 October Newsletter & #1568 Commission Structure from Erica Grodin on 2026-10-15; $600 SQO + $1,000 Closed Won = $1,600 via https://try.rippling.com/mcfo1m09qiwt)"
+          "correspondence_status": "Approved & Live (Newsletter #1552 Welcome, #1562 October Newsletter & #1568 Commission Structure from Erica Grodin on 2026-10-15; $600 SQO + $1,000 Closed Won = $1,600 via https://try.rippling.com/mcfo1m09qiwt; 28 verified clicks recorded in PartnerStack dashboard)"
         },
         "ipx1031": {
           "status": "active_direct",
@@ -327,7 +330,7 @@
           "network": "Impact.com",
           "campaign_id": "15154",
           "bounty": "$300",
-          "correspondence_status": "Application Submitted & Confirmed by Email (Inbox #967 on 2026-10-12T17:17Z from notifications@app.impact.com confirming Gusto Campaign #15154 application on Impact Account 7932737 / Branded Account 3161796; Verified Insertion Order Payout: $300.00 USD per Sale; CJ Affiliate ADP #5275573 [3m EPC $1,776.97] & Intuit Small Business - QuickBooks, GoPayment, Payroll #2271086 also submitted on CID 8101803)",
+          "correspondence_status": "Application Submitted, Confirmed by Email & Publisher Intro Sent (Inbox #967 on 2026-10-12T17:17Z confirming Gusto Campaign #15154 on Impact Account 7932737 / Branded Account 3161796 + publisher intro Sent #271 to noelle.hyra@gusto.com; Verified Insertion Order Payout: $300.00 USD per Sale; CJ Affiliate ADP #5275573 [3m EPC $1,776.97] & Intuit Small Business - QuickBooks, GoPayment, Payroll #2271086 submitted on CID 8101803 + publisher intro Sent #265 to cj_intuit@cj.com)",
           "active_fallback_merchant": "rippling",
           "active_fallback_url": "https://try.rippling.com/mcfo1m09qiwt",
           "active_fallback_payout": "$600-$1600 via PartnerStack + Sovrn Commerce /r/gusto"
@@ -342,7 +345,7 @@
           "network": "Impact.com / In-House",
           "campaign_id": "51436",
           "bounty": "$100-$4000",
-          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Direct Follow-Up (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 submitted on 2026-10-18 in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL]; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254)",
+          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Direct Follow-Up (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 submitted on 2026-10-18 in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL]; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
@@ -356,7 +359,7 @@
           "category": "COMMERCIAL_REAL_ESTATE",
           "network": "FirstPromoter / Impact.com",
           "bounty": "$250-$500",
-          "correspondence_status": "Approved & Live on FirstPromoter (Newsletter #1575 Welcome & #1576 PayPal payout verification code 679553 for arif.coskun@profithelm.com; FirstPromoter token fp_ref=arif-4ac24e active at https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client + Impact #16354 uContractId 30705024 [$500 Onboarded] submitted on 2026-10-18 + follow-up Sent #261 to luanne.bryant@xendoo.com)"
+          "correspondence_status": "Approved & Live on FirstPromoter (Newsletter #1575 Welcome & #1576 PayPal payout verification code 679553 for arif.coskun@profithelm.com; FirstPromoter token fp_ref=arif-4ac24e active at https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client with 1 verified click recorded on FirstPromoter dashboard + Impact #16354 uContractId 30705024 [$500 Onboarded] submitted on 2026-10-18 + follow-up Sent #261 to luanne.bryant@xendoo.com & Sent #269 to lil.roberts@xendoo.com)"
         },
         "exeter1031": {
           "status": "awaiting_response",
@@ -395,7 +398,7 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$45-$120",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + Advertiser Applications Submitted (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z after IRS Form W-9 [EIN ******1423] and Direct Deposit ACH [Routing *****1229, Account ********1395] confirmed via Inbox #991, #992, #995 & #996; submitted CJ Advertiser ID #1905878 TurboTax [$284.78 7d EPC], #4110283 TaxAct [10% Sale, $43.64 3m EPC], #4526117 FreeTaxUSA, #4355234 E-file.com & #6874782 ezTaxReturn.com; wrapped via Sovrn Commerce /r/turbotax)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + Advertiser Applications Submitted + Publisher Intros Sent (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z after IRS Form W-9 [EIN ******1423] and Direct Deposit ACH [Routing *****1229, Account ********1395] confirmed via Inbox #991, #992, #995 & #996; submitted CJ Advertiser ID #1905878 TurboTax [$284.78 7d EPC], #4110283 TaxAct [10% Sale, $43.64 3m EPC], #4526117 FreeTaxUSA, #4355234 E-file.com & #6874782 ezTaxReturn.com + publisher intros Sent #264 to turbotax@cj.com, Sent #266 to affiliates@freetaxusa.com & Sent #267 to aaron@e-file.com; wrapped via Sovrn Commerce /r/turbotax)",
           "cj_advertiser_id": "4110283",
           "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
@@ -408,7 +411,7 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + TaxSlayer Application Submitted (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; TaxSlayer CJ Advertiser ID #5273914 [0%-10% Sale], LibertyTax #3835168 & Ownwell #6784655 submitted and verified in Status: Pending Applications [28 Results]; wrapped via Sovrn Commerce /r/taxslayer)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + TaxSlayer Application Submitted + Publisher Intro Sent (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; TaxSlayer CJ Advertiser ID #5273914 [0%-10% Sale], LibertyTax #3835168 & Ownwell #6784655 submitted and verified in Status: Pending Applications [28 Results] + publisher intro Sent #268 to allwyn.symon@eztaxreturn.com; wrapped via Sovrn Commerce /r/taxslayer)",
           "cj_advertiser_id": "5273914",
           "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
@@ -423,7 +426,7 @@
           "campaign_id": "37770",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Kalshi.brand",
           "bounty": "$40-$150",
-          "correspondence_status": "Approved & Live on Impact.com (Account 7932737; Campaign #37770 Kalshi Contract Active since 2026-10-17 with pendAdvContracts transition 2 -> 3 -> Active; live tracking URL https://kalshi.pxf.io/c/7932737/3078072/37770 verified at $40.00 USD CPA with Deep Linking enabled)"
+          "correspondence_status": "Approved & Live on Impact.com (Account 7932737; Campaign #37770 Kalshi Contract Active since 2026-10-17 with pendAdvContracts transition 2 -> 3 -> Active; live tracking URL https://kalshi.pxf.io/c/7932737/3078072/37770 verified at $40.00 USD CPA with Deep Linking enabled and 3 verified clicks recorded on Impact dashboard including referring domain profithelm.com)"
         },
         "interactive_brokers": {
           "status": "awaiting_response",
@@ -564,7 +567,7 @@
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Splash-Financial.brand",
           "bounty": "$300",
           "gate_1_verified_payout": "$300.00 USD per SLR Closed Loan",
-          "correspondence_status": "Live Lending Marketplace & Impact Application Confirmed (Impact Campaign #9516 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 4 -> 5 + direct follow-up Sent #247 & #258 to contact@splashfinancial.com; verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)"
+          "correspondence_status": "Live Lending Marketplace & Impact Application Confirmed (Impact Campaign #9516 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 4 -> 5 + direct follow-up Sent #247 & #258 to contact@splashfinancial.com + publisher intro Sent #272 to pleimkuehler@splashfinancial.com; verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)"
         },
         "sofi": {
           "status": "live",
@@ -576,7 +579,7 @@
           "network": "Impact.com",
           "bounty": "$120",
           "gate_1_verified_payout": "$120.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Lending Destination & Impact Application Confirmed by Email (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737; passes Gate 1 >= $45; active outbound route /r/sofi)",
+          "correspondence_status": "Live Lending Destination & Impact Application Confirmed by Email (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737 + publisher intro Sent #273 to cfels@lqdigital.com; passes Gate 1 >= $45; active outbound route /r/sofi)",
           "campaign_id": "11190",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/SoFi.brand"
         },
@@ -618,7 +621,7 @@
           "network": "Impact.com",
           "bounty": "$100-$150",
           "gate_1_verified_payout": "$100.00-$150.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace & Impact Application Confirmed (Impact Campaign #3276 IO #20978 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 7 -> 8; passes Gate 1 >= $45; active outbound route /r/lendkey)",
+          "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace & Impact Application Confirmed (Impact Campaign #3276 IO #20978 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 7 -> 8 + publisher intro Sent #274 to accounting@lendkey.com; passes Gate 1 >= $45; active outbound route /r/lendkey)",
           "campaign_id": "3276",
           "applied_io_id": "20978",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/LendKey.brand"

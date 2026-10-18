@@ -610,8 +610,8 @@ def _resolve_partner_offer_and_manual_gate(
             default_chosen_key = "kalshi"
             vertical_candidates = ["kalshi", "moby", "zacks", "coinledger"]
         elif any(k in combined for k in ("tax-bracket", "irs-2027", "ca-tax-bracket", "standard-deduction")):
-            default_chosen_key = "taxslayer"
-            vertical_candidates = ["taxslayer", "taxact", "eztaxreturn", "turbotax"]
+            default_chosen_key = "crest_capital"
+            vertical_candidates = ["crest_capital", "turbotax", "taxslayer", "taxact", "eztaxreturn"]
         elif any(k in combined for k in ("bookkeeping", "accounting", "174", "r-d", "audit", "reconciliation")):
             default_chosen_key = "bench"
             vertical_candidates = ["bench", "pilot", "ramp", "gusto"]
@@ -3507,8 +3507,23 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             re.DOTALL | re.IGNORECASE,
         )
         if qa_pattern.search(html):
+            def _repl_qa_aside(m: re.Match) -> str:
+                open_aside, inner_aside, close_aside = m.group(1), m.group(2), m.group(3)
+                title_m = re.search(
+                    r'<div[^>]*class=["\'][^"\']*quick-answer-title[^"\']*["\'][^>]*>.*?</div>',
+                    inner_aside,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if title_m:
+                    title_html = f"\n  {title_m.group(0)}"
+                elif "irs-2027-tax-brackets" in str(overlay_data.get("slug") or ""):
+                    title_html = '\n  <div class="quick-answer-title">Key Finding: 2027 IRS Sunset Projection</div>'
+                else:
+                    title_html = ""
+                return f'{open_aside}{title_html}\n  <div class="quick-answer-body"><p>{escaped_qa}</p></div>\n{close_aside}'
+
             html = qa_pattern.sub(
-                rf'\g<1>\n  <div class="quick-answer-body"><p>{escaped_qa}</p></div>\n\g<3>',
+                _repl_qa_aside,
                 html,
                 count=1,
             )

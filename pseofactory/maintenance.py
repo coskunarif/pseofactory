@@ -5611,7 +5611,24 @@ class RetroReflectionEngine:
                                 ):
                                     if preserve_key in raw_ov:
                                         healed_ov[preserve_key] = raw_ov[preserve_key]
-                                ov_path.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
+                                raw_ov = healed_ov
+                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+
+                            if (
+                                property_id.lower() in ("profithelm", "exchange1031")
+                                and any(k in ov_s.lower() for k in ("tax-bracket", "irs-2027", "ca-tax-brackets"))
+                                and isinstance(raw_ov.get("partner_offer"), dict)
+                                and str(raw_ov["partner_offer"].get("partner_key") or "").lower() in ("taxslayer", "turbotax")
+                            ):
+                                po = dict(raw_ov["partner_offer"])
+                                po["partner_key"] = "crest_capital"
+                                po["partner_name"] = "Xendoo Section 179 & Business Tax Accounting"
+                                po["url"] = "https://www.xendoo.com/?fp_ref=arif-4ac24e"
+                                po["redirect_path"] = "/r/crest_capital"
+                                po["cta_text"] = "Optimize Section 179 Accounting with Xendoo"
+                                po["cta_id"] = f"cta-{property_id.lower()}-{ov_s}-crest_capital"
+                                raw_ov["partner_offer"] = po
+                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                         except Exception:
                             pass
             except Exception:

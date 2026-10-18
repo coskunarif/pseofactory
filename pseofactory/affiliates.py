@@ -4003,29 +4003,64 @@ def normalize_html_callout_message_match(
             pk_match = re.search(r'href=["\']/r/([a-z0-9_]+)', sec_html, re.I)
         if not pk_match:
             return sec_html
-        pk = pk_match.group(1).lower()
+        old_pk = pk_match.group(1).lower()
+        pk = old_pk
+        if prop in ("profithelm", "exchange1031"):
+            if (
+                is_general_tax_page
+                and not is_capital_gains_page
+                and pk in ("taxslayer", "turbotax")
+                and _effective_dom_status(pk, registry.get(pk)) != "live"
+            ):
+                pk = "crest_capital"
+            elif (
+                is_s_corp_or_workers_comp
+                and pk == "gusto"
+                and _effective_dom_status(pk, registry.get(pk)) != "live"
+            ):
+                pk = "rippling"
+        if pk != old_pk:
+            sec_html = re.sub(
+                rf'data-partner=["\']{re.escape(old_pk)}["\']',
+                f'data-partner="{pk}"',
+                sec_html,
+                flags=re.I,
+            )
+            sec_html = re.sub(
+                rf'href=["\']/r/{re.escape(old_pk)}(?=["\'\?])',
+                f'href="/r/{pk}',
+                sec_html,
+                flags=re.I,
+            )
+            sec_html = re.sub(
+                rf'(data-cta-id=["\'][^"\']*?)-{re.escape(old_pk)}(["\'])',
+                rf'\g<1>-{pk}\g<2>',
+                sec_html,
+                flags=re.I,
+            )
         resolved = _resolve_copy(pk)
         if not resolved:
             return sec_html
         p_name, p_cta, p_url = resolved
         p_obj = registry.get(pk)
         p_status = _effective_dom_status(pk, p_obj)
+        safe_url = html_lib.escape(p_url)
+        sec_html = re.sub(
+            r'data-partner-url=["\'][^"\']*["\']',
+            f'data-partner-url="{safe_url}"',
+            sec_html,
+        )
         expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         sec_text_lower = re.sub(r"<[^>]+>", " ", sec_html).lower()
         needs_fix = (
-            any(f_tok in sec_text_lower for f_tok in forbidden_tokens)
+            pk != old_pk
+            or any(f_tok in sec_text_lower for f_tok in forbidden_tokens)
             or (bool(expected_tokens) and not any(tok in sec_text_lower for tok in expected_tokens))
         )
         if needs_fix:
             safe_name = html_lib.escape(p_name)
             safe_cta = html_lib.escape(p_cta)
-            safe_url = html_lib.escape(p_url)
-            sec_html = re.sub(
-                r'data-partner-url=["\'][^"\']*["\']',
-                f'data-partner-url="{safe_url}"',
-                sec_html,
-            )
             sec_html = re.sub(
                 r'(<h3[^>]*>)(.*?)(</h3>)',
                 rf"\g<1>Recommended Partner Solution: {safe_name}\g<3>",
@@ -4054,6 +4089,13 @@ def normalize_html_callout_message_match(
                 rf'\g<1> data-status="{html_lib.escape(p_status)}"',
                 sec_html,
                 count=1,
+                flags=re.I,
+            )
+        else:
+            sec_html = re.sub(
+                r'data-status=["\'][^"\']*["\']',
+                f'data-status="{html_lib.escape(p_status)}"',
+                sec_html,
                 flags=re.I,
             )
         return sec_html

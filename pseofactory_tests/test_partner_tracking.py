@@ -1254,8 +1254,11 @@ def test_all_partners_have_verified_external_receipt_in_vault():
     assert vault["master_networks"]["impact"]["identity_verification_status"] == "COMPLETE"
     assert vault["master_networks"]["impact"]["active_advertiser_contracts"] == 1
     assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 17
+    assert vault["master_networks"]["impact"]["verified_clicks"] >= 3
+    assert vault["master_networks"]["partnerstack"]["verified_clicks"] >= 28
     assert vault["master_networks"]["cj_affiliate"]["company_cid"] == "7792582"
     assert vault["master_networks"]["cj_affiliate"]["publisher_id"] == "8101803"
+    assert vault["master_networks"]["cj_affiliate"]["promotional_property_id"] == "101725461"
     assert vault["master_networks"]["cj_affiliate"]["onboarding_progress"] == "9_of_9_completed"
     assert vault["master_networks"]["cj_affiliate"]["account_status"] == "ACTIVE"
     assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 28
@@ -1287,4 +1290,100 @@ def test_all_partners_have_verified_external_receipt_in_vault():
             assert any(tok in corr for tok in proof_tokens), (
                 f"{prop_id}.{p_key} lacks hard external receipt proof in correspondence_status: {corr}"
             )
+
+
+def test_publisher_introduction_sent_emails_classification():
+    """
+    Asserts that Sent #264-#274 publisher introduction emails to CJ Affiliate and Impact.com
+    advertiser contacts classify cleanly to their respective partner keys and properties.
+    """
+    engine = EmailIngestionEngine()
+    sent_messages = [
+        EmailMessage(
+            id="264",
+            message_id="msg-sent-264",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T12:32:46-07:00",
+            subject="CJ Affiliate Publisher Introduction: ProfitHelm.com (CID #8101803 / PID #101725461) - TurboTax (#1905878)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We recently submitted our publisher application to the TurboTax Affiliate Program.",
+            raw_headers={"to_email": "turbotax@cj.com"},
+        ),
+        EmailMessage(
+            id="265",
+            message_id="msg-sent-265",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T12:32:47-07:00",
+            subject="CJ Affiliate Publisher Introduction: ProfitHelm.com (CID #8101803) - Intuit Small Business QuickBooks & Payroll (#2271086)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We recently submitted our publisher application to Intuit Small Business.",
+            raw_headers={"to_email": "cj_intuit@cj.com"},
+        ),
+        EmailMessage(
+            id="268",
+            message_id="msg-sent-268",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T12:32:49-07:00",
+            subject="CJ Affiliate Publisher Introduction: ProfitHelm.com (CID #8101803) - ezTaxReturn.com (#6874782)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We recently submitted our publisher application to ezTaxReturn.com.",
+            raw_headers={"to_email": "allwyn.symon@eztaxreturn.com"},
+        ),
+        EmailMessage(
+            id="272",
+            message_id="msg-sent-272",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T12:32:53-07:00",
+            subject="Impact.com Publisher Introduction: Prexvo.com (Account #7932737) - Splash Financial (#9516)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We submitted our publisher application to Splash Financial on Impact.com.",
+            raw_headers={"to_email": "pleimkuehler@splashfinancial.com"},
+        ),
+        EmailMessage(
+            id="273",
+            message_id="msg-sent-273",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T12:32:54-07:00",
+            subject="Impact.com Publisher Introduction: Prexvo.com (Account #7932737) - SoFi Student Loan Refinancing (#11190)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We submitted our publisher application to SoFi (#11190) on Impact.com.",
+            raw_headers={"to_email": "cfels@lqdigital.com"},
+        ),
+        EmailMessage(
+            id="274",
+            message_id="msg-sent-274",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T12:32:54-07:00",
+            subject="Impact.com Publisher Introduction: Prexvo.com (Account #7932737) - LendKey Student Loan Refinancing (#3276)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We submitted our publisher application to LendKey (#3276) on Impact.com.",
+            raw_headers={"to_email": "accounting@lendkey.com"},
+        ),
+    ]
+    cls = engine.classify_partner_emails(sent_messages)
+    assert len(cls) == 6
+    by_id = {c.email_id: c for c in cls}
+    assert by_id["264"].partner_key == "turbotax"
+    assert by_id["264"].property_id == "profithelm"
+    assert by_id["265"].partner_key == "gusto"
+    assert by_id["268"].partner_key == "taxslayer"
+    assert by_id["272"].partner_key == "splash_financial"
+    assert by_id["272"].property_id == "prexvo"
+    assert by_id["273"].partner_key == "sofi"
+    assert by_id["273"].property_id == "prexvo"
+    assert by_id["274"].partner_key == "lendkey"
+    assert by_id["274"].property_id == "prexvo"
+
 

@@ -851,3 +851,27 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert imp_turbotax["estimated_monthly_revenue_impact_usd"] > imp_taxslayer["estimated_monthly_revenue_impact_usd"]
     assert imp_taxslayer["estimated_monthly_revenue_impact_usd"] > imp_exeter["estimated_monthly_revenue_impact_usd"]
     assert imp_exeter["estimated_monthly_revenue_impact_usd"] > imp_surety["estimated_monthly_revenue_impact_usd"]
+
+    # Verify #gsc-striking-overlay on tax bracket pages upgrades pending taxslayer to live crest_capital (Xendoo)
+    tax_overlay_html = """<!DOCTYPE html>
+<html><head><title>2027 IRS Tax Brackets & TCJA Sunset Calculator</title></head><body>
+  <aside class="quick-answer">
+    <div class="quick-answer-title">Key Finding: 2027 IRS Sunset Projection</div>
+    <p>Original quick answer text.</p>
+  </aside>
+  <div id="gsc-striking-overlay" class="striking-distance-overlay" data-slug="irs-2027-tax-brackets">
+    <section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="profithelm" data-partner="taxslayer" data-partner-url="https://www.taxslayer.com/">
+      <h3 class="section-subtitle">Recommended Partner Solution: TaxSlayer Self-Employed Tax Filing</h3>
+      <p class="overlay-partner-desc">File federal and state self-employed tax returns.</p>
+      <a href="/r/taxslayer" class="btn-cta" rel="noopener sponsored nofollow" target="_blank">Calculate &amp; File with TaxSlayer</a>
+    </section>
+  </div>
+</body></html>"""
+    norm_overlay = normalize_html_callout_message_match(tax_overlay_html, property_id="profithelm")
+    assert 'data-partner="crest_capital"' in norm_overlay
+    assert 'data-status="live"' in norm_overlay
+    assert 'data-partner-url="https://www.xendoo.com/?fp_ref=arif-4ac24e"' in norm_overlay
+    assert 'href="/r/crest_capital"' in norm_overlay
+    assert "Optimize Section 179 Accounting with Xendoo" in norm_overlay
+
+
