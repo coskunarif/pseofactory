@@ -3868,6 +3868,60 @@ def normalize_html_callout_message_match(
             return (partner.name, partner.cta_text, partner.default_url)
         return fallback_copy.get(pk)
 
+    # Extract page-level identity (title, canonical, h1) excluding footer/related links
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+    canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
+    if not canon_m:
+        canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html, re.I)
+    h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, re.S | re.I)
+    page_identity_lower = " ".join([
+        (title_m.group(1) if title_m else ""),
+        (canon_m.group(1) if canon_m else ""),
+        re.sub(r"<[^>]+>", " ", h1_m.group(1) if h1_m else ""),
+    ]).lower()
+
+    is_prediction_page = any(
+        tok in page_identity_lower
+        for tok in ("prediction-market", "prediction market", "kalshi", "polymarket", "event-contract", "kelly", "arbitrage")
+    )
+    is_prediction_odds_page = is_prediction_page and "tax" not in page_identity_lower
+    is_1031_page = "1031" in page_identity_lower
+    is_crypto_or_tax_page = (
+        not is_1031_page
+        and any(
+            tok in page_identity_lower
+            for tok in ("crypto", "1099-da", "8949", "tax-bracket", "tax bracket", "capital-gains", "capital gains", "tcja", "prediction-market-tax", "prediction market tax")
+        )
+    )
+    is_medical_page = any(
+        tok in page_identity_lower
+        for tok in ("medical", "dental", "healthcare", "practice")
+    )
+    is_s_corp_or_workers_comp = any(
+        tok in page_identity_lower
+        for tok in ("s-corp", "s corp", "reasonable-salary", "workers-comp", "payroll-burden")
+    )
+
+    updated = html
+
+    # Strip any prior idempotent inline calculator CTA and fold compaction style
+    updated = re.sub(
+        r'\s*<style\s+id=["\']pseo-inline-cta-fold["\'][^>]*>.*?</style>',
+        "",
+        updated,
+        flags=re.S | re.I,
+    )
+    updated = re.sub(
+        r'\s*<div\s+class=["\']calc-inline-cta["\'][^>]*>\s*<div\s+class=["\']calc-inline-cta-copy["\'][^>]*>.*?</div>\s*<a\s+[^>]*>.*?</a>\s*</div>',
+        "",
+        updated,
+        flags=re.S | re.I,
+    )
+
+    # If homepage (no /tools/ in canonical) only has pending crest_capital, upgrade to live mercury
+    if prop in ("profithelm", "exchange1031") and canon_m and "/tools/" not in canon_m.group(1).lower() and "/r/crest_capital" in updated and "/r/mercury" not in updated:
+        updated = updated.replace("/r/crest_capital", "/r/mercury").replace('data-partner="crest_capital"', 'data-partner="mercury"')
+
     def _replace_overlay_section(match: re.Match) -> str:
         sec_html = match.group(0)
         pk_match = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', sec_html, re.I)
@@ -3880,43 +3934,60 @@ def normalize_html_callout_message_match(
         if not resolved:
             return sec_html
         p_name, p_cta, p_url = resolved
+        p_obj = registry.get(pk)
+        p_status = p_obj.status if p_obj else "live"
         expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         sec_text_lower = re.sub(r"<[^>]+>", " ", sec_html).lower()
-        needs_fix = any(f_tok in sec_text_lower for f_tok in forbidden_tokens) or (
-            bool(expected_tokens) and not any(tok in sec_text_lower for tok in expected_tokens)
+        needs_fix = (
+            any(f_tok in sec_text_lower for f_tok in forbidden_tokens)
+            or (bool(expected_tokens) and not any(tok in sec_text_lower for tok in expected_tokens))
         )
-        if not needs_fix:
-            return sec_html
-
-        safe_name = html_lib.escape(p_name)
-        safe_cta = html_lib.escape(p_cta)
-        safe_url = html_lib.escape(p_url)
-        sec_html = re.sub(
-            r'data-partner-url=["\'][^"\']*["\']',
-            f'data-partner-url="{safe_url}"',
-            sec_html,
-        )
-        sec_html = re.sub(
-            r'(<h3[^>]*>)(.*?)(</h3>)',
-            rf"\g<1>Recommended Partner Solution: {safe_name}\g<3>",
-            sec_html,
-            count=1,
-            flags=re.S | re.I,
-        )
-        sec_html = re.sub(
-            r'(<a\s+[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*>)(.*?)(</a>)',
-            rf"\g<1>{safe_cta}\g<3>",
-            sec_html,
-            count=1,
-            flags=re.S | re.I,
-        )
+        if needs_fix:
+            safe_name = html_lib.escape(p_name)
+            safe_cta = html_lib.escape(p_cta)
+            safe_url = html_lib.escape(p_url)
+            sec_html = re.sub(
+                r'data-partner-url=["\'][^"\']*["\']',
+                f'data-partner-url="{safe_url}"',
+                sec_html,
+            )
+            sec_html = re.sub(
+                r'(<h3[^>]*>)(.*?)(</h3>)',
+                rf"\g<1>Recommended Partner Solution: {safe_name}\g<3>",
+                sec_html,
+                count=1,
+                flags=re.S | re.I,
+            )
+            if p_obj and p_obj.description:
+                sec_html = re.sub(
+                    r'(<p\s+class=["\']overlay-partner-desc["\'][^>]*>)(.*?)(</p>)',
+                    rf"\g<1>{html_lib.escape(p_obj.description)}\g<3>",
+                    sec_html,
+                    count=1,
+                    flags=re.S | re.I,
+                )
+            sec_html = re.sub(
+                r'(<a\s+[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*>)(.*?)(</a>)',
+                rf"\g<1>{safe_cta}\g<3>",
+                sec_html,
+                count=1,
+                flags=re.S | re.I,
+            )
+        if 'data-status=' not in sec_html:
+            sec_html = re.sub(
+                r'(<a\s+[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'])',
+                rf'\g<1> data-status="{html_lib.escape(p_status)}"',
+                sec_html,
+                count=1,
+                flags=re.I,
+            )
         return sec_html
 
     updated = re.sub(
         r'<section\s+class=["\'][^"\']*overlay-partner-offer[^"\']*["\'][^>]*>.*?</section>',
         _replace_overlay_section,
-        html,
+        updated,
         flags=re.S | re.I,
     )
 
@@ -3932,7 +4003,11 @@ def normalize_html_callout_message_match(
             return match.group(0)
         p_name, _, _ = resolved
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
-        if any(f_tok in h_text.lower() or f_tok in between.lower() for f_tok in forbidden_tokens):
+        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+        combined_low = f"{h_text} {between}".lower()
+        if any(f_tok in combined_low for f_tok in forbidden_tokens) or (
+            bool(expected_tokens) and not any(tok in combined_low for tok in expected_tokens)
+        ):
             partner = registry.get(pk)
             if partner and partner.description:
                 between = re.sub(
@@ -3961,6 +4036,17 @@ def normalize_html_callout_message_match(
         if not resolved:
             return match.group(0)
         _, p_cta, _ = resolved
+        p_obj = registry.get(pk)
+        p_status = p_obj.status if p_obj else "live"
+        if 'data-status=' not in open_tag:
+            open_tag = open_tag[:-1] + f' data-status="{html_lib.escape(p_status)}">'
+        else:
+            open_tag = re.sub(
+                r'data-status=["\'][^"\']*["\']',
+                f'data-status="{html_lib.escape(p_status)}"',
+                open_tag,
+                flags=re.I,
+            )
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         btn_text = re.sub(r"<[^>]+>", " ", inner_html)
@@ -3975,7 +4061,7 @@ def normalize_html_callout_message_match(
             if "&rarr;" in inner_html or "\u2192" in inner_html:
                 return f"{open_tag}{safe_cta} &rarr;{close_tag}"
             return f"{open_tag}{safe_cta}{close_tag}"
-        return match.group(0)
+        return f"{open_tag}{inner_html}{close_tag}"
 
     updated = re.sub(
         r'(<a\s+[^>]*href=["\'](/r/([a-z0-9_]+)[^"\']*)["\'][^>]*>)(.*?)(</a>)',
@@ -3984,14 +4070,16 @@ def normalize_html_callout_message_match(
         flags=re.S | re.I,
     )
 
+    primary_inline_pk: Optional[str] = None
+
     if prop == "prexvo":
         def _expand_prexvo_refinance_section(match: re.Match) -> str:
             sec_html = match.group(0)
             if (
                 'data-restricted-public-service="true"' in sec_html
                 or 'data-commercial-offers="none"' in sec_html
+                or "ymyl-public-service-guardrail" in sec_html
                 or "/r/splash_financial" not in sec_html
-                or "/r/credible" in sec_html
             ):
                 return sec_html
             cards_html: List[str] = []
@@ -4005,7 +4093,7 @@ def normalize_html_callout_message_match(
                     f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
                     f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
                     f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
-                    f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-cta-slot="{slot}">\n'
+                    f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
                     f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                     f'        </a>\n'
                     f'      </div>'
@@ -4025,9 +4113,14 @@ def normalize_html_callout_message_match(
             updated,
             flags=re.S | re.I,
         )
-    elif prop in ("profithelm", "exchange1031"):
-        html_lower = updated.lower()
+        if (
+            "ymyl-public-service-guardrail" not in updated
+            and 'data-restricted-public-service="true"' not in updated
+            and "/r/splash_financial" in updated
+        ):
+            primary_inline_pk = "splash_financial"
 
+    elif prop in ("profithelm", "exchange1031"):
         def _build_profithelm_partner_card(pk: str) -> str:
             p_obj = PROFITHELM_AFFILIATES.get(pk)
             if not p_obj:
@@ -4045,42 +4138,87 @@ def normalize_html_callout_message_match(
                 f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                 f'        </a>\n'
                 f'      </div>\n'
-                f'    </div>\n'
+                f'    </div>'
             )
 
         def _expand_profithelm_affiliates_section(match: re.Match) -> str:
+            nonlocal primary_inline_pk
             sec_html = match.group(0)
+            found_keys: List[str] = []
+            for m_k in re.finditer(r'href=["\']/r/([a-z0-9_]+)', sec_html, re.I):
+                k_val = m_k.group(1).lower()
+                if k_val in PROFITHELM_AFFILIATES and k_val not in found_keys:
+                    found_keys.append(k_val)
+
+            # Filter out vertical mismatches caused by prior footer-link false positives
+            if not is_prediction_page and "kalshi" in found_keys and len(found_keys) > 1:
+                found_keys = [k for k in found_keys if k != "kalshi"]
+            if not is_medical_page and "national_funding_med" in found_keys and len(found_keys) > 1:
+                found_keys = [k for k in found_keys if k != "national_funding_med"]
+
+            # Enrich with approved live direct sponsors matched to page vertical
+            if is_prediction_page and "kalshi" not in found_keys:
+                found_keys.append("kalshi")
+            if (
+                not is_1031_page
+                and ("coinledger" in found_keys or is_crypto_or_tax_page)
+                and "koinly" not in found_keys
+                and any(tok in page_identity_lower for tok in ("crypto", "1099-da", "8949", "tax-bracket", "tax bracket", "capital-gains", "capital gains", "tcja", "prediction-market", "prediction market"))
+            ):
+                if "coinledger" not in found_keys:
+                    found_keys.append("coinledger")
+                found_keys.append("koinly")
+            if (
+                "mercury" in found_keys
+                and "rippling" not in found_keys
+                and any(tok in page_identity_lower for tok in ("section-174", "section 174", "r-and-d", "r&d", "payroll", "s-corp", "workers-comp", "179", "runway", "burn", "factoring", "tariff", "surety"))
+            ):
+                found_keys.append("rippling")
+            if (
+                "rippling" in found_keys
+                and "mercury" not in found_keys
+                and any(tok in page_identity_lower for tok in ("workers-comp", "payroll", "s-corp"))
+            ):
+                found_keys.append("mercury")
+
+            # Sort so live direct sponsors always lead before pending fallbacks
+            def _partner_sort_key(k: str) -> Tuple[int, int]:
+                p_obj = PROFITHELM_AFFILIATES.get(k)
+                st = p_obj.status if p_obj else "pending"
+                st_rank = 0 if st == "live" else (1 if st == "pending_expansion" else 2)
+                if is_prediction_odds_page and k == "kalshi":
+                    return (-1, 0)
+                if is_1031_page and k == "ipx1031":
+                    return (-1, 0)
+                if is_s_corp_or_workers_comp and k == "rippling":
+                    return (-1, 0)
+                return (st_rank, found_keys.index(k))
+
+            sorted_keys = sorted(found_keys, key=_partner_sort_key)
+            if sorted_keys:
+                primary_inline_pk = sorted_keys[0]
+
+            if "affiliate-card" in sec_html and sorted_keys:
+                h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
+                h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
+                cards_joined = "\n".join(_build_profithelm_partner_card(k) for k in sorted_keys)
+                return (
+                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                    f'        {h2_html}'
+                    f'{cards_joined}\n'
+                    f'      </section>'
+                )
+
+            # Fallback for minimal unit-test snippets without .affiliate-card
             extra_cards = ""
-            if (
-                "/r/coinledger" in sec_html
-                and "/r/koinly" not in sec_html
-                and any(tok in html_lower for tok in ("crypto-tax", "crypto tax", "1099-da", "prediction-market-tax", "prediction market tax"))
-            ):
-                extra_cards += _build_profithelm_partner_card("koinly")
-            if (
-                "/r/mercury" in sec_html
-                and "/r/rippling" not in sec_html
-                and any(tok in html_lower for tok in ("section-174", "section 174", "r-and-d-tax-credit", "r&d tax credit"))
-            ):
-                extra_cards += _build_profithelm_partner_card("rippling")
-            if (
-                "/r/kalshi" not in sec_html
-                and any(tok in html_lower for tok in ("prediction-market", "prediction market", "kalshi"))
-            ):
-                extra_cards += _build_profithelm_partner_card("kalshi")
+            for k in sorted_keys:
+                if f"/r/{k}" not in sec_html:
+                    extra_cards += _build_profithelm_partner_card(k)
             if not extra_cards:
                 return sec_html
-            if re.search(r"</div>\s*</section>\s*$", sec_html, re.S | re.I):
-                return re.sub(
-                    r"(</div>\s*</section>\s*$)",
-                    rf"{extra_cards}        \g<1>",
-                    sec_html,
-                    count=1,
-                    flags=re.S | re.I,
-                )
             return re.sub(
                 r"(</section>\s*$)",
-                rf"{extra_cards}      \g<1>",
+                rf"{extra_cards}\n  \g<1>",
                 sec_html,
                 count=1,
                 flags=re.S | re.I,
@@ -4092,6 +4230,62 @@ def normalize_html_callout_message_match(
             updated,
             flags=re.S | re.I,
         )
+
+        # Ensure affiliates-section sits immediately before decision-framework-card when buried after it
+        df_match = re.search(r'<section\s+class=["\'][^"\']*decision-framework-card[^"\']*["\'][^>]*>', updated, re.I)
+        aff_sec_match = re.search(r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>', updated, re.S | re.I)
+        if df_match and aff_sec_match and aff_sec_match.start() > df_match.start():
+            aff_block = aff_sec_match.group(0)
+            updated = updated[:aff_sec_match.start()] + updated[aff_sec_match.end():]
+            df_match_2 = re.search(r'<section\s+class=["\'][^"\']*decision-framework-card[^"\']*["\'][^>]*>', updated, re.I)
+            if df_match_2:
+                updated = updated[:df_match_2.start()] + aff_block + "\n\n      " + updated[df_match_2.start():]
+
+    # Inject above-the-fold inline calculator result CTA into the calculator output panel
+    if primary_inline_pk and primary_inline_pk in registry:
+        p_inline = registry[primary_inline_pk]
+        safe_badge = html_lib.escape(p_inline.badge)
+        safe_name = html_lib.escape(p_inline.name)
+        safe_cta = html_lib.escape(p_inline.cta_text)
+        safe_status = html_lib.escape(p_inline.status)
+        inline_cta_html = (
+            f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
+            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
+            f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
+            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
+            f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
+            f'            </div>\n'
+            f'            <a href="/r/{primary_inline_pk}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
+            f'              {safe_cta} &rarr;\n'
+            f'            </a>\n'
+            f'          </div>'
+        )
+        injected_inline = False
+        for pat in (
+            r'(<div\s+class=["\']card\s+result-card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
+            r'(<div\s+class=["\']calculator-grid["\']>.*?<div\s+class=["\']card["\']>.*?<div\s+class=["\']card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
+            r'(<div\s+class=["\']calc-outputs-panel["\']>\s*<div\s+class=["\']calc-panel-header["\']>.*?</div>)',
+            r'(<div\s+class=["\']calc-results-column["\']>\s*<h3\s+class=["\']calc-column-title["\']>.*?</h3>)',
+        ):
+            if re.search(pat, updated, re.S | re.I):
+                updated = re.sub(pat, rf"\g<1>{inline_cta_html}", updated, count=1, flags=re.S | re.I)
+                injected_inline = True
+                break
+        if injected_inline and "</head>" in updated:
+            fold_css = (
+                '  <style id="pseo-inline-cta-fold">\n'
+                '    .hero-section, .tool-header.hero-section { padding-top: 0.625rem !important; padding-bottom: 0.625rem !important; margin-bottom: 0.625rem !important; }\n'
+                '    .hero-section p, .tool-header.hero-section p { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }\n'
+                '    .byline-wrap { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; padding-top: 0.25rem !important; padding-bottom: 0.25rem !important; }\n'
+                '    .direct-answer-block, .quick-answer { padding: 0.625rem 1rem !important; margin-bottom: 0.625rem !important; }\n'
+                '    .ftc-disclosure-banner { padding: 0.375rem 0.75rem !important; margin-bottom: 0.5rem !important; }\n'
+                '    .calc-header { margin-bottom: 0.375rem !important; padding-bottom: 0.25rem !important; }\n'
+                '    .calc-switcher-panel { padding: 0.5rem 0.875rem !important; margin-bottom: 0.625rem !important; }\n'
+                '    .calc-switcher-header { margin-bottom: 0.25rem !important; }\n'
+                '    .calc-panel-header, .card-header { margin-bottom: 0.625rem !important; padding-bottom: 0.5rem !important; }\n'
+                '  </style>\n'
+            )
+            updated = updated.replace("</head>", f"{fold_css}</head>", 1)
 
     return updated
 

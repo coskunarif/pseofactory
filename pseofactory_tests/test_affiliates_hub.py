@@ -747,3 +747,61 @@ def test_callout_expansion_for_prexvo_and_profithelm_approved_partners():
     expanded_rnd = normalize_html_callout_message_match(profithelm_rnd_html, property_id="profithelm")
     assert "/r/mercury" in expanded_rnd
     assert "/r/rippling" in expanded_rnd
+
+
+def test_visitor_journey_cta_placement_and_live_first_ordering():
+    """Verifies inline calculator result CTA injection, live-first ordering, and removal of footer-polluted mismatches."""
+    import re
+    from pseofactory.affiliates import normalize_html_callout_message_match
+
+    # 1. Prediction-market odds page promotes live Kalshi ahead of pending Interactive Brokers and injects inline result CTA
+    pred_odds_html = """<!DOCTYPE html>
+<html><head><title>Prediction Market Odds & Arbitrage Calculator</title></head><body>
+  <div class="calculator-grid">
+    <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
+    <div class="card"><div class="card-header"><h2>Arbitrage Outputs</h2></div><div class="metric-grid"></div></div>
+  </div>
+  <section class="affiliate-section affiliates-section">
+    <h2>Partners</h2>
+    <div class="affiliate-card partner-card">
+      <div class="affiliate-info"><h3>Zacks Quantitative Yield & Investment Research</h3></div>
+      <div><a href="/r/interactive_brokers" class="btn-cta">Access Quantitative Yield Research on Zacks</a></div>
+    </div>
+    <div class="affiliate-card partner-card">
+      <div class="affiliate-info"><h3>Kalshi CFTC-Regulated Event Contract Exchange</h3></div>
+      <div><a href="/r/kalshi" class="btn-cta">Trade Regulated Event Contracts on Kalshi</a></div>
+    </div>
+  </section>
+</body></html>"""
+    norm_pred = normalize_html_callout_message_match(pred_odds_html, property_id="profithelm")
+    assert 'class="calc-inline-cta"' in norm_pred
+    assert 'data-cta-slot="calculator_result_inline"' in norm_pred
+    r_links = re.findall(r'href="/r/([a-z0-9_]+)"', norm_pred)
+    assert r_links[0] == "kalshi"
+    assert r_links[1] == "kalshi"
+    assert r_links.index("kalshi") < r_links.index("interactive_brokers")
+
+    # 2. Section 179 page with footer link to Kalshi strips mismatched Kalshi/National Funding Med and orders live Mercury/Rippling first
+    sec179_html = """<!DOCTYPE html>
+<html><head><title>Section 179 Deduction Calculator</title></head><body>
+  <div class="calculator-grid">
+    <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
+    <div class="card result-card"><div class="card-header"><h2>Projected First-Year Tax Savings</h2></div></div>
+  </div>
+  <section class="affiliate-section affiliates-section">
+    <h2>Partners</h2>
+    <div class="affiliate-card partner-card"><a href="/r/crest_capital" class="btn-cta">Optimize Section 179 Accounting with Xendoo</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/national_funding_med" class="btn-cta">Upgrade Practice Billing & Payments with Stax</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/mercury" class="btn-cta">Apply for Mercury Startup Banking</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/kalshi" class="btn-cta">Trade Regulated Event Contracts on Kalshi</a></div>
+  </section>
+  <footer><a href="/tools/prediction-market-odds/">Kalshi Prediction Market Odds</a></footer>
+</body></html>"""
+    norm_179 = normalize_html_callout_message_match(sec179_html, property_id="profithelm")
+    r_179 = re.findall(r'href="/r/([a-z0-9_]+)"', norm_179)
+    assert "kalshi" not in r_179
+    assert "national_funding_med" not in r_179
+    assert r_179[0] == "mercury"
+    assert r_179.index("mercury") < r_179.index("crest_capital")
+    assert r_179.index("rippling") < r_179.index("crest_capital")
+
