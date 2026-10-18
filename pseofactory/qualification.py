@@ -4043,6 +4043,31 @@ def sync_tenant_redirect_rollup_adapters(
         fac_py = root / "profithelm" / "factory.py"
         if fac_py.is_file():
             fa_txt = fac_py.read_text(encoding="utf-8")
+            fa_orig = fa_txt
+            old_fac_init = """    if live_probe is None:
+        live_probe = live_deploy or (os.getenv("PROFITHELM_LIVE_PROBE") == "1")"""
+            new_fac_init = """    if live_probe is None:
+        live_probe = live_deploy or (os.getenv("PROFITHELM_LIVE_PROBE") == "1")
+    if check_queue:
+        abort_on_zero_asset = True"""
+            if old_fac_init in fa_txt and "if check_queue:\n        abort_on_zero_asset = True" not in fa_txt:
+                fa_txt = fa_txt.replace(old_fac_init, new_fac_init, 1)
+
+            old_fac_gate = """        # Pre-Run Empty-Queue Gate
+        if top_opp is None and top_trend is None and not target_query:
+            from profithelm.staleness import evaluate_system_staleness
+            staleness = evaluate_system_staleness()
+            requires_recompile = staleness.get("requires_recompile", False)
+            if not requires_recompile and not force:"""
+            new_fac_gate = """        # Pre-Run Empty-Queue Gate
+        if top_opp is None and top_trend is None and not target_query:
+            from profithelm.staleness import evaluate_system_staleness
+            staleness = evaluate_system_staleness()
+            requires_recompile = staleness.get("requires_recompile", False)
+            if (not requires_recompile or check_queue) and not force:"""
+            if old_fac_gate in fa_txt:
+                fa_txt = fa_txt.replace(old_fac_gate, new_fac_gate, 1)
+
             old_fac_build = """        extra = [synthesized_spec] if (synthesized_spec and synthesized_spec["slug"] not in {t["slug"] for t in TOOLS}) else None
         if use_worktree:
             with ephemeral_build_worktree(BASE_DIR) as wt_dir:
@@ -4086,6 +4111,7 @@ def sync_tenant_redirect_rollup_adapters(
         )"""
             if old_fac_build in fa_txt and "skip_rebuild = False" not in fa_txt:
                 fa_txt = fa_txt.replace(old_fac_build, new_fac_build, 1)
+            if fa_txt != fa_orig:
                 fac_py.write_text(fa_txt, encoding="utf-8")
                 updated_files += 1
     else:
@@ -4248,6 +4274,37 @@ def sync_tenant_redirect_rollup_adapters(
             if old_po in po_txt and "rollup_redirected_gsc_rows" not in po_txt:
                 po_txt = po_txt.replace(old_po, new_po, 1)
                 prexvo_obs.write_text(po_txt, encoding="utf-8")
+                updated_files += 1
+
+        prexvo_fac = root / "prexvo" / "factory.py"
+        if prexvo_fac.is_file():
+            px_txt = prexvo_fac.read_text(encoding="utf-8")
+            px_orig = px_txt
+            old_px_init = """    if live_probe is None:
+        live_probe = live_deploy or (os.getenv("PREXVO_LIVE_PROBE") == "1")"""
+            new_px_init = """    if live_probe is None:
+        live_probe = live_deploy or (os.getenv("PREXVO_LIVE_PROBE") == "1")
+    if check_queue:
+        abort_on_zero_asset = True
+    in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PREXVO_IN_TEST") == "1")"""
+            if old_px_init in px_txt and "if check_queue:\n        abort_on_zero_asset = True" not in px_txt:
+                px_txt = px_txt.replace(old_px_init, new_px_init, 1)
+
+            old_px_gate = """        if top_opp is None and not target_query:
+            from prexvo.staleness import evaluate_system_staleness
+            staleness = evaluate_system_staleness()
+            requires_recompile = staleness.get("requires_recompile", False)
+            if not requires_recompile and not force:"""
+            new_px_gate = """        if top_opp is None and not target_query:
+            from prexvo.staleness import evaluate_system_staleness
+            staleness = evaluate_system_staleness()
+            requires_recompile = staleness.get("requires_recompile", False)
+            if (not requires_recompile or check_queue) and not force:"""
+            if old_px_gate in px_txt:
+                px_txt = px_txt.replace(old_px_gate, new_px_gate, 1)
+
+            if px_txt != px_orig:
+                prexvo_fac.write_text(px_txt, encoding="utf-8")
                 updated_files += 1
 
     return updated_files

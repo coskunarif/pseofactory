@@ -1125,8 +1125,13 @@ def compile_search_opportunity_briefs(
 
         if apply_overlays and (tot_impr >= 3 or best_pos <= 25.0):
             try:
-                content_ov_path = root / "content" / "overlays" / f"{overlay_file_stem}.json"
-                persist_overlay_respecting_lock(content_ov_path, overlay_spec)
+                is_prod_repo = (
+                    str(root.resolve()).startswith("/home/ubuntuadmin/projects/")
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                )
+                if not is_prod_repo:
+                    content_ov_path = root / "content" / "overlays" / f"{overlay_file_stem}.json"
+                    persist_overlay_respecting_lock(content_ov_path, overlay_spec)
                 agy_ov_path = root / ".agy" / "overlays" / f"{overlay_file_stem}.json"
                 persist_overlay_respecting_lock(agy_ov_path, overlay_spec)
                 overlays_compiled += 1

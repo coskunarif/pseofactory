@@ -9,6 +9,7 @@ import os
 import json
 import shutil
 import subprocess
+from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from typing import Dict, Any, Optional, List
@@ -265,6 +266,29 @@ class TregChecker:
         self.tenant_domains = list(tenant_domains or DEFAULT_TENANT_DOMAINS)
         self.cache: Dict[str, TregDurabilityResult] = {}
         self.ai_citation_cache: Dict[str, Dict[str, Any]] = {}
+        self._live_ai_calls_made: int = 0
+        self._max_live_ai_calls: int = int(os.environ.get("PSEUFACTORY_MAX_LIVE_AI_CALLS", "2"))
+        self._disk_cache_path = Path(__file__).resolve().parents[2] / ".agy" / "ai_citation_cache.json"
+        if "PYTEST_CURRENT_TEST" not in os.environ and not mock_data and self._disk_cache_path.is_file():
+            try:
+                raw_disk = json.loads(self._disk_cache_path.read_text(encoding="utf-8"))
+                if isinstance(raw_disk, dict):
+                    for dk, dv in raw_disk.items():
+                        if isinstance(dv, dict):
+                            self.ai_citation_cache[str(dk).lower().strip()] = dv
+            except Exception:
+                pass
+
+    def _persist_ai_citation_disk_cache(self) -> None:
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        try:
+            self._disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_p = self._disk_cache_path.with_suffix(".json.tmp")
+            tmp_p.write_text(json.dumps(self.ai_citation_cache, indent=2), encoding="utf-8")
+            tmp_p.replace(self._disk_cache_path)
+        except Exception:
+            pass
 
     def register_mock(self, query: str, metrics: Dict[str, Any]) -> None:
         """Registers mock metrics for a specific query for fixture testing."""
@@ -287,8 +311,9 @@ class TregChecker:
         clean_q = query.strip()
         q_key = clean_q.lower()
         eff_tenants = tenant_domains or self.tenant_domains
+        is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
 
-        if q_key in self.ai_citation_cache and mock_override is None:
+        if q_key in self.ai_citation_cache and mock_override is None and not is_mocked:
             return self.ai_citation_cache[q_key]
 
         if remaining_budget is not None and remaining_budget < 15.0:
@@ -331,11 +356,12 @@ class TregChecker:
             return res
 
         treg_bin = shutil.which("treg")
-        is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
         is_test_env = "PYTEST_CURRENT_TEST" in os.environ
         live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
+        within_live_cap = is_mocked or live_opt_in or (self._live_ai_calls_made < self._max_live_ai_calls)
 
-        if treg_bin and (not is_test_env or is_mocked or live_opt_in):
+        if treg_bin and (not is_test_env or is_mocked or live_opt_in) and within_live_cap:
+            self._live_ai_calls_made += 1
             call_timeout = (
                 min(self.timeout, max(1.0, remaining_budget - 2.0))
                 if remaining_budget is not None
@@ -376,6 +402,8 @@ class TregChecker:
                         "ai_citation_checked": True,
                     }
                     self.ai_citation_cache[q_key] = res
+                    if not is_mocked:
+                        self._persist_ai_citation_disk_cache()
                     return res
             except (subprocess.TimeoutExpired, Exception):
                 pass
@@ -395,6 +423,8 @@ class TregChecker:
             "ai_citation_checked": True,
         }
         self.ai_citation_cache[q_key] = fallback
+        if not is_mocked:
+            self._persist_ai_citation_disk_cache()
         return fallback
 
     def _offline_ai_citation_payload(self, q_key: str) -> Dict[str, Any]:

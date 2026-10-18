@@ -1129,7 +1129,48 @@ def test_unattended_timer_concurrency_and_distribution_verification(tmp_path):
     assert not (tenant_dir / "content" / "overlays" / "irs-2027-tax-brackets.json").exists()
     assert not (agy_dir / "FAILED.profithelm_factory").exists()
 
+    # 6. Verify sync_tenant_redirect_rollup_adapters synchronizes check_queue and in_test guards
+    from pseofactory.qualification import sync_tenant_redirect_rollup_adapters
+    from pseofactory.trends.treg_checker import TregChecker
 
+    ph_fac = tenant_dir / "profithelm" / "factory.py"
+    ph_fac.parent.mkdir(parents=True, exist_ok=True)
+    ph_fac.write_text(
+        '    if live_probe is None:\n'
+        '        live_probe = live_deploy or (os.getenv("PROFITHELM_LIVE_PROBE") == "1")\n'
+        '        # Pre-Run Empty-Queue Gate\n'
+        '        if top_opp is None and top_trend is None and not target_query:\n'
+        '            from profithelm.staleness import evaluate_system_staleness\n'
+        '            staleness = evaluate_system_staleness()\n'
+        '            requires_recompile = staleness.get("requires_recompile", False)\n'
+        '            if not requires_recompile and not force:\n'
+        '                pass\n',
+        encoding="utf-8",
+    )
+    assert sync_tenant_redirect_rollup_adapters(tenant_dir, property_id="profithelm") >= 1
+    ph_synced = ph_fac.read_text(encoding="utf-8")
+    assert "if check_queue:\n        abort_on_zero_asset = True" in ph_synced
+    assert "if (not requires_recompile or check_queue) and not force:" in ph_synced
 
+    px_dir = tmp_path / "prexvo"
+    px_fac = px_dir / "prexvo" / "factory.py"
+    px_fac.parent.mkdir(parents=True, exist_ok=True)
+    px_fac.write_text(
+        '    if live_probe is None:\n'
+        '        live_probe = live_deploy or (os.getenv("PREXVO_LIVE_PROBE") == "1")\n'
+        '        if top_opp is None and not target_query:\n'
+        '            from prexvo.staleness import evaluate_system_staleness\n'
+        '            staleness = evaluate_system_staleness()\n'
+        '            requires_recompile = staleness.get("requires_recompile", False)\n'
+        '            if not requires_recompile and not force:\n'
+        '                pass\n',
+        encoding="utf-8",
+    )
+    assert sync_tenant_redirect_rollup_adapters(px_dir, property_id="prexvo") >= 1
+    px_synced = px_fac.read_text(encoding="utf-8")
+    assert 'in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PREXVO_IN_TEST") == "1")' in px_synced
+    assert "if (not requires_recompile or check_queue) and not force:" in px_synced
 
-
+    checker = TregChecker(check_ai_citations=True)
+    assert hasattr(checker, "_max_live_ai_calls")
+    assert checker._max_live_ai_calls >= 1
