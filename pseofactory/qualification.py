@@ -3734,6 +3734,20 @@ def sync_tenant_redirect_rollup_adapters(
             pass"""
             if old_match in g_txt:
                 g_txt = g_txt.replace(old_match, new_match, 1)
+
+            old_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    if not path.is_file():
+        return None"""
+            new_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    if not path.is_file() and base_dir is None:
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file():
+            path = alt_path
+    if not path.is_file():
+        return None"""
+            if old_load_ov in g_txt and 'BASE_DIR / ".agy" / "overlays"' not in g_txt:
+                g_txt = g_txt.replace(old_load_ov, new_load_ov, 1)
+
             if g_txt != gsc_py.read_text(encoding="utf-8"):
                 gsc_py.write_text(g_txt, encoding="utf-8")
                 updated_files += 1
@@ -3826,6 +3840,24 @@ def sync_tenant_redirect_rollup_adapters(
             if old_pf_ret in pf_txt:
                 pf_txt = pf_txt.replace(old_pf_ret, new_pf_ret, 1)
                 prexvo_freshness.write_text(pf_txt, encoding="utf-8")
+                updated_files += 1
+
+        prexvo_gsc = root / "prexvo" / "gsc_adapter.py"
+        if prexvo_gsc.is_file():
+            pg_txt = prexvo_gsc.read_text(encoding="utf-8")
+            old_pg_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    if not path.is_file():
+        return None"""
+            new_pg_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    if not path.is_file() and base_dir is None:
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file():
+            path = alt_path
+    if not path.is_file():
+        return None"""
+            if old_pg_ov in pg_txt and 'BASE_DIR / ".agy" / "overlays"' not in pg_txt:
+                pg_txt = pg_txt.replace(old_pg_ov, new_pg_ov, 1)
+                prexvo_gsc.write_text(pg_txt, encoding="utf-8")
                 updated_files += 1
 
         prexvo_obs = root / "prexvo" / "observer.py"

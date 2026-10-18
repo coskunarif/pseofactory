@@ -956,10 +956,24 @@ def test_midnight_factory_build_dist_stash_and_redirect_rollup_self_healing(tmp_
     assert 'export PROFITHELM_DIST_DIR="$WORKTREE_SANDBOX/dist"' in rf_after
     assert '"reset", "-q", "HEAD", "--", "dist"' in factory_py.read_text(encoding="utf-8")
 
-    # 5. Verify sync_tenant_redirect_rollup_adapters wires prexvo/observer.py
+    # 5. Verify sync_tenant_redirect_rollup_adapters wires prexvo/observer.py and .agy/overlays fallback in gsc_adapter.py
+    ph_gsc = ph_dir / "gsc_adapter.py"
+    ph_gsc.write_text(
+        'def load_page_overlay(slug, base_dir=None):\n'
+        '    path = get_overlay_path(slug, base_dir=base_dir)\n'
+        '    if not path.is_file():\n'
+        '        return None\n'
+        '    return {}\n',
+        encoding="utf-8",
+    )
+    updated_ph = sync_tenant_redirect_rollup_adapters(tenant_repo, property_id="profithelm")
+    assert updated_ph >= 1
+    assert 'BASE_DIR / ".agy" / "overlays"' in ph_gsc.read_text(encoding="utf-8")
+
     updated_px = sync_tenant_redirect_rollup_adapters(tenant_repo, property_id="prexvo")
     assert updated_px >= 1
     assert "rollup_redirected_gsc_rows" in prexvo_obs.read_text(encoding="utf-8")
+
 
 
 
