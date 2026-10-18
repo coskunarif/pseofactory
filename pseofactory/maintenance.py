@@ -4515,6 +4515,9 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if '"WebApplication"' in html_content and '"priceCurrency"' not in html_content:
         return True
 
+    if "venues default to ordinary income rates" in html_content:
+        return True
+
     return False
 
 
@@ -4587,6 +4590,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
         ("&amp;amp;", "&amp;"),
         ("Audit-Ready-S-Corp", "Audit-Ready S-Corp"),
         ("<td>480.00%</td>", "<td>4.80%</td>"),
+        ("venues default to ordinary income rates", "venues are taxed at ordinary income rates"),
     ):
         if old_tok in updated:
             updated = updated.replace(old_tok, new_tok)
@@ -6069,7 +6073,10 @@ class RetroReflectionEngine:
             return True
         if any(k in ov_s_low for k in ("prediction", "kalshi", "polymarket", "odds", "1256")) and (
             "IRC Section 1(j) Marginal Rate Tiers" in ov_body_dump
+            or "default to" in ov_body_dump.lower()
         ):
+            return True
+        if "default to" in ov_body_dump.lower():
             return True
         return False
 

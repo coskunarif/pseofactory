@@ -2360,7 +2360,7 @@ def _build_vertical_profithelm_overlay_blocks(
                     "answer": (
                         "Event contracts traded on a CFTC-designated contract market (DCM) under 17 CFR Part 40 can be evaluated "
                         "under IRC Section 1256(g) on IRS Form 6781 (60% long-term, 40% short-term capital gain), whereas non-DCM "
-                        "venues default to ordinary income rates and IRC Section 165(d) loss limits."
+                        "venues are taxed at ordinary income rates and IRC Section 165(d) loss limits."
                     ),
                 },
                 {
