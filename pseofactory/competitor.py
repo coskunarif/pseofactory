@@ -1591,9 +1591,48 @@ def _resolve_tax_bracket_and_entity_competitor_content(s_low: str) -> Optional[D
     """Resolves vertical-isolated statutory trap, checklist, pitfalls, and handoff content for Tax Brackets, TCJA, Capital Gains, and S-Corp models."""
     if not any(
         tok in s_low
-        for tok in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "1202", "qsbs", "amt", "niit")
+        for tok in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "reasonable-salary", "1202", "qsbs", "amt", "niit")
     ):
         return None
+    if any(tok in s_low for tok in ("s-corp", "reasonable-salary")):
+        return {
+            "trap_title": "Immediate IRS Revenue Ruling 74-44 Reasonable Compensation and Section 199A Wage Cap Trap Alert (IRC Section 3121)",
+            "trap_body": (
+                "Under IRS Revenue Ruling 74-44 and IRC Section 3121, S-Corporation shareholder-employees who perform "
+                "substantial services must receive reasonable W-2 compensation subject to 15.3% FICA tax before taking "
+                "FICA-exempt K-1 distributions. Setting W-2 salary artificially low risks IRS distribution recharacterization "
+                "and IRC Section 6656 payroll tax penalties, while setting W-2 salary too high erodes the 20% IRC Section 199A QBI deduction base."
+            ),
+            "checklist_items": [
+                "Benchmark officer W-2 compensation against BLS OEWS occupational wage percentiles across technical, management, and administrative hours.",
+                "Model the IRC Section 3121 OASDI Social Security wage base cap ($176,100) alongside the uncapped 2.9% Medicare and 0.9% Additional Medicare surtax.",
+                "Balance W-2 salary against remaining K-1 pass-through profit to maximize the 20% IRC Section 199A Qualified Business Income (QBI) deduction.",
+                "Report >2% S-Corp shareholder health insurance premiums on Form W-2 Box 1 (exempt from Box 3 and Box 5 FICA under IRS Notice 2008-1) to preserve above-the-line deductibility.",
+            ],
+            "pitfalls": [
+                (
+                    "Taking $0 or nominal W-2 officer salary while withdrawing large K-1 shareholder distributions",
+                    "Triggers IRS Revenue Ruling 74-44 audit reclassification of distributions into wages plus 15.3% FICA and Section 6656 failure-to-deposit penalties",
+                    "Document an annual BLS OEWS multi-role compensation study and run scheduled W-2 payroll via Form 941 before distributing K-1 profits",
+                ),
+                (
+                    "Over-allocating W-2 salary when net business income is below the Section 199A W-2 wage limitation threshold",
+                    "Replaces tax-advantaged K-1 pass-through income (eligible for the 20% QBI deduction) with fully taxed W-2 wages subject to 15.3% FICA",
+                    "Solve jointly for combined FICA payroll tax and Section 199A QBI tax shield across your marginal federal tax bracket",
+                ),
+                (
+                    "Omitting >2% shareholder-employee health insurance premiums from Form W-2 Box 1 wages",
+                    "Disqualifies the IRC Section 162(l) self-employed health insurance deduction on Schedule 1 of Form 1040",
+                    "Reimburse or pay policy premiums through the S-Corp and include them in Box 1 (but not Boxes 3 or 5) of the officer's Form W-2",
+                ),
+            ],
+            "handoff_title": "S-Corp Payroll, Reasonable Compensation & CPA Vetting Checklist",
+            "handoff_items": [
+                "Verify automated Form 941/940 quarterly payroll tax filings, W-2 Box 14 >2% shareholder health insurance coding, and state SUTA synchronization.",
+                "Confirm BLS OEWS reasonable compensation study documentation and Section 199A W-2/K-1 split modeling support.",
+                "Check state Pass-Through Entity Tax (PTET) election workflows (IRS Notice 2020-75) and quarterly Form 1040-ES safe-harbor integration.",
+            ],
+        }
     return {
         "trap_title": "Immediate TCJA Sunset and Marginal vs Effective Tax Rate Trap Alert (IRC Section 1(j) & 199A)",
         "trap_body": (
@@ -2355,13 +2394,28 @@ def _resolve_vertical_competitor_content(
 def _format_safe_heading_topic(title: str, slug: str) -> str:
     """
     Produces a concise, entity-specific topic label for H2/H3 subheadings with
-    zero forbidden dashes and zero standalone single-letter uppercase words (B-HJ-Z).
+    zero forbidden dashes, zero unsplit CamelCase tokens, and zero standalone
+    single-letter uppercase words (B-HJ-Z).
     """
     raw = str(title or "").split("|")[0].split(" - ")[0].strip()
     raw = re.sub(r"\([^)]*\)", "", raw).strip()
     raw = re.sub(r"^20\d{2}(?:-20\d{2})?\s+", "", raw).strip()
+    # Split CamelCase model names (e.g. SCorpReasonableSalaryTaxArbitrageModel, SaaSRunwayGoingConcernModel)
+    raw = re.sub(r"\bSCorp\b", "S-Corp", raw)
+    raw = re.sub(r"\bSCorp([A-Z])", r"S-Corp \1", raw)
+    raw = re.sub(r"\bCCorp([A-Z])", r"C-Corp \1", raw)
+    raw = re.sub(r"SaaS([A-Z])", r"SaaS \1", raw)
+    raw = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw)
+    raw = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", raw)
+    raw = re.sub(r"\bSaa\s+S\b", "SaaS", raw, flags=re.IGNORECASE)
+
+    slug_clean = str(slug or "").strip("/")
+    is_raw_spoke_title = "/" in slug_clean and raw.lower().startswith(
+        ("irs 2027 tax brackets ", "section 1031 calculator ", "section 179 calculator ")
+    )
     if (
         not raw
+        or is_raw_spoke_title
         or ("-" in raw and " " not in raw)
         or raw.lower().startswith(("prexvo-", "profithelm-"))
         or raw.lower()
@@ -2372,22 +2426,56 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
             "tool",
         )
     ):
-        raw = str(slug or "statutory-model").replace("/", " ").replace("-", " ").title()
-        for acr in ("Rap", "Ibr", "Pslf", "Plus", "Save", "Paye", "Icr", "Irs", "Tcja", "Qsbs", "Niit", "Amt", "Hysa"):
-            raw = re.sub(rf"\b{acr}\b", acr.upper(), raw)
-        raw = re.sub(r"\bSaas\b", "SaaS", raw)
-    # Join standalone single-letter uppercase tokens (B-HJ-Z) to adjacent words so verifier.py:4185 never triggers
-    raw = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", raw)
-    raw = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])\b", r"\1-\2", raw)
+        if "/" in slug_clean:
+            sp_parts = [p for p in slug_clean.split("/") if p]
+            if len(sp_parts) == 2 and sp_parts[0] == "irs-2027-tax-brackets":
+                st_lbl = sp_parts[1].replace("-", " ").title().replace("Of", "of")
+                raw = f"{st_lbl} 2027 Tax Brackets"
+            elif len(sp_parts) == 2 and sp_parts[0] == "section-1031-calculator":
+                st_lbl = sp_parts[1].replace("-", " ").title().replace("Of", "of")
+                raw = f"{st_lbl} Section 1031 Exchange"
+            elif len(sp_parts) == 2 and sp_parts[0] == "section-179-calculator":
+                veh_map = dict(PROFITHELM_SECTION_179_VEHICLES)
+                v_full = veh_map.get(sp_parts[1], f"{sp_parts[1].replace('-', ' ').title()} Section 179")
+                raw = re.sub(r"\s+(?:Tax\s+)?(?:Deduction|Write-Off|Depreciation)?\s*Calculator.*$", "", v_full, flags=re.IGNORECASE).strip()
+            else:
+                raw = slug_clean.replace("/", " ").replace("-", " ").title()
+        else:
+            veh_map = dict(PROFITHELM_SECTION_179_VEHICLES)
+            if slug_clean in veh_map:
+                raw = re.sub(r"\s+(?:Tax\s+)?(?:Deduction|Write-Off|Depreciation)?\s*Calculator.*$", "", veh_map[slug_clean], flags=re.IGNORECASE).strip()
+            else:
+                raw = str(slug_clean or "statutory-model").replace("/", " ").replace("-", " ").title()
+
+    raw = re.sub(r"\bS\s+Corp\b", "S-Corp", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bC\s+Corp\b", "C-Corp", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bR\s+(?:And|&)\s+D\b", "R&D", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bK\s+1\b", "K-1", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bW\s+([249])\b", r"W-\1", raw, flags=re.IGNORECASE)
+    for acr in ("Rap", "Ibr", "Pslf", "Plus", "Save", "Paye", "Icr", "Irs", "Irc", "Tcja", "Qsbs", "Niit", "Amt", "Hysa", "Fica", "Qbi", "Gvwr", "Suv", "Apr", "Roi"):
+        raw = re.sub(rf"\b{acr}\b", acr.upper(), raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bSaas\b", "SaaS", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bVs\b", "vs", raw)
+    raw = re.sub(
+        r"(?:\s+(?:Quantitative|Arbitrage|Differential|Calculation|Model))+\s*$",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Join standalone single-letter uppercase tokens (B-HJ-Z) to adjacent words without touching S-Corp/W-2
+    raw = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", raw)
+    raw = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", raw)
     raw = re.sub(r"\s+", " ", raw).strip(" :-,")
     words = raw.split()
-    if len(words) > 6:
-        words = words[:6]
-        while words and words[-1].lower() in ("and", "or", "vs", "vs.", "for", "with", "to", "in", "of", "on", "&", "&amp;"):
+    max_words = 7 if len(words) >= 7 and [w.lower() for w in words[5:7]] == ["section", "179"] else 6
+    if len(words) > max_words:
+        words = words[:max_words]
+        while words and words[-1].lower() in ("and", "or", "vs", "vs.", "for", "with", "to", "in", "of", "on", "&", "&amp;", "section"):
             words.pop()
     result = " ".join(words).strip(" :-,")
-    result = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", result)
-    result = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])\b", r"\1-\2", result)
+    result = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", result)
+    result = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", result)
     return result or "Statutory Calculation Model"
 
 

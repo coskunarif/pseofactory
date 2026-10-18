@@ -2052,11 +2052,10 @@ def _build_vertical_profithelm_overlay_blocks(
                 {
                     "question": "What statutory compliance rules cannot be verified by a 1031 calculator alone?",
                     "answer": (
-                        "Arithmetic models cannot verify non-numeric statutory mandates: (1) executing a written Qualified Intermediary "
-                        "exchange agreement BEFORE relinquished closing under Treas. Reg. 1.1031(k)-1(g)(4), (2) avoiding disqualified "
-                        "persons (agents, CPAs, attorneys, or family members within 2 years under Treas. Reg. 1.1031(k)-1(k)), "
-                        "(3) delivering signed 3-Property or 200% Rule written identification by midnight of Day 45, and "
-                        "(4) filing annual state clawback returns such as California FTB Form 3840 or Oregon Form OR-24."
+                        "Arithmetic models cannot verify non-numeric statutory mandates: executing a written Qualified Intermediary "
+                        "exchange agreement before relinquished closing under Treas. Reg. 1.1031(k)-1(g)(4) and screening out disqualified "
+                        "persons under Treas. Reg. 1.1031(k)-1(k). Investors must also deliver signed 3-Property or 200% Rule written "
+                        "identification by midnight of Day 45 and file annual state clawback returns such as California FTB Form 3840."
                     ),
                 },
             ],
@@ -2249,7 +2248,131 @@ def _build_vertical_profithelm_overlay_blocks(
                 },
             ],
         }
-    if any(k in comb for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal", "s-corp", "s corp", "reasonable-salary", "199a", "1202", "qsbs")):
+    if any(k in comb for k in ("s-corp", "s corp", "reasonable-salary", "reasonable salary")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 3121 FICA & Revenue Ruling 74-44 Benchmarks",
+                f"Audit-Ready {heading_label} W-2 vs K-1 Split & Section 199A QBI Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-scorp-baseline",
+                    "label": f"{heading_label} Solo Consultant Baseline ($220k Profit, $95k W-2)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"net_business_income": 220000, "reasonable_salary": 95000, "marginal_tax_rate_pct": 32},
+                    "description": "Splitting $220,000 net profit into a $95,000 BLS-benchmarked W-2 salary and $125,000 K-1 distribution saves $13,180 in FICA taxes.",
+                },
+                {
+                    "id": "preset-scorp-agency",
+                    "label": f"{heading_label} Scaling Operating Entity ($400k Profit, $145k W-2)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"net_business_income": 400000, "reasonable_salary": 145000, "marginal_tax_rate_pct": 35},
+                    "description": "Optimizing W-2 wage base ($145,000) to satisfy the IRC Section 199A 50%-of-W-2-wages QBI limitation while shielding $255,000 K-1 profit.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$220,000 Net Operating Profit ($95k W-2 Salary / $125k K-1 Split)",
+                    "baseline": "$27,713 Schedule C Self-Employment Tax",
+                    "optimized": "$14,535 S-Corp FICA Tax + $25,000 Sec. 199A QBI Deduction",
+                    "delta": "+$13,180 Annual FICA Payroll Tax Saved",
+                    "authority": "IRC Section 3121, Section 199A & Rev. Rul. 74-44",
+                },
+                {
+                    "scenario": "$400,000 Net Profit Crossing OASDI $176,100 Social Security Cap",
+                    "baseline": "$34,425 Unstructured Pass-Through SE Tax",
+                    "optimized": "$22,185 S-Corp FICA + $51,000 Sec. 199A QBI Deduction",
+                    "delta": "+$12,240 Medicare Surtax & FICA Shield",
+                    "authority": "IRC Section 1366, Section 3111 & Form 1120-S",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How does the IRS audit S-Corp reasonable compensation under Revenue Ruling 74-44?",
+                    "answer": (
+                        "Under IRS Revenue Ruling 74-44 and IRC Section 3121, shareholder-employees must receive W-2 compensation "
+                        "commensurate with BLS OEWS occupational wage percentiles for their duties before withdrawing FICA-exempt "
+                        "K-1 distributions on Schedule K-1 (Form 1120-S)."
+                    ),
+                },
+                {
+                    "question": "How does W-2 officer salary interact with the 20% IRC Section 199A QBI deduction?",
+                    "answer": (
+                        "Every dollar paid as W-2 salary reduces remaining K-1 qualified business income eligible for the 20% Section "
+                        "199A deduction, except above statutory taxable income phase-outs where W-2 wages unlock the 50% wage limitation cap."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("prediction", "1256", "kalshi", "polymarket", "odds", "kelly")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 1256 60/40 vs Section 165(d) Statutory Rules",
+                f"Audit-Ready {heading_label} CFTC Part 40 & Fee-Adjusted Edge Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-pred-dcm",
+                    "label": f"{heading_label} CFTC Regulated DCM Contract ($50k Net Gain)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"gain": 50000, "income": 150000, "kalshi_price": 52, "poly_price": 44},
+                    "description": "CFTC-regulated event contracts modeling 60% long-term / 40% short-term Section 1256 blended rates on IRS Form 6781.",
+                },
+                {
+                    "id": "preset-pred-arb",
+                    "label": f"{heading_label} Cross-Venue Spread Arbitrage ($120k Volume)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"gain": 120000, "income": 250000, "kalshi_price": 48, "poly_price": 47},
+                    "description": "Evaluating quadratic exchange fee drag (0.07 * P * (1 minus P)) and Half-Kelly position sizing across binary contracts.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$50,000 Realized Event Contract Gain (35% Federal Bracket)",
+                    "baseline": "$19,400 Ordinary Tax + NIIT (38.8% Rate)",
+                    "optimized": "$13,400 IRC Section 1256 60/40 Blended Tax (26.8% Rate)",
+                    "delta": "+$6,000 After-Tax Trading Alpha Saved",
+                    "authority": "IRC Section 1256(g), CFTC 17 CFR Part 40 & Form 6781",
+                },
+                {
+                    "scenario": "Mid-Market 50c Binary Contract Execution Without Fee Adjustment",
+                    "baseline": "3.50% Round-Trip Quadratic Taker Fee Drag",
+                    "optimized": "0.00% Maker Limit Order Execution + 0.5x Half-Kelly Sizing",
+                    "delta": "+350 bps Break-Even Win Probability Reduction",
+                    "authority": "Commodity Exchange Act 7 U.S.C. 1a & CFTC Rule 40.11",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "When do prediction market contracts qualify for IRC Section 1256 60/40 tax treatment?",
+                    "answer": (
+                        "Event contracts traded on a CFTC-designated contract market (DCM) under 17 CFR Part 40 can be evaluated "
+                        "under IRC Section 1256(g) on IRS Form 6781 (60% long-term, 40% short-term capital gain), whereas non-DCM "
+                        "venues default to ordinary income rates and IRC Section 165(d) loss limits."
+                    ),
+                },
+                {
+                    "question": "How do quadratic exchange fees change break-even implied probability?",
+                    "answer": (
+                        "Because binary exchange fees peak at 50 cents ($0.0175 per contract under 0.07 * P * (1 minus P)), traders "
+                        "must add round-trip fee basis points to mid-market implied probability before applying Half-Kelly sizing."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal", "199a", "1202", "qsbs")):
         return _build_tax_bracket_profithelm_overlay_blocks(
             heading_label=heading_label,
             query_clean=query_clean,
@@ -2316,6 +2439,255 @@ def _build_vertical_profithelm_overlay_blocks(
                         "Making a timely IRC Section 280C(c)(3) election on an original return applies a 79% statutory "
                         "multiplier to the gross R&D credit in exchange for preserving 100% of your allowable Section 174 "
                         "deductions and simplifying state tax return adjustments."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("301", "tariff", "landed-cost", "htsus", "customs", "duty")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: Trade Act Section 301 (19 U.S.C. 2411) & HTSUS Duty Stacking",
+                f"Audit-Ready {heading_label} CBP Form 7501 & MPF/HMF Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-301-list3",
+                    "label": f"{heading_label} List 3 Industrial Container ($100k Customs Value, 25% Surcharge)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"customs_value": 100000, "base_duty_pct": 3.5, "section_301_pct": 25.0, "freight_insurance": 6500},
+                    "description": "Ocean container entry stacking 3.5% MFN Column 1 duty, 25% Section 301 List 3 tariff, 0.3464% MPF, and 0.125% HMF.",
+                },
+                {
+                    "id": "preset-301-ev-semi",
+                    "label": f"{heading_label} High-Tariff Strategic Tech Entry ($250k Value, 50% Surcharge)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"customs_value": 250000, "base_duty_pct": 2.5, "section_301_pct": 50.0, "freight_insurance": 12000},
+                    "description": "High-tariff semiconductor/battery import modeling CBP Form 7501 cash outlay and continuous customs bond sizing.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$100,000 Declared Customs Value (3.5% MFN + 25% Section 301)",
+                    "baseline": "$3,971 Base MFN Duty + MPF/HMF Only",
+                    "optimized": "$28,971 Total CBP Form 7501 Duty & Fee Outlay",
+                    "delta": "+$25,000 Section 301 Chapter 99 Surcharge",
+                    "authority": "19 U.S.C. 2411, HTSUS Chapter 99 & 19 CFR 24.23",
+                },
+                {
+                    "scenario": "First Sale for Export Valuation Election (19 U.S.C. 1401a)",
+                    "baseline": "28.5% Stacked Duty on Middleman Markup Invoice",
+                    "optimized": "28.5% Duty Assessed on Factory First-Sale Price",
+                    "delta": "Saves 15% to 25% of Dutiable Customs Basis",
+                    "authority": "19 U.S.C. 1401a & CBP First Sale Rule",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How do Section 301 tariffs stack with MFN duties, MPF, and HMF on CBP Form 7501?",
+                    "answer": (
+                        "Under 19 U.S.C. 2411 and HTSUS Chapter 99, Section 301 punitive tariffs (7.5% to 100%) add directly to "
+                        "Column 1 MFN duty rates on declared transaction value, plus 0.3464% Merchandise Processing Fee (subject to "
+                        "statutory min/max caps) and 0.125% Harbor Maintenance Fee on ocean cargo."
+                    ),
+                },
+                {
+                    "question": "What triggers CBP customs bond insufficiency under Section 301 duty hikes?",
+                    "answer": (
+                        "U.S. Customs and Border Protection requires continuous import bonds to cover at least 10% of total duties, "
+                        "taxes, and fees paid over the prior 12 months. Stacked Section 301 surcharges frequently require proactive "
+                        "bond rider increases to prevent port-of-entry holds."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("surety", "bond", "contractor-surety", "miller-act")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: Federal Miller Act (40 U.S.C. 3131) & Underwriting Tiers",
+                f"Audit-Ready {heading_label} Credit Tier & Indemnity Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-bond-preferred",
+                    "label": f"{heading_label} Preferred Standard Market ($50k Bond, 720+ FICO)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"bond_amount": 50000, "premium_rate_pct": 1.0, "term_years": 1},
+                    "description": "Preferred underwriting tier (0.5% to 1.5% rate) for contractors with strong CPA working capital and 700+ credit.",
+                },
+                {
+                    "id": "preset-bond-miller",
+                    "label": f"{heading_label} Public Works Performance Bond ($250k Contract, 1.5% Rate)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"bond_amount": 250000, "premium_rate_pct": 1.5, "term_years": 1},
+                    "description": "Federal Miller Act (40 U.S.C. 3131) 100% performance and payment bond requirement on public contracts over $150,000.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$100,000 Statutory Contractor or Performance Bond Penalty",
+                    "baseline": "$5,000 to $10,000 Specialty High-Risk Tier (5%-10%)",
+                    "optimized": "$750 to $1,500 Preferred Standard Tier (0.75%-1.5%)",
+                    "delta": "+$4,250 to $8,500 Annual Underwriting Savings",
+                    "authority": "40 U.S.C. 3131 (Miller Act) & Treasury Circular 570",
+                },
+                {
+                    "scenario": "Multi-Year License Bond Continuation vs Annual Renewal",
+                    "baseline": "100% Full Annual Renewal Premium Outlay",
+                    "optimized": "15% to 25% Prepaid Multi-Year Continuation Discount",
+                    "delta": "Prevents State License Lapse & Lowers Effective Rate",
+                    "authority": "FAR Part 28 & SBA Surety Bond Guarantee Rules",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How is a surety bond premium calculated compared to commercial insurance?",
+                    "answer": (
+                        "Surety bond cost equals the statutory bond penalty multiplied by your credit-tiered underwriting rate "
+                        "(0.5% to 1.5% preferred vs 3% to 10% high-risk). Unlike casualty insurance, surety bonds require a "
+                        "General Indemnity Agreement (GIA) granting the surety 100% subrogation recovery rights."
+                    ),
+                },
+                {
+                    "question": "When does the Federal Miller Act (40 U.S.C. 3131) require 100% performance and payment bonds?",
+                    "answer": (
+                        "Under 40 U.S.C. 3131 and FAR Part 28, prime contractors on federal construction contracts exceeding "
+                        "$150,000 must furnish 100% Performance and Payment Bonds issued by a carrier listed on U.S. Treasury Circular 570."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("factoring", "line-of-credit")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: Annualized Effective APR & TILA Reg Z Disclosures",
+                f"Audit-Ready {heading_label} DSO Turnover & UCC-1 Lien Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-factor-30d",
+                    "label": f"{heading_label} Net-30 Receivable Turnover ($100k Invoice, 2.5% Fee)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"invoice_amount": 100000, "advance_rate_pct": 85, "factor_fee_pct": 2.5, "dso_days": 30, "loc_apr_pct": 10.5},
+                    "description": "Converting a 2.5% flat 30-day factoring discount on an 85% advance into its true 35.78% annualized Effective APR.",
+                },
+                {
+                    "id": "preset-factor-60d",
+                    "label": f"{heading_label} Net-60 Enterprise DSO Cycle ($250k Invoice, 3.5% Fee)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"invoice_amount": 250000, "advance_rate_pct": 85, "factor_fee_pct": 3.5, "dso_days": 60, "loc_apr_pct": 11.0},
+                    "description": "Comparing 60-day commercial receivable discounting against a senior bank revolving line of credit.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$100,000 B2B Invoice (85% Advance, 30-Day Collection DSO)",
+                    "baseline": "$2,500 Factor Fee (35.78% Effective Annualized APR)",
+                    "optimized": "$734 Revolving Line of Credit Interest (at 10.5% APR)",
+                    "delta": "+$1,766 Financing Cost Saved Per 30-Day Cycle",
+                    "authority": "12 CFR Part 1026 (Reg Z), CA SB 1235 & NY CFDL",
+                },
+                {
+                    "scenario": "Blanket UCC-1 All-Assets Lien vs Specific Receivable Assignment",
+                    "baseline": "Blocks Senior Bank Line of Credit Underwriting",
+                    "optimized": "Carved-Out Specific Account Debtor UCC-1 Filing",
+                    "delta": "Preserves Revolving Credit Facility Eligibility",
+                    "authority": "UCC Article 9 & IRC Section 163(j)",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "Why does a 2.5% monthly invoice factoring fee equal a 35%+ annualized APR?",
+                    "answer": (
+                        "A 2.5% flat discount fee is charged on 100% of the gross invoice face value even though the factor only "
+                        "advances 80% to 85% of funds for 30 days. Annualizing that cost across 12 turnover cycles (365 / 30 DSO) "
+                        "produces an effective APR exceeding 35% under CA SB 1235 and NY CFDL commercial disclosure formulas."
+                    ),
+                },
+                {
+                    "question": "What is the difference between recourse and non-recourse invoice factoring?",
+                    "answer": (
+                        "Under recourse factoring, your business must buy back or replace any factored invoice that remains unpaid "
+                        "after 60 to 90 days, whereas non-recourse factoring only covers court-verified customer bankruptcy insolvency."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("workers-comp", "payroll-burden", "payroll burden", "futa", "suta")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 3111 FICA, FUTA/SUTA & NCCI EMR Rules",
+                f"Audit-Ready {heading_label} Fully Burdened Labor Rate Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-wc-clerical",
+                    "label": f"{heading_label} Clerical / Software Payroll (NCCI Code 8810, $85k Base)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"annual_wage": 85000, "wc_rate_per_100": 0.35, "emr_multiplier": 1.0, "benefits_annual": 9600},
+                    "description": "Low-hazard clerical/technical employee (Code 8810) stacking 7.65% FICA, FUTA/SUTA, and employer benefits.",
+                },
+                {
+                    "id": "preset-wc-field",
+                    "label": f"{heading_label} Field Construction / Commercial Trade ($75k Base, 1.15 EMR)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"annual_wage": 75000, "wc_rate_per_100": 6.80, "emr_multiplier": 1.15, "benefits_annual": 8400},
+                    "description": "Field operations employee modeling NCCI class rate multiplied by a 1.15 Experience Modification Rate (EMR).",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$75,000 Field Payroll (Undivided vs Segregated Clerical Split)",
+                    "baseline": "$5,865 Workers' Comp Premium (100% Billed at Field Rate)",
+                    "optimized": "$3,610 After Segregating Clerical 8810 & Overtime 0.5x Premium",
+                    "delta": "+$2,255 Annual Workers' Comp Audit Savings",
+                    "authority": "NCCI Basic Manual, IRC Section 3111 & Section 3301",
+                },
+                {
+                    "scenario": "Uninsured 1099 Subcontractor Discovered at Annual Payroll Audit",
+                    "baseline": "Reclassified as Direct Payroll at Highest Governing Class Rate",
+                    "optimized": "Verified Active COI Collected Prior to Disbursement",
+                    "delta": "Eliminates Retroactive Audit Premium Surcharge",
+                    "authority": "29 CFR Part 795 (FLSA) & State Workers' Comp Statutes",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How is fully burdened employee labor cost calculated above base hourly or W-2 salary?",
+                    "answer": (
+                        "Fully burdened employer cost stacks mandatory statutory payroll taxes (7.65% FICA under IRC Section 3111, "
+                        "0.6% net FUTA on the first $7,000 under IRC Section 3301, and state SUTA), NCCI Workers' Compensation "
+                        "(manual rate per $100 payroll times EMR), and employer health/401(k) contributions, typically adding 18% to 38%."
+                    ),
+                },
+                {
+                    "question": "How does NCCI treat overtime pay during a workers' compensation payroll audit?",
+                    "answer": (
+                        "In most NCCI jurisdictions, employers can deduct the 0.5x overtime premium increment (reducing time-and-a-half "
+                        "back to straight-time hourly wages) from auditable workers' compensation payroll when overtime is separately tracked."
                     ),
                 },
             ],
@@ -2493,7 +2865,38 @@ def compile_remediation_overlay_spec(
     if not target_url:
         target_url = f"https://{domain}/tools/{slug}/"
 
-    if not raw_query:
+    from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, _format_safe_heading_topic
+
+    rq_low = raw_query.lower()
+    is_noisy_query = (
+        not raw_query
+        or "/" in slug
+        or slug in dict(PROFITHELM_SECTION_179_VEHICLES)
+        or any(
+            bad_q in rq_low
+            for bad_q in (
+                "site:",
+                "near me",
+                "for sale",
+                "foreign currency",
+                "tax advisor",
+                "tax consultant",
+                "tax services",
+                "100% business use",
+                "?",
+                "what is ",
+                "is income ",
+                "properties for",
+                "transfer tax",
+                "(",
+                ")",
+                '"',
+            )
+        )
+    )
+    if is_noisy_query and slug:
+        raw_query = _format_safe_heading_topic("", slug)
+    elif not raw_query:
         raw_query = slug.replace("-", " ")
 
     # Scrub any accidental cross-tenant tokens from query label
@@ -2511,10 +2914,14 @@ def compile_remediation_overlay_spec(
     query_clean = re.sub(r"\bk[\s-]+1\b", "K-1", query_clean, flags=re.IGNORECASE)
     query_clean = re.sub(r"\bw[\s-]+([249])\b", r"W-\1", query_clean, flags=re.IGNORECASE)
 
-    _upper_tokens = {"irc", "irs", "rap", "ibr", "pslf", "paye", "icr", "agi", "saas", "gaap", "r&d", "roi", "ebitda", "cbam", "tcja", "qsbs"}
+    _upper_tokens = {"irc", "irs", "rap", "ibr", "pslf", "paye", "icr", "agi", "saas", "gaap", "r&d", "roi", "ebitda", "cbam", "tcja", "qsbs", "gvwr", "suv", "ev", "awd", "4wd", "4x4", "xl", "xlt", "gmc"}
 
     def _cap_word(w: str) -> str:
         wl = w.lower()
+        if wl == "saas":
+            return "SaaS"
+        if wl == "of":
+            return "of"
         if wl in _upper_tokens:
             return w.upper()
         if "-" in w:
@@ -2523,6 +2930,8 @@ def compile_remediation_overlay_spec(
 
     words = [_cap_word(w) for w in query_clean.split() if w]
     heading_label = " ".join(words) if words else ("Title IV Repayment Calculator" if resolved_tenant == "prexvo" else "Statutory Tax Calculator")
+    heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
+    heading_label = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", heading_label)
 
     title_rewrite = _normalize_title_50_60(f"{heading_label} 2026", brand=brand, tenant_id=resolved_tenant)
     meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label)
@@ -3918,6 +4327,84 @@ def _sanitize_overlay_scenario_preset(sc: Dict[str, Any], idx: int) -> Tuple[str
     return label, params_obj, desc_raw
 
 
+def _build_overlay_heading_guidance_html(
+    clean_h2: str,
+    idx: int,
+    overlay_data: Dict[str, Any],
+) -> str:
+    """Renders non-tautological statutory prose and scannable bullet takeaways for each overlay H2."""
+    comp_rows = [
+        r for r in (overlay_data.get("comparison_rows") or [])
+        if isinstance(r, dict) and r.get("scenario")
+    ]
+    scenarios = [
+        s for s in (overlay_data.get("preset_scenarios") or [])
+        if isinstance(s, dict)
+    ]
+    row = comp_rows[min(idx, len(comp_rows) - 1)] if comp_rows else None
+
+    if idx == 0 and row:
+        sc = html_lib.escape(_strip_forbidden_dashes(str(row.get("scenario", ""))))
+        base = html_lib.escape(_strip_forbidden_dashes(str(row.get("baseline", ""))))
+        opt = html_lib.escape(_strip_forbidden_dashes(str(row.get("optimized", ""))))
+        delta = html_lib.escape(_strip_forbidden_dashes(str(row.get("delta", ""))))
+        auth = html_lib.escape(_strip_forbidden_dashes(str(row.get("authority", ""))))
+        p_text = (
+            f"Under {auth}, the {sc} benchmark shifts from {base} under baseline treatment "
+            f"to {opt} when structured within statutory compliance thresholds ({delta} net variance). "
+            f"Verify primary statutory elections and filing documentation before locking in current-year assumptions."
+        )
+        b1 = f"<li><strong>Baseline vs. Optimized Spread:</strong> {sc} moves from {base} to {opt} ({delta}) under {auth}.</li>"
+        b2 = "<li><strong>Primary Compliance Action:</strong> Reconcile source schedules and statutory phaseout limits prior to filing.</li>"
+    elif idx == 1 and row:
+        sc = html_lib.escape(_strip_forbidden_dashes(str(row.get("scenario", ""))))
+        base = html_lib.escape(_strip_forbidden_dashes(str(row.get("baseline", ""))))
+        opt = html_lib.escape(_strip_forbidden_dashes(str(row.get("optimized", ""))))
+        delta = html_lib.escape(_strip_forbidden_dashes(str(row.get("delta", ""))))
+        auth = html_lib.escape(_strip_forbidden_dashes(str(row.get("authority", ""))))
+        p_text = (
+            f"Evaluating {sc} under {auth} contrasts a {base} baseline against {opt} under optimized execution, "
+            f"producing a {delta} statutory impact. Stress-test adjacent income or capital tiers to confirm "
+            f"where marginal rate cliffs or phaseouts alter net cash flow."
+        )
+        b1 = f"<li><strong>Threshold Sensitivity ({sc}):</strong> {base} baseline versus {opt} optimized outcome ({delta} delta).</li>"
+        b2 = f"<li><strong>Governing Citation:</strong> Enforced under {auth} and companion reconciliation schedules.</li>"
+    elif scenarios:
+        sc_item = scenarios[min(max(0, idx - 2), len(scenarios) - 1)]
+        sc_label, _, sc_desc = _sanitize_overlay_scenario_preset(sc_item, idx)
+        sc_desc_esc = html_lib.escape(sc_desc)
+        p_text = (
+            f"{sc_desc_esc} Retaining contemporaneous workpapers, source receipts, and signed election schedules "
+            f"substantiates treatment across federal and state compliance reviews."
+        )
+        if row:
+            sc = html_lib.escape(_strip_forbidden_dashes(str(row.get("scenario", ""))))
+            base = html_lib.escape(_strip_forbidden_dashes(str(row.get("baseline", ""))))
+            opt = html_lib.escape(_strip_forbidden_dashes(str(row.get("optimized", ""))))
+            delta = html_lib.escape(_strip_forbidden_dashes(str(row.get("delta", ""))))
+            auth = html_lib.escape(_strip_forbidden_dashes(str(row.get("authority", ""))))
+            b1 = f"<li><strong>Stress-Test Benchmark ({sc}):</strong> {base} baseline vs. {opt} optimized ({delta}) under {auth}.</li>"
+        else:
+            b1 = f"<li><strong>Scenario Benchmark ({sc_label}):</strong> Apply verified calculator inputs to test statutory sensitivity.</li>"
+        b2 = "<li><strong>Audit-Ready Substantiation:</strong> Archive timestamped ledger entries, valuation schedules, and statutory election forms with the primary return.</li>"
+    else:
+        p_text = (
+            f"Verify statutory phaseout thresholds, marginal rate boundaries, and mandatory election deadlines "
+            f"governing {clean_h2} before locking in current-year projections. Contemporaneous documentation "
+            f"and source schedule reconciliation prevent statutory disallowance during audit review."
+        )
+        b1 = "<li><strong>Threshold Verification:</strong> Compare baseline assumptions against adjacent rate tiers and phaseout boundaries.</li>"
+        b2 = "<li><strong>Audit Documentation:</strong> Retain signed election schedules and source ledger records with the primary filing.</li>"
+
+    return (
+        f'  <p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{p_text}</p>\n'
+        f'  <ul class="section-takeaways" style="margin: 0 0 1.5rem 1.25rem; color: var(--text-secondary, #475569); line-height: 1.6;">\n'
+        f"    {b1}\n"
+        f"    {b2}\n"
+        f"  </ul>"
+    )
+
+
 def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     """
     Non-destructively injects remediated overlay components into rendered page HTML:
@@ -3998,7 +4485,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     h2_section_markup = ""
     if h2_headings:
         h2_parts = ['<section class="overlay-section overlay-headings card pseo-card">']
-        for h2 in h2_headings:
+        for idx, h2 in enumerate(h2_headings):
             h2_val = h2.get("heading", "") if isinstance(h2, dict) else str(h2)
             h2_norm = _strip_forbidden_dashes(str(h2_val))
             h2_norm = re.sub(r"\bS\s+Corp\b", "S-Corp", h2_norm, flags=re.IGNORECASE)
@@ -4006,12 +4493,12 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             h2_norm = re.sub(r"\bR\s+(?:And|&)\s+D\b", "R&D", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bK\s+1\b", "K-1", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bW\s+([249])\b", r"W-\1", h2_norm, flags=re.IGNORECASE)
-            h2_norm = re.sub(r"(?<![.\w])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.])", r"\1-\2", h2_norm)
-            h2_norm = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w])", r"\1-\2", h2_norm)
-            h2_norm = h2_norm.replace("31-U.S.C.", "31 U.S.C.")
+            h2_norm = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", h2_norm)
+            h2_norm = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", h2_norm)
+            h2_norm = h2_norm.replace("31-U.S.C.", "31 U.S.C.").replace("Audit-Ready-S-Corp", "Audit-Ready S-Corp")
             clean_h2 = html_lib.escape(h2_norm)
             h2_parts.append(f'  <h2 class="section-title">{clean_h2}</h2>')
-            h2_parts.append(f'  <p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 1.5rem;">Statutory analysis and compliance guidelines for {clean_h2}.</p>')
+            h2_parts.append(_build_overlay_heading_guidance_html(clean_h2, idx, overlay_data))
         h2_parts.append("</section>")
         h2_section_markup = "\n".join(h2_parts)
         injected_sections.append(h2_section_markup)

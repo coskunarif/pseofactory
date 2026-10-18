@@ -683,4 +683,89 @@ def test_page_structure_geo_immediacy_and_vertical_isolation(profithelm_spec):
     schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(retro_html)
     assert len(schema_faqs) == len(body_faqs)
     assert [q for q, _ in schema_faqs] == [q for q, _ in body_faqs]
+    assert "Statutory analysis and compliance guidelines for " not in retro_html
+    assert "IRC Section 1(j) Marginal Rate Tiers" not in retro_html
+    assert "Revenue Ruling 74-44" in retro_html
+
+
+def test_body_level_bloat_camelcase_and_llms_manifest_parity(tmp_path):
+    """
+    Verifies body-level anti-bloat normalization, CamelCase heading splitting,
+    spoke quick-answer/meta specificity, and llms.txt / llms-full.txt synchronization.
+    """
+    from pseofactory.competitor import _format_safe_heading_topic
+    from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    assert (
+        _format_safe_heading_topic(
+            "SCorpReasonableSalaryTaxArbitrageModel Quantitative Model",
+            "s-corp-reasonable-salary-tax-calculator",
+        )
+        == "S-Corp Reasonable Salary Tax"
+    )
+    assert (
+        _format_safe_heading_topic("", "irs-2027-tax-brackets/california")
+        == "California 2027 Tax Brackets"
+    )
+    assert (
+        _format_safe_heading_topic("", "section-1031-calculator/texas")
+        == "Texas Section 1031 Exchange"
+    )
+    assert (
+        _format_safe_heading_topic("", "section-179-calculator/ford-f150-lightning")
+        == "Ford F-150 Lightning EV Truck Section 179"
+    )
+
+    noisy_ov = compile_remediation_overlay_spec(
+        {
+            "slug": "saas-runway-calculator",
+            "target_url": "https://profithelm.com/tools/saas-runway-calculator/",
+            "query": '("$5m arr") site:linkedin.com/posts',
+            "position": 14.0,
+            "impressions": 80,
+        },
+        tenant_id="profithelm",
+    )
+    assert "linkedin.com" not in noisy_ov["title"].lower()
+    assert "SaaS" in noisy_ov["title"]
+
+    spoke_ov = compile_remediation_overlay_spec(
+        {
+            "slug": "irs-2027-tax-brackets/california",
+            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "query": "tax advisor",
+            "position": 12.0,
+            "impressions": 90,
+        },
+        tenant_id="profithelm",
+    )
+    assert "California" in spoke_ov["title"]
+    assert "tax advisor" not in spoke_ov["title"].lower()
+    assert "California 2027 Tax Brackets" in spoke_ov["quick_answer"]
+
+    dist = tmp_path / "dist"
+    tool_dir = dist / "tools" / "pslf-buyback-calculator"
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "index.html").write_text(
+        '<!doctype html><html><head>'
+        '<title>PSLF Buyback Calculator</title>'
+        '<meta name="description" content="Calculate PSLF buyback lump-sum payments under 34 CFR 685.219(g).">'
+        '</head><body><h1>PSLF Buyback Calculator</h1>'
+        '<aside class="quick-answer"><p>Under 34 CFR 685.219(g), borrowers with 120 months of public service employment can buy back eligible forbearance months.</p></aside>'
+        '</body></html>',
+        encoding="utf-8",
+    )
+    (dist / "llms.txt").write_text(
+        "# Prexvo - Title IV Engine\n\n> Summary.\n\n## Available Calculators\n\n## Documentation\n- [Methodology](https://prexvo.com/methodology/)\n",
+        encoding="utf-8",
+    )
+    (dist / "llms-full.txt").write_text(
+        "# Prexvo\nPrinceton GEO Answer: Old\n",
+        encoding="utf-8",
+    )
+    assert RetroReflectionEngine._has_stale_llms_manifests(dist, "prexvo") is True
+    changed = RetroReflectionEngine.sync_tenant_llms_manifests(dist, "prexvo", canonical_base="https://prexvo.com")
+    assert "llms.txt" in changed and "llms-full.txt" in changed
+    assert RetroReflectionEngine._has_stale_llms_manifests(dist, "prexvo") is False
 

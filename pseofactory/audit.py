@@ -183,9 +183,11 @@ def audit_rendered_asset(
             g2_ok = False
             violations.append(f"Gate 2 (Model Name): model_name '{model_name}' missing from header takeaway text")
 
-        # Check calculation container H2
+        # Check calculation container H2 (accept either raw model_name or its human-formatted heading label)
+        from pseofactory.competitor import _format_safe_heading_topic
+        safe_model_h2 = _format_safe_heading_topic(model_name, "")
         h2_matches = re.findall(r'<h2[^>]*>(.*?)</h2>', html_content, re.IGNORECASE | re.DOTALL)
-        if not any(model_name in h for h in h2_matches):
+        if not any(model_name in h or (safe_model_h2 and safe_model_h2 in h) for h in h2_matches):
             g2_ok = False
             violations.append(f"Gate 2 (Model Name): model_name '{model_name}' missing from calculation <h2> headings")
 
@@ -569,6 +571,19 @@ def audit_rendered_asset(
         if "/tools/" not in meth_inner:
             g8_ok = False
             violations.append("Gate 8 (Structural Components): methodology section missing contextual internal /tools/ links")
+
+    if "Statutory analysis and compliance guidelines for " in html_content:
+        g8_ok = False
+        violations.append("Gate 8 (Structural Components): body contains tautological overlay heading filler")
+    if "&amp;amp;" in html_content:
+        g8_ok = False
+        violations.append("Gate 8 (Structural Components): HTML contains double-escaped entity (&amp;amp;)")
+    if "<td>480.00%</td>" in html_content:
+        g8_ok = False
+        violations.append("Gate 8 (Structural Components): HTML contains unnormalized percentage scale (480.00%)")
+    if re.search(r"<h2[^>]*>[^<]*[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*</h2>", html_content):
+        g8_ok = False
+        violations.append("Gate 8 (Structural Components): H2 heading contains unsplit CamelCase identifier")
 
     gate_results["structural_components"] = g8_ok
 

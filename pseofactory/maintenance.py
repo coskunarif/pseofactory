@@ -4250,6 +4250,10 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
     if is_non_179_vertical and "Section 179" in stat_src:
         stat_src = ""
         econ_src = ""
+    if "CFTC 17 CFR Part 40" in stat_src and not any(
+        k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig", "1256")
+    ):
+        stat_src = stat_src.replace("; CFTC 17 CFR Part 40", "; IRS Form 4562").replace("CFTC 17 CFR Part 40", "").strip(" ;")
 
     if any(k in s_low for k in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "reasonable-salary", "1202", "qsbs", "amt", "niit")):
         default_stat = "IRC Section 1(j); IRC Section 199A; IRS Rev. Proc. 2025-32"
@@ -4279,7 +4283,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
         default_stat = "IRC Section 3111; IRC Section 3301; 29 CFR Part 795 (FLSA Classification)"
         default_econ = "BLS Employer Costs for Employee Compensation (ECEC) Series"
     else:
-        default_stat = "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40"
+        default_stat = "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562"
         default_econ = "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
     return stat_src or default_stat, econ_src or default_econ
 
@@ -4392,8 +4396,32 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
             "<h2>Sensitivity Scenario Modeling (0.8x to 1.2x Parameter Matrix)</h2>",
             "<h2>Statutory Analysis and Computational Methodology</h2>",
             "<h2>Frequently Asked Questions</h2>",
+            '<h2 class="section-title">Dual Dataset Provenance &amp; Statutory Corroboration</h2>',
+            '<h2 class="section-title">Parameterized Scenario Presets &amp; Baseline Verification</h2>',
+            "Sensitivity Scenario Modeling (5-Point SSR Matrix)</h2>",
+            "Statutory analysis and compliance guidelines for ",
+            "Audit-Ready-S-Corp",
+            "&amp;amp;",
+            "<td>480.00%</td>",
+            "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40",
+            "thirty-five thousand two hundred twelve dollars",
         )
     ):
+        return True
+
+    if re.search(
+        r"<h[23][^>]*>[^<]*(?:[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*|\bIrs 2027\b[^<]*|\b(?:Quantitative|Arbitrage|Differential)\s+Model\s*)</h[23]>",
+        html_content,
+    ):
+        return True
+
+    if html_content.count('class="decision-framework-card') > 1:
+        return True
+
+    if re.search(r"with real-time(?: scenari[a-z]*|\s*)\.\.\.", html_content):
+        return True
+
+    if "Multi-Dataset Provenance &amp; Economic Benchmarks" in html_content and 'class="multi-dataset-join' in html_content:
         return True
 
     mdj_idx = html_content.find('class="multi-dataset-join')
@@ -4428,6 +4456,35 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if not canon_m:
         canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
     canon_url = canon_m.group(1).strip().lower() if canon_m else ""
+    if re.search(r"/tools/(?:irs-2027-tax-brackets|section-1031-calculator|section-179-calculator)/[a-z0-9-]+/?", canon_url):
+        if any(
+            stale_spoke in html_content
+            for stale_spoke in (
+                "Foreign Currency Exchange Services",
+                "Deals Near Me",
+                "For Sale 2026",
+                "100% Business Use 2026",
+                "Tax Advisor 2026",
+                "Tax Consultant 2026",
+                "Tax Services 2026",
+            )
+        ):
+            return True
+        has_spoke_schedule = (
+            "(Top Rate:" in html_content
+            or "Section 1031 Real Estate Tax Deferral Rules" in html_content
+            or "GVWR)" in html_content
+        )
+        if has_spoke_schedule and any(
+            s_leak in html_content
+            for s_leak in (
+                "using deterministic IRC statutory formulas",
+                "Tax Deferral Calculator defers 100 percent",
+                "Under IRC Section 1, Section 1(h), and Section 1411",
+            )
+        ):
+            return True
+
     if (
         "prexvo.com/tools/" in canon_url
         and not any(
@@ -4461,6 +4518,310 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     return False
 
 
+def _normalize_prexvo_commentary_and_numbers(html_content: str) -> Tuple[str, bool]:
+    """Converts spelled-out statutory numbers in Prexvo commentary boxes to digits and adds a scannable takeaway list."""
+    updated = html_content
+    changed = False
+    word_num_replacements = [
+        ("thirty-five thousand two hundred twelve dollars", "$35,212"),
+        ("twenty-three thousand four hundred seventy-five dollars", "$23,475"),
+        ("one hundred percent", "100%"),
+        ("twenty-five year", "25-year"),
+        ("three hundred qualifying", "300 qualifying"),
+        ("one hundred twenty", "120"),
+    ]
+    for old_w, new_w in word_num_replacements:
+        if old_w in updated:
+            updated = updated.replace(old_w, new_w)
+            changed = True
+
+    def _chunk_commentary_box(m: re.Match) -> str:
+        box_html = m.group(0)
+        if "<ul" in box_html:
+            return box_html
+        p_matches = list(re.finditer(r'<p\s+class=["\']commentary-text["\'][^>]*>([\s\S]*?)</p>', box_html, re.IGNORECASE))
+        if len(p_matches) < 3:
+            return box_html
+        last_p = p_matches[-1]
+        p_inner = last_p.group(1).strip()
+        sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", p_inner) if s.strip()]
+        if len(sents) >= 2:
+            b1 = sents[0]
+            b2 = " ".join(sents[1:])
+        else:
+            b1 = p_inner
+            b2 = "Compare monthly cash-flow savings against total 120-month PSLF or 240-month IDR forgiveness horizons before consolidating."
+        ul_block = (
+            '<ul class="commentary-takeaways" style="margin: 0.75rem 0 0 1.25rem; color: var(--text-secondary); line-height: 1.65;">\n'
+            f"            <li><strong>Statutory Planning Rule:</strong> {b1}</li>\n"
+            f"            <li><strong>Execution Check:</strong> {b2}</li>\n"
+            "          </ul>"
+        )
+        return box_html[: last_p.start()] + ul_block + box_html[last_p.end() :]
+
+    chunked_comm = re.sub(
+        r'<div\s+class=["\']commentary-box["\'][^>]*>[\s\S]*?</div>',
+        _chunk_commentary_box,
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if chunked_comm != updated:
+        updated = chunked_comm
+        changed = True
+    return updated, changed
+
+
+def _normalize_spoke_and_synthesized_body_bloat(
+    html_content: str,
+    property_id: str,
+    slug: str,
+    topic_label: str,
+    stat_auth: str,
+    econ_ds: str,
+) -> Tuple[str, bool]:
+    """Repairs body-level heading/prose bloat, duplicate blocks, 480.00% yield formatting, and spoke meta/answer parity."""
+    updated = html_content
+    changed = False
+
+    for old_tok, new_tok in (
+        ("&amp;amp;", "&amp;"),
+        ("Audit-Ready-S-Corp", "Audit-Ready S-Corp"),
+        ("<td>480.00%</td>", "<td>4.80%</td>"),
+    ):
+        if old_tok in updated:
+            updated = updated.replace(old_tok, new_tok)
+            changed = True
+
+    if "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40" in updated:
+        clean_stat = stat_auth if "CFTC 17 CFR Part 40" not in stat_auth else "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562"
+        updated = updated.replace("26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40", clean_stat)
+        changed = True
+
+    # Remove redundant top Multi-Dataset Provenance table above .calculator-grid when .multi-dataset-join is present
+    if 'class="multi-dataset-join' in updated and "Multi-Dataset Provenance &amp; Economic Benchmarks" in updated:
+        dedup_top_table = re.sub(
+            r'\s*(?:<!--\s*Multi-Dataset Join Proof Table\s*-->\s*)?<section[^>]*>\s*<h2[^>]*>Multi-Dataset Provenance &amp; Economic Benchmarks</h2>[\s\S]*?</section>',
+            "",
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if dedup_top_table != updated:
+            updated = dedup_top_table
+            changed = True
+
+    # Remove duplicate generic second .decision-framework-card on synthesized pages
+    if updated.count('class="decision-framework-card') > 1:
+        dedup_df = re.sub(
+            r'\s*<section[^>]*class=["\'][^"\']*decision-framework-card[^"\']*["\'][^>]*>\s*<h2[^>]*>\s*What Is The [^<]*Decision Framework\?\s*</h2>\s*<p[^>]*>\s*Deterministic mathematical model and planning calculator for[\s\S]*?</section>',
+            "",
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if dedup_df != updated:
+            updated = dedup_df
+            changed = True
+
+    # Fix mid-word truncated '...' descriptions in related-tools cards
+    fixed_rel = re.sub(
+        r"with real-time(?: scenari[a-z]*|\s+scenario\s+[a-z]*|\s*)\.\.\.",
+        "with real-time scenario modeling.",
+        updated,
+    )
+    if fixed_rel != updated:
+        updated = fixed_rel
+        changed = True
+
+    # Replace tautological 'Statutory analysis and compliance guidelines for {H2}.' paragraphs
+    if "Statutory analysis and compliance guidelines for " in updated:
+        def _repl_tautological_desc(m: re.Match) -> str:
+            h2_echo = m.group(1).strip()
+            return (
+                f'<p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">'
+                f"Under {stat_auth}, evaluating {h2_echo} requires reconciling baseline assumptions against published "
+                f"marginal rate tiers, statutory phaseout boundaries, and {econ_ds} benchmarks before filing.</p>\n"
+                f'  <ul class="section-takeaways" style="margin: 0 0 1.5rem 1.25rem; color: var(--text-secondary, #475569); line-height: 1.6;">\n'
+                f"    <li><strong>Governing Statutory Authority:</strong> Enforced under {stat_auth} and companion statutory reconciliation schedules.</li>\n"
+                f"    <li><strong>Audit Substantiation:</strong> Archive contemporaneous workpapers, source ledger entries, and election forms with the primary filing.</li>\n"
+                f"  </ul>"
+            )
+
+        re_desc = re.sub(
+            r'<p\s+class=["\']section-desc["\'][^>]*>\s*Statutory analysis and compliance guidelines for ([^<]+)\.\s*</p>',
+            _repl_tautological_desc,
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if re_desc != updated:
+            updated = re_desc
+            changed = True
+
+    # Contextualize Prexvo and generic section-title H2s and repair CamelCase / Quantitative H2/H3 suffixes
+    prexvo_h2_pairs = [
+        (
+            '<h2 class="section-title">Dual Dataset Provenance &amp; Statutory Corroboration</h2>',
+            f'<h2 class="section-title">Dual Dataset Provenance &amp; Statutory Corroboration: {topic_label}</h2>',
+        ),
+        (
+            '<h2 class="section-title">Parameterized Scenario Presets &amp; Baseline Verification</h2>',
+            f'<h2 class="section-title">Parameterized Scenario Presets &amp; Baseline Verification: {topic_label}</h2>',
+        ),
+        (
+            '<h2 class="section-title">Sensitivity Scenario Modeling (5-Point SSR Matrix)</h2>',
+            f'<h2 class="section-title">Sensitivity Scenario Modeling: {topic_label}</h2>',
+        ),
+        (
+            '<h2 class="calc-section-title">Sensitivity Scenario Modeling (5-Point SSR Matrix)</h2>',
+            f'<h2 class="calc-section-title">Sensitivity Scenario Modeling: {topic_label}</h2>',
+        ),
+        (
+            '<h2 class="calc-section-title">Dual Dataset Provenance &amp; Statutory Corroboration</h2>',
+            f'<h2 class="calc-section-title">Dual Dataset Provenance &amp; Statutory Corroboration: {topic_label}</h2>',
+        ),
+        (
+            '<h2 class="calc-section-title">Parameterized Scenario Presets &amp; Baseline Verification</h2>',
+            f'<h2 class="calc-section-title">Parameterized Scenario Presets &amp; Baseline Verification: {topic_label}</h2>',
+        ),
+    ]
+    for old_ph2, new_ph2 in prexvo_h2_pairs:
+        if old_ph2 in updated:
+            updated = updated.replace(old_ph2, new_ph2)
+            changed = True
+
+    def _clean_heading_suffix(hm: re.Match) -> str:
+        open_tag, inner_txt, close_tag = hm.group(1), hm.group(2), hm.group(3)
+        if not re.search(
+            r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Quantitative|Arbitrage|Differential)(?:\s+Model)?\b|\bIrs 2027\b|\bSaa\s+S",
+            inner_txt,
+        ):
+            return hm.group(0)
+        cleaned_inner = re.sub(
+            r":\s*[^:]+?(?=\s*(?:Statutory Compliance and Procedural Verification|Decision Architecture|Issue to Prevention Matrix|$))",
+            f": {topic_label}",
+            inner_txt,
+        )
+        return f"{open_tag}{cleaned_inner}{close_tag}"
+
+    cleaned_headings = re.sub(r"(<h[23]\b[^>]*>)([^<]*)(</h[23]>)", _clean_heading_suffix, updated)
+    if cleaned_headings != updated:
+        updated = cleaned_headings
+        changed = True
+
+    if property_id.lower() == "prexvo":
+        updated, comm_changed = _normalize_prexvo_commentary_and_numbers(updated)
+        if comm_changed:
+            changed = True
+
+    # Synchronize state/vehicle spoke meta descriptions, titles, quick-answers, and JSON-LD descriptions
+    if "/" in slug:
+        og_m = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', updated, re.IGNORECASE)
+        md_m = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', updated, re.IGNORECASE)
+        if og_m and md_m:
+            og_val = og_m.group(1).strip()
+            md_val = md_m.group(1).strip()
+            if ("$" in og_val or "GVWR" in og_val) and md_val != og_val and 70 <= len(og_val) <= 160:
+                updated = re.sub(
+                    r'(<meta\s+name=["\']description["\']\s+content=["\'])([^"\']*)(["\'])',
+                    rf"\g<1>{og_val}\g<3>",
+                    updated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                updated = re.sub(
+                    r'("description":\s*")Calculate [^"]*?compliance benchmarks\.(")',
+                    rf"\g<1>{og_val}\g<2>",
+                    updated,
+                )
+                changed = True
+
+        if slug.startswith("irs-2027-tax-brackets/"):
+            tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', updated)
+            eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', updated)
+            th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', updated)
+            inc_m = re.search(r'id=["\']inp-income["\'][^>]*value=["\'](\d+)["\']', updated)
+            if tot_m and eff_m and th_m:
+                st_name = slug.split("/", 1)[1].replace("-", " ").title().replace("Of", "of")
+                inc_val = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
+                tot_val = tot_m.group(1).strip()
+                eff_val = eff_m.group(1).strip()
+                th_val = th_m.group(1).strip()
+                spoke_qa = (
+                    f"For a {st_name} single filer earning the {inc_val} median wage benchmark, combined 2026 "
+                    f"federal and {st_name} income tax totals {tot_val} ({eff_val} effective rate), leaving {th_val} "
+                    f"in net take-home pay. Under IRC Section 1(j), federal brackets span 10% to 37% alongside "
+                    f"{st_name} statutory brackets and standard deductions."
+                )
+                qa_pat = re.compile(
+                    r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
+                    re.IGNORECASE,
+                )
+                qa_m = qa_pat.search(updated)
+                if qa_m and tot_val not in qa_m.group(2):
+                    updated = qa_pat.sub(
+                        rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {st_name} 2026-2027 Tax Liability</div>\n  <div class="quick-answer-body"><p>{spoke_qa}</p></div>\n\g<3>',
+                        updated,
+                        count=1,
+                    )
+                    changed = True
+        elif slug.startswith("section-1031-calculator/"):
+            def_m = re.search(r'id=["\']sec1031-res-deferred["\'][^>]*>\s*([^<]+)<', updated)
+            fed_m = re.search(r'id=["\']sec1031-res-fed-tax["\'][^>]*>\s*([^<]+)<', updated)
+            st_m = re.search(r'id=["\']sec1031-res-state-tax["\'][^>]*>\s*([^<]+)<', updated)
+            if def_m and fed_m and st_m:
+                st_name = slug.split("/", 1)[1].replace("-", " ").title().replace("Of", "of")
+                def_val = def_m.group(1).strip()
+                fed_val = fed_m.group(1).strip()
+                st_val = st_m.group(1).strip()
+                spoke_1031_qa = (
+                    f"On a $2,500,000 {st_name} commercial property exchange ($650,000 basis, $400,000 depreciation), "
+                    f"an IRC Section 1031 like-kind exchange defers {def_val} in total capital gains tax ({fed_val} "
+                    f"federal and {st_val} {st_name} state tax) when proceeds transfer via a Qualified Intermediary "
+                    f"within the 45-day identification and 180-day closing windows on IRS Form 8824."
+                )
+                qa_pat = re.compile(
+                    r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
+                    re.IGNORECASE,
+                )
+                qa_m = qa_pat.search(updated)
+                if qa_m and def_val not in qa_m.group(2):
+                    updated = qa_pat.sub(
+                        rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {st_name} Section 1031 Capital Gains Deferral</div>\n  <div class="quick-answer-body"><p>{spoke_1031_qa}</p></div>\n\g<3>',
+                        updated,
+                        count=1,
+                    )
+                    changed = True
+        elif slug.startswith("section-179-calculator/"):
+            wo_m = re.search(r'id=["\']sec179-res-writeoff["\'][^>]*>\s*([^<]+)<', updated)
+            sav_m = re.search(r'id=["\']sec179-res-savings["\'][^>]*>\s*([^<]+)<', updated)
+            net_m = re.search(r'id=["\']sec179-res-netcost["\'][^>]*>\s*([^<]+)<', updated)
+            gvwr_m = re.search(r'GVWR\s+([0-9,]+\s*LBS)', updated, re.IGNORECASE)
+            if wo_m and sav_m and net_m:
+                wo_val = wo_m.group(1).strip()
+                sav_val = sav_m.group(1).strip()
+                net_val = net_m.group(1).strip()
+                gvwr_str = gvwr_m.group(1).lower() if gvwr_m else "over 6,000 lbs"
+                veh_qa = (
+                    f"With a certified GVWR of {gvwr_str} and {wo_val} baseline acquisition cost, the {topic_label} "
+                    f"qualifies for {wo_val} in first-year IRC Section 179 and Section 168(k) expensing, generating "
+                    f"{sav_val} in tax savings at a 35% marginal rate ({net_val} net effective cost) on IRS Form 4562."
+                )
+                qa_pat = re.compile(
+                    r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
+                    re.IGNORECASE,
+                )
+                qa_m = qa_pat.search(updated)
+                if qa_m and sav_val not in qa_m.group(2):
+                    updated = qa_pat.sub(
+                        rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {topic_label} Qualification</div>\n  <div class="quick-answer-body"><p>{veh_qa}</p></div>\n\g<3>',
+                        updated,
+                        count=1,
+                    )
+                    changed = True
+
+    return updated, changed
+
+
 def _normalize_page_structure_and_geo_parity(
     html_content: str,
     property_id: str,
@@ -4478,8 +4839,14 @@ def _normalize_page_structure_and_geo_parity(
     4. Repairs truncated S-Corp FAQ prose and converts static FAQ cards into accessible <details>/<summary class="touch-target"> accordions.
     5. Enforces 1:1 parity between FAQPage JSON-LD in <head> and visible <details> FAQs in <body>.
     """
-    updated = html_content
-    changed = False
+    updated, changed = _normalize_spoke_and_synthesized_body_bloat(
+        html_content,
+        property_id=property_id,
+        slug=slug,
+        topic_label=topic_label,
+        stat_auth=stat_auth,
+        econ_ds=econ_ds,
+    )
 
     # 1. Contextualize generic <h2> headings
     h2_replacements = [
@@ -4952,29 +5319,6 @@ class RetroReflectionEngine:
         if 'type="range"' not in html_content and "type='range'" not in html_content:
             missing.append("range_slider")
 
-        has_v_pollution = _has_vertical_competitor_pollution(html_content)
-        if has_v_pollution:
-            if "calculation_manifest" not in missing:
-                missing.append("calculation_manifest")
-            if "multi_dataset_join" not in missing:
-                missing.append("multi_dataset_join")
-
-        if (
-            'data-mechanic="instant_edge_case_trap_immediacy"' not in html_content
-            or "(1 - P)" in html_content
-            or "calendar days after closing relinquished property OR the due date (including extensions)" in html_content
-            or has_v_pollution
-        ):
-            missing.append("instant_edge_case_trap_immediacy")
-
-        if (
-            'data-mechanic="statutory_compliance_framing"' not in html_content
-            or '<div id="statutory-pitfalls-matrix"' in html_content
-            or "<h2>Beyond the Calculator: Statutory Compliance and Procedural Verification</h2>" in html_content
-            or has_v_pollution
-        ):
-            missing.append("statutory_compliance_framing")
-
         canon_m = re.search(
             r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
             html_content,
@@ -4988,6 +5332,40 @@ class RetroReflectionEngine:
             )
         canon_href = canon_m.group(1) if canon_m else ""
         canon_clean = canon_href.split("?")[0].lower()
+
+        has_v_pollution = _has_vertical_competitor_pollution(html_content)
+        has_cftc_pollution = (
+            "26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40" in html_content
+            and not any(k in canon_clean for k in ("prediction", "kalshi", "polymarket", "odds", "1256"))
+        )
+        has_scorp_generic_blocks = (
+            ("s-corp" in canon_clean or "reasonable-salary" in canon_clean)
+            and "IRC Section 1(j) and Section 199A, taxpayers crossing QBI phase-out thresholds" in html_content
+        )
+        if has_v_pollution or has_cftc_pollution:
+            if "calculation_manifest" not in missing:
+                missing.append("calculation_manifest")
+            if "multi_dataset_join" not in missing:
+                missing.append("multi_dataset_join")
+
+        if (
+            'data-mechanic="instant_edge_case_trap_immediacy"' not in html_content
+            or "(1 - P)" in html_content
+            or "calendar days after closing relinquished property OR the due date (including extensions)" in html_content
+            or has_v_pollution
+            or has_scorp_generic_blocks
+        ):
+            missing.append("instant_edge_case_trap_immediacy")
+
+        if (
+            'data-mechanic="statutory_compliance_framing"' not in html_content
+            or '<div id="statutory-pitfalls-matrix"' in html_content
+            or "<h2>Beyond the Calculator: Statutory Compliance and Procedural Verification</h2>" in html_content
+            or has_v_pollution
+            or has_scorp_generic_blocks
+        ):
+            missing.append("statutory_compliance_framing")
+
         spoke_state_m = re.search(
             r"/tools/(?:irs-2027-tax-brackets|section-1031-calculator)/([a-z0-9-]+)/?$",
             canon_clean,
@@ -5050,6 +5428,7 @@ class RetroReflectionEngine:
             or '<div style="font-size: 16px; font-weight: 700;' in html_content
             or "Execution Protocol:" in html_content
             or has_v_pollution
+            or has_scorp_generic_blocks
         ):
             missing.append("vetted_commercial_handoff_framing")
 
@@ -5101,6 +5480,7 @@ class RetroReflectionEngine:
         manifest_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Extracts existing calculation manifest from HTML or sidecar JSON, or synthesizes a verified one."""
+        from pseofactory.competitor import _format_safe_heading_topic
         from pseofactory.contracts import safe_eval_mathematical_formula
 
         if isinstance(manifest_override, dict) and manifest_override.get("formula"):
@@ -5139,14 +5519,14 @@ class RetroReflectionEngine:
             if is_prexvo
             else _resolve_profithelm_statutory_provenance(slug, html_content)
         )
-        slug_title = slug.replace("/", " ").replace("-", " ").title()
+        slug_title = _format_safe_heading_topic("", slug)
         if not raw or not raw.get("formula"):
             if is_prexvo:
                 preset = cls.PREXVO_FALLBACK_MANIFESTS.get(slug) or cls.PREXVO_FALLBACK_MANIFESTS["rap-payment-calculator"]
                 raw = dict(preset)
             else:
                 raw = {
-                    "model_name": f"{slug_title} Quantitative Model",
+                    "model_name": f"{slug_title} Model",
                     "formula": "gross_amount * (1.0 - effective_rate)",
                     "inputs": {"gross_amount": 100000.0, "effective_rate": 0.24},
                     "published_output": 76000.0,
@@ -5154,10 +5534,16 @@ class RetroReflectionEngine:
                     "economic_dataset": default_econ,
                     "sample_calculation": "Deterministic baseline evaluation at $100,000 gross input and 24% effective rate yields $76,000.00.",
                 }
-        elif not is_prexvo and "179" not in slug.lower() and "Section 179" in str(raw.get("statutory_authority") or ""):
+        elif not is_prexvo and (
+            ("179" not in slug.lower() and "Section 179" in str(raw.get("statutory_authority") or ""))
+            or (
+                "CFTC 17 CFR Part 40" in str(raw.get("statutory_authority") or "")
+                and not any(k in slug.lower() for k in ("prediction", "kalshi", "polymarket", "odds", "1256"))
+            )
+        ):
             raw["statutory_authority"] = default_stat
             raw["economic_dataset"] = default_econ
-            raw["model_name"] = f"{slug_title} Quantitative Model"
+            raw["model_name"] = f"{slug_title} Model"
 
         formula = str(raw.get("formula") or "gross_amount * (1.0 - effective_rate)").strip()
         inputs_raw = raw.get("inputs") if isinstance(raw.get("inputs"), dict) else {"gross_amount": 100000.0, "effective_rate": 0.24}
@@ -5180,7 +5566,11 @@ class RetroReflectionEngine:
 
         statutory_authority = str(raw.get("statutory_authority") or default_stat).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
         economic_dataset = str(raw.get("economic_dataset") or default_econ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
-        model_name = str(raw.get("model_name") or f"{slug_title} Model").replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
+        raw_model_name = str(raw.get("model_name") or f"{slug_title} Model").replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
+        if re.search(r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\bQuantitative\b|\bIrs 2027\b", raw_model_name):
+            model_name = f"{_format_safe_heading_topic(raw_model_name, slug)} Model"
+        else:
+            model_name = raw_model_name
         sample_calc = str(
             raw.get("sample_calculation")
             or f"Deterministic evaluation of {formula} produces {eval_out:,.2f}."
@@ -5536,6 +5926,16 @@ class RetroReflectionEngine:
                     1,
                 )
 
+        if dist_dir is not None:
+            sidecar_path = Path(dist_dir) / "manifests" / f"{slug}.json"
+            if sidecar_path.is_file():
+                try:
+                    existing_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                    if existing_sidecar != manifest:
+                        sidecar_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+
         if injected_parts:
             retro_bundle = "\n\n".join(injected_parts)
             # Inject immediately before </main> so .quick-answer stays above first <h2>
@@ -5590,6 +5990,90 @@ class RetroReflectionEngine:
         return updated, repaired
 
     @classmethod
+    def _overlay_spec_needs_heal(cls, ov_s: str, raw_ov: Dict[str, Any]) -> bool:
+        """Determines whether a persisted remediation overlay spec contains polluted queries or cross-vertical drift."""
+        from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, PROFITHELM_US_STATES
+
+        ov_s_low = str(ov_s or "").lower().strip("/")
+        ov_body_dump = json.dumps({k: v for k, v in raw_ov.items() if k != "hub_links"})
+        qa_str = str(raw_ov.get("quick_answer") or "")
+        q_str = str(raw_ov.get("query") or "").lower().strip()
+        vehicle_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
+        is_vehicle_slug = ov_s_low in vehicle_slugs or "section-179-calculator" in ov_s_low
+        is_spoke = (
+            "/" in ov_s_low
+            or ov_s_low in vehicle_slugs
+            or any(
+                ov_s_low.startswith(p)
+                for p in (
+                    "irs-2027-tax-brackets-",
+                    "section-1031-calculator-",
+                    "section-179-calculator-",
+                )
+            )
+        )
+        if not is_vehicle_slug and "179" not in ov_s_low and "Section 179" in ov_body_dump:
+            return True
+        if ov_s_low == "student-loan-repayment-calculator" and "Tiered Standard" in ov_body_dump:
+            return True
+        if "and audit-ready." in ov_body_dump or not qa_str.strip():
+            return True
+        if "(1)" in qa_str or "Audit-Ready-S-Corp" in qa_str:
+            return True
+        if any(
+            bad_q in q_str
+            for bad_q in (
+                "site:",
+                "near me",
+                "for sale",
+                "foreign currency",
+                "tax advisor",
+                "tax consultant",
+                "tax services",
+                "100% business use",
+                "?",
+                "what is ",
+                "is income ",
+            )
+        ):
+            return True
+        if is_spoke:
+            has_state_or_vehicle_name = any(
+                st.replace("-", " ").title().replace("Of", "of") in qa_str for st in PROFITHELM_US_STATES
+            ) or any(
+                vn.split(" Section 179")[0] in qa_str for _, vn in PROFITHELM_SECTION_179_VEHICLES
+            )
+            if "This page models " in qa_str or not has_state_or_vehicle_name:
+                return True
+        if any(
+            k in ov_s_low
+            for k in (
+                "s-corp",
+                "reasonable-salary",
+                "174",
+                "r-and-d",
+                "301",
+                "tariff",
+                "surety",
+                "bond",
+                "factoring",
+                "workers-comp",
+                "payroll",
+                "1202",
+                "qsbs",
+            )
+        ) and (
+            "IRC Section 1, Section 1(h), and Section 1411" in qa_str
+            or "IRC Section 1(j) Marginal Rate Tiers" in ov_body_dump
+        ):
+            return True
+        if any(k in ov_s_low for k in ("prediction", "kalshi", "polymarket", "odds", "1256")) and (
+            "IRC Section 1(j) Marginal Rate Tiers" in ov_body_dump
+        ):
+            return True
+        return False
+
+    @classmethod
     def _resolve_active_estate_overlays(
         cls,
         dist_dir: Path,
@@ -5620,36 +6104,7 @@ class RetroReflectionEngine:
                             if not isinstance(raw_ov, dict):
                                 continue
                             ov_s = str(raw_ov.get("slug") or ov_path.stem)
-                            raw_dump = json.dumps(raw_ov)
-                            qa_str = str(raw_ov.get("quick_answer") or "")
-                            needs_ov_heal = (
-                                ("179" not in ov_s.lower() and "Section 179" in raw_dump)
-                                or (ov_s == "student-loan-repayment-calculator" and "Tiered Standard" in raw_dump)
-                                or ("and audit-ready." in raw_dump)
-                                or not qa_str.strip()
-                                or (
-                                    any(
-                                        k in ov_s.lower()
-                                        for k in (
-                                            "s-corp",
-                                            "reasonable-salary",
-                                            "174",
-                                            "r-and-d",
-                                            "301",
-                                            "tariff",
-                                            "surety",
-                                            "bond",
-                                            "factoring",
-                                            "workers-comp",
-                                            "payroll",
-                                            "1202",
-                                            "qsbs",
-                                        )
-                                    )
-                                    and "IRC Section 1, Section 1(h), and Section 1411" in qa_str
-                                )
-                            )
-                            if needs_ov_heal:
+                            if cls._overlay_spec_needs_heal(ov_s, raw_ov):
                                 healed_ov = compile_remediation_overlay_spec(
                                     {
                                         "slug": ov_s,
@@ -5724,6 +6179,12 @@ class RetroReflectionEngine:
                             nested_s = f"{hub_prefix}/{s[len(hub_prefix) + 1:]}"
                             if nested_s not in candidates:
                                 candidates.append(nested_s)
+                    if property_id.lower() != "prexvo":
+                        from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+                        if s in {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}:
+                            veh_nested = f"section-179-calculator/{s}"
+                            if veh_nested not in candidates:
+                                candidates.append(veh_nested)
 
                 for cand in candidates:
                     if cand in ("statutory-calculator", "index", "tools", ""):
@@ -5735,6 +6196,263 @@ class RetroReflectionEngine:
                         resolved[rel_html] = (ov_file, ov_spec)
                         break
         return resolved
+
+    @classmethod
+    def _has_stale_llms_manifests(cls, dist_dir: Path, property_id: str) -> bool:
+        """Checks whether llms.txt or llms-full.txt in dist_dir contain truncated descriptions, generic filler, or missing routes."""
+        llms_path = dist_dir / "llms.txt"
+        llms_full_path = dist_dir / "llms-full.txt"
+        tools_dir = dist_dir / "tools"
+        if not tools_dir.is_dir():
+            return False
+        root_tool_slugs = sorted(
+            td.name
+            for td in tools_dir.iterdir()
+            if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file()
+        )
+        if llms_path.is_file():
+            try:
+                txt = llms_path.read_text(encoding="utf-8", errors="ignore")
+                if (
+                    "\u2014" in txt
+                    or "\u2013" in txt
+                    or " - " in txt
+                    or "Deterministic mathematical model and planning calculator for " in txt
+                    or "..." in txt
+                    or "ford-f-250-super-duty" in txt
+                    or "139 Canonical Endpoints" in txt
+                ):
+                    return True
+                for r_slug in root_tool_slugs:
+                    if f"/tools/{r_slug}/" not in txt:
+                        return True
+            except Exception:
+                return True
+        if llms_full_path.is_file():
+            try:
+                ftxt = llms_full_path.read_text(encoding="utf-8", errors="ignore")
+                if (
+                    "\u2014" in ftxt
+                    or "\u2013" in ftxt
+                    or " - " in ftxt
+                    or "Princeton GEO Answer:" in ftxt
+                    or "Direct Statutory Answer:" not in ftxt
+                ):
+                    return True
+                for r_slug in root_tool_slugs:
+                    if f"/tools/{r_slug}/" not in ftxt:
+                        return True
+            except Exception:
+                return True
+        return False
+
+    @classmethod
+    def sync_tenant_llms_manifests(
+        cls,
+        dist_dir: Path,
+        property_id: str,
+        canonical_base: Optional[str] = None,
+    ) -> List[str]:
+        """Synchronizes llms.txt and llms-full.txt with actual retrofitted HTML tool titles, descriptions, and quick-answers."""
+        updated_files: List[str] = []
+        tools_dir = dist_dir / "tools"
+        if not tools_dir.is_dir():
+            return updated_files
+
+        canon = (
+            canonical_base
+            or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+        ).rstrip("/")
+
+        # Extract metadata from every root tool HTML page in dist_dir / "tools"
+        tool_meta: Dict[str, Dict[str, str]] = {}
+        for td in sorted(tools_dir.iterdir()):
+            if not td.is_dir() or td.name.startswith("."):
+                continue
+            idx_html = td / "index.html"
+            if not idx_html.is_file():
+                continue
+            try:
+                raw_h = idx_html.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            h1_m = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", raw_h, re.IGNORECASE)
+            h1_txt = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else td.name.replace("-", " ").title()
+            desc_m = re.search(
+                r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
+                raw_h,
+                re.IGNORECASE,
+            ) or re.search(
+                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']',
+                raw_h,
+                re.IGNORECASE,
+            )
+            desc_txt = desc_m.group(1).strip() if desc_m else ""
+            qa_m = re.search(
+                r'<aside[^>]+class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)</p>',
+                raw_h,
+                re.IGNORECASE,
+            )
+            qa_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", qa_m.group(1))).strip() if qa_m else desc_txt
+            for k_val in (h1_txt, desc_txt, qa_txt):
+                pass
+            h1_txt = h1_txt.replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
+            desc_txt = desc_txt.replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
+            qa_txt = qa_txt.replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
+            if not desc_txt and qa_txt:
+                desc_txt = qa_txt.split(". ")[0].rstrip(".") + "."
+            tool_meta[td.name] = {
+                "title": h1_txt,
+                "description": desc_txt,
+                "quick_answer": qa_txt or desc_txt,
+                "url": f"{canon}/tools/{td.name}/",
+            }
+
+        llms_path = dist_dir / "llms.txt"
+        spoke_lines: List[str] = []
+        if llms_path.is_file():
+            try:
+                orig_llms = llms_path.read_text(encoding="utf-8", errors="ignore")
+                new_llms = (
+                    orig_llms.replace("\u2014", ": ")
+                    .replace("\u2013", " to ")
+                    .replace(" - ", ": ")
+                    .replace("/tools/section-179-calculator/ford-f-250-super-duty/", "/tools/section-179-calculator/ford-super-duty-f250/")
+                    .replace("139 Canonical Endpoints", "150 Canonical Endpoints")
+                    .replace("serves 139 programmatic calculation endpoints", "serves 150 programmatic calculation endpoints")
+                    .replace("10 Flagship Financial Intelligence Engines", f"{len(tool_meta)} Flagship Financial Intelligence Engines")
+                )
+
+                def _fix_llms_bullet(m: re.Match) -> str:
+                    b_title, b_url, b_sum = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+                    slug_m = re.search(r"/tools/([^/?#]+)/?$", b_url)
+                    if slug_m:
+                        s_key = slug_m.group(1)
+                        if s_key in tool_meta and (
+                            "Deterministic mathematical model and planning calculator for " in b_sum
+                            or b_sum.endswith("...")
+                        ):
+                            clean_d = tool_meta[s_key]["description"]
+                            if clean_d:
+                                return f"- [{b_title}]({b_url}): {clean_d}"
+                    return m.group(0)
+
+                new_llms = re.sub(
+                    r"^- \[([^\]]+)\]\(([^)]+)\):\s*(.+)$",
+                    _fix_llms_bullet,
+                    new_llms,
+                    flags=re.MULTILINE,
+                )
+
+                # Ensure any missing root tool is listed under the primary calculator heading
+                missing_bullets: List[str] = []
+                for s_key, m_info in sorted(tool_meta.items()):
+                    if f"/tools/{s_key}/" not in new_llms:
+                        missing_bullets.append(f"- [{m_info['title']}]({m_info['url']}): {m_info['description']}")
+                if missing_bullets:
+                    joined_missing = "\n".join(missing_bullets)
+                    if "## Documentation" in new_llms:
+                        new_llms = new_llms.replace("## Documentation", f"{joined_missing}\n\n## Documentation", 1)
+                    elif "## 50-State" in new_llms:
+                        new_llms = new_llms.replace("## 50-State", f"{joined_missing}\n\n## 50-State", 1)
+                    else:
+                        new_llms = new_llms.rstrip() + "\n" + joined_missing + "\n"
+
+                for line in new_llms.splitlines():
+                    if line.startswith("- [") and any(
+                        sp in line
+                        for sp in (
+                            "/tools/irs-2027-tax-brackets/",
+                            "/tools/section-179-calculator/",
+                            "/tools/section-1031-calculator/",
+                        )
+                    ):
+                        # Only spoke URLs with two path segments after /tools/
+                        if re.search(r"/tools/[^/]+/[^/)]+/\)", line):
+                            spoke_lines.append(line)
+
+                if new_llms != orig_llms:
+                    llms_path.write_text(new_llms, encoding="utf-8")
+                    updated_files.append("llms.txt")
+            except Exception:
+                pass
+
+        llms_full_path = dist_dir / "llms-full.txt"
+        if llms_full_path.is_file() and tool_meta:
+            try:
+                orig_full = llms_full_path.read_text(encoding="utf-8", errors="ignore")
+                is_prexvo = property_id.lower() == "prexvo"
+                if is_prexvo:
+                    header_block = (
+                        "# Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest\n"
+                        "Domain: prexvo.com\n"
+                        f"Base URL: {canon}\n"
+                        "Research Entity: Prexvo Statutory Research Group\n"
+                        "Legal Entity: Prexvo LLC\n"
+                        "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
+                    )
+                else:
+                    header_block = (
+                        "# ProfitHelm: Complete Machine Knowledge Base & Statutory Calculation Manifest\n"
+                        "Domain: profithelm.com\n"
+                        f"Base URL: {canon}\n"
+                        "Research Entity: ProfitHelm Quantitative Research\n"
+                        "Legal Entity: ProfitHelm LLC\n"
+                    )
+
+                sections_out: List[str] = [header_block]
+                for idx, (s_key, m_info) in enumerate(sorted(tool_meta.items()), start=1):
+                    if is_prexvo:
+                        q_syn = f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
+                        sections_out.append(
+                            f"## {idx}. {m_info['title']}\n"
+                            f"Canonical URL: {m_info['url']}\n"
+                            f"Query Syntax: {q_syn}\n"
+                            f"Summary: {m_info['description']}\n"
+                            f"Direct Statutory Answer: {m_info['quick_answer']}\n"
+                        )
+                    else:
+                        sections_out.append(
+                            f"## {idx}. {m_info['title']}\n"
+                            f"Canonical URL: {m_info['url']}\n"
+                            f"Description: {m_info['description']}\n"
+                            f"Direct Statutory Answer: {m_info['quick_answer']}\n"
+                        )
+
+                if not is_prexvo and spoke_lines:
+                    sections_out.append(
+                        "## State Income Tax, Commercial Vehicle Section 179, and Section 1031 Spoke Endpoints\n"
+                        + "\n".join(spoke_lines)
+                        + "\n"
+                    )
+
+                if is_prexvo:
+                    sections_out.append(
+                        "## Title IV Statutory Parameter Specifications & Formula Definitions\n"
+                        "- Repayment Assistance Plan (RAP): Discretionary income calculated at 225% of HHS Poverty Guidelines (42 U.S.C. 9902(2)). Statutory rate is 10% of discretionary income. 100% unpaid interest subsidy applies to undergraduate balances.\n"
+                        "- Income-Based Repayment (IBR): Discretionary income calculated at 150% of HHS Poverty Guidelines under 34 CFR 685.221. Rate is 15% for pre-July 2014 borrowers (25-year forgiveness) and 10% for new borrowers (20-year forgiveness), capped at the 10-year standard payment amount.\n"
+                        "- Pay As You Earn (PAYE): Governed by 34 CFR 685.209. 150% poverty exemption, 10% discretionary income rate, 20-year forgiveness horizon, capped at 10-year standard repayment payment.\n"
+                        "- Income-Contingent Repayment (ICR): Governed by 34 CFR 685.209(b). Lesser of: 20% discretionary income over 100% poverty line, or 12-year income-adjusted payment formula. Sole direct IDR option for consolidated Parent PLUS loans.\n"
+                        "- Tiered Standard Repayment: Governed by 34 CFR 685.208. Fixed amortization terms based on total debt: $7,500-$9,999 (12 years), $10,000-$19,999 (15 years), $20,000-$39,999 (20 years), $40,000-$59,999 (25 years), $60,000+ (30 years).\n"
+                        "- PSLF Buyback (34 CFR 685.219(g)): Allows borrowers with 120 months of qualifying public service employment to buy back eligible months of deferment or forbearance at the lower historical IDR payment amount.\n"
+                    )
+                else:
+                    sections_out.append(
+                        "## Key Statutory Authorities\n"
+                        "- TCJA Sunset: Federal marginal rates revert to 10%-39.6% on December 31, 2025 under IRC Section 1(j).\n"
+                        "- Section 179: Maximum deduction cap $2,560,000 with $4,090,000 equipment phase-out under IRC Section 179 and IRC Section 168(k).\n"
+                        "- Section 1031: 45-day replacement identification and 180-day closing deadlines under 26 U.S.C. Section 1031.\n"
+                        "- GAAP ASC 205-40: Going-concern cash runway forecasting benchmarked to monthly net burn and liquid reserves.\n"
+                    )
+
+                new_full = "\n".join(sections_out).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
+                if new_full != orig_full:
+                    llms_full_path.write_text(new_full, encoding="utf-8")
+                    updated_files.append("llms-full.txt")
+            except Exception:
+                pass
+
+        return updated_files
 
     @classmethod
     def audit_estate(
@@ -5772,14 +6490,25 @@ class RetroReflectionEngine:
             scanned += 1
             missing = cls.audit_html_mechanics(content)
             if rel in active_overlays:
+                _, ov_spec = active_overlays[rel]
+                ov_s = str(ov_spec.get("slug") or "")
                 if (
-                    'id="gsc-striking-overlay"' not in content
-                    and 'class="gsc-remediation-overlay"' not in content
-                ) or "and audit-ready." in content or bool(re.search(r'<div\s+class=["\']faq-card["\']', content, re.IGNORECASE)):
+                    (
+                        'id="gsc-striking-overlay"' not in content
+                        and 'class="gsc-remediation-overlay"' not in content
+                    )
+                    or "and audit-ready." in content
+                    or "Statutory analysis and compliance guidelines for " in content
+                    or bool(re.search(r'<div\s+class=["\']faq-card["\']', content, re.IGNORECASE))
+                    or cls._overlay_spec_needs_heal(ov_s, ov_spec)
+                ):
                     if "gsc_striking_overlay" not in missing:
                         missing.append("gsc_striking_overlay")
             if missing:
                 stale_pages[rel] = missing
+
+        if cls._has_stale_llms_manifests(d, property_id):
+            stale_pages["llms.txt"] = ["llms_manifest_parity"]
 
         videos_dir = d / "videos"
         if videos_dir.is_dir():
@@ -5975,6 +6704,11 @@ class RetroReflectionEngine:
             if (repaired or overlay_injected) and updated_html != content:
                 html_file.write_text(updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
+
+        # Synchronize llms.txt and llms-full.txt machine endpoints with retrofitted HTML inventory
+        for llms_rel in cls.sync_tenant_llms_manifests(d, property_id, canonical_base=canonical_base):
+            if llms_rel not in retrofitted_paths:
+                retrofitted_paths.append(llms_rel)
 
         # Purge any <= 1024 byte stub .mp4 video artifacts and prune unrendered catalog entries
         videos_dir = d / "videos"
@@ -6743,20 +7477,6 @@ def reflect_and_recompile_all_assets(
                     if verbose:
                         print(f"Error rebuilding assets for '{p_id}': {b_err}")
 
-            # Always execute single-pass retro-reflection across existing dist inventory
-            try:
-                retro_res = RetroReflectionEngine.retrofit_estate(
-                    dist_dir=adapter.dist_dir,
-                    property_id=adapter.property_id,
-                    canonical_base=adapter.canonical_base,
-                )
-                retrofitted_count = int(retro_res.get("pages_retrofitted", 0))
-                if recompiled_count == 0:
-                    recompiled_count = max(retrofitted_count, len(drifted_records), 1)
-            except Exception as r_err:
-                if verbose:
-                    print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
-
             # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,
             # and heal any legacy cross-vertical polluted overlay specs in .agy/overlays/
             try:
@@ -6773,12 +7493,7 @@ def reflect_and_recompile_all_assets(
                             if not isinstance(raw_ov, dict):
                                 continue
                             ov_s = str(raw_ov.get("slug") or agy_ov.stem)
-                            raw_dump = json.dumps(raw_ov)
-                            needs_ov_heal = (
-                                ("179" not in ov_s.lower() and "Section 179" in raw_dump)
-                                or (ov_s == "student-loan-repayment-calculator" and "Tiered Standard" in raw_dump)
-                            )
-                            if needs_ov_heal:
+                            if RetroReflectionEngine._overlay_spec_needs_heal(ov_s, raw_ov):
                                 healed_ov = compile_remediation_overlay_spec(
                                     {
                                         "slug": ov_s,
@@ -6789,6 +7504,16 @@ def reflect_and_recompile_all_assets(
                                     },
                                     tenant_id=adapter.property_id,
                                 )
+                                for preserve_key in (
+                                    "partner_offer",
+                                    "restricted_public_service",
+                                    "commercial_offers_allowed",
+                                    "locked_until",
+                                    "created_at",
+                                    "status",
+                                ):
+                                    if preserve_key in raw_ov:
+                                        healed_ov[preserve_key] = raw_ov[preserve_key]
                                 agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
                         except Exception:
                             pass
@@ -6819,6 +7544,20 @@ def reflect_and_recompile_all_assets(
                                     target_html.write_text(updated_h, encoding="utf-8")
             except Exception:
                 pass
+
+            # Always execute single-pass retro-reflection across existing dist inventory after overlays
+            try:
+                retro_res = RetroReflectionEngine.retrofit_estate(
+                    dist_dir=adapter.dist_dir,
+                    property_id=adapter.property_id,
+                    canonical_base=adapter.canonical_base,
+                )
+                retrofitted_count = int(retro_res.get("pages_retrofitted", 0))
+                if recompiled_count == 0:
+                    recompiled_count = max(retrofitted_count, len(drifted_records), 1)
+            except Exception as r_err:
+                if verbose:
+                    print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
             # Final pass to ensure all HTML pages in dist_dir pass callout destination message match
             try:

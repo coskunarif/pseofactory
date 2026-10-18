@@ -433,7 +433,8 @@ def _render_5point_sensitivity_table_html(
     mod_con_output = _format_scenario_number(published_output * 0.9)
     mod_exp_output = _format_scenario_number(published_output * 1.1)
     aggressive_output = _format_scenario_number(published_output * 1.2)
-    clean_model = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", str(model_name or "").strip())
+    from pseofactory.competitor import _format_safe_heading_topic
+    clean_model = _format_safe_heading_topic(str(model_name or "").strip(), "")
     sens_h2 = f"Sensitivity Scenario Modeling: {clean_model}" if clean_model else "Sensitivity Scenario Modeling"
 
     return (
@@ -935,9 +936,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     if not sibling_links:
         sibling_links = cluster
 
+    from pseofactory.competitor import _format_safe_heading_topic
     primary_sibling_slug, primary_sibling_title = sibling_links[0]
     secondary_sibling_slug, secondary_sibling_title = sibling_links[1 % len(sibling_links)]
-    safe_model_h2 = re.sub(r"\b([B-HJ-Z])\s+([A-Za-z0-9]+)", r"\1-\2", model_name)
+    safe_model_h2 = _format_safe_heading_topic(model_name, slug)
 
     cluster_items_html = []
     for s_slug, s_title in sibling_links:
