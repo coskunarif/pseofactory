@@ -20,6 +20,7 @@ from pseofactory.infra_audit import (
     audit_host_hygiene,
     audit_live_edge_endpoints,
     run_consolidated_infra_audit,
+    DEFAULT_ENDPOINTS,
     DEFAULT_PROFITHELM_REPO,
 )
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
@@ -113,3 +114,10 @@ def test_audit_infra_script_exists_and_executable():
     script_path = repo_root / "bin" / "audit-infra.sh"
     assert script_path.exists(), f"Script missing at {script_path}"
     assert os.access(script_path, os.X_OK), f"Script not executable: {script_path}"
+
+
+def test_default_endpoints_excludes_decommissioned_gainhelm():
+    """Asserts decommissioned Cloud Run gainhelm.com is not probed by default."""
+    assert "https://gainhelm.com" not in DEFAULT_ENDPOINTS
+    assert "https://profithelm.com" in DEFAULT_ENDPOINTS
+

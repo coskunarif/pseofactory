@@ -21,7 +21,6 @@ DEFAULT_ENDPOINTS = [
     "https://profithelm.com",
     "https://prexvo.com",
     "https://arifcoskun.com",
-    "https://gainhelm.com",
 ]
 
 DEFAULT_CLOUD_CLI = Path("/home/ubuntuadmin/projects/satellites/cloudflare/bin/cloud")
@@ -244,7 +243,7 @@ def main() -> int:
     else:
         print(f"      FAIL: {msg_hygiene}")
 
-    print("[4/4] Probing live edge endpoints (profithelm, prexvo, arifcoskun, gainhelm)...")
+    print("[4/4] Probing live edge endpoints (profithelm, prexvo, arifcoskun)...")
     ok_edge, msg_edge = audit_live_edge_endpoints()
     if ok_edge:
         print("      PASS: All active production endpoints returned HTTP 200")
