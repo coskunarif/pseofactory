@@ -4141,18 +4141,23 @@ class RetroReflectionEngine:
             )
             or (
                 "/tools/irs-2027-tax-brackets/" in cluster_body
-                and (
-                    "/tools/prediction-market-tax/" not in cluster_body
-                    or "/tools/crypto-tax-form-1099-da-mandatory-reporting/" not in cluster_body
-                    or "/tools/r-and-d-tax-credit-section-174-amortization-calculator/" not in cluster_body
-                    or "/tools/section-179-calculator/gmc-yukon-xl/" not in cluster_body
+                and sum(
+                    1
+                    for req_u in (
+                        "/tools/prediction-market-tax/",
+                        "/tools/crypto-tax-form-1099-da-mandatory-reporting/",
+                        "/tools/r-and-d-tax-credit-section-174-amortization-calculator/",
+                        "/tools/section-179-calculator/gmc-yukon-xl/",
+                    )
+                    if req_u in cluster_body
                 )
+                < 3
             )
             or (
                 "Income-Based" in cluster_body
                 and (
                     "/tools/paye-sunset-calculator/" not in cluster_body
-                    or "/tools/tiered-standard-calculator/" not in cluster_body
+                    and "/tools/tiered-standard-calculator/" not in cluster_body
                 )
             )
             or (spoke_state and f"/{spoke_state}/" not in cluster_body)

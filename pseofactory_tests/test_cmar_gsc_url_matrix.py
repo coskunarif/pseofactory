@@ -345,3 +345,36 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
         assert f"/tools/{px_slug}/" in px_cluster, f"Missing Prexvo tool {px_slug} in cluster nav"
     assert "/tools/student-loan-refinance-break-even-calculator/" not in px_cluster
 
+
+def test_audit_html_mechanics_passes_on_sentinel_cluster_pages_without_self_links():
+    for slug in (
+        "prediction-market-tax",
+        "crypto-tax-form-1099-da-mandatory-reporting",
+        "r-and-d-tax-credit-section-174-amortization-calculator",
+        "section-179-calculator/gmc-yukon-xl",
+    ):
+        raw_html = f"""<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
+        <title>{slug}</title>
+        <link rel="canonical" href="https://profithelm.com/tools/{slug}/" />
+        </head><body><main><h1>{slug}</h1><input type="number" id="x" value="100" /></main></body></html>"""
+        retro_html, _ = RetroReflectionEngine.retrofit_html(
+            raw_html,
+            property_id="profithelm",
+            slug=slug,
+            canonical_url=f"https://profithelm.com/tools/{slug}/",
+        )
+        assert RetroReflectionEngine.audit_html_mechanics(retro_html) == []
+
+    for px_slug in ("paye-sunset-calculator", "tiered-standard-calculator"):
+        raw_px = f"""<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
+        <title>{px_slug}</title>
+        <link rel="canonical" href="https://prexvo.com/tools/{px_slug}/" />
+        </head><body><main><h1>{px_slug}</h1><input type="number" id="x" value="100" /></main></body></html>"""
+        retro_px, _ = RetroReflectionEngine.retrofit_html(
+            raw_px,
+            property_id="prexvo",
+            slug=px_slug,
+            canonical_url=f"https://prexvo.com/tools/{px_slug}/",
+        )
+        assert RetroReflectionEngine.audit_html_mechanics(retro_px) == []
+
