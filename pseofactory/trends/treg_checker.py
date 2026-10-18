@@ -238,6 +238,11 @@ def parse_ai_citation_payload(
     }
 
 
+_PROCESS_AI_CITATION_CACHE: Dict[str, Dict[str, Any]] = {}
+_PROCESS_LIVE_AI_CALLS_MADE: int = 0
+_PROCESS_DISK_CACHE_LOADED: bool = False
+
+
 class TregChecker:
     """
     Cross-checks query search volume, CPC, competition density, and AI citation vacancy using treg catalog routes.
@@ -254,6 +259,7 @@ class TregChecker:
         check_ai_citations: bool = False,
         tenant_domains: Optional[List[str]] = None,
     ):
+        global _PROCESS_DISK_CACHE_LOADED
         self.mock_registry: Dict[str, Dict[str, Any]] = {}
         if mock_data:
             for k, v in mock_data.items():
@@ -265,17 +271,25 @@ class TregChecker:
         self.check_ai_citations = check_ai_citations
         self.tenant_domains = list(tenant_domains or DEFAULT_TENANT_DOMAINS)
         self.cache: Dict[str, TregDurabilityResult] = {}
-        self.ai_citation_cache: Dict[str, Dict[str, Any]] = {}
+        self.ai_citation_cache: Dict[str, Dict[str, Any]] = (
+            {} if ("PYTEST_CURRENT_TEST" in os.environ or mock_data) else _PROCESS_AI_CITATION_CACHE
+        )
         self._live_ai_calls_made: int = 0
         self._max_live_ai_calls: int = int(os.environ.get("PSEUFACTORY_MAX_LIVE_AI_CALLS", "2"))
         self._disk_cache_path = Path(__file__).resolve().parents[2] / ".agy" / "ai_citation_cache.json"
-        if "PYTEST_CURRENT_TEST" not in os.environ and not mock_data and self._disk_cache_path.is_file():
+        if (
+            "PYTEST_CURRENT_TEST" not in os.environ
+            and not mock_data
+            and not _PROCESS_DISK_CACHE_LOADED
+            and self._disk_cache_path.is_file()
+        ):
             try:
                 raw_disk = json.loads(self._disk_cache_path.read_text(encoding="utf-8"))
                 if isinstance(raw_disk, dict):
                     for dk, dv in raw_disk.items():
                         if isinstance(dv, dict):
                             self.ai_citation_cache[str(dk).lower().strip()] = dv
+                _PROCESS_DISK_CACHE_LOADED = True
             except Exception:
                 pass
 
@@ -355,13 +369,20 @@ class TregChecker:
             self.ai_citation_cache[q_key] = res
             return res
 
+        global _PROCESS_LIVE_AI_CALLS_MADE
         treg_bin = shutil.which("treg")
         is_test_env = "PYTEST_CURRENT_TEST" in os.environ
         live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
-        within_live_cap = is_mocked or live_opt_in or (self._live_ai_calls_made < self._max_live_ai_calls)
+        within_live_cap = (
+            is_mocked
+            or live_opt_in
+            or (self._live_ai_calls_made < self._max_live_ai_calls and _PROCESS_LIVE_AI_CALLS_MADE < self._max_live_ai_calls)
+        )
 
         if treg_bin and (not is_test_env or is_mocked or live_opt_in) and within_live_cap:
             self._live_ai_calls_made += 1
+            if not is_mocked:
+                _PROCESS_LIVE_AI_CALLS_MADE += 1
             call_timeout = (
                 min(self.timeout, max(1.0, remaining_budget - 2.0))
                 if remaining_budget is not None

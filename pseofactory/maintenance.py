@@ -7584,22 +7584,25 @@ def reflect_and_recompile_all_assets(
 
         # Execute autonomous downstream chain whenever assets recompiled/retrofitted or pending downstream work exists
         downstream_summary: Dict[str, Any] = {"status": "SKIPPED"}
+        downstream_executed = False
         if (
             run_downstream
             and not is_foreign_pytest
             and (recompiled_count > 0 or retrofitted_count > 0 or _has_pending_downstream_work(adapter))
         ):
             try:
+                downstream_executed = True
                 downstream_summary = _execute_autonomous_downstream_chain(
                     adapter,
                     dry_run=False,
                     defer_live_indexing=defer_live_indexing,
                 )
-                RetroReflectionEngine.retrofit_estate(
+                ds_retro = RetroReflectionEngine.retrofit_estate(
                     dist_dir=adapter.dist_dir,
                     property_id=adapter.property_id,
                     canonical_base=adapter.canonical_base,
                 )
+                retrofitted_count += int(ds_retro.get("retrofitted_count", 0))
                 from pseofactory.affiliates import normalize_html_callout_message_match
                 for html_f in sorted(adapter.dist_dir.rglob("*.html")):
                     if html_f.name.startswith("."):
@@ -7608,13 +7611,14 @@ def reflect_and_recompile_all_assets(
                     norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
                     if norm_c != raw_c:
                         html_f.write_text(norm_c, encoding="utf-8")
+                        retrofitted_count += 1
                 evaluator._audit_cache.clear()
                 evaluator._fingerprint_cache.clear()
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
 
-        if (recompiled_count > 0 or retrofitted_count > 0) and build_verified.status == "PASS":
+        if (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed) and build_verified.status == "PASS":
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
@@ -7651,7 +7655,7 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 freshness_needs_refresh = True
 
-        if (recompiled_count > 0 or retrofitted_count > 0 or freshness_needs_refresh) and latch_state and build_verified.status == "PASS":
+        if (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh) and latch_state and build_verified.status == "PASS":
             try:
                 s_file = adapter.dist_dir.parent / ".agy" / "engine_hash.json"
                 l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
