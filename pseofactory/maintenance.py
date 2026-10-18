@@ -5517,6 +5517,17 @@ def reflect_and_recompile_all_assets(
 
         if (
             getattr(adapter, "repo_path", None)
+            and adapter.property_id in ("profithelm", "prexvo")
+            and not is_foreign_pytest
+        ):
+            try:
+                from pseofactory.gitops import sync_tenant_test_isolation_guards
+                sync_tenant_test_isolation_guards(adapter.repo_path)
+            except Exception:
+                pass
+
+        if (
+            getattr(adapter, "repo_path", None)
             and adapter.property_id == "profithelm"
             and not is_foreign_pytest
         ):
@@ -5826,6 +5837,12 @@ def reflect_and_recompile_all_assets(
                         pass
 
                 if adapter.dist_dir.parent != scanner.workspace_root:
+                    cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
+                    asset_hashes = {
+                        a.relative_to(adapter.dist_dir).as_posix(): compute_asset_fingerprint(a)
+                        for a in adapter.list_assets()
+                    }
+                    record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
                     root_s_file = scanner.workspace_root / ".agy" / "engine_hash.json"
                     root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
                     root_s_file.parent.mkdir(parents=True, exist_ok=True)
@@ -5860,8 +5877,12 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
 
+        evaluator._audit_cache.clear()
+        evaluator._fingerprint_cache.clear()
         post_report = (
-            evaluator.audit_all(adapter) if ((recompiled_count > 0 or retrofitted_count > 0) and latch_state) else build_verified
+            evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
+            if ((recompiled_count > 0 or retrofitted_count > 0) and latch_state)
+            else build_verified
         )
 
         results["total_assets_checked"] += build_verified.total_assets_checked
@@ -5883,7 +5904,10 @@ def reflect_and_recompile_all_assets(
     if latch_state and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
         try:
             from pseofactory.gitops import reconcile_workspace_tracking_state
-            reconcile_workspace_tracking_state(restore_tenant_dist=False)
+            reconcile_workspace_tracking_state(
+                restore_tenant_dist=False,
+                untrack_agy_runs=True,
+            )
         except Exception:
             pass
 
