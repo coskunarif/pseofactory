@@ -5291,15 +5291,44 @@ def _execute_autonomous_downstream_chain(
         )
         exceptions_routed.append(act.action_id)
 
-    # Stage 4: Search Ranking Visibility Inspection & Metric Recovery Baseline
+    # Stage 4: Search Ranking Visibility Inspection, 8 SEO Growth Workflows & Metric Recovery Baseline
     try:
         from pseofactory.indexing_inspector import DailyIndexingInspector
         from pseofactory.gsc_remediation import evaluate_expired_overlays
+        from pseofactory.seo_growth_loops import (
+            harvest_and_sync_gsc_daily_timeline,
+            load_consolidated_gsc_query_rows,
+            run_all_seo_growth_workflows,
+            sync_real_gsc_baselines_to_recovery_ledger,
+        )
+
+        in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        daily_gsc_records = None
+        consolidated_live_queries = None
+        if not in_pytest:
+            try:
+                daily_gsc_records = harvest_and_sync_gsc_daily_timeline(
+                    property_id=adapter.property_id,
+                    repo_root=repo_root,
+                    persist=not dry_run,
+                )
+            except Exception:
+                daily_gsc_records = None
+            try:
+                cons_res = load_consolidated_gsc_query_rows(
+                    property_id=adapter.property_id,
+                    repo_root=repo_root,
+                    live_gsc=True,
+                )
+                consolidated_live_queries = list(cons_res.get("current_rows") or [])
+            except Exception:
+                consolidated_live_queries = None
+
         inspector = DailyIndexingInspector(
             tenant_id=adapter.property_id,
             base_dir=repo_root,
         )
-        insp_report = inspector.run_inspection(dry_run=dry_run)
+        insp_report = inspector.run_inspection(dry_run=dry_run, gsc_records=daily_gsc_records)
         # Ensure metric_recovery_ledger.json has baseline visibility snapshots for built tools
         m_ledger_file = repo_root / ".agy" / "metric_recovery_ledger.json"
         if not dry_run:
@@ -5328,9 +5357,20 @@ def _execute_autonomous_downstream_chain(
                     }
             m_ledger_file.parent.mkdir(parents=True, exist_ok=True)
             m_ledger_file.write_text(json.dumps(m_data, indent=2), encoding="utf-8")
+            if consolidated_live_queries:
+                try:
+                    sync_real_gsc_baselines_to_recovery_ledger(
+                        property_id=adapter.property_id,
+                        repo_root=repo_root,
+                        discovered_tools=discovered_tools,
+                        live_queries=consolidated_live_queries,
+                    )
+                except Exception:
+                    pass
             overlay_eval_res = evaluate_expired_overlays(
                 site_url=f"sc-domain:{adapter.property_id}.com",
                 base_dir=repo_root,
+                live_queries=consolidated_live_queries,
             )
             try:
                 from pseofactory.qualification import (
@@ -5345,6 +5385,20 @@ def _execute_autonomous_downstream_chain(
                 )
             except Exception:
                 pass
+            if not in_pytest:
+                try:
+                    wf_res = run_all_seo_growth_workflows(
+                        property_id=adapter.property_id,
+                        repo_root=repo_root,
+                        dist_dir=adapter.dist_dir,
+                        live_queries=consolidated_live_queries,
+                        apply_overlays=True,
+                        persist=True,
+                    )
+                    summary["seo_workflows_status"] = wf_res.get("status", "PASS")
+                    summary["seo_workflows_executed"] = wf_res.get("workflows_executed", 8)
+                except Exception:
+                    pass
             summary["overlay_evaluations_count"] = overlay_eval_res.get("total_evaluated", 0)
         summary["visibility_status"] = insp_report.get("overall_status", "PASS")
     except Exception as vis_err:

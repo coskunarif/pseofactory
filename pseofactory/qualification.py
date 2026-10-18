@@ -3592,6 +3592,28 @@ def sync_tenant_redirect_rollup_adapters(
             elif prev_meta in f_txt:
                 f_txt = f_txt.replace(prev_meta, new_meta, 1)
 
+            old_age_block = """        try:
+            mtime = html_file.stat().st_mtime
+            age_days = (now_ts - mtime) / 86400.0
+        except Exception:
+            age_days = 0.0"""
+            new_age_block = """        try:
+            mtime = html_file.stat().st_mtime
+            age_days = (now_ts - mtime) / 86400.0
+            if age_days < 1.0:
+                from pseofactory.seo_growth_loops import resolve_true_asset_age_days
+                age_days = resolve_true_asset_age_days(
+                    page_url_path,
+                    html_file=html_file,
+                    property_id="profithelm",
+                    repo_root=dist_dir.parent if dist_dir else BASE_DIR,
+                    now_ts=now_ts,
+                )
+        except Exception:
+            age_days = 0.0"""
+            if old_age_block in f_txt and "resolve_true_asset_age_days" not in f_txt:
+                f_txt = f_txt.replace(old_age_block, new_age_block, 1)
+
             old_ret = """    return {
         "status": "PASS",
         "max_age_days": max_age_days,
@@ -3800,17 +3822,47 @@ def sync_tenant_redirect_rollup_adapters(
         "dataset_provenance": dataset_provenance,
         "dataset_provenance_verified": dataset_provenance_verified,
     }"""
-            new_pf_ret = """    redirect_rollup_meta: Dict[str, Any] = {}
+            prev_pf_report = """    report = {
+        "verdict": verdict,
+        "total_score": max(0.0, score),
+        "mathematical_determinism": math_audit,
+        "statutory_oracle": oracle_audit,
+        "compliance_gate": comp_gate,
+        "seo_checklist": seo_audit,
+        "affiliate_routes": affiliate_audit,
+        "merkle_drift": merkle_drift,
+        "dataset_provenance": dataset_provenance,
+        "dataset_provenance_verified": dataset_provenance_verified,
+        "redirect_signal_rollup": redirect_rollup_meta,
+    }"""
+            new_pf_report = """    internal_link_graph_meta: Dict[str, Any] = {"status": "PASS", "total_pages": 0, "orphaned_pages": [], "orphaned_count": 0}
+    zero_impression_meta: Dict[str, Any] = {"status": "PASS", "max_age_days": 30.0, "pages_audited": 0, "zero_impression_candidates": [], "flagged_count": 0}
     try:
-        from pseofactory.qualification import load_property_redirect_map
-        rmap = load_property_redirect_map(repo_root=target_dir.parent, property_id="prexvo")
-        unique_sources = sorted({v["source_path"] for v in rmap.values() if isinstance(v, dict) and v.get("source_path")})
-        redirect_rollup_meta = {
-            "property_id": "prexvo",
-            "active_redirect_sources_count": len(unique_sources),
-            "redirected_rows_count": 0,
-            "rolled_up_impressions": 0,
-            "rolled_up_clicks": 0,
+        from pseofactory.seo_growth_loops import (
+            discover_internal_linking_opportunities,
+            evaluate_content_portfolio_decisions,
+        )
+        il_rep = discover_internal_linking_opportunities(
+            property_id="prexvo",
+            repo_root=target_dir.parent,
+            dist_dir=target_dir,
+            persist=False,
+        )
+        internal_link_graph_meta = dict(il_rep.get("internal_link_graph") or internal_link_graph_meta)
+        pf_rep = evaluate_content_portfolio_decisions(
+            property_id="prexvo",
+            repo_root=target_dir.parent,
+            dist_dir=target_dir,
+            persist=False,
+        )
+        zero_impression_meta = {
+            "status": "PASS",
+            "max_age_days": 30.0,
+            "pages_audited": int(pf_rep.get("pages_audited", 0)),
+            "zero_impression_candidates": list(pf_rep.get("zero_impression_candidates") or []),
+            "flagged_count": int(pf_rep.get("flagged_count", 0)),
+            "noindexed_count": 0,
+            "action_taken": "FLAGGED_ONLY",
         }
     except Exception:
         pass
@@ -3827,18 +3879,15 @@ def sync_tenant_redirect_rollup_adapters(
         "dataset_provenance": dataset_provenance,
         "dataset_provenance_verified": dataset_provenance_verified,
         "redirect_signal_rollup": redirect_rollup_meta,
-    }
-    try:
-        if target_dir.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ:
-            (target_dir.parent / "freshness_audit_report.json").write_text(
-                json.dumps(report, indent=2) + "\\n",
-                encoding="utf-8",
-            )
-    except Exception:
-        pass
-    return report"""
-            if old_pf_ret in pf_txt:
-                pf_txt = pf_txt.replace(old_pf_ret, new_pf_ret, 1)
+        "internal_link_graph": internal_link_graph_meta,
+        "zero_impression_handling": zero_impression_meta,
+    }"""
+            if prev_pf_report in pf_txt and "internal_link_graph_meta" not in pf_txt:
+                pf_txt = pf_txt.replace(prev_pf_report, new_pf_report, 1)
+                prexvo_freshness.write_text(pf_txt, encoding="utf-8")
+                updated_files += 1
+            elif old_pf_ret in pf_txt:
+                pf_txt = pf_txt.replace(old_pf_ret, new_pf_report + "\n    return report", 1)
                 prexvo_freshness.write_text(pf_txt, encoding="utf-8")
                 updated_files += 1
 

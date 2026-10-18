@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import html as html_lib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -286,11 +287,25 @@ def _resolve_contextual_internal_links(
         elif any(k in combined for k in ("1031", "cost-segregation", "cost segregation", "bonus-depreciation", "opportunity-zone", "dst", "721", "real-estate", "cap-rate")):
             cluster = [
                 {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "Texas Section 1031 Like-Kind Exchange & Boot Tax Calculator", "href": "/tools/section-1031-calculator/texas/"},
+                {"anchor": "California Section 1031 Like-Kind Exchange & Clawback Calculator", "href": "/tools/section-1031-calculator/california/"},
                 {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
             ]
+            if "/" in s_norm:
+                sp_parts = [p for p in s_norm.split("/") if p]
+                if len(sp_parts) == 2 and sp_parts[0] == "section-1031-calculator":
+                    st_slug = sp_parts[1]
+                    st_label = st_slug.replace("-", " ").title()
+                    cluster.insert(
+                        1,
+                        {
+                            "anchor": f"{st_label} 2027 Tax Brackets & Marginal Rate Calculator",
+                            "href": f"/tools/irs-2027-tax-brackets/{st_slug}/",
+                        },
+                    )
         else:
             cluster = [
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
@@ -298,6 +313,7 @@ def _resolve_contextual_internal_links(
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
                 {"anchor": "IRS 2027 Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
+                {"anchor": "GMC Yukon XL Section 179 Heavy SUV Deduction Calculator", "href": "/tools/section-179-calculator/gmc-yukon-xl/"},
             ]
 
     selected = [base_hub]
@@ -2927,6 +2943,13 @@ def evaluate_expired_overlays(
 
     live_by_query: Dict[str, Dict[str, Any]] = {}
     live_rows_by_path: Dict[str, List[Dict[str, Any]]] = {}
+    if live_queries is None and "PYTEST_CURRENT_TEST" not in os.environ:
+        try:
+            from pseofactory.seo_growth_loops import load_consolidated_gsc_query_rows
+            cons_q = load_consolidated_gsc_query_rows(property_id=prop, repo_root=root, live_gsc=True)
+            live_queries = list(cons_q.get("current_rows") or [])
+        except Exception:
+            live_queries = None
     if live_queries:
         rollup_res = rollup_redirected_gsc_rows(live_queries, property_id=prop, repo_root=root)
         for item in list(live_queries) + list(rollup_res.get("rows") or []):
@@ -3987,3 +4010,21 @@ class AsyncRemediationQueue:
             "halted_reason": halted_reason,
             "elapsed_seconds": round(time.monotonic() - start_ts, 4),
         }
+
+
+from pseofactory.seo_growth_loops import (  # noqa: E402
+    compile_ai_citation_digital_pr_queue,
+    compile_search_opportunity_briefs,
+    compile_technical_seo_sprint,
+    discover_internal_linking_opportunities,
+    evaluate_content_portfolio_decisions,
+    harvest_and_sync_gsc_daily_timeline,
+    identify_content_decay,
+    investigate_competitor_traffic_spikes,
+    load_consolidated_gsc_query_rows,
+    monitor_post_release_seo_regressions,
+    resolve_true_asset_age_days,
+    run_all_seo_growth_workflows,
+    sync_real_gsc_baselines_to_recovery_ledger,
+)
+

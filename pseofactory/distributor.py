@@ -4216,12 +4216,130 @@ def generate_social_syndication_pack(
     }
 
 
-def generate_ai_benchmark_nodes(tools = None) -> Dict[str, Any]:
+def generate_ai_benchmark_nodes(tools = None, tenant: str = "profithelm") -> Dict[str, Any]:
     """
     Compiles clean, zero-fluff Markdown and JSON data benchmark tables indexing
     statutory figures, comparative deductions, and thresholds for AI engine reference.
+    Supports both ProfitHelm (IRC corporate tax benchmarks) and Prexvo (Title IV 34 CFR Part 685 benchmarks).
     Adheres strictly to Princeton GEO citation guidelines and anti-slop invariants. Zero em-dashes. Zero en-dashes.
     """
+    eff_tenant = str(tenant or "profithelm").strip().lower()
+    if eff_tenant == "prexvo":
+        prexvo_base = "https://prexvo.com"
+        rap_ibr_md = """# Title IV RAP vs IBR Student Loan Repayment Statutory Benchmarks
+
+Under 34 CFR Part 685 and Higher Education Act Section 493C, federal student loan borrowers evaluate two primary income-driven formulas: the 2026 Repayment Assistance Plan (RAP) and Income-Based Repayment (IBR). RAP exempts 225% of the HHS Federal Poverty Guideline and waives 100% of unpaid monthly interest, whereas new IBR exempts 150% of poverty and caps monthly payments at the 10-year Standard schedule.
+
+| Plan Parameter | 2026 RAP Formula | New IBR (Post-July 2014) | Old IBR (Pre-July 2014) | Statutory Authority |
+| :--- | :--- | :--- | :--- | :--- |
+| Poverty Exemption | 225% HHS Poverty | 150% HHS Poverty | 150% HHS Poverty | 34 CFR 685.209 |
+| Assessment Rate | 10% discretionary | 10% discretionary | 15% discretionary | HEA Section 493C |
+| Unpaid Interest | 100% monthly subsidy | Subsidized 3 years only | Capitalizes on exit | 34 CFR 685.209(b) |
+| Payment Cap | Uncapped by standard | 10-year Standard cap | 10-year Standard cap | 34 CFR 685.221 |
+
+On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (family size 2), RAP yields a $248.23 monthly payment with a $76.77 monthly unpaid interest subsidy, compared to $346.04 under new IBR."""
+
+        rap_ibr_json = {
+            "topic": "Title IV RAP vs IBR Student Loan Repayment",
+            "plan_year": 2026,
+            "statutory_authority": ["34 CFR Part 685", "HEA Section 493C", "2026 HHS Poverty Guidelines"],
+            "rap_poverty_multiplier": 2.25,
+            "ibr_poverty_multiplier": 1.50,
+            "benchmarks": [
+                {"plan": "rap_2026", "poverty_exemption_pct": 225, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 248.23, "monthly_interest_subsidy_usd": 76.77},
+                {"plan": "new_ibr", "poverty_exemption_pct": 150, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 346.04, "monthly_interest_subsidy_usd": 0.0},
+                {"plan": "old_ibr", "poverty_exemption_pct": 150, "rate_pct": 15.0, "sample_60k_65k_agi_payment_usd": 519.06, "monthly_interest_subsidy_usd": 0.0},
+            ],
+        }
+
+        pslf_md = """# Public Service Loan Forgiveness (PSLF) 120-Payment Statutory Benchmarks
+
+Under 34 CFR 685.219 and Higher Education Act Section 455(m), full-time employees of qualifying government and 501(c)(3) non-profit organizations receive 100% tax-free principal and interest forgiveness after completing 120 qualifying monthly Direct Loan payments under an eligible Income-Driven Repayment plan.
+
+| PSLF Requirement | Statutory Threshold | Qualifying Rule | Statutory Citation |
+| :--- | :--- | :--- | :--- |
+| Qualifying Payments | 120 monthly payments | Non-consecutive allowed | 34 CFR 685.219(c)(1)(iii) |
+| Employment Hours | 30 hours per week min | Full-time or combined part-time | 34 CFR 685.219(b) |
+| Tax Treatment | 100% federal tax-free | Excluded from gross income | IRC Section 108(f)(1) |
+| Buyback Eligibility | Deferment/forbearance months | Retroactive lump-sum credit | 34 CFR 685.219(g) |
+
+Borrowers married to high earners can file Married Filing Separately (MFS) under 34 CFR 685.209(e) to exclude spousal income from monthly IDR payment calculations."""
+
+        pslf_json = {
+            "topic": "Public Service Loan Forgiveness (PSLF)",
+            "statutory_authority": ["34 CFR 685.219", "HEA Section 455(m)", "IRC Section 108(f)(1)"],
+            "qualifying_payments_required": 120,
+            "minimum_weekly_hours": 30,
+            "federal_tax_exempt": True,
+        }
+
+        parent_plus_md = """# Parent PLUS Consolidation & ICR Statutory Benchmarks
+
+Under 34 CFR 685.209(c) and 34 CFR 685.220, Direct Parent PLUS loans are statutorily restricted from direct enrollment in IBR, PAYE, or RAP unless consolidated into a Direct Consolidation Loan. Single-step consolidation unlocks Income-Contingent Repayment (ICR), which assesses the lesser of 20% of discretionary income above 100% of the federal poverty line or a 12-year fixed amortization adjusted by income.
+
+| Consolidation Tier | Eligible Repayment Plan | Discretionary Rate | Poverty Exemption | Statutory Authority |
+| :--- | :--- | :--- | :--- | :--- |
+| Unconsolidated PLUS | Standard / Graduated / Extended | Fixed amortization | 0% | 34 CFR 685.208 |
+| Single Consolidation | Income-Contingent (ICR) | 20% discretionary | 100% HHS Poverty | 34 CFR 685.209(c) |
+| Double Consolidation | IBR / RAP (Pre-Sunset Cutoff) | 10% to 15% | 150% to 225% Poverty | 34 CFR 685.220 |
+
+Consolidation weighted interest rates are rounded up to the nearest one-eighth of one percent (0.125%) under 34 CFR 685.220(f)."""
+
+        parent_plus_json = {
+            "topic": "Parent PLUS Consolidation and ICR Repayment",
+            "statutory_authority": ["34 CFR 685.209(c)", "34 CFR 685.220"],
+            "icr_discretionary_rate": 0.20,
+            "icr_poverty_multiplier": 1.00,
+            "weighted_rate_rounding_increment": 0.00125,
+        }
+
+        ai_citations_prexvo_md = f"""# Prexvo Machine-Readable Title IV Student Loan Statutory Knowledge Base
+
+Canonical Root: {prexvo_base}
+Machine Knowledge Endpoint: {prexvo_base}/llms.txt
+Full Dataset Corpus: {prexvo_base}/llms-full.txt
+
+This directory contains deterministic benchmark matrices and Title IV statutory reference data formatted for direct retrieval and citation by generative AI search engines (ChatGPT Search, Perplexity AI, Claude, and Google AI Overviews).
+
+## Indexed Benchmark Nodes
+- **Title IV RAP vs IBR Repayment Formulas**: [title_iv_rap_ibr_benchmarks.md](./title_iv_rap_ibr_benchmarks.md) (34 CFR Part 685, HEA Section 493C)
+- **PSLF 120-Payment Forgiveness & Buyback Rules**: [pslf_forgiveness_benchmarks.md](./pslf_forgiveness_benchmarks.md) (34 CFR 685.219, IRC Section 108(f))
+- **Parent PLUS Consolidation & ICR Thresholds**: [parent_plus_icr_benchmarks.md](./parent_plus_icr_benchmarks.md) (34 CFR 685.209(c), 34 CFR 685.220)
+
+All calculations are 100% deterministic, grounded in federal Title IV regulations and HHS Poverty Guidelines.
+"""
+
+        manifest_prexvo_json = {
+            "name": "Prexvo Title IV AI Citation Benchmark Repository",
+            "updated_at": "2026-10-18T00:00:00Z",
+            "canonical_base": prexvo_base,
+            "nodes": [
+                {"name": "title_iv_rap_ibr", "md_file": "title_iv_rap_ibr_benchmarks.md", "json_file": "title_iv_rap_ibr_benchmarks.json"},
+                {"name": "pslf_forgiveness", "md_file": "pslf_forgiveness_benchmarks.md", "json_file": "pslf_forgiveness_benchmarks.json"},
+                {"name": "parent_plus_icr", "md_file": "parent_plus_icr_benchmarks.md", "json_file": "parent_plus_icr_benchmarks.json"},
+            ],
+        }
+
+        prexvo_files = {
+            "title_iv_rap_ibr_benchmarks.md": rap_ibr_md,
+            "title_iv_rap_ibr_benchmarks.json": json.dumps(rap_ibr_json, indent=2),
+            "pslf_forgiveness_benchmarks.md": pslf_md,
+            "pslf_forgiveness_benchmarks.json": json.dumps(pslf_json, indent=2),
+            "parent_plus_icr_benchmarks.md": parent_plus_md,
+            "parent_plus_icr_benchmarks.json": json.dumps(parent_plus_json, indent=2),
+            "ai_citations_reference.md": ai_citations_prexvo_md,
+            "ai_benchmarks_manifest.json": json.dumps(manifest_prexvo_json, indent=2),
+        }
+        for fname, fcontent in prexvo_files.items():
+            assert_no_forbidden_dashes(fcontent, context=fname)
+        return {
+            "status": "SUCCESS",
+            "tenant": "prexvo",
+            "nodes_count": len(manifest_prexvo_json["nodes"]),
+            "files_count": len(prexvo_files),
+            "files": prexvo_files,
+        }
+
     sec179_md = """# Section 179 Vehicle Depreciation Statutory Benchmarks
 
 IRC Section 179 allows business taxpayers to expense up to $1,220,000 of qualifying commercial property placed in service during tax year 2026. Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $31,300 statutory cap under IRC Section 280F.

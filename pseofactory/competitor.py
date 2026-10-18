@@ -12,6 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.affiliates import (
@@ -155,10 +156,20 @@ class CompetitorGapEngine:
     Zero em-dashes. Zero en-dashes.
     """
 
-    def __init__(self, tenant_profile: TenantTruthProfile):
-        self.tenant_profile = tenant_profile
-        self.tenant_id = str(tenant_profile.tenant_id).lower().strip()
+    def __init__(
+        self,
+        tenant_profile: Optional[Union[TenantTruthProfile, str]] = None,
+        *,
+        tenant_id: Optional[str] = None,
+    ):
         self.fact_store = TenantFactStore.get_instance()
+        if isinstance(tenant_profile, TenantTruthProfile):
+            self.tenant_profile = tenant_profile
+            self.tenant_id = str(tenant_profile.tenant_id).lower().strip()
+        else:
+            eff_id = str(tenant_id or tenant_profile or "profithelm").lower().strip()
+            self.tenant_profile = self.fact_store.get_profile(eff_id)
+            self.tenant_id = str(self.tenant_profile.tenant_id).lower().strip()
         self.scanner = CrossPropertyContaminationScanner()
 
     def diff_competitor_serp(
@@ -368,6 +379,26 @@ class CompetitorGapEngine:
             candidates.append(spec)
 
         return candidates
+
+    def investigate_competitor_traffic_spikes(
+        self,
+        repo_root: Optional[Union[str, Path]] = None,
+        velocity_spike_threshold: float = 0.25,
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Correlates longitudinal velocity spikes from trend_history.db and statutory.db
+        against competitor SERP features and active tenant catalog gaps (Workflow 3).
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.seo_growth_loops import investigate_competitor_traffic_spikes as _investigate_spikes
+
+        return _investigate_spikes(
+            property_id=self.tenant_id,
+            repo_root=repo_root,
+            velocity_spike_threshold=velocity_spike_threshold,
+            persist=persist,
+        )
 
     def _assert_spec_clean(self, spec: GapCandidateSpec) -> None:
         """Enforces zero foreign tokens in candidate spec."""

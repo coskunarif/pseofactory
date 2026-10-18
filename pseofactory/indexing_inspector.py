@@ -353,6 +353,17 @@ class DailyIndexingInspector:
         Audits search traffic drops by computing 7-day rolling averages (RMA_7)
         and flagging declines exceeding drop_threshold (15%) past dynamic floor.
         """
+        if not gsc_records and "PYTEST_CURRENT_TEST" not in os.environ:
+            try:
+                from pseofactory.seo_growth_loops import harvest_and_sync_gsc_daily_timeline
+                gsc_records = harvest_and_sync_gsc_daily_timeline(
+                    property_id=self.tenant_id,
+                    repo_root=self.base_dir,
+                    persist=False,
+                )
+            except Exception:
+                gsc_records = None
+
         if not gsc_records or len(gsc_records) < 14:
             return {
                 "status": "PASS",

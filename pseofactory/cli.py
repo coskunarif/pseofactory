@@ -1731,7 +1731,59 @@ def build_parser() -> argparse.ArgumentParser:
     p_ref.add_argument("--json", action="store_true", help="Output summary as JSON")
     p_ref.add_argument("--no-gitops", action="store_true", help="Bypass automated gitops staging and verification")
 
+    # seo-workflows
+    p_seowf = subparsers.add_parser(
+        "seo-workflows",
+        help="Execute all 8 autonomous SEO growth workflows across historical and live Search Console telemetry",
+    )
+    p_seowf.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, or all)")
+    p_seowf.add_argument("--dry-run", action="store_true", help="Evaluate workflows without writing overlays or ledger updates")
+    p_seowf.add_argument("--json", action="store_true", help="Output workflow report as structured JSON")
+
     return parser
+
+
+def cmd_seo_workflows(args: argparse.Namespace) -> int:
+    """
+    Executes all 8 autonomous SEO growth workflows for one or all properties.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.seo_growth_loops import run_all_seo_growth_workflows
+
+    prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
+    dry_run = bool(getattr(args, "dry_run", False))
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    reports = {}
+    for p_id in props:
+        reports[p_id] = run_all_seo_growth_workflows(
+            property_id=p_id,
+            apply_overlays=not dry_run,
+            persist=not dry_run,
+        )
+    out = reports[props[0]] if len(props) == 1 else {"status": "PASS", "properties": reports}
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                out,
+                indent=2,
+                default=lambda o: o.to_dict() if hasattr(o, "to_dict") else (o.__dict__ if hasattr(o, "__dict__") else str(o)),
+            )
+        )
+    else:
+        for p_id, rep in reports.items():
+            wf = rep.get("workflows", {})
+            print(
+                f"[{rep.get('status', 'PASS')}] SEO Growth Workflows ({p_id}): "
+                f"decay={wf.get('1_identify_content_decay', {}).get('decayed_pages_count', 0)} | "
+                f"sprint={wf.get('2_technical_seo_sprint', {}).get('sprint_tickets_count', 0)} | "
+                f"spikes={wf.get('3_competitor_traffic_spikes', {}).get('spikes_count', 0)} | "
+                f"briefs={wf.get('4_search_opportunity_briefs', {}).get('briefs_count', 0)} | "
+                f"links={wf.get('5_internal_linking_opportunities', {}).get('injection_recommendations_count', 0)} | "
+                f"portfolio={wf.get('6_content_portfolio_decisions', {}).get('pages_audited', 0)} | "
+                f"ai_pr={wf.get('7_ai_citation_digital_pr_queue', {}).get('queue_count', 0)} | "
+                f"regressions={wf.get('8_post_release_seo_regressions', {}).get('regressions_count', 0)}"
+            )
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1793,6 +1845,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_indexing_inspect(args)
     elif args.command == "indexing-feedback-loop":
         return cmd_indexing_feedback_loop(args)
+    elif args.command == "seo-workflows":
+        return cmd_seo_workflows(args)
     else:
         parser.print_help()
         return 1
