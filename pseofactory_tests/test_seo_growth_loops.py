@@ -435,3 +435,71 @@ def test_run_all_seo_growth_workflows_and_cli_integration(tmp_path: Path, capsys
     captured = capsys.readouterr().out
     parsed = json.loads(captured)
     assert parsed["workflows_executed"] == 8
+
+
+def test_live_queue_ai_citation_detector_and_prexvo_vertical_overlays(tmp_path: Path) -> None:
+    """
+    Verifies that void_candidates.jsonl, .agy/gsc_remediation_queue.json, and
+    freshness_audit_report.json are evaluated through TregChecker.check_ai_citation,
+    prioritized by deterministic tax/Title IV math need, and compiled into vertical-specific
+    overlays without generic RAP/IBR boilerplate pollution on PSLF or Parent PLUS pages.
+    """
+    from pseofactory.gsc_remediation import (
+        calculate_candidate_roi,
+        classify_deterministic_math_opportunity,
+        compile_remediation_overlay_spec,
+    )
+
+    tax_math = classify_deterministic_math_opportunity(
+        slug="section-179-calculator",
+        query="section 179 bonus depreciation phaseout",
+        tenant_id="profithelm",
+    )
+    assert tax_math["needs_deterministic_math"] is True
+    assert tax_math["math_domain"] == "STATUTORY_TAX_MATH"
+
+    loan_math = classify_deterministic_math_opportunity(
+        slug="pslf-buyback-calculator",
+        query="pslf buyback lump sum calculation",
+        tenant_id="prexvo",
+    )
+    assert loan_math["needs_deterministic_math"] is True
+    assert loan_math["math_domain"] == "TITLE_IV_STUDENT_LOAN_MATH"
+
+    roi_res = calculate_candidate_roi(
+        {
+            "slug": "pslf-buyback-calculator",
+            "query": "pslf buyback calculator",
+            "tenant_id": "prexvo",
+            "impressions": 45,
+            "clicks": 0,
+            "position": 8.4,
+            "losing_to_weaker_domains": True,
+            "weaker_cited_domains": ["studentaid.gov", "reddit.com"],
+        }
+    )
+    assert roi_res["needs_deterministic_math"] is True
+    assert roi_res["citation_gap_status"] == "LOSING_TO_WEAKER_DOMAINS"
+    assert roi_res["ai_citation_boost"] == 0.30
+    assert roi_res["deterministic_math_boost"] == 0.15
+
+    pslf_spec = compile_remediation_overlay_spec(
+        {
+            "slug": "pslf-buyback-calculator",
+            "query": "pslf buyback settlement calculator",
+            "target_url": "https://prexvo.com/tools/pslf-buyback-calculator/",
+            "impressions": 45,
+            "clicks": 0,
+            "ctr": 0.0,
+            "position": 8.4,
+            "citation_gap_status": "LOSING_TO_WEAKER_DOMAINS",
+            "weaker_cited_domains": ["studentaid.gov", "reddit.com"],
+        },
+        tenant_id="prexvo",
+    )
+    assert "34 CFR 685.219" in pslf_spec["quick_answer"]
+    assert any("Buyback" in r.get("scenario", "") for r in pslf_spec["comparison_rows"])
+    assert pslf_spec["citation_gap_status"] == "LOSING_TO_WEAKER_DOMAINS"
+
+
+

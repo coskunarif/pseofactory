@@ -4603,6 +4603,9 @@ def _normalize_page_structure_and_geo_parity(
     if "31-U.S.C." in updated:
         updated = updated.replace("31-U.S.C.", "31 U.S.C.")
         changed = True
+    if "1 - Effective" in updated:
+        updated = updated.replace("1 - Effective", "1 minus Effective")
+        changed = True
     if '<h3 style="margin-bottom: 8px;">Tier ' in updated:
         updated = re.sub(
             r'<h3 style="margin-bottom: 8px;">(Tier [123]:[^<]+)</h3>',
@@ -4758,6 +4761,39 @@ def _normalize_page_structure_and_geo_parity(
             if synced_ld != updated:
                 updated = synced_ld
                 changed = True
+
+    if slug == "tools-directory" and "WebApplication" not in updated and "FAQPage" not in updated:
+        def _inject_tools_directory_webapp_ld(match: re.Match) -> str:
+            open_t, raw_j, close_t = match.group(1), match.group(2), match.group(3)
+            try:
+                data = json.loads(raw_j.strip())
+                if isinstance(data, dict) and "@graph" in data and isinstance(data["@graph"], list):
+                    base_u = (canonical_url or "https://profithelm.com/tools/").split("#")[0]
+                    data["@graph"].append(
+                        {
+                            "@type": "WebApplication",
+                            "@id": f"{base_u}#webapplication",
+                            "name": f"{topic_label}",
+                            "url": base_u,
+                            "applicationCategory": "FinanceApplication",
+                            "operatingSystem": "All",
+                        }
+                    )
+                    return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
+            except Exception:
+                pass
+            return match.group(0)
+
+        dir_ld = re.sub(
+            r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+            _inject_tools_directory_webapp_ld,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if dir_ld != updated:
+            updated = dir_ld
+            changed = True
 
     return updated, changed
 
@@ -6840,7 +6876,20 @@ def reflect_and_recompile_all_assets(
                     except Exception:
                         pass
 
-        if (recompiled_count > 0 or retrofitted_count > 0) and latch_state and build_verified.status == "PASS":
+        freshness_needs_refresh = False
+        if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo"):
+            try:
+                f_rep_path = adapter.dist_dir.parent / "freshness_audit_report.json"
+                if not f_rep_path.is_file():
+                    freshness_needs_refresh = True
+                else:
+                    f_rep_data = json.loads(f_rep_path.read_text(encoding="utf-8"))
+                    if f_rep_data.get("verdict") != "CERTIFIED_FRESH":
+                        freshness_needs_refresh = True
+            except Exception:
+                freshness_needs_refresh = True
+
+        if (recompiled_count > 0 or retrofitted_count > 0 or freshness_needs_refresh) and latch_state and build_verified.status == "PASS":
             try:
                 s_file = adapter.dist_dir.parent / ".agy" / "engine_hash.json"
                 l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"

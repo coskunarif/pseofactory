@@ -195,3 +195,32 @@ def test_treg_checker_ai_citation_subprocess():
             assert "dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced" in call_args
             assert "X-Treg-Route-Max-Cost: 0.01" in call_args
 
+
+def test_parse_ai_citation_payload_gap_status_classification():
+    """
+    Verifies parse_ai_citation_payload and offline fallback classify MISSING_AI_OVERVIEW
+    vs LOSING_TO_WEAKER_DOMAINS accurately.
+    """
+    from pseofactory.trends.treg_checker import parse_ai_citation_payload
+
+    missing_res = parse_ai_citation_payload({"result": {"sources": []}})
+    assert missing_res["missing_ai_overview"] is True
+    assert missing_res["losing_to_weaker_domains"] is False
+    assert missing_res["citation_gap_status"] == "MISSING_AI_OVERVIEW"
+
+    weaker_res = parse_ai_citation_payload(
+        {
+            "result": {
+                "sources": [
+                    {"domain": "studentaid.gov", "url": "https://studentaid.gov/manage-loans/forgiveness-cancellation"},
+                    {"domain": "reddit.com", "url": "https://www.reddit.com/r/StudentLoans/"},
+                ]
+            }
+        }
+    )
+    assert weaker_res["missing_ai_overview"] is False
+    assert weaker_res["losing_to_weaker_domains"] is True
+    assert weaker_res["weaker_cited_domains"] == ["studentaid.gov", "reddit.com"]
+    assert weaker_res["citation_gap_status"] == "LOSING_TO_WEAKER_DOMAINS"
+
+

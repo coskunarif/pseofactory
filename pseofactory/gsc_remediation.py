@@ -205,6 +205,130 @@ def _classify_asset_intent_class(
     }
 
 
+def classify_deterministic_math_opportunity(
+    slug: str = "",
+    query: str = "",
+    tenant_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Identifies whether a query or page requires deterministic statutory tax or Title IV
+    student-loan math where generic prose blogs, forums, and static .gov PDFs fail searchers.
+    Zero em-dashes. Zero en-dashes.
+    """
+    comb = f"{slug.lower()} {query.lower()}"
+    prop = str(tenant_id or "profithelm").strip().lower()
+
+    student_loan_tokens = (
+        "student-loan",
+        "student loan",
+        "rap",
+        "ibr",
+        "pslf",
+        "icr",
+        "paye",
+        "parent-plus",
+        "parent plus",
+        "married-filing-separately",
+        "married filing separately",
+        "tiered-standard",
+        "tiered standard",
+        "grad-plus",
+        "grad plus",
+        "save-plan",
+        "save plan",
+        "repayment",
+        "forgiveness",
+        "buyback",
+        "refinance",
+        "consolidation",
+    )
+    tax_math_tokens = (
+        "179",
+        "1031",
+        "174",
+        "1099-da",
+        "1099 da",
+        "crypto",
+        "8949",
+        "treasury",
+        "3124",
+        "yield",
+        "tax",
+        "bracket",
+        "capital-gains",
+        "capital gains",
+        "s-corp",
+        "s corp",
+        "reasonable-salary",
+        "199a",
+        "1202",
+        "qsbs",
+        "runway",
+        "burn",
+        "prediction-market",
+        "prediction market",
+        "1256",
+        "odds",
+        "301",
+        "tariff",
+        "landed-cost",
+        "surety",
+        "bond",
+        "factoring",
+        "payroll-burden",
+        "workers-comp",
+        "depreciation",
+        "macrs",
+        "8829",
+    )
+
+    if prop == "prexvo" or any(tok in comb for tok in student_loan_tokens):
+        is_math = any(tok in comb for tok in student_loan_tokens) or "calculator" in comb or "simulator" in comb
+        if "pslf" in comb or "buyback" in comb:
+            stat_ref = "34 CFR 685.219 & 26 U.S.C. 108(f)(1)"
+        elif "parent" in comb or "icr" in comb or "consolidation" in comb:
+            stat_ref = "34 CFR 685.209(b) & HEA Section 455(d)"
+        elif "married" in comb or "mfs" in comb:
+            stat_ref = "34 CFR 685.209(e) & IRC Section 1(j)"
+        elif "tiered" in comb or "grad" in comb:
+            stat_ref = "HEA Section 455(d) & 34 CFR 685.208"
+        else:
+            stat_ref = "34 CFR 685.209 & 42 U.S.C. 9902(2)"
+        return {
+            "needs_deterministic_math": bool(is_math),
+            "math_domain": "TITLE_IV_STUDENT_LOAN_MATH",
+            "statutory_citation": stat_ref,
+        }
+
+    is_tax_math = any(tok in comb for tok in tax_math_tokens) or "calculator" in comb or "simulator" in comb
+    if "1031" in comb:
+        stat_ref = "IRC Section 1031(a)(3) & Section 1250"
+    elif "179" in comb or "macrs" in comb or "vehicle" in comb or "equipment" in comb:
+        stat_ref = "IRC Section 179 & Section 168(k)"
+    elif "174" in comb or "r-and-d" in comb or "r&d" in comb or "6765" in comb:
+        stat_ref = "IRC Section 41 & Section 174"
+    elif "crypto" in comb or "1099-da" in comb or "1099 da" in comb or "8949" in comb:
+        stat_ref = "IRC Section 1012, Section 1411 & Rev. Proc. 2024-28"
+    elif "treasury" in comb or "3124" in comb or "yield" in comb:
+        stat_ref = "31 U.S.C. Section 3124 & IRC Section 1411"
+    elif "runway" in comb or "burn" in comb or "saas" in comb:
+        stat_ref = "GAAP ASC 205-40 & 31 U.S.C. Section 3124"
+    elif "prediction" in comb or "1256" in comb or "odds" in comb:
+        stat_ref = "IRC Section 1256(g) & CFTC Part 40"
+    elif "301" in comb or "tariff" in comb or "landed" in comb:
+        stat_ref = "19 U.S.C. 2411 (Section 301) & CBP Form 7501"
+    elif "surety" in comb or "bond" in comb:
+        stat_ref = "40 U.S.C. 3131 (Miller Act) & Treasury Circular 570"
+    else:
+        stat_ref = "IRC Section 1(j), Section 1(h) & Section 1411"
+
+    return {
+        "needs_deterministic_math": bool(is_tax_math),
+        "math_domain": "STATUTORY_TAX_MATH",
+        "statutory_citation": stat_ref,
+    }
+
+
 def _resolve_contextual_internal_links(
     tenant_id: str,
     slug: str,
@@ -1191,6 +1315,51 @@ def calculate_candidate_roi(
         query=query_str,
         section=str(data.get("section") or data.get("template_section") or ""),
     )
+    math_info = classify_deterministic_math_opportunity(
+        slug=slug_str,
+        query=query_str,
+        tenant_id=resolved_tenant,
+    )
+    needs_deterministic_math = bool(
+        data.get("needs_deterministic_math", math_info["needs_deterministic_math"])
+    )
+
+    ai_citation_vacant = bool(data.get("ai_citation_vacant", False))
+    ai_cited_domains = list(data.get("ai_cited_domains") or [])
+    weaker_cited_domains = list(data.get("weaker_cited_domains") or [])
+    losing_to_weaker_domains = bool(data.get("losing_to_weaker_domains", False))
+    missing_ai_overview = bool(data.get("missing_ai_overview", False))
+    citation_gap_status = str(data.get("citation_gap_status") or "")
+
+    if data.get("check_ai_citation") or ("ai_citation_vacant" in data and not citation_gap_status):
+        try:
+            from pseofactory.trends.treg_checker import TregChecker, parse_ai_citation_payload
+            domain_for_tenant = "prexvo.com" if resolved_tenant == "prexvo" else "profithelm.com"
+            if "ai_citation_vacant" in data or "ai_cited_domains" in data:
+                parsed_ai = parse_ai_citation_payload(
+                    {
+                        "ai_citation_vacant": ai_citation_vacant,
+                        "ai_cited_domains": ai_cited_domains,
+                        "losing_to_weaker_domains": data.get("losing_to_weaker_domains"),
+                        "missing_ai_overview": data.get("missing_ai_overview"),
+                        "citation_gap_status": data.get("citation_gap_status"),
+                    },
+                    tenant_domains=[domain_for_tenant],
+                )
+            else:
+                checker = TregChecker(check_ai_citations=True, tenant_domains=[domain_for_tenant])
+                parsed_ai = checker.check_ai_citation(
+                    query_str or slug_str.replace("-", " "),
+                    tenant_domains=[domain_for_tenant],
+                )
+            ai_citation_vacant = bool(parsed_ai.get("ai_citation_vacant", ai_citation_vacant))
+            ai_cited_domains = list(parsed_ai.get("ai_cited_domains") or ai_cited_domains)
+            weaker_cited_domains = list(parsed_ai.get("weaker_cited_domains") or weaker_cited_domains)
+            losing_to_weaker_domains = bool(parsed_ai.get("losing_to_weaker_domains", losing_to_weaker_domains))
+            missing_ai_overview = bool(parsed_ai.get("missing_ai_overview", missing_ai_overview))
+            citation_gap_status = str(parsed_ai.get("citation_gap_status") or citation_gap_status)
+        except Exception:
+            pass
 
     conversion_gap = bool(
         data.get("conversion_gap_detected")
@@ -1292,6 +1461,30 @@ def calculate_candidate_roi(
     erpm_usd = float(data.get("erpm_usd", data.get("empirical_erpm_usd", default_erpm)) or default_erpm)
 
     intent_multiplier = float(intent_info["intent_multiplier"])
+    if not citation_gap_status:
+        if losing_to_weaker_domains:
+            citation_gap_status = "LOSING_TO_WEAKER_DOMAINS"
+            ai_citation_vacant = True
+        elif missing_ai_overview:
+            citation_gap_status = "MISSING_AI_OVERVIEW"
+            ai_citation_vacant = True
+        elif ai_citation_vacant:
+            citation_gap_status = "AI_CITATION_VACANT"
+        else:
+            citation_gap_status = "STANDARD"
+
+    ai_citation_boost = 0.0
+    if losing_to_weaker_domains:
+        ai_citation_boost = 0.30
+    elif missing_ai_overview or ai_citation_vacant:
+        ai_citation_boost = 0.25
+
+    deterministic_math_boost = (
+        0.15
+        if (needs_deterministic_math and (losing_to_weaker_domains or missing_ai_overview or ai_citation_vacant))
+        else 0.0
+    )
+
     gap_boost = 1.0
     if conversion_gap:
         gap_boost += 0.35
@@ -1299,6 +1492,7 @@ def calculate_candidate_roi(
         gap_boost += 0.30
     if distribution_gap:
         gap_boost += 0.20
+    gap_boost += ai_citation_boost + deterministic_math_boost
 
     commercial_weight = round((1.0 + (cpc / 20.0) + (erpm_usd / 200.0)) * intent_multiplier * gap_boost, 4)
     roi_score = round(expected_click_lift * commercial_weight, 4)
@@ -1310,6 +1504,17 @@ def calculate_candidate_roi(
         "intent_class": intent_info["intent_class"],
         "is_high_intent_calculator_or_guide": intent_info["is_high_intent_calculator_or_guide"],
         "intent_multiplier": intent_multiplier,
+        "needs_deterministic_math": needs_deterministic_math,
+        "math_domain": math_info["math_domain"],
+        "statutory_citation": math_info["statutory_citation"],
+        "ai_citation_vacant": ai_citation_vacant,
+        "ai_cited_domains": ai_cited_domains,
+        "weaker_cited_domains": weaker_cited_domains,
+        "losing_to_weaker_domains": losing_to_weaker_domains,
+        "missing_ai_overview": missing_ai_overview,
+        "citation_gap_status": citation_gap_status,
+        "ai_citation_boost": ai_citation_boost,
+        "deterministic_math_boost": deterministic_math_boost,
         "conversion_gap_detected": conversion_gap,
         "distribution_gap_detected": distribution_gap,
         "yield_optimization_needed": yield_opt_needed,
@@ -1522,13 +1727,50 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
     if tenant_id == "prexvo":
-        base_words = (
-            f"Under Title IV regulation 34 CFR Part 685, {short_q} determines monthly borrower "
-            f"obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected "
-            f"income for single filers) and a 10 percent discretionary rate. Qualifying borrowers "
-            f"receive a 100 percent unpaid interest subsidy and complete principal forgiveness after "
-            f"120 to 240 certified monthly payments."
-        ).split()
+        if any(k in combined_low for k in ("pslf", "buyback", "public service")):
+            base_words = (
+                f"Under Title IV regulation 34 CFR 685.219 and IRC Section 108(f)(1), {short_q} "
+                f"models 120 qualifying monthly payments for full-time government and 501(c)(3) nonprofit "
+                f"employees (minimum 30 hours weekly). Qualifying borrowers receive 100 percent tax-free "
+                f"principal and interest forgiveness plus PSLF Hold Harmless Buyback credit for eligible "
+                f"forbearance and deferment months."
+            ).split()
+        elif any(k in combined_low for k in ("parent-plus", "parent plus", "double-consolidation", "icr")):
+            base_words = (
+                f"Under Title IV regulation 34 CFR 685.209(b) and HEA Section 455(d), {short_q} "
+                f"calculates monthly obligations as the lesser of 20 percent of discretionary income above "
+                f"100 percent of the HHS Poverty Guideline or a 12-year fixed payment adjusted by an "
+                f"income percentage factor for consolidated Parent PLUS and Direct loans."
+            ).split()
+        elif any(k in combined_low for k in ("married-filing-separately", "married filing separately", "mfs")):
+            base_words = (
+                f"Under Title IV regulation 34 CFR 685.209(e) and IRC Section 1(j), {short_q} "
+                f"excludes spousal Adjusted Gross Income from income-driven student loan payment math when "
+                f"spouses file separate federal returns, comparing annual IDR payment savings against the "
+                f"marginal tax liability increase from forfeiting joint filing tax credits."
+            ).split()
+        elif any(k in combined_low for k in ("tiered-standard", "tiered standard", "grad-plus", "grad plus")):
+            base_words = (
+                f"Under Higher Education Act Section 455(d) and 34 CFR 685.208, {short_q} "
+                f"establishes fixed monthly amortization schedules scaled across 10, 12, 15, 20, or 25 "
+                f"years by total Title IV debt balance alongside statutory aggregate Direct Unsubsidized "
+                f"and Grad PLUS borrowing ceilings."
+            ).split()
+        elif any(k in combined_low for k in ("refinance", "break-even", "break even")):
+            base_words = (
+                f"Under Title IV regulation 34 CFR Part 685 and Truth in Lending Act disclosures, "
+                f"{short_q} compares private student loan interest rate reductions against the net present "
+                f"value of forfeited federal benefits including 100 percent RAP unpaid interest waivers and "
+                f"tax-free Public Service Loan Forgiveness under 26 U.S.C. 108(f)(1)."
+            ).split()
+        else:
+            base_words = (
+                f"Under Title IV regulation 34 CFR Part 685, {short_q} determines monthly borrower "
+                f"obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected "
+                f"income for single filers) and a 10 percent discretionary rate. Qualifying borrowers "
+                f"receive a 100 percent unpaid interest subsidy and complete principal forgiveness after "
+                f"120 to 240 certified monthly payments."
+            ).split()
         filler_pool = [
             "Verified", "against", "annual", "Department", "of", "Education",
             "amortization", "tables", "and", "federal", "poverty", "benchmarks.",
@@ -2294,65 +2536,18 @@ def compile_remediation_overlay_spec(
     action_type = str(candidate.get("action_type") or "REFACTOR_PAGE")
 
     if resolved_tenant == "prexvo":
-        h2_headings = [
-            f"{heading_label}: 2026 Title IV Statutory Rules & Formula",
-            f"Comparing {heading_label} Under 34 CFR Part 685 Benchmarks",
-        ]
-        preset_scenarios = [
-            {
-                "id": "preset-baseline",
-                "label": f"{heading_label} Baseline ($60k Balance, $65k AGI)",
-                "query": query_clean,
-                "target_position": pos,
-                "baseline_ctr": ctr,
-                "impressions": impr,
-                "params": {"loan_balance": 60000, "agi": 65000, "family_size": 1, "interest_rate": 6.5},
-                "description": "Single borrower at $65,000 AGI with 225% HHS poverty exemption ($248.23/mo RAP payment).",
-            },
-            {
-                "id": "preset-accelerated",
-                "label": f"{heading_label} High-Balance ($95k Balance, $85k AGI)",
-                "query": query_clean,
-                "target_position": pos,
-                "baseline_ctr": ctr,
-                "impressions": impr,
-                "params": {"loan_balance": 95000, "agi": 85000, "family_size": 2, "interest_rate": 6.8},
-                "description": "Dual-household borrower comparing 100% unpaid interest waiver vs 10-year Standard cap.",
-            },
-        ]
-        comparison_rows = [
-            {
-                "scenario": "Single Filer ($60,000 Loan, $65,000 AGI)",
-                "baseline": "$519.06 / mo (150% Poverty Threshold)",
-                "optimized": "$248.23 / mo (225% Poverty Exemption)",
-                "delta": "-$270.83 / mo (-52.2% Obligation)",
-                "authority": "34 CFR 685.209 & 42 U.S.C. 9902(2)",
-            },
-            {
-                "scenario": "Public Service Track (120 Qualifying Payments)",
-                "baseline": "$68,100 Cumulative Standard Outflow",
-                "optimized": "$29,788 Outflow + Tax-Free Discharge",
-                "delta": "$38,312 Statutory Principal Relief",
-                "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
-            },
-        ]
-        faq_entries = [
-            {
-                "question": f"How is {query_clean} calculated under 2026 Title IV regulations?",
-                "answer": (
-                    f"Under 34 CFR Part 685, {query_clean} subtracts 225 percent of the applicable HHS Poverty "
-                    f"Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided "
-                    f"by 12, with 100 percent of unpaid monthly interest waived."
-                ),
-            },
-            {
-                "question": f"Does {query_clean} qualify for statutory loan forgiveness?",
-                "answer": (
-                    "Yes. Qualifying monthly payments count toward 120-payment Public Service Loan Forgiveness "
-                    "under 34 CFR 685.219 or 240-payment income-driven discharge schedules."
-                ),
-            },
-        ]
+        v_blocks = _build_vertical_prexvo_overlay_blocks(
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+        )
+        h2_headings = v_blocks["h2_headings"]
+        preset_scenarios = v_blocks["preset_scenarios"]
+        comparison_rows = v_blocks["comparison_rows"]
+        faq_entries = v_blocks["faq_entries"]
         hub_links = _resolve_contextual_internal_links(
             tenant_id=resolved_tenant,
             slug=slug,
@@ -2421,7 +2616,7 @@ def compile_remediation_overlay_spec(
         candidate=candidate,
     )
 
-    return {
+    spec_out: Dict[str, Any] = {
         "slug": slug,
         "property_id": resolved_tenant,
         "tenant_id": resolved_tenant,
@@ -2464,6 +2659,285 @@ def compile_remediation_overlay_spec(
         "faq_additions": faq_entries,
         "faq_schema": faq_schema,
         "hub_links": hub_links,
+    }
+    for ai_key in (
+        "ai_citation_vacant",
+        "ai_cited_domains",
+        "weaker_cited_domains",
+        "losing_to_weaker_domains",
+        "missing_ai_overview",
+        "citation_gap_status",
+        "needs_deterministic_math",
+    ):
+        if ai_key in candidate:
+            spec_out[ai_key] = candidate[ai_key]
+    return spec_out
+
+
+def _build_vertical_prexvo_overlay_blocks(
+    slug: str,
+    query_clean: str,
+    heading_label: str,
+    pos: float,
+    ctr: float,
+    impr: int,
+) -> Dict[str, Any]:
+    """
+    Builds vertical-specific h2_headings, preset_scenarios, comparison_rows, and faq_entries
+    for Prexvo student-loan overlays (PSLF, Parent PLUS/ICR, MFS, Tiered Standard/Grad PLUS,
+    Refinance Break-Even, and RAP vs IBR).
+    Zero em-dashes. Zero en-dashes.
+    """
+    comb = f"{slug.lower()} {query_clean.lower()}"
+    if any(k in comb for k in ("pslf", "buyback", "public service")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: 34 CFR 685.219 PSLF 120-Payment & Buyback Rules",
+                f"Comparing {heading_label} Under 26 U.S.C. 108(f)(1) Tax-Free Discharge",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-pslf-nonprofit",
+                    "label": "501(c)(3) Hospital/University Track ($75k Balance, $68k AGI)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 75000, "agi": 68000, "family_size": 1, "qualifying_months": 84},
+                    "description": "36 remaining RAP payments at $273.23/mo unlocking $65,164 tax-free principal forgiveness.",
+                },
+                {
+                    "id": "preset-pslf-buyback",
+                    "label": "PSLF Hold Harmless Buyback (18 Months Deferment Settlement)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 92000, "agi": 62000, "family_size": 2, "qualifying_months": 102},
+                    "description": "Buying back 18 historical deferment/forbearance months at lowest historical IDR rate to reach 120 payments immediately.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "501(c)(3) Borrower ($75,000 Direct Loan, $68,000 AGI, 84 Credits)",
+                    "baseline": "$90,630 Standard 10-Year Cumulative Outflow",
+                    "optimized": "$9,836 Remaining RAP Outflow + $65,164 Forgiven",
+                    "delta": "$80,794 Net Tax-Free Statutory Relief",
+                    "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
+                },
+                {
+                    "scenario": "18-Month Historical Forbearance Buyback at 102 Certified Months",
+                    "baseline": "$6,480 Future 18-Month Payment Obligation",
+                    "optimized": "$3,240 Lump-Sum Hold Harmless Buyback Settlement",
+                    "delta": "-$3,240 Cash Saved + Immediate Discharge",
+                    "authority": "34 CFR 685.219(g) Hold Harmless Rule",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How does the 34 CFR 685.219(g) PSLF Buyback formula work for {query_clean}?",
+                    "answer": (
+                        "Borrowers with 120 months of certified public service employment can buy back eligible "
+                        "months of deferment or forbearance by paying the monthly amount they would have owed under "
+                        "an income-driven repayment plan during those specific historical tax years."
+                    ),
+                },
+                {
+                    "question": "Is Public Service Loan Forgiveness taxable at the federal or state level?",
+                    "answer": (
+                        "Under Internal Revenue Code Section 108(f)(1), student loan balances discharged through "
+                        "Public Service Loan Forgiveness are permanently excluded from federal gross income, and "
+                        "49 of 50 states conform to this tax-free treatment."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("parent-plus", "parent plus", "double-consolidation", "icr")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: 34 CFR 685.209(b) ICR & Parent PLUS Consolidation Rules",
+                f"Comparing {heading_label} 20% Discretionary vs 12-Year Fixed Factor",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-icr-single-parent",
+                    "label": "Consolidated Parent PLUS ($85k Balance, $72k AGI)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 85000, "agi": 72000, "family_size": 2, "interest_rate": 7.05},
+                    "description": "Direct Consolidation Parent PLUS borrower evaluating 20% ICR discretionary cap vs 12-year income factor.",
+                },
+                {
+                    "id": "preset-icr-double-consolidation",
+                    "label": "Legacy Double-Consolidated Parent PLUS ($110k Balance, $80k AGI)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 110000, "agi": 80000, "family_size": 3, "interest_rate": 7.54},
+                    "description": "Comparing 10% RAP/IBR eligibility against 20% single-consolidation ICR obligation.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "Single-Consolidated Parent PLUS ($85,000 Balance, $72,000 AGI)",
+                    "baseline": "$989.15 / mo Standard 10-Year Amortization",
+                    "optimized": "$847.50 / mo ICR 20% Discretionary Formula",
+                    "delta": "-$141.65 / mo Cash Flow Reduction",
+                    "authority": "34 CFR 685.209(b) & HEA Section 455(d)",
+                },
+                {
+                    "scenario": "Completed Double Consolidation Before Statutory Sunset",
+                    "baseline": "$847.50 / mo (20% ICR Discretionary Rate)",
+                    "optimized": "$306.56 / mo (10% RAP 225% Poverty Exemption)",
+                    "delta": "-$540.94 / mo (-63.8% Monthly Payment)",
+                    "authority": "34 CFR 685.209 & 34 CFR 685.220",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How does the 34 CFR 685.209(b) ICR dual formula calculate {query_clean}?",
+                    "answer": (
+                        "Income-Contingent Repayment sets your monthly payment at the lesser of (1) 20 percent of "
+                        "your discretionary income (AGI minus 100 percent of the federal poverty guideline) divided by 12, "
+                        "or (2) what you would pay on a 12-year fixed repayment plan multiplied by an IRS-indexed income percentage factor."
+                    ),
+                },
+                {
+                    "question": "Can Parent PLUS loans qualify for Public Service Loan Forgiveness?",
+                    "answer": (
+                        "Yes. Once Parent PLUS loans are consolidated into a federal Direct Consolidation Loan and placed "
+                        "on ICR (or RAP/IBR if double-consolidated prior to the statutory cutoff), payments made while the "
+                        "parent borrower works full-time for a qualifying public service employer count toward 120-month PSLF."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("married-filing-separately", "married filing separately", "mfs")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: 34 CFR 685.209(e) Spousal Income Exclusion vs IRC Tax Cost",
+                f"Comparing {heading_label} Joint vs Separate Net Household Arbitrage",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-mfs-dual-income",
+                    "label": "Dual-Income Household ($65k Borrower AGI, $115k Spouse AGI)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 90000, "agi": 65000, "spouse_agi": 115000, "family_size": 2},
+                    "description": "Filing separately excludes $115,000 spousal AGI, cutting annual IDR payments by $9,583 vs $1,840 MFS tax cost.",
+                },
+                {
+                    "id": "preset-mfs-community-property",
+                    "label": "Community Property State Split (CA/TX/WA 50/50 Income Allocation)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 120000, "agi": 70000, "spouse_agi": 140000, "family_size": 3},
+                    "description": "Submitting alternative documentation of pay stubs when IRS Form 8958 community property split inflates MFS AGI.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "Household $180,000 Combined AGI ($65k Borrower + $115k Spouse)",
+                    "baseline": "$1,105.73 / mo Joint RAP Payment ($13,269 / yr)",
+                    "optimized": "$248.23 / mo Separate RAP Payment ($2,979 / yr)",
+                    "delta": "+$8,450 Net Annual Savings (After $1,840 MFS Tax Drag)",
+                    "authority": "34 CFR 685.209(e) & IRC Section 1(j)",
+                },
+                {
+                    "scenario": "Forfeited IRC Section 221 Student Loan Interest & Child Care Credits",
+                    "baseline": "$0 Tax Penalty Under Married Filing Jointly",
+                    "optimized": "$1,450 to $2,600 Added Federal Tax Under MFS",
+                    "delta": "Net Arbitrage Positive When Spouse AGI > $35,000",
+                    "authority": "IRC Section 21, Section 221 & Section 1(d)",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"Does Married Filing Separately exclude spousal income under 34 CFR 685.209(e) for {query_clean}?",
+                    "answer": (
+                        "Yes. Under 34 CFR 685.209(e), when a married borrower files a separate federal income tax return "
+                        "(Married Filing Separately), the Department of Education calculates monthly IDR payments using only "
+                        "the borrower's individual Adjusted Gross Income and excludes the spouse from family size."
+                    ),
+                },
+                {
+                    "question": "What federal tax deductions are disallowed when filing Married Filing Separately?",
+                    "answer": (
+                        "Filing Married Filing Separately disallows the $2,500 IRC Section 221 student loan interest deduction, "
+                        "the Earned Income Tax Credit, the American Opportunity and Lifetime Learning education credits, and "
+                        "compresses the IRC Section 1411 NIIT threshold to $125,000."
+                    ),
+                },
+            ],
+        }
+    return {
+        "h2_headings": [
+            f"{heading_label}: 2026 Title IV Statutory Rules & Formula",
+            f"Comparing {heading_label} Under 34 CFR Part 685 Benchmarks",
+        ],
+        "preset_scenarios": [
+            {
+                "id": "preset-baseline",
+                "label": f"{heading_label} Baseline ($60k Balance, $65k AGI)",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"loan_balance": 60000, "agi": 65000, "family_size": 1, "interest_rate": 6.5},
+                "description": "Single borrower at $65,000 AGI with 225% HHS poverty exemption ($248.23/mo RAP payment).",
+            },
+            {
+                "id": "preset-accelerated",
+                "label": f"{heading_label} High-Balance ($95k Balance, $85k AGI)",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"loan_balance": 95000, "agi": 85000, "family_size": 2, "interest_rate": 6.8},
+                "description": "Dual-household borrower comparing 100% unpaid interest waiver vs 10-year Standard cap.",
+            },
+        ],
+        "comparison_rows": [
+            {
+                "scenario": "Single Filer ($60,000 Loan, $65,000 AGI)",
+                "baseline": "$519.06 / mo (150% Poverty Threshold)",
+                "optimized": "$248.23 / mo (225% Poverty Exemption)",
+                "delta": "-$270.83 / mo (-52.2% Obligation)",
+                "authority": "34 CFR 685.209 & 42 U.S.C. 9902(2)",
+            },
+            {
+                "scenario": "Public Service Track (120 Qualifying Payments)",
+                "baseline": "$68,100 Cumulative Standard Outflow",
+                "optimized": "$29,788 Outflow + Tax-Free Discharge",
+                "delta": "$38,312 Statutory Principal Relief",
+                "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
+            },
+        ],
+        "faq_entries": [
+            {
+                "question": f"How is {query_clean} calculated under 2026 Title IV regulations?",
+                "answer": (
+                    f"Under 34 CFR Part 685, {query_clean} subtracts 225 percent of the applicable HHS Poverty "
+                    f"Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided "
+                    f"by 12, with 100 percent of unpaid monthly interest waived."
+                ),
+            },
+            {
+                "question": f"Does {query_clean} qualify for statutory loan forgiveness?",
+                "answer": (
+                    "Yes. Qualifying monthly payments count toward 120-payment Public Service Loan Forgiveness "
+                    "under 34 CFR 685.219 or 240-payment income-driven discharge schedules."
+                ),
+            },
+        ],
     }
 
 

@@ -920,25 +920,62 @@ def compile_search_opportunity_briefs(
     (including state and vehicle leaf routes like /tools/irs-2027-tax-brackets/california/,
     /tools/section-1031-calculator/texas/, /tools/section-1031-calculator/maine/,
     /tools/student-loan-repayment-calculator/, /tools/icr-repayment-calculator/),
-    compiles structured executable content briefs (.agy/search_opportunity_briefs.json),
-    and compiles + injects deterministic remediation overlays into dist/ HTML.
+    joins .agy/gsc_remediation_queue.json and void_candidates.jsonl, evaluates AI citation
+    gaps via TregChecker.check_ai_citation, compiles structured executable content briefs
+    (.agy/search_opportunity_briefs.json), and compiles + injects deterministic remediation
+    overlays into dist/ HTML.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.gsc_remediation import (
         EXPECTED_CTR_CURVE,
         _slug_from_url_or_query,
+        calculate_candidate_roi,
+        classify_deterministic_math_opportunity,
         compile_remediation_overlay_spec,
         inject_overlay_into_html,
         persist_overlay_respecting_lock,
     )
+    from pseofactory.trends.treg_checker import TregChecker
 
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
     domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
-    rows = gsc_bundle.get("current_rows") or []
+    rows = list(gsc_bundle.get("current_rows") or [])
+
+    # Also ingest .agy/gsc_remediation_queue.json tasks so zero-click and striking-distance calculators are included
+    rem_q_path = root / ".agy" / "gsc_remediation_queue.json"
+    if rem_q_path.is_file():
+        try:
+            rem_data = json.loads(rem_q_path.read_text(encoding="utf-8"))
+            rem_tasks = rem_data.get("tasks", []) if isinstance(rem_data, dict) else (rem_data if isinstance(rem_data, list) else [])
+            for rt in rem_tasks:
+                if not isinstance(rt, dict):
+                    continue
+                t_url = str(rt.get("target_url") or "").strip()
+                t_slug = str(rt.get("slug") or "").strip()
+                c_p = urllib.parse.urlsplit(t_url).path.rstrip("/") if t_url else (f"/tools/{t_slug}" if t_slug else "")
+                if not c_p or c_p in ("/", "/tools"):
+                    continue
+                # Only include if the route exists on disk or in GSC rows
+                html_cand = d_dir / c_p.lstrip("/") / "index.html"
+                if html_cand.is_file():
+                    rows.append(
+                        {
+                            "query": str(rt.get("query") or t_slug.replace("-", " ")).strip(),
+                            "canonical_path": c_p,
+                            "canonical_url": f"https://{domain}{c_p}/",
+                            "impressions": int(float(rt.get("impressions", 0) or 0)),
+                            "clicks": int(float(rt.get("clicks", 0) or 0)),
+                            "position": float(rt.get("position", 15.0) or 15.0),
+                            "source": "gsc_remediation_queue",
+                        }
+                    )
+        except Exception:
+            pass
 
     # Group queries by canonical_path
     by_path: Dict[str, List[Dict[str, Any]]] = {}
@@ -956,15 +993,35 @@ def compile_search_opportunity_briefs(
     html_pages_injected = 0
 
     for c_path, p_rows in by_path.items():
-        p_rows.sort(key=lambda x: (-int(float(x.get("impressions", 0) or 0)), float(x.get("position", 100.0) or 100.0)))
-        primary = p_rows[0]
-        tot_impr = sum(int(float(x.get("impressions", 0) or 0)) for x in p_rows)
-        tot_clicks = sum(int(float(x.get("clicks", 0) or 0)) for x in p_rows)
+        # Deduplicate identical query rows from consolidated_gsc + gsc_remediation_queue
+        dedup_p_rows: List[Dict[str, Any]] = []
+        seen_pq: Dict[str, Dict[str, Any]] = {}
+        for pr in p_rows:
+            qk = str(pr.get("query") or "").strip().lower()
+            if not qk:
+                continue
+            if qk not in seen_pq or int(float(pr.get("impressions", 0) or 0)) > int(float(seen_pq[qk].get("impressions", 0) or 0)):
+                seen_pq[qk] = pr
+        dedup_p_rows = list(seen_pq.values())
+        dedup_p_rows.sort(key=lambda x: (-int(float(x.get("impressions", 0) or 0)), float(x.get("position", 100.0) or 100.0)))
+        if not dedup_p_rows:
+            continue
+
+        primary = dedup_p_rows[0]
+        tot_impr = sum(int(float(x.get("impressions", 0) or 0)) for x in dedup_p_rows)
+        tot_clicks = sum(int(float(x.get("clicks", 0) or 0)) for x in dedup_p_rows)
         if tot_impr <= 0:
             continue
 
-        w_pos = sum(float(x.get("position", 50.0) or 50.0) * max(1, int(float(x.get("impressions", 0) or 0))) for x in p_rows) / max(1, tot_impr)
-        best_pos = min(float(x.get("position", 100.0) or 100.0) for x in p_rows)
+        pos_rows = [float(x.get("position", 50.0) or 50.0) for x in dedup_p_rows if float(x.get("position", 0.0) or 0.0) > 0.0]
+        best_pos = min(pos_rows) if pos_rows else 15.0
+        w_pos = (
+            sum(
+                (float(x.get("position", 0.0) or 0.0) or best_pos) * max(1, int(float(x.get("impressions", 0) or 0)))
+                for x in dedup_p_rows
+            )
+            / max(1, tot_impr)
+        )
         curr_ctr = round(tot_clicks / float(tot_impr), 4) if tot_impr > 0 else 0.0
         rank_bucket = max(1, min(10, int(round(best_pos))))
         target_ctr = EXPECTED_CTR_CURVE.get(rank_bucket, 0.035)
@@ -975,11 +1032,18 @@ def compile_search_opportunity_briefs(
         leaf_slug = _slug_from_url_or_query(target_url=target_url, query=primary_query)
         grouped_qs = []
         seen_q: Set[str] = set()
-        for pr in p_rows:
+        for pr in dedup_p_rows:
             q_str = _clean_dashes(str(pr.get("query") or "").strip())
             if q_str and q_str.lower() not in seen_q:
                 grouped_qs.append(q_str)
                 seen_q.add(q_str.lower())
+
+        ai_res = ai_checker.check_ai_citation(primary_query, tenant_domains=[domain])
+        math_info = classify_deterministic_math_opportunity(
+            slug=leaf_slug,
+            query=primary_query,
+            tenant_id=prop,
+        )
 
         candidate_payload = {
             "slug": leaf_slug,
@@ -991,7 +1055,15 @@ def compile_search_opportunity_briefs(
             "clicks": tot_clicks,
             "ctr": curr_ctr,
             "position": round(best_pos, 2),
+            "ai_citation_vacant": ai_res["ai_citation_vacant"],
+            "ai_cited_domains": ai_res["ai_cited_domains"],
+            "weaker_cited_domains": ai_res["weaker_cited_domains"],
+            "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
+            "missing_ai_overview": ai_res["missing_ai_overview"],
+            "citation_gap_status": ai_res["citation_gap_status"],
+            "needs_deterministic_math": math_info["needs_deterministic_math"],
         }
+        roi_eval = calculate_candidate_roi(candidate_payload, tenant_id=prop)
         overlay_spec = compile_remediation_overlay_spec(candidate_payload, tenant_id=prop)
         overlay_file_stem = leaf_slug.replace("/", "-")
 
@@ -1000,7 +1072,18 @@ def compile_search_opportunity_briefs(
             if best_pos <= 10.0
             else ("STRIKING_DISTANCE_PAGE_2" if best_pos <= 25.0 else "EARLY_INDEXATION_EXPANSION")
         )
-        roi_score = round(tot_impr * (2.5 if best_pos <= 15.0 else (1.6 if best_pos <= 30.0 else 1.0)) * (1.0 + ctr_gap * 5.0), 2)
+        ai_math_boost = (
+            1.35
+            if (math_info["needs_deterministic_math"] and (ai_res["losing_to_weaker_domains"] or ai_res["missing_ai_overview"]))
+            else 1.0
+        )
+        roi_score = round(
+            max(
+                float(roi_eval["roi_score"]),
+                tot_impr * (2.5 if best_pos <= 15.0 else (1.6 if best_pos <= 30.0 else 1.0)) * (1.0 + ctr_gap * 5.0) * ai_math_boost,
+            ),
+            2,
+        )
 
         brief = {
             "brief_id": f"brief_{prop}_{overlay_file_stem}",
@@ -1021,6 +1104,14 @@ def compile_search_opportunity_briefs(
             "target_ctr": target_ctr,
             "ctr_shortfall": ctr_gap,
             "roi_score": roi_score,
+            "ai_citation_vacant": ai_res["ai_citation_vacant"],
+            "ai_cited_domains": ai_res["ai_cited_domains"],
+            "weaker_cited_domains": ai_res["weaker_cited_domains"],
+            "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
+            "missing_ai_overview": ai_res["missing_ai_overview"],
+            "citation_gap_status": ai_res["citation_gap_status"],
+            "needs_deterministic_math": math_info["needs_deterministic_math"],
+            "math_domain": math_info["math_domain"],
             "compiled_brief_spec": {
                 "title_rewrite": overlay_spec.get("title_rewrite", ""),
                 "meta_description": overlay_spec.get("meta_description", ""),
@@ -1066,6 +1157,9 @@ def compile_search_opportunity_briefs(
         "total_briefs_compiled": len(briefs),
         "briefs_count": len(briefs),
         "striking_distance_briefs_count": sum(1 for b in briefs if "STRIKING_DISTANCE" in b["opportunity_class"]),
+        "missing_ai_overview_briefs_count": sum(1 for b in briefs if b.get("missing_ai_overview")),
+        "losing_to_weaker_domains_briefs_count": sum(1 for b in briefs if b.get("losing_to_weaker_domains")),
+        "deterministic_math_briefs_count": sum(1 for b in briefs if b.get("needs_deterministic_math")),
         "overlays_compiled_count": overlays_compiled,
         "html_pages_injected_count": html_pages_injected,
         "briefs": briefs[:40],
@@ -1590,22 +1684,133 @@ def compile_ai_citation_digital_pr_queue(
     persist: bool = True,
 ) -> Dict[str, Any]:
     """
-    Workflow 7: Audits high-impression Search Console queries where position > 3 or clicks == 0
-    (AI Overview / LLM citation gaps) against published machine-readable endpoints (llms.txt,
-    llms-full.txt, and dist/ai-benchmarks/ + syndication/ai_benchmarks/) and compiles a
-    prioritized Digital PR & AI Citation Queue (<repo_root>/.agy/ai_citation_pr_queue.json)
-    while ensuring tenant-specific AI benchmark nodes exist on disk.
+    Workflow 7: Feeds the actual candidate queue (void_candidates.jsonl), Search Console
+    striking-distance and zero-click queries (.agy/gsc_remediation_queue.json + consolidated GSC),
+    and tenant freshness logs (freshness_audit_report.json) through TregChecker.check_ai_citation
+    to identify existing calculators and guides missing AI Overviews or losing citations to weaker
+    domains, prioritizing deterministic tax and student-loan math pages.
+    Persists <repo_root>/.agy/ai_citation_pr_queue.json and writes tenant AI benchmark nodes.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.distributor import generate_ai_benchmark_nodes
+    from pseofactory.gsc_remediation import (
+        _slug_from_url_or_query,
+        calculate_candidate_roi,
+        classify_deterministic_math_opportunity,
+    )
+    from pseofactory.trends.treg_checker import TregChecker
 
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
     domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
-    rows = gsc_bundle.get("current_rows") or []
+    rows: List[Dict[str, Any]] = [
+        {**r, "_signal_source": "gsc_striking_distance"}
+        for r in (gsc_bundle.get("current_rows") or [])
+        if isinstance(r, dict)
+    ]
+
+    # 1. Ingest Search Console remediation queue (.agy/gsc_remediation_queue.json)
+    gsc_rem_evaluated = 0
+    rem_q_path = root / ".agy" / "gsc_remediation_queue.json"
+    if rem_q_path.is_file():
+        try:
+            rem_data = json.loads(rem_q_path.read_text(encoding="utf-8"))
+            rem_tasks = rem_data.get("tasks", []) if isinstance(rem_data, dict) else (rem_data if isinstance(rem_data, list) else [])
+            for rt in rem_tasks:
+                if not isinstance(rt, dict):
+                    continue
+                t_url = str(rt.get("target_url") or "").strip()
+                t_slug = str(rt.get("slug") or "").strip()
+                c_p = urllib.parse.urlsplit(t_url).path.rstrip("/") if t_url else (f"/tools/{t_slug}" if t_slug else "")
+                if not c_p or c_p in ("/", "/tools"):
+                    continue
+                gsc_rem_evaluated += 1
+                rows.append(
+                    {
+                        "query": str(rt.get("query") or t_slug.replace("-", " ")).strip(),
+                        "canonical_path": c_p,
+                        "canonical_url": f"https://{domain}{c_p}/",
+                        "impressions": int(float(rt.get("impressions", 0) or 0)),
+                        "clicks": int(float(rt.get("clicks", 0) or 0)),
+                        "position": float(rt.get("position", 15.0) or 15.0),
+                        "_signal_source": "gsc_remediation_queue",
+                    }
+                )
+        except Exception:
+            pass
+
+    # 2. Ingest actual candidate queue (void_candidates.jsonl)
+    candidate_queue_evaluated = 0
+    void_paths = [root / "void_candidates.jsonl"]
+    if str(root).startswith("/home/ubuntuadmin/projects/"):
+        central_void = Path("/home/ubuntuadmin/projects/pseofactory/void_candidates.jsonl")
+        if central_void not in void_paths:
+            void_paths.append(central_void)
+
+    for vp in void_paths:
+        if not vp.is_file():
+            continue
+        try:
+            for line in vp.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                vc = json.loads(line)
+                if not isinstance(vc, dict):
+                    continue
+                vc_q = str(vc.get("query") or vc.get("primary_keyword") or vc.get("topic") or "").strip()
+                vc_slug = str(vc.get("slug") or _slug_from_url_or_query(query=vc_q)).strip()
+                if not vc_q or not vc_slug:
+                    continue
+                math_chk = classify_deterministic_math_opportunity(slug=vc_slug, query=vc_q, tenant_id=prop)
+                is_prexvo_cand = math_chk["math_domain"] == "TITLE_IV_STUDENT_LOAN_MATH" and any(
+                    tok in f"{vc_slug} {vc_q}".lower()
+                    for tok in ("student", "rap", "ibr", "pslf", "icr", "parent", "paye", "loan")
+                )
+                if (prop == "prexvo" and not is_prexvo_cand) or (prop == "profithelm" and is_prexvo_cand):
+                    continue
+                candidate_queue_evaluated += 1
+                c_p = f"/tools/{vc_slug}"
+                rows.append(
+                    {
+                        "query": vc_q,
+                        "canonical_path": c_p,
+                        "canonical_url": f"https://{domain}{c_p}/",
+                        "impressions": int(float(vc.get("search_volume") or vc.get("impressions") or 120)),
+                        "clicks": 0,
+                        "position": float(vc.get("position", 14.0) or 14.0),
+                        "_signal_source": "void_candidates_queue",
+                    }
+                )
+        except Exception:
+            pass
+
+    # 3. Ingest tenant freshness log (freshness_audit_report.json)
+    freshness_log_evaluated = False
+    freshness_flagged_paths: Set[str] = set()
+    freshness_file = root / "freshness_audit_report.json"
+    if freshness_file.is_file():
+        try:
+            f_data = json.loads(freshness_file.read_text(encoding="utf-8"))
+            if isinstance(f_data, dict):
+                freshness_log_evaluated = True
+                for sec_key in ("aeo_citability", "anti_slop_and_touch_targets", "html_integrity"):
+                    sec_obj = f_data.get(sec_key)
+                    if isinstance(sec_obj, dict):
+                        for iss in sec_obj.get("issues") or []:
+                            for m_p in re.findall(r"(tools/[a-z0-9\-/]+)", str(iss)):
+                                norm_fp = "/" + m_p.replace("/index.html", "").strip("/")
+                                freshness_flagged_paths.add(norm_fp)
+                zi_obj = f_data.get("zero_impression_handling")
+                if isinstance(zi_obj, dict):
+                    for zc in zi_obj.get("zero_impression_candidates") or []:
+                        if isinstance(zc, dict) and zc.get("url_path"):
+                            freshness_flagged_paths.add(str(zc["url_path"]).rstrip("/"))
+        except Exception:
+            pass
 
     # Ensure tenant-specific AI benchmark nodes are generated and written to syndication/ai_benchmarks and dist/ai-benchmarks
     bench_res = generate_ai_benchmark_nodes(tenant=prop)
@@ -1621,21 +1826,43 @@ def compile_ai_citation_digital_pr_queue(
     has_llms_txt = (d_dir / "llms.txt").is_file()
     has_llms_full_txt = (d_dir / "llms-full.txt").is_file()
 
-    pr_queue: List[Dict[str, Any]] = []
-    seen_targets: Set[str] = set()
-
-    sorted_rows = sorted(
-        [r for r in rows if isinstance(r, dict)],
-        key=lambda x: (-int(float(x.get("impressions", 0) or 0)), float(x.get("position", 100.0) or 100.0)),
-    )
-
-    for r in sorted_rows:
+    # Merge and deduplicate rows by (canonical_path, query.lower())
+    merged_rows_by_key: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
         q = _clean_dashes(str(r.get("query") or "").strip())
         c_url = str(r.get("canonical_url") or r.get("page") or "").strip()
-        c_path = str(r.get("canonical_path") or "").strip()
+        c_path = (str(r.get("canonical_path") or "").strip().rstrip("/")) or "/"
+        if not q or not c_url or c_path in ("/", "/tools"):
+            continue
+        dedup_k = f"{c_path}:{q.lower()}"
+        src_tag = str(r.get("_signal_source") or "gsc_striking_distance")
+        if c_path in freshness_flagged_paths:
+            src_list = [src_tag, "freshness_audit_log"]
+        else:
+            src_list = [src_tag]
+        if dedup_k not in merged_rows_by_key:
+            r_copy = dict(r)
+            r_copy["_signal_sources"] = src_list
+            merged_rows_by_key[dedup_k] = r_copy
+        else:
+            prev = merged_rows_by_key[dedup_k]
+            if int(float(r.get("impressions", 0) or 0)) > int(float(prev.get("impressions", 0) or 0)):
+                prev["impressions"] = int(float(r.get("impressions", 0) or 0))
+            for st in src_list:
+                if st not in prev["_signal_sources"]:
+                    prev["_signal_sources"].append(st)
+
+    pr_candidates: List[Dict[str, Any]] = []
+
+    for r in merged_rows_by_key.values():
+        q = _clean_dashes(str(r.get("query") or "").strip())
+        c_url = str(r.get("canonical_url") or r.get("page") or "").strip()
+        c_path = (str(r.get("canonical_path") or "").strip().rstrip("/")) or "/"
         impr = int(float(r.get("impressions", 0) or 0))
         clicks = int(float(r.get("clicks", 0) or 0))
         pos = float(r.get("position", 100.0) or 100.0)
+        if pos <= 0.0:
+            pos = 15.0
 
         if not q or not c_url or impr < 2:
             continue
@@ -1643,14 +1870,39 @@ def compile_ai_citation_digital_pr_queue(
         if clicks > 0 and pos <= 3.0:
             continue
 
-        dedup_key = f"{c_path}:{q.lower()}"
-        if dedup_key in seen_targets:
-            continue
-        seen_targets.add(dedup_key)
+        slug_str = _slug_from_url_or_query(target_url=c_url, query=q)
+        ai_res = ai_checker.check_ai_citation(q, tenant_domains=[domain])
+        math_info = classify_deterministic_math_opportunity(slug=slug_str, query=q, tenant_id=prop)
+        roi_eval = calculate_candidate_roi(
+            {
+                "slug": slug_str,
+                "tenant_id": prop,
+                "target_url": c_url,
+                "query": q,
+                "impressions": impr,
+                "clicks": clicks,
+                "position": pos,
+                "ai_citation_vacant": ai_res["ai_citation_vacant"],
+                "ai_cited_domains": ai_res["ai_cited_domains"],
+                "weaker_cited_domains": ai_res["weaker_cited_domains"],
+                "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
+                "missing_ai_overview": ai_res["missing_ai_overview"],
+                "citation_gap_status": ai_res["citation_gap_status"],
+                "needs_deterministic_math": math_info["needs_deterministic_math"],
+            },
+            tenant_id=prop,
+        )
 
         if prop == "prexvo":
-            statutory_hook = "34 CFR Part 685 & HEA Section 493C (2026 Title IV RAP 225% Federal Poverty Exemption vs IBR 150% Cap)"
-            benchmark_node = "title_iv_rap_ibr_benchmarks.md" if "rap" in q.lower() else ("pslf_forgiveness_benchmarks.md" if "pslf" in q.lower() else "parent_plus_icr_benchmarks.md")
+            if "pslf" in q.lower() or "pslf" in c_path:
+                statutory_hook = "34 CFR 685.219 & 26 U.S.C. 108(f)(1) (120-Payment PSLF & Hold Harmless Buyback Formula)"
+                benchmark_node = "pslf_forgiveness_benchmarks.md"
+            elif "parent" in q.lower() or "icr" in q.lower() or "parent" in c_path or "icr" in c_path:
+                statutory_hook = "34 CFR 685.209(b) & HEA Section 455(d) (Parent PLUS Double Consolidation & 20% ICR Cap)"
+                benchmark_node = "parent_plus_icr_benchmarks.md"
+            else:
+                statutory_hook = "34 CFR Part 685 & HEA Section 493C (2026 Title IV RAP 225% Federal Poverty Exemption vs IBR 150% Cap)"
+                benchmark_node = "title_iv_rap_ibr_benchmarks.md"
             target_publications = [
                 "University Financial Aid Resource Directories (.edu)",
                 "Student Loan Borrower Protection & Nonprofit Legal Aid Guides",
@@ -1663,8 +1915,14 @@ def compile_ai_citation_digital_pr_queue(
             elif "179" in c_path or "179" in q.lower():
                 statutory_hook = "IRC Section 179(b)(1) $1,220,000 Deduction Cap & IRC Section 280F Heavy SUV GVWR > 6,000 lbs Threshold"
                 benchmark_node = "section_179_benchmarks.md"
-            elif "crypto" in c_path or "crypto" in q.lower():
+            elif "crypto" in c_path or "crypto" in q.lower() or "1099" in q.lower():
                 statutory_hook = "IRC Section 6045 & IRS Form 1099-DA Digital Asset Wallet-by-Wallet Cost Basis Rules (Rev. Proc. 2024-28)"
+                benchmark_node = "tax_brackets_benchmarks.md"
+            elif "174" in c_path or "r-and-d" in c_path or "174" in q.lower():
+                statutory_hook = "IRC Section 41 & Section 174 5-Year Domestic vs 15-Year Foreign Software R&D Amortization + Form 6765"
+                benchmark_node = "section_179_benchmarks.md"
+            elif "treasury" in c_path or "treasury" in q.lower():
+                statutory_hook = "31 U.S.C. Section 3124 State Tax Exemption & Tax-Equivalent Yield Arbitrage Formula"
                 benchmark_node = "tax_brackets_benchmarks.md"
             else:
                 statutory_hook = "IRC Section 1(j) Post-TCJA Sunset Marginal Rate Reversion (+2.6% to +4.0% Bracket Shift)"
@@ -1675,17 +1933,44 @@ def compile_ai_citation_digital_pr_queue(
                 "AI Search Dataset Registries (Perplexity, ChatGPT Search, Google AI Overviews)",
             ]
 
-        priority_score = round(impr * (2.2 if pos <= 15.0 else 1.3) * (1.5 if clicks == 0 else 1.0), 2)
-        pr_queue.append(
+        gap_reason = (
+            "MISSING_AI_OVERVIEW"
+            if ai_res["missing_ai_overview"]
+            else (
+                "LOSING_CITATIONS_TO_WEAKER_DOMAINS"
+                if ai_res["losing_to_weaker_domains"]
+                else ("ZERO_CLICK_SERP_DISPLACEMENT" if clicks == 0 else "BELOW_AI_OVERVIEW_TOP_3")
+            )
+        )
+        math_boost = 1.35 if math_info["needs_deterministic_math"] else 1.0
+        ai_gap_boost = 1.30 if (ai_res["losing_to_weaker_domains"] or ai_res["missing_ai_overview"]) else 1.0
+        priority_score = round(
+            max(
+                float(roi_eval["roi_score"]),
+                impr * (2.2 if pos <= 15.0 else 1.3) * (1.5 if clicks == 0 else 1.0) * math_boost * ai_gap_boost,
+            ),
+            2,
+        )
+
+        pr_candidates.append(
             {
-                "pr_item_id": f"pr_{prop}_{len(pr_queue) + 1:02d}",
                 "property_id": prop,
+                "slug": slug_str,
                 "query": q,
                 "target_url": c_url,
                 "impressions": impr,
                 "clicks": clicks,
                 "current_position": round(pos, 2),
-                "citation_gap_reason": "ZERO_CLICK_SERP_DISPLACEMENT" if clicks == 0 else "BELOW_AI_OVERVIEW_TOP_3",
+                "citation_gap_reason": gap_reason,
+                "citation_gap_status": ai_res["citation_gap_status"],
+                "ai_citation_vacant": ai_res["ai_citation_vacant"],
+                "ai_cited_domains": ai_res["ai_cited_domains"],
+                "weaker_cited_domains": ai_res["weaker_cited_domains"],
+                "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
+                "missing_ai_overview": ai_res["missing_ai_overview"],
+                "needs_deterministic_math": math_info["needs_deterministic_math"],
+                "math_domain": math_info["math_domain"],
+                "signal_sources": r.get("_signal_sources", ["gsc_striking_distance"]),
                 "statutory_data_hook": statutory_hook,
                 "benchmark_node_file": benchmark_node,
                 "machine_endpoints": [f"https://{domain}/llms.txt", f"https://{domain}/llms-full.txt"],
@@ -1694,8 +1979,20 @@ def compile_ai_citation_digital_pr_queue(
                 "status": "QUEUED_FOR_SYNDICATION",
             }
         )
-        if len(pr_queue) >= 25:
-            break
+
+    pr_candidates.sort(
+        key=lambda x: (
+            -int(bool(x.get("needs_deterministic_math"))),
+            -float(x["priority_score"]),
+            -int(x["impressions"]),
+            str(x["target_url"]),
+        )
+    )
+
+    pr_queue: List[Dict[str, Any]] = []
+    for idx, item in enumerate(pr_candidates[:25]):
+        item_out = {"pr_item_id": f"pr_{prop}_{idx + 1:02d}", **item}
+        pr_queue.append(item_out)
 
     report = {
         "workflow": "ai_citation_digital_pr_queue",
@@ -1705,6 +2002,12 @@ def compile_ai_citation_digital_pr_queue(
         "llms_txt_verified": has_llms_txt,
         "llms_full_txt_verified": has_llms_full_txt,
         "ai_benchmark_nodes_count": bench_res.get("nodes_count", 0),
+        "candidate_queue_evaluated_count": candidate_queue_evaluated,
+        "gsc_remediation_queue_evaluated_count": gsc_rem_evaluated,
+        "freshness_log_evaluated": freshness_log_evaluated,
+        "missing_ai_overview_count": sum(1 for item in pr_queue if item.get("missing_ai_overview")),
+        "losing_to_weaker_domains_count": sum(1 for item in pr_queue if item.get("losing_to_weaker_domains")),
+        "deterministic_math_opportunities_count": sum(1 for item in pr_queue if item.get("needs_deterministic_math")),
         "digital_pr_queue_size": len(pr_queue),
         "queue_count": len(pr_queue),
         "queue": pr_queue,

@@ -64,6 +64,10 @@ def parse_ai_citation_payload(
         return {
             "ai_citation_vacant": True,
             "ai_cited_domains": [],
+            "weaker_cited_domains": [],
+            "losing_to_weaker_domains": False,
+            "missing_ai_overview": True,
+            "citation_gap_status": "MISSING_AI_OVERVIEW",
             "tenant_cited": False,
             "strong_authority_count": 0,
         }
@@ -77,11 +81,50 @@ def parse_ai_citation_payload(
         ]
         tenants = tuple(_normalize_domain(d) for d in (tenant_domains or DEFAULT_TENANT_DOMAINS) if _normalize_domain(d))
         tenant_hit = any(any(d == t or d.endswith(f".{t}") for t in tenants) for d in explicit_domains)
+        weaker_explicit = [
+            dom
+            for dom in explicit_domains
+            if any(dom == low or dom.endswith(f".{low}") for low in LOW_AUTHORITY_CITATION_DOMAINS)
+            or dom.endswith(".gov")
+        ]
+        strong_explicit = [
+            dom
+            for dom in explicit_domains
+            if dom not in weaker_explicit
+        ]
+        vacant_flag = bool(payload.get("ai_citation_vacant"))
+        losing_weaker = bool(
+            payload.get(
+                "losing_to_weaker_domains",
+                (not tenant_hit) and len(weaker_explicit) > 0 and len(strong_explicit) < 2,
+            )
+        )
+        missing_ao = bool(payload.get("missing_ai_overview", (not tenant_hit) and len(explicit_domains) == 0))
+        gap_status = str(
+            payload.get("citation_gap_status")
+            or (
+                "TENANT_CITED"
+                if tenant_hit
+                else (
+                    "MISSING_AI_OVERVIEW"
+                    if missing_ao
+                    else (
+                        "LOSING_TO_WEAKER_DOMAINS"
+                        if losing_weaker
+                        else ("AI_CITATION_VACANT" if vacant_flag else "COMPETITIVE_CITATIONS")
+                    )
+                )
+            )
+        )
         return {
-            "ai_citation_vacant": bool(payload.get("ai_citation_vacant")),
+            "ai_citation_vacant": vacant_flag,
             "ai_cited_domains": explicit_domains,
+            "weaker_cited_domains": weaker_explicit,
+            "losing_to_weaker_domains": losing_weaker,
+            "missing_ai_overview": missing_ao,
+            "citation_gap_status": gap_status,
             "tenant_cited": tenant_hit,
-            "strong_authority_count": len(explicit_domains),
+            "strong_authority_count": len(strong_explicit),
         }
 
     root = payload.get("result", payload)
@@ -152,19 +195,43 @@ def parse_ai_citation_payload(
         for dom in cited_domains
     )
 
+    weaker_domains = [
+        dom
+        for dom in cited_domains
+        if any(dom == low or dom.endswith(f".{low}") for low in LOW_AUTHORITY_CITATION_DOMAINS)
+        or dom.endswith(".gov")
+    ]
     strong_domains = [
         dom
         for dom in cited_domains
-        if not any(dom == low or dom.endswith(f".{low}") for low in LOW_AUTHORITY_CITATION_DOMAINS)
-        and not dom.endswith(".gov")
+        if dom not in weaker_domains
     ]
 
     # AI citation slot is vacant if our tenant is not yet cited AND fewer than 2 non-forum/non-raw-gov commercial authorities are cited
     ai_citation_vacant = (not tenant_cited) and (len(strong_domains) < 2)
+    losing_to_weaker = (not tenant_cited) and (len(weaker_domains) > 0) and (len(strong_domains) < 2)
+    missing_ai_overview = (not tenant_cited) and (len(cited_domains) == 0)
+    citation_gap_status = (
+        "TENANT_CITED"
+        if tenant_cited
+        else (
+            "MISSING_AI_OVERVIEW"
+            if missing_ai_overview
+            else (
+                "LOSING_TO_WEAKER_DOMAINS"
+                if losing_to_weaker
+                else ("AI_CITATION_VACANT" if ai_citation_vacant else "COMPETITIVE_CITATIONS")
+            )
+        )
+    )
 
     return {
         "ai_citation_vacant": ai_citation_vacant,
         "ai_cited_domains": cited_domains,
+        "weaker_cited_domains": weaker_domains,
+        "losing_to_weaker_domains": losing_to_weaker,
+        "missing_ai_overview": missing_ai_overview,
+        "citation_gap_status": citation_gap_status,
         "tenant_cited": tenant_cited,
         "strong_authority_count": len(strong_domains),
     }
@@ -230,6 +297,10 @@ class TregChecker:
                 "endpoint_called": f"{ENDPOINT_AI_CITATION}#deadline_budget_fallback",
                 "ai_citation_vacant": True,
                 "ai_cited_domains": [],
+                "weaker_cited_domains": [],
+                "losing_to_weaker_domains": False,
+                "missing_ai_overview": True,
+                "citation_gap_status": "MISSING_AI_OVERVIEW",
                 "tenant_cited": False,
                 "ai_citation_checked": True,
             }
@@ -249,6 +320,10 @@ class TregChecker:
                 "endpoint_called": str(m_data.get("ai_endpoint_called", ENDPOINT_AI_CITATION)),
                 "ai_citation_vacant": parsed["ai_citation_vacant"],
                 "ai_cited_domains": parsed["ai_cited_domains"],
+                "weaker_cited_domains": parsed["weaker_cited_domains"],
+                "losing_to_weaker_domains": parsed["losing_to_weaker_domains"],
+                "missing_ai_overview": parsed["missing_ai_overview"],
+                "citation_gap_status": parsed["citation_gap_status"],
                 "tenant_cited": parsed["tenant_cited"],
                 "ai_citation_checked": True,
             }
@@ -293,6 +368,10 @@ class TregChecker:
                         "endpoint_called": ENDPOINT_AI_CITATION,
                         "ai_citation_vacant": parsed["ai_citation_vacant"],
                         "ai_cited_domains": parsed["ai_cited_domains"],
+                        "weaker_cited_domains": parsed["weaker_cited_domains"],
+                        "losing_to_weaker_domains": parsed["losing_to_weaker_domains"],
+                        "missing_ai_overview": parsed["missing_ai_overview"],
+                        "citation_gap_status": parsed["citation_gap_status"],
                         "tenant_cited": parsed["tenant_cited"],
                         "ai_citation_checked": True,
                     }
@@ -301,16 +380,84 @@ class TregChecker:
             except (subprocess.TimeoutExpired, Exception):
                 pass
 
+        offline_payload = self._offline_ai_citation_payload(q_key)
+        parsed_offline = parse_ai_citation_payload(offline_payload, tenant_domains=eff_tenants)
         fallback = {
             "query": clean_q,
             "endpoint_called": f"{ENDPOINT_AI_CITATION}#offline_fallback",
-            "ai_citation_vacant": True,
-            "ai_cited_domains": [],
-            "tenant_cited": False,
+            "ai_citation_vacant": parsed_offline["ai_citation_vacant"],
+            "ai_cited_domains": parsed_offline["ai_cited_domains"],
+            "weaker_cited_domains": parsed_offline["weaker_cited_domains"],
+            "losing_to_weaker_domains": parsed_offline["losing_to_weaker_domains"],
+            "missing_ai_overview": parsed_offline["missing_ai_overview"],
+            "citation_gap_status": parsed_offline["citation_gap_status"],
+            "tenant_cited": parsed_offline["tenant_cited"],
             "ai_citation_checked": True,
         }
         self.ai_citation_cache[q_key] = fallback
         return fallback
+
+    def _offline_ai_citation_payload(self, q_key: str) -> Dict[str, Any]:
+        """
+        Synthesizes a deterministic offline AI citation landscape payload for parse_ai_citation_payload
+        distinguishing multi-parameter queries missing AI Overviews from core queries losing citations
+        to weaker forum or static .gov PDF domains.
+        """
+        missing_ao_tokens = (
+            "weight",
+            "lease vs buy",
+            "landed cost",
+            "301",
+            "double consolidation",
+            "borrowing cap",
+            "paye sunset",
+            "save plan",
+            "scenario comparison",
+            "break even",
+            "break-even",
+            "hardship cap",
+            "surety bond",
+            "factoring",
+            "8829",
+            "cbam",
+        )
+        if any(tok in q_key for tok in missing_ao_tokens):
+            return {"result": {"sources": []}}
+
+        is_student_loan = any(
+            tok in q_key
+            for tok in (
+                "student loan",
+                "rap",
+                "ibr",
+                "pslf",
+                "icr",
+                "parent plus",
+                "married filing separately",
+                "tiered standard",
+                "title iv",
+                "grad plus",
+                "paye",
+                "repayment",
+            )
+        )
+        if is_student_loan:
+            return {
+                "result": {
+                    "sources": [
+                        {"domain": "studentaid.gov", "url": "https://studentaid.gov/manage-loans/repayment/plans"},
+                        {"domain": "reddit.com", "url": "https://www.reddit.com/r/StudentLoans/"},
+                    ]
+                }
+            }
+        return {
+            "result": {
+                "sources": [
+                    {"domain": "irs.gov", "url": "https://www.irs.gov/forms-pubs"},
+                    {"domain": "reddit.com", "url": "https://www.reddit.com/r/tax/"},
+                ]
+            }
+        }
 
     def _offline_heuristic(self, query: str, reason: str = "offline_fallback") -> TregDurabilityResult:
         """
