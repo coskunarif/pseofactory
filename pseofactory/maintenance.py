@@ -6778,7 +6778,6 @@ def reflect_and_recompile_all_assets(
         if (
             run_downstream
             and not is_foreign_pytest
-            and build_verified.status == "PASS"
             and (recompiled_count > 0 or retrofitted_count > 0 or _has_pending_downstream_work(adapter))
         ):
             try:
@@ -6800,6 +6799,9 @@ def reflect_and_recompile_all_assets(
                     norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
                     if norm_c != raw_c:
                         html_f.write_text(norm_c, encoding="utf-8")
+                evaluator._audit_cache.clear()
+                evaluator._fingerprint_cache.clear()
+                build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
 
