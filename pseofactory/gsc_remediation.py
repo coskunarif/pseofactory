@@ -267,7 +267,7 @@ def _resolve_contextual_internal_links(
             cluster = [
                 {"anchor": "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator", "href": "/tools/irs-2027-tax-brackets/"},
                 {"anchor": "California 2027 Tax Brackets & Marginal Rate Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
-                {"anchor": "IRS Capital Gains Statutory Tax Calculator", "href": "/tools/irs-capital-gains-statutory-tax/"},
+                {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
             ]

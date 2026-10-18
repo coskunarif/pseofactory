@@ -1036,6 +1036,16 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         Zero em-dashes. Zero en-dashes.
         """
         self._enforce_sys_modules_isolation()
+        if self._repo_path and "PYTEST_CURRENT_TEST" not in os.environ:
+            try:
+                from pseofactory.qualification import reconcile_tenant_topical_authority_and_cannibalization
+                reconcile_tenant_topical_authority_and_cannibalization(
+                    repo_root=Path(self._repo_path),
+                    property_id=self.property_id,
+                    dist_dir=self.dist_dir,
+                )
+            except Exception:
+                pass
         if self._build_command:
             try:
                 env = os.environ.copy()
@@ -1564,12 +1574,16 @@ def _discover_tenant_tools(
     without importing any tenant Python modules into host sys.modules.
     Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.qualification import is_retired_or_consolidated_slug
+
     merged: Dict[str, Dict[str, Any]] = {}
     ordered_slugs: List[str] = []
 
     for item in default_tools:
         if isinstance(item, dict) and item.get("slug"):
             s = str(item["slug"]).strip()
+            if is_retired_or_consolidated_slug(s, adapter.property_id):
+                continue
             merged[s] = dict(item)
             ordered_slugs.append(s)
 
@@ -1594,6 +1608,8 @@ def _discover_tenant_tools(
                     for t_obj in dyn_list:
                         if isinstance(t_obj, dict) and t_obj.get("slug"):
                             s = str(t_obj["slug"]).strip()
+                            if is_retired_or_consolidated_slug(s, adapter.property_id):
+                                continue
                             if has_built_tools_dir and not (Path(dist_dir) / "tools" / s / "index.html").is_file():
                                 continue
                             if s not in merged:
@@ -1610,7 +1626,7 @@ def _discover_tenant_tools(
             if not idx_html.is_file():
                 continue
             s = entry.name
-            if s in merged:
+            if s in merged or is_retired_or_consolidated_slug(s, adapter.property_id):
                 continue
             title_val = s.replace("-", " ").title()
             desc_val = f"Interactive {title_val} statutory model and financial benchmark tool."
@@ -5375,6 +5391,9 @@ def reflect_and_recompile_all_assets(
                     or rec_summary.get("cleaned_mixed_signal_slugs")
                     or rec_summary.get("redirects_updated", 0) > 0
                     or rec_summary.get("stale_dist_dirs_removed", 0) > 0
+                    or rec_summary.get("stale_tool_specs_removed", 0) > 0
+                    or rec_summary.get("stale_syndication_removed", 0) > 0
+                    or rec_summary.get("void_candidates_reconciled", 0) > 0
                 ):
                     topical_reconciliation_changed = True
             except Exception:

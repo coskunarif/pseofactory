@@ -465,3 +465,177 @@ def test_competitor_cluster_and_overlay_hub_links_scrub_retired_clones(tmp_path)
     assert "/tools/1031-exchange-rules-arizona/" not in reinjected_html
     assert "/tools/tcja-sunset-capital-gains/" in reinjected_html
 
+
+def test_crawl_budget_consolidation_queue_and_syndication_hygiene(tmp_path):
+    from pseofactory.gsc_remediation import _resolve_contextual_internal_links
+    from pseofactory.distributor import export_all_syndication_files
+    from pseofactory.verifier import MasterSEOVerifier
+
+    # 1. Contextual internal links for tax-bracket queries must never point to retired irs-capital-gains-statutory-tax
+    tax_links = _resolve_contextual_internal_links(
+        slug="irs-2027-tax-brackets",
+        tenant_id="profithelm",
+        query="irs 2027 tax brackets",
+    )
+    tax_hrefs = {item["href"] for item in tax_links}
+    assert "/tools/irs-capital-gains-statutory-tax/" not in tax_hrefs
+    assert "/tools/tcja-sunset-capital-gains/" in tax_hrefs
+
+    # 2. Real dynamic_tools.json schema cleaning (stringified dicts, title/statutory_reference prompts, dict["rows"] table)
+    (tmp_path / "profithelm" / "data").mkdir(parents=True)
+    (tmp_path / ".agy" / "overlays").mkdir(parents=True)
+    (tmp_path / "content" / "overlays").mkdir(parents=True)
+    (tmp_path / "dist" / "tools" / "saas-burn-multiple-benchmarks-2026").mkdir(parents=True)
+    (tmp_path / "dist" / "tools" / "saas-burn-multiple-benchmarks-2026" / "index.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    (tmp_path / ".agy" / "tool_spec_ca-tax-brackets-2026.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".agy" / "tool_spec_saas-burn-multiple-benchmarks-2026.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".agy" / "tool_spec_section-179-calculator.json").write_text("{}", encoding="utf-8")
+
+    (tmp_path / "syndication" / "ca-tax-brackets-2026").mkdir(parents=True)
+    (tmp_path / "syndication" / "ca-tax-brackets-2026" / "x_post.txt").write_text("stale", encoding="utf-8")
+    (tmp_path / "syndication" / "saas-burn-multiple-benchmarks-2026").mkdir(parents=True)
+    (tmp_path / "syndication" / "ca-tax-brackets-2026-devto.md").write_text("stale", encoding="utf-8")
+    (tmp_path / "syndication" / "facebook_group_targets.md").write_text(
+        "# Matrix\n## SaaS Burn\nTarget: https://profithelm.com/tools/saas-burn-multiple-benchmarks-2026/\n## Section 179\nTarget: https://profithelm.com/tools/section-179-calculator/\n",
+        encoding="utf-8",
+    )
+
+    real_schema_tools = [
+        {
+            "slug": "contractor-surety-bond-cost-calculator",
+            "title": "Contractor License & Performance Surety Bond Cost Calculator",
+            "primary_keyword": "contractor surety bond cost calculator",
+            "secondary_keywords": ["surety bond rate calculator"],
+            "statutory_references": ["40 U.S.C. Sections 3131-3134 (Miller Act)"],
+            "adjacent_tools": [
+                "{'slug': 'crypto-tax-calculator', 'title': 'Crypto Tax', 'short_title': 'Crypto Tax', 'category': 'Digital Assets', 'canonical_path': '/tools/crypto-tax-calculator/'}",
+                "{'slug': 'irs-2027-tax-brackets', 'title': 'IRS 2027 Tax Brackets', 'short_title': 'IRS 2027 Tax Brackets', 'category': 'Tax Intelligence', 'canonical_path': '/tools/irs-2027-tax-brackets/'}",
+                "{'slug': 'prediction-market-odds', 'title': 'Prediction Market Arbitrage', 'short_title': 'Prediction Market Arbitrage', 'category': 'Market Arbitrage', 'canonical_path': '/tools/prediction-market-odds/'}",
+            ],
+            "calculation_prompts": [
+                {
+                    "title": "TCJA Sunset Rate Simulation",
+                    "prompt": "Calculate how 2027 post-TCJA statutory brackets adjust your net liability.",
+                    "statutory_reference": "IRC Section 1 (2026-2027 Schedules)",
+                    "target_slug": "crypto-tax-calculator",
+                },
+                {
+                    "title": "Net Investment Income Surtax & Capital Deferral",
+                    "prompt": "Evaluate capital gains deferral and 3.8% NIIT surtax thresholds.",
+                    "statutory_reference": "IRC Section 1411 and Section 1031",
+                    "target_slug": "irs-2027-tax-brackets",
+                },
+            ],
+            "proprietary_calculation_table": {
+                "title": "Proprietary Matrix",
+                "rows": [
+                    {"tier": "Standard Growth", "reference": "IRC Section 1202"},
+                    {"tier": "Institutional", "reference": "IRC Section 1411"},
+                ],
+            },
+        },
+        {
+            "slug": "saas-burn-multiple-benchmarks-2026",
+            "title": "SaaS Burn Multiple Benchmarks 2026",
+            "primary_keyword": "saas burn multiple benchmarks 2026",
+            "secondary_keywords": ["david sacks burn multiple"],
+        },
+    ]
+    (tmp_path / "profithelm" / "data" / "dynamic_tools.json").write_text(
+        json.dumps(real_schema_tools), encoding="utf-8"
+    )
+    (tmp_path / ".agy" / "deployed_voids.json").write_text(
+        json.dumps([
+            {"slug": "qsbs-section-1202-tax-calculator", "query": "qsbs section 1202 tax calculator"},
+            {"slug": "saas-burn-multiple-benchmarks-2026", "query": "saas burn multiple benchmarks 2026"},
+            {"slug": "valid-edge-tool-2027", "query": "valid edge tool 2027"},
+        ]),
+        encoding="utf-8",
+    )
+    (tmp_path / "void_candidates.jsonl").write_text(
+        "\n".join([
+            json.dumps({"slug": "irs-capital-gains-statutory-tax", "query": "irs capital gains statutory tax", "action": "BUILD_PAGE"}),
+            json.dumps({"slug": "saas-burn-multiple-benchmarks-2026", "query": "saas burn multiple benchmarks 2026", "action": "BUILD_PAGE", "status": "PENDING"}),
+            json.dumps({"slug": "ionq-stock", "query": "ionq stock", "action": "BUILD_PAGE"}),
+            json.dumps({"slug": "section-179-calculator", "query": "section 179 calculator", "action": "BUILD_PAGE", "status": "BUILT"}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    rec = qual_mod.reconcile_tenant_topical_authority_and_cannibalization(
+        repo_root=tmp_path,
+        property_id="profithelm",
+        dist_dir=tmp_path / "dist",
+    )
+    assert "saas-burn-multiple-benchmarks-2026" in rec["consolidated_clones"]
+    assert rec["stale_tool_specs_removed"] == 2
+    assert not (tmp_path / ".agy" / "tool_spec_ca-tax-brackets-2026.json").exists()
+    assert not (tmp_path / ".agy" / "tool_spec_saas-burn-multiple-benchmarks-2026.json").exists()
+    assert (tmp_path / ".agy" / "tool_spec_section-179-calculator.json").exists()
+    assert not (tmp_path / "dist" / "tools" / "saas-burn-multiple-benchmarks-2026").exists()
+    assert not (tmp_path / "syndication" / "ca-tax-brackets-2026").exists()
+    assert not (tmp_path / "syndication" / "saas-burn-multiple-benchmarks-2026").exists()
+    assert not (tmp_path / "syndication" / "ca-tax-brackets-2026-devto.md").exists()
+    assert "saas-burn-multiple-benchmarks-2026" not in (tmp_path / "syndication" / "facebook_group_targets.md").read_text(encoding="utf-8")
+
+    cleaned_dyn = json.loads((tmp_path / "profithelm" / "data" / "dynamic_tools.json").read_text(encoding="utf-8"))
+    assert len(cleaned_dyn) == 1
+    bond_tool = cleaned_dyn[0]
+    adj_dump = json.dumps(bond_tool["adjacent_tools"])
+    assert "crypto-tax-calculator" not in adj_dump
+    assert "prediction-market-odds" not in adj_dump
+    assert "s-corp-reasonable-salary-tax-calculator" in adj_dump
+    prompts_dump = json.dumps(bond_tool["calculation_prompts"])
+    assert "TCJA Sunset" not in prompts_dump
+    assert "IRC Section 1411" not in prompts_dump
+    assert "crypto-tax-calculator" not in prompts_dump
+    table_dump = json.dumps(bond_tool["proprietary_calculation_table"])
+    assert "IRC Section 1202" not in table_dump
+    assert "IRC Section 1411" not in table_dump
+    assert "Miller Act" in table_dump
+
+    dv_after = json.loads((tmp_path / ".agy" / "deployed_voids.json").read_text(encoding="utf-8"))
+    assert len(dv_after) == 2
+    assert all(item["status"] == "CONSOLIDATED_REDIRECT" for item in dv_after)
+
+    vc_after = [json.loads(line) for line in (tmp_path / "void_candidates.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert vc_after[0]["status"] == "REJECTED"
+    assert vc_after[0]["consolidation_status"] == "CONSOLIDATED_REDIRECT"
+    assert vc_after[0]["canonical_slug"] == "tcja-sunset-capital-gains"
+    assert vc_after[1]["status"] == "REJECTED"
+    assert vc_after[1]["canonical_slug"] == "saas-runway-calculator"
+    assert vc_after[2]["status"] == "REJECTED"
+    assert vc_after[3]["status"] == "BUILT"
+
+    # 3. Verify export_all_syndication_files purges retired folders in output_dir rather than resurrecting them
+    (tmp_path / "syndication" / "ca-tax-brackets-2026").mkdir(parents=True)
+    export_all_syndication_files(
+        tools=[{"slug": "section-179-calculator", "title": "Section 179 Calculator"}],
+        output_dir=tmp_path / "syndication",
+        dry_run=False,
+        property_id="profithelm",
+    )
+    assert not (tmp_path / "syndication" / "ca-tax-brackets-2026").exists()
+    assert (tmp_path / "syndication" / "section-179-calculator").is_dir()
+
+    # 4. Verify check_url_redirects_gate catches internal HTML links pointing to a redirected source
+    full_dist = tmp_path / "full_dist"
+    (full_dist / "tools" / "section-179-calculator").mkdir(parents=True)
+    (full_dist / "index.html").write_text('<html><body><a href="/tools/section-179-calculator/">179</a></body></html>', encoding="utf-8")
+    (full_dist / "tools" / "index.html").write_text(
+        '<html><body><a href="/tools/ca-tax-brackets-2026/">Stale Redirected Slug</a></body></html>',
+        encoding="utf-8",
+    )
+    (full_dist / "tools" / "section-179-calculator" / "index.html").write_text("<html><body>Ok</body></html>", encoding="utf-8")
+    (full_dist / "_redirects").write_text(
+        "/tools/ca-tax-brackets-2026/ /tools/section-179-calculator/ 301\n",
+        encoding="utf-8",
+    )
+    verifier = MasterSEOVerifier(dist_dir=full_dist, domain="profithelm.com")
+    red_gate = verifier.check_url_redirects_gate(full_dist)
+    assert red_gate["status"] == "FAIL"
+    assert any("points to redirected source" in issue for issue in red_gate["issues"])
+
+

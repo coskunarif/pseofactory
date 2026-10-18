@@ -2210,18 +2210,20 @@ class MasterSEOVerifier:
 
             is_full_build = (target / "index.html").is_file() and (target / "tools" / "index.html").is_file()
             sitemap_locs: Set[str] = set()
-            sm_file = target / "sitemap.xml"
-            if sm_file.is_file():
-                try:
-                    sm_text = sm_file.read_text(encoding="utf-8", errors="ignore")
-                    for m_loc in re.finditer(r'<loc>(.*?)</loc>', sm_text, re.IGNORECASE):
-                        loc_u = urllib.parse.urlsplit(m_loc.group(1).strip())
-                        if loc_u.path:
-                            sitemap_locs.add(loc_u.path)
-                            sitemap_locs.add(loc_u.path.rstrip("/"))
-                except Exception:
-                    pass
+            for sm_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml"):
+                sm_file = target / sm_name
+                if sm_file.is_file():
+                    try:
+                        sm_text = sm_file.read_text(encoding="utf-8", errors="ignore")
+                        for m_loc in re.finditer(r'<loc>(.*?)</loc>', sm_text, re.IGNORECASE):
+                            loc_u = urllib.parse.urlsplit(m_loc.group(1).strip())
+                            if loc_u.path:
+                                sitemap_locs.add(loc_u.path)
+                                sitemap_locs.add(loc_u.path.rstrip("/"))
+                    except Exception:
+                        pass
 
+            non_wildcard_sources: Set[str] = set()
             for line_num, src_path, dst_path, status_code in parsed_rules:
                 dst_variants = {dst_path, dst_path.rstrip("/"), dst_path.rstrip("/") + "/"}
                 if dst_path != "/" and (dst_variants & redirect_sources):
@@ -2237,6 +2239,9 @@ class MasterSEOVerifier:
                             f"Redirect target '{dst_path}' at line {line_num} points to non-existent route in dist/"
                         )
                 if is_full_build and "*" not in src_path and ":" not in src_path:
+                    non_wildcard_sources.add(src_path)
+                    non_wildcard_sources.add(src_path.rstrip("/"))
+                    non_wildcard_sources.add(src_path.rstrip("/") + "/")
                     src_rel = src_path.strip("/")
                     if src_rel:
                         src_index = target / src_rel / "index.html"
@@ -2248,6 +2253,26 @@ class MasterSEOVerifier:
                             issues.append(
                                 f"Redirected source '{src_path}' is still listed in sitemap.xml"
                             )
+
+            if is_full_build and non_wildcard_sources:
+                for html_f in sorted(target.rglob("*.html")):
+                    if html_f.name == "404.html" or html_f.name.startswith("."):
+                        continue
+                    rel_h = html_f.relative_to(target).as_posix()
+                    h_txt = self._read_cached_html(html_f)
+                    for m_href in re.finditer(r'(?:href|item|url|"@id")\s*[:=]\s*["\']([^"\'#?]+)', h_txt, re.IGNORECASE):
+                        raw_u = m_href.group(1).strip()
+                        if raw_u.startswith(("mailto:", "tel:", "javascript:", "data:")):
+                            continue
+                        u_parsed = urllib.parse.urlsplit(raw_u)
+                        if u_parsed.scheme and u_parsed.netloc and self.domain not in u_parsed.netloc:
+                            continue
+                        u_path = u_parsed.path
+                        if u_path and u_path != "/" and (u_path in non_wildcard_sources or u_path.rstrip("/") in non_wildcard_sources):
+                            issues.append(
+                                f"Internal link or schema reference in {rel_h} points to redirected source '{u_path}'"
+                            )
+                            break
 
         return {
             "status": "PASS" if not issues else "FAIL",

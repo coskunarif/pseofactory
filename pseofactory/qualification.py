@@ -9,12 +9,13 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import json
+import os
 import ast
 import re
 import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple, Union, Set
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -193,6 +194,13 @@ SYNTHETIC_CANDIDATE_PATTERNS = (
     r"^query\s+(?:one|two|three)\s+buildable$",
     r"^test-void-slug$",
     r"^dummy-tool-slug$",
+    r"^valid-edge-tool-\d+$",
+    r"^bad-slug-with-underscores-and-dashes-invalid$",
+    r"^calculator-(?:app|net|free|near-me)$",
+    r"^ionq-stock$",
+    r"^custom-test-calculator$",
+    r"^poison-pill-test$",
+    r"^irs-1031-exchange-tax-deferral-test$",
 )
 
 
@@ -1344,9 +1352,69 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
         "canonical_slug": "irs-2027-tax-brackets",
         "redirect_target": "/tools/irs-2027-tax-brackets/california/",
     },
+    "california-tax-brackets-2027": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "ca-tax-brackets-2027-married-jointly": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "2027-california-tax-brackets": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "2027-california-income-tax-brackets": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "california-2027-tax-brackets": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "2027-california-tax-rates": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "california-state-tax-brackets": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+    },
+    "sc-income-tax-rate-2027": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/south-carolina/",
+    },
+    "s-c-income-tax-rate-2027": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/south-carolina/",
+    },
+    "2027-tax-tables": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/",
+    },
+    "irs-2027-tax-bracket-projections": {
+        "canonical_slug": "irs-2027-tax-brackets",
+        "redirect_target": "/tools/irs-2027-tax-brackets/",
+    },
     "1031-exchange-rules-arizona": {
         "canonical_slug": "section-1031-calculator",
         "redirect_target": "/tools/section-1031-calculator/arizona/",
+    },
+    "1031-exchange-ohio": {
+        "canonical_slug": "section-1031-calculator",
+        "redirect_target": "/tools/section-1031-calculator/ohio/",
+    },
+    "ohio-1031": {
+        "canonical_slug": "section-1031-calculator",
+        "redirect_target": "/tools/section-1031-calculator/ohio/",
+    },
+    "1031-exchange-in-massachusetts": {
+        "canonical_slug": "section-1031-calculator",
+        "redirect_target": "/tools/section-1031-calculator/massachusetts/",
+    },
+    "section-1031-exchange-deferral": {
+        "canonical_slug": "section-1031-calculator",
+        "redirect_target": "/tools/section-1031-calculator/",
     },
     "irs-2027-tax-rates": {
         "canonical_slug": "irs-2027-tax-brackets",
@@ -1356,9 +1424,41 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
         "canonical_slug": "tcja-sunset-capital-gains",
         "redirect_target": "/tools/tcja-sunset-capital-gains/",
     },
+    "qsbs-section-1202-tax-calculator": {
+        "canonical_slug": "tcja-sunset-capital-gains",
+        "redirect_target": "/tools/tcja-sunset-capital-gains/",
+    },
+    "qsbs-83b-tax-calculator": {
+        "canonical_slug": "tcja-sunset-capital-gains",
+        "redirect_target": "/tools/tcja-sunset-capital-gains/",
+    },
     "kalshi-prediction-market-arbitrage-strategy": {
         "canonical_slug": "prediction-market-odds",
         "redirect_target": "/tools/prediction-market-odds/",
+    },
+    "saas-burn-multiple-benchmarks-2026": {
+        "canonical_slug": "saas-runway-calculator",
+        "redirect_target": "/tools/saas-runway-calculator/",
+    },
+    "financial-model": {
+        "canonical_slug": "saas-runway-calculator",
+        "redirect_target": "/tools/saas-runway-calculator/",
+    },
+    "freelance-tax-calculator": {
+        "canonical_slug": "s-corp-reasonable-salary-tax-calculator",
+        "redirect_target": "/tools/s-corp-reasonable-salary-tax-calculator/",
+    },
+    "bonus-depreciation-calculator-2027": {
+        "canonical_slug": "section-179-calculator",
+        "redirect_target": "/tools/section-179-calculator/",
+    },
+    "macrs-depreciation-calculator": {
+        "canonical_slug": "section-179-calculator",
+        "redirect_target": "/tools/section-179-calculator/",
+    },
+    "section-179-vehicle-deduction": {
+        "canonical_slug": "section-179-calculator",
+        "redirect_target": "/tools/section-179-calculator/",
     },
     "irs-2027-tax-brackets-scenario-comparison-model": {
         "canonical_slug": "irs-2027-tax-brackets",
@@ -1382,6 +1482,25 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
     },
 }
 
+PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
+    "pslf-buyback-calculator": {
+        "canonical_slug": "pslf-qualifying-payment-simulator",
+        "redirect_target": "/tools/pslf-qualifying-payment-simulator/",
+    },
+    "repayment-assistance-plan-calculator": {
+        "canonical_slug": "rap-payment-calculator",
+        "redirect_target": "/tools/rap-payment-calculator/",
+    },
+    "student-loan-interest-subsidy-calculator": {
+        "canonical_slug": "save-plan-litigation-transition",
+        "redirect_target": "/tools/save-plan-litigation-transition/",
+    },
+    "tax-deduction-for-car-loan-interest": {
+        "canonical_slug": "student-loan-repayment-calculator",
+        "redirect_target": "/tools/",
+    },
+}
+
 OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP: Dict[str, str] = {
     "/shopify-profit-tracker": "/tools/",
     "/shopify-profit-tracker/": "/tools/",
@@ -1395,6 +1514,20 @@ OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP: Dict[str, str] = {
     "/triple-whale-alternative/": "/tools/",
     "/sellerboard-alternative": "/tools/",
     "/sellerboard-alternative/": "/tools/",
+    "/profit-calculator": "/tools/",
+    "/profit-calculator/": "/tools/",
+    "/tools/profit-margin-calculator": "/tools/",
+    "/tools/profit-margin-calculator/": "/tools/",
+    "/ecommerce-margin": "/tools/",
+    "/ecommerce-margin/": "/tools/",
+    "/margin-calculator": "/tools/",
+    "/margin-calculator/": "/tools/",
+    "/tools/ecommerce-margin": "/tools/",
+    "/tools/ecommerce-margin/": "/tools/",
+    "/tools/chargeback-calculator": "/tools/",
+    "/tools/chargeback-calculator/": "/tools/",
+    "/tools/ad-spend-roi-calculator": "/tools/",
+    "/tools/ad-spend-roi-calculator/": "/tools/",
     "/tools/shopify-fees-calculator": "/tools/",
     "/tools/shopify-fees-calculator/": "/tools/",
     "/tools/break-even-acos-calculator": "/tools/",
@@ -1407,7 +1540,71 @@ OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP: Dict[str, str] = {
     "/tools/landed-cost-calculator/": "/tools/section-301-tariff-landed-cost-calculator/",
     "/tools/qsbs-section-1202-tax-calculator": "/tools/tcja-sunset-capital-gains/",
     "/tools/qsbs-section-1202-tax-calculator/": "/tools/tcja-sunset-capital-gains/",
+    "/tools/qsbs-83b-tax-calculator": "/tools/tcja-sunset-capital-gains/",
+    "/tools/qsbs-83b-tax-calculator/": "/tools/tcja-sunset-capital-gains/",
 }
+
+_B2B_ADJACENT_TOOL_METADATA: Dict[str, Dict[str, str]] = {
+    "s-corp-reasonable-salary-tax-calculator": {
+        "slug": "s-corp-reasonable-salary-tax-calculator",
+        "title": "S-Corp Reasonable Salary & Self-Employment Tax Calculator",
+        "short_title": "S-Corp Salary Tax",
+        "category": "Corporate Finance",
+        "canonical_path": "/tools/s-corp-reasonable-salary-tax-calculator/",
+    },
+    "section-179-calculator": {
+        "slug": "section-179-calculator",
+        "title": "Section 179 Equipment Deduction & Bonus Depreciation Calculator",
+        "short_title": "Section 179 Deduction",
+        "category": "Corporate Finance",
+        "canonical_path": "/tools/section-179-calculator/",
+    },
+    "saas-runway-calculator": {
+        "slug": "saas-runway-calculator",
+        "title": "SaaS Burn Multiple & Cash Runway Calculator",
+        "short_title": "SaaS Burn & Runway",
+        "category": "Corporate Finance",
+        "canonical_path": "/tools/saas-runway-calculator/",
+    },
+    "irs-2027-tax-brackets": {
+        "slug": "irs-2027-tax-brackets",
+        "title": "IRS 2027 Tax Brackets & TCJA Sunset Calculator",
+        "short_title": "IRS 2027 Tax Brackets",
+        "category": "Tax Intelligence",
+        "canonical_path": "/tools/irs-2027-tax-brackets/",
+    },
+    "tcja-sunset-capital-gains": {
+        "slug": "tcja-sunset-capital-gains",
+        "title": "Capital Gains & TCJA Sunset Statutory Tax Calculator",
+        "short_title": "Capital Gains Tax",
+        "category": "Tax Intelligence",
+        "canonical_path": "/tools/tcja-sunset-capital-gains/",
+    },
+}
+
+
+def is_retired_or_consolidated_slug(slug: str, property_id: Optional[str] = None) -> bool:
+    """Returns True if slug is a consolidated clone, retired redirect source, or synthetic test fixture."""
+    s = str(slug or "").strip().lower()
+    if not s:
+        return False
+    if is_synthetic_test_candidate(s):
+        return True
+    prop = str(property_id or "").strip().lower()
+    if prop == "prexvo":
+        return s in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP or s == "loans"
+    if prop == "profithelm":
+        return (
+            s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+            or f"/tools/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+            or f"/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+        )
+    return (
+        s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        or s in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        or f"/tools/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+        or f"/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+    )
 
 
 def _clean_tool_mixed_topical_signals(
@@ -1417,11 +1614,13 @@ def _clean_tool_mixed_topical_signals(
     """
     Cleans mixed topical signals on a dynamic_tools.json entry in-place:
     1. Replaces cannibalizing clone slugs in adjacent_tools with canonical hubs, and replaces
-       retail crypto-tax-calculator links on B2B commercial calculators with B2B tax hubs.
+       retail crypto-tax-calculator / prediction-market-odds links on B2B commercial calculators
+       with B2B tax/finance hubs (handling plain string slugs, dicts, and stringified dicts).
     2. Replaces copy-pasted TCJA Sunset / IRC Section 1411 NIIT calculation_prompts on non-capital-gains
        tools with prompts grounded in the tool's own statutory authority.
     3. Replaces copy-pasted IRC Section 1202 / IRC Section 1411 rows in proprietary_calculation_table
-       on non-capital-gains tools with rows grounded in the tool's own statutory authority.
+       on non-capital-gains tools with rows grounded in the tool's own statutory authority
+       (handling both list-of-rows and dict-with-rows schemas).
     4. Merges grouped queries from consolidated clones into secondary_keywords.
     Returns True if tool dict was mutated.
     Zero em-dashes. Zero en-dashes.
@@ -1430,7 +1629,11 @@ def _clean_tool_mixed_topical_signals(
     slug = str(tool.get("slug") or "").strip()
     title = str(tool.get("title") or slug.replace("-", " ").title()).strip()
     stat_refs = tool.get("statutory_references") if isinstance(tool.get("statutory_references"), list) else []
-    primary_stat = str(stat_refs[0] if stat_refs else "26 U.S.C. Section 162 and IRC Section 179").strip()
+    primary_stat = str(
+        stat_refs[0]
+        if stat_refs
+        else (tool.get("statutory_authority") or "26 U.S.C. Section 162 and IRC Section 179")
+    ).strip()
 
     # 1. Merge grouped queries into secondary_keywords
     if grouped_queries_for_slug:
@@ -1444,57 +1647,148 @@ def _clean_tool_mixed_topical_signals(
                 changed = True
         tool["secondary_keywords"] = sec
 
-    # 2. Clean adjacent_tools
+    is_crypto_or_prediction = any(k in slug for k in ("crypto", "prediction", "kalshi"))
+    is_cap_gains_related = any(k in slug for k in ("capital-gains", "1031", "crypto"))
+
+    def _map_b2b_adjacent_slug(cand_slug: str, seen: Set[str]) -> str:
+        mapped = str(cand_slug or "").strip()
+        if mapped in CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
+            mapped = CANNIBALIZING_CLONE_CONSOLIDATION_MAP[mapped]["canonical_slug"]
+        elif mapped in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
+            mapped = PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP[mapped]["canonical_slug"]
+        if mapped in ("crypto-tax-calculator", "prediction-market-odds") and not is_crypto_or_prediction:
+            for fallback in ("s-corp-reasonable-salary-tax-calculator", "section-179-calculator", "saas-runway-calculator"):
+                if fallback != slug and fallback not in seen:
+                    mapped = fallback
+                    break
+            else:
+                mapped = "section-179-calculator" if slug != "section-179-calculator" else "saas-runway-calculator"
+        return mapped
+
+    # 2. Clean adjacent_tools (supports plain string slugs, dicts, or stringified Python dicts)
     adj = tool.get("adjacent_tools")
     if isinstance(adj, list):
-        new_adj: List[str] = []
-        is_crypto_or_prediction = any(k in slug for k in ("crypto", "prediction", "kalshi"))
-        for a_slug in adj:
-            mapped = str(a_slug).strip()
-            if mapped in CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
-                mapped = CANNIBALIZING_CLONE_CONSOLIDATION_MAP[mapped]["canonical_slug"]
-            if mapped == "crypto-tax-calculator" and not is_crypto_or_prediction:
-                mapped = (
-                    "s-corp-reasonable-salary-tax-calculator"
-                    if slug != "s-corp-reasonable-salary-tax-calculator"
-                    else "section-179-calculator"
-                )
-            if mapped and mapped != slug and mapped not in new_adj:
-                new_adj.append(mapped)
+        new_adj: List[Any] = []
+        seen_adj_slugs: Set[str] = set()
+        for a_item in adj:
+            if isinstance(a_item, dict):
+                orig_slug = str(a_item.get("slug") or "").strip()
+                mapped_slug = _map_b2b_adjacent_slug(orig_slug, seen_adj_slugs)
+                if not mapped_slug or mapped_slug == slug or mapped_slug in seen_adj_slugs:
+                    continue
+                seen_adj_slugs.add(mapped_slug)
+                if mapped_slug != orig_slug:
+                    meta = _B2B_ADJACENT_TOOL_METADATA.get(mapped_slug, {})
+                    updated_item = dict(a_item)
+                    updated_item["slug"] = mapped_slug
+                    updated_item["title"] = meta.get("title", mapped_slug.replace("-", " ").title())
+                    updated_item["short_title"] = meta.get("short_title", mapped_slug.replace("-", " ").title())
+                    updated_item["category"] = meta.get("category", "Corporate Finance")
+                    updated_item["canonical_path"] = f"/tools/{mapped_slug}/"
+                    new_adj.append(updated_item)
+                else:
+                    new_adj.append(a_item)
+            elif isinstance(a_item, str):
+                s_strip = a_item.strip()
+                parsed_dict: Optional[Dict[str, Any]] = None
+                if s_strip.startswith("{") and s_strip.endswith("}"):
+                    try:
+                        val = ast.literal_eval(s_strip)
+                        if isinstance(val, dict):
+                            parsed_dict = val
+                    except Exception:
+                        parsed_dict = None
+                if parsed_dict is not None:
+                    orig_slug = str(parsed_dict.get("slug") or "").strip()
+                    mapped_slug = _map_b2b_adjacent_slug(orig_slug, seen_adj_slugs)
+                    if not mapped_slug or mapped_slug == slug or mapped_slug in seen_adj_slugs:
+                        continue
+                    seen_adj_slugs.add(mapped_slug)
+                    if mapped_slug != orig_slug:
+                        meta = _B2B_ADJACENT_TOOL_METADATA.get(mapped_slug, {})
+                        updated_dict = dict(parsed_dict)
+                        updated_dict["slug"] = mapped_slug
+                        updated_dict["title"] = meta.get("title", mapped_slug.replace("-", " ").title())
+                        updated_dict["short_title"] = meta.get("short_title", mapped_slug.replace("-", " ").title())
+                        updated_dict["category"] = meta.get("category", "Corporate Finance")
+                        updated_dict["canonical_path"] = f"/tools/{mapped_slug}/"
+                        new_adj.append(repr(updated_dict))
+                    else:
+                        new_adj.append(a_item)
+                else:
+                    mapped_slug = _map_b2b_adjacent_slug(s_strip, seen_adj_slugs)
+                    if mapped_slug and mapped_slug != slug and mapped_slug not in seen_adj_slugs:
+                        seen_adj_slugs.add(mapped_slug)
+                        new_adj.append(mapped_slug)
         if new_adj != adj:
             tool["adjacent_tools"] = new_adj
             changed = True
 
-    is_cap_gains_related = any(k in slug for k in ("capital-gains", "1031", "crypto"))
-
     # 3. Clean copy-pasted TCJA Sunset / Section 1411 NIIT calculation_prompts on B2B calculators
     prompts = tool.get("calculation_prompts")
     if isinstance(prompts, list) and not is_cap_gains_related:
-        new_prompts: List[Dict[str, str]] = []
+        new_prompts: List[Dict[str, Any]] = []
         prompts_changed = False
+        seen_target_slugs: Set[str] = set()
         for idx, p_item in enumerate(prompts):
             if not isinstance(p_item, dict):
                 continue
             lbl = str(p_item.get("label") or "")
+            ttl = str(p_item.get("title") or "")
             prm = str(p_item.get("prompt") or "")
-            if "TCJA Sunset" in lbl or "1411 NIIT" in lbl or "TCJA Sunset" in prm or "Section 1411" in prm:
+            sref = str(p_item.get("statutory_reference") or "")
+            ctx = str(p_item.get("context") or "")
+            tslug = str(p_item.get("target_slug") or "")
+            combined_p = f"{lbl} {ttl} {prm} {sref} {ctx}"
+            has_off_topic_signal = any(
+                marker in combined_p
+                for marker in ("TCJA Sunset", "1411", "NIIT", "Net Investment Income Surtax")
+            )
+            mapped_tslug = _map_b2b_adjacent_slug(tslug, seen_target_slugs) if tslug else ""
+            if mapped_tslug:
+                seen_target_slugs.add(mapped_tslug)
+            if has_off_topic_signal or (tslug and mapped_tslug != tslug):
                 prompts_changed = True
-                if idx == 1:
-                    new_prompts.append({
-                        "label": "Statutory Phase-Out & Threshold Sensitivity",
-                        "prompt": (
+                updated_p = dict(p_item)
+                if "label" in updated_p and not updated_p.get("title"):
+                    if idx == 1:
+                        updated_p["label"] = "Statutory Phase-Out & Threshold Sensitivity"
+                        updated_p["prompt"] = (
                             f"Evaluate {title} across statutory phase-out thresholds and marginal cost tiers "
                             f"under {primary_stat} to quantify net after-tax cash flow impact."
-                        ),
-                    })
-                else:
-                    new_prompts.append({
-                        "label": "Multi-Year Working Capital & Deduction Timing",
-                        "prompt": (
+                        )
+                    else:
+                        updated_p["label"] = "Multi-Year Working Capital & Deduction Timing"
+                        updated_p["prompt"] = (
                             f"Compare first-year deduction recovery against multi-year amortization schedules "
                             f"for {title} under {primary_stat}."
-                        ),
-                    })
+                        )
+                else:
+                    if idx == 0:
+                        updated_p["title"] = "Statutory Deduction & Effective Cost Simulation"
+                        updated_p["prompt"] = (
+                            f"Calculate how {primary_stat} deduction thresholds and marginal tax rates adjust net liability for {title}."
+                        )
+                        updated_p["query"] = f"{slug.replace('-', ' ')} statutory deduction and marginal tax rate"
+                        updated_p["statutory_reference"] = primary_stat
+                        updated_p["context"] = (
+                            f"Commercial expenditures and deduction phase-outs under {primary_stat} directly determine net after-tax cash flow."
+                        )
+                    elif idx == 1:
+                        updated_p["title"] = "Statutory Phase-Out & Threshold Sensitivity"
+                        updated_p["prompt"] = (
+                            f"Evaluate {title} across statutory phase-out thresholds and marginal cost tiers under {primary_stat}."
+                        )
+                        updated_p["query"] = f"{slug.replace('-', ' ')} phase out threshold and working capital impact"
+                        updated_p["statutory_reference"] = primary_stat
+                        updated_p["context"] = (
+                            f"Statutory phase-out rules under {primary_stat} govern the effective marginal cost of capital across commercial tiers."
+                        )
+                    if mapped_tslug:
+                        meta = _B2B_ADJACENT_TOOL_METADATA.get(mapped_tslug, {})
+                        updated_p["target_slug"] = mapped_tslug
+                        updated_p["target_title"] = meta.get("short_title") or meta.get("title") or mapped_tslug.replace("-", " ").title()
+                new_prompts.append(updated_p)
             else:
                 new_prompts.append(p_item)
         if prompts_changed:
@@ -1510,25 +1804,252 @@ def _clean_tool_mixed_topical_signals(
             if not isinstance(row, dict):
                 continue
             scen = str(row.get("scenario") or "")
-            if "IRC Section 1202" in scen:
+            ref = str(row.get("reference") or "")
+            if "IRC Section 1202" in scen or "IRC Section 1202" in ref:
                 table_changed = True
                 updated_row = dict(row)
-                updated_row["scenario"] = f"Accelerated Deduction Tier ({primary_stat})"
-                updated_row["notes"] = f"Statutory phase-out threshold compliance verified under {primary_stat}"
+                if "scenario" in updated_row:
+                    updated_row["scenario"] = f"Accelerated Deduction Tier ({primary_stat})"
+                if "notes" in updated_row:
+                    updated_row["notes"] = f"Statutory phase-out threshold compliance verified under {primary_stat}"
+                if "reference" in updated_row:
+                    updated_row["reference"] = primary_stat
                 new_table.append(updated_row)
-            elif "IRC Section 1411" in scen:
+            elif "IRC Section 1411" in scen or "IRC Section 1411" in ref:
                 table_changed = True
                 updated_row = dict(row)
-                updated_row["scenario"] = f"High-Volume Commercial Tier ({primary_stat})"
-                updated_row["notes"] = f"Marginal cost and effective burden sensitivity under {primary_stat}"
+                if "scenario" in updated_row:
+                    updated_row["scenario"] = f"High-Volume Commercial Tier ({primary_stat})"
+                if "notes" in updated_row:
+                    updated_row["notes"] = f"Marginal cost and effective burden sensitivity under {primary_stat}"
+                if "reference" in updated_row:
+                    updated_row["reference"] = primary_stat
                 new_table.append(updated_row)
             else:
                 new_table.append(row)
         if table_changed:
             tool["proprietary_calculation_table"] = new_table
             changed = True
+    elif isinstance(prop_table, dict) and isinstance(prop_table.get("rows"), list) and not is_cap_gains_related:
+        new_rows: List[Dict[str, Any]] = []
+        rows_changed = False
+        for row in prop_table["rows"]:
+            if not isinstance(row, dict):
+                continue
+            ref = str(row.get("reference") or "")
+            scen = str(row.get("scenario") or "")
+            if any(m in ref or m in scen for m in ("IRC Section 1202", "IRC Section 1411")):
+                rows_changed = True
+                updated_row = dict(row)
+                if "reference" in updated_row:
+                    updated_row["reference"] = primary_stat
+                if "scenario" in updated_row:
+                    updated_row["scenario"] = f"Commercial Statutory Tier ({primary_stat})"
+                new_rows.append(updated_row)
+            else:
+                new_rows.append(row)
+        if rows_changed:
+            updated_table = dict(prop_table)
+            updated_table["rows"] = new_rows
+            tool["proprietary_calculation_table"] = updated_table
+            changed = True
 
     return changed
+
+
+def reconcile_void_candidates_queue(vc_path: Union[str, Path]) -> int:
+    """
+    Reconciles a void_candidates.jsonl topic queue against consolidated/retired slugs
+    and synthetic/off-topic patterns so the autonomous pipeline never re-queues or resurrects
+    retired duplicate pages.
+    Returns the number of updated or deduplicated records.
+    Zero em-dashes. Zero en-dashes.
+    """
+    p = Path(vc_path)
+    if not p.is_file() or str(p).startswith("/dev/"):
+        return 0
+    try:
+        raw_lines = [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    except Exception:
+        return 0
+    if not raw_lines:
+        return 0
+
+    all_clone_maps: Dict[str, Dict[str, str]] = {}
+    all_clone_maps.update(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
+    all_clone_maps.update(CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
+
+    updated_count = 0
+    reconciled_records: List[Dict[str, Any]] = []
+    for line in raw_lines:
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        rec_copy = dict(rec)
+        raw_slug = str(rec_copy.get("slug") or "").strip().lower()
+        raw_query = str(rec_copy.get("query") or rec_copy.get("primary_keyword") or "").strip().lower()
+        slug_from_query = re.sub(r"[^a-z0-9]+", "-", raw_query).strip("-") if raw_query else ""
+        eff_slug = raw_slug or slug_from_query
+
+        if is_synthetic_test_candidate(eff_slug or raw_query, rec_copy):
+            if rec_copy.get("status") != "REJECTED" or rec_copy.get("action") != "REJECT":
+                rec_copy["status"] = "REJECTED"
+                rec_copy["action"] = "REJECT"
+                rec_copy["status_reason"] = "Rejected synthetic or off-topic candidate"
+                updated_count += 1
+        elif eff_slug in all_clone_maps or slug_from_query in all_clone_maps:
+            matched_key = eff_slug if eff_slug in all_clone_maps else slug_from_query
+            info = all_clone_maps[matched_key]
+            if (
+                rec_copy.get("status") != "REJECTED"
+                or rec_copy.get("consolidation_status") != "CONSOLIDATED_REDIRECT"
+                or rec_copy.get("canonical_slug") != info["canonical_slug"]
+                or rec_copy.get("redirect_target") != info["redirect_target"]
+            ):
+                rec_copy["status"] = "REJECTED"
+                rec_copy["action"] = "REFACTOR_PAGE"
+                rec_copy["consolidation_status"] = "CONSOLIDATED_REDIRECT"
+                rec_copy["canonical_slug"] = info["canonical_slug"]
+                rec_copy["redirect_target"] = info["redirect_target"]
+                rec_copy["status_reason"] = (
+                    f"Consolidated into canonical hub {info['canonical_slug']} ({info['redirect_target']})"
+                )
+                updated_count += 1
+        else:
+            act = str(rec_copy.get("action") or "").strip().upper()
+            if act in ("REJECT", "MONITOR") and rec_copy.get("status") != "REJECTED":
+                rec_copy["status"] = "REJECTED"
+                rec_copy["status_reason"] = (
+                    rec_copy.get("status_reason")
+                    or f"Engine verdict {act}: {rec_copy.get('decision_reason') or 'not actionable'}"
+                )
+                updated_count += 1
+
+        reconciled_records.append(rec_copy)
+
+    if updated_count > 0:
+        p.write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in reconciled_records) + "\n",
+            encoding="utf-8",
+        )
+    return updated_count
+
+
+def _clean_syndication_directories_and_ledgers(
+    root: Path,
+    prop: str,
+    slugs_to_purge: Set[str],
+) -> int:
+    """
+    Purges stale syndication folders, files, markdown entries, broadcast_ledger entries,
+    and facebook_groups_catalog entries for retired/consolidated/synthetic slugs.
+    Returns count of removed/cleaned syndication artifacts.
+    Zero em-dashes. Zero en-dashes.
+    """
+    removed_count = 0
+    synd_dirs = [root / "syndication"]
+    is_foreign_pytest = bool("PYTEST_CURRENT_TEST" in os.environ)
+    if not is_foreign_pytest:
+        central_synd = Path(__file__).resolve().parent.parent / "syndication" / prop
+        if central_synd.is_dir() and central_synd not in synd_dirs:
+            synd_dirs.append(central_synd)
+
+    for synd_dir in synd_dirs:
+        if not synd_dir.is_dir():
+            continue
+        for item in sorted(synd_dir.iterdir()):
+            if item.name.startswith(".") or item.name == "ai_benchmarks":
+                continue
+            if item.is_dir():
+                if item.name in slugs_to_purge or is_retired_or_consolidated_slug(item.name, prop):
+                    shutil.rmtree(item, ignore_errors=True)
+                    removed_count += 1
+            elif item.is_file():
+                matched_prefix = False
+                for dead_s in slugs_to_purge:
+                    if item.name == f"{dead_s}.md" or item.name == f"{dead_s}.json" or item.name.startswith(f"{dead_s}-"):
+                        matched_prefix = True
+                        break
+                if matched_prefix:
+                    try:
+                        item.unlink()
+                        removed_count += 1
+                    except Exception:
+                        pass
+
+        # Clean retired slug references from github_seed_discovery.md and facebook_group_targets.md
+        gh_md = synd_dir / "github_seed_discovery.md"
+        if gh_md.is_file():
+            try:
+                gh_txt = gh_md.read_text(encoding="utf-8")
+                gh_lines = gh_txt.splitlines()
+                filtered_gh = [
+                    ln for ln in gh_lines
+                    if not any(f"/tools/{ds}/" in ln or f"/tools/{ds})" in ln for ds in slugs_to_purge)
+                ]
+                if len(filtered_gh) != len(gh_lines):
+                    gh_md.write_text("\n".join(filtered_gh) + "\n", encoding="utf-8")
+                    removed_count += 1
+            except Exception:
+                pass
+
+        fb_md = synd_dir / "facebook_group_targets.md"
+        if fb_md.is_file():
+            try:
+                fb_txt = fb_md.read_text(encoding="utf-8")
+                if any(f"/tools/{ds}/" in fb_txt for ds in slugs_to_purge):
+                    sections = re.split(r"(?m)^(?=## )", fb_txt)
+                    kept_sections = [
+                        sec for sec in sections
+                        if not any(f"/tools/{ds}/" in sec for ds in slugs_to_purge)
+                    ]
+                    if len(kept_sections) != len(sections):
+                        new_fb_txt = "".join(kept_sections)
+                        fb_md.write_text(new_fb_txt, encoding="utf-8")
+                        removed_count += 1
+            except Exception:
+                pass
+
+    # Clean .agy/broadcast_ledger.json and .agy/facebook_groups_catalog*.json
+    b_ledger = root / ".agy" / "broadcast_ledger.json"
+    if b_ledger.is_file():
+        try:
+            b_data = json.loads(b_ledger.read_text(encoding="utf-8"))
+            if isinstance(b_data, list):
+                filtered_b = [
+                    entry for entry in b_data
+                    if isinstance(entry, dict)
+                    and str(entry.get("slug") or "") not in slugs_to_purge
+                    and not is_retired_or_consolidated_slug(str(entry.get("slug") or ""), prop)
+                ]
+                if len(filtered_b) != len(b_data):
+                    b_ledger.write_text(json.dumps(filtered_b, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                    removed_count += 1
+        except Exception:
+            pass
+
+    for fb_cat_name in ("facebook_groups_catalog.json", "facebook_groups_catalog.dryrun.json"):
+        fb_cat = root / ".agy" / fb_cat_name
+        if fb_cat.is_file():
+            try:
+                cat_data = json.loads(fb_cat.read_text(encoding="utf-8"))
+                if isinstance(cat_data, dict):
+                    dead_keys = [
+                        k for k in cat_data.keys()
+                        if k in slugs_to_purge or is_retired_or_consolidated_slug(k, prop)
+                    ]
+                    if dead_keys:
+                        for dk in dead_keys:
+                            cat_data.pop(dk, None)
+                        fb_cat.write_text(json.dumps(cat_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                        removed_count += 1
+            except Exception:
+                pass
+
+    return removed_count
 
 
 def reconcile_tenant_topical_authority_and_cannibalization(
@@ -1538,20 +2059,20 @@ def reconcile_tenant_topical_authority_and_cannibalization(
 ) -> Dict[str, Any]:
     """
     Deterministically reconciles a tenant repository's tool catalog, redirects, overlays,
-    and compiled dist directory against the Search Intent & Topical Authority Doctrine:
-    1. Consolidates standalone cannibalizing clone hubs (e.g. 6 CA tax bracket clones,
-       5 *-scenario-comparison-model clones, 1031-exchange-rules-arizona, irs-2027-tax-rates,
-       irs-capital-gains-statutory-tax, kalshi-prediction-market-arbitrage-strategy) and
-       removes synthetic test fixtures ('query-two-buildable').
+    syndication packs, tool_spec provenance files, void_candidates queues, and compiled dist
+    directory against the Search Intent & Topical Authority Doctrine:
+    1. Consolidates standalone cannibalizing clone hubs and removes synthetic test fixtures.
     2. Groups harvested queries/scenarios from retired clones onto their canonical parent
        tool overlays without resetting active 28-day measurement locks, and syncs
        .agy/overlays <-> content/overlays.
     3. Registers 301 consolidation redirects in content/redirects.json and re-points
        legacy off-topic e-commerce/Shopify redirects to /tools/.
-    4. Removes stale dist/tools/<clone_slug> and dist/manifests/<clone_slug>.json before
-       tenant build_all() runs so redirect verification and sitemap hygiene pass cleanly.
+    4. Removes stale dist/tools/<clone_slug>, dist/manifests/<clone_slug>.json,
+       .agy/tool_spec_<clone_slug>.json, and syndication/<clone_slug> before tenant build_all()
+       runs so redirect verification, syndication, and sitemap hygiene pass cleanly.
     5. Scrubs mixed topical signals (retail crypto adjacent links and copy-pasted TCJA/NIIT/1202
        prompts/tables) from B2B commercial calculators in dynamic_tools.json.
+    6. Reconciles void_candidates.jsonl queues so retired clones can never be re-queued.
     Zero em-dashes. Zero en-dashes.
     """
     root = Path(repo_root)
@@ -1566,10 +2087,38 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         "redirects_updated": 0,
         "overlays_synced": 0,
         "stale_dist_dirs_removed": 0,
+        "stale_tool_specs_removed": 0,
+        "stale_syndication_removed": 0,
+        "void_candidates_reconciled": 0,
     }
 
+    clone_map = (
+        PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        if prop == "prexvo"
+        else CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+    )
+
     if prop != "profithelm":
-        # For prexvo or other properties, still sync .agy/overlays <-> content/overlays
+        prexvo_purge_slugs = set(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | {"query-two-buildable", "loans"}
+        if eff_dist.is_dir():
+            for purge_slug in sorted(prexvo_purge_slugs):
+                if purge_slug == "loans":
+                    continue
+                stale_tool_dir = eff_dist / "tools" / purge_slug
+                if stale_tool_dir.is_dir():
+                    shutil.rmtree(stale_tool_dir, ignore_errors=True)
+                    summary["stale_dist_dirs_removed"] += 1
+                stale_manifest = eff_dist / "manifests" / f"{purge_slug}.json"
+                if stale_manifest.is_file():
+                    try:
+                        stale_manifest.unlink()
+                    except Exception:
+                        pass
+        summary["stale_syndication_removed"] += _clean_syndication_directories_and_ledgers(
+            root=root,
+            prop=prop,
+            slugs_to_purge=prexvo_purge_slugs,
+        )
         agy_ov = root / ".agy" / "overlays"
         cnt_ov = root / "content" / "overlays"
         if agy_ov.is_dir() or cnt_ov.is_dir():
@@ -1584,7 +2133,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         return summary
 
     grouped_queries_by_canonical: Dict[str, List[str]] = {}
-    for clone_slug, info in CANNIBALIZING_CLONE_CONSOLIDATION_MAP.items():
+    for clone_slug, info in clone_map.items():
         c_slug = info["canonical_slug"]
         q_default = clone_slug.replace("-scenario-comparison-model", "").replace("-", " ").strip()
         grouped_queries_by_canonical.setdefault(c_slug, [])
@@ -1610,8 +2159,8 @@ def reconcile_tenant_topical_authority_and_cannibalization(
             if not isinstance(t, dict):
                 continue
             s = str(t.get("slug") or "").strip()
-            if s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
-                c_slug = CANNIBALIZING_CLONE_CONSOLIDATION_MAP[s]["canonical_slug"]
+            if s in clone_map:
+                c_slug = clone_map[s]["canonical_slug"]
                 bucket = grouped_queries_by_canonical.setdefault(c_slug, [])
                 for kw in [t.get("primary_keyword"), *(t.get("secondary_keywords") or [])]:
                     kw_str = str(kw or "").strip().lower()
@@ -1629,7 +2178,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                     summary["removed_synthetic_slugs"].append(s)
                 file_modified = True
                 continue
-            if s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
+            if s in clone_map:
                 if s not in summary["consolidated_clones"]:
                     summary["consolidated_clones"].append(s)
                 file_modified = True
@@ -1643,7 +2192,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         if file_modified:
             dyn_path.write_text(json.dumps(kept_tools, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    # 2. Reconcile .agy/deployed_voids.json (remove synthetic fixtures; annotate consolidated clones)
+    # 2. Reconcile .agy/deployed_voids.json (remove synthetic fixtures; annotate all consolidated clones)
     dv_path = root / ".agy" / "deployed_voids.json"
     if dv_path.is_file():
         try:
@@ -1659,8 +2208,8 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                             if s not in summary["removed_synthetic_slugs"]:
                                 summary["removed_synthetic_slugs"].append(s)
                             continue
-                        if s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
-                            info = CANNIBALIZING_CLONE_CONSOLIDATION_MAP[s]
+                        if s in clone_map:
+                            info = clone_map[s]
                             if (
                                 entry.get("status") != "CONSOLIDATED_REDIRECT"
                                 or entry.get("canonical_slug") != info["canonical_slug"]
@@ -1677,8 +2226,40 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         except Exception:
             pass
 
-    # 3. Remove stale dist/tools/<clone_slug> and dist/manifests/<clone_slug>.json before build_all()
-    slugs_to_purge = set(CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | {"query-two-buildable"}
+    # 3. Build complete set of retired/consolidated/synthetic slugs to purge
+    slugs_to_purge: Set[str] = set(clone_map.keys()) | {
+        "query-two-buildable",
+        "valid-edge-tool-2027",
+        "bad-slug-with-underscores-and-dashes-invalid",
+        "calculator-app",
+        "calculator-net",
+        "calculator-free",
+        "calculator-near-me",
+        "ionq-stock",
+        "custom-test-calculator",
+        "poison-pill-test",
+        "irs-1031-exchange-tax-deferral-test",
+    }
+    for off_path in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP.keys():
+        clean_off = off_path.strip("/")
+        if clean_off.startswith("tools/"):
+            slugs_to_purge.add(clean_off[len("tools/"):].strip("/"))
+        elif "/" not in clean_off and clean_off:
+            slugs_to_purge.add(clean_off)
+
+    # Remove stale .agy/tool_spec_<slug>.json files for retired/consolidated/synthetic slugs
+    agy_dir = root / ".agy"
+    if agy_dir.is_dir():
+        for spec_f in sorted(agy_dir.glob("tool_spec_*.json")):
+            spec_slug = spec_f.name[len("tool_spec_"):-len(".json")]
+            if spec_slug in slugs_to_purge or is_retired_or_consolidated_slug(spec_slug, prop):
+                try:
+                    spec_f.unlink()
+                    summary["stale_tool_specs_removed"] += 1
+                except Exception:
+                    pass
+
+    # 4. Remove stale dist/tools/<clone_slug> and dist/manifests/<clone_slug>.json before build_all()
     if eff_dist.is_dir():
         for purge_slug in sorted(slugs_to_purge):
             stale_tool_dir = eff_dist / "tools" / purge_slug
@@ -1692,7 +2273,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 except Exception:
                     pass
 
-    # 4. Update content/redirects.json with 301 consolidation rules and off-topic redirect cleanup
+    # 5. Update content/redirects.json with 301 consolidation rules and off-topic redirect cleanup
     redirects_path = root / "content" / "redirects.json"
     if redirects_path.is_file():
         try:
@@ -1704,10 +2285,12 @@ def reconcile_tenant_topical_authority_and_cannibalization(
 
     if isinstance(redirects_data, dict):
         red_changed = False
-        for clone_slug, info in CANNIBALIZING_CLONE_CONSOLIDATION_MAP.items():
+        for clone_slug, info in clone_map.items():
             target = info["redirect_target"]
             for src_path in (f"/tools/{clone_slug}", f"/tools/{clone_slug}/"):
-                if redirects_data.get(src_path) != target:
+                cur_val = redirects_data.get(src_path)
+                cur_target = cur_val.get("target") if isinstance(cur_val, dict) else cur_val
+                if cur_target != target:
                     redirects_data[src_path] = target
                     red_changed = True
                     summary["redirects_updated"] += 1
@@ -1717,7 +2300,9 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 red_changed = True
                 summary["redirects_updated"] += 1
         for src_path, target in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP.items():
-            if redirects_data.get(src_path) != target:
+            cur_val = redirects_data.get(src_path)
+            cur_target = cur_val.get("target") if isinstance(cur_val, dict) else cur_val
+            if cur_target != target:
                 redirects_data[src_path] = target
                 red_changed = True
                 summary["redirects_updated"] += 1
@@ -1725,21 +2310,20 @@ def reconcile_tenant_topical_authority_and_cannibalization(
             redirects_path.parent.mkdir(parents=True, exist_ok=True)
             redirects_path.write_text(json.dumps(redirects_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    # 5. Consolidate clone overlays into canonical parent overlays & sync .agy/overlays <-> content/overlays
+    # 6. Consolidate clone overlays into canonical parent overlays & sync .agy/overlays <-> content/overlays
     agy_ov_dir = root / ".agy" / "overlays"
     cnt_ov_dir = root / "content" / "overlays"
     agy_ov_dir.mkdir(parents=True, exist_ok=True)
     cnt_ov_dir.mkdir(parents=True, exist_ok=True)
 
-    # First remove clone/synthetic overlay files after harvesting any queries they held
     for ov_dir in (agy_ov_dir, cnt_ov_dir):
         for purge_slug in sorted(slugs_to_purge):
             ov_f = ov_dir / f"{purge_slug}.json"
             if ov_f.is_file():
                 try:
                     ov_data = json.loads(ov_f.read_text(encoding="utf-8"))
-                    if isinstance(ov_data, dict) and purge_slug in CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
-                        c_slug = CANNIBALIZING_CLONE_CONSOLIDATION_MAP[purge_slug]["canonical_slug"]
+                    if isinstance(ov_data, dict) and purge_slug in clone_map:
+                        c_slug = clone_map[purge_slug]["canonical_slug"]
                         bucket = grouped_queries_by_canonical.setdefault(c_slug, [])
                         for q_item in [ov_data.get("query"), ov_data.get("target_query"), *(ov_data.get("grouped_queries") or [])]:
                             q_str = str(q_item or "").strip().lower()
@@ -1749,7 +2333,6 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 except Exception:
                     pass
 
-    # Merge canonical overlays between .agy/overlays and content/overlays while preserving active locks
     all_ov_names = sorted({f.name for f in agy_ov_dir.glob("*.json")} | {f.name for f in cnt_ov_dir.glob("*.json")})
     for ov_name in all_ov_names:
         slug = ov_name[:-5]
@@ -1797,7 +2380,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 isinstance(link_item, dict)
                 and any(
                     f"/{dead_slug}/" in str(link_item.get("href") or "")
-                    for dead_slug in (set(CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | slugs_to_purge)
+                    for dead_slug in slugs_to_purge
                 )
                 for link_item in existing_hub_links
             )
@@ -1815,5 +2398,25 @@ def reconcile_tenant_topical_authority_and_cannibalization(
             if old_txt != serialized:
                 target_f.write_text(serialized, encoding="utf-8")
                 summary["overlays_synced"] += 1
+
+    # 7. Clean stale syndication directories, files, and broadcast/group ledgers
+    summary["stale_syndication_removed"] += _clean_syndication_directories_and_ledgers(
+        root=root,
+        prop=prop,
+        slugs_to_purge=slugs_to_purge,
+    )
+
+    # 8. Reconcile void_candidates.jsonl queues
+    vc_candidates = [
+        root / "void_candidates.jsonl",
+        root / ".agy" / "void_candidates.jsonl",
+    ]
+    if "PYTEST_CURRENT_TEST" not in os.environ and str(root).startswith("/home/ubuntuadmin/projects/"):
+        vc_candidates.extend([
+            Path.home() / ".local" / "share" / "vault" / "void_candidates.jsonl",
+            Path(__file__).resolve().parent.parent / "void_candidates.jsonl",
+        ])
+    for vc_p in vc_candidates:
+        summary["void_candidates_reconciled"] += reconcile_void_candidates_queue(vc_p)
 
     return summary

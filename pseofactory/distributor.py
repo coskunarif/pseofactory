@@ -1294,7 +1294,7 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
             f"compare after-tax yield:\n{url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?utm_source=x&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
             f"IRC Section 1202 lets C-corp founders exclude up to $10M or 10x basis from exit tax.\n\n"
             f"check your QSBS cap:\n{url}"
@@ -1382,7 +1382,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
             f"On $250,000 in treasury cash, that state tax exemption saves $3,212 a year compared to a 4.25% commercial bank HYSA. Compare your state's tax-equivalent yield here: {url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?utm_source=facebook&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
             f"Under IRC Section 1202, qualified C-corporation stock held for 5 years excludes the greater of $10,000,000 or 10x adjusted basis from federal capital gains tax, though non-conforming states like California still tax the exit.\n\n"
             f"Check your QSBS exclusion cap and state tax exposure here: {url}"
@@ -3454,7 +3454,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
             f"{url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?utm_source=x&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
             f"IRC 1202 lets C-corp founders exclude up to $10M or 10x basis from federal exit tax.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
@@ -4973,7 +4973,14 @@ def export_all_syndication_files(
             else:
                 target_tools = TOOLS
 
-        target_tools = list(target_tools or [])
+        from pseofactory.qualification import is_retired_or_consolidated_slug
+        target_tools = [
+            t for t in (target_tools or [])
+            if not is_retired_or_consolidated_slug(
+                t["slug"] if isinstance(t, dict) else str(t),
+                property_id,
+            )
+        ]
         known_slugs = {
             t["slug"] if isinstance(t, dict) else str(t)
             for t in target_tools
@@ -4995,6 +5002,8 @@ def export_all_syndication_files(
             if dt_dir.is_dir():
                 for item in sorted(dt_dir.iterdir()):
                     if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                        if is_retired_or_consolidated_slug(item.name, property_id):
+                            continue
                         if item.name not in known_slugs:
                             target_tools.append({
                                 "slug": item.name,
@@ -5003,10 +5012,15 @@ def export_all_syndication_files(
                             known_slugs.add(item.name)
 
         # Dynamically discover existing tool directories in target_dir
-        # (excluding hidden folders, files, and 'ai_benchmarks')
+        # (excluding hidden folders, files, 'ai_benchmarks', and retired/consolidated slugs)
         if output_dir.exists():
+            import shutil as _shutil
             for item in sorted(output_dir.iterdir()):
                 if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
+                    if is_retired_or_consolidated_slug(item.name, property_id):
+                        if not dry_run:
+                            _shutil.rmtree(item, ignore_errors=True)
+                        continue
                     if item.name not in known_slugs:
                         target_tools.append({
                             "slug": item.name,
@@ -5014,7 +5028,14 @@ def export_all_syndication_files(
                         })
                         known_slugs.add(item.name)
     else:
+        from pseofactory.qualification import is_retired_or_consolidated_slug
         target_tools = tools
+        if output_dir.exists() and not dry_run:
+            import shutil as _shutil
+            for item in sorted(output_dir.iterdir()):
+                if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
+                    if is_retired_or_consolidated_slug(item.name, property_id):
+                        _shutil.rmtree(item, ignore_errors=True)
 
     target_tools = [
         {"slug": t, "title": t.replace("-", " ").title()} if isinstance(t, str) else t
@@ -5277,6 +5298,14 @@ def dispatch_to_distribution_lead(
             else:
                 target_tools = list(TOOLS)
 
+        from pseofactory.qualification import is_retired_or_consolidated_slug
+        target_tools = [
+            t for t in target_tools
+            if not is_retired_or_consolidated_slug(
+                t["slug"] if isinstance(t, dict) else str(t),
+                property_id,
+            )
+        ]
         known_slugs = {
             t["slug"] if isinstance(t, dict) else str(t)
             for t in target_tools
@@ -5286,6 +5315,8 @@ def dispatch_to_distribution_lead(
         if eff_dist and (eff_dist / "tools").is_dir():
             for item in sorted((eff_dist / "tools").iterdir()):
                 if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                    if is_retired_or_consolidated_slug(item.name, property_id):
+                        continue
                     if item.name not in known_slugs:
                         target_tools.append({
                             "slug": item.name,

@@ -63,10 +63,39 @@ ACTIONABLE_ENGINE_ACTIONS = frozenset({"BUILD_PAGE", "REFACTOR_PAGE"})
 
 def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Stamps the shared void_candidates lifecycle status from the Jev engine verdict.
-    Records that already carry a status are left untouched.
+    Stamps the shared void_candidates lifecycle status from the Jev engine verdict,
+    while blocking resurrection of consolidated/retired clones or synthetic test fixtures.
     Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.qualification import (
+        CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
+        PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
+        is_synthetic_test_candidate,
+    )
+
+    raw_slug = str(record.get("slug") or "").strip().lower()
+    raw_query = str(record.get("query") or record.get("primary_keyword") or "").strip().lower()
+    slug_from_query = sanitize_url_slug(raw_query) if raw_query else ""
+    eff_slug = raw_slug or slug_from_query
+
+    if is_synthetic_test_candidate(eff_slug or raw_query, record):
+        record["status"] = "REJECTED"
+        record["action"] = "REJECT"
+        record["status_reason"] = "Rejected synthetic or off-topic candidate"
+        return record
+
+    all_clone_maps = {**PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP, **CANNIBALIZING_CLONE_CONSOLIDATION_MAP}
+    matched_clone = eff_slug if eff_slug in all_clone_maps else (slug_from_query if slug_from_query in all_clone_maps else "")
+    if matched_clone:
+        info = all_clone_maps[matched_clone]
+        record["status"] = "REJECTED"
+        record["action"] = "REFACTOR_PAGE"
+        record["consolidation_status"] = "CONSOLIDATED_REDIRECT"
+        record["canonical_slug"] = info["canonical_slug"]
+        record["redirect_target"] = info["redirect_target"]
+        record["status_reason"] = f"Consolidated into canonical hub {info['canonical_slug']} ({info['redirect_target']})"
+        return record
+
     if record.get("status"):
         return record
     action = str(record.get("action") or "").strip().upper()
