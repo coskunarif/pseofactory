@@ -106,3 +106,92 @@ def test_treg_checker_offline_fallback():
         assert res.keyword_difficulty < 25.0
         assert res.position_zero_vacant is True
         assert "offline_fallback" in res.endpoint_called
+
+
+def test_parse_ai_citation_payload_vacant_and_occupied():
+    """
+    Verifies DataForSEO chat_gpt/llm_scraper/live/advanced payload parsing
+    distinguishes vacant AI citation slots from occupied ones.
+    """
+    from pseofactory.trends.treg_checker import parse_ai_citation_payload
+
+    # Case 1: Only Reddit and raw IRS .gov cited -> vacant interactive calculator slot
+    vacant_payload = {
+        "tasks": [
+            {
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "sources": [
+                                    {"domain": "www.irs.gov", "url": "https://www.irs.gov/pub/irs-pdf/f8829.pdf"},
+                                    {"domain": "reddit.com", "url": "https://www.reddit.com/r/tax/comments/123"},
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    parsed_vacant = parse_ai_citation_payload(vacant_payload)
+    assert parsed_vacant["ai_citation_vacant"] is True
+    assert parsed_vacant["tenant_cited"] is False
+    assert "irs.gov" in parsed_vacant["ai_cited_domains"]
+    assert "reddit.com" in parsed_vacant["ai_cited_domains"]
+
+    # Case 2: Tenant domain already cited -> not vacant
+    tenant_payload = {
+        "result": {
+            "sources": [
+                {"domain": "profithelm.com", "url": "https://profithelm.com/tools/section-179-calculator"},
+            ]
+        }
+    }
+    parsed_tenant = parse_ai_citation_payload(tenant_payload)
+    assert parsed_tenant["tenant_cited"] is True
+    assert parsed_tenant["ai_citation_vacant"] is False
+
+    # Case 3: Two strong commercial calculator authorities cited -> not vacant
+    occupied_payload = {
+        "result": {
+            "sources": [
+                {"domain": "calculator.net"},
+                {"domain": "smartasset.com"},
+            ]
+        }
+    }
+    parsed_occupied = parse_ai_citation_payload(occupied_payload)
+    assert parsed_occupied["ai_citation_vacant"] is False
+    assert parsed_occupied["strong_authority_count"] == 2
+
+
+def test_treg_checker_ai_citation_subprocess():
+    """
+    Verifies check_ai_citation invokes dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced
+    with X-Treg-Route-Max-Cost: 0.01 ($0.004/call route).
+    """
+    checker = TregChecker(ai_max_cost="0.01", check_ai_citations=True)
+    mock_ai_stdout = json.dumps({
+        "result": {
+            "sources": [
+                {"domain": "irs.gov", "url": "https://www.irs.gov/forms-pubs/about-form-8829"},
+                {"domain": "reddit.com", "url": "https://www.reddit.com/r/smallbusiness/"},
+            ]
+        }
+    })
+
+    with patch("shutil.which", return_value="/usr/local/bin/treg"):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=mock_ai_stdout)
+            ai_res = checker.check_ai_citation("form 8829 deduction calculator")
+
+            assert ai_res["ai_citation_checked"] is True
+            assert ai_res["ai_citation_vacant"] is True
+            assert ai_res["ai_cited_domains"] == ["irs.gov", "reddit.com"]
+
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0][0]
+            assert "dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced" in call_args
+            assert "X-Treg-Route-Max-Cost: 0.01" in call_args
+

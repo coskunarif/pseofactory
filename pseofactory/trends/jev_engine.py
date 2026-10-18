@@ -196,9 +196,12 @@ class JevEngine:
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
         r = 0.6 * cannibalization_risk + 0.4 * kd_norm
 
-        # When serp_weakness_count >= 1 or treg_result.position_zero_vacant, discount risk r
-        if weakness_count >= 1 or treg_result.position_zero_vacant:
+        # When serp_weakness_count >= 1, position_zero_vacant, or ai_citation_vacant, discount risk r
+        ai_vacant = bool(getattr(treg_result, "ai_citation_vacant", False))
+        if weakness_count >= 1 or treg_result.position_zero_vacant or ai_vacant:
             effective_weakness = max(1, weakness_count) if treg_result.position_zero_vacant else weakness_count
+            if ai_vacant:
+                effective_weakness += 1
             r_discount = max(0.60, 1.0 - 0.10 * min(effective_weakness, 4))
             r = r * r_discount
 
@@ -363,6 +366,9 @@ class JevEngine:
                     "intent_tier": monetization.get("intent_tier", ""),
                     "recommended_partners": monetization.get("recommended_partners", []),
                 }
+                if getattr(treg_result, "ai_citation_checked", False):
+                    overlay_spec["ai_citation_vacant"] = bool(treg_result.ai_citation_vacant)
+                    overlay_spec["ai_cited_domains"] = list(treg_result.ai_cited_domains or [])
                 reason = f"Striking distance query (pos {pos:.1f}) matches existing tool '{tool_slug}'; issue overlay spec with 28-day measurement lock per Search Intent Doctrine"
                 return JevDecisionResult(
                     query=clean_q,
@@ -396,10 +402,15 @@ class JevEngine:
                     matching_tool=tool_slug,
                 )
 
-        # Step 4: Build Page Qualification Gate (with Monetization Qualification)
+        # Step 4: Build Page Qualification Gate (with Monetization Qualification & AI Citation Void)
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
         r_composite = 0.6 * c_cannibal + 0.4 * kd_norm
-        p0_or_low_kd = treg_result.position_zero_vacant or treg_result.keyword_difficulty < 25.0
+        ai_vacant = bool(getattr(treg_result, "ai_citation_vacant", False))
+        p0_or_low_kd = (
+            treg_result.position_zero_vacant
+            or treg_result.keyword_difficulty < 25.0
+            or (ai_vacant and treg_result.keyword_difficulty <= 38.0)
+        )
 
         if (
             composite_yield >= self.min_build_yield
@@ -419,6 +430,8 @@ class JevEngine:
                 "cpc_usd": treg_result.cpc_usd,
                 "keyword_difficulty": treg_result.keyword_difficulty,
                 "position_zero_vacant": treg_result.position_zero_vacant,
+                "ai_citation_vacant": ai_vacant,
+                "ai_cited_domains": list(getattr(treg_result, "ai_cited_domains", None) or []),
                 "status": "APPROVED_BUILD",
                 "discovered_at": candidate.discovered_at,
                 "property_id": monetization.get("property_id", ""),

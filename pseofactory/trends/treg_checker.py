@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from typing import Dict, Any, Optional, List
 
 from pseofactory.contracts import assert_no_forbidden_dashes, sanitize_url_slug
@@ -17,12 +18,161 @@ from pseofactory.trends.models import TregDurabilityResult
 
 
 ENDPOINT_IDEAS = "treg.google.keywords.ideas"
+ENDPOINT_AI_CITATION = "dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced"
 MAX_ROUTE_COST = "0.05"
+MAX_AI_CITATION_COST = "0.01"
+
+DEFAULT_TENANT_DOMAINS = ("profithelm.com", "prexvo.com")
+LOW_AUTHORITY_CITATION_DOMAINS = (
+    "reddit.com",
+    "quora.com",
+    "medium.com",
+    "pinterest.com",
+    "youtube.com",
+    "wikipedia.org",
+    "facebook.com",
+    "linkedin.com",
+)
+
+
+def _normalize_domain(raw_domain_or_url: str) -> str:
+    """Extracts and normalizes a bare lowercase domain from a URL or domain string."""
+    val = str(raw_domain_or_url or "").strip().lower()
+    if not val:
+        return ""
+    if "://" in val:
+        parsed = urlparse(val)
+        host = parsed.netloc or parsed.path
+    else:
+        host = val.split("/")[0]
+    host = host.split(":")[0].strip()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def parse_ai_citation_payload(
+    payload: Dict[str, Any],
+    tenant_domains: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Parses DataForSEO ai_optimization/chat_gpt/llm_scraper/live/advanced response
+    to extract cited domains and evaluate whether an interactive calculator citation slot is vacant.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(payload, dict):
+        return {
+            "ai_citation_vacant": True,
+            "ai_cited_domains": [],
+            "tenant_cited": False,
+            "strong_authority_count": 0,
+        }
+
+    # Support explicit override fields if pre-computed in a mock or normalized response
+    if "ai_citation_vacant" in payload and "sources" not in payload and "items" not in payload and "tasks" not in payload:
+        explicit_domains = [
+            _normalize_domain(d)
+            for d in (payload.get("ai_cited_domains") or [])
+            if _normalize_domain(d)
+        ]
+        tenants = tuple(_normalize_domain(d) for d in (tenant_domains or DEFAULT_TENANT_DOMAINS) if _normalize_domain(d))
+        tenant_hit = any(any(d == t or d.endswith(f".{t}") for t in tenants) for d in explicit_domains)
+        return {
+            "ai_citation_vacant": bool(payload.get("ai_citation_vacant")),
+            "ai_cited_domains": explicit_domains,
+            "tenant_cited": tenant_hit,
+            "strong_authority_count": len(explicit_domains),
+        }
+
+    root = payload.get("result", payload)
+    candidate_blocks: List[Dict[str, Any]] = []
+    if isinstance(root, dict):
+        candidate_blocks.append(root)
+        tasks = root.get("tasks")
+        if isinstance(tasks, list):
+            for t in tasks:
+                if isinstance(t, dict):
+                    t_res = t.get("result")
+                    if isinstance(t_res, list):
+                        for r_item in t_res:
+                            if isinstance(r_item, dict):
+                                candidate_blocks.append(r_item)
+        items = root.get("items")
+        if isinstance(items, list):
+            for it in items:
+                if isinstance(it, dict):
+                    candidate_blocks.append(it)
+    elif isinstance(root, list):
+        for r_item in root:
+            if isinstance(r_item, dict):
+                candidate_blocks.append(r_item)
+
+    cited_domains: List[str] = []
+    seen: set = set()
+
+    for block in candidate_blocks:
+        for key in ("sources", "search_results", "citations", "references"):
+            entries = block.get(key)
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if isinstance(entry, dict):
+                    dom = _normalize_domain(entry.get("domain") or entry.get("url") or entry.get("source_name") or "")
+                elif isinstance(entry, str):
+                    dom = _normalize_domain(entry)
+                else:
+                    dom = ""
+                if dom and dom not in seen:
+                    seen.add(dom)
+                    cited_domains.append(dom)
+
+        nested_items = block.get("items")
+        if isinstance(nested_items, list):
+            for ni in nested_items:
+                if not isinstance(ni, dict):
+                    continue
+                for key in ("sources", "search_results", "citations"):
+                    entries = ni.get(key)
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        if isinstance(entry, dict):
+                            dom = _normalize_domain(entry.get("domain") or entry.get("url") or "")
+                        elif isinstance(entry, str):
+                            dom = _normalize_domain(entry)
+                        else:
+                            dom = ""
+                        if dom and dom not in seen:
+                            seen.add(dom)
+                            cited_domains.append(dom)
+
+    tenants = tuple(_normalize_domain(d) for d in (tenant_domains or DEFAULT_TENANT_DOMAINS) if _normalize_domain(d))
+    tenant_cited = any(
+        any(dom == t or dom.endswith(f".{t}") for t in tenants)
+        for dom in cited_domains
+    )
+
+    strong_domains = [
+        dom
+        for dom in cited_domains
+        if not any(dom == low or dom.endswith(f".{low}") for low in LOW_AUTHORITY_CITATION_DOMAINS)
+        and not dom.endswith(".gov")
+    ]
+
+    # AI citation slot is vacant if our tenant is not yet cited AND fewer than 2 non-forum/non-raw-gov commercial authorities are cited
+    ai_citation_vacant = (not tenant_cited) and (len(strong_domains) < 2)
+
+    return {
+        "ai_citation_vacant": ai_citation_vacant,
+        "ai_cited_domains": cited_domains,
+        "tenant_cited": tenant_cited,
+        "strong_authority_count": len(strong_domains),
+    }
 
 
 class TregChecker:
     """
-    Cross-checks query search volume, CPC, and competition density using treg catalog routes.
+    Cross-checks query search volume, CPC, competition density, and AI citation vacancy using treg catalog routes.
     Maintains an in-memory cache and provides deterministic offline fallback for test isolation.
     """
 
@@ -30,21 +180,137 @@ class TregChecker:
         self,
         mock_data: Optional[Dict[str, Dict[str, Any]]] = None,
         max_cost: str = MAX_ROUTE_COST,
+        ai_max_cost: str = MAX_AI_CITATION_COST,
         timeout: float = 5.0,
         db: Optional[Any] = None,
+        check_ai_citations: bool = False,
+        tenant_domains: Optional[List[str]] = None,
     ):
         self.mock_registry: Dict[str, Dict[str, Any]] = {}
         if mock_data:
             for k, v in mock_data.items():
                 self.mock_registry[k.lower().strip()] = v
         self.max_cost = max_cost
+        self.ai_max_cost = ai_max_cost
         self.timeout = timeout
         self.db = db
+        self.check_ai_citations = check_ai_citations
+        self.tenant_domains = list(tenant_domains or DEFAULT_TENANT_DOMAINS)
         self.cache: Dict[str, TregDurabilityResult] = {}
+        self.ai_citation_cache: Dict[str, Dict[str, Any]] = {}
 
     def register_mock(self, query: str, metrics: Dict[str, Any]) -> None:
         """Registers mock metrics for a specific query for fixture testing."""
         self.mock_registry[query.lower().strip()] = metrics
+
+    def check_ai_citation(
+        self,
+        query: str,
+        tenant_domains: Optional[List[str]] = None,
+        mock_override: Optional[Dict[str, Any]] = None,
+        remaining_budget: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Checks live AI citation landscape for a high-intent query via treg route
+        dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced ($0.004/call).
+        Determines whether an AI citation gap exists (ai_citation_vacant) and returns cited domains.
+        Zero em-dashes. Zero en-dashes.
+        """
+        assert_no_forbidden_dashes(query, "TregChecker.check_ai_citation.query")
+        clean_q = query.strip()
+        q_key = clean_q.lower()
+        eff_tenants = tenant_domains or self.tenant_domains
+
+        if q_key in self.ai_citation_cache and mock_override is None:
+            return self.ai_citation_cache[q_key]
+
+        if remaining_budget is not None and remaining_budget < 15.0:
+            fallback = {
+                "query": clean_q,
+                "endpoint_called": f"{ENDPOINT_AI_CITATION}#deadline_budget_fallback",
+                "ai_citation_vacant": True,
+                "ai_cited_domains": [],
+                "tenant_cited": False,
+                "ai_citation_checked": True,
+            }
+            return fallback
+
+        m_data = mock_override or self.mock_registry.get(q_key)
+        if m_data is not None and (
+            "ai_citation_vacant" in m_data
+            or "ai_cited_domains" in m_data
+            or "sources" in m_data
+            or "items" in m_data
+            or "tasks" in m_data
+        ):
+            parsed = parse_ai_citation_payload(m_data, tenant_domains=eff_tenants)
+            res = {
+                "query": clean_q,
+                "endpoint_called": str(m_data.get("ai_endpoint_called", ENDPOINT_AI_CITATION)),
+                "ai_citation_vacant": parsed["ai_citation_vacant"],
+                "ai_cited_domains": parsed["ai_cited_domains"],
+                "tenant_cited": parsed["tenant_cited"],
+                "ai_citation_checked": True,
+            }
+            self.ai_citation_cache[q_key] = res
+            return res
+
+        treg_bin = shutil.which("treg")
+        is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
+        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
+        live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
+
+        if treg_bin and (not is_test_env or is_mocked or live_opt_in):
+            call_timeout = (
+                min(self.timeout, max(1.0, remaining_budget - 2.0))
+                if remaining_budget is not None
+                else self.timeout
+            )
+            try:
+                cmd = [
+                    treg_bin,
+                    "call",
+                    ENDPOINT_AI_CITATION,
+                    "--method",
+                    "POST",
+                    "--data",
+                    json.dumps([{"keyword": clean_q, "location_code": 2840, "language_code": "en"}]),
+                    "--header",
+                    f"X-Treg-Route-Max-Cost: {self.ai_max_cost}",
+                ]
+                proc = subprocess.run(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    timeout=call_timeout,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    payload = json.loads(proc.stdout.strip())
+                    parsed = parse_ai_citation_payload(payload, tenant_domains=eff_tenants)
+                    res = {
+                        "query": clean_q,
+                        "endpoint_called": ENDPOINT_AI_CITATION,
+                        "ai_citation_vacant": parsed["ai_citation_vacant"],
+                        "ai_cited_domains": parsed["ai_cited_domains"],
+                        "tenant_cited": parsed["tenant_cited"],
+                        "ai_citation_checked": True,
+                    }
+                    self.ai_citation_cache[q_key] = res
+                    return res
+            except (subprocess.TimeoutExpired, Exception):
+                pass
+
+        fallback = {
+            "query": clean_q,
+            "endpoint_called": f"{ENDPOINT_AI_CITATION}#offline_fallback",
+            "ai_citation_vacant": True,
+            "ai_cited_domains": [],
+            "tenant_cited": False,
+            "ai_citation_checked": True,
+        }
+        self.ai_citation_cache[q_key] = fallback
+        return fallback
 
     def _offline_heuristic(self, query: str, reason: str = "offline_fallback") -> TregDurabilityResult:
         """
@@ -127,18 +393,21 @@ class TregChecker:
         query: str,
         mock_override: Optional[Dict[str, Any]] = None,
         remaining_budget: Optional[float] = None,
+        check_ai_citations: Optional[bool] = None,
     ) -> TregDurabilityResult:
         """
         Cross-checks search demand for candidate query.
+        Optionally enriches qualified candidates with live AI citation telemetry ($0.004/call).
         Returns TregDurabilityResult.
         Zero em-dashes. Zero en-dashes.
         """
         assert_no_forbidden_dashes(query, "TregChecker.check_query.query")
         clean_q = query.strip()
         q_key = clean_q.lower()
+        should_check_ai = self.check_ai_citations if check_ai_citations is None else check_ai_citations
 
         # Cache lookup
-        if q_key in self.cache and mock_override is None:
+        if q_key in self.cache and mock_override is None and not should_check_ai:
             return self.cache[q_key]
 
         # Deadline budget degradation: if remaining budget < 15.0s, return offline fallback immediately
@@ -153,6 +422,27 @@ class TregChecker:
             p0_flag = m_data.get("position_zero_vacant")
             p0_vacant = bool(p0_flag) if p0_flag is not None else (kd < 25.0)
 
+            ai_vacant = bool(m_data.get("ai_citation_vacant", False))
+            ai_domains = [
+                _normalize_domain(d)
+                for d in (m_data.get("ai_cited_domains") or [])
+                if _normalize_domain(d)
+            ]
+            ai_checked = bool(
+                m_data.get("ai_citation_checked", False)
+                or "ai_citation_vacant" in m_data
+                or "ai_cited_domains" in m_data
+            )
+            if should_check_ai and not ai_checked:
+                ai_info = self.check_ai_citation(
+                    clean_q,
+                    mock_override=m_data,
+                    remaining_budget=remaining_budget,
+                )
+                ai_vacant = bool(ai_info.get("ai_citation_vacant", False))
+                ai_domains = list(ai_info.get("ai_cited_domains", []))
+                ai_checked = True
+
             result = TregDurabilityResult(
                 query=clean_q,
                 endpoint_called=str(m_data.get("endpoint_called", ENDPOINT_IDEAS)),
@@ -164,6 +454,9 @@ class TregChecker:
                 historical_stability=float(m_data.get("historical_stability", 0.85)),
                 checked_at=datetime.now(timezone.utc).isoformat(),
                 raw_ideas=m_data.get("raw_ideas"),
+                ai_citation_vacant=ai_vacant,
+                ai_cited_domains=ai_domains,
+                ai_citation_checked=ai_checked,
             )
             self.cache[q_key] = result
             return result
@@ -232,6 +525,23 @@ class TregChecker:
                     p0_vacant = bool(res_body.get("position_zero_vacant", kd < 25.0))
                     stability = float(res_body.get("historical_stability", 0.85))
 
+                    ai_vacant = bool(res_body.get("ai_citation_vacant", False))
+                    ai_domains = [
+                        _normalize_domain(d)
+                        for d in (res_body.get("ai_cited_domains") or [])
+                        if _normalize_domain(d)
+                    ]
+                    ai_checked = bool(
+                        res_body.get("ai_citation_checked", False)
+                        or "ai_citation_vacant" in res_body
+                        or "ai_cited_domains" in res_body
+                    )
+                    if should_check_ai and not ai_checked and volume >= 500:
+                        ai_info = self.check_ai_citation(clean_q, remaining_budget=remaining_budget)
+                        ai_vacant = bool(ai_info.get("ai_citation_vacant", False))
+                        ai_domains = list(ai_info.get("ai_cited_domains", []))
+                        ai_checked = True
+
                     result = TregDurabilityResult(
                         query=clean_q,
                         endpoint_called=ENDPOINT_IDEAS,
@@ -243,11 +553,14 @@ class TregChecker:
                         historical_stability=stability,
                         checked_at=datetime.now(timezone.utc).isoformat(),
                         raw_ideas=res_body.get("keywords"),
+                        ai_citation_vacant=ai_vacant,
+                        ai_cited_domains=ai_domains,
+                        ai_citation_checked=ai_checked,
                     )
                     self.cache[q_key] = result
                     return result
             except (subprocess.TimeoutExpired, Exception):
                 return self._offline_heuristic(clean_q, reason="subprocess_fallback")
 
-        # 3. Deterministic offline fallback heuristic
+        # 4. Deterministic offline fallback heuristic
         return self._offline_heuristic(clean_q, reason="offline_fallback")

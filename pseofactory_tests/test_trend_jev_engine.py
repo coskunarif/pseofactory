@@ -302,3 +302,80 @@ def test_compute_composite_yield_serp_weakness_discount():
         serp_weakness_count=0,
     )
     assert yield_p0 > yield_base
+
+
+def test_ai_citation_vacancy_unlocks_moderate_kd_build_and_overlay():
+    """
+    Verifies that ai_citation_vacant=True:
+    1. Discounts composite risk and qualifies moderate-KD (<= 38.0) high-yield voids for BUILD_PAGE
+       even when traditional position_zero_vacant is False.
+    2. Propagates ai_citation_vacant and ai_cited_domains into candidate_spec and striking-distance overlay_spec.
+    """
+    engine = JevEngine()
+    cand = TrendCandidate(
+        id="cand-ai-void",
+        query="section 179d commercial clean energy deduction matrix",
+        slug="section-179d-commercial-clean-energy-deduction-matrix",
+        source="google_suggest",
+        velocity=35.0,
+        acceleration=11.0,
+        z_score=3.6,
+        intent_cluster="statutory_compliance",
+    )
+
+    # Without AI citation vacancy: KD=31.0 (> 25.0) and position_zero_vacant=False -> MONITOR
+    treg_no_ai = TregDurabilityResult(
+        query=cand.query,
+        search_volume=2400,
+        cpc_usd=12.40,
+        keyword_difficulty=31.0,
+        position_zero_vacant=False,
+        ai_citation_vacant=False,
+        ai_citation_checked=True,
+    )
+    dec_no_ai = engine.evaluate(
+        candidate=cand,
+        treg_result=treg_no_ai,
+        jev_mock={"jev_score": 1.85, "durable_prob": 0.95},
+    )
+    assert dec_no_ai.action == "MONITOR"
+
+    # With AI citation vacancy (e.g. ChatGPT only cites raw IRS PDF + Reddit): qualifies for BUILD_PAGE
+    treg_with_ai_void = TregDurabilityResult(
+        query=cand.query,
+        search_volume=2400,
+        cpc_usd=12.40,
+        keyword_difficulty=31.0,
+        position_zero_vacant=False,
+        ai_citation_vacant=True,
+        ai_cited_domains=["irs.gov", "reddit.com"],
+        ai_citation_checked=True,
+    )
+    dec_ai_void = engine.evaluate(
+        candidate=cand,
+        treg_result=treg_with_ai_void,
+        jev_mock={"jev_score": 1.85, "durable_prob": 0.95},
+    )
+    assert dec_ai_void.action == "BUILD_PAGE"
+    assert dec_ai_void.composite_profit_yield > dec_no_ai.composite_profit_yield
+    assert dec_ai_void.candidate_spec is not None
+    assert dec_ai_void.candidate_spec["ai_citation_vacant"] is True
+    assert dec_ai_void.candidate_spec["ai_cited_domains"] == ["irs.gov", "reddit.com"]
+
+    # Striking-distance cannibalization propagates AI citation telemetry into overlay_spec
+    cann_ctx = {
+        "matches_existing_slug": "section-179-tax-deduction-calculator",
+        "current_position": 9.5,
+        "cannibalization_score": 0.75,
+    }
+    dec_overlay = engine.evaluate(
+        candidate=cand,
+        treg_result=treg_with_ai_void,
+        cannibalization_context=cann_ctx,
+        jev_mock={"jev_score": 1.85, "durable_prob": 0.95},
+    )
+    assert dec_overlay.action == "REFACTOR_PAGE"
+    assert dec_overlay.overlay_spec is not None
+    assert dec_overlay.overlay_spec["ai_citation_vacant"] is True
+    assert dec_overlay.overlay_spec["ai_cited_domains"] == ["irs.gov", "reddit.com"]
+

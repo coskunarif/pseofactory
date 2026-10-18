@@ -94,7 +94,7 @@ class TrendCandidate:
 
 @dataclass
 class TregDurabilityResult:
-    """External search demand and competition metrics cross-checked via treg catalog endpoints."""
+    """External search demand, competition, and AI citation metrics cross-checked via treg catalog endpoints."""
     query: str
     endpoint_called: str = "treg.google.keywords.ideas"
     search_volume: int = 0
@@ -105,6 +105,9 @@ class TregDurabilityResult:
     historical_stability: float = 0.85
     checked_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     raw_ideas: Optional[List[Dict[str, Any]]] = None
+    ai_citation_vacant: bool = False
+    ai_cited_domains: List[str] = field(default_factory=list)
+    ai_citation_checked: bool = False
 
     def __post_init__(self):
         assert_no_forbidden_dashes(self.query, "TregDurabilityResult.query")
@@ -125,6 +128,9 @@ class TregDurabilityResult:
             historical_stability=float(data.get("historical_stability", 0.85)),
             checked_at=str(data.get("checked_at", datetime.now(timezone.utc).isoformat())),
             raw_ideas=data.get("raw_ideas"),
+            ai_citation_vacant=bool(data.get("ai_citation_vacant", False)),
+            ai_cited_domains=[str(d) for d in (data.get("ai_cited_domains") or [])],
+            ai_citation_checked=bool(data.get("ai_citation_checked", False)),
         )
 
 
