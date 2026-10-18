@@ -1604,18 +1604,66 @@ def _resolve_tax_bracket_and_entity_competitor_content(s_low: str) -> Optional[D
     }
 
 
+PROFITHELM_US_STATES: Tuple[str, ...] = (
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
+    "delaware", "district-of-columbia", "florida", "georgia", "hawaii", "idaho", "illinois",
+    "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland",
+    "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana",
+    "nebraska", "nevada", "new-hampshire", "new-jersey", "new-mexico", "new-york",
+    "north-carolina", "north-dakota", "ohio", "oklahoma", "oregon", "pennsylvania",
+    "rhode-island", "south-carolina", "south-dakota", "tennessee", "texas", "utah",
+    "vermont", "virginia", "washington", "west-virginia", "wisconsin", "wyoming",
+)
+
+PROFITHELM_SECTION_179_VEHICLES: Tuple[Tuple[str, str], ...] = (
+    ("bmw-x5-xdrive40i", "BMW X5 xDrive40i Section 179 & Bonus Depreciation Calculator"),
+    ("cadillac-escalade-esv", "Cadillac Escalade ESV Heavy SUV Section 179 Calculator"),
+    ("chevrolet-express-cargo", "Chevrolet Express Cargo Van Section 179 Deduction Calculator"),
+    ("chevrolet-silverado-1500", "Chevrolet Silverado 1500 Section 179 Tax Deduction Calculator"),
+    ("chevrolet-silverado-2500hd", "Chevrolet Silverado 2500HD Heavy Truck Section 179 Calculator"),
+    ("chevrolet-suburban-commercial", "Chevrolet Suburban Commercial Fleet Section 179 Calculator"),
+    ("ford-f150-lightning", "Ford F-150 Lightning EV Truck Section 179 Deduction Calculator"),
+    ("ford-f150-supercrew", "Ford F-150 SuperCrew Section 179 & Bonus Depreciation Calculator"),
+    ("ford-super-duty-f250", "Ford Super Duty F-250 100% Section 179 Write-Off Calculator"),
+    ("ford-transit-cargo-van", "Ford Transit Cargo Van Section 179 Commercial Write-Off Calculator"),
+    ("gmc-sierra-1500", "GMC Sierra 1500 Section 179 & MACRS Depreciation Calculator"),
+    ("gmc-sierra-2500hd", "GMC Sierra 2500HD Heavy Duty Section 179 Deduction Calculator"),
+    ("gmc-yukon-xl", "GMC Yukon XL Heavy SUV Section 179 & Bonus Depreciation Calculator"),
+    ("land-rover-defender-110", "Land Rover Defender 110 6,000+ lb GVWR Section 179 Calculator"),
+    ("lincoln-navigator-l", "Lincoln Navigator L Heavy SUV Section 179 Tax Write-Off Calculator"),
+    ("mercedes-benz-esprinter", "Mercedes-Benz eSprinter Electric Cargo Van Section 179 Calculator"),
+    ("mercedes-benz-sprinter-2500", "Mercedes-Benz Sprinter 2500 Cargo Van Section 179 Calculator"),
+    ("nissan-titan-crew-cab", "Nissan Titan Crew Cab Section 179 Commercial Truck Calculator"),
+    ("porsche-cayenne", "Porsche Cayenne 6,000+ lb GVWR Section 179 Tax Deduction Calculator"),
+    ("ram-1500-crew-cab", "Ram 1500 Crew Cab Section 179 & Bonus Depreciation Calculator"),
+    ("ram-2500-heavy-duty", "Ram 2500 Heavy Duty 100% Section 179 Deduction Calculator"),
+    ("ram-promaster-cargo-van", "Ram ProMaster Cargo Van Section 179 Commercial Write-Off Calculator"),
+    ("rivian-r1t", "Rivian R1T Electric Truck Section 179 & Bonus Depreciation Calculator"),
+    ("tesla-cybertruck", "Tesla Cybertruck 6,000+ lb GVWR Section 179 Write-Off Calculator"),
+    ("toyota-tundra-crewmax", "Toyota Tundra CrewMax Section 179 & MACRS Depreciation Calculator"),
+)
+
+
 def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
-    """Builds context-aware 3-tier topic cluster links with modifier-qualified state and vertical anchors."""
+    """Builds context-aware 3-tier topic cluster links covering all 22 root calculators plus state and vehicle rings."""
     tier_1 = [
         ("irs-2027-tax-brackets", "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator"),
         ("section-179-calculator", "Section 179 Equipment Expense & Phaseout Calculator"),
         ("section-1031-calculator", "Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
         ("s-corp-reasonable-salary-tax-calculator", "S-Corp Reasonable Salary & FICA Tax Savings Calculator"),
+        ("tcja-sunset-capital-gains", "TCJA Sunset & Long-Term Capital Gains Tax Calculator"),
+        ("crypto-tax-calculator", "Digital Asset Form 8949 & Rev. Proc. 2024-28 Tax Calculator"),
+        ("treasury-yield-calculator", "Treasury Bill vs HYSA Tax-Equivalent Yield Calculator (31 U.S.C. 3124)"),
     ]
     tier_2 = [
         ("equipment-lease-vs-buy-section-179-calculator", "Equipment Lease vs Buy Section 179 Cash Flow Matrix"),
-        ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
+        ("equipment-lease-tax-deduction", "Equipment Lease Tax Deduction & Operating vs Capital Lease Calculator"),
         ("invoice-factoring-vs-business-line-of-credit-calculator", "Invoice Factoring vs Business Line of Credit APR Matrix"),
+        ("saas-runway-calculator", "SaaS Cash Runway, Net Burn & Zero Cash Date Calculator"),
+        ("saas-burn-multiple-benchmarks-2026", "SaaS Burn Multiple & Capital Efficiency Benchmarks Calculator"),
+        ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
+        ("prediction-market-tax", "Prediction Market Section 1256 vs Ordinary Income Tax Calculator"),
+        ("r-and-d-tax-credit-section-174-amortization-calculator", "IRC Section 41 R&D Tax Credit & Section 174 Amortization Calculator"),
     ]
     tier_3: List[Tuple[str, str]] = []
     if "/" in s_low:
@@ -1635,18 +1683,58 @@ def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[
                     f"{state_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
                 )
             )
-    striking_state_spokes = [
+            if state_slug in PROFITHELM_US_STATES:
+                st_idx = PROFITHELM_US_STATES.index(state_slug)
+                n_states = len(PROFITHELM_US_STATES)
+                for offset in (-2, -1, 1, 2):
+                    adj_state = PROFITHELM_US_STATES[(st_idx + offset) % n_states]
+                    adj_label = adj_state.replace("-", " ").title()
+                    if parts[0] == "irs-2027-tax-brackets":
+                        tier_3.append(
+                            (
+                                f"irs-2027-tax-brackets/{adj_state}",
+                                f"{adj_label} 2027 Tax Brackets & Marginal Income Tax Rate Calculator",
+                            )
+                        )
+                    else:
+                        tier_3.append(
+                            (
+                                f"section-1031-calculator/{adj_state}",
+                                f"{adj_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
+                            )
+                        )
+        elif len(parts) == 2 and parts[0] == "section-179-calculator":
+            veh_slug = parts[1]
+            veh_map = dict(PROFITHELM_SECTION_179_VEHICLES)
+            veh_keys = [k for k, _ in PROFITHELM_SECTION_179_VEHICLES]
+            veh_label = veh_map.get(
+                veh_slug,
+                f"{veh_slug.replace('-', ' ').title()} Section 179 & Bonus Depreciation Calculator",
+            )
+            tier_3.append((f"section-179-calculator/{veh_slug}", veh_label))
+            if veh_slug in veh_keys:
+                v_idx = veh_keys.index(veh_slug)
+                n_vehs = len(veh_keys)
+                for offset in (-3, -2, -1, 1, 2, 3):
+                    adj_v = veh_keys[(v_idx + offset) % n_vehs]
+                    tier_3.append((f"section-179-calculator/{adj_v}", veh_map[adj_v]))
+    striking_state_and_asset_spokes = [
         ("irs-2027-tax-brackets/california", "California 2027 Tax Brackets & Marginal Tax Rate Calculator"),
         ("irs-2027-tax-brackets/connecticut", "Connecticut 2027 Tax Brackets & Marginal Tax Rate Calculator"),
         ("irs-2027-tax-brackets/maine", "Maine 2027 Tax Brackets & Marginal Tax Rate Calculator"),
         ("irs-2027-tax-brackets/new-jersey", "New Jersey 2027 Tax Brackets & Marginal Tax Rate Calculator"),
         ("irs-2027-tax-brackets/new-york", "New York 2027 Tax Brackets & Marginal Tax Rate Calculator"),
-        ("tcja-sunset-capital-gains", "TCJA Sunset & Long-Term Capital Gains Tax Calculator"),
+        ("section-179-calculator/gmc-yukon-xl", "GMC Yukon XL Heavy SUV Section 179 & Bonus Depreciation Calculator"),
         ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
-        ("crypto-tax-calculator", "Digital Asset Form 8949 & Rev. Proc. 2024-28 Tax Calculator"),
+        ("section-179-vehicle-equipment-deduction", "Section 179 Commercial Vehicle & Equipment Deduction Calculator"),
+        ("medical-and-dental-equipment-section-179-roi-calculator", "Medical & Dental Equipment Section 179 Tax ROI Calculator"),
+        ("crypto-tax-form-1099-da-mandatory-reporting", "IRS Form 1099-DA Digital Asset Broker Basis Reconciliation Calculator"),
+        ("workers-comp-and-payroll-burden-calculator", "Workers' Compensation & Employer Payroll Tax Burden Calculator"),
+        ("contractor-surety-bond-cost-calculator", "Contractor License & Commercial Surety Bond Cost Calculator"),
+        ("section-301-tariff-landed-cost-calculator", "Section 301 Tariff Duty & Import Landed Cost Calculator"),
     ]
     existing_slugs = {slug_key for slug_key, _ in tier_3}
-    for sp_slug, sp_label in striking_state_spokes:
+    for sp_slug, sp_label in striking_state_and_asset_spokes:
         if sp_slug not in existing_slugs:
             tier_3.append((sp_slug, sp_label))
             existing_slugs.add(sp_slug)
@@ -1794,6 +1882,7 @@ def _resolve_vertical_competitor_content(
                     ("student-loan-repayment-calculator", "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)"),
                     ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs Income-Based Repayment (IBR) Calculator"),
                     ("rap-payment-calculator", "Repayment Assistance Plan (RAP) Monthly Payment Calculator"),
+                    ("tiered-standard-calculator", "Tiered Standard Repayment Plan Amortization Calculator"),
                 ],
             ),
             (
@@ -1801,6 +1890,7 @@ def _resolve_vertical_competitor_content(
                 [
                     ("pslf-qualifying-payment-simulator", "PSLF 120 Qualifying Payments Verification Simulator"),
                     ("save-plan-litigation-transition", "SAVE Plan Forbearance to IBR/RAP Transition Calculator"),
+                    ("paye-sunset-calculator", "PAYE Sunset & Statutory Repayment Plan Transition Calculator"),
                     ("ibr-hardship-cap-calculator", "IBR Partial Financial Hardship Cap Calculator"),
                 ],
             ),

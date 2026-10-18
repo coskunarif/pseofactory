@@ -2883,15 +2883,24 @@ class RefactorCascadeEngine:
             return
         try:
             rel_parts = target_path.relative_to(adapter.dist_dir).as_posix().split("/")
-            if len(rel_parts) > 3 and rel_parts[0] == "tools":
+            if len(rel_parts) > 4 and rel_parts[0] == "tools":
                 return
         except Exception:
             pass
         repo_root = getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
         if not repo_root:
             return
-        overlay_path = Path(repo_root) / "content" / "overlays" / f"{slug}.json"
-        if not overlay_path.is_file():
+        overlay_path: Optional[Path] = None
+        flat_slug = slug.replace("/", "-")
+        for ov_dir in (Path(repo_root) / "content" / "overlays", Path(repo_root) / ".agy" / "overlays"):
+            for cand_name in (f"{slug}.json", f"{flat_slug}.json"):
+                cand_p = ov_dir / cand_name
+                if cand_p.is_file():
+                    overlay_path = cand_p
+                    break
+            if overlay_path is not None:
+                break
+        if overlay_path is None:
             return
         try:
             overlay_data = json.loads(overlay_path.read_text(encoding="utf-8"))
@@ -4101,11 +4110,16 @@ class RetroReflectionEngine:
                 re.IGNORECASE,
             )
         canon_href = canon_m.group(1) if canon_m else ""
+        canon_clean = canon_href.split("?")[0].lower()
         spoke_state_m = re.search(
             r"/tools/(?:irs-2027-tax-brackets|section-1031-calculator)/([a-z0-9-]+)/?$",
-            canon_href.split("?")[0].lower(),
+            canon_clean,
         )
         spoke_state = spoke_state_m.group(1) if spoke_state_m else ""
+        spoke_vehicle_m = re.search(
+            r"/tools/section-179-calculator/([a-z0-9-]+)/?$",
+            canon_clean,
+        )
         cluster_m = re.search(
             r'<section[^>]+data-mechanic="three_tier_topic_cluster_nav"[\s\S]*?</section>',
             html_content,
@@ -4125,7 +4139,24 @@ class RetroReflectionEngine:
                 "/tools/irs-2027-tax-brackets/" not in cluster_body
                 and "Income-Based" not in cluster_body
             )
+            or (
+                "/tools/irs-2027-tax-brackets/" in cluster_body
+                and (
+                    "/tools/prediction-market-tax/" not in cluster_body
+                    or "/tools/crypto-tax-form-1099-da-mandatory-reporting/" not in cluster_body
+                    or "/tools/r-and-d-tax-credit-section-174-amortization-calculator/" not in cluster_body
+                    or "/tools/section-179-calculator/gmc-yukon-xl/" not in cluster_body
+                )
+            )
+            or (
+                "Income-Based" in cluster_body
+                and (
+                    "/tools/paye-sunset-calculator/" not in cluster_body
+                    or "/tools/tiered-standard-calculator/" not in cluster_body
+                )
+            )
             or (spoke_state and f"/{spoke_state}/" not in cluster_body)
+            or (spoke_vehicle_m and cluster_body.count("/tools/section-179-calculator/") < 6)
         ):
             missing.append("three_tier_topic_cluster_nav")
 
@@ -4651,6 +4682,101 @@ class RetroReflectionEngine:
         return updated, repaired
 
     @classmethod
+    def _resolve_active_estate_overlays(
+        cls,
+        dist_dir: Path,
+        property_id: str,
+        heal_legacy: bool = False,
+        canonical_base: Optional[str] = None,
+    ) -> Dict[str, Tuple[Path, Dict[str, Any]]]:
+        """
+        Resolves active remediation overlays across content/overlays/ and .agy/overlays/
+        to their target relative HTML path in dist_dir (e.g. 'tools/<slug>/index.html'),
+        supporting both nested spoke paths and flattened filenames like
+        'irs-2027-tax-brackets-california.json'.
+        """
+        repo_root = dist_dir.parent
+        canon = (
+            canonical_base
+            or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+        ).rstrip("/")
+        if heal_legacy:
+            try:
+                from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+                agy_ov_dir = repo_root / ".agy" / "overlays"
+                if agy_ov_dir.is_dir():
+                    for agy_ov in sorted(agy_ov_dir.rglob("*.json")):
+                        try:
+                            raw_ov = json.loads(agy_ov.read_text(encoding="utf-8"))
+                            if not isinstance(raw_ov, dict):
+                                continue
+                            ov_s = str(raw_ov.get("slug") or agy_ov.stem)
+                            raw_dump = json.dumps(raw_ov)
+                            needs_ov_heal = (
+                                ("179" not in ov_s.lower() and "Section 179" in raw_dump)
+                                or (ov_s == "student-loan-repayment-calculator" and "Tiered Standard" in raw_dump)
+                            )
+                            if needs_ov_heal:
+                                healed_ov = compile_remediation_overlay_spec(
+                                    {
+                                        "slug": ov_s,
+                                        "target_url": raw_ov.get("target_url") or f"{canon}/tools/{ov_s}/",
+                                        "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                                        "position": raw_ov.get("baseline_position", 12.0),
+                                        "impressions": raw_ov.get("baseline_impressions", 50),
+                                    },
+                                    tenant_id=property_id,
+                                )
+                                agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        resolved: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
+        for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+            if not overlays_dir.is_dir():
+                continue
+            for ov_file in sorted(overlays_dir.rglob("*.json")):
+                try:
+                    ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(ov_spec, dict) or ov_spec.get("status") == "DEGRADED_ROLLED_BACK":
+                    continue
+                rel_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
+                spec_slug = str(ov_spec.get("slug") or "").strip("/")
+                target_url = str(ov_spec.get("target_url") or "")
+                url_slug = ""
+                if "/tools/" in target_url:
+                    url_slug = target_url.split("/tools/", 1)[1].split("?")[0].strip("/")
+
+                candidates: List[str] = []
+                for s in (rel_slug, spec_slug, url_slug):
+                    if s and s not in candidates:
+                        candidates.append(s)
+                    for hub_prefix in (
+                        "irs-2027-tax-brackets",
+                        "section-1031-calculator",
+                        "section-179-calculator",
+                    ):
+                        if s.startswith(f"{hub_prefix}-"):
+                            nested_s = f"{hub_prefix}/{s[len(hub_prefix) + 1:]}"
+                            if nested_s not in candidates:
+                                candidates.append(nested_s)
+
+                for cand in candidates:
+                    if cand in ("statutory-calculator", "index", "tools", ""):
+                        continue
+                    rel_html = f"tools/{cand}/index.html"
+                    if rel_html in resolved:
+                        break
+                    if (dist_dir / rel_html).is_file():
+                        resolved[rel_html] = (ov_file, ov_spec)
+                        break
+        return resolved
+
+    @classmethod
     def audit_estate(
         cls,
         dist_dir: Union[str, Path],
@@ -4663,6 +4789,7 @@ class RetroReflectionEngine:
 
         from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
 
+        active_overlays = cls._resolve_active_estate_overlays(d, property_id, heal_legacy=False)
         stale_pages: Dict[str, List[str]] = {}
         scanned = 0
         for html_file in sorted(d.rglob("*.html")):
@@ -4684,6 +4811,13 @@ class RetroReflectionEngine:
                 continue
             scanned += 1
             missing = cls.audit_html_mechanics(content)
+            if rel in active_overlays:
+                if (
+                    'id="gsc-striking-overlay"' not in content
+                    and 'class="gsc-remediation-overlay"' not in content
+                ):
+                    if "gsc_striking_overlay" not in missing:
+                        missing.append("gsc_striking_overlay")
             if missing:
                 stale_pages[rel] = missing
 
@@ -4732,6 +4866,7 @@ class RetroReflectionEngine:
         while normalizing deterministic visual primitives across all HTML pages in the estate.
         """
         from pseofactory.visual_primitives import normalize_html_visual_primitives
+        from pseofactory.gsc_remediation import inject_overlay_into_html
 
         d = Path(dist_dir).resolve()
         if not d.is_dir():
@@ -4743,6 +4878,12 @@ class RetroReflectionEngine:
                 "retrofitted_paths": [],
             }
 
+        active_overlays = cls._resolve_active_estate_overlays(
+            d,
+            property_id,
+            heal_legacy=True,
+            canonical_base=canonical_base,
+        )
         scanned = 0
         retrofitted_paths: List[str] = []
         for html_file in sorted(d.rglob("*.html")):
@@ -4779,12 +4920,26 @@ class RetroReflectionEngine:
             else:
                 slug = "rap-payment-calculator" if property_id.lower() == "prexvo" else "section-179-deduction-calculator"
 
+            working_content = content
+            overlay_injected = False
+            if rel in active_overlays:
+                _, ov_spec = active_overlays[rel]
+                try:
+                    ov_html = inject_overlay_into_html(working_content, ov_spec)
+                    if ov_html != working_content:
+                        working_content = ov_html
+                        overlay_injected = True
+                except Exception:
+                    pass
+
             updated_html, repaired = cls.retrofit_html(
-                content,
+                working_content,
                 property_id=property_id,
                 slug=slug,
                 dist_dir=d,
             )
+            if overlay_injected and "gsc_striking_overlay" not in repaired:
+                repaired.append("gsc_striking_overlay")
             if "/r/" in updated_html:
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
@@ -4795,7 +4950,7 @@ class RetroReflectionEngine:
                             repaired.append("callout_message_match")
                 except Exception:
                     pass
-            if repaired and updated_html != content:
+            if (repaired or overlay_injected) and updated_html != content:
                 html_file.write_text(updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
 

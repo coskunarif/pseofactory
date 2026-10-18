@@ -5,6 +5,7 @@ telemetry sanitization, and visual primitives inline-style self-healing.
 Zero em-dashes. Zero en-dashes.
 """
 
+import json
 from pathlib import Path
 from pseofactory.competitor import render_competitor_winning_pattern_blocks
 from pseofactory.gsc_remediation import (
@@ -191,3 +192,156 @@ def test_visual_primitives_preserves_and_heals_inline_flex_and_padding():
     assert "padding: 0.625rem 0.875rem" in healed
     assert "padding: 0.5rem 1rem" in healed
     assert detect_visual_and_ux_contract_issues(healed, require_primitives=True) == []
+
+
+def test_retrofit_estate_injects_and_audits_agy_overlays_including_hierarchical_spokes(tmp_path: Path):
+    repo_root = tmp_path / "profithelm-platform"
+    dist_dir = repo_root / "dist"
+    agy_ov_dir = repo_root / ".agy" / "overlays"
+    agy_ov_dir.mkdir(parents=True, exist_ok=True)
+
+    crypto_dir = dist_dir / "tools" / "crypto-tax-calculator"
+    ca_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "california"
+    crypto_dir.mkdir(parents=True, exist_ok=True)
+    ca_dir.mkdir(parents=True, exist_ok=True)
+
+    base_crypto_html = """<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
+    <title>Crypto Tax Calculator 2027</title>
+    <meta name="description" content="Calculate digital asset capital gains and losses under IRS Form 8949 and Rev. Proc. 2024-28 wallet-by-wallet cost basis rules." />
+    <link rel="canonical" href="https://profithelm.com/tools/crypto-tax-calculator/" />
+    </head><body><main>
+    <h1>Crypto Tax Calculator 2027</h1>
+    <aside class="quick-answer"><p>Initial answer.</p></aside>
+    <input type="number" id="gains" value="50000" aria-label="Gains" />
+    </main></body></html>"""
+
+    base_ca_html = """<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
+    <title>California 2027 Tax Brackets Calculator</title>
+    <meta name="description" content="Calculate California 2027 marginal income tax brackets and post-TCJA federal sunset tax rates across filing statuses." />
+    <link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/california/" />
+    </head><body><main>
+    <h1>California 2027 Tax Brackets Calculator</h1>
+    <aside class="quick-answer"><p>Initial answer.</p></aside>
+    <input type="number" id="income" value="150000" aria-label="Income" />
+    </main></body></html>"""
+
+    (crypto_dir / "index.html").write_text(base_crypto_html, encoding="utf-8")
+    (ca_dir / "index.html").write_text(base_ca_html, encoding="utf-8")
+
+    crypto_ov = compile_remediation_overlay_spec(
+        {
+            "slug": "crypto-tax-calculator",
+            "target_url": "https://profithelm.com/tools/crypto-tax-calculator/",
+            "query": "crypto tax calculator 2027",
+            "position": 9.5,
+            "impressions": 120,
+        },
+        tenant_id="profithelm",
+    )
+    ca_ov = compile_remediation_overlay_spec(
+        {
+            "slug": "irs-2027-tax-brackets/california",
+            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "query": "california 2027 tax brackets",
+            "position": 6.3,
+            "impressions": 85,
+        },
+        tenant_id="profithelm",
+    )
+    (agy_ov_dir / "crypto-tax-calculator.json").write_text(json.dumps(crypto_ov, indent=2), encoding="utf-8")
+    (agy_ov_dir / "irs-2027-tax-brackets-california.json").write_text(json.dumps(ca_ov, indent=2), encoding="utf-8")
+
+    RetroReflectionEngine.retrofit_estate(dist_dir, "profithelm", canonical_base="https://profithelm.com")
+
+    crypto_after = (crypto_dir / "index.html").read_text(encoding="utf-8")
+    ca_after = (ca_dir / "index.html").read_text(encoding="utf-8")
+    assert 'id="gsc-striking-overlay"' in crypto_after
+    assert 'id="gsc-striking-overlay"' in ca_after
+
+    audit_after = RetroReflectionEngine.audit_estate(dist_dir, "profithelm")
+    assert audit_after["status"] == "PASS", f"Expected PASS after retrofit_estate, got: {audit_after}"
+
+    stripped_crypto = crypto_after.split('<div id="gsc-striking-overlay"')[0] + "</main></body></html>"
+    (crypto_dir / "index.html").write_text(stripped_crypto, encoding="utf-8")
+    audit_stripped = RetroReflectionEngine.audit_estate(dist_dir, "profithelm")
+    assert audit_stripped["status"] == "STALE"
+    assert "gsc_striking_overlay" in audit_stripped["stale_pages"].get("tools/crypto-tax-calculator/index.html", [])
+
+
+def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
+    veh_blocks = render_competitor_winning_pattern_blocks(
+        slug="section-179-calculator/land-rover-defender-110",
+        title="Land Rover Defender 110 Section 179 Calculator",
+        property_id="profithelm",
+        canonical_base="https://profithelm.com",
+        statutory_authority="IRC Section 179 & 168(k)",
+        economic_dataset="IRS Publication 946",
+    )
+    cluster_html = veh_blocks["three_tier_cluster_html"]
+    assert "/tools/section-179-calculator/lincoln-navigator-l/" in cluster_html
+    assert "/tools/section-179-calculator/mercedes-benz-sprinter-2500/" in cluster_html
+    assert "/tools/section-179-calculator/gmc-yukon-xl/" in cluster_html
+
+    neighbor_blocks = render_competitor_winning_pattern_blocks(
+        slug="section-179-calculator/lincoln-navigator-l",
+        title="Lincoln Navigator L Section 179 Calculator",
+        property_id="profithelm",
+        canonical_base="https://profithelm.com",
+        statutory_authority="IRC Section 179 & 168(k)",
+        economic_dataset="IRS Publication 946",
+    )
+    assert "/tools/section-179-calculator/land-rover-defender-110/" in neighbor_blocks["three_tier_cluster_html"]
+
+    expected_profithelm_roots = [
+        "irs-2027-tax-brackets",
+        "section-179-calculator",
+        "section-1031-calculator",
+        "s-corp-reasonable-salary-tax-calculator",
+        "tcja-sunset-capital-gains",
+        "crypto-tax-calculator",
+        "treasury-yield-calculator",
+        "equipment-lease-vs-buy-section-179-calculator",
+        "equipment-lease-tax-deduction",
+        "invoice-factoring-vs-business-line-of-credit-calculator",
+        "saas-runway-calculator",
+        "saas-burn-multiple-benchmarks-2026",
+        "prediction-market-odds",
+        "prediction-market-tax",
+        "r-and-d-tax-credit-section-174-amortization-calculator",
+        "commercial-heavy-vehicle-section-179-weight-calculator",
+        "section-179-vehicle-equipment-deduction",
+        "medical-and-dental-equipment-section-179-roi-calculator",
+        "crypto-tax-form-1099-da-mandatory-reporting",
+        "workers-comp-and-payroll-burden-calculator",
+        "contractor-surety-bond-cost-calculator",
+        "section-301-tariff-landed-cost-calculator",
+    ]
+    for root_slug in expected_profithelm_roots:
+        assert f"/tools/{root_slug}/" in cluster_html, f"Missing ProfitHelm root tool {root_slug} in cluster nav"
+
+    px_blocks = render_competitor_winning_pattern_blocks(
+        slug="student-loan-repayment-calculator",
+        title="Student Loan Repayment Calculator",
+        property_id="prexvo",
+        canonical_base="https://prexvo.com",
+        statutory_authority="Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
+        economic_dataset="Federal Reserve G.19 Consumer Credit Series",
+    )
+    px_cluster = px_blocks["three_tier_cluster_html"]
+    expected_prexvo_peers = [
+        "rap-vs-ibr-calculator",
+        "rap-payment-calculator",
+        "tiered-standard-calculator",
+        "pslf-qualifying-payment-simulator",
+        "save-plan-litigation-transition",
+        "paye-sunset-calculator",
+        "ibr-hardship-cap-calculator",
+        "married-filing-separately-student-loan-calculator",
+        "icr-repayment-calculator",
+        "parent-plus-double-consolidation",
+        "grad-plus-borrowing-cap-calculator",
+    ]
+    for px_slug in expected_prexvo_peers:
+        assert f"/tools/{px_slug}/" in px_cluster, f"Missing Prexvo tool {px_slug} in cluster nav"
+    assert "/tools/student-loan-refinance-break-even-calculator/" not in px_cluster
+
