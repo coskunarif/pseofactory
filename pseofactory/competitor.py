@@ -1645,7 +1645,7 @@ PROFITHELM_SECTION_179_VEHICLES: Tuple[Tuple[str, str], ...] = (
 
 
 def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
-    """Builds context-aware 3-tier topic cluster links covering all 22 root calculators plus state and vehicle rings."""
+    """Builds context-aware 3-tier topic cluster links covering all 21 canonical root calculators plus state and vehicle rings."""
     tier_1 = [
         ("irs-2027-tax-brackets", "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator"),
         ("section-179-calculator", "Section 179 Equipment Expense & Phaseout Calculator"),
@@ -1659,8 +1659,7 @@ def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[
         ("equipment-lease-vs-buy-section-179-calculator", "Equipment Lease vs Buy Section 179 Cash Flow Matrix"),
         ("equipment-lease-tax-deduction", "Equipment Lease Tax Deduction & Operating vs Capital Lease Calculator"),
         ("invoice-factoring-vs-business-line-of-credit-calculator", "Invoice Factoring vs Business Line of Credit APR Matrix"),
-        ("saas-runway-calculator", "SaaS Cash Runway, Net Burn & Zero Cash Date Calculator"),
-        ("saas-burn-multiple-benchmarks-2026", "SaaS Burn Multiple & Capital Efficiency Benchmarks Calculator"),
+        ("saas-runway-calculator", "SaaS Cash Runway, Net Burn & Burn Multiple Benchmarks Calculator"),
         ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
         ("prediction-market-tax", "Prediction Market Section 1256 vs Ordinary Income Tax Calculator"),
         ("r-and-d-tax-credit-section-174-amortization-calculator", "IRC Section 41 R&D Tax Credit & Section 174 Amortization Calculator"),

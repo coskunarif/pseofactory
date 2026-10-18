@@ -304,7 +304,7 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
         "equipment-lease-tax-deduction",
         "invoice-factoring-vs-business-line-of-credit-calculator",
         "saas-runway-calculator",
-        "saas-burn-multiple-benchmarks-2026",
+        "saas-runway-calculator",
         "prediction-market-odds",
         "prediction-market-tax",
         "r-and-d-tax-credit-section-174-amortization-calculator",
@@ -318,6 +318,7 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
     ]
     for root_slug in expected_profithelm_roots:
         assert f"/tools/{root_slug}/" in cluster_html, f"Missing ProfitHelm root tool {root_slug} in cluster nav"
+    assert "/tools/saas-burn-multiple-benchmarks-2026/" not in cluster_html
 
     px_blocks = render_competitor_winning_pattern_blocks(
         slug="student-loan-repayment-calculator",
