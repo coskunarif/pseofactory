@@ -5995,7 +5995,7 @@ class RetroReflectionEngine:
         from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, PROFITHELM_US_STATES
 
         ov_s_low = str(ov_s or "").lower().strip("/")
-        ov_body_dump = json.dumps({k: v for k, v in raw_ov.items() if k != "hub_links"})
+        ov_body_dump = json.dumps({k: v for k, v in raw_ov.items() if k not in ("hub_links", "partner_offer")})
         qa_str = str(raw_ov.get("quick_answer") or "")
         q_str = str(raw_ov.get("query") or "").lower().strip()
         vehicle_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
