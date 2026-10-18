@@ -6368,6 +6368,11 @@ def reflect_and_recompile_all_assets(
                     dry_run=False,
                     defer_live_indexing=defer_live_indexing,
                 )
+                RetroReflectionEngine.retrofit_estate(
+                    dist_dir=adapter.dist_dir,
+                    property_id=adapter.property_id,
+                    canonical_base=adapter.canonical_base,
+                )
                 from pseofactory.affiliates import normalize_html_callout_message_match
                 for html_f in sorted(adapter.dist_dir.rglob("*.html")):
                     if html_f.name.startswith("."):
