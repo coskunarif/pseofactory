@@ -975,6 +975,161 @@ def test_midnight_factory_build_dist_stash_and_redirect_rollup_self_healing(tmp_
     assert "rollup_redirected_gsc_rows" in prexvo_obs.read_text(encoding="utf-8")
 
 
+def test_unattended_timer_concurrency_and_distribution_verification(tmp_path):
+    """
+    Verifies unattended timer concurrency and downstream distribution gates:
+    1. Treasury Yield Calculator checklist copy contains zero spaced hyphens (' - ')
+    2. Concurrent TrendHistoryDB.acquire_lock(timeout=...) serializes overlapping threads without BlockingIOError
+    3. MaintenanceLifecycle.run verifies distribution BEFORE writing substrate_lock.json or invoking GitOps shipper
+    4. ShipperQueue.reconcile_stale_events reconciles superseded CI_FAILURE WAL records
+    5. reconcile_workspace_tracking_state preserves locked canonical overlays in .agy/overlays/ and removes FAILED.* markers
+    Zero em-dashes. Zero en-dashes.
+    """
+    import re
+    import threading
+    import time
+    from unittest.mock import patch
+    from pseofactory.competitor import render_competitor_winning_pattern_blocks
+    from pseofactory.gitops import ShipperQueue, reconcile_workspace_tracking_state
+    from pseofactory.indexing.preflight import PreflightReport
+    from pseofactory.maintenance import ConfigurablePropertyAdapter, MaintenanceLifecycle
+    from pseofactory.trends.db import TrendHistoryDB
+
+    # 1. Verify treasury-yield-calculator blocks contain zero spaced hyphens in body copy
+    blocks = render_competitor_winning_pattern_blocks(
+        slug="treasury-yield-calculator",
+        title="Treasury Bill Yield vs HYSA Tax-Equivalent Yield Calculator",
+        property_id="profithelm",
+        canonical_base="https://profithelm.com",
+        statutory_authority="31 U.S.C. 3124",
+        economic_dataset="U.S. Treasury Daily Yield Curve",
+    )
+    combined_html = "\n".join(str(v) for v in blocks.values())
+    body_text = re.sub(r"<[^>]+>", " ", combined_html)
+    assert re.search(r"\s-\s", body_text) is None
+
+    # 2. Verify TrendHistoryDB.acquire_lock(non_blocking=True, timeout=...) waits cleanly when another thread releases lock
+    db_file = tmp_path / "trends.db"
+    db1 = TrendHistoryDB(db_file)
+    db2 = TrendHistoryDB(db_file)
+    events = []
+
+    def holder():
+        with db1.acquire_lock(non_blocking=True, timeout=0.0):
+            events.append("holder_acquired")
+            time.sleep(0.25)
+            events.append("holder_releasing")
+
+    t = threading.Thread(target=holder)
+    t.start()
+    while "holder_acquired" not in events:
+        time.sleep(0.02)
+    with db2.acquire_lock(non_blocking=True, timeout=2.0):
+        events.append("waiter_acquired")
+    t.join()
+    assert events == ["holder_acquired", "holder_releasing", "waiter_acquired"]
+
+    # 3. Verify MaintenanceLifecycle.run aborts on failed distribution BEFORE writing substrate_lock.json or calling GitOps
+    tenant_dir = tmp_path / "profithelm-platform"
+    (tenant_dir / ".git" / "info").mkdir(parents=True, exist_ok=True)
+    dist_dir = tenant_dir / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    agy_dir = tenant_dir / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>ProfitHelm</title>"
+        '<link rel="canonical" href="https://profithelm.com/"></head>'
+        "<body><main><h1>ProfitHelm</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+        repo_path=tenant_dir,
+    )
+    call_order = []
+
+    def fake_airlock(*args, **kwargs):
+        call_order.append("airlock")
+        return PreflightReport(
+            property_id="profithelm",
+            domain="profithelm.com",
+            total_inspected=1,
+            passed_count=1,
+            blocked_count=0,
+            tier1_hubs_eligible=1,
+            tier2_leaves_queued=0,
+            breakdown={},
+            push_eligible_urls=["https://profithelm.com/"],
+            sitemap_eligible_urls=["https://profithelm.com/"],
+            blocked_urls=[],
+            is_gate_passed=True,
+        )
+
+    def fake_dist_fail(*args, **kwargs):
+        call_order.append("distribution")
+        return {"status": "FAILED", "error": "Simulated interrupted distribution run"}
+
+    def fake_shipper(*args, **kwargs):
+        call_order.append("gitops")
+        raise AssertionError("GitOps shipper must not run when distribution fails")
+
+    lifecycle = MaintenanceLifecycle()
+    with patch("pseofactory.indexing.preflight.IndexingPreflightEngine.inspect_dist", side_effect=fake_airlock), \
+         patch("pseofactory.distributor.dispatch_to_distribution_lead", side_effect=fake_dist_fail), \
+         patch("pseofactory.gitops.GitOpsCoordinator.dispatch_to_shipper", side_effect=fake_shipper):
+        res = lifecycle.run(
+            adapter,
+            force=True,
+            enable_gitops=True,
+            enable_distribution=True,
+            state_file=agy_dir / "engine_hash.json",
+            ledger_file=agy_dir / "asset_ledger.json",
+        )
+    assert res.status == "FAILED"
+    assert res.distribution_status == "FAILED"
+    assert "gitops" not in call_order
+    assert not (tenant_dir / "substrate_lock.json").exists()
+    assert not (agy_dir / "engine_hash.json").exists()
+
+    # 4. Verify ShipperQueue.reconcile_stale_events reconciles superseded CI_FAILURE records
+    queues_dir = tmp_path / "queues"
+    sq = ShipperQueue(property_id="profithelm", queues_dir=queues_dir)
+    e1 = sq.enqueue({"run_id": "run-ci-fail", "token": "tok_fail"})
+    sq.complete_event(e1["event_id"], status="CI_FAILURE")
+    e2 = sq.enqueue({"run_id": "run-ok", "token": "tok_ok"})
+    sq.complete_event(e2["event_id"], status="COMPLETED")
+    reconciled_count = sq.reconcile_stale_events()
+    assert reconciled_count == 1
+    q_lines = [json.loads(line) for line in sq.queue_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert q_lines[0]["status"] == "RECONCILED_SUPERSEDED"
+    assert q_lines[0]["previous_status"] == "CI_FAILURE"
+
+    # 5. Verify reconcile_workspace_tracking_state preserves locked canonical overlays in .agy/overlays/ and removes FAILED.*
+    (agy_dir / "overlays").mkdir(parents=True, exist_ok=True)
+    (tenant_dir / "content" / "overlays").mkdir(parents=True, exist_ok=True)
+    canonical_ov = {"slug": "irs-2027-tax-brackets", "locked_until": "2026-11-15T00:00:00+00:00", "canonical": True}
+    duplicate_ov = {"slug": "irs-2027-tax-brackets", "locked_until": "2026-11-16T00:00:00+00:00", "canonical": False}
+    (agy_dir / "overlays" / "irs-2027-tax-brackets.json").write_text(json.dumps(canonical_ov), encoding="utf-8")
+    (tenant_dir / "content" / "overlays" / "irs-2027-tax-brackets.json").write_text(json.dumps(duplicate_ov), encoding="utf-8")
+    (agy_dir / "FAILED.profithelm_factory").write_text("1", encoding="utf-8")
+
+    rec_ws = reconcile_workspace_tracking_state(
+        runs_dir=tmp_path / "runs",
+        queues_dir=queues_dir,
+        ledger_path=tmp_path / "ledger.json",
+        tenant_repos=[tenant_dir],
+    )
+    assert rec_ws["status"] == "PASS"
+    preserved = json.loads((agy_dir / "overlays" / "irs-2027-tax-brackets.json").read_text(encoding="utf-8"))
+    assert preserved["canonical"] is True
+    assert not (tenant_dir / "content" / "overlays" / "irs-2027-tax-brackets.json").exists()
+    assert not (agy_dir / "FAILED.profithelm_factory").exists()
+
+
 
 
 

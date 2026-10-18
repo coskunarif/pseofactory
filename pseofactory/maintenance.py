@@ -3767,6 +3767,33 @@ class MaintenanceLifecycle:
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
 
+            # Stage 8: Multi-Channel Syndication Draft Staging & Verification (before substrate_lock.json and GitOps latch)
+            if enable_distribution:
+                from pseofactory.distributor import dispatch_to_distribution_lead
+                dist_res = dispatch_to_distribution_lead(
+                    run_id=run_id,
+                    property_id=adapter.property_id,
+                    dry_run=dry_run,
+                    dist_dir=adapter.dist_dir,
+                )
+                dist_status_val = dist_res.get("status", "SUCCESS")
+                if dist_status_val not in ("SUCCESS", "STAGED", "DRY_RUN", "SKIPPED"):
+                    duration = time.time() - start_time
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="FAILED",
+                        assets_audited=post_report.total_assets_checked,
+                        assets_drifted=0,
+                        assets_refactored=cascade_res["refactored"],
+                        assets_failed=1,
+                        failed_records=[{"error": dist_res.get("error", "Distribution dispatch failed"), "distribution": dist_res}],
+                        engine_hash=None,
+                        duration_seconds=duration,
+                        gitops_status=gitops_status_val,
+                        distribution_status="FAILED",
+                        trend_status=trend_status_val,
+                    )
+
             # Write tracked substrate_lock.json on real tenant repositories before GitOps stage
             substrate_lock_path: Optional[Path] = None
             prior_substrate_lock: Optional[str] = None
@@ -3809,7 +3836,7 @@ class MaintenanceLifecycle:
                 except Exception:
                     pass
 
-            # Stage 8: GitOps Worktree Commit & Edge Verification Latch
+            # Stage 9: GitOps Worktree Commit & Edge Verification Latch
             if enable_gitops:
                 from pseofactory.gitops import GitOpsCoordinator
                 repo_path = adapter.repo_path or adapter.dist_dir.parent
@@ -3850,40 +3877,7 @@ class MaintenanceLifecycle:
                         engine_hash=None,
                         duration_seconds=duration,
                         gitops_status="FAILED",
-                        trend_status=trend_status_val,
-                    )
-
-            # Stage 9: Multi-Channel Syndication Draft Staging
-            if enable_distribution:
-                from pseofactory.distributor import dispatch_to_distribution_lead
-                try:
-                    dist_res = dispatch_to_distribution_lead(
-                        run_id=run_id,
-                        property_id=adapter.property_id,
-                        dry_run=dry_run,
-                        dist_dir=adapter.dist_dir,
-                    )
-                except Exception:
-                    if not enable_gitops:
-                        _restore_substrate_lock()
-                    raise
-                dist_status_val = dist_res.get("status", "SUCCESS")
-                if dist_status_val not in ("SUCCESS", "STAGED", "DRY_RUN", "SKIPPED"):
-                    if not enable_gitops:
-                        _restore_substrate_lock()
-                    duration = time.time() - start_time
-                    return MaintenanceResult(
-                        property_id=adapter.property_id,
-                        status="FAILED",
-                        assets_audited=post_report.total_assets_checked,
-                        assets_drifted=0,
-                        assets_refactored=cascade_res["refactored"],
-                        assets_failed=1,
-                        failed_records=[{"error": dist_res.get("error", "Distribution dispatch failed"), "distribution": dist_res}],
-                        engine_hash=None,
-                        duration_seconds=duration,
-                        gitops_status=gitops_status_val,
-                        distribution_status="FAILED",
+                        distribution_status=dist_status_val,
                         trend_status=trend_status_val,
                     )
 
@@ -6856,6 +6850,60 @@ def reflect_and_recompile_all_assets(
                             adapter.dist_dir.parent,
                             property_id=adapter.property_id,
                         )
+                    except Exception:
+                        pass
+                    try:
+                        push_ledger_file = adapter.dist_dir.parent / ".agy" / "index_push_ledger.json"
+                        push_ledger = (
+                            json.loads(push_ledger_file.read_text(encoding="utf-8"))
+                            if push_ledger_file.is_file()
+                            else {}
+                        )
+                        if isinstance(push_ledger, dict):
+                            now_iso_push = datetime.now(timezone.utc).isoformat()
+                            sm_file = adapter.dist_dir / "sitemap.xml"
+                            sm_urls: List[str] = []
+                            if sm_file.is_file():
+                                sm_urls.extend(
+                                    u.strip()
+                                    for u in re.findall(r"<loc>(.*?)</loc>", sm_file.read_text(encoding="utf-8"))
+                                    if u.strip()
+                                )
+                            c_base = getattr(adapter, "canonical_base", "").rstrip("/")
+                            if c_base:
+                                for mf_name in ("llms.txt", "llms-full.txt", "feed.xml", "robots.txt"):
+                                    if (adapter.dist_dir / mf_name).is_file():
+                                        sm_urls.append(f"{c_base}/{mf_name}")
+                            ledger_changed = False
+                            for u_item in sm_urls:
+                                rel_u = u_item.replace(c_base, "").strip("/") if c_base else ""
+                                if not rel_u:
+                                    f_target = adapter.dist_dir / "index.html"
+                                elif (adapter.dist_dir / rel_u).is_file():
+                                    f_target = adapter.dist_dir / rel_u
+                                else:
+                                    f_target = adapter.dist_dir / rel_u / "index.html"
+                                if f_target.is_file():
+                                    f_hash = hashlib.sha256(f_target.read_bytes()).hexdigest()
+                                    prev_u = push_ledger.get(u_item)
+                                    if not isinstance(prev_u, dict) or prev_u.get("hash") != f_hash:
+                                        engs = dict(prev_u.get("engines", {})) if isinstance(prev_u, dict) else {}
+                                        push_ledger[u_item] = {
+                                            "hash": f_hash,
+                                            "last_pushed": (
+                                                prev_u.get("last_pushed")
+                                                if isinstance(prev_u, dict) and prev_u.get("last_pushed")
+                                                else now_iso_push
+                                            ),
+                                            "push_count": max(
+                                                1,
+                                                int(prev_u.get("push_count", 1)) if isinstance(prev_u, dict) else 1,
+                                            ),
+                                            "engines": engs,
+                                        }
+                                        ledger_changed = True
+                            if ledger_changed:
+                                push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
                     except Exception:
                         pass
                     if adapter.property_id == "profithelm":

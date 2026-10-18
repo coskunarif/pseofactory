@@ -83,22 +83,40 @@ class TrendHistoryDB:
         self.close()
 
     @contextmanager
-    def acquire_lock(self, non_blocking: bool = True) -> Generator[None, None, None]:
+    def acquire_lock(self, non_blocking: bool = True, timeout: float = 0.0) -> Generator[None, None, None]:
         """
         Acquires atomic advisory file lock on <db_path>.lock per HWL-1253.
-        Fails fast if non_blocking is True and another process holds the lock.
+        Fails fast if non_blocking is True and timeout <= 0.0 when another process holds the lock.
+        When timeout > 0.0, waits up to timeout seconds before raising BlockingIOError.
         """
+        import time
+
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_fd = os.open(str(self.lock_path), os.O_CREAT | os.O_RDWR, 0o666)
         flags = fcntl.LOCK_EX
         if non_blocking:
             flags |= fcntl.LOCK_NB
+        acquired = False
         try:
-            fcntl.flock(lock_fd, flags)
+            if non_blocking and timeout > 0.0:
+                deadline = time.monotonic() + float(timeout)
+                while True:
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        acquired = True
+                        break
+                    except (BlockingIOError, OSError):
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.1)
+            else:
+                fcntl.flock(lock_fd, flags)
+                acquired = True
             yield
         finally:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                if acquired:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
             finally:
                 os.close(lock_fd)
 

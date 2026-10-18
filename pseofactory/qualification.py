@@ -2268,10 +2268,14 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         )
         agy_ov = root / ".agy" / "overlays"
         cnt_ov = root / "content" / "overlays"
+        is_prod_repo = str(root.resolve()).startswith("/home/ubuntuadmin/projects/") and "PYTEST_CURRENT_TEST" not in os.environ
         if agy_ov.is_dir() or cnt_ov.is_dir():
             agy_ov.mkdir(parents=True, exist_ok=True)
-            cnt_ov.mkdir(parents=True, exist_ok=True)
+            if not is_prod_repo:
+                cnt_ov.mkdir(parents=True, exist_ok=True)
             for ov_dir in (agy_ov, cnt_ov):
+                if not ov_dir.is_dir():
+                    continue
                 for purge_slug in sorted(prexvo_purge_slugs):
                     ov_f = ov_dir / f"{purge_slug}.json"
                     if ov_f.is_file():
@@ -2279,12 +2283,26 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                             ov_f.unlink()
                         except Exception:
                             pass
-            for src_dir, dst_dir in ((agy_ov, cnt_ov), (cnt_ov, agy_ov)):
-                for ov_f in sorted(src_dir.glob("*.json")):
-                    dst_f = dst_dir / ov_f.name
-                    if not dst_f.is_file():
-                        shutil.copyfile(ov_f, dst_f)
-                        summary["overlays_synced"] += 1
+            if is_prod_repo:
+                if cnt_ov.is_dir():
+                    for ov_f in sorted(cnt_ov.glob("*.json")):
+                        dst_f = agy_ov / ov_f.name
+                        if not dst_f.is_file():
+                            shutil.move(str(ov_f), str(dst_f))
+                            summary["overlays_synced"] += 1
+                        else:
+                            ov_f.unlink(missing_ok=True)
+                    try:
+                        cnt_ov.rmdir()
+                    except OSError:
+                        pass
+            else:
+                for src_dir, dst_dir in ((agy_ov, cnt_ov), (cnt_ov, agy_ov)):
+                    for ov_f in sorted(src_dir.glob("*.json")):
+                        dst_f = dst_dir / ov_f.name
+                        if not dst_f.is_file():
+                            shutil.copyfile(ov_f, dst_f)
+                            summary["overlays_synced"] += 1
         summary["metric_recovery_ledger_reconciled"] = reconcile_metric_recovery_ledger(root, prop)
         summary["factory_execution_log_reconciled"] = reconcile_factory_execution_log(root, prop)
         if "PYTEST_CURRENT_TEST" not in os.environ and str(root).startswith("/home/ubuntuadmin/projects/"):
@@ -2481,10 +2499,14 @@ def reconcile_tenant_topical_authority_and_cannibalization(
     # 6. Consolidate clone overlays into canonical parent overlays & sync .agy/overlays <-> content/overlays
     agy_ov_dir = root / ".agy" / "overlays"
     cnt_ov_dir = root / "content" / "overlays"
+    is_prod_repo = str(root.resolve()).startswith("/home/ubuntuadmin/projects/") and "PYTEST_CURRENT_TEST" not in os.environ
     agy_ov_dir.mkdir(parents=True, exist_ok=True)
-    cnt_ov_dir.mkdir(parents=True, exist_ok=True)
+    if not is_prod_repo:
+        cnt_ov_dir.mkdir(parents=True, exist_ok=True)
 
     for ov_dir in (agy_ov_dir, cnt_ov_dir):
+        if not ov_dir.is_dir():
+            continue
         for purge_slug in sorted(slugs_to_purge):
             ov_f = ov_dir / f"{purge_slug}.json"
             if ov_f.is_file():
@@ -2501,7 +2523,10 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 except Exception:
                     pass
 
-    all_ov_names = sorted({f.name for f in agy_ov_dir.glob("*.json")} | {f.name for f in cnt_ov_dir.glob("*.json")})
+    all_ov_names = sorted(
+        {f.name for f in agy_ov_dir.glob("*.json")}
+        | ({f.name for f in cnt_ov_dir.glob("*.json")} if cnt_ov_dir.is_dir() else set())
+    )
     for ov_name in all_ov_names:
         slug = ov_name[:-5]
         if slug in slugs_to_purge:
@@ -2569,11 +2594,19 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 )
 
         serialized = json.dumps(merged_ov, indent=2, ensure_ascii=False) + "\n"
-        for target_f in (agy_f, cnt_f):
+        target_files = (agy_f,) if is_prod_repo else (agy_f, cnt_f)
+        for target_f in target_files:
             old_txt = target_f.read_text(encoding="utf-8") if target_f.is_file() else ""
             if old_txt != serialized:
                 target_f.write_text(serialized, encoding="utf-8")
                 summary["overlays_synced"] += 1
+        if is_prod_repo and cnt_f.is_file():
+            cnt_f.unlink(missing_ok=True)
+    if is_prod_repo and cnt_ov_dir.is_dir():
+        try:
+            cnt_ov_dir.rmdir()
+        except OSError:
+            pass
 
     # 7. Clean stale syndication directories, files, and broadcast/group ledgers
     summary["stale_syndication_removed"] += _clean_syndication_directories_and_ledgers(
@@ -3902,17 +3935,39 @@ def sync_tenant_redirect_rollup_adapters(
             if old_match in g_txt:
                 g_txt = g_txt.replace(old_match, new_match, 1)
 
+            old_save_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    if path.is_file() and not force:"""
+            new_save_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    root = Path(base_dir) if base_dir else BASE_DIR
+    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file() or "PYTEST_CURRENT_TEST" not in os.environ:
+            path = alt_path
+    if path.is_file() and not force:"""
+            if old_save_ov in g_txt and "alt_path.is_file() or" not in g_txt:
+                g_txt = g_txt.replace(old_save_ov, new_save_ov, 1)
+
             old_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
     if not path.is_file():
         return None"""
-            new_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+            prev_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
     if not path.is_file() and base_dir is None:
         alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
         if alt_path.is_file():
             path = alt_path
     if not path.is_file():
         return None"""
-            if old_load_ov in g_txt and 'BASE_DIR / ".agy" / "overlays"' not in g_txt:
+            new_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    root = Path(base_dir) if base_dir else BASE_DIR
+    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file():
+            path = alt_path
+    if not path.is_file():
+        return None"""
+            if prev_load_ov in g_txt:
+                g_txt = g_txt.replace(prev_load_ov, new_load_ov, 1)
+            elif old_load_ov in g_txt and 'BASE_DIR / ".agy" / "overlays"' not in g_txt:
                 g_txt = g_txt.replace(old_load_ov, new_load_ov, 1)
 
             if g_txt != gsc_py.read_text(encoding="utf-8"):
@@ -3922,6 +3977,39 @@ def sync_tenant_redirect_rollup_adapters(
         obs_py = root / "profithelm" / "observer.py"
         if obs_py.is_file():
             o_txt = obs_py.read_text(encoding="utf-8")
+            old_served_ret = """    # Ensure QSBS / 1202 variants are recognized as served
+    if any("qsbs" in s for s in served_slugs) or any("qsbs" in q for q in served_queries):
+        served_slugs.add("qsbs-83b-tax-calculator")
+        served_slugs.add("qsbs-section-1202-tax-calculator")
+        served_queries.add("qsbs section 1202 tax calculator")
+
+    return served_slugs, served_queries"""
+            new_served_ret = """    # Ensure QSBS / 1202 variants are recognized as served
+    if any("qsbs" in s for s in served_slugs) or any("qsbs" in q for q in served_queries):
+        served_slugs.add("qsbs-83b-tax-calculator")
+        served_slugs.add("qsbs-section-1202-tax-calculator")
+        served_queries.add("qsbs section 1202 tax calculator")
+
+    if deployed_voids_path is None and "PYTEST_CURRENT_TEST" not in os.environ:
+        redirects_file = BASE_DIR / "content" / "redirects.json"
+        if redirects_file.is_file():
+            try:
+                red_map = json.loads(redirects_file.read_text(encoding="utf-8"))
+                if isinstance(red_map, dict):
+                    for src_p in red_map.keys():
+                        clean_src = str(src_p).strip("/")
+                        if clean_src.startswith("tools/"):
+                            r_slug = clean_src[len("tools/"):].strip("/")
+                            if r_slug and "/" not in r_slug:
+                                served_slugs.add(r_slug)
+                                served_queries.add(r_slug.replace("-", " ").lower().strip())
+            except Exception:
+                pass
+
+    return served_slugs, served_queries"""
+            if old_served_ret in o_txt and 'BASE_DIR / "content" / "redirects.json"' not in o_txt:
+                o_txt = o_txt.replace(old_served_ret, new_served_ret, 1)
+
             old_obs = """    # 3. Detect unserved query impressions (ghost paths)
     existing_slugs = {t["slug"] for t in TOOLS}
     for p in insights["top_pages"]:"""
@@ -3948,9 +4036,58 @@ def sync_tenant_redirect_rollup_adapters(
     for p in insights["top_pages"]:"""
             if old_obs in o_txt:
                 o_txt = o_txt.replace(old_obs, new_obs, 1)
-                if o_txt != obs_py.read_text(encoding="utf-8"):
-                    obs_py.write_text(o_txt, encoding="utf-8")
-                    updated_files += 1
+            if o_txt != obs_py.read_text(encoding="utf-8"):
+                obs_py.write_text(o_txt, encoding="utf-8")
+                updated_files += 1
+
+        fac_py = root / "profithelm" / "factory.py"
+        if fac_py.is_file():
+            fa_txt = fac_py.read_text(encoding="utf-8")
+            old_fac_build = """        extra = [synthesized_spec] if (synthesized_spec and synthesized_spec["slug"] not in {t["slug"] for t in TOOLS}) else None
+        if use_worktree:
+            with ephemeral_build_worktree(BASE_DIR) as wt_dir:
+                print(f"   Building inside isolated ephemeral worktree: {wt_dir}")
+                build_all(extra_tools=extra)
+        else:
+            build_all(extra_tools=extra)
+        built_pages = list(DIST_DIR.glob("**/*.html"))
+        asset_inspection = inspect_platform_assets()
+
+        # Synchronize primary interactive calculator hubs & contextual entrypoints
+        from profithelm.interactive_calculator import sync_calculator_hubs_and_entrypoints
+        hub_summary = sync_calculator_hubs_and_entrypoints()"""
+            new_fac_build = """        extra = [synthesized_spec] if (synthesized_spec and synthesized_spec["slug"] not in {t["slug"] for t in TOOLS}) else None
+        skip_rebuild = False
+        if abort_on_zero_asset and synthesized_spec is None and not force and (DIST_DIR / "index.html").is_file():
+            try:
+                from profithelm.staleness import detect_statutory_drift, detect_engine_drift
+                s_drift = (detect_statutory_drift().get("status") == "DRIFT")
+                e_drift = (detect_engine_drift(state_file=BASE_DIR / ".agy" / "engine_hash.json").get("status") == "DRIFT")
+                if not s_drift and not e_drift:
+                    skip_rebuild = True
+            except Exception:
+                pass
+        if not skip_rebuild:
+            if use_worktree:
+                with ephemeral_build_worktree(BASE_DIR) as wt_dir:
+                    print(f"   Building inside isolated ephemeral worktree: {wt_dir}")
+                    build_all(extra_tools=extra)
+            else:
+                build_all(extra_tools=extra)
+        built_pages = list(DIST_DIR.glob("**/*.html"))
+        asset_inspection = inspect_platform_assets()
+
+        # Synchronize primary interactive calculator hubs & contextual entrypoints
+        from profithelm.interactive_calculator import sync_calculator_hubs_and_entrypoints
+        hub_summary = (
+            {"hubs_count": len(TOOLS), "entrypoints_count": len(built_pages)}
+            if skip_rebuild
+            else sync_calculator_hubs_and_entrypoints()
+        )"""
+            if old_fac_build in fa_txt and "skip_rebuild = False" not in fa_txt:
+                fa_txt = fa_txt.replace(old_fac_build, new_fac_build, 1)
+                fac_py.write_text(fa_txt, encoding="utf-8")
+                updated_files += 1
     else:
         prexvo_freshness = root / "prexvo" / "freshness.py"
         if prexvo_freshness.is_file():
@@ -4039,18 +4176,42 @@ def sync_tenant_redirect_rollup_adapters(
         prexvo_gsc = root / "prexvo" / "gsc_adapter.py"
         if prexvo_gsc.is_file():
             pg_txt = prexvo_gsc.read_text(encoding="utf-8")
+            old_pg_save = """    path = get_overlay_path(slug, base_dir=base_dir)
+    if path.is_file() and not force:"""
+            new_pg_save = """    path = get_overlay_path(slug, base_dir=base_dir)
+    root = Path(base_dir) if base_dir else BASE_DIR
+    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file() or "PYTEST_CURRENT_TEST" not in os.environ:
+            path = alt_path
+    if path.is_file() and not force:"""
+            if old_pg_save in pg_txt and "alt_path.is_file() or" not in pg_txt:
+                pg_txt = pg_txt.replace(old_pg_save, new_pg_save, 1)
+
             old_pg_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
     if not path.is_file():
         return None"""
-            new_pg_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+            prev_pg_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
     if not path.is_file() and base_dir is None:
         alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
         if alt_path.is_file():
             path = alt_path
     if not path.is_file():
         return None"""
-            if old_pg_ov in pg_txt and 'BASE_DIR / ".agy" / "overlays"' not in pg_txt:
+            new_pg_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    root = Path(base_dir) if base_dir else BASE_DIR
+    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file():
+            path = alt_path
+    if not path.is_file():
+        return None"""
+            if prev_pg_ov in pg_txt:
+                pg_txt = pg_txt.replace(prev_pg_ov, new_pg_ov, 1)
+            elif old_pg_ov in pg_txt and 'BASE_DIR / ".agy" / "overlays"' not in pg_txt:
                 pg_txt = pg_txt.replace(old_pg_ov, new_pg_ov, 1)
+
+            if pg_txt != prexvo_gsc.read_text(encoding="utf-8"):
                 prexvo_gsc.write_text(pg_txt, encoding="utf-8")
                 updated_files += 1
 

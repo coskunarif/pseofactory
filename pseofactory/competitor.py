@@ -1978,7 +1978,7 @@ def _resolve_b2b_commercial_competitor_content(s_low: str) -> Optional[Dict[str,
                 "equals a 5.60% to 5.88% taxable bank yield."
             ),
             "checklist_items": [
-                "Compare bank HYSA yields against U.S. Treasury Bills using Tax-Equivalent Yield: TEY = Treasury Yield / (1 - Effective State & Local Tax Rate).",
+                "Compare bank HYSA yields against U.S. Treasury Bills using Tax-Equivalent Yield: TEY = Treasury Yield / (1 minus Effective State & Local Tax Rate).",
                 "Verify whether money market funds meet state minimum U.S. Government obligation asset thresholds (e.g., 50% quarterly requirement in CA, NY, CT).",
                 "Account for the 3.8% Net Investment Income Tax (IRC Section 1411) which applies equally to both Treasury interest and bank HYSA interest above MAGI caps.",
                 "Match T-Bill maturity ladders (4-week, 8-week, 13-week, 26-week) against quarterly IRS estimated tax and payroll disbursement dates.",

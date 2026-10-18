@@ -269,6 +269,7 @@ class TrendCronRunner:
         total_site_impressions: int = 500,
         include_unassigned: bool = False,
         sink_path: Optional[Union[str, Path]] = None,
+        lock_timeout: float = 60.0,
     ) -> Dict[str, Any]:
         """
         Public entrypoint for executing autonomous trend cron cycle.
@@ -283,6 +284,7 @@ class TrendCronRunner:
             total_site_impressions=total_site_impressions,
             include_unassigned=include_unassigned,
             sink_path=sink_path,
+            lock_timeout=lock_timeout,
         )
 
     def run_cycle(
@@ -295,6 +297,7 @@ class TrendCronRunner:
         total_site_impressions: int = 500,
         include_unassigned: bool = False,
         sink_path: Optional[Union[str, Path]] = None,
+        lock_timeout: float = 60.0,
     ) -> Dict[str, Any]:
         """
         Executes complete daily cron monitoring cycle.
@@ -319,8 +322,8 @@ class TrendCronRunner:
 
         db = TrendHistoryDB(self.db_path)
 
-        # Acquire atomic advisory lock on <db_path>.lock
-        with db.acquire_lock(non_blocking=True):
+        # Acquire atomic advisory lock on <db_path>.lock with bounded wait for concurrent fleet/timer execution
+        with db.acquire_lock(non_blocking=True, timeout=lock_timeout):
             # 1. Start cycle in DB
             sources_crawled = ["google_suggest", "youtube_suggest", "reddit_autocomplete", "hn_search", "google_trends_rss"]
             if fixture_path:

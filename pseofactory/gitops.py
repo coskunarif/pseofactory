@@ -337,14 +337,16 @@ class ShipperQueue:
                     latest_completed_idx = -1
                     for idx, rec in enumerate(records):
                         st = str(rec.get("status", ""))
-                        if st != "PENDING":
-                            latest_completed_idx = idx
+                        if st in ("COMPLETED", "DRY_RUN", "RECONCILED_SUPERSEDED"):
+                            if st in ("COMPLETED", "DRY_RUN"):
+                                latest_completed_idx = idx
                             tok = str(rec.get("payload", {}).get("token", ""))
-                            if tok:
+                            if tok and st in ("COMPLETED", "DRY_RUN"):
                                 completed_tokens.add(tok)
 
                     for idx, rec in enumerate(records):
-                        if rec.get("status") != "PENDING":
+                        st = str(rec.get("status", ""))
+                        if st not in ("PENDING", "CI_FAILURE", "EDGE_VERIFICATION_FAILED", "FAILED"):
                             continue
                         tok = str(rec.get("payload", {}).get("token", ""))
                         is_stale = False
@@ -355,7 +357,7 @@ class ShipperQueue:
                         elif idx < latest_completed_idx:
                             is_stale = True
                             reason = "Superseded by newer completed release on property"
-                        else:
+                        elif st == "PENDING":
                             ts_str = str(rec.get("timestamp", ""))
                             if ts_str:
                                 try:
@@ -367,6 +369,8 @@ class ShipperQueue:
                                     is_stale = True
                                     reason = "Unparseable timestamp"
                         if is_stale:
+                            if st != "PENDING":
+                                rec["previous_status"] = st
                             rec["status"] = "RECONCILED_SUPERSEDED"
                             rec["completed_at"] = now_iso
                             rec["reconciliation_reason"] = reason
@@ -2970,13 +2974,17 @@ def reconcile_workspace_tracking_state(
                                 sep = "" if (not existing_ex or existing_ex.endswith("\n")) else "\n"
                                 exclude_file.write_text(existing_ex + sep + "content/overlays/\n", encoding="utf-8")
 
-                        # Relocate any legacy untracked content/overlays/*.json into .agy/overlays/
+                        # Relocate any legacy untracked content/overlays/*.json into .agy/overlays/ without overwriting locked canonical overlays
                         legacy_ov_dir = rp / "content" / "overlays"
                         if legacy_ov_dir.is_dir():
                             target_ov_dir = rp / ".agy" / "overlays"
                             target_ov_dir.mkdir(parents=True, exist_ok=True)
                             for ov_file in list(legacy_ov_dir.glob("*.json")):
-                                shutil.move(str(ov_file), str(target_ov_dir / ov_file.name))
+                                dst_ov = target_ov_dir / ov_file.name
+                                if not dst_ov.is_file():
+                                    shutil.move(str(ov_file), str(dst_ov))
+                                else:
+                                    ov_file.unlink(missing_ok=True)
                                 healed_tenant_trees += 1
                             try:
                                 legacy_ov_dir.rmdir()
@@ -2984,6 +2992,22 @@ def reconcile_workspace_tracking_state(
                                     (rp / "content").rmdir()
                             except OSError:
                                 pass
+
+                        # Clean stale .agy/FAILED.* markers and .agy/runs/last_failure.json after workspace reconciliation
+                        agy_dir = rp / ".agy"
+                        if agy_dir.is_dir():
+                            for failed_marker in list(agy_dir.glob("FAILED.*")):
+                                try:
+                                    failed_marker.unlink(missing_ok=True)
+                                    healed_tenant_trees += 1
+                                except OSError:
+                                    pass
+                            last_fail_file = agy_dir / "runs" / "last_failure.json"
+                            if last_fail_file.is_file():
+                                try:
+                                    last_fail_file.unlink(missing_ok=True)
+                                except OSError:
+                                    pass
 
                         # Reconcile tracked .agy/runs files (test repair records or concurrency logs force-committed by legacy factory runs)
                         tracked_agy = subprocess.run(
