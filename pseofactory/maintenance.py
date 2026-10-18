@@ -4455,6 +4455,9 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         if schema_q_set != body_q_set or len(schema_faqs) != len(body_faqs):
             return True
 
+    if '"WebApplication"' in html_content and '"priceCurrency"' not in html_content:
+        return True
+
     return False
 
 
@@ -4762,24 +4765,44 @@ def _normalize_page_structure_and_geo_parity(
                 updated = synced_ld
                 changed = True
 
-    if slug == "tools-directory" and "WebApplication" not in updated and "FAQPage" not in updated:
+    if slug == "tools-directory" or ('"WebApplication"' in updated and '"priceCurrency"' not in updated):
         def _inject_tools_directory_webapp_ld(match: re.Match) -> str:
             open_t, raw_j, close_t = match.group(1), match.group(2), match.group(3)
             try:
                 data = json.loads(raw_j.strip())
                 if isinstance(data, dict) and "@graph" in data and isinstance(data["@graph"], list):
                     base_u = (canonical_url or "https://profithelm.com/tools/").split("#")[0]
-                    data["@graph"].append(
-                        {
-                            "@type": "WebApplication",
-                            "@id": f"{base_u}#webapplication",
-                            "name": f"{topic_label}",
-                            "url": base_u,
-                            "applicationCategory": "FinanceApplication",
-                            "operatingSystem": "All",
-                        }
-                    )
-                    return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
+                    modified_graph = False
+                    has_webapp = False
+                    for node in data["@graph"]:
+                        if isinstance(node, dict) and node.get("@type") in ("WebApplication", "SoftwareApplication"):
+                            has_webapp = True
+                            if "offers" not in node:
+                                node["offers"] = {
+                                    "@type": "Offer",
+                                    "price": "0",
+                                    "priceCurrency": "USD",
+                                }
+                                modified_graph = True
+                    if not has_webapp and slug == "tools-directory" and "FAQPage" not in updated:
+                        data["@graph"].append(
+                            {
+                                "@type": "WebApplication",
+                                "@id": f"{base_u}#webapplication",
+                                "name": f"{topic_label}",
+                                "url": base_u,
+                                "applicationCategory": "FinanceApplication",
+                                "operatingSystem": "All",
+                                "offers": {
+                                    "@type": "Offer",
+                                    "price": "0",
+                                    "priceCurrency": "USD",
+                                },
+                            }
+                        )
+                        modified_graph = True
+                    if modified_graph:
+                        return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
             except Exception:
                 pass
             return match.group(0)

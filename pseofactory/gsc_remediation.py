@@ -3981,23 +3981,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             re.DOTALL | re.IGNORECASE,
         )
         if qa_pattern.search(html):
-            def _repl_qa_aside(m: re.Match) -> str:
-                open_aside, inner_aside, close_aside = m.group(1), m.group(2), m.group(3)
-                title_m = re.search(
-                    r'<div[^>]*class=["\'][^"\']*quick-answer-title[^"\']*["\'][^>]*>.*?</div>',
-                    inner_aside,
-                    re.DOTALL | re.IGNORECASE,
-                )
-                if title_m:
-                    title_html = f"\n  {title_m.group(0)}"
-                elif "irs-2027-tax-brackets" in str(overlay_data.get("slug") or ""):
-                    title_html = '\n  <div class="quick-answer-title">Key Finding: 2027 IRS Sunset Projection</div>'
-                else:
-                    title_html = ""
-                return f'{open_aside}{title_html}\n  <div class="quick-answer-body"><p>{escaped_qa}</p></div>\n{close_aside}'
-
             html = qa_pattern.sub(
-                _repl_qa_aside,
+                r'\g<1>\n  <div class="quick-answer-body"><p>' + escaped_qa + r'</p></div>\n\g<3>',
                 html,
                 count=1,
             )
