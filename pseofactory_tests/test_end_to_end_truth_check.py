@@ -635,3 +635,141 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
     assert tool_html_file.read_text(encoding="utf-8") == original_html
 
 
+def test_tenant_tracked_test_repair_records_and_test_isolation_self_healing(tmp_path):
+    """
+    Replays the exact failure mode where Stage 5 pytest runs in profithelm-platform
+    created .agy/runs/test_run_*/repair_bundle.json and Stage 6 'git add -f .agy/runs/'
+    force-committed them into HEAD (so every subsequent test run left modified
+    .agy/runs/test_run_*/repair_bundle.json records in git status).
+    Verifies that:
+    1. sync_tenant_test_isolation_guards injects test-run isolation into profithelm/repair.py
+       and unstages .agy/runs in profithelm/factory.py.
+    2. reconcile_workspace_tracking_state prunes test_run_* directories across .agy/runs
+       and cleans dirty tracked .agy/runs/* files in tenant working trees.
+    3. GitOpsCoordinator.stage_tracked untracks any force-committed .agy/runs/* files
+       so subsequent commits permanently remove them from git tracking.
+    """
+    import subprocess
+    import pseofactory.gitops as gitops_mod
+    from pseofactory.gitops import (
+        GitOpsCoordinator,
+        reconcile_workspace_tracking_state,
+    )
+
+    tenant_repo = tmp_path / "profithelm-platform"
+    tenant_repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(tenant_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "config", "user.email", "test@profithelm.com"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "config", "user.name", "Test Runner"], check=True)
+
+    (tenant_repo / ".gitignore").write_text(".agy/\ndist/\n", encoding="utf-8")
+    ph_pkg = tenant_repo / "profithelm"
+    ph_pkg.mkdir(parents=True, exist_ok=True)
+    repair_py = ph_pkg / "repair.py"
+    repair_py.write_text(
+        'from pathlib import Path\n'
+        'import os\n'
+        'BASE_DIR = Path(__file__).resolve().parent.parent\n'
+        'def create_repair_context_bundle(run_id=None):\n'
+        '    saved_path = None\n'
+        '    if run_id:\n'
+        '        target_locations = [\n'
+        '            Path(".agy/runs") / run_id / "repair_bundle.json",\n'
+        '            Path("/home/ubuntuadmin/projects/.agy/runs") / run_id / "repair_bundle.json",\n'
+        '            BASE_DIR / ".agy" / "runs" / run_id / "repair_bundle.json",\n'
+        '        ]\n'
+        '    return saved_path\n',
+        encoding="utf-8",
+    )
+    factory_py = ph_pkg / "factory.py"
+    factory_py.write_text(
+        'import subprocess\n'
+        'def sync_git_and_deploy(BASE_DIR, env):\n'
+        '    subprocess.run(\n'
+        '        ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
+        '        cwd=BASE_DIR,\n'
+        '        env=env,\n'
+        '        check=False,\n'
+        '    )\n',
+        encoding="utf-8",
+    )
+
+    # Simulate force-tracked test repair records in HEAD (commit b093bbb7 pattern)
+    for r_id in (
+        "test_run_bundle_schema_check",
+        "test_run_empty_inputs",
+        "test_run_healing_verification",
+    ):
+        rb = tenant_repo / ".agy" / "runs" / r_id / "repair_bundle.json"
+        rb.parent.mkdir(parents=True, exist_ok=True)
+        rb.write_text(json.dumps({"run_id": r_id, "timestamp": "2026-10-17T12:02:03"}), encoding="utf-8")
+    fc = tenant_repo / ".agy" / "runs" / "factory_concurrency.jsonl"
+    fc.write_text('{"event": "LOCK_CONTENTION_TIMEOUT"}\n', encoding="utf-8")
+
+    subprocess.run(["git", "-C", str(tenant_repo), "add", ".gitignore", "profithelm/"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "add", "-f", ".agy/runs/"], check=True)
+    subprocess.run(["git", "-C", str(tenant_repo), "commit", "-m", "feat(factory): autonomous pipeline update"], check=True, capture_output=True)
+
+    # Simulate subsequent pytest run modifying the tracked test repair records
+    for r_id in (
+        "test_run_bundle_schema_check",
+        "test_run_empty_inputs",
+        "test_run_healing_verification",
+    ):
+        rb = tenant_repo / ".agy" / "runs" / r_id / "repair_bundle.json"
+        rb.write_text(json.dumps({"run_id": r_id, "timestamp": "2026-10-17T21:08:00"}), encoding="utf-8")
+
+    dirty_before = subprocess.run(
+        ["git", "-C", str(tenant_repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert "M .agy/runs/test_run_bundle_schema_check/repair_bundle.json" in dirty_before
+
+    # 1. Reconcile workspace tracking state (read-only mode restores tracked .agy/runs to clean HEAD)
+    rec = reconcile_workspace_tracking_state(
+        queues_dir=tmp_path / "queues",
+        runs_dir=tenant_repo / ".agy" / "runs",
+        ledger_path=tmp_path / "ledger.json",
+        tenant_repos=[tenant_repo],
+    )
+    assert rec.get("pruned_test_runs", 0) >= 3
+    clean_after_reconcile = subprocess.run(
+        ["git", "-C", str(tenant_repo), "status", "--porcelain", "--", ".agy/runs"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert clean_after_reconcile == ""
+
+    # 2. Sync tenant test isolation guards and stage via GitOpsCoordinator
+    sync_fn = getattr(gitops_mod, "sync_tenant_test_isolation_guards", lambda _p: {"updated_files": 0})
+    guard_res = sync_fn(tenant_repo)
+    assert guard_res["updated_files"] >= 2
+    assert "not is_test_run" in repair_py.read_text(encoding="utf-8")
+    assert '"git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/"' in factory_py.read_text(encoding="utf-8")
+    assert '".agy/runs"' in factory_py.read_text(encoding="utf-8")
+
+    coord = GitOpsCoordinator(repo_path=tenant_repo)
+    staged = coord.stage_tracked(tenant_repo)
+    assert ".agy/runs/test_run_bundle_schema_check/repair_bundle.json" in staged
+    subprocess.run(["git", "-C", str(tenant_repo), "commit", "-m", "fix(profithelm-platform): automated release sync"], check=True, capture_output=True)
+
+    tracked_agy = subprocess.run(
+        ["git", "-C", str(tenant_repo), "ls-files", ".agy/"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert tracked_agy == ""
+    final_status = subprocess.run(
+        ["git", "-C", str(tenant_repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert final_status == ""
+
+
+

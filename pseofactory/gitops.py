@@ -528,11 +528,34 @@ class GitOpsCoordinator:
     def stage_tracked(self, target_dir: Optional[Union[str, Path]] = None) -> List[str]:
         """
         Stages tracked modifications and new source files excluding dist (if untracked) and run state.
+        Untracks any force-committed .agy/runs artifacts so test repair bundles never pollute git status.
         Zero em-dashes. Zero en-dashes.
         """
         td = Path(target_dir).resolve() if target_dir else self.repo_path
+        sync_tenant_test_isolation_guards(td)
         cmd = ["git", "-C", str(td), "add", "-A", "--", "."] + self.get_negative_pathspecs(td)
         subprocess.run(cmd, env=self._get_git_env(), capture_output=True, text=True, check=False)
+
+        tracked_agy_runs = subprocess.run(
+            ["git", "-C", str(td), "ls-files", ".agy/runs"],
+            env=self._get_git_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if tracked_agy_runs.returncode == 0 and tracked_agy_runs.stdout.strip():
+            subprocess.run(
+                ["git", "-C", str(td), "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],
+                env=self._get_git_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            runs_sub = td / ".agy" / "runs"
+            if runs_sub.is_dir():
+                for child in list(runs_sub.iterdir()):
+                    if child.is_dir() and (child.name.startswith("test_") or child.name.endswith("_test")):
+                        shutil.rmtree(child, ignore_errors=True)
 
         # Retrieve staged file list
         res = subprocess.run(
@@ -2390,6 +2413,128 @@ def _extract_concatenated_json_objects(raw_text: str) -> List[Dict[str, Any]]:
     return objs
 
 
+def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Compiles and enforces test-isolation guards into tenant synthesis repair, generator,
+    and factory modules so test runs never pollute .agy/runs or force-stage .agy/runs into git.
+    Zero em-dashes. Zero en-dashes.
+    """
+    repo = Path(repo_path).resolve()
+    updated_files: List[str] = []
+
+    # 1. Isolate test repair context bundles in profithelm/repair.py
+    repair_py = repo / "profithelm" / "repair.py"
+    if repair_py.is_file():
+        try:
+            src = repair_py.read_text(encoding="utf-8")
+            target_snippet = "    if run_id:\n        target_locations = ["
+            replacement_snippet = (
+                '    is_test_run = (\n'
+                '        str(run_id).startswith("test_")\n'
+                '        or str(run_id).endswith("_test")\n'
+                '        or "PYTEST_CURRENT_TEST" in os.environ\n'
+                '    )\n'
+                '    if run_id and not is_test_run:\n'
+                '        target_locations = ['
+            )
+            if "not is_test_run" not in src and target_snippet in src:
+                repair_py.write_text(src.replace(target_snippet, replacement_snippet, 1), encoding="utf-8")
+                updated_files.append(str(repair_py))
+        except Exception:
+            pass
+
+    # 2. Isolate test tool manifest exports in profithelm/generator.py
+    gen_py = repo / "profithelm" / "generator.py"
+    if gen_py.is_file():
+        try:
+            g_src = gen_py.read_text(encoding="utf-8")
+            g_target = (
+                '    if output_path is None:\n'
+                '        output_path = BASE_DIR / ".agy" / f"tool_spec_{spec[\'slug\']}.json"'
+            )
+            g_replacement = (
+                '    if output_path is None:\n'
+                '        if "PYTEST_CURRENT_TEST" in os.environ:\n'
+                '            output_path = Path("/tmp") / f"tool_spec_{spec[\'slug\']}.json"\n'
+                '        else:\n'
+                '            output_path = BASE_DIR / ".agy" / f"tool_spec_{spec[\'slug\']}.json"'
+            )
+            if g_target in g_src and 'Path("/tmp") / f"tool_spec_' not in g_src:
+                gen_py.write_text(g_src.replace(g_target, g_replacement, 1), encoding="utf-8")
+                updated_files.append(str(gen_py))
+        except Exception:
+            pass
+
+    # 3. Ensure tenant factory Stage 6 never commits .agy/runs into git
+    for factory_rel in ("profithelm/factory.py", "prexvo/factory.py"):
+        factory_py = repo / factory_rel
+        if not factory_py.is_file():
+            continue
+        try:
+            f_src = factory_py.read_text(encoding="utf-8")
+            if '"rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"' in f_src:
+                continue
+            ph_stage_block = (
+                '                subprocess.run(\n'
+                '                    ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
+                '                    cwd=BASE_DIR,\n'
+                '                    env=env,\n'
+                '                    check=False,\n'
+                '                )'
+            )
+            ph_stage_minified = (
+                '    subprocess.run(\n'
+                '        ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
+                '        cwd=BASE_DIR,\n'
+                '        env=env,\n'
+                '        check=False,\n'
+                '    )'
+            )
+            px_stage_block = '                subprocess.run(["git", "add", "-f", "dist/", ".agy/runs/"], cwd=BASE_DIR, env=env, check=False)'
+            if ph_stage_block in f_src:
+                unstage_call = (
+                    ph_stage_block
+                    + '\n                subprocess.run(\n'
+                    '                    ["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],\n'
+                    '                    cwd=BASE_DIR,\n'
+                    '                    env=env,\n'
+                    '                    capture_output=True,\n'
+                    '                    check=False,\n'
+                    '                )'
+                )
+                factory_py.write_text(f_src.replace(ph_stage_block, unstage_call, 1), encoding="utf-8")
+                updated_files.append(str(factory_py))
+            elif ph_stage_minified in f_src:
+                unstage_min = (
+                    ph_stage_minified
+                    + '\n    subprocess.run(\n'
+                    '        ["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],\n'
+                    '        cwd=BASE_DIR,\n'
+                    '        env=env,\n'
+                    '        capture_output=True,\n'
+                    '        check=False,\n'
+                    '    )'
+                )
+                factory_py.write_text(f_src.replace(ph_stage_minified, unstage_min, 1), encoding="utf-8")
+                updated_files.append(str(factory_py))
+            elif px_stage_block in f_src:
+                unstage_px = (
+                    px_stage_block
+                    + '\n                subprocess.run(["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"], cwd=BASE_DIR, env=env, capture_output=True, check=False)'
+                )
+                factory_py.write_text(f_src.replace(px_stage_block, unstage_px, 1), encoding="utf-8")
+                updated_files.append(str(factory_py))
+        except Exception:
+            pass
+
+    return {
+        "status": "PASS",
+        "repo_path": str(repo),
+        "updated_files": len(updated_files),
+        "files": updated_files,
+    }
+
+
 def reconcile_workspace_tracking_state(
     runs_dir: Optional[Union[str, Path]] = None,
     queues_dir: Optional[Union[str, Path]] = None,
@@ -2397,6 +2542,8 @@ def reconcile_workspace_tracking_state(
     repo_heads: Optional[Dict[str, str]] = None,
     max_pending_age_seconds: float = 900.0,
     restore_tenant_dist: bool = True,
+    tenant_repos: Optional[List[Union[str, Path]]] = None,
+    untrack_agy_runs: bool = False,
 ) -> Dict[str, Any]:
     """
     Automatic self-reconciliation of workspace tracking state (.agy/queues, .agy/runs,
@@ -2404,7 +2551,12 @@ def reconcile_workspace_tracking_state(
     without manual cleanup scripts.
     Zero em-dashes. Zero en-dashes.
     """
-    is_explicit = runs_dir is not None or queues_dir is not None or ledger_path is not None
+    is_explicit = (
+        runs_dir is not None
+        or queues_dir is not None
+        or ledger_path is not None
+        or tenant_repos is not None
+    )
     in_test = _is_test_context() and not is_explicit
 
     eff_runs_dir = (
@@ -2517,37 +2669,60 @@ def reconcile_workspace_tracking_state(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # 4. Reconcile .agy/runs directories (corrupt manifests, test leaks, superseded incidents)
-    if eff_runs_dir.is_dir():
-        for run_dir in list(eff_runs_dir.iterdir()):
+    runs_dirs_to_scan: List[Path] = [eff_runs_dir]
+    if tenant_repos:
+        for tr in tenant_repos:
+            tr_runs = Path(tr) / ".agy" / "runs"
+            if tr_runs not in runs_dirs_to_scan:
+                runs_dirs_to_scan.append(tr_runs)
+    elif not in_test and not is_explicit:
+        for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
+            tr_runs = Path("/home/ubuntuadmin/projects") / repo_name / ".agy" / "runs"
+            if tr_runs not in runs_dirs_to_scan:
+                runs_dirs_to_scan.append(tr_runs)
+
+    for scan_runs_dir in runs_dirs_to_scan:
+        if not scan_runs_dir.is_dir():
+            continue
+        for run_dir in list(scan_runs_dir.iterdir()):
             if not run_dir.is_dir():
                 continue
 
             manifest_file = run_dir / "release_manifest.json"
             draft_file = run_dir / "distribution_draft.json"
             incident_file = run_dir / "ci_failure_incident.json"
+            repair_bundle_file = run_dir / "repair_bundle.json"
 
             # Check for test-leaked run directory
-            is_test_leak = False
-            for candidate in (manifest_file, draft_file):
-                if candidate.exists():
-                    try:
-                        raw = candidate.read_text(encoding="utf-8", errors="ignore")
-                        if '"/tmp/' in raw or "/pytest-" in raw:
-                            is_test_leak = True
-                            break
-                        objs = _extract_concatenated_json_objects(raw)
-                        for obj in objs:
-                            proj_str = str(obj.get("project", ""))
-                            pid_str = str(obj.get("property_id", "")).strip().lower()
-                            if (
-                                proj_str.startswith("/tmp/")
-                                or "/pytest-" in proj_str
-                                or (pid_str and pid_str not in CANONICAL_PRODUCTION_PROPERTIES)
-                            ):
+            is_test_leak = run_dir.name.startswith("test_") or run_dir.name.endswith("_test")
+            if not is_test_leak and repair_bundle_file.exists():
+                try:
+                    rb_raw = repair_bundle_file.read_text(encoding="utf-8", errors="ignore")
+                    if '"/tmp/' in rb_raw or "/pytest-" in rb_raw or "File 'test.py'" in rb_raw:
+                        is_test_leak = True
+                except Exception:
+                    pass
+            if not is_test_leak:
+                for candidate in (manifest_file, draft_file):
+                    if candidate.exists():
+                        try:
+                            raw = candidate.read_text(encoding="utf-8", errors="ignore")
+                            if '"/tmp/' in raw or "/pytest-" in raw:
                                 is_test_leak = True
                                 break
-                    except Exception:
-                        pass
+                            objs = _extract_concatenated_json_objects(raw)
+                            for obj in objs:
+                                proj_str = str(obj.get("project", ""))
+                                pid_str = str(obj.get("property_id", "")).strip().lower()
+                                if (
+                                    proj_str.startswith("/tmp/")
+                                    or "/pytest-" in proj_str
+                                    or (pid_str and pid_str not in CANONICAL_PRODUCTION_PROPERTIES)
+                                ):
+                                    is_test_leak = True
+                                    break
+                        except Exception:
+                            pass
             if is_test_leak:
                 shutil.rmtree(run_dir, ignore_errors=True)
                 pruned_test_runs += 1
@@ -2622,140 +2797,197 @@ def reconcile_workspace_tracking_state(
 
     # 5. Self-heal read-only tenant working trees and drop stale automated factory stashes in production
     healed_tenant_trees = 0
-    if not in_test and not is_explicit:
-        for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
-            rp = Path("/home/ubuntuadmin/projects") / repo_name
-            if not (rp / ".git").exists():
-                continue
-            try:
-                if repo_name in ("profithelm-platform", "prexvo"):
-                    lock_name = "profithelm_factory.lock" if repo_name == "profithelm-platform" else "prexvo_factory.lock"
-                    lock_path = Path("/tmp") / lock_name
-                    lock_fd = None
+    target_repo_paths: List[Path] = []
+    if tenant_repos is not None:
+        target_repo_paths = [Path(tr) for tr in tenant_repos]
+    elif not in_test and not is_explicit:
+        target_repo_paths = [
+            Path("/home/ubuntuadmin/projects") / rn
+            for rn in ("pseofactory", "profithelm-platform", "prexvo")
+        ]
+
+    for rp in target_repo_paths:
+        if not (rp / ".git").exists():
+            continue
+        repo_name = rp.name
+        try:
+            if repo_name in ("profithelm-platform", "prexvo") or tenant_repos is not None:
+                lock_name = "profithelm_factory.lock" if "profithelm" in repo_name else "prexvo_factory.lock"
+                lock_path = (
+                    (rp / f".{lock_name}")
+                    if (tenant_repos is not None or ws != Path("/home/ubuntuadmin/projects"))
+                    else (Path("/tmp") / lock_name)
+                )
+                lock_fd = None
+                lock_acquired = False
+                try:
+                    lock_fd = open(lock_path, "a+", encoding="utf-8")
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    lock_acquired = True
+                except OSError:
                     lock_acquired = False
+
+                if lock_acquired:
                     try:
-                        lock_fd = open(lock_path, "a+", encoding="utf-8")
-                        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        lock_acquired = True
-                    except OSError:
-                        lock_acquired = False
+                        # Ensure content/overlays/ is in .git/info/exclude so runtime GSC overlay staging never dirties git status
+                        exclude_file = rp / ".git" / "info" / "exclude"
+                        if exclude_file.parent.is_dir():
+                            existing_ex = exclude_file.read_text(encoding="utf-8") if exclude_file.exists() else ""
+                            if "content/overlays/" not in existing_ex.splitlines():
+                                sep = "" if (not existing_ex or existing_ex.endswith("\n")) else "\n"
+                                exclude_file.write_text(existing_ex + sep + "content/overlays/\n", encoding="utf-8")
 
-                    if lock_acquired:
-                        try:
-                            # Ensure content/overlays/ is in .git/info/exclude so runtime GSC overlay staging never dirties git status
-                            exclude_file = rp / ".git" / "info" / "exclude"
-                            if exclude_file.parent.is_dir():
-                                existing_ex = exclude_file.read_text(encoding="utf-8") if exclude_file.exists() else ""
-                                if "content/overlays/" not in existing_ex.splitlines():
-                                    sep = "" if (not existing_ex or existing_ex.endswith("\n")) else "\n"
-                                    exclude_file.write_text(existing_ex + sep + "content/overlays/\n", encoding="utf-8")
-
-                            # Relocate any legacy untracked content/overlays/*.json into .agy/overlays/
-                            legacy_ov_dir = rp / "content" / "overlays"
-                            if legacy_ov_dir.is_dir():
-                                target_ov_dir = rp / ".agy" / "overlays"
-                                target_ov_dir.mkdir(parents=True, exist_ok=True)
-                                for ov_file in list(legacy_ov_dir.glob("*.json")):
-                                    shutil.move(str(ov_file), str(target_ov_dir / ov_file.name))
-                                    healed_tenant_trees += 1
-                                try:
-                                    legacy_ov_dir.rmdir()
-                                    if (rp / "content").is_dir() and not any((rp / "content").iterdir()):
-                                        (rp / "content").rmdir()
-                                except OSError:
-                                    pass
-
-                            # Restore any uncommitted/staged mutations in read-only compiled dist/
-                            # only when restore_tenant_dist=True and substrate_lock.json is not pending release
-                            if restore_tenant_dist:
-                                lock_st = subprocess.run(
-                                    ["git", "-C", str(rp), "status", "--porcelain", "--", "substrate_lock.json"],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False,
-                                    timeout=5,
-                                )
-                                lock_dirty = bool(lock_st.returncode == 0 and lock_st.stdout.strip())
-                                dist_st = subprocess.run(
-                                    ["git", "-C", str(rp), "status", "--porcelain", "--", "dist"],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False,
-                                    timeout=5,
-                                )
-                                if not lock_dirty and dist_st.returncode == 0 and dist_st.stdout.strip():
-                                    subprocess.run(
-                                        ["git", "-C", str(rp), "reset", "HEAD", "--", "dist"],
-                                        capture_output=True,
-                                        text=True,
-                                        check=False,
-                                        timeout=10,
-                                    )
-                                    subprocess.run(
-                                        ["git", "-C", str(rp), "checkout", "HEAD", "--", "dist"],
-                                        capture_output=True,
-                                        text=True,
-                                        check=False,
-                                        timeout=10,
-                                    )
-                                    healed_tenant_trees += 1
-                        finally:
+                        # Relocate any legacy untracked content/overlays/*.json into .agy/overlays/
+                        legacy_ov_dir = rp / "content" / "overlays"
+                        if legacy_ov_dir.is_dir():
+                            target_ov_dir = rp / ".agy" / "overlays"
+                            target_ov_dir.mkdir(parents=True, exist_ok=True)
+                            for ov_file in list(legacy_ov_dir.glob("*.json")):
+                                shutil.move(str(ov_file), str(target_ov_dir / ov_file.name))
+                                healed_tenant_trees += 1
                             try:
-                                if lock_fd is not None:
-                                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                                    lock_fd.close()
+                                legacy_ov_dir.rmdir()
+                                if (rp / "content").is_dir() and not any((rp / "content").iterdir()):
+                                    (rp / "content").rmdir()
                             except OSError:
                                 pass
-                    elif lock_fd is not None:
+
+                        # Reconcile tracked .agy/runs files (test repair records or concurrency logs force-committed by legacy factory runs)
+                        tracked_agy = subprocess.run(
+                            ["git", "-C", str(rp), "ls-files", ".agy/runs"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=5,
+                        )
+                        if tracked_agy.returncode == 0 and tracked_agy.stdout.strip():
+                            if untrack_agy_runs:
+                                subprocess.run(
+                                    ["git", "-C", str(rp), "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=10,
+                                )
+                                healed_tenant_trees += 1
+                            else:
+                                agy_st = subprocess.run(
+                                    ["git", "-C", str(rp), "status", "--porcelain", "--", ".agy/runs"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=5,
+                                )
+                                if agy_st.returncode == 0 and agy_st.stdout.strip():
+                                    subprocess.run(
+                                        ["git", "-C", str(rp), "reset", "HEAD", "--", ".agy/runs"],
+                                        capture_output=True,
+                                        text=True,
+                                        check=False,
+                                        timeout=10,
+                                    )
+                                    subprocess.run(
+                                        ["git", "-C", str(rp), "checkout", "HEAD", "--", ".agy/runs"],
+                                        capture_output=True,
+                                        text=True,
+                                        check=False,
+                                        timeout=10,
+                                    )
+                                    healed_tenant_trees += 1
+
+                        # Restore any uncommitted/staged mutations in read-only compiled dist/
+                        # only when restore_tenant_dist=True and substrate_lock.json is not pending release
+                        if restore_tenant_dist:
+                            lock_st = subprocess.run(
+                                ["git", "-C", str(rp), "status", "--porcelain", "--", "substrate_lock.json"],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            lock_dirty = bool(lock_st.returncode == 0 and lock_st.stdout.strip())
+                            dist_st = subprocess.run(
+                                ["git", "-C", str(rp), "status", "--porcelain", "--", "dist"],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            if not lock_dirty and dist_st.returncode == 0 and dist_st.stdout.strip():
+                                subprocess.run(
+                                    ["git", "-C", str(rp), "reset", "HEAD", "--", "dist"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=10,
+                                )
+                                subprocess.run(
+                                    ["git", "-C", str(rp), "checkout", "HEAD", "--", "dist"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=10,
+                                )
+                                healed_tenant_trees += 1
+                    finally:
                         try:
-                            lock_fd.close()
+                            if lock_fd is not None:
+                                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                                lock_fd.close()
+                            if (tenant_repos is not None or ws != Path("/home/ubuntuadmin/projects")) and lock_path.exists():
+                                lock_path.unlink(missing_ok=True)
                         except OSError:
                             pass
+                elif lock_fd is not None:
+                    try:
+                        lock_fd.close()
+                    except OSError:
+                        pass
 
-                st_res = subprocess.run(
-                    ["git", "-C", str(rp), "status", "--porcelain"],
+            st_res = subprocess.run(
+                ["git", "-C", str(rp), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if st_res.returncode == 0 and not st_res.stdout.strip():
+                for failed_marker in (rp / ".agy").glob("FAILED.*_factory"):
+                    try:
+                        failed_marker.unlink()
+                    except OSError:
+                        pass
+                stash_res = subprocess.run(
+                    ["git", "-C", str(rp), "stash", "list"],
                     capture_output=True,
                     text=True,
                     check=False,
                     timeout=5,
                 )
-                if st_res.returncode == 0 and not st_res.stdout.strip():
-                    for failed_marker in (rp / ".agy").glob("FAILED.*_factory"):
-                        try:
-                            failed_marker.unlink()
-                        except OSError:
-                            pass
-                    stash_res = subprocess.run(
-                        ["git", "-C", str(rp), "stash", "list"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=5,
-                    )
-                    if stash_res.returncode == 0 and stash_res.stdout.strip():
-                        lines = stash_res.stdout.strip().splitlines()
-                        for line in reversed(lines):
-                            if any(
-                                tag in line
-                                for tag in (
-                                    "agy-failed-run-factory",
-                                    "agy-aborted-factory",
-                                    "agy-success-cleanup-factory",
-                                    "agy-pre-merge-stash-",
-                                )
-                            ):
-                                ref = line.split(":", 1)[0].strip()
-                                drop_res = subprocess.run(
-                                    ["git", "-C", str(rp), "stash", "drop", ref],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False,
-                                    timeout=5,
-                                )
-                                if drop_res.returncode == 0:
-                                    dropped_stashes += 1
-            except Exception:
-                pass
+                if stash_res.returncode == 0 and stash_res.stdout.strip():
+                    lines = stash_res.stdout.strip().splitlines()
+                    for line in reversed(lines):
+                        if any(
+                            tag in line
+                            for tag in (
+                                "agy-failed-run-factory",
+                                "agy-aborted-factory",
+                                "agy-success-cleanup-factory",
+                                "agy-pre-merge-stash-",
+                            )
+                        ):
+                            ref = line.split(":", 1)[0].strip()
+                            drop_res = subprocess.run(
+                                ["git", "-C", str(rp), "stash", "drop", ref],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            if drop_res.returncode == 0:
+                                dropped_stashes += 1
+        except Exception:
+            pass
 
     return {
         "status": "PASS",
@@ -2768,4 +3000,3 @@ def reconcile_workspace_tracking_state(
         "dropped_stashes": dropped_stashes,
         "healed_tenant_trees": healed_tenant_trees,
     }
-

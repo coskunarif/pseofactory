@@ -3126,8 +3126,12 @@ class MaintenanceLifecycle:
                 )
             ):
                 try:
-                    from pseofactory.gitops import reconcile_workspace_tracking_state
-                    reconcile_workspace_tracking_state()
+                    from pseofactory.gitops import (
+                        reconcile_workspace_tracking_state,
+                        sync_tenant_test_isolation_guards,
+                    )
+                    sync_tenant_test_isolation_guards(adapter.repo_path)
+                    reconcile_workspace_tracking_state(untrack_agy_runs=True)
                 except Exception:
                     pass
                 if (Path(adapter.repo_path) / "functions" / "r").is_dir():
@@ -3624,7 +3628,10 @@ class MaintenanceLifecycle:
                         )
                         if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
                             from pseofactory.gitops import reconcile_workspace_tracking_state
-                            reconcile_workspace_tracking_state()
+                            reconcile_workspace_tracking_state(
+                                restore_tenant_dist=enable_gitops,
+                                untrack_agy_runs=not enable_gitops,
+                            )
                     except Exception:
                         pass
             else:
