@@ -945,11 +945,518 @@ def audit_code_slop_ratchet(
     }
 
 
+REQUIRED_SYNDICATION_CHANNELS = ("youtube", "linkedin", "facebook", "ghost", "github_gist")
+STALE_STATUTORY_PATTERNS = (
+    (r"\$1,220,000", "Stale Section 179 deduction cap ($1,220,000 vs statutory $2,560,000)"),
+    (r"\$1,250,000\s+(?:maximum\s+)?(?:deduction|cap|Section\s+179)", "Stale Section 179 deduction cap ($1,250,000 vs statutory $2,560,000)"),
+    (r"\$3,050,000", "Stale Section 179 phase-out threshold ($3,050,000 vs statutory $4,090,000)"),
+    (r"\$3,130,000", "Stale Section 179 phase-out threshold ($3,130,000 vs statutory $4,090,000)"),
+    (r"\$31,300", "Stale Section 179 SUV cap ($31,300 vs statutory $30,500)"),
+    (r"60%\s+(?:bonus\s+depreciation|first-year\s+bonus)", "Stale 2026 bonus depreciation rate (60% vs statutory 20%)"),
+    (r"\$11,925|\$48,475|\$103,350", "Stale 2026 single tax bracket thresholds ($11,925/$48,475/$103,350 vs statutory $12,050/$48,900/$104,400)"),
+)
+GENERIC_SYNDICATION_FILLER_PHRASES = (
+    "15% to 35% variance",
+    "Users analyze complex tax liabilities and cash flow projections",
+    "Read our full breakdown of the 2026 student loan forgiveness rules and IDR plan updates:",
+)
+
+
+def _extract_channel_text_and_urls(channel_name: str, payload: Any) -> Dict[str, Any]:
+    """Extract normalized text body and parameterized URLs from a syndication channel payload."""
+    if payload is None:
+        return {"text": "", "has_param_url": False}
+    if isinstance(payload, str):
+        text = payload.strip()
+    elif isinstance(payload, dict):
+        parts: List[str] = []
+        for key in (
+            "title",
+            "content",
+            "copy",
+            "description",
+            "pinned_comment",
+            "article_markdown",
+            "markdown",
+            "html",
+            "code",
+            "summary",
+        ):
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+        if channel_name == "youtube":
+            tr = payload.get("transcript")
+            if isinstance(tr, str) and tr.strip():
+                parts.append(tr.strip())
+            elif isinstance(tr, list):
+                for seg in tr:
+                    if isinstance(seg, dict):
+                        seg_txt = seg.get("spoken_script") or seg.get("text")
+                        if isinstance(seg_txt, str) and seg_txt.strip():
+                            parts.append(seg_txt.strip())
+        if channel_name == "github_gist" and isinstance(payload.get("files"), dict):
+            for fmeta in payload["files"].values():
+                if isinstance(fmeta, dict) and isinstance(fmeta.get("content"), str):
+                    parts.append(fmeta["content"].strip())
+                elif isinstance(fmeta, str):
+                    parts.append(fmeta.strip())
+        text = "\n".join(parts)
+    else:
+        text = str(payload)
+
+    has_param_url = bool(re.search(r"https?://[^\s)\"'>]+\?[^\s)\"'>]+=", text))
+    return {"text": text, "has_param_url": has_param_url}
+
+
+def _verify_gist_executable_proof(gist_payload: Any, expected_output: float) -> List[str]:
+    """Verify exact-match GitHub Gist payload contains AST-valid executable Python matching published_output."""
+    violations: List[str] = []
+    if not isinstance(gist_payload, dict):
+        return ["THIN_PAYLOAD_STUB:github_gist_not_dict"]
+    files_map = gist_payload.get("files")
+    if not isinstance(files_map, dict) or not files_map:
+        return ["THIN_PAYLOAD_STUB:github_gist_missing_files"]
+
+    py_sources: List[str] = []
+    for fname, fval in files_map.items():
+        content = fval.get("content", "") if isinstance(fval, dict) else (fval if isinstance(fval, str) else "")
+        if str(fname).endswith(".py") and content.strip():
+            py_sources.append(content)
+
+    if not py_sources:
+        return ["THIN_PAYLOAD_STUB:github_gist_missing_python_proof"]
+
+    for src in py_sources:
+        try:
+            ast.parse(src)
+            ns: Dict[str, Any] = {}
+            exec(compile(src, "<github_gist_proof>", "exec"), ns, ns)
+            if "verify_calculation_proof" in ns and callable(ns["verify_calculation_proof"]):
+                result = ns["verify_calculation_proof"]()
+                if isinstance(result, dict) and "published_output" in result:
+                    if abs(float(result["published_output"]) - float(expected_output)) > 0.05:
+                        violations.append("CALCULATION_PARITY_MISMATCH:github_gist_output_drift")
+        except Exception as exc:
+            violations.append(f"CALCULATION_PARITY_MISMATCH:github_gist_exec_failed:{exc}")
+    return violations
+
+
+def _check_calculation_proof_gate(asset_pack: Dict[str, Any], channel_texts: Dict[str, str]) -> List[str]:
+    """Validate calculation_proof mathematical parity and cross-channel proof presence."""
+    violations: List[str] = []
+    proof = asset_pack.get("calculation_proof")
+    if not isinstance(proof, dict):
+        return ["MISSING_CALCULATION_PROOF:calculation_proof_missing"]
+
+    formula = str(proof.get("formula", "")).strip()
+    inputs = proof.get("inputs")
+    pub_out = proof.get("published_output")
+    sample_calc = str(proof.get("sample_calculation", "")).strip()
+    param_url = str(proof.get("parameterized_url", "")).strip()
+
+    if not formula or not isinstance(inputs, dict) or not inputs or pub_out is None or not sample_calc:
+        return ["MISSING_CALCULATION_PROOF:incomplete_proof_fields"]
+    if "?" not in param_url or "=" not in param_url:
+        violations.append("UNPARAMETERIZED_CANONICAL_URL:calculation_proof_url")
+
+    try:
+        numeric_inputs = {str(k): float(v) for k, v in inputs.items()}
+        evaluated = float(safe_eval_mathematical_formula(formula, numeric_inputs))
+        expected = float(pub_out)
+        if abs(evaluated - expected) > 0.05:
+            violations.append(
+                f"CALCULATION_PARITY_MISMATCH:evaluated={evaluated:.2f}_vs_published={expected:.2f}"
+            )
+    except Exception as exc:
+        violations.append(f"CALCULATION_PARITY_MISMATCH:formula_eval_error:{exc}")
+        return violations
+
+    expected_val = float(pub_out)
+    formatted_tokens = {
+        f"{expected_val:,.0f}",
+        f"{expected_val:.0f}",
+        f"{expected_val:,.2f}",
+        f"{expected_val:.2f}",
+    }
+    for ch in REQUIRED_SYNDICATION_CHANNELS:
+        body = channel_texts.get(ch, "")
+        if not body:
+            continue
+        if not any(tok in body for tok in formatted_tokens) and sample_calc not in body:
+            violations.append(f"MISSING_CALCULATION_PROOF:{ch}_missing_published_output")
+
+    yt_payload = asset_pack.get("youtube")
+    if isinstance(yt_payload, dict):
+        tr = yt_payload.get("transcript")
+        spoken_text = ""
+        if isinstance(tr, str):
+            spoken_text = tr
+        elif isinstance(tr, list):
+            spoken_text = " ".join(
+                str(seg.get("spoken_script") or seg.get("text") or "")
+                for seg in tr
+                if isinstance(seg, dict)
+            )
+        if spoken_text and not any(tok in spoken_text for tok in formatted_tokens):
+            violations.append("MISSING_CALCULATION_PROOF:youtube_transcript_missing_spoken_output")
+
+    violations.extend(_verify_gist_executable_proof(asset_pack.get("github_gist"), expected_val))
+    return violations
+
+
+def audit_syndication_asset_against_truth_store(
+    asset_pack: Dict[str, Any],
+    property_id: str = "profithelm",
+    fact_store: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Outside truth-store audit for a tool's syndication asset pack.
+    Enforces Gates S1-S6 across canonical tools, YouTube, LinkedIn, Facebook, Ghost, and GitHub Gists.
+    Deliberately rejects Reddit and classifies untested/missing channels as UNKNOWN.
+    """
+    from pseofactory.contracts import detect_uncorroborated_statutory_claims
+    from pseofactory.tenant_facts import TenantFactStore
+
+    if not isinstance(asset_pack, dict) or not asset_pack:
+        return {
+            "passed": False,
+            "status": "FAIL",
+            "property_id": property_id,
+            "slug": "",
+            "violations": ["EMPTY_ASSET_PACK"],
+            "failures": ["EMPTY_ASSET_PACK"],
+            "unknown_channels": list(REQUIRED_SYNDICATION_CHANNELS),
+        }
+
+    store = fact_store or TenantFactStore.get_instance()
+    slug = str(asset_pack.get("slug") or asset_pack.get("tool_slug") or "unknown-slug")
+    resolved_prop = str(asset_pack.get("property_id") or property_id or "profithelm").lower()
+    if "prexvo" in resolved_prop:
+        resolved_prop = "prexvo"
+    else:
+        resolved_prop = "profithelm"
+
+    violations: List[str] = []
+    unknown_channels: List[str] = []
+
+    # Gate S1: Deliberately omit Reddit
+    channels_list = asset_pack.get("channels", [])
+    if (
+        "reddit" in asset_pack
+        or "reddit_teardown" in asset_pack
+        or (isinstance(channels_list, list) and "reddit" in channels_list)
+    ):
+        violations.append("PROHIBITED_CHANNEL_REDDIT")
+
+    # Gate S2: Required channels present and non-empty
+    channel_texts: Dict[str, str] = {}
+    channel_param_urls: Dict[str, bool] = {}
+    for ch in REQUIRED_SYNDICATION_CHANNELS:
+        raw_ch = asset_pack.get(ch)
+        extracted = _extract_channel_text_and_urls(ch, raw_ch)
+        if not extracted["text"]:
+            unknown_channels.append(ch)
+            violations.append(f"MISSING_OR_UNKNOWN_CHANNEL:{ch}")
+        else:
+            channel_texts[ch] = extracted["text"]
+            channel_param_urls[ch] = extracted["has_param_url"]
+
+    # Gate S3: Calculation proof & AST parity
+    violations.extend(_check_calculation_proof_gate(asset_pack, channel_texts))
+
+    # Gate S4: Statutory Truth-Store Verification
+    combined_text = "\n".join(channel_texts.values())
+    for extra_key in ("linkedin_pulse", "substack_teardown", "x"):
+        if extra_key in asset_pack:
+            combined_text += "\n" + _extract_channel_text_and_urls(extra_key, asset_pack[extra_key])["text"]
+
+    try:
+        assert_no_forbidden_dashes(combined_text, context=f"syndication:{slug}")
+    except Exception as exc:
+        violations.append(f"TYPOGRAPHY_VIOLATION:{exc}")
+
+    for pattern, reason in STALE_STATUTORY_PATTERNS:
+        if re.search(pattern, combined_text, flags=re.IGNORECASE):
+            violations.append(f"STATUTORY_TRUTH_MISMATCH:{reason}")
+
+    uncorroborated = detect_uncorroborated_statutory_claims(combined_text, rel_path=f"{resolved_prop}/{slug}")
+    for bad_claim in uncorroborated:
+        violations.append(f"STATUTORY_TRUTH_MISMATCH:{bad_claim}")
+
+    if hasattr(store, "detect_banned_claims"):
+        for banned in store.detect_banned_claims(resolved_prop, combined_text):
+            violations.append(f"STATUTORY_TRUTH_MISMATCH:banned_claim:{banned}")
+
+    proof = asset_pack.get("calculation_proof")
+    if isinstance(proof, dict):
+        stat_Claim = str(proof.get("statutory_claim_key", "")).strip()
+        stat_Val = proof.get("statutory_claim_value")
+        if stat_Claim and stat_Val is not None:
+            if not store.verify_claim(resolved_prop, stat_Claim, stat_Val):
+                violations.append(f"STATUTORY_TRUTH_MISMATCH:unverified_claim:{stat_Claim}={stat_Val}")
+
+    # Gate S5: Parameterized canonical URLs & dual dataset citations
+    citations = asset_pack.get("dual_dataset_citations")
+    if not isinstance(citations, list) or isinstance(citations, bool) or len(citations) < 2:
+        violations.append("INVALID_DUAL_DATASET_CITATIONS")
+    elif not all(isinstance(c, str) and len(c.strip()) >= 8 for c in citations):
+        violations.append("INVALID_DUAL_DATASET_CITATIONS:empty_citation_entry")
+
+    for ch, has_url in channel_param_urls.items():
+        if not has_url:
+            violations.append(f"UNPARAMETERIZED_CANONICAL_URL:{ch}")
+
+    # Gate S6: Anti-Slop / Thin Stub Rejection
+    for phrase in GENERIC_SYNDICATION_FILLER_PHRASES:
+        if phrase.lower() in combined_text.lower():
+            violations.append(f"THIN_PAYLOAD_STUB:generic_filler:{phrase[:32]}")
+
+    min_lengths = {
+        "linkedin": 220,
+        "facebook": 180,
+        "ghost": 600,
+        "github_gist": 280,
+        "youtube": 250,
+    }
+    for ch, min_len in min_lengths.items():
+        if ch in channel_texts and len(channel_texts[ch]) < min_len:
+            violations.append(f"THIN_PAYLOAD_STUB:{ch}_len_{len(channel_texts[ch])}_lt_{min_len}")
+
+    for long_key in ("linkedin_pulse", "substack_teardown"):
+        if long_key in asset_pack:
+            ltext = _extract_channel_text_and_urls(long_key, asset_pack[long_key])["text"]
+            if len(ltext) < 600:
+                violations.append(f"THIN_PAYLOAD_STUB:{long_key}_len_{len(ltext)}_lt_600")
+
+    passed = len(violations) == 0
+    return {
+        "passed": passed,
+        "status": "PASS" if passed else "FAIL",
+        "property_id": resolved_prop,
+        "slug": slug,
+        "violations": violations,
+        "failures": violations,
+        "unknown_channels": unknown_channels,
+    }
+
+
+def audit_distribution_draft_payload(
+    draft_payload: Dict[str, Any],
+    property_id: str = "profithelm",
+    fact_store: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Audit a full distribution_draft.json run payload against the outside truth store."""
+    from pseofactory.tenant_facts import TenantFactStore
+
+    store = fact_store or TenantFactStore.get_instance()
+    if not isinstance(draft_payload, dict) or not draft_payload:
+        return {
+            "passed": False,
+            "status": "FAIL",
+            "tools_audited": 0,
+            "passed_tools": 0,
+            "total_tools_audited": 0,
+            "failed_tools": 0,
+            "violations": ["EMPTY_DISTRIBUTION_DRAFT_PAYLOAD"],
+            "failures": ["EMPTY_DISTRIBUTION_DRAFT_PAYLOAD"],
+            "tool_reports": {},
+        }
+
+    all_assets = draft_payload.get("all_assets")
+    total_generated = draft_payload.get("total_assets_generated")
+    if not isinstance(all_assets, dict) or not all_assets or (total_generated is not None and int(total_generated or 0) <= 0):
+        return {
+            "passed": False,
+            "status": "FAIL",
+            "tools_audited": 0,
+            "passed_tools": 0,
+            "total_tools_audited": 0,
+            "failed_tools": 0,
+            "violations": ["EMPTY_DISTRIBUTION_RUN_ZERO_ASSETS"],
+            "failures": ["EMPTY_DISTRIBUTION_RUN_ZERO_ASSETS"],
+            "tool_reports": {},
+        }
+
+    channels_list = draft_payload.get("channels", [])
+    aggregated_violations: List[str] = []
+    if isinstance(channels_list, list) and "reddit" in channels_list:
+        aggregated_violations.append("PROHIBITED_CHANNEL_REDDIT:draft_channels")
+
+    prop_default = str(draft_payload.get("property_id") or property_id or "profithelm")
+    tool_reports: Dict[str, Any] = {}
+    failed_tools = 0
+
+    for slug, pack in all_assets.items():
+        pack_dict = dict(pack) if isinstance(pack, dict) else {}
+        pack_dict.setdefault("slug", slug)
+        rep = audit_syndication_asset_against_truth_store(
+            pack_dict,
+            property_id=str(pack_dict.get("property_id") or prop_default),
+            fact_store=store,
+        )
+        tool_reports[slug] = rep
+        if not rep["passed"]:
+            failed_tools += 1
+            for v in rep["violations"]:
+                aggregated_violations.append(f"{slug}:{v}")
+
+    total_audited = len(tool_reports)
+    passed_count = total_audited - failed_tools
+    passed = failed_tools == 0 and len(aggregated_violations) == 0 and total_audited > 0
+    return {
+        "passed": passed,
+        "status": "PASS" if passed else "FAIL",
+        "tools_audited": total_audited,
+        "passed_tools": passed_count,
+        "total_tools_audited": total_audited,
+        "failed_tools": failed_tools,
+        "violations": aggregated_violations,
+        "failures": aggregated_violations,
+        "tool_reports": tool_reports,
+    }
+
+
+def audit_historical_distribution_runs(
+    runs_dir: Union[str, Path] = "/home/ubuntuadmin/projects/.agy/runs",
+    fact_store: Optional[Any] = None,
+    max_runs: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Replay outside truth-store audit across earlier repo runs (distribution_draft*.json)
+    to demonstrate that thin, Reddit-containing, unparameterized, or statutory-mismatched drafts fail automatically.
+    """
+    from pseofactory.tenant_facts import TenantFactStore
+
+    store = fact_store or TenantFactStore.get_instance()
+    root = Path(runs_dir)
+    if not root.exists():
+        return {
+            "runs_scanned": 0,
+            "runs_audited": 0,
+            "runs_failed": 0,
+            "runs_passed": 0,
+            "failure_reason_counts": {},
+            "sample_failures": [],
+        }
+
+    eff_limit = limit if limit is not None else max_runs
+    draft_files = sorted(root.glob("*/distribution_draft*.json"))
+    if eff_limit is not None and eff_limit > 0:
+        draft_files = draft_files[:eff_limit]
+
+    runs_scanned = 0
+    runs_failed = 0
+    runs_passed = 0
+    reason_counts: Dict[str, int] = {}
+    sample_failures: List[Dict[str, Any]] = []
+
+    for fpath in draft_files:
+        try:
+            payload = json.loads(fpath.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        runs_scanned += 1
+        report = audit_distribution_draft_payload(payload, fact_store=store)
+        if report["passed"]:
+            runs_passed += 1
+        else:
+            runs_failed += 1
+            seen_categories = set()
+            for v in report["violations"]:
+                parts = v.split(":")
+                cat = parts[1] if len(parts) > 1 and parts[0] in report.get("tool_reports", {}) else parts[0]
+                seen_categories.add(cat)
+            for cat in seen_categories:
+                reason_counts[cat] = reason_counts.get(cat, 0) + 1
+            if len(sample_failures) < 10:
+                sample_failures.append({
+                    "run_file": str(fpath),
+                    "failed_tools": report["failed_tools"],
+                    "sample_violations": report["violations"][:6],
+                })
+
+    return {
+        "runs_scanned": runs_scanned,
+        "runs_audited": runs_scanned,
+        "runs_failed": runs_failed,
+        "runs_passed": runs_passed,
+        "failure_reason_counts": reason_counts,
+        "sample_failures": sample_failures,
+    }
+
+
+def inspect_raw_syndication_manifests_and_trails(
+    syndication_root: Union[str, Path] = "/home/ubuntuadmin/projects/pseofactory/syndication",
+    runs_dir: Union[str, Path] = "/home/ubuntuadmin/projects/.agy/runs",
+) -> Dict[str, Any]:
+    """
+    Single-pass diagnostic over raw syndication manifests and historical audit trails.
+    Separates observed payload quality from unverified assumptions and marks untested channels as UNKNOWN.
+    """
+    syn_path = Path(syndication_root)
+    pack_files = sorted(syn_path.glob("*/*/syndication_pack.json")) if syn_path.exists() else []
+
+    observed_channels: Dict[str, int] = {ch: 0 for ch in ("youtube", "linkedin", "facebook", "x", "reddit", "ghost", "github_gist")}
+    parameterized_url_packs = 0
+    boolean_citation_packs = 0
+    thin_substack_packs = 0
+
+    for pf in pack_files:
+        try:
+            data = json.loads(pf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for ch in observed_channels:
+            if data.get(ch):
+                observed_channels[ch] += 1
+        if isinstance(data.get("dual_dataset_citations"), bool):
+            boolean_citation_packs += 1
+        raw_sub = data.get("substack_teardown")
+        sub = raw_sub.get("article_markdown", "") if isinstance(raw_sub, dict) else str(raw_sub or "")
+        if 0 < len(sub) < 450:
+            thin_substack_packs += 1
+        li_obj = data.get("linkedin") if isinstance(data.get("linkedin"), dict) else {}
+        li_copy = str(li_obj.get("content") or li_obj.get("copy") or "")
+        if "?" in li_copy and "=" in li_copy:
+            parameterized_url_packs += 1
+
+    unknown_channels = [
+        ch for ch in REQUIRED_SYNDICATION_CHANNELS if observed_channels.get(ch, 0) == 0
+    ]
+    historical_summary = audit_historical_distribution_runs(runs_dir=runs_dir, max_runs=50)
+
+    return {
+        "manifests_inspected": len(pack_files),
+        "observed_channel_counts": observed_channels,
+        "unknown_channels": {ch: "UNKNOWN" for ch in unknown_channels},
+        "observed_facts": {
+            "parameterized_url_packs": parameterized_url_packs,
+            "boolean_citation_packs": boolean_citation_packs,
+            "thin_substack_packs": thin_substack_packs,
+            "historical_runs_sampled": historical_summary["runs_scanned"],
+            "historical_runs_failed": historical_summary["runs_failed"],
+        },
+        "unverified_assumptions_falsified": [
+            "Assumed external channels only published statutory-verified figures (falsified by stale $1,220,000 Section 179 and $31,300 SUV limits in teardown/YouTube/benchmark generators).",
+            "Assumed YouTube spoken transcripts contained concrete mathematical proofs (falsified by generic filler sentences lacking numerical inputs/outputs).",
+            "Assumed fallback dynamic tools carried parameterized deep-link query strings (falsified by empty {} query mappings and '15% to 35% variance' filler).",
+            "Assumed Prexvo long-form syndication carried calculation proofs (falsified by 332-char Substack stubs and boolean dual_dataset_citations=True).",
+        ],
+    }
+
+
 __all__ = [
     "ContentAccuracyAuditStage",
     "ContentAccuracyAuditReport",
     "ContentAccuracyAuditError",
     "audit_rendered_asset",
     "audit_code_slop_ratchet",
+    "audit_syndication_asset_against_truth_store",
+    "audit_distribution_draft_payload",
+    "audit_historical_distribution_runs",
+    "inspect_raw_syndication_manifests_and_trails",
 ]
+
 

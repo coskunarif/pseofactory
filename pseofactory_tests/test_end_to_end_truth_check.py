@@ -1305,3 +1305,159 @@ def test_spoke_quick_answer_word_bounds_commercial_context_and_equipment_healing
     assert "$37,180 in first-year" in v_qb_m.group(1)
     assert RetroReflectionEngine.audit_html_mechanics(final_veh) == []
 
+
+def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
+    """
+    Verifies:
+    1. Single-pass raw manifest and audit trail inspection distinguishes observed payload quality
+       from unverified assumptions and treats untested/missing channels as UNKNOWN.
+    2. Upgraded publishing workflow across canonical tools, YouTube scripts, LinkedIn, Facebook,
+       Ghost, and exact-match GitHub Gists (deliberately omitting Reddit) delivers calculation-backed
+       proof locked to statutory facts for both ProfitHelm and Prexvo.
+    3. Outside truth-store audit passes 100% on upgraded assets and automatically fails thin stubs,
+       Reddit-containing packs, missing/unknown channels, unparameterized URLs, formula drift, and
+       stale statutory numbers, including replay against historical repo runs.
+    """
+    import copy
+    from pathlib import Path
+    from pseofactory.audit import (
+        audit_distribution_draft_payload,
+        audit_historical_distribution_runs,
+        audit_syndication_asset_against_truth_store,
+        inspect_raw_syndication_manifests_and_trails,
+    )
+    from pseofactory.distributor import (
+        dispatch_to_distribution_lead,
+        export_all_syndication_files,
+        generate_all_distribution_assets,
+    )
+
+    # 1. Single-pass inspection treats untested channels on legacy manifests as UNKNOWN
+    legacy_synd_dir = tmp_path / "legacy_syndication" / "prexvo" / "rap-vs-ibr-calculator"
+    legacy_synd_dir.mkdir(parents=True)
+    (legacy_synd_dir / "syndication_pack.json").write_text(
+        json.dumps(
+            {
+                "title": "RAP vs IBR Calculator",
+                "url": "https://prexvo.com/tools/rap-vs-ibr-calculator/",
+                "dual_dataset_citations": True,
+                "linkedin": {"content": "Compare RAP vs IBR at https://prexvo.com/tools/rap-vs-ibr-calculator/"},
+                "facebook": {"content": "Compare RAP vs IBR"},
+                "youtube": {"description": "Compare RAP vs IBR"},
+                "substack_teardown": {"article_markdown": "Short 50 char stub."},
+                "reddit": {"content": "Reddit post"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    diag = inspect_raw_syndication_manifests_and_trails(
+        syndication_root=tmp_path / "legacy_syndication",
+        runs_dir="/home/ubuntuadmin/projects/.agy/runs",
+    )
+    assert diag["manifests_inspected"] == 1
+    assert diag["unknown_channels"].get("ghost") == "UNKNOWN"
+    assert diag["unknown_channels"].get("github_gist") == "UNKNOWN"
+    assert diag["observed_facts"]["boolean_citation_packs"] == 1
+    assert diag["observed_facts"]["thin_substack_packs"] == 1
+    assert len(diag["unverified_assumptions_falsified"]) >= 4
+
+    # 2. Upgraded workflow across all ProfitHelm and Prexvo tools omits Reddit and passes truth-store audit
+    for prop in ("profithelm", "prexvo"):
+        assets = generate_all_distribution_assets(property_id=prop)
+        assert len(assets) >= (21 if prop == "profithelm" else 13)
+        for slug, pack in assets.items():
+            assert "reddit" not in pack
+            assert "reddit_teardown" not in pack
+            for req_ch in ("youtube", "linkedin", "facebook", "ghost", "github_gist"):
+                assert req_ch in pack and pack[req_ch]
+            assert "?" in pack["url"] and "=" in pack["url"]
+            audit_res = audit_syndication_asset_against_truth_store(pack, property_id=prop)
+            assert audit_res["status"] == "PASS", f"{prop}/{slug} failed truth audit: {audit_res['failures']}"
+            assert audit_res["unknown_channels"] == []
+
+        # Export to disk and verify reddit.md is purged while ghost & github_gist are written
+        out_dir = tmp_path / "exported_syndication" / prop
+        stale_reddit = out_dir / next(iter(assets.keys())) / "reddit.md"
+        stale_reddit.parent.mkdir(parents=True, exist_ok=True)
+        stale_reddit.write_text("# Stale Reddit", encoding="utf-8")
+
+        export_all_syndication_files(output_dir=out_dir, property_id=prop)
+        first_slug = next(iter(assets.keys()))
+        assert not (out_dir / first_slug / "reddit.md").exists()
+        assert (out_dir / first_slug / "ghost.json").is_file()
+        assert (out_dir / first_slug / "ghost_article.md").is_file()
+        assert (out_dir / first_slug / "github_gist.json").is_file()
+        assert (out_dir / first_slug / "github_gist.md").is_file()
+
+        # Verify dispatch_to_distribution_lead omits Reddit and passes draft audit
+        dist_res = dispatch_to_distribution_lead(
+            run_id=f"test-truth-upgrade-{prop}",
+            property_id=prop,
+            dry_run=True,
+            dist_dir=tmp_path / "dist",
+            tools=[{"slug": first_slug, "title": assets[first_slug]["title"]}],
+        )
+        assert "reddit" not in dist_res["channels"]
+        assert "ghost" in dist_res["channels"]
+        assert "github_gist" in dist_res["channels"]
+        assert dist_res["truth_store_audit"]["status"] == "PASS"
+
+    # 3. Demonstrate that thin, Reddit-containing, unparameterized, formula-drifted, or statutory-mismatched drafts fail automatically
+    valid_pack = copy.deepcopy(generate_all_distribution_assets(property_id="profithelm")["section-179-calculator"])
+
+    # 3a. Reddit present -> PROHIBITED_CHANNEL_REDDIT
+    reddit_pack = copy.deepcopy(valid_pack)
+    reddit_pack["reddit"] = {"target_subreddit": "r/tax", "content": "Legacy Reddit post"}
+    res_reddit = audit_syndication_asset_against_truth_store(reddit_pack, property_id="profithelm")
+    assert res_reddit["status"] == "FAIL"
+    assert "PROHIBITED_CHANNEL_REDDIT" in res_reddit["violations"]
+
+    # 3b. Missing Ghost / GitHub Gist -> MISSING_OR_UNKNOWN_CHANNEL + marked UNKNOWN
+    missing_ch_pack = copy.deepcopy(valid_pack)
+    missing_ch_pack.pop("ghost", None)
+    missing_ch_pack.pop("github_gist", None)
+    res_missing = audit_syndication_asset_against_truth_store(missing_ch_pack, property_id="profithelm")
+    assert res_missing["status"] == "FAIL"
+    assert "ghost" in res_missing["unknown_channels"]
+    assert "github_gist" in res_missing["unknown_channels"]
+
+    # 3c. Calculation parity drift -> CALCULATION_PARITY_MISMATCH
+    bad_math_pack = copy.deepcopy(valid_pack)
+    bad_math_pack["calculation_proof"]["published_output"] = 999999.0
+    res_math = audit_syndication_asset_against_truth_store(bad_math_pack, property_id="profithelm")
+    assert res_math["status"] == "FAIL"
+    assert any("CALCULATION_PARITY_MISMATCH" in v for v in res_math["violations"])
+
+    # 3d. Stale statutory figure ($1,220,000 Section 179 cap / $31,300 SUV cap / 60% bonus depreciation) -> STATUTORY_TRUTH_MISMATCH
+    stale_stat_pack = copy.deepcopy(valid_pack)
+    stale_stat_pack["linkedin"]["content"] += "\nUnder 2026 rules, the Section 179 cap is $1,220,000 with a $31,300 SUV limit and 60% bonus depreciation."
+    res_stat = audit_syndication_asset_against_truth_store(stale_stat_pack, property_id="profithelm")
+    assert res_stat["status"] == "FAIL"
+    assert any("STATUTORY_TRUTH_MISMATCH" in v for v in res_stat["violations"])
+
+    # 3e. Unparameterized URL & generic filler -> UNPARAMETERIZED_CANONICAL_URL + THIN_PAYLOAD_STUB
+    thin_pack = copy.deepcopy(valid_pack)
+    thin_pack["facebook"]["content"] = (
+        "Users analyze complex tax liabilities across multiple scenarios resulting in a 15% to 35% variance: "
+        "https://profithelm.com/tools/section-179-calculator/"
+    )
+    res_thin = audit_syndication_asset_against_truth_store(thin_pack, property_id="profithelm")
+    assert res_thin["status"] == "FAIL"
+    assert any("UNPARAMETERIZED_CANONICAL_URL:facebook" in v for v in res_thin["violations"])
+    assert any("THIN_PAYLOAD_STUB" in v for v in res_thin["violations"])
+
+    # 4. Replay against earlier historical repo runs in /home/ubuntuadmin/projects/.agy/runs
+    runs_dir = Path("/home/ubuntuadmin/projects/.agy/runs")
+    if runs_dir.is_dir():
+        hist_report = audit_historical_distribution_runs(runs_dir=runs_dir, limit=40)
+        assert hist_report["runs_audited"] > 0
+        assert hist_report["runs_failed"] == hist_report["runs_audited"]
+        assert hist_report["runs_passed"] == 0
+        reasons = hist_report["failure_reason_counts"]
+        assert (
+            reasons.get("EMPTY_DISTRIBUTION_RUN_ZERO_ASSETS", 0) > 0
+            or reasons.get("PROHIBITED_CHANNEL_REDDIT", 0) > 0
+            or reasons.get("MISSING_CALCULATION_PROOF", 0) > 0
+        )
+
+

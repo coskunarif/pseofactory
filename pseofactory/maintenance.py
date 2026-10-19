@@ -1749,9 +1749,9 @@ PROFITHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = [
         "slug": "section-179-vehicle-equipment-deduction",
         "title": "Section 179 Commercial Vehicle & Equipment Deduction Calculator",
         "short_title": "Section 179 Vehicle & Equip",
-        "description": "Model combined IRC Section 179 expensing, 60% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+        "description": "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
         "primary_keyword": "section 179 vehicle equipment deduction",
-        "quick_answer": "Under IRC Section 179 and Section 280F, commercial vehicles and machinery used over 50% for qualified business operations capture immediate first-year expensing plus 60% bonus depreciation on remaining basis.",
+        "quick_answer": "Under IRC Section 179 and Section 280F, commercial vehicles and machinery used over 50% for qualified business operations capture immediate first-year expensing (up to $2,560,000) plus 20% bonus depreciation on remaining basis.",
         "category": "Corporate Tax & CapEx",
     },
     {
@@ -7097,11 +7097,31 @@ def _has_pending_downstream_work(
 
     repo_root = Path(getattr(adapter, "repo_path", None) or Path(dist_dir).parent)
 
-    # 1. Check syndication packs
+    # 1. Check syndication packs (must have ghost.json + github_gist.json and zero reddit.md)
     synd_dir = repo_root / "syndication"
+    central_synd = (
+        Path(__file__).resolve().parent.parent / "syndication" / ("prexvo" if adapter.property_id == "prexvo" else "profithelm")
+        if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo")
+        else None
+    )
     for s in built_slugs:
-        if not (synd_dir / s / "syndication_pack.json").is_file():
+        tool_synd = synd_dir / s
+        if (
+            not (tool_synd / "syndication_pack.json").is_file()
+            or not (tool_synd / "ghost.json").is_file()
+            or not (tool_synd / "github_gist.json").is_file()
+            or (tool_synd / "reddit.md").is_file()
+        ):
             return True
+        if central_synd is not None:
+            c_synd = central_synd / s
+            if (
+                not (c_synd / "syndication_pack.json").is_file()
+                or not (c_synd / "ghost.json").is_file()
+                or not (c_synd / "github_gist.json").is_file()
+                or (c_synd / "reddit.md").is_file()
+            ):
+                return True
 
     # 2. Check broadcast ledger
     b_ledger_file = repo_root / ".agy" / "broadcast_ledger.json"

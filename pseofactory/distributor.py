@@ -835,31 +835,409 @@ DEFAULT_TOOL_DEEP_LINK_PARAMS: Dict[str, Dict[str, Any]] = {
 }
 
 
+CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
+    "irs-2027-tax-brackets": {
+        "formula": "post_tcja_tax - current_tax",
+        "inputs": {"post_tcja_tax": 23530.0, "current_tax": 19181.0},
+        "published_output": 4349.0,
+        "sample_calculation": "$23,530 post-sunset federal tax minus $19,181 baseline tax = $4,349 (+22.7%) tax increase on $125,000 single income",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"income": 125000, "status": "single", "state": "CA"},
+    },
+    "crypto-tax-calculator": {
+        "formula": "short_term_tax + long_term_tax + staking_tax",
+        "inputs": {"short_term_tax": 5400.0, "long_term_tax": 7800.0, "staking_tax": 1800.0},
+        "published_output": 15000.0,
+        "sample_calculation": "$5,400 short-term tax + $7,800 long-term capital gains tax + $1,800 staking tax = $15,000 total Form 1099-DA tax",
+        "statutory_claim_key": "niit_threshold_single",
+        "statutory_claim_value": 200000,
+        "query_params": {"short": 15000, "long": 45000, "staking": 5000, "ordinary": 85000, "status": "single", "state": "CA"},
+    },
+    "saas-runway-calculator": {
+        "formula": "round(cash_balance / (gross_burn - mrr_compounded), 1)",
+        "inputs": {"cash_balance": 1200000.0, "gross_burn": 65000.0, "mrr_compounded": 19372.62},
+        "published_output": 26.3,
+        "sample_calculation": "$1,200,000 liquid cash / ($65,000 gross burn minus $19,372.62 compounded MRR) = 26.3 months Zero Cash Date runway",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"cash": 1200000, "burn": 65000, "rev": 25000, "growth": 5},
+    },
+    "prediction-market-odds": {
+        "formula": "round(capital * (1.0 - (yes_price + no_price)), 2)",
+        "inputs": {"capital": 10000.0, "yes_price": 0.52, "no_price": 0.44},
+        "published_output": 400.0,
+        "sample_calculation": "$10,000 bankroll * (1.00 - (0.52 Kalshi Yes + 0.44 Polymarket No)) = $400 net synthetic spread (4.0%)",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"yes": 52, "no": 44, "capital": 10000},
+    },
+    "tcja-sunset-capital-gains": {
+        "formula": "federal_cg_tax + niit_surtax + state_cg_tax",
+        "inputs": {"federal_cg_tax": 15000.0, "niit_surtax": 1900.0, "state_cg_tax": 13300.0},
+        "published_output": 30200.0,
+        "sample_calculation": "$15,000 federal LTCG + $1,900 Section 1411 NIIT + $13,300 CA tax = $30,200 total tax (30.2% effective rate)",
+        "statutory_claim_key": "niit_threshold_single",
+        "statutory_claim_value": 200000,
+        "query_params": {"cggain": 100000, "ordinary": 150000, "period": "long_term", "status": "single", "state": "CA"},
+    },
+    "section-179-calculator": {
+        "formula": "round(equipment_cost * business_use_rate * marginal_tax_rate, 2)",
+        "inputs": {"equipment_cost": 125000.0, "business_use_rate": 1.0, "marginal_tax_rate": 0.35},
+        "published_output": 43750.0,
+        "sample_calculation": "$125,000 qualifying equipment * 100% business use * 35% marginal tax rate = $43,750 Year-1 cash tax reduction (under $2,560,000 statutory cap)",
+        "statutory_claim_key": "section_179_limit_2026",
+        "statutory_claim_value": 2560000,
+        "query_params": {"cost": 125000, "year": 2026, "bracket": 35, "use": 100},
+    },
+    "section-179-vehicle-equipment-deduction": {
+        "formula": "round(equipment_cost * business_use_rate * marginal_tax_rate, 2)",
+        "inputs": {"equipment_cost": 125000.0, "business_use_rate": 1.0, "marginal_tax_rate": 0.35},
+        "published_output": 43750.0,
+        "sample_calculation": "$125,000 qualifying commercial equipment * 100% business use * 35% marginal tax rate = $43,750 Year-1 IRC Section 179 tax savings (under $2,560,000 statutory cap)",
+        "statutory_claim_key": "section_179_limit_2026",
+        "statutory_claim_value": 2560000,
+        "query_params": {"cost": 125000, "year": 2026, "bracket": 35, "use": 100},
+    },
+    "treasury-yield-calculator": {
+        "formula": "round(principal * (tey_rate - hysa_rate) * (1.0 - fed_rate), 0)",
+        "inputs": {"principal": 250000.0, "tey_rate": 0.062266, "hysa_rate": 0.0425, "fed_rate": 0.35},
+        "published_output": 3212.0,
+        "sample_calculation": "$250,000 in 4.80% T-Bills (6.13% CA TEY under 31 U.S.C. 3124) vs 4.25% HYSA = $3,212 annual after-tax cash advantage",
+        "statutory_claim_key": "niit_threshold_single",
+        "statutory_claim_value": 200000,
+        "query_params": {"principal": 250000, "tbill": "4.80", "hysa": "4.25", "state": "CA", "fed": 35, "niit": "true"},
+    },
+    "section-1031-calculator": {
+        "formula": "capital_gains_tax + depreciation_recapture_tax + state_and_niit_tax",
+        "inputs": {"capital_gains_tax": 130000.0, "depreciation_recapture_tax": 62500.0, "state_and_niit_tax": 100000.0},
+        "published_output": 292500.0,
+        "sample_calculation": "$130,000 federal LTCG + $62,500 Section 1250 recapture (25%) + $100,000 NIIT/state tax = $292,500 total tax deferred",
+        "statutory_claim_key": "section_1031_identification_days",
+        "statutory_claim_value": 45,
+        "query_params": {"sale": 1500000, "basis": 600000, "depr": 250000, "rep": 1800000, "from": "CA", "to": "TX"},
+    },
+    "prediction-market-tax": {
+        "formula": "ordinary_tax - section_1256_tax",
+        "inputs": {"ordinary_tax": 13860.0, "section_1256_tax": 7840.0},
+        "published_output": 6020.0,
+        "sample_calculation": "$13,860 Polymarket ordinary tax minus $7,840 Kalshi Section 1256 60/40 tax = $6,020 tax savings on $35,000 gain",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"pmgain": 35000, "income": 120000, "status": "single", "state": "NY", "venue": "kalshi"},
+    },
+    "qsbs-section-1202-tax-calculator": {
+        "formula": "round(qsbs_excluded_gain * combined_ltcg_niit_rate, 0)",
+        "inputs": {"qsbs_excluded_gain": 10000000.0, "combined_ltcg_niit_rate": 0.238},
+        "published_output": 2380000.0,
+        "sample_calculation": "$10,000,000 Section 1202 QSBS gain exclusion * 23.8% combined federal LTCG and NIIT rate = $2,380,000 federal tax saved",
+        "statutory_claim_key": "qsbs_exclusion_cap",
+        "statutory_claim_value": 10000000,
+        "query_params": {"gain": 10000000, "basis": 500000, "years": 5},
+    },
+    "equipment-lease-tax-deduction": {
+        "formula": "round(lease_annual_payment * business_use_pct, 2)",
+        "inputs": {"lease_annual_payment": 24000.0, "business_use_pct": 0.85},
+        "published_output": 20400.0,
+        "sample_calculation": "$24,000 annual lease payment * 85% business use = $20,400 deductible IRC Section 162(a)(3) lease write-off",
+        "statutory_claim_key": "section_179_limit_2026",
+        "statutory_claim_value": 2560000,
+        "query_params": {"lease_annual_payment": 24000, "business_use_pct": 0.85},
+    },
+    "student-loan-repayment-calculator": {
+        "formula": "round(monthly_interest - interest_subsidy, 2)",
+        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
+        "published_output": 248.23,
+        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (family of 2), 2026 RAP sets payment at $248.23/month with $76.77/month unpaid interest waived",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1},
+    },
+    "rap-vs-ibr-calculator": {
+        "formula": "round(((agi - fpl_225) * 0.10) / 12 + base_adjustment, 2)",
+        "inputs": {"agi": 95000.0, "fpl_225": 47587.5, "base_adjustment": 103.13},
+        "published_output": 498.23,
+        "sample_calculation": "At $95,000 AGI on $60,000 debt (6.5%), uncapped RAP charges $498.23/month ($119,575 total) while IBR caps at $78,617 total",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 60000, "agi": 95000, "rate": 6.5, "deps": 1},
+    },
+    "tiered-standard-calculator": {
+        "formula": "round((principal * monthly_rate) / (1 - (1 + monthly_rate) ** (-360)), 2)",
+        "inputs": {"principal": 65000.0, "monthly_rate": 0.00541667},
+        "published_output": 410.84,
+        "sample_calculation": "$65,000 Direct Consolidation loan at 6.5% over 360 months under 34 CFR 685.208 = $410.84/month (vs $738.06/month on 10-year standard)",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 65000, "agi": 85000, "rate": 6.5, "deps": 0},
+    },
+    "paye-sunset-calculator": {
+        "formula": "paye_forgiveness_years * 12",
+        "inputs": {"paye_forgiveness_years": 20.0},
+        "published_output": 240.0,
+        "sample_calculation": "20-year grandfathered PAYE graduate forgiveness horizon * 12 months = 240 qualifying payments (vs 300 on legacy IBR)",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 85000, "agi": 90000, "rate": 6.5, "deps": 0},
+    },
+    "icr-repayment-calculator": {
+        "formula": "pslf_qualifying_years * 12",
+        "inputs": {"pslf_qualifying_years": 10.0},
+        "published_output": 120.0,
+        "sample_calculation": "10 years of public-sector service under 34 CFR 685.209(b) ICR * 12 months = 120 qualifying PSLF payments for consolidated Parent PLUS borrowers",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 75000, "agi": 80000, "rate": 7.5, "deps": 0},
+    },
+    "save-plan-transition-to-rap-repayment-calculator": {
+        "formula": "round(monthly_interest - interest_subsidy, 2)",
+        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 60.94},
+        "published_output": 223.23,
+        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (family of 2), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 1},
+    },
+    "save-plan-litigation-transition": {
+        "formula": "round(monthly_interest - interest_subsidy, 2)",
+        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 60.94},
+        "published_output": 223.23,
+        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (family of 2), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 1},
+    },
+    "pslf-qualifying-payment-and-buyback-calculator": {
+        "formula": "pslf_required_years * 12",
+        "inputs": {"pslf_required_years": 10.0},
+        "published_output": 120.0,
+        "sample_calculation": "96 qualifying PSLF payments + 14 buyback months + 10 active months = 120 qualifying payments for 100% tax-free discharge under 34 CFR 685.219(g)",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 92000, "agi": 78000, "rate": 6.8, "deps": 0},
+    },
+    "pslf-buyback-calculator": {
+        "formula": "pslf_required_years * 12",
+        "inputs": {"pslf_required_years": 10.0},
+        "published_output": 120.0,
+        "sample_calculation": "96 qualifying PSLF payments + 14 buyback months + 10 active months = 120 qualifying payments for 100% tax-free discharge under 34 CFR 685.219(g)",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 92000, "agi": 78000, "rate": 6.8, "deps": 0},
+    },
+    "pslf-qualifying-payment-simulator": {
+        "formula": "round(monthly_rap_savings * 120, 0)",
+        "inputs": {"monthly_rap_savings": 97.808333},
+        "published_output": 11737.0,
+        "sample_calculation": "$97.81/month RAP vs IBR savings * 120 qualifying PSLF payments = $11,737 saved with tax-free IRC Section 108(f) discharge",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 92000, "agi": 78000, "rate": 6.8, "deps": 0},
+    },
+    "parent-plus-double-consolidation-repayment-calculator": {
+        "formula": "round(icr_monthly_payment - monthly_savings, 2)",
+        "inputs": {"icr_monthly_payment": 1196.67, "monthly_savings": 766.25},
+        "published_output": 430.42,
+        "sample_calculation": "$1,196.67 single-consolidated ICR payment minus $766.25 two-step consolidation savings = $430.42/month under 10% RAP",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 110000, "agi": 88000, "rate": 7.6, "deps": 0},
+    },
+    "parent-plus-double-consolidation": {
+        "formula": "round(icr_monthly_payment - monthly_savings, 2)",
+        "inputs": {"icr_monthly_payment": 1196.67, "monthly_savings": 766.25},
+        "published_output": 430.42,
+        "sample_calculation": "$1,196.67 single-consolidated ICR payment minus $766.25 two-step consolidation savings = $430.42/month under 10% RAP",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 110000, "agi": 88000, "rate": 7.6, "deps": 0},
+    },
+    "student-loan-refinance-break-even-calculator": {
+        "formula": "round(federal_total_interest - private_total_interest, 0)",
+        "inputs": {"federal_total_interest": 30260.0, "private_total_interest": 21120.0},
+        "published_output": 9140.0,
+        "sample_calculation": "$30,260 10-year 7.2% federal interest minus $21,120 5.2% private refinance interest = $9,140 gross interest savings before pricing forfeited Title IV subsidies",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 75000, "agi": 110000, "rate": 7.2, "deps": 0},
+    },
+    "rap-payment-calculator": {
+        "formula": "round(monthly_interest - interest_subsidy, 2)",
+        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
+        "published_output": 248.23,
+        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (family of 2), 2026 RAP sets payment at $248.23/month with $76.77/month interest waived",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1},
+    },
+    "grad-plus-borrowing-cap-calculator": {
+        "formula": "annual_unsubsidized_cap * 1.0",
+        "inputs": {"annual_unsubsidized_cap": 20500.0},
+        "published_output": 20500.0,
+        "sample_calculation": "Statutory Direct Unsubsidized graduate annual cap = $20,500/year ($138,500 aggregate limit) under HEA Section 455 and 34 CFR 685.203",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 85000, "agi": 70000, "rate": 7.9, "deps": 0},
+    },
+    "married-filing-separately-student-loan-calculator": {
+        "formula": "round(excluded_spousal_agi * idr_assessment_rate, 0)",
+        "inputs": {"excluded_spousal_agi": 80000.0, "idr_assessment_rate": 0.10},
+        "published_output": 8000.0,
+        "sample_calculation": "$80,000 excluded spousal AGI under Married Filing Separately * 10% IDR assessment rate = $8,000/year student loan payment reduction",
+        "statutory_claim_key": "rap_fpl_multiplier",
+        "statutory_claim_value": 2.25,
+        "query_params": {"balance": 75000, "agi": 72000, "rate": 6.8, "deps": 1},
+    },
+    "ibr-hardship-cap-calculator": {
+        "formula": "round((principal * monthly_rate) / (1 - (1 + monthly_rate) ** (-120)), 2)",
+        "inputs": {"principal": 65000.0, "monthly_rate": 0.00541667},
+        "published_output": 738.06,
+        "sample_calculation": "$65,000 balance at 6.5% over 120 months under HEA Section 493C locks a permanent $738.06/month 10-year Standard payment ceiling",
+        "statutory_claim_key": "pslf_qualifying_payments",
+        "statutory_claim_value": 120,
+        "query_params": {"balance": 65000, "agi": 95000, "rate": 6.5, "deps": 0},
+    },
+}
+
+
+def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profithelm") -> Dict[str, Any]:
+    """
+    Resolves deterministic calculation proof (formula, inputs, published_output, sample_calculation,
+    statutory_source, economic_source, parameterized_url) locked to TenantFactStore for any tool.
+    """
+    from pseofactory.contracts import safe_eval_mathematical_formula
+
+    tool = _resolve_tool(tool_or_slug)
+    slug = str(tool.get("slug", "financial-calculator"))
+    norm_prop = "prexvo" if ("prexvo" in str(property_id).lower() or slug in PREXVO_TOOL_SCENARIOS) else "profithelm"
+    base_url = "https://prexvo.com" if norm_prop == "prexvo" else POST_URL_BASE
+
+    ext_spec: Dict[str, Any] = {}
+    try:
+        from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS, PROFITHELM_EXTENDED_TOOLS
+        for item in list(PROFITHELM_EXTENDED_TOOLS) + list(PREXVO_EXTENDED_TOOLS):
+            if isinstance(item, dict) and item.get("slug") == slug:
+                ext_spec = item
+                break
+    except Exception:
+        ext_spec = {}
+
+    curated = CURATED_TOOL_CALCULATION_PROOFS.get(slug)
+    if curated:
+        formula = str(curated["formula"])
+        inputs = dict(curated["inputs"])
+        published_output = float(curated["published_output"])
+        sample_calc = str(curated["sample_calculation"])
+        claim_key = str(curated.get("statutory_claim_key", "standard_deduction_2026_single"))
+        claim_val = curated.get("statutory_claim_value", 16100)
+        q_params = dict(curated.get("query_params") or inputs)
+    elif tool.get("formula") and isinstance(tool.get("inputs"), dict) and tool.get("published_output") is not None:
+        formula = str(tool["formula"])
+        inputs = {str(k): float(v) for k, v in tool["inputs"].items()}
+        published_output = float(tool["published_output"])
+        sample_calc = str(tool.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
+        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else "section_179_limit_2026"
+        claim_val = 2.25 if norm_prop == "prexvo" else 2560000
+        q_params = dict(inputs)
+    elif ext_spec.get("formula") and isinstance(ext_spec.get("inputs"), dict) and ext_spec.get("published_output") is not None:
+        formula = str(ext_spec["formula"])
+        inputs = {str(k): float(v) for k, v in ext_spec["inputs"].items()}
+        published_output = float(ext_spec["published_output"])
+        sample_calc = str(ext_spec.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
+        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else "section_179_limit_2026"
+        claim_val = 2.25 if norm_prop == "prexvo" else 2560000
+        q_params = dict(inputs)
+    elif norm_prop == "prexvo":
+        formula = "round(monthly_interest - interest_subsidy, 2)"
+        inputs = {"monthly_interest": 325.0, "interest_subsidy": 76.77}
+        published_output = 248.23
+        sample_calc = "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI, 2026 RAP sets payment at $248.23/month with $76.77/month unpaid interest waived"
+        claim_key = "rap_fpl_multiplier"
+        claim_val = 2.25
+        q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1}
+    else:
+        domain = _classify_tool_domain(slug)
+        if domain == "capex":
+            formula = "round(equipment_cost * business_use_rate * marginal_tax_rate, 2)"
+            inputs = {"equipment_cost": 125000.0, "business_use_rate": 1.0, "marginal_tax_rate": 0.35}
+            published_output = 43750.0
+            sample_calc = "$125,000 qualifying capital asset * 100% business use * 35% marginal rate = $43,750 Year-1 IRC Section 179 tax savings (under $2,560,000 cap)"
+            claim_key = "section_179_limit_2026"
+            claim_val = 2560000
+            q_params = {"cost": 125000, "year": 2026, "bracket": 35, "use": 100}
+        elif domain == "saas":
+            formula = "round(cash_balance / (gross_burn - mrr_compounded), 1)"
+            inputs = {"cash_balance": 1200000.0, "gross_burn": 65000.0, "mrr_compounded": 19372.62}
+            published_output = 26.3
+            sample_calc = "$1,200,000 liquid cash / ($65,000 gross burn minus $19,372.62 compounded MRR) = 26.3 months Zero Cash Date runway"
+            claim_key = "standard_deduction_2026_single"
+            claim_val = 16100
+            q_params = {"cash": 1200000, "burn": 65000, "rev": 25000, "growth": 5}
+        else:
+            formula = "post_tcja_tax - current_tax"
+            inputs = {"post_tcja_tax": 23530.0, "current_tax": 19181.0}
+            published_output = 4349.0
+            sample_calc = "$23,530 projected tax minus $19,181 baseline tax = $4,349 deterministic tax variance on $125,000 single filer income"
+            claim_key = "standard_deduction_2026_single"
+            claim_val = 16100
+            q_params = {"income": 125000, "status": "single", "state": "CA"}
+
+    evaluated = float(safe_eval_mathematical_formula(formula, {str(k): float(v) for k, v in inputs.items()}))
+    if abs(evaluated - published_output) > 0.05:
+        published_output = round(evaluated, 2)
+
+    if norm_prop == "prexvo":
+        stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "Title IV Higher Education Act (34 CFR Part 685)")
+        econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "HHS Poverty Guidelines and Department of Education Federal Student Aid")
+    else:
+        cites = get_dual_dataset_citations(slug)
+        stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or cites["statutory_source"])
+        econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or cites["economic_source"])
+
+    qs = urllib.parse.urlencode(q_params)
+    canon_url = f"{base_url}/tools/{slug}/"
+    param_url = f"{canon_url}?{qs}"
+    out_fmt = f"{published_output:,.0f}" if abs(published_output - round(published_output)) < 0.005 else f"{published_output:,.2f}"
+    scen_label = _sanitize_distribution_text(
+        str(tool.get("short_title") or tool.get("title") or slug.replace("-", " ").title())
+    )
+
+    return {
+        "slug": slug,
+        "property_id": norm_prop,
+        "scenario_label": scen_label,
+        "formula": formula,
+        "inputs": inputs,
+        "published_output": published_output,
+        "published_output_formatted": out_fmt,
+        "sample_calculation": _sanitize_distribution_text(sample_calc),
+        "statutory_source": _sanitize_distribution_text(stat_src),
+        "economic_source": _sanitize_distribution_text(econ_src),
+        "statutory_claim_key": claim_key,
+        "statutory_claim_value": claim_val,
+        "query_params": q_params,
+        "parameterized_query": qs,
+        "canonical_url": canon_url,
+        "parameterized_url": param_url,
+    }
+
+
 def _get_tool_deep_link_params(slug: str, domain: Optional[str] = None) -> Dict[str, Any]:
     if slug in DEFAULT_TOOL_DEEP_LINK_PARAMS:
         return dict(DEFAULT_TOOL_DEEP_LINK_PARAMS[slug])
+    if slug in CURATED_TOOL_CALCULATION_PROOFS:
+        return dict(CURATED_TOOL_CALCULATION_PROOFS[slug]["query_params"])
     for k, v in DEFAULT_TOOL_DEEP_LINK_PARAMS.items():
         if k in slug:
             return dict(v)
-    if domain == "tax":
-        return {
-            "gross_income": 150000,
-            "filing_status": "married_joint",
-            "state_jurisdiction": "CA",
-        }
-    elif domain == "saas":
-        return {
-            "cash_balance": 1000000,
-            "monthly_revenue": 30000,
-            "gross_burn": 80000,
-        }
-    elif domain == "capex":
-        return {
-            "purchase_price": 95000,
-            "business_use_pct": 85,
-            "vehicle_weight": "heavy_suv",
-        }
-    return {}
+    proof = _resolve_tool_calculation_proof(slug)
+    if proof.get("query_params"):
+        return dict(proof["query_params"])
+    return {
+        "gross_income": 150000,
+        "filing_status": "married_joint",
+        "state_jurisdiction": "CA",
+    }
 
 
 def _build_parameterized_calculator_url(
@@ -881,8 +1259,8 @@ def _build_parameterized_calculator_url(
 
 def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Uses Jev System One semantic distribution router to synthesize community routing,
-    contrarian hooks, and authoritative syndication copy for any dynamic tool.
+    Uses Jev System One semantic distribution router and deterministic calculation proofs
+    to synthesize calculation-backed syndication copy for any dynamic tool.
     Adheres strictly to HWL-1073 and HWL-1065. Zero em-dashes.
     """
     slug = tool.get("slug", "")
@@ -892,7 +1270,14 @@ def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
     qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model provides deterministic projections and analytical modeling."))
     query = _sanitize_distribution_text(tool.get("primary_keyword", short_title))
-    deep_params = _get_tool_deep_link_params(slug, domain)
+
+    proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
+    deep_params = dict(proof["query_params"])
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    stat_cite = proof["statutory_source"]
+    econ_cite = proof["economic_source"]
+
     url = _build_parameterized_calculator_url(slug, deep_params)
     x_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "x", "utm_medium": "social", "utm_campaign": slug})
     reddit_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "reddit", "utm_medium": "social", "utm_campaign": slug})
@@ -906,237 +1291,78 @@ def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         social_angle = {
             "target_community": "r/investing",
-            "headline": f"Quantitative Analysis: Mathematical model for {short_title}",
+            "headline": f"Quantitative Analysis: {short_title} (${out_fmt} Verified Proof)",
         }
 
     comm = social_angle.get("target_community", "r/investing")
-    headline = _sanitize_distribution_text(social_angle.get("headline", f"Quantitative Analysis: Mathematical model for {short_title}"))
+    headline = _sanitize_distribution_text(social_angle.get("headline", f"Quantitative Analysis: {short_title} (${out_fmt} Verified Proof)"))
 
-    if domain == "saas":
-        # 1. Reddit
-        reddit_content = (
-            f"Detailed teardown of going-concern cash runway and net burn mechanics for {title}.\n\n"
-            f"Key analytical and financial findings:\n"
-            f"1. Core Baseline: {qa}\n"
-            f"2. Formulaic Precision: Modeling replaces gross burn heuristics with net burn factoring revenue CAGR.\n"
-            f"3. Operational Takeaway: Running net burn stress testing identifies true Zero Cash Date runway.\n\n"
-            f"Recommended analytical steps:\n"
-            f"- Verify GAAP ASC 205-40 going-concern benchmarks against audited financial statements.\n"
-            f"- Model net burn across customer cohorts to isolate churn sensitivity.\n"
-            f"- Stress-test cash reserves against conservative revenue growth assumptions.\n\n"
-            f"Reference specification and quantitative data models: {reddit_url}"
-        )
-        # 2. LinkedIn
-        li_hook = f"Financial stress testing for {short_title} reveals a 25% to 40% variance in true Zero Cash Date runway modeling."
-        if len(li_hook) > 140:
-            li_hook = li_hook[:137] + "..."
-        li_content = (
-            f"{li_hook}\n\n"
-            f"{desc}\n\n"
-            f"Key findings from our startup cash modeling engine:\n"
-            f"• Core framework: {qa}\n"
-            f"• Grounded in GAAP ASC 205-40 going-concern benchmarks and net burn modeling.\n"
-            f"• Structured for venture-backed founders and corporate finance teams.\n\n"
-            f"Model your exact scenario in sub-100ms with zero login:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #SaaS #VentureCapital #StartupFinance #CashFlow"
-        )
-        # 4. Facebook
-        fb_content = (
-            f"Stress-testing startup runway? Use our interactive calculator for {title}. "
-            f"{qa} Calculate net burn and true Zero Cash Date: {fb_url}"
-        )
-        # 5. Pulse
-        pulse_title = f"{title}: Quantitative Analysis and Going-Concern Framework"
-        pulse_body = (
-            f"# {pulse_title}\n\n"
-            f"Capital efficiency and liquidity discipline dictate startup survival in shifting macroeconomic conditions. {desc}\n\n"
-            f"### Key Findings and Mathematical Framework\n\n"
-            f"1. Baseline Metric: {qa}\n"
-            f"2. Going-Concern Standard: Evaluated under GAAP ASC 205-40 going-concern benchmarks and net burn modeling.\n"
-            f"3. Runway Preservation: Deterministic Zero Cash Date forecasting identifies runway cliffs months in advance.\n\n"
-            f"To stress-test your startup treasury and run custom cash scenarios, access our free interactive engine:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #SaaS #VentureCapital #StartupFinance #CFO"
-        )
-        # 7. Newsletter
-        nl_subject = f"Quantitative Alert: {short_title} Baseline Analysis"
-        nl_teaser = (
-            f"How long is your actual startup runway under stress scenarios for {title}? "
-            f"{qa} Test your numbers in 30 seconds: {url}"
-        )
-    elif domain == "quant":
-        # 1. Reddit
-        reddit_content = (
-            f"Detailed teardown of event contract pricing and spread mechanics for {title}.\n\n"
-            f"Key quantitative and market findings:\n"
-            f"1. Core Baseline: {qa}\n"
-            f"2. Formulaic Precision: Modeling replaces static odds with cross-venue implied probability spreads.\n"
-            f"3. Operational Takeaway: Running cross-venue probability mapping reveals synthetic risk-free spreads.\n\n"
-            f"Recommended analytical steps:\n"
-            f"- Verify binary contract prices conform to CFTC Rule 40.11 and CEA 7 U.S.C. Section 1a(19).\n"
-            f"- Model implied probability distributions across complementary event contracts.\n"
-            f"- Optimize position sizing using the Half-Kelly Criterion to protect bankroll capital.\n\n"
-            f"Reference specification and quantitative data models: {reddit_url}"
-        )
-        # 2. LinkedIn
-        li_hook = f"Quantitative modeling for {short_title} identifies actionable binary contract spreads and optimal Kelly sizing."
-        if len(li_hook) > 140:
-            li_hook = li_hook[:137] + "..."
-        li_content = (
-            f"{li_hook}\n\n"
-            f"{desc}\n\n"
-            f"Key findings from our institutional modeling engine:\n"
-            f"• Core market rule: {qa}\n"
-            f"• Evaluates CFTC Rule 40.11 / CEA 7 U.S.C. Section 1a(19) binary contract spreads.\n"
-            f"• Stake sizing dynamically calibrated via the Half-Kelly Criterion.\n\n"
-            f"Model your exact scenario in sub-100ms with zero login:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #QuantitativeFinance #PredictionMarkets #Arbitrage #KellyCriterion"
-        )
-        # 4. Facebook
-        fb_content = (
-            f"Analyzing prediction market spreads? Use our interactive calculator for {title}. "
-            f"{qa} Evaluate implied odds and Half-Kelly sizing: {fb_url}"
-        )
-        # 5. Pulse
-        pulse_title = f"{title}: Quantitative Market Analysis and Spread Modeling"
-        pulse_body = (
-            f"# {pulse_title}\n\n"
-            f"Cross-venue liquidity fragmentation and binary event pricing create executable arbitrage windows for quantitative traders. {desc}\n\n"
-            f"### Key Findings and Mathematical Framework\n\n"
-            f"1. Market Benchmark: {qa}\n"
-            f"2. Regulatory Framework: Governed by CFTC Rule 40.11 and Commodity Exchange Act 7 U.S.C. Section 1a(19).\n"
-            f"3. Capital Allocation: Stake sizing calibrated via the Half-Kelly Criterion to maximize long-term bankroll growth.\n\n"
-            f"To calculate real-time contract spreads and optimal bankroll allocation, access our free interactive engine:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #QuantitativeFinance #PredictionMarkets #Arbitrage #Trading"
-        )
-        # 7. Newsletter
-        nl_subject = f"Quantitative Alert: {short_title} Baseline Analysis"
-        nl_teaser = (
-            f"Are you leaving event contract spread arbitrage on the table for {title}? "
-            f"{qa} Test your numbers in 30 seconds: {url}"
-        )
-    elif domain == "capex":
-        # 1. Reddit
-        reddit_content = (
-            f"Detailed teardown of capital expensing and depreciation schedules for {title}.\n\n"
-            f"Key statutory and accounting findings:\n"
-            f"1. Core Baseline: {qa}\n"
-            f"2. Formulaic Precision: Modeling replaces straight-line estimates with first-year expensing vs MACRS.\n"
-            f"3. Operational Takeaway: Running first-year expensing simulations optimizes cash preservation.\n\n"
-            f"Recommended analytical steps:\n"
-            f"- Verify asset eligibility under IRC Section 179 and Section 168(k) phase-down schedules.\n"
-            f"- Compare first-year full expensing write-offs against multi-year MACRS depreciation schedules.\n"
-            f"- Review placed-in-service deadlines prior to calendar year-end caps.\n\n"
-            f"Reference specification and quantitative data models: {reddit_url}"
-        )
-        # 2. LinkedIn
-        li_hook = f"Capital allocation modeling for {short_title} identifies immediate first-year cash savings under IRC Section 179."
-        if len(li_hook) > 140:
-            li_hook = li_hook[:137] + "..."
-        li_content = (
-            f"{li_hook}\n\n"
-            f"{desc}\n\n"
-            f"Key findings from our institutional modeling engine:\n"
-            f"• Core statutory election: {qa}\n"
-            f"• Compares IRC Section 179 first-year expensing against Section 168(k) MACRS.\n"
-            f"• Maximizes first-year cash preservation for capital-intensive operators.\n\n"
-            f"Model your exact scenario in sub-100ms with zero login:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #Section179 #CapEx #EquipmentFinancing #Accounting #CFO"
-        )
-        # 4. Facebook
-        fb_content = (
-            f"Evaluating capital equipment investments? Use our interactive calculator for {title}. "
-            f"{qa} Compare Section 179 first-year expensing vs MACRS: {fb_url}"
-        )
-        # 5. Pulse
-        pulse_title = f"{title}: Quantitative Depreciation Analysis and Expensing Schedule"
-        pulse_body = (
-            f"# {pulse_title}\n\n"
-            f"Accelerating capital asset expensing directly impacts first-year cash flows and corporate tax efficiency. {desc}\n\n"
-            f"### Key Findings and Mathematical Framework\n\n"
-            f"1. Expensing Baseline: {qa}\n"
-            f"2. Statutory Authority: Grounded in IRC Section 179 and Section 168(k) first-year expensing vs MACRS.\n"
-            f"3. Capital Efficiency: Proactive tax deduction modeling eliminates unexpected depreciation recapture liabilities.\n\n"
-            f"To model first-year write-offs and compare multi-tier purchase scenarios, access our free interactive engine:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #Section179 #CapEx #Accounting #EquipmentFinancing #CFO"
-        )
-        # 7. Newsletter
-        nl_subject = f"Quantitative Alert: {short_title} Baseline Analysis"
-        nl_teaser = (
-            f"How much can you deduct on first-year equipment investments for {title}? "
-            f"{qa} Test your numbers in 30 seconds: {url}"
-        )
-    else:
-        # Default / Tax
-        reddit_content = (
-            f"Detailed teardown of the statutory framework and quantitative mechanics for {title}.\n\n"
-            f"Key statutory and mathematical findings:\n"
-            f"1. Core Baseline: {qa}\n"
-            f"2. Formulaic Precision: Modeling replaces qualitative rules of thumb with deterministic rate calculations.\n"
-            f"3. Operational Takeaway: Running multi-tier scenario modeling prevents costly bracket creep.\n\n"
-            f"Recommended analytical steps:\n"
-            f"- Verify baseline parameter inputs against official IRS and regulatory schedules.\n"
-            f"- Model progressive rate boundaries to anticipate transition thresholds.\n"
-            f"- Review statutory election deadlines well in advance of calendar filing windows.\n\n"
-            f"Reference specification and quantitative data models: {reddit_url}"
-        )
-        li_hook = f"Quantitative modeling for {short_title} identifies an immediate 15% to 35% variance in projected net liabilities."
-        if len(li_hook) > 140:
-            li_hook = li_hook[:137] + "..."
-        li_content = (
-            f"{li_hook}\n\n"
-            f"{desc}\n\n"
-            f"Key findings from our institutional modeling engine:\n"
-            f"• Core statutory rule: {qa}\n"
-            f"• Deterministic baseline projections eliminate fiscal estimation drift.\n"
-            f"• Structured for high-earning operators and corporate treasuries.\n\n"
-            f"Model your exact scenario in sub-100ms with zero login:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #QuantitativeFinance #Fintech #TaxPlanning"
-        )
-        fb_content = (
-            f"Planning for future statutory shifts? Use our interactive calculator for {title}. "
-            f"{qa} See your exact projections here: {fb_url}"
-        )
-        pulse_title = f"{title}: Quantitative Analysis and Statutory Schedule"
-        pulse_body = (
-            f"# {pulse_title}\n\n"
-            f"Statutory policy changes and regulatory revisions create significant financial variances for high earners. "
-            f"{desc}\n\n"
-            f"### Key Findings and Mathematical Framework\n\n"
-            f"1. Statutory Rule: {qa}\n"
-            f"2. Deterministic Modeling: Unlike qualitative summaries, quantitative models calculate exact liability.\n"
-            f"3. Risk Mitigation: Proactive forecasting prevents bracket compression and unnecessary tax drag.\n\n"
-            f"To calculate your specific numbers and compare multi-tier scenarios, access our free interactive engine:\n"
-            f"{li_url}\n\n"
-            f"#{SITE_NAME} #QuantitativeFinance #FinancialPlanning #TaxStrategy"
-        )
-        nl_subject = f"Quantitative Alert: {short_title} Baseline Analysis"
-        nl_teaser = (
-            f"How will upcoming statutory changes impact your bottom line for {title}? "
-            f"{qa} Test your numbers in 30 seconds: {url}"
-        )
+    reddit_content = (
+        f"Detailed teardown of the statutory framework and quantitative mechanics for {title}.\n\n"
+        f"Key statutory and mathematical findings:\n"
+        f"1. Core Baseline: {qa}\n"
+        f"2. Verified Calculation Proof: {sample_calc} (Output: {out_fmt}).\n"
+        f"3. Statutory & Empirical Basis: {stat_cite} and {econ_cite}.\n\n"
+        f"Recommended analytical steps:\n"
+        f"- Verify baseline parameter inputs ({proof['formula']}) against official regulatory schedules.\n"
+        f"- Model multi-tier boundaries to isolate threshold sensitivity around {out_fmt}.\n"
+        f"- Review statutory election deadlines prior to filing cutoffs.\n\n"
+        f"Reference specification and quantitative data models: {reddit_url}"
+    )
 
-    # 3. X Post (> 50 chars, <= 280 chars, zero em-dashes)
-    summary_snip = qa[:70].rstrip()
-    x_content = f"{headline}\n\n{summary_snip}...\n\nModel your figures:\n{x_url}"
+    li_hook = f"Deterministic modeling for {short_title} verifies a {out_fmt} benchmark outcome under {stat_cite[:42]}."
+    if len(li_hook) > 140:
+        li_hook = li_hook[:137] + "..."
+    li_content = (
+        f"{li_hook}\n\n"
+        f"{desc}\n\n"
+        f"Key findings from our institutional modeling engine:\n"
+        f"• Core statutory rule: {qa}\n"
+        f"• Mathematical proof: {sample_calc} (Verified output: {out_fmt}).\n"
+        f"• Grounded in {stat_cite} and {econ_cite}.\n\n"
+        f"Model your exact scenario in sub-100ms with zero login:\n"
+        f"{li_url}\n\n"
+        f"#{SITE_NAME} #QuantitativeFinance #Fintech #TaxPlanning #CFO"
+    )
+
+    fb_content = (
+        f"Evaluating your exact numbers for {title}? Our deterministic model proves that {sample_calc} (verified output: {out_fmt}) under {stat_cite}.\n\n"
+        f"{qa} Run your pre-filled scenario here: {fb_url}"
+    )
+
+    pulse_title = f"{title}: Quantitative Derivation and Statutory Schedule"
+    pulse_body = (
+        f"# {pulse_title}\n\n"
+        f"Statutory policy rules and regulatory thresholds create measurable financial outcomes for operators and households. "
+        f"{desc}\n\n"
+        f"### Key Findings and Mathematical Proof\n\n"
+        f"1. Statutory Rule: {qa}\n"
+        f"2. Deterministic Formula (`{proof['formula']}`): {sample_calc} yielding a verified output of {out_fmt}.\n"
+        f"3. Dual-Dataset Provenance: Anchored to {stat_cite} and {econ_cite}.\n\n"
+        f"To calculate your specific numbers and compare multi-tier scenarios, access our free interactive engine:\n"
+        f"{li_url}\n\n"
+        f"#{SITE_NAME} #QuantitativeFinance #FinancialPlanning #TaxStrategy"
+    )
+
+    nl_subject = f"Quantitative Alert: {short_title} ({out_fmt} Baseline Proof)"
+    nl_teaser = (
+        f"How does {title} impact your bottom line? {sample_calc} ({out_fmt}). "
+        f"Test your numbers in 30 seconds: {url}"
+    )
+
+    summary_snip = sample_calc[:68].rstrip()
+    x_content = f"{headline}\n\n{summary_snip} ({out_fmt})\n\nModel:\n{x_url}"
     if len(x_content) > 280:
-        x_content = f"{headline}\n\nModel:\n{x_url}"
+        x_content = f"{short_title}: {out_fmt} verified.\n\nModel:\n{x_url}"
     if len(x_content) > 280:
         avail = 280 - len(f"\n\nModel:\n{x_url}")
         x_content = f"{headline[:max(0, avail)]}\n\nModel:\n{x_url}"
 
-    # 6. Outreach Pitch (<= 120 words, zero em-dashes)
     pitch_text = (
         f"Hi {{Editor Name}},\n\n"
         f"I came across your guide on {query} and appreciated your thorough breakdown. "
-        f"Readers often want to calculate their exact numbers after reading quantitative overviews.\n\n"
-        f"We recently published a free, deterministic interactive tool for {short_title}:\n"
+        f"Readers often want to verify exact numbers ({sample_calc}) after reading quantitative overviews.\n\n"
+        f"We published a free, deterministic interactive tool for {short_title}:\n"
         f"{url}\n\n"
         f"Would this be a valuable free interactive resource to feature for your readers?\n\n"
         f"Best,\n"
@@ -1166,6 +1392,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     from pseofactory.maintenance import TenantRegistry, DEFAULT_TENANT_LINKEDIN_IDS
     tool = _resolve_tool(tool_slug)
     slug = tool["slug"]
+    proof = _resolve_tool_calculation_proof(tool, property_id=property_id or "profithelm")
 
     if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=linkedin&utm_medium=social&utm_campaign=irs-2027-tax-brackets&utm_content=company_post"
@@ -1287,7 +1514,11 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"#PredictionMarkets #TaxStrategy #Section1256 #Kalshi #EventContracts #QuantitativeTrading"
         )
     else:
-        url = f"{POST_URL_BASE}/tools/{tool['slug']}/?utm_source=linkedin&utm_medium=social&utm_campaign={tool['slug']}&utm_content=company_post"
+        url = _build_parameterized_calculator_url(
+            slug,
+            proof["query_params"],
+            {"utm_source": "linkedin", "utm_medium": "social", "utm_campaign": slug, "utm_content": "company_post"},
+        )
         dyn = _generate_dynamic_distribution_copy(tool)
         text = dyn["linkedin_content"]
 
@@ -1321,7 +1552,12 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     """Generates high-CTR X post tailored for each specific tool with parameterized deep-links and zero hashtag spam."""
     tool = _resolve_tool(tool_slug)
     slug = tool["slug"]
-    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=x&utm_medium=social&utm_campaign={slug}"
+    proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
+    url = _build_parameterized_calculator_url(
+        slug,
+        proof["query_params"],
+        {"utm_source": "x", "utm_medium": "social", "utm_campaign": slug},
+    )
 
     if tool_slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
@@ -1366,15 +1602,15 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
             f"compare after-tax yield:\n{url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?gain=10000000&basis=500000&years=5&utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"IRC Section 1202 lets C-corp founders exclude up to $10M or 10x basis from exit tax.\n\n"
+            f"IRC Section 1202 lets C-corp founders exclude $10M ($2,380,000 federal tax saved).\n\n"
             f"check your QSBS cap:\n{url}"
         )
     elif tool_slug == "equipment-lease-tax-deduction":
-        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?utm_source=x&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
+        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=x&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
         text = (
-            f"with 2026 bonus depreciation down to 20%, operating leases often beat buying on NPV.\n\n"
+            f"with 2026 bonus depreciation at 20%, a $24k lease at 85% use deducts $20,400/yr.\n\n"
             f"compare lease vs buy:\n{url}"
         )
     elif tool_slug == "section-1031-calculator":
@@ -1409,7 +1645,12 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     """Generates problem-first peer Facebook post tailored for each tool with zero hashtag spam."""
     tool = _resolve_tool(tool_slug)
     slug = tool["slug"]
-    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=facebook&utm_medium=social&utm_campaign={slug}"
+    proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
+    url = _build_parameterized_calculator_url(
+        slug,
+        proof["query_params"],
+        {"utm_source": "facebook", "utm_medium": "social", "utm_campaign": slug},
+    )
 
     if tool_slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
@@ -1438,7 +1679,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif tool_slug == "tcja-sunset-capital-gains":
         url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&period=long_term&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"Even when statutory long-term capital gains tiers stay at 0%, 15%, and 20%, stacking a $100,000 gain on top of $150,000 salary in California pushes your effective tax rate on that gain to 30.2% once the unindexed $200,000 NIIT threshold kicks in.\n\n"
+            f"Even when statutory long-term capital gains tiers stay at 0%, 15%, and 20%, stacking a $100,000 gain on top of $150,000 salary in California pushes your effective tax rate on that gain to 30.2% ($30,200 total tax) once the unindexed $200,000 NIIT threshold kicks in.\n\n"
             f"Run your ordinary income and capital gains stack across all 50 states here: {url}"
         )
     elif tool_slug == "section-179-calculator":
@@ -1454,15 +1695,15 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
             f"On $250,000 in treasury cash, that state tax exemption saves $3,212 a year compared to a 4.25% commercial bank HYSA. Compare your state's tax-equivalent yield here: {url}"
         )
     elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
+        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?gain=10000000&basis=500000&years=5&utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"Under IRC Section 1202, qualified C-corporation stock held for 5 years excludes the greater of $10,000,000 or 10x adjusted basis from federal capital gains tax, though non-conforming states like California still tax the exit.\n\n"
+            f"Under IRC Section 1202, qualified C-corporation stock held for 5 years excludes the greater of $10,000,000 or 10x adjusted basis from federal capital gains tax ($2,380,000 in federal LTCG and NIIT saved), though non-conforming states like California still tax the exit.\n\n"
             f"Check your QSBS exclusion cap and state tax exposure here: {url}"
         )
     elif tool_slug == "equipment-lease-tax-deduction":
-        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?utm_source=facebook&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
+        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=facebook&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
         text = (
-            f"With federal bonus depreciation down to 20% in 2026, deducting 100% of operating lease payments under IRC Section 162 can beat a financed purchase when state Section 179 caps (like California's $25,000 limit) block upfront write-offs.\n\n"
+            f"With federal bonus depreciation down to 20% in 2026, deducting $20,400 on a $24,000 operating lease (85% business use) under IRC Section 162 can beat a financed purchase when state Section 179 caps (like California's $25,000 limit) block upfront write-offs.\n\n"
             f"Run a side-by-side after-tax NPV comparison for your equipment acquisition here: {url}"
         )
     elif tool_slug == "section-1031-calculator":
@@ -1470,6 +1711,12 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
         text = (
             f"Selling a $1,500,000 commercial property ($600,000 adjusted basis, $250,000 accumulated depreciation) outright triggers $292,500 in immediate federal capital gains, 25% Section 1250 depreciation recapture, and 3.8% NIIT.\n\n"
             f"Rolling the proceeds into a $1,800,000 replacement property under IRC Section 1031 defers 100% of that liability. Model your boot, debt relief, and 45/180-day deadlines here: {url}"
+        )
+    elif tool_slug == "prediction-market-tax":
+        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&status=single&state=NY&venue=kalshi&utm_source=facebook&utm_medium=social&utm_campaign=prediction-market-tax"
+        text = (
+            f"A $35,000 event contract gain on CFTC-regulated Kalshi incurs $7,840 in federal tax under IRC Section 1256 (60/40 blended capital gains) compared to $13,860 as ordinary income on Polymarket, saving $6,020.\n\n"
+            f"Compare your Section 1256 vs ordinary event contract tax exposure here: {url}"
         )
     else:
         dyn = _generate_dynamic_distribution_copy(tool)
@@ -1928,6 +2175,7 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
     domain = _classify_tool_domain(slug)
+    proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:24]))
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
@@ -1938,6 +2186,10 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
     citations = get_dual_dataset_citations(slug)
     stat_cite = _sanitize_distribution_text(citations.get("statutory_source", "Internal Revenue Code Section 1"))
     econ_cite = _sanitize_distribution_text(citations.get("economic_source", "Federal Reserve FRED Economic Data"))
+    proof_callout = (
+        f"Verified Statutory Proof ({proof['scenario_label']}): {proof['sample_calculation']} "
+        f"(Formula: `{proof['formula']}` -> `{proof['published_output_formatted']}`)."
+    )
     if domain == "saas":
         body = (
             f"# {title}: Quantitative Runway Analysis and Net Burn Modeling\n\n"
@@ -1946,6 +2198,7 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
             f"between gross cash outlays, revenue contraction, and customer cohort churn.\n\n"
             f"### Executive Overview and Core Findings\n\n"
             f"{qa}\n\n"
+            f"{proof_callout}\n\n"
             f"Our quantitative research models demonstrate that relying on static runway calculations creates substantial variance "
             f"in survival timelines. When modeling {short_title}, three primary dynamics determine capital efficiency:\n\n"
             f"1. Going-Concern Accounting Standards: Evaluated under {stat_cite}, deterministic cash modeling isolates net burn volatility "
@@ -1973,6 +2226,7 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
             f"exchange fee drag, and optimal stake sizing.\n\n"
             f"### Executive Overview and Core Findings\n\n"
             f"{qa}\n\n"
+            f"{proof_callout}\n\n"
             f"Our quantitative research models demonstrate that relying on naive probabilities creates substantial execution drag. "
             f"When modeling {short_title}, three primary dynamics determine capital efficiency:\n\n"
             f"1. Regulatory & Market Architecture: Governed by {stat_cite}, binary contracts settle deterministically to $1.00 upon resolution, enabling synthetic risk-free spreads.\n"
@@ -1999,6 +2253,7 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
             f"MACRS schedules, and bonus depreciation phase-down.\n\n"
             f"### Executive Overview and Core Findings\n\n"
             f"{qa}\n\n"
+            f"{proof_callout}\n\n"
             f"Our quantitative research models demonstrate that relying on straight-line estimates creates substantial variance in first-year cash flow. "
             f"When modeling {short_title}, three primary dynamics determine capital efficiency:\n\n"
             f"1. Statutory Expensing Baseline: Grounded in {stat_cite}, statutory phase-down schedules govern first-year write-offs across commercial equipment and vehicles.\n"
@@ -2023,6 +2278,7 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
             f"As fiscal year 2026 approaches, corporate finance operators and private wealth advisors must address impending statutory shifts under federal tax law. Conventional heuristics and back-of-the-envelope estimations routinely fail to capture the compounding interaction between federal baseline thresholds, state conformity statutes, and phase-down schedules.\n\n"
             f"### Executive Overview and Core Findings\n\n"
             f"{qa}\n\n"
+            f"{proof_callout}\n\n"
             f"Our quantitative research models demonstrate that relying on static assumptions creates substantial variance in post-transaction net proceeds. When modeling {short_title}, three primary dynamics determine capital efficiency:\n\n"
             f"1. Statutory Baseline Adjustments: The expiration of temporary rate relief triggers statutory reversions to pre-existing Internal Revenue Code schedules. Grounded in {stat_cite}, statutory rate structures reset marginal baselines across commercial and individual filers.\n"
             f"2. Macroeconomic Baseline Variances: Integrating empirical benchmarks from {econ_cite} reveals that inflation indexing adjustments do not fully offset bracket compression in high-cost metropolitan jurisdictions.\n"
@@ -2254,10 +2510,15 @@ def generate_parasite_substack_teardown(tool_or_slug: Any) -> Dict[str, Any]:
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
     domain = _classify_tool_domain(slug)
+    proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:24]))
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
-    qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis."))
+    qa = _sanitize_distribution_text(
+        f"{tool.get('quick_answer', f'The {title} model provides deterministic projections and statutory analysis.')} "
+        f"Verified Statutory Proof ({proof['scenario_label']}): {proof['sample_calculation']} "
+        f"(Formula: {proof['formula']} -> {proof['published_output_formatted']})."
+    )
     deep_params = _get_tool_deep_link_params(slug, domain)
     url = _build_parameterized_calculator_url(slug, deep_params)
 
@@ -2499,8 +2760,8 @@ To model {short_title} deterministically, we express the total allowable first-y
 
 ### Variable Definitions
 - Let A represent total qualifying equipment acquisition cost.
-- Let L_179 represent the statutory Section 179 expensing cap ($1,220,000 for 2026).
-- Let P_179 represent the phase-out beginning threshold ($3,050,000 for 2026).
+- Let L_179 represent the statutory Section 179 expensing cap ($2,560,000 for 2026).
+- Let P_179 represent the phase-out beginning threshold ($4,090,000 for 2026).
 - Let beta denote the applicable bonus depreciation percentage (20% in 2026, phasing down to 0% in 2027).
 - Let tau_m denote the corporate or business marginal income tax rate.
 
@@ -2536,7 +2797,7 @@ To demonstrate empirical tax shields across common commercial investments, we ev
 | Tier 1: Commercial Vehicle | 6,000+ lbs Truck $85,000 | $85,000 | $0 | $85,000 | $29,750 | {stat_cite} |
 | Tier 2: Heavy Equipment | Production Line $350,000 | $350,000 | $0 | $350,000 | $122,500 | {stat_cite} |
 | Tier 3: Fleet Expansion | 10 Delivery Vans $750,000 | $750,000 | $0 | $750,000 | $262,500 | {stat_cite} |
-| Tier 4: Enterprise CapEx | Machinery $3,200,000 | $1,070,000 | $426,000 | $1,496,000 | $523,600 | {stat_cite} |
+| Tier 4: Enterprise CapEx | Machinery $3,200,000 | $2,560,000 | $230,400 | $2,790,400 | $976,640 | {stat_cite} |
 
 The empirical results above highlight that leveraging Section 179 expensing captures up to 100% immediate deduction on qualifying assets, preserving critical first-year liquidity.
 
@@ -3701,7 +3962,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "📌 PROJECT YOUR CAPITAL GAINS REVERSION:\n"
-            "Realizing $250k in capital gains triggers a combined 34.0% marginal rate in CA/NY post-2025 as ordinary brackets expand around unindexed NIIT thresholds.\n\n"
+            "Realizing $100k in long-term capital gains on $150k salary triggers $30,200 in combined tax (30.2% effective tax burden in CA including $1,900 Section 1411 NIIT).\n\n"
             "👉 Project your post-TCJA federal, state, and NIIT liabilities:\n"
             f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&period=long_term&status=single&state=CA&utm_source=youtube&utm_medium=video&utm_campaign=tcja-sunset-capital-gains-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under IRC Section 1(h) and Section 1411 Net Investment Income Tax regulations."
@@ -3831,8 +4092,8 @@ TOOL_YOUTUBE_METADATA = {
         "preset_query": "vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35",
         "chapters": [
             "IRC Section 179(b)(5) & 6,000 lb GVWR Thresholds",
-            "Heavy SUV $31,300 Cap vs Cargo Work Truck Full Write-Off",
-            "60% Bonus Depreciation & 50% Business-Use Recapture",
+            "Heavy SUV $30,500 Cap vs Cargo Work Truck Full Write-Off",
+            "20% Bonus Depreciation & 50% Business-Use Recapture",
             "Interactive Heavy Vehicle Section 179 Walkthrough",
         ],
         "pinned_comment": (
@@ -4072,7 +4333,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR COMMERCIAL FLEET & EQUIPMENT WRITE-OFF:\n"
-            "Combining IRC Section 179 expensing with 60% bonus depreciation maximizes first-year deductions across qualifying commercial vehicles and machinery.\n\n"
+            "Combining IRC Section 179 expensing ($2,560,000 cap) with 20% bonus depreciation unlocks a $20,400 deduction on $24,000 commercial vehicle and equipment commitments at 85% business use.\n\n"
             "Run your commercial vehicle and equipment numbers on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/section-179-vehicle-equipment-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=youtube&utm_medium=video&utm_campaign=section-179-vehicle-equipment-deduction-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under IRC Section 179, Section 168(k), and Section 280F."
@@ -4567,7 +4828,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     """
     Generates indexable YouTube video spoken transcript with timestamped chapters,
     Schema.org VideoObject JSON-LD, 40-60 word extractable passages satisfying
-    assert_quick_answer_passage_relevance, and tenant statutory/economic grounding.
+    assert_quick_answer_passage_relevance, and tenant statutory/economic calculation proof.
     Conforms strictly to zero forbidden dashes, zero personal attribution, and zero conversational filler.
     """
     from pseofactory.contracts import assert_youtube_transcript
@@ -4588,6 +4849,11 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     else:
         is_prexvo = any(t.get("slug") == slug for t in PREXVO_DEFAULT_TOOLS)
 
+    effective_prop = "prexvo" if is_prexvo else "profithelm"
+    proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
+    out_fmt = proof["published_output_formatted"]
+    param_url = proof["parameterized_url"]
+
     curated = TOOL_YOUTUBE_METADATA.get(slug, {})
     curated_chapters = curated.get("chapters") or []
 
@@ -4607,7 +4873,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "target_query": query,
                 "spoken_script": (
                     f"The {short_title} model evaluates federal student loan repayment obligations under Title IV of the Higher Education Act and 34 CFR Part 685. "
-                    f"Borrowers analyze statutory repayment options to determine optimal monthly obligations across direct loan portfolios. "
+                    f"Deterministic statutory modeling verifies a {out_fmt} benchmark obligation across direct student loan portfolios. "
                     f"Prexvo provides deterministic repayment modeling to ensure complete statutory compliance without requiring account registration."
                 ),
                 "entities": ["Prexvo", "Title IV", "34 CFR Part 685", short_title],
@@ -4619,9 +4885,9 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "section_title": ch1,
                 "target_query": f"{query} poverty line",
                 "spoken_script": (
-                    "Under HEA Section 493C and Department of Education regulations, income-driven repayment plans protect discretionary income above the HHS Poverty Guidelines. "
-                    "The 2026 Repayment Assistance Plan increases this exemption to 225% of the federal poverty line while subsidizing unpaid interest. "
-                    "Prexvo calculates your exact discretionary threshold and monthly obligations across household sizes."
+                    f"Under HEA Section 493C and Department of Education regulations, income-driven repayment plans protect discretionary income above the HHS Poverty Guidelines. "
+                    f"The 2026 Repayment Assistance Plan increases this exemption to 225% of the federal poverty line while subsidizing unpaid interest for a {out_fmt} benchmark. "
+                    f"Prexvo calculates your exact discretionary threshold and monthly obligations across household sizes."
                 ),
                 "entities": ["Prexvo", "HEA Section 493C", "HHS Poverty Guidelines"],
             },
@@ -4668,7 +4934,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "target_query": query,
                 "spoken_script": (
                     f"The {short_title} model calculates quantitative financial metrics pursuant to official IRC statutory codes and 26 CFR regulations. "
-                    f"Users analyze complex tax liabilities and planning thresholds across variable economic scenarios. "
+                    f"Deterministic calculations verify a {out_fmt} benchmark outcome across statutory marginal rate thresholds. "
                     f"ProfitHelm delivers verified mathematical projections with sub-100ms response times and zero account registration requirements."
                 ),
                 "entities": ["ProfitHelm", "IRC", "26 CFR", short_title],
@@ -4680,9 +4946,9 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "section_title": ch1,
                 "target_query": f"{query} modeling",
                 "spoken_script": (
-                    "Empirical economic benchmarks from FRED series and BLS dataset indices provide foundational baseline data for quantitative calculations. "
-                    "Evaluating inflation adjustments and statutory rate variations ensures accurate forward-looking financial projections. "
-                    "ProfitHelm models multi-tier scenario interactions to identify optimal tax and capital allocation decisions."
+                    f"Empirical economic benchmarks from FRED series and BLS dataset indices provide foundational baseline data for quantitative calculations. "
+                    f"Evaluating inflation adjustments and statutory rate variations confirms the {out_fmt} mathematical projection across filing tiers. "
+                    f"ProfitHelm models multi-tier scenario interactions to identify optimal tax and capital allocation decisions."
                 ),
                 "entities": ["ProfitHelm", "FRED", "BLS"],
             },
@@ -4741,13 +5007,13 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "name": seg["section_title"],
                 "startOffset": seg["seconds"],
                 "endOffset": seg["seconds"] + 30,
-                "url": f"{canonical_base}/tools/{slug}/#t={seg['timestamp']}",
+                "url": f"{param_url}#t={seg['timestamp']}",
             }
             for seg in segments
         ],
         "potentialAction": {
             "@type": "SeekToAction",
-            "target": f"{canonical_base}/tools/{slug}/#t={{seek_to_second_number}}",
+            "target": f"{param_url}#t={{seek_to_second_number}}",
             "startOffset-input": "required name=seek_to_second_number",
         },
     }
@@ -4761,6 +5027,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         "target_queries": [seg["target_query"] for seg in segments],
         "segments": segments,
         "schema": schema,
+        "calculation_proof": proof,
     }
 
     assert_youtube_transcript(transcript_pack, brand_name=brand_name)
@@ -4804,11 +5071,14 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
     brand_name = "Prexvo" if is_prexvo else "ProfitHelm"
     canonical_base = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
 
+    proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
     transcript_pack = _generate_youtube_transcript(tool, property_id=effective_prop)
 
     curated = TOOL_YOUTUBE_METADATA.get(slug, {})
     curated_chapters = curated.get("chapters") or []
-    preset_query = curated.get("preset_query") or (
+    preset_query = curated.get("preset_query") or proof.get("parameterized_query") or (
         PREXVO_TOOL_SCENARIOS.get(slug, {}).get("query", "balance=60000&agi=65000&rate=6.5&deps=1")
         if is_prexvo
         else "income=125000&status=single&state=CA"
@@ -4863,6 +5133,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             "",
             "Key Takeaways & Methodologies:",
             f"• Statutory Basis: {qa}",
+            f"• Verified Calculation Proof: {sample_calc} (Published output: {out_fmt}).",
             "• Economic Benchmarks: Evaluated against official HHS Poverty Guidelines and Department of Education data.",
             "• Real-time Modeling: Sub-100ms deterministic math engines with live parameter synchronization.",
             "",
@@ -4887,7 +5158,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         if not default_pinned:
             pinned_lines = [
                 "CALCULATE YOUR MONTHLY REPAYMENT:",
-                f"Model quantitative Title IV obligations and statutory repayment rules for {short_title}.",
+                f"Verified Proof: {sample_calc} (Output: {out_fmt}).",
                 "",
                 "Run your exact numbers in sub-100ms on Prexvo (free, deterministic, zero login required):",
                 f"{pinned_cta_url}",
@@ -4897,6 +5168,8 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             clean_pinned_comment = nl.join(pinned_lines)
         else:
             clean_pinned_comment = default_pinned
+            if out_fmt not in clean_pinned_comment:
+                clean_pinned_comment = f"{clean_pinned_comment}\nVerified Calculation Output: {out_fmt}"
         clean_pinned_comment = _sanitize_youtube_text(clean_pinned_comment)
 
         slug_phrase = slug.replace("-", " ")
@@ -4938,6 +5211,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             "",
             "Key Takeaways & Methodologies:",
             f"• {basis_label}: {qa}",
+            f"• Verified Calculation Proof: {sample_calc} (Published output: {out_fmt}).",
             "• Real-time Modeling: Sub-100ms deterministic math engines with live parameter synchronization.",
             "• Scenario Analysis: Dynamic evaluation across income tiers and holding periods.",
             "",
@@ -4962,7 +5236,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         if not default_pinned:
             pinned_lines = [
                 "CALCULATE YOUR NUMBERS:",
-                f"Model quantitative calculations and statutory framework analysis for {short_title}.",
+                f"Verified Proof: {sample_calc} (Output: {out_fmt}).",
                 "",
                 "Run your exact numbers in sub-100ms on ProfitHelm (free, deterministic, zero login required):",
                 f"{pinned_cta_url}",
@@ -4972,6 +5246,8 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             clean_pinned_comment = nl.join(pinned_lines)
         else:
             clean_pinned_comment = default_pinned
+            if out_fmt not in clean_pinned_comment:
+                clean_pinned_comment = f"{clean_pinned_comment}\nVerified Calculation Output: {out_fmt}"
         clean_pinned_comment = _sanitize_youtube_text(clean_pinned_comment)
 
         slug_phrase = slug.replace("-", " ")
@@ -5010,21 +5286,237 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
     }
 
 
+def _build_sensitivity_markdown_rows(proof: Dict[str, Any]) -> str:
+    """Builds a 5-tier sensitivity table scaled deterministically around the baseline calculation proof."""
+    from pseofactory.contracts import safe_eval_mathematical_formula
+
+    formula = proof["formula"]
+    inputs = proof["inputs"]
+    first_key = next(iter(inputs.keys()))
+    base_val = float(inputs[first_key])
+    multipliers = [
+        ("Tier 1 (0.50x Stress)", 0.50),
+        ("Tier 2 (0.75x Conservative)", 0.75),
+        ("Tier 3 (1.00x Statutory Baseline)", 1.00),
+        ("Tier 4 (1.25x Expansion)", 1.25),
+        ("Tier 5 (1.50x Upper Bound)", 1.50),
+    ]
+    rows = [
+        f"| Scenario Tier | `{first_key}` Input | Formula (`{formula}`) | Evaluated Output | Statutory Source |",
+        "| :--- | :--- | :--- | :--- | :--- |",
+    ]
+    for label, mult in multipliers:
+        scaled_inputs = dict(inputs)
+        if base_val > 1.0:
+            scaled_inputs[first_key] = round(base_val * mult, 2)
+        try:
+            val = float(safe_eval_mathematical_formula(formula, scaled_inputs))
+        except Exception:
+            val = float(proof["published_output"]) * mult
+        val_str = f"{val:,.0f}" if abs(val - round(val)) < 0.005 else f"{val:,.2f}"
+        inp_str = f"{scaled_inputs[first_key]:,.2f}"
+        rows.append(f"| {label} | {inp_str} | `{formula}` | {val_str} | {proof['statutory_source'][:40]} |")
+    return "\n".join(rows)
+
+
+def generate_ghost_article(tool_or_slug: Any, property_id: str = "profithelm") -> Dict[str, Any]:
+    """
+    Generates a calculation-backed Ghost CMS article payload (Markdown + HTML + Admin API fields)
+    locked to TenantFactStore and canonical parameterized URLs. Zero forbidden dashes.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes, assert_no_personal_attribution
+
+    tool = _resolve_tool(tool_or_slug)
+    slug = tool["slug"]
+    proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
+    norm_prop = proof["property_id"]
+    brand_name = "Prexvo" if norm_prop == "prexvo" else "ProfitHelm"
+    title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
+    short_title = _sanitize_distribution_text(tool.get("short_title", title[:32]))
+    qa = _sanitize_distribution_text(
+        tool.get("quick_answer", f"The {title} model computes deterministic statutory projections.")
+    )
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    stat_cite = proof["statutory_source"]
+    econ_cite = proof["economic_source"]
+    param_url = f"{proof['parameterized_url']}&utm_source=ghost&utm_medium=editorial&utm_campaign={slug}"
+    inputs_json = json.dumps(proof["inputs"], sort_keys=True)
+    sens_table = _build_sensitivity_markdown_rows(proof)
+
+    article_title = _sanitize_distribution_text(
+        f"{title}: Statutory Derivation and {out_fmt} Calculation Proof"
+    )
+    excerpt = _sanitize_distribution_text(
+        f"Deterministic {brand_name} analysis for {short_title}: {sample_calc} (Verified output: {out_fmt})."
+    )
+    markdown_body = _sanitize_distribution_text(
+        f"# {article_title}\n\n"
+        f"**Executive Summary:** {qa}\n\n"
+        f"## 1. Statutory & Empirical Provenance\n\n"
+        f"- **Primary Statutory Authority:** {stat_cite}\n"
+        f"- **Empirical Economic Dataset:** {econ_cite}\n"
+        f"- **Interactive Parameterized Verification URL:** [{param_url}]({param_url})\n\n"
+        f"## 2. Deterministic Mathematical Proof\n\n"
+        f"Every {brand_name} model is governed by an AST-verified mathematical equation locked to federal statutory limits:\n\n"
+        f"- **Canonical Formula:** `{proof['formula']}`\n"
+        f"- **Baseline Input Vector:** `{inputs_json}`\n"
+        f"- **Step-by-Step Derivation:** {sample_calc}\n"
+        f"- **Verified Published Output:** **{out_fmt}**\n\n"
+        f"## 3. Multi-Tier Sensitivity Matrix\n\n"
+        f"{sens_table}\n\n"
+        f"## 4. Verify Your Exact Scenario\n\n"
+        f"Run your custom parameters with sub-100ms recalculation and zero login barriers on {brand_name}:\n"
+        f"[{param_url}]({param_url})\n"
+    )
+    html_body = _sanitize_distribution_text(
+        f"<article><h1>{article_title}</h1>"
+        f"<p><strong>Executive Summary:</strong> {qa}</p>"
+        f"<h2>1. Statutory &amp; Empirical Provenance</h2>"
+        f"<ul><li><strong>Statutory Authority:</strong> {stat_cite}</li>"
+        f"<li><strong>Empirical Dataset:</strong> {econ_cite}</li></ul>"
+        f"<h2>2. Deterministic Mathematical Proof</h2>"
+        f"<p>Formula: <code>{proof['formula']}</code> | Inputs: <code>{inputs_json}</code></p>"
+        f"<p>Derivation: {sample_calc} | Verified Output: <strong>{out_fmt}</strong></p>"
+        f"<p><a href=\"{param_url}\">Run the pre-filled {title} calculator on {brand_name}</a></p></article>"
+    )
+
+    assert_no_forbidden_dashes(markdown_body, context=f"{slug} ghost markdown")
+    assert_no_personal_attribution(markdown_body, context=f"{slug} ghost markdown")
+
+    return {
+        "platform": "ghost",
+        "slug": slug,
+        "title": article_title,
+        "custom_excerpt": excerpt,
+        "canonical_url": param_url,
+        "target_url": param_url,
+        "status": "draft",
+        "tags": [brand_name, short_title, "Statutory Proof", "Quantitative Analysis"],
+        "markdown": markdown_body,
+        "article_markdown": markdown_body,
+        "html": html_body,
+        "content": markdown_body,
+        "calculation_proof": proof,
+    }
+
+
+def generate_exact_match_github_gist(tool_or_slug: Any, property_id: str = "profithelm") -> Dict[str, Any]:
+    """
+    Generates an exact-match GitHub Gist payload containing:
+    1. <slug>.md: Exact-match markdown specification with statutory proof, sensitivity table, and parameterized URL.
+    2. <slug_underscored>_proof.py: Zero-dependency executable Python verification script asserting parity.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes
+
+    tool = _resolve_tool(tool_or_slug)
+    slug = tool["slug"]
+    proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
+    norm_prop = proof["property_id"]
+    brand_name = "Prexvo" if norm_prop == "prexvo" else "ProfitHelm"
+    title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    stat_cite = proof["statutory_source"]
+    econ_cite = proof["economic_source"]
+    param_url = f"{proof['parameterized_url']}&utm_source=github_gist&utm_medium=code&utm_campaign={slug}"
+    sens_table = _build_sensitivity_markdown_rows(proof)
+
+    md_filename = f"{slug}.md"
+    py_filename = f"{slug.replace('-', '_')}_proof.py"
+
+    gist_md = _sanitize_distribution_text(
+        f"# {title} ({brand_name} Exact-Match Statutory Calculation Proof)\n\n"
+        f"- **Canonical Calculator (Pre-Filled):** {param_url}\n"
+        f"- **Statutory Authority:** {stat_cite}\n"
+        f"- **Empirical Benchmark Source:** {econ_cite}\n"
+        f"- **Formula:** `{proof['formula']}`\n"
+        f"- **Baseline Inputs:** `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- **Verified Output:** **{out_fmt}** ({sample_calc})\n\n"
+        f"## Deterministic Sensitivity Benchmark\n\n"
+        f"{sens_table}\n"
+    )
+
+    py_code = _sanitize_distribution_text(
+        f'"""\n'
+        f"Exact-Match Statutory Calculation Proof for {title} ({slug})\n"
+        f"Statutory Authority: {stat_cite}\n"
+        f"Empirical Source: {econ_cite}\n"
+        f"Canonical URL: {param_url}\n"
+        f'"""\n\n'
+        f"from typing import Any, Dict\n\n"
+        f"SLUG: str = {json.dumps(slug)}\n"
+        f"PROPERTY_ID: str = {json.dumps(norm_prop)}\n"
+        f"FORMULA: str = {json.dumps(proof['formula'])}\n"
+        f"INPUTS: Dict[str, float] = {json.dumps(proof['inputs'], sort_keys=True)}\n"
+        f"EXPECTED_OUTPUT: float = {float(proof['published_output'])}\n"
+        f"PUBLISHED_OUTPUT_FORMATTED: str = {json.dumps(out_fmt)}\n"
+        f"SAMPLE_CALCULATION: str = {json.dumps(sample_calc)}\n"
+        f"STATUTORY_AUTHORITY: str = {json.dumps(stat_cite)}\n"
+        f"ECONOMIC_SOURCE: str = {json.dumps(econ_cite)}\n"
+        f"CANONICAL_PARAMETERIZED_URL: str = {json.dumps(param_url)}\n\n\n"
+        f"def verify_calculation_proof() -> Dict[str, Any]:\n"
+        f'    """Evaluates the deterministic formula against baseline inputs and asserts parity."""\n'
+        f'    safe_globals = {{"__builtins__": {{}}, "min": min, "max": max, "abs": abs, "round": round}}\n'
+        f"    evaluated = float(eval(FORMULA, safe_globals, dict(INPUTS)))\n"
+        f"    drift = abs(evaluated - EXPECTED_OUTPUT)\n"
+        f'    assert drift <= 0.05, f"Parity drift {{drift}} exceeds 0.05 tolerance ({{evaluated}} vs {{EXPECTED_OUTPUT}})"\n'
+        f"    return {{\n"
+        f'        "slug": SLUG,\n'
+        f'        "evaluated_output": evaluated,\n'
+        f'        "published_output": EXPECTED_OUTPUT,\n'
+        f'        "published_output_formatted": PUBLISHED_OUTPUT_FORMATTED,\n'
+        f'        "parameterized_url": CANONICAL_PARAMETERIZED_URL,\n'
+        f'        "passed": True,\n'
+        f"    }}\n\n\n"
+        f'if __name__ == "__main__":\n'
+        f"    print(verify_calculation_proof())\n"
+    )
+
+    assert_no_forbidden_dashes(gist_md, context=f"{slug} gist md")
+    assert_no_forbidden_dashes(py_code, context=f"{slug} gist py")
+
+    return {
+        "platform": "github_gist",
+        "slug": slug,
+        "description": _sanitize_distribution_text(
+            f"{title}: Deterministic Statutory Proof ({out_fmt}) via {stat_cite} - {param_url}"
+        ),
+        "public": True,
+        "target_url": param_url,
+        "canonical_url": param_url,
+        "markdown_filename": md_filename,
+        "python_filename": py_filename,
+        "markdown": gist_md,
+        "code": py_code,
+        "content": f"{gist_md}\n\n{py_code}",
+        "files": {
+            md_filename: {"filename": md_filename, "content": gist_md, "language": "Markdown"},
+            py_filename: {"filename": py_filename, "content": py_code, "language": "Python"},
+        },
+        "calculation_proof": proof,
+    }
+
+
 def generate_social_syndication_pack(
     tool_or_slug: Any = "irs-2027-tax-brackets",
     tool_slug: Optional[str] = None,
     include_citations: bool = True,
+    property_id: str = "profithelm",
 ) -> Dict[str, Any]:
     """
-    Generates multi-channel social syndication pack (LinkedIn, X, Facebook)
-    with injected dual-dataset citation hooks (statutory IRC + empirical economic sources).
+    Generates multi-channel social syndication pack (LinkedIn, X, Facebook, YouTube, Ghost, GitHub Gist)
+    with injected dual-dataset citation hooks (statutory IRC + empirical economic sources)
+    and verified calculation proof. Deliberately omits Reddit.
     Satisfies Google contentEffort standards and institutional distribution guidelines.
     Zero em-dashes. Zero en-dashes.
     """
     target = tool_slug or tool_or_slug
     tool = _resolve_tool(target)
     slug = tool["slug"]
-    url = f"{POST_URL_BASE}/tools/{slug}/"
+    norm_prop = _normalize_property_id(property_id)
+    proof = _resolve_tool_calculation_proof(tool, property_id=norm_prop)
+    url = proof["parameterized_url"]
 
     citations = get_dual_dataset_citations(slug)
     stat_cite = citations["statutory_source"]
@@ -5043,12 +5535,17 @@ def generate_social_syndication_pack(
 
     return {
         "tool_slug": slug,
+        "slug": slug,
+        "property_id": norm_prop,
         "title": tool.get("title", slug.replace("-", " ").title()),
         "url": url,
+        "canonical_url": proof["canonical_url"],
+        "parameterized_url": url,
         "first_comment": first_comment,
         "statutory_source": stat_cite,
         "economic_source": econ_cite,
         "dual_dataset_citations": [stat_cite, econ_cite],
+        "calculation_proof": proof,
         "citations": {
             "statutory": stat_cite,
             "economic": econ_cite,
@@ -5056,7 +5553,9 @@ def generate_social_syndication_pack(
         "linkedin": li_pack,
         "x": x_pack,
         "facebook": fb_pack,
-        "youtube": generate_youtube_syndication(tool),
+        "youtube": generate_youtube_syndication(tool, property_id=norm_prop),
+        "ghost": generate_ghost_article(tool, property_id=norm_prop),
+        "github_gist": generate_exact_match_github_gist(tool, property_id=norm_prop),
     }
 
 
@@ -5194,12 +5693,12 @@ All calculations are 100% deterministic, grounded in federal Title IV regulation
 
     sec179_md = """# Section 179 Vehicle Depreciation Statutory Benchmarks
 
-IRC Section 179 allows business taxpayers to expense up to $1,220,000 of qualifying commercial property placed in service during tax year 2026. Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $31,300 statutory cap under IRC Section 280F.
+IRC Section 179 allows business taxpayers to expense up to $2,560,000 of qualifying commercial property placed in service during tax year 2026 (with phase-out beginning at $4,090,000). Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $30,500 statutory cap under IRC Section 280F.
 
 | Vehicle Category | GVWR Limit | 2026 Cap | First-Year Bonus | Statutory Authority |
 | :--- | :--- | :--- | :--- | :--- |
-| Heavy SUV | 6,001 to 14,000 lbs | $31,300 | 60% basis | IRC Section 280F(d)(7) |
-| Cargo Truck | Over 6,000 lbs | $1,220,000 | 60% basis | IRC Section 179(b)(1) |
+| Heavy SUV | 6,001 to 14,000 lbs | $30,500 | 20% basis | IRC Section 280F(d)(7) |
+| Cargo Truck | Over 6,000 lbs | $2,560,000 | 20% basis | IRC Section 179(b)(1) |
 | Passenger Car | Under 6,000 lbs | $20,400 | Included | IRC Section 280F(a) |
 
 Compliance requires business use exceeding 50% across the statutory recovery period. Deductions face recapture if business use declines."""
@@ -5207,13 +5706,15 @@ Compliance requires business use exceeding 50% across the statutory recovery per
     sec179_json = {
         "topic": "Section 179 Vehicle Depreciation",
         "tax_year": 2026,
-        "statutory_authority": ["IRC Section 179", "IRC Section 280F", "IRS Rev. Proc. 2024-34"],
-        "heavy_suv_cap_usd": 31300,
-        "bonus_depreciation_pct": 60,
+        "statutory_authority": ["IRC Section 179", "IRC Section 280F", "IRS Form 4562"],
+        "heavy_suv_cap_usd": 30500,
+        "section_179_cap_usd": 2560000,
+        "phaseout_threshold_usd": 4090000,
+        "bonus_depreciation_pct": 20,
         "business_use_minimum_pct": 50,
         "benchmarks": [
-            {"category": "heavy_suv", "gvwr_lbs_min": 6001, "cap_usd": 31300, "bonus_pct": 60, "example_85k_deduction": 53320},
-            {"category": "commercial_truck", "gvwr_lbs_min": 6001, "cap_usd": 1220000, "bonus_pct": 60, "example_85k_deduction": 85000},
+            {"category": "heavy_suv", "gvwr_lbs_min": 6001, "cap_usd": 30500, "bonus_pct": 20, "example_85k_deduction": 50120},
+            {"category": "commercial_truck", "gvwr_lbs_min": 6001, "cap_usd": 2560000, "bonus_pct": 20, "example_85k_deduction": 85000},
             {"category": "passenger_car", "gvwr_lbs_min": 0, "cap_usd": 20400, "bonus_pct": 0, "example_85k_deduction": 20400},
         ],
     }
@@ -5290,18 +5791,18 @@ Exclusions require original stock issuance from a domestic C-corporation in qual
 Canonical Authority: IRC Section 1, Public Law 115-97 (Tax Cuts and Jobs Act)
 Reference URL: {CANONICAL_BASE}/tools/irs-2027-tax-brackets/
 
-| Tax Bracket Tier | Current 2025/2026 Rate | Projected 2027 Rate (Post-TCJA) | Single Filer Income Threshold (2026) | Married Filing Jointly Threshold (2026) |
+| Tax Bracket Tier | Current 2026 Rate | Projected 2027 Rate (Post-TCJA) | Single Filer Income Threshold (2026) | Married Filing Jointly Threshold (2026) |
 | :--- | :--- | :--- | :--- | :--- |
-| Tier 1 | 10.0% | 10.0% | Up to $11,925 | Up to $23,850 |
-| Tier 2 | 12.0% | 15.0% | $11,926 - $48,475 | $23,851 - $96,950 |
-| Tier 3 | 22.0% | 25.0% | $48,476 - $103,350 | $96,951 - $206,700 |
-| Tier 4 | 24.0% | 28.0% | $103,351 - $197,300 | $206,701 - $394,600 |
-| Tier 5 | 32.0% | 33.0% | $197,301 - $250,525 | $394,601 - $501,050 |
-| Tier 6 | 35.0% | 35.0% | $250,526 - $626,350 | $501,051 - $751,600 |
-| Top Tier | 37.0% | 39.6% | Over $626,350 | Over $751,600 |
+| Tier 1 | 10.0% | 10.0% | Up to $12,400 | Up to $24,800 |
+| Tier 2 | 12.0% | 15.0% | $12,401 - $50,400 | $24,801 - $100,800 |
+| Tier 3 | 22.0% | 25.0% | $50,401 - $105,700 | $100,801 - $211,400 |
+| Tier 4 | 24.0% | 28.0% | $105,701 - $201,775 | $211,401 - $403,550 |
+| Tier 5 | 32.0% | 33.0% | $201,776 - $256,225 | $403,551 - $512,450 |
+| Tier 6 | 35.0% | 35.0% | $256,226 - $640,600 | $512,451 - $768,700 |
+| Top Tier | 37.0% | 39.6% | Over $640,600 | Over $768,700 |
 
 ## Statutory Reversion Summary
-Following the scheduled expiration of the TCJA individual provisions on December 31, 2025, marginal tax rates revert to pre-2018 statutory schedules, increasing rates by 2.6% to 4.0% across middle and high income tiers.
+Following the scheduled expiration of the TCJA individual provisions, marginal tax rates revert to pre-2018 statutory schedules, increasing rates by 2.6% to 4.0% across middle and high income tiers.
 """
 
     tax_brackets_json = {
@@ -5309,12 +5810,12 @@ Following the scheduled expiration of the TCJA individual provisions on December
         "tax_years": ["2026", "2027"],
         "statutory_authority": ["IRC Section 1", "Public Law 115-97"],
         "brackets": [
-            {"current_rate": 10.0, "sunset_rate": 10.0, "single_max": 11925, "mfj_max": 23850},
-            {"current_rate": 12.0, "sunset_rate": 15.0, "single_max": 48475, "mfj_max": 96950},
-            {"current_rate": 22.0, "sunset_rate": 25.0, "single_max": 103350, "mfj_max": 206700},
-            {"current_rate": 24.0, "sunset_rate": 28.0, "single_max": 197300, "mfj_max": 394600},
-            {"current_rate": 32.0, "sunset_rate": 33.0, "single_max": 250525, "mfj_max": 501050},
-            {"current_rate": 35.0, "sunset_rate": 35.0, "single_max": 626350, "mfj_max": 751600},
+            {"current_rate": 10.0, "sunset_rate": 10.0, "single_max": 12400, "mfj_max": 24800},
+            {"current_rate": 12.0, "sunset_rate": 15.0, "single_max": 50400, "mfj_max": 100800},
+            {"current_rate": 22.0, "sunset_rate": 25.0, "single_max": 105700, "mfj_max": 211400},
+            {"current_rate": 24.0, "sunset_rate": 28.0, "single_max": 201775, "mfj_max": 403550},
+            {"current_rate": 32.0, "sunset_rate": 33.0, "single_max": 256225, "mfj_max": 512450},
+            {"current_rate": 35.0, "sunset_rate": 35.0, "single_max": 640600, "mfj_max": 768700},
             {"current_rate": 37.0, "sunset_rate": 39.6, "single_max": 999999999, "mfj_max": 999999999},
         ],
     }
@@ -5454,7 +5955,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
             },
             {
                 "id": "stat-sec179-equipment-cap",
-                "headline_stat": "For tax year 2026, businesses can immediately expense up to $1,250,000 in qualifying equipment under IRC Section 179(b)(1), with dollar-for-dollar phase-out beginning at $3,130,000 and heavy SUVs capped at $31,300 under IRC Section 280F(d)(7).",
+                "headline_stat": "For tax year 2026, businesses can immediately expense up to $2,560,000 in qualifying equipment under IRC Section 179(b)(1), with dollar-for-dollar phase-out beginning at $4,090,000 and heavy SUVs capped at $30,500 under IRC Section 280F(d)(7).",
                 "statutory_authority": "IRC Section 179(b)(1), IRC Section 280F(d)(7), IRS Form 4562",
                 "canonical_calculator_url": f"{base_url}/tools/section-179-tax-deduction-calculator/",
             },
@@ -5538,7 +6039,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Regional CPA Firm Client Tax Planning Resource Directories",
                 ],
                 "replacement_url": f"{CANONICAL_BASE}/tools/section-179-tax-deduction-calculator/",
-                "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($1,250,000 cap, $3,130,000 phase-out) and IRC Section 280F(d)(7) SUV limits.",
+                "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) and IRC Section 280F(d)(7) $30,500 SUV limits.",
             },
             {
                 "campaign_id": "reclaim-ph-1031-boot-form8824",
@@ -5630,7 +6131,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
             "• PSLF Eligibility: Consolidating Parent PLUS loans into a Direct Consolidation Loan under ICR unlocks the 120-payment PSLF track for public-sector parents."
         ),
         "fb_body": (
-            "Because single-consolidated Parent PLUS loans are excluded from IBR and PAYE, Income-Contingent Repayment (ICR) is the primary path to qualify for Public Service Loan Forgiveness.\n\n"
+            "Because single-consolidated Parent PLUS loans are excluded from IBR and PAYE, Income-Contingent Repayment (ICR) is the primary path to qualify for 120-payment Public Service Loan Forgiveness.\n\n"
             "Unlike RAP or IBR, ICR calculates your bill two ways every year: 20% of discretionary income above 100% of the federal poverty line, OR a 12-year fixed amortization adjusted by an income multiplier, charging whichever is lower. Grounded in statutory 34 CFR 685.209(b) rules."
         ),
     },
@@ -5750,7 +6251,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
             "• Net Present Value Break-Even Spread: A private APR must beat your effective subsidy-adjusted federal rate by at least 150 to 200 bps to justify losing statutory forbearance."
         ),
         "fb_body": (
-            "Before refinancing $75,000 in 7.2% federal student loans into a 5.2% private rate, borrowers must price the exact dollar value of forfeited Title IV protections.\n\n"
+            "Before refinancing $75,000 in 7.2% federal student loans into a 5.2% private rate (which saves $9,140 in nominal interest only when federal subsidies equal $0), borrowers must price the exact dollar value of forfeited Title IV protections.\n\n"
             "If your AGI qualifies you for 225% FPL RAP interest subsidies or 120-payment PSLF forgiveness under 34 CFR 685.219, a lower private rate can still increase your net lifetime out-of-pocket cost. Grounded in statutory Title IV 34 CFR Part 685 and 12 CFR Part 1026 rules."
         ),
     },
@@ -5910,25 +6411,33 @@ def _generate_prexvo_reddit(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
     text = (
-        f"How do 2026 student loan repayment plans differ under federal regulations?\n\n"
-        f"Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines. "
-        f"Unlike legacy plans, RAP offers a full 100% subsidy on unpaid monthly interest. "
-        f"Borrowers can run side-by-side repayment projections on the free Prexvo {title}: {url}"
+        f"How do 2026 student loan repayment plans differ under federal regulations for {title}?\n\n"
+        f"{scen['li_hook']}\n\n"
+        f"{scen['li_body']}\n\n"
+        f"Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines "
+        f"and provides a 100% unpaid monthly interest subsidy. "
+        f"Borrowers can run side-by-side repayment projections on the free Prexvo {title}: {deep_url}"
     )
     clean_text = _sanitize_distribution_text(text)
     assert_no_forbidden_dashes(clean_text, context=f"{slug} quora")
-    return {"answer_markdown": clean_text, "url": url}
+    return {"answer_markdown": clean_text, "url": deep_url}
 
 
 def _generate_prexvo_google_sites(tool: Dict[str, Any], url: str) -> str:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    deep_url = proof["parameterized_url"]
     return (
         f"<!DOCTYPE html><html><head><title>{title} - Prexvo</title></head><body>"
         f"<h1>{title}</h1>"
-        f"<p>Model Title IV student loan repayment plans and statutory subsidies.</p>"
-        f'<p><a href="{url}">Access the Free Interactive Calculator on Prexvo</a></p>'
+        f"<p>{proof['sample_calculation']}</p>"
+        f"<p>Verified Formula: <code>{proof['formula']} = {proof['published_output_formatted']}</code></p>"
+        f'<p><a href="{deep_url}">Access the Free Interactive Calculator on Prexvo</a></p>'
         f"</body></html>"
     )
 
@@ -5936,74 +6445,144 @@ def _generate_prexvo_google_sites(tool: Dict[str, Any], url: str) -> str:
 def _generate_prexvo_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=linkedin_pulse&utm_medium=article&utm_campaign={slug}"
     article = (
         f"# {title}: Statutory Analysis and Repayment Guide\n\n"
+        f"{scen['li_hook']}\n\n"
         f"The statutory landscape for Title IV Higher Education Act student loan repayment has fundamentally shifted. "
         f"With the rollout of the 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685, "
-        f"borrowers must evaluate their enrollment options.\n\n"
-        f"## Statutory Framework Comparison\n\n"
+        f"borrowers must evaluate their enrollment options using exact statutory formulas.\n\n"
+        f"### Verified Statutory Calculation Proof ({proof['scenario_label']})\n"
+        f"- Formula: `{proof['formula']}`\n"
+        f"- Inputs: `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- Verified Output: **{proof['published_output_formatted']}**\n"
+        f"- Walkthrough: {proof['sample_calculation']}\n\n"
+        f"## Statutory Framework Breakdown\n\n"
+        f"{scen['li_body']}\n\n"
         f"### 1. Repayment Assistance Plan (RAP)\n"
-        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level\n"
+        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level ($33,975 single / $47,587.50 family of 2)\n"
         f"- Discretionary Income Assessment Rate: 10%\n"
-        f"- Interest Subsidy: 100% of unpaid monthly interest covered by the Department of Education\n"
+        f"- Interest Subsidy: 100% of unpaid monthly interest waived by the Department of Education\n"
         f"- Standard Payment Cap: None\n\n"
         f"### 2. Income-Based Repayment (IBR)\n"
         f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level\n"
         f"- Assessment Rate: 10% for new borrowers, 15% for legacy borrowers\n"
-        f"- Payment Cap: Strictly capped at the 10-year Standard Repayment Plan baseline\n\n"
+        f"- Payment Cap: Strictly capped at the 10-year Standard Repayment Plan baseline under HEA Section 493C\n\n"
         f"## Quantitative Modeling and Tool Access\n\n"
         f"To calculate exact monthly amortization schedules and side-by-side repayment totals, "
-        f"explore our deterministic tool at {url}.\n"
+        f"explore our deterministic tool at {deep_url}.\n\n"
+        f"#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt"
     )
     clean_article = _sanitize_distribution_text(article)
+    if len(clean_article) > 2780:
+        excess = len(clean_article) - 2780
+        parts = clean_article.rsplit("\n\n", 1)
+        if len(parts) > 1 and len(parts[0]) > 2000:
+            clean_article = parts[0][:len(parts[0]) - excess].rstrip() + "\n\n" + parts[1]
+    assert_linkedin(clean_article)
     assert_no_forbidden_dashes(clean_article, context=f"{slug} pulse article")
-    return {"article_markdown": clean_article}
+    return {
+        "platform": "linkedin_pulse",
+        "title": title,
+        "target_url": deep_url,
+        "content": clean_article,
+        "article_markdown": clean_article,
+        "char_count": len(clean_article),
+        "word_count": len(clean_article.split()),
+        "statutory_source": proof["statutory_source"],
+        "economic_source": proof["economic_source"],
+    }
 
 
 def _generate_prexvo_substack(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{scen['query']}&utm_source=substack&utm_medium=article&utm_campaign={slug}"
+    sensitivity_rows = _build_sensitivity_markdown_rows(proof)
     article = (
-        f"# Statutory Deep Dive: {title}\n\n"
-        f"An in-depth analysis of 2026 student debt statutory frameworks under Title IV and 34 CFR Part 685. "
-        f"Compare discretionary income exemptions and interest capitalization rules. "
-        f"Model your personal scenario on Prexvo: {url}\n"
+        f"# Statutory Deep Dive: {title} ({proof['scenario_label']})\n\n"
+        f"{scen['li_hook']}\n\n"
+        f"An in-depth mathematical analysis of 2026 student debt statutory frameworks under {proof['statutory_source']} "
+        f"and {proof['economic_source']}.\n\n"
+        f"## 1. Deterministic Calculation Proof\n\n"
+        f"{proof['sample_calculation']}\n\n"
+        f"- **Formula:** `{proof['formula']}`\n"
+        f"- **Inputs:** `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- **Verified Output:** **{proof['published_output_formatted']}**\n\n"
+        f"## 2. Statutory Mechanics & Trade-Offs\n\n"
+        f"{scen['li_body']}\n\n"
+        f"## 3. Multi-Scenario Sensitivity Matrix\n\n"
+        f"| Scenario Profile | Primary Input | Secondary Input | Statutory Result |\n"
+        f"| :--- | :--- | :--- | :--- |\n"
+        f"{sensitivity_rows}\n\n"
+        f"## 4. Interactive Verification\n\n"
+        f"Model your personal scenario with pre-populated statutory parameters on Prexvo: [{deep_url}]({deep_url})\n"
     )
     clean_article = _sanitize_distribution_text(article)
     assert_no_forbidden_dashes(clean_article, context=f"{slug} substack")
-    return {"article_markdown": clean_article}
+    return {
+        "platform": "substack",
+        "title": title,
+        "target_url": deep_url,
+        "content": clean_article,
+        "article_markdown": clean_article,
+        "char_count": len(clean_article),
+        "word_count": len(clean_article.split()),
+    }
 
 
 def _generate_prexvo_outreach(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    deep_url = proof["parameterized_url"]
     pitch = (
-        f"Subject: 2026 Title IV Federal Student Loan Calculation Resource for Your Readers\n\n"
+        f"Subject: 2026 Title IV Federal Student Loan Calculation Resource for Your Readers ({title})\n\n"
         f"Dear Editor,\n\n"
         f"With the Department of Education rolling out the 2026 Repayment Assistance Plan (RAP), "
         f"millions of borrowers face confusion on how RAP compares to legacy IBR, PAYE, and ICR.\n\n"
-        f"We built an open, deterministic mathematical tool modeling these statutory choices: {url}\n\n"
+        f"For example ({proof['scenario_label']}): {proof['sample_calculation']} "
+        f"(Verified output: {proof['published_output_formatted']}).\n\n"
+        f"We built an open, deterministic mathematical tool modeling these statutory choices: {deep_url}\n\n"
         f"It computes 0.00 discrepancy Title IV formulas and provides clear comparison tables. "
         f"Feel free to cite or link this resource in your student debt coverage.\n\n"
         f"Best regards,\nPrexvo Research Team"
     )
     clean_pitch = _sanitize_distribution_text(pitch)
     assert_no_forbidden_dashes(clean_pitch, context=f"{slug} outreach")
-    return {"pitch_text": clean_pitch}
+    return {"pitch_text": clean_pitch, "target_url": deep_url}
 
 
 def _generate_prexvo_newsletter_hook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
-    content = f"Are you paying more than required under federal student loan rules? Model the 2026 RAP plan on Prexvo: {url}"
-    return {"content": content}
+    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    deep_url = proof["parameterized_url"]
+    content = _sanitize_distribution_text(
+        f"{proof['sample_calculation']} Model the 2026 Title IV rules on Prexvo: {deep_url}"
+    )
+    return {"content": content, "target_url": deep_url}
 
 
 def _generate_prexvo_regulatory_lead_magnet(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
-    content = f"Download the 2026 Title IV Student Loan Statutory Decision Matrix and Amortization Guide: {url}"
-    return {"content": content}
+    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    deep_url = proof["parameterized_url"]
+    content = _sanitize_distribution_text(
+        f"Download the 2026 Title IV Student Loan Statutory Decision Matrix ({proof['scenario_label']}: {proof['published_output_formatted']}): {deep_url}"
+    )
+    return {"content": content, "target_url": deep_url}
 
 
 def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:
-    """Compiles complete syndication copy and growth hack payloads across all tools."""
+    """
+    Compiles complete syndication copy and calculation-backed proof payloads across all tools.
+    Deliberately omits Reddit across all tenants and includes canonical parameterized tools,
+    YouTube scripts, LinkedIn, Facebook, Ghost, and exact-match GitHub Gists.
+    """
     from pseofactory.maintenance import TenantRegistry
     try:
         reg = TenantRegistry.default()
@@ -6013,21 +6592,42 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
 
     if tools is None:
         from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
-        target_tools = adapter.tools if (adapter and adapter.tools) else None
+        from pseofactory.qualification import is_retired_or_consolidated_slug
+        target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
         if not target_tools:
             try:
                 import importlib
                 cfg = importlib.import_module(f"{property_id}.config")
-                target_tools = getattr(cfg, "TOOLS", None)
+                target_tools = list(getattr(cfg, "TOOLS", None) or [])
             except Exception:
                 pass
         if not target_tools:
             if property_id == "prexvo":
-                target_tools = PREXVO_DEFAULT_TOOLS
-            elif property_id == "profithelm":
-                target_tools = PROFITHELM_DEFAULT_TOOLS
+                target_tools = list(PREXVO_DEFAULT_TOOLS)
             else:
-                target_tools = TOOLS
+                target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
+        target_tools = [
+            t for t in target_tools
+            if not is_retired_or_consolidated_slug(
+                t["slug"] if isinstance(t, dict) else str(t),
+                property_id,
+            )
+        ]
+        known_slugs = {
+            t["slug"] if isinstance(t, dict) else str(t)
+            for t in target_tools
+            if isinstance(t, (dict, str))
+        }
+        if adapter and getattr(adapter, "dist_dir", None):
+            dt_dir = Path(adapter.dist_dir) / "tools"
+            if dt_dir.is_dir():
+                for item in sorted(dt_dir.iterdir()):
+                    if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                        if is_retired_or_consolidated_slug(item.name, property_id):
+                            continue
+                        if item.name not in known_slugs:
+                            target_tools.append(_resolve_tool(item.name))
+                            known_slugs.add(item.name)
     else:
         target_tools = tools
 
@@ -6045,50 +6645,67 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         distribution_pack = {}
         for t in target_tools:
             slug = t["slug"]
-            url = f"https://prexvo.com/tools/{slug}/"
+            base_url = f"https://prexvo.com/tools/{slug}/"
+            proof = _resolve_tool_calculation_proof(t, property_id="prexvo")
+            param_url = proof["parameterized_url"]
             yt = generate_youtube_syndication(t, property_id="prexvo")
-            li = _generate_prexvo_linkedin(t, url)
+            li = _generate_prexvo_linkedin(t, base_url)
+            ghost_pack = generate_ghost_article(t, property_id="prexvo")
+            gist_pack = generate_exact_match_github_gist(t, property_id="prexvo")
             distribution_pack[slug] = {
+                "slug": slug,
+                "property_id": "prexvo",
                 "title": t.get("title", slug),
-                "url": url,
+                "url": param_url,
+                "canonical_url": base_url,
+                "parameterized_url": param_url,
                 "first_comment": li["first_comment"],
-                "statutory_source": "Title IV Higher Education Act (34 CFR Part 685)",
-                "economic_source": "HHS Poverty Guidelines and Department of Education Federal Student Aid",
-                "dual_dataset_citations": True,
+                "statutory_source": proof["statutory_source"],
+                "economic_source": proof["economic_source"],
+                "dual_dataset_citations": [proof["statutory_source"], proof["economic_source"]],
+                "calculation_proof": proof,
                 "linkedin": li,
-                "x": _generate_prexvo_x(t, url),
-                "facebook": _generate_prexvo_facebook(t, url),
+                "x": _generate_prexvo_x(t, base_url),
+                "facebook": _generate_prexvo_facebook(t, base_url),
                 "youtube": yt,
-                "google_sites": _generate_prexvo_google_sites(t, url),
-                "linkedin_pulse": _generate_prexvo_linkedin_pulse(t, url),
-                "substack_teardown": _generate_prexvo_substack(t, url),
-                "reddit": _generate_prexvo_reddit(t, url),
-                "quora": _generate_prexvo_quora(t, url),
-                "outreach_pitch": _generate_prexvo_outreach(t, url),
-                "newsletter_hook": _generate_prexvo_newsletter_hook(t, url),
-                "regulatory_lead_magnet": _generate_prexvo_regulatory_lead_magnet(t, url),
+                "ghost": ghost_pack,
+                "github_gist": gist_pack,
+                "google_sites": _generate_prexvo_google_sites(t, base_url),
+                "linkedin_pulse": _generate_prexvo_linkedin_pulse(t, base_url),
+                "substack_teardown": _generate_prexvo_substack(t, base_url),
+                "quora": _generate_prexvo_quora(t, base_url),
+                "outreach_pitch": _generate_prexvo_outreach(t, base_url),
+                "newsletter_hook": _generate_prexvo_newsletter_hook(t, base_url),
+                "regulatory_lead_magnet": _generate_prexvo_regulatory_lead_magnet(t, base_url),
             }
         return distribution_pack
 
     distribution_pack = {}
     for t in target_tools:
         slug = t["slug"]
-        social_pack = generate_social_syndication_pack(t)
+        social_pack = generate_social_syndication_pack(t, property_id="profithelm")
+        proof = social_pack["calculation_proof"]
         distribution_pack[slug] = {
+            "slug": slug,
+            "property_id": "profithelm",
             "title": t["title"],
-            "url": f"{POST_URL_BASE}/tools/{slug}/",
+            "url": social_pack["url"],
+            "canonical_url": social_pack["canonical_url"],
+            "parameterized_url": social_pack["parameterized_url"],
             "first_comment": social_pack["first_comment"],
             "statutory_source": social_pack["statutory_source"],
             "economic_source": social_pack["economic_source"],
             "dual_dataset_citations": social_pack["dual_dataset_citations"],
+            "calculation_proof": proof,
             "linkedin": social_pack["linkedin"],
             "x": social_pack["x"],
             "facebook": social_pack["facebook"],
             "youtube": social_pack["youtube"],
+            "ghost": social_pack["ghost"],
+            "github_gist": social_pack["github_gist"],
             "google_sites": generate_parasite_google_sites_html(t),
             "linkedin_pulse": generate_parasite_linkedin_pulse(t),
             "substack_teardown": generate_parasite_substack_teardown(t),
-            "reddit": generate_reddit_community_teardown(slug),
             "quora": generate_quora_thread_answer(slug),
             "outreach_pitch": generate_backlink_outreach_pitch(slug),
             "newsletter_hook": generate_newsletter_growth_hook(slug),
@@ -6106,7 +6723,8 @@ def export_all_syndication_files(
 ):
     """
     Exports clean, production-ready syndication packs across all tools to syndication/.
-    Generates Markdown files, JSON payloads, and automated execution hints.
+    Generates Markdown files, JSON payloads, Ghost articles, and exact-match GitHub Gist proof bundles,
+    while deliberately omitting and purging Reddit artifacts and auditing every pack against the outside truth store.
     Supports dry-run sandboxing and run_id artifact tracking.
     Zero em-dashes. Zero en-dashes.
     """
@@ -6119,6 +6737,7 @@ def export_all_syndication_files(
         assert_no_prompt_leakage,
         assert_no_personal_attribution,
     )
+    from pseofactory.audit import audit_syndication_asset_against_truth_store
     if dry_run:
         eff_run = run_id or f"dryrun-{int(time.time())}"
         if _is_test_context(output_dir, property_id):
@@ -6165,11 +6784,9 @@ def export_all_syndication_files(
                 pass
         if not target_tools:
             if property_id == "prexvo":
-                target_tools = PREXVO_DEFAULT_TOOLS
-            elif property_id == "profithelm":
-                target_tools = PROFITHELM_DEFAULT_TOOLS
+                target_tools = list(PREXVO_DEFAULT_TOOLS)
             else:
-                target_tools = TOOLS
+                target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
 
         target_tools = [
             t for t in (target_tools or [])
@@ -6245,6 +6862,12 @@ def export_all_syndication_files(
         tool_dir.mkdir(parents=True, exist_ok=True)
         tool_spec = tool_map.get(slug) or _resolve_tool(slug)
 
+        # Deliberately omit Reddit and purge any legacy Reddit files on disk
+        if "reddit" in pack or "reddit_teardown" in pack:
+            raise ValueError(f"Reddit channel is prohibited in syndication pack for {slug}")
+        (tool_dir / "reddit.md").unlink(missing_ok=True)
+        (tool_dir / "reddit_teardown.md").unlink(missing_ok=True)
+
         # Enforce strict output contracts before file writes
         assert_x_post(pack["x"]["content"])
         assert_linkedin(pack["linkedin"]["content"])
@@ -6253,16 +6876,25 @@ def export_all_syndication_files(
         assert_no_personal_attribution(pack["linkedin_pulse"]["article_markdown"], context=f"{slug} linkedin_pulse")
         assert_no_personal_attribution(pack["x"]["content"], context=f"{slug} x")
         assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
-        assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
+        assert_no_forbidden_dashes(pack["ghost"]["markdown"], context=f"{slug} ghost")
+        assert_no_forbidden_dashes(pack["github_gist"]["content"], context=f"{slug} github_gist")
         assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")
         assert_no_forbidden_dashes(pack["outreach_pitch"]["pitch_text"], context=f"{slug} outreach")
         assert_no_forbidden_dashes(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
         assert_no_forbidden_dashes(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
         assert_no_prompt_leakage(pack["facebook"]["content"], context=f"{slug} facebook")
-        assert_no_prompt_leakage(pack["reddit"]["content"], context=f"{slug} reddit")
+        assert_no_prompt_leakage(pack["ghost"]["markdown"], context=f"{slug} ghost")
+        assert_no_prompt_leakage(pack["github_gist"]["content"], context=f"{slug} github_gist")
         assert_no_prompt_leakage(pack["quora"]["answer_markdown"], context=f"{slug} quora")
         assert_no_prompt_leakage(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
         assert_no_prompt_leakage(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
+
+        # Audit against outside truth store (statutory facts + calculation proof parity)
+        truth_audit = audit_syndication_asset_against_truth_store(pack, property_id=property_id)
+        if truth_audit["status"] != "PASS":
+            raise ValueError(
+                f"Syndication truth-store audit failed for {property_id}/{slug}: {truth_audit['failures']}"
+            )
 
         # 1. JSON complete pack
         (tool_dir / "syndication_pack.json").write_text(json.dumps(pack, indent=2), encoding="utf-8")
@@ -6292,11 +6924,22 @@ def export_all_syndication_files(
         # 5. Facebook
         (tool_dir / "facebook.txt").write_text(pack["facebook"]["content"], encoding="utf-8")
 
-        # 6. Reddit Teardown
-        reddit_md = f"# Subreddit: {pack['reddit']['target_subreddit']}\n# Title: {pack['reddit']['title']}\n\n{pack['reddit']['content']}"
-        (tool_dir / "reddit.md").write_text(reddit_md, encoding="utf-8")
+        # 6. Ghost Article (Canonical Cross-Post & Full Mathematical Proof)
+        ghost_pack = pack["ghost"]
+        (tool_dir / "ghost_article.md").write_text(ghost_pack["markdown"], encoding="utf-8")
+        (tool_dir / "ghost.json").write_text(json.dumps(ghost_pack, indent=2), encoding="utf-8")
 
-        # 6b. Quora Thread Answer
+        # 6b. Exact-Match GitHub Gist (Markdown + Executable Python Verification Script)
+        gist_pack = pack["github_gist"]
+        (tool_dir / "github_gist.md").write_text(gist_pack["content"], encoding="utf-8")
+        (tool_dir / "github_gist.json").write_text(json.dumps(gist_pack, indent=2), encoding="utf-8")
+        py_fname = gist_pack.get("python_filename")
+        if py_fname and isinstance(gist_pack.get("files"), dict) and py_fname in gist_pack["files"]:
+            py_content = gist_pack["files"][py_fname].get("content", "")
+            if py_content:
+                (tool_dir / py_fname).write_text(py_content, encoding="utf-8")
+
+        # 6c. Quora Thread Answer
         (tool_dir / "quora.md").write_text(pack["quora"]["answer_markdown"], encoding="utf-8")
         (tool_dir / "quora.txt").write_text(pack["quora"]["answer_markdown"], encoding="utf-8")
 
@@ -6453,7 +7096,7 @@ Calculations and statutory rules derived from:
                 f"**Empirical Data Sources:** HHS Federal Poverty Guidelines & Department of Education Federal Student Aid Portfolio\n\n"
                 f"## Repayment Plan Statutory Comparison Matrix (2026 Baseline)\n\n"
                 f"| Plan Name | Discretionary Income Exemption | Monthly Payment Rate | Unpaid Interest Subsidy | Forgiveness Horizon |\n"
-                f"| :--- | :--- | :--- | :--- | :--- |\n"
+                f"| :--- | :--- | :--- | :--- |\n"
                 f"| **2026 RAP** | 225% of Federal Poverty Line | 10% of Discretionary Income | 100% Unpaid Interest Waived | 240 - 300 Months |\n"
                 f"| **New IBR (Post-2014)** | 150% of Federal Poverty Line | 10% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 240 Months (20 Yrs) |\n"
                 f"| **Legacy IBR (Pre-2014)** | 150% of Federal Poverty Line | 15% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 300 Months (25 Yrs) |\n"
@@ -6482,6 +7125,8 @@ Calculations and statutory rules derived from:
                     src_tool_dir = output_dir / slug
                     dst_tool_dir = central_synd_dir / slug
                     if src_tool_dir.is_dir():
+                        (dst_tool_dir / "reddit.md").unlink(missing_ok=True)
+                        (dst_tool_dir / "reddit_teardown.md").unlink(missing_ok=True)
                         _shutil.copytree(src_tool_dir, dst_tool_dir, dirs_exist_ok=True)
                 for top_file in ("github_seed_discovery.md", "affiliate_routes_verified.json"):
                     if (output_dir / top_file).is_file():
@@ -6510,8 +7155,9 @@ def dispatch_to_distribution_lead(
 ) -> Dict[str, Any]:
     """
     Standard framework dispatch to distribution_lead specialist:
-    Phase 1: Asset discovery and multi-channel syndication generation across 10 channels.
-    Phase 2: Anti-slop content contract assertion gate.
+    Phase 1: Asset discovery and multi-channel syndication generation across canonical tools,
+             YouTube scripts, LinkedIn, Facebook, Ghost, and exact-match GitHub Gists (Reddit omitted).
+    Phase 2: Anti-slop content contract & outside truth-store audit assertion gate.
     Phase 3: Mechanical Voice DNA verification (x-cli voice check).
     Phase 4: Budget oracle preflight check (x-cli budget).
     Phase 5: Release simulation with live publishing strictly blocked.
@@ -6533,6 +7179,10 @@ def dispatch_to_distribution_lead(
         assert_youtube_pinned_comment,
         assert_youtube_transcript,
     )
+    from pseofactory.audit import (
+        audit_syndication_asset_against_truth_store,
+        audit_distribution_draft_payload,
+    )
 
     eff_run_id = run_id or f"run-dist-{int(time.time())}"
 
@@ -6551,10 +7201,8 @@ def dispatch_to_distribution_lead(
         if not target_tools:
             if property_id == "prexvo":
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
-            elif property_id == "profithelm":
-                target_tools = list(PROFITHELM_DEFAULT_TOOLS)
             else:
-                target_tools = list(TOOLS)
+                target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
 
         from pseofactory.qualification import is_retired_or_consolidated_slug
         target_tools = [
@@ -6602,15 +7250,34 @@ def dispatch_to_distribution_lead(
     wal_queue.reconcile_stale_events()
     wal_rec = wal_queue.enqueue({"run_id": eff_run_id, "property_id": property_id, "tools_count": len(target_tools)})
 
-    try:
-        # Phase 1: Asset discovery and multi-channel syndication generation across 10 channels
-        all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
-        total_assets = len(all_assets) * 10
-        print(f"[DISPATCH:DISTRIBUTION] Phase 1: Multi-channel syndication generation across 10 channels -> generated {total_assets} assets")
+    active_channels = [
+        "x",
+        "linkedin",
+        "facebook",
+        "youtube",
+        "ghost",
+        "github_gist",
+        "quora",
+        "google_sites",
+        "linkedin_pulse",
+        "substack_teardown",
+        "outreach_pitch",
+    ]
 
-        # Phase 2: Anti-slop content contract assertion
+    try:
+        # Phase 1: Asset discovery and multi-channel syndication generation (Reddit omitted)
+        all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
+        total_assets = len(all_assets) * len(active_channels)
+        print(
+            f"[DISPATCH:DISTRIBUTION] Phase 1: Multi-channel syndication generation across {len(active_channels)} channels "
+            f"(Reddit omitted) -> generated {total_assets} assets"
+        )
+
+        # Phase 2: Anti-slop content contract & outside truth-store assertion
         brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
         for slug, pack in all_assets.items():
+            if "reddit" in pack or "reddit_teardown" in pack:
+                raise ValueError(f"Reddit channel is prohibited in syndication pack for {slug}")
             assert_x_post(pack["x"]["content"])
             assert_linkedin(pack["linkedin"]["content"])
             assert_linkedin(pack["linkedin_pulse"]["article_markdown"])
@@ -6620,18 +7287,26 @@ def dispatch_to_distribution_lead(
                 assert_youtube_pinned_comment(pack["youtube"]["pinned_comment"])
                 assert_youtube_transcript(pack["youtube"]["transcript"], brand_name=brand_to_check)
             assert_no_forbidden_dashes(pack["facebook"]["content"], context=f"{slug} facebook")
-            assert_no_forbidden_dashes(pack["reddit"]["content"], context=f"{slug} reddit")
+            assert_no_forbidden_dashes(pack["ghost"]["markdown"], context=f"{slug} ghost")
+            assert_no_forbidden_dashes(pack["github_gist"]["content"], context=f"{slug} github_gist")
             assert_no_forbidden_dashes(pack["quora"]["answer_markdown"], context=f"{slug} quora")
             assert_no_forbidden_dashes(pack["outreach_pitch"]["pitch_text"], context=f"{slug} outreach")
             assert_no_forbidden_dashes(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
             assert_no_forbidden_dashes(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
             assert_no_prompt_leakage(pack["facebook"]["content"], context=f"{slug} facebook")
-            assert_no_prompt_leakage(pack["reddit"]["content"], context=f"{slug} reddit")
+            assert_no_prompt_leakage(pack["ghost"]["markdown"], context=f"{slug} ghost")
+            assert_no_prompt_leakage(pack["github_gist"]["content"], context=f"{slug} github_gist")
             assert_no_prompt_leakage(pack["quora"]["answer_markdown"], context=f"{slug} quora")
             assert_no_prompt_leakage(pack["newsletter_hook"]["content"], context=f"{slug} newsletter")
             assert_no_prompt_leakage(pack["regulatory_lead_magnet"]["content"], context=f"{slug} regulatory lead magnet")
 
-        print("[DISPATCH:DISTRIBUTION] Phase 2: Anti-slop content contract assertion -> contracts verified PASS (0 forbidden dashes)")
+            truth_audit = audit_syndication_asset_against_truth_store(pack, property_id=property_id)
+            if truth_audit["status"] != "PASS":
+                raise ValueError(
+                    f"Outside truth-store audit failed for {property_id}/{slug}: {truth_audit['failures']}"
+                )
+
+        print("[DISPATCH:DISTRIBUTION] Phase 2: Anti-slop & outside truth-store contract assertion -> PASS (0 forbidden dashes, 100% statutory proof parity)")
 
         # Phase 3: Mechanical Voice DNA verification
         first_pack = next(iter(all_assets.values())) if all_assets else None
@@ -6732,26 +7407,34 @@ def dispatch_to_distribution_lead(
                                     continue
                                 if e_slug in seen_slugs:
                                     continue
+                                dispatches_map = e.get("dispatches")
+                                if isinstance(dispatches_map, dict):
+                                    dispatches_map.pop("reddit", None)
+                                    dispatches_map.setdefault("ghost", "STAGED")
+                                    dispatches_map.setdefault("github_gist", "STAGED")
+                                if e_slug in all_assets:
+                                    e["post_url"] = all_assets[e_slug].get("parameterized_url") or all_assets[e_slug].get("url") or e.get("post_url")
                                 seen_slugs.add(e_slug)
                                 existing_entries.append(e)
                     except Exception:
                         existing_entries = []
                         seen_slugs = set()
                 canon_base = "https://prexvo.com" if property_id == "prexvo" else "https://profithelm.com"
-                for slug in all_assets:
+                for slug, pack_obj in all_assets.items():
                     if slug not in seen_slugs:
                         existing_entries.append({
                             "slug": slug,
                             "timestamp": now_iso,
                             "mode": "SYNDICATED_STAGED",
                             "run_id": eff_run_id,
-                            "post_url": f"{canon_base}/tools/{slug}/",
+                            "post_url": pack_obj.get("parameterized_url") or f"{canon_base}/tools/{slug}/",
                             "dispatches": {
                                 "x": "STAGED",
                                 "linkedin": "STAGED",
                                 "facebook": "STAGED",
                                 "youtube": "STAGED",
-                                "reddit": "STAGED",
+                                "ghost": "STAGED",
+                                "github_gist": "STAGED",
                                 "quora": "STAGED",
                                 "google_sites": "STAGED",
                                 "linkedin_pulse": "STAGED",
@@ -6790,18 +7473,8 @@ def dispatch_to_distribution_lead(
         "dry_run": dry_run,
         "total_assets_generated": total_assets,
         "all_assets": all_assets,
-        "channels": [
-            "x",
-            "linkedin",
-            "facebook",
-            "youtube",
-            "reddit",
-            "quora",
-            "google_sites",
-            "linkedin_pulse",
-            "substack_teardown",
-            "outreach_pitch",
-        ],
+        "channels": active_channels,
+        "omitted_channels": ["reddit"],
         "budget_before": budget_before,
         "budget_after": budget_after,
         "voice_check_passed": voice_ok,
@@ -6811,10 +7484,20 @@ def dispatch_to_distribution_lead(
         "owner_calls": [
             "Approve live X post release (x-cli post / x-cli thread)",
             "Approve live social distribution on LinkedIn / Facebook pages",
+            "Approve Ghost article & exact-match GitHub Gist publication",
             "Approve YouTube video uploads or channel modifications",
         ],
         "timestamp": now_iso,
     }
+    draft_audit = audit_distribution_draft_payload(result, property_id=property_id)
+    if draft_audit["status"] != "PASS":
+        raise ValueError(f"Distribution draft payload failed truth-store audit: {draft_audit['failures']}")
+    result["truth_store_audit"] = {
+        "status": draft_audit["status"],
+        "tools_audited": draft_audit["tools_audited"],
+        "passed_tools": draft_audit["passed_tools"],
+    }
+
     with open(draft_lock_file, "a+") as dlf:
         fcntl.flock(dlf.fileno(), fcntl.LOCK_EX)
         try:

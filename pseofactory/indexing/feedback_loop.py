@@ -1329,6 +1329,10 @@ class IndexingFeedbackLoop:
         brand = "Prexvo" if self.property_id == "prexvo" else "ProfitHelm"
         auth_tag = "Title IV 34 CFR Part 685" if self.property_id == "prexvo" else "Internal Revenue Code 2026"
 
+        from pseofactory.distributor import _resolve_tool_calculation_proof
+        proof = _resolve_tool_calculation_proof({"slug": slug, "title": title}, property_id=self.property_id)
+        param_url = _scrub(proof.get("parameterized_url") or canon_url)
+
         file_slug = slug.replace("/", "-")
         linkedin_path = synd_dir / f"{file_slug}-linkedin.md"
         newsletter_path = synd_dir / f"{file_slug}-newsletter.md"
@@ -1339,10 +1343,12 @@ class IndexingFeedbackLoop:
             linkedin_body = (
                 f"# {title}\n\n"
                 f"{quick_ans}\n\n"
+                f"Verified Statutory Proof ({proof['scenario_label']}): {proof['sample_calculation']} "
+                f"(Formula: `{proof['formula']}` -> `{proof['published_output_formatted']}`).\n\n"
                 f"Key statutory highlights ({auth_tag}):\n"
                 f"* Deterministic scenario modeling with audit-ready assumptions\n"
                 f"* Real-time sensitivity analysis across marginal brackets and thresholds\n\n"
-                f"Run the interactive calculator on {brand}: {canon_url}\n"
+                f"Run the interactive calculator on {brand}: {param_url}\n"
             )
             linkedin_path.write_text(_scrub(linkedin_body), encoding="utf-8")
             written_files.append(str(linkedin_path))
@@ -1352,7 +1358,8 @@ class IndexingFeedbackLoop:
                 f"Subject: {title}\n\n"
                 f"## {title}\n\n"
                 f"{quick_ans}\n\n"
-                f"Access the full interactive calculator and scenario comparison table at {canon_url}\n"
+                f"Verified Calculation ({proof['scenario_label']}): {proof['sample_calculation']} ({proof['published_output_formatted']}).\n\n"
+                f"Access the full interactive calculator and scenario comparison table at {param_url}\n"
             )
             newsletter_path.write_text(_scrub(newsletter_body), encoding="utf-8")
             written_files.append(str(newsletter_path))
@@ -1360,7 +1367,8 @@ class IndexingFeedbackLoop:
         if not substack_path.is_file():
             substack_body = (
                 f"{title}: {quick_ans} "
-                f"Explore the interactive {brand} model at {canon_url}\n"
+                f"Verified Output ({proof['scenario_label']}): {proof['published_output_formatted']}. "
+                f"Explore the interactive {brand} model at {param_url}\n"
             )
             substack_path.write_text(_scrub(substack_body), encoding="utf-8")
             written_files.append(str(substack_path))
@@ -1377,9 +1385,9 @@ class IndexingFeedbackLoop:
                     b_data = []
             entry = {
                 "slug": slug,
-                "url": canon_url,
+                "url": param_url,
                 "dispatched_at": datetime.now(timezone.utc).isoformat(),
-                "channels": ["linkedin", "newsletter", "substack_notes"],
+                "channels": ["linkedin", "facebook", "youtube", "ghost", "github_gist", "newsletter", "substack_notes"],
             }
             if isinstance(b_data, list):
                 existing_idx = next(
