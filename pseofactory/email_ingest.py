@@ -887,6 +887,34 @@ class EmailIngestionEngine:
                 )
                 continue
 
+            if msg.mailbox != "Sent" and "gusto" in combined_text and (
+                "you're approved" in combined_text
+                or "welcome to gusto" in combined_text
+                or "noelle.hyra@gusto.com" in sender_lower
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="gusto",
+                        partner_name="Gusto Payroll, Benefits & HR Platform",
+                        category="PAYROLL_HR",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="Gusto Impact.com contract approved (#15154, $200-$300 CPA). Tracking link active.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://gusto.pxf.io/c/7932737/1226287/15154",
+                        network="Impact.com",
+                    )
+                )
+                continue
+
             matched_outbound = outbound_partner_map.get(to_email)
             if not matched_outbound and msg.mailbox == "Sent":
                 for addr_key, p_tuple in outbound_partner_map.items():
@@ -1111,30 +1139,57 @@ class EmailIngestionEngine:
                 )
                 continue
 
-            # 1. Gusto Affiliate Application (Impact.com)
-            if "gusto" in combined_text and ("impact.com" in sender_lower or "affiliate" in combined_text):
-                is_applied = "thank you for applying" in body_lower or "application" in combined_text
-                classifications.append(
-                    PartnerEmailClassification(
-                        email_id=msg.id,
-                        account=msg.account,
-                        property_id="profithelm",
-                        partner_key="gusto",
-                        partner_name="Gusto Payroll & HR",
-                        category="PAYROLL_HR",
-                        classification_type="APPLICATION_SUBMITTED",
-                        requires_operator_decision=False,
-                        summary="Application submitted via Impact.com. Awaiting partner review and tracking link issuance.",
-                        urgency="MEDIUM",
-                        deadline=None,
-                        missing_requirements=["Pending Impact.com vendor review", "Missing tracking link"],
-                        raw_subject=msg.subject,
-                        sender_email=msg.sender_email,
-                        date=msg.date,
-                        candidate_url=cand_url,
-                        network="Impact.com",
-                    )
+            # 1. Gusto Affiliate Application & Approval (Impact.com)
+            if "gusto" in combined_text and ("impact.com" in sender_lower or "noelle.hyra@gusto.com" in sender_lower or "affiliate" in combined_text):
+                is_approved_gusto = (
+                    "you're approved" in combined_text
+                    or "welcome to gusto" in combined_text
+                    or "noelle.hyra@gusto.com" in sender_lower
                 )
+                if is_approved_gusto:
+                    classifications.append(
+                        PartnerEmailClassification(
+                            email_id=msg.id,
+                            account=msg.account,
+                            property_id="profithelm",
+                            partner_key="gusto",
+                            partner_name="Gusto Payroll, Benefits & HR Platform",
+                            category="PAYROLL_HR",
+                            classification_type="APPLICATION_APPROVED",
+                            requires_operator_decision=False,
+                            summary="Gusto Impact.com contract approved (#15154, $200-$300 CPA). Tracking link active.",
+                            urgency="LOW",
+                            deadline=None,
+                            missing_requirements=[],
+                            raw_subject=msg.subject,
+                            sender_email=msg.sender_email,
+                            date=msg.date,
+                            candidate_url=cand_url or "https://gusto.pxf.io/c/7932737/1226287/15154",
+                            network="Impact.com",
+                        )
+                    )
+                else:
+                    classifications.append(
+                        PartnerEmailClassification(
+                            email_id=msg.id,
+                            account=msg.account,
+                            property_id="profithelm",
+                            partner_key="gusto",
+                            partner_name="Gusto Payroll & HR",
+                            category="PAYROLL_HR",
+                            classification_type="APPLICATION_SUBMITTED",
+                            requires_operator_decision=False,
+                            summary="Application submitted via Impact.com. Awaiting partner review and tracking link issuance.",
+                            urgency="MEDIUM",
+                            deadline=None,
+                            missing_requirements=["Pending Impact.com vendor review", "Missing tracking link"],
+                            raw_subject=msg.subject,
+                            sender_email=msg.sender_email,
+                            date=msg.date,
+                            candidate_url=cand_url,
+                            network="Impact.com",
+                        )
+                    )
 
             # 2. Prexvo Shopify Payments Payout Alert
             elif "prexvo" in combined_text and ("shop pay installments" in combined_text or "payouts from orders" in combined_text or ("shopify" in combined_text and "payout" in combined_text)):

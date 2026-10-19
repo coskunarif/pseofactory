@@ -57,7 +57,7 @@ def test_vault_schema_loading_and_default_fallback():
     status = hub.get_vault_status()
     assert status["direct_partners_total"] >= 20
     assert status["direct_partners_active"] >= 2
-    assert status["direct_partners_pending"] >= 18
+    assert status["direct_partners_pending"] >= 17
     assert status["master_keys"]["sovrn_commerce_domain_key_configured"] is True
     assert status["master_keys"]["sovrn_commerce_api_key_configured"] is True
     assert status["master_keys"]["partnerstack_api_key_configured"] is True

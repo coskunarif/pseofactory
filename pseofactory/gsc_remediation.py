@@ -682,7 +682,7 @@ def _resolve_partner_offer_and_manual_gate(
                 }
             elif any(k in combined for k in ("payroll-fica", "fica-tax", "withholding-calculator", "gusto-payroll")):
                 g_info = registry.get("gusto", {})
-                if g_info.get("status") != "live":
+                if g_info.get("status") != "live" or "payroll-fica" in combined:
                     manual_requirement = {
                         "property_id": "profithelm",
                         "asset_slug": s_norm,

@@ -123,7 +123,7 @@ def get_contextual_ftc_disclosure(
     elif any(k in s_lower for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "truck", "suv", "lease")):
         vertical_partners = "Xendoo, Mercury, Rippling, Stax Payments, and verified Section 179 accounting or commercial capital partners"
     elif any(k in s_lower for k in ("saas", "runway", "burn", "s-corp", "payroll", "174", "workers-comp", "factoring", "tariff", "surety")):
-        vertical_partners = "Mercury, Rippling, Xendoo, SurePayroll, Stax Payments, Simply Business, Next Insurance, Hiscox, Invoice Simple, and verified commercial treasury or payroll partners"
+        vertical_partners = "Mercury, Rippling, Gusto, Xendoo, SurePayroll, Stax Payments, Simply Business, Next Insurance, Hiscox, Invoice Simple, and verified commercial treasury or payroll partners"
     elif any(k in s_lower for k in ("treasury", "tbill", "hysa", "yield", "qsbs", "1202")):
         vertical_partners = "Mercury, Kalshi, Xendoo, Zacks Investment Research, Valley Bank, Quontic Bank, and verified institutional yield partners"
     elif any(k in s_lower for k in ("crypto", "8949", "1099-da", "prediction", "1256", "kalshi", "polymarket")):
@@ -281,24 +281,24 @@ PROFITHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
     "gusto": AffiliatePartner(
         key="gusto",
-        name="SurePayroll by Paychex Business Payroll",
+        name="Gusto Payroll, Benefits & HR Platform",
         category="Corporate Finance",
         property_id="profithelm",
-        status="pending_expansion",
+        status="live",
         env_var="AFFILIATE_GUSTO_URL",
-        default_url="https://www.surepayroll.com/",
+        default_url="https://gusto.pxf.io/c/7932737/1226287/15154",
         badge="Automated S-Corp & Team Payroll",
-        commission_est="$100 flat",
-        bounty_est="$100 flat",
-        network="Sovrn Commerce",
-        description="Automated small business and S-Corp payroll tax filing, W-2 and 1099 compliance, and same-day direct deposit backed by Paychex.",
+        commission_est="$200-$300/sale",
+        bounty_est="$200-$300",
+        network="Impact.com",
+        description="Automated small business and S-Corp payroll tax filing, W-2 and 1099 compliance, benefits administration, and same-day direct deposit.",
         target_tools=[
             "saas-runway-calculator",
             "s-corp-reasonable-salary-tax-calculator",
             "workers-comp-and-payroll-burden-calculator",
         ],
         supported_params=["ph_tier"],
-        cta_text="Automate Business Payroll with SurePayroll",
+        cta_text="Automate S-Corp & Team Payroll with Gusto",
     ),
     "rippling": AffiliatePartner(
         key="rippling",
@@ -2507,7 +2507,7 @@ def get_affiliate_route(
     elif partner_obj.key == "rho":
         cta_text = "Maximize Yield with Mercury Commercial Treasury" if is_premium else "Explore Mercury Commercial Treasury"
     elif partner_obj.key == "gusto":
-        cta_text = "Scale Automated Payroll with SurePayroll Pro" if is_premium else "Automate Business Payroll with SurePayroll"
+        cta_text = "Scale Automated Payroll with Gusto Plus" if is_premium else "Automate S-Corp & Team Payroll with Gusto"
     elif partner_obj.key == "rippling":
         cta_text = "Deploy Global Workforce with Rippling" if is_premium else "Schedule Rippling Demo"
     elif partner_obj.key == "crest_capital":
@@ -3472,15 +3472,13 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
     },
     "gusto": {
         "partner_key": "gusto",
-        "sovrn_merchant_id": 31485,
-        "verified_merchant_name": "SurePayroll",
-        "verified_url": "https://www.surepayroll.com/",
-        "is_direct": False,
+        "verified_merchant_name": "Gusto Payroll, Benefits & HR Platform",
+        "verified_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
+        "is_direct": True,
         "approved": True,
-        "payout_rate": "$100.00 USD Completed Sale",
-        "network": "Sovrn Commerce",
-        "swapped_from_non_paying": True,
-        "replaced_domain": "gusto.com",
+        "payout_rate": "$200.00-$300.00 USD CPA per Sale",
+        "network": "Impact.com",
+        "swapped_from_non_paying": False,
     },
     "deel": {
         "partner_key": "deel",
@@ -3782,7 +3780,7 @@ EXPECTED_PARTNER_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "ramp": ("mercury",),
     "rho": ("mercury",),
     "brex": ("mercury",),
-    "gusto": ("surepayroll", "paychex"),
+    "gusto": ("gusto",),
     "deel": ("rippling",),
     "bench": ("xendoo",),
     "pilot": ("xendoo",),
@@ -3823,7 +3821,7 @@ FORBIDDEN_REPLACED_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "ramp": ("ramp",),
     "rho": ("rho",),
     "brex": ("brex",),
-    "gusto": ("gusto",),
+    "gusto": ("surepayroll", "paychex"),
     "deel": ("deel",),
     "bench": ("bench",),
     "pilot": ("pilot",),
@@ -4436,7 +4434,7 @@ def normalize_html_callout_message_match(
                         else ["coinledger", "koinly", "crest_capital"]
                     )
                 elif is_s_corp_or_workers_comp:
-                    sorted_keys = ["rippling", "mercury", "crest_capital"]
+                    sorted_keys = ["rippling", "gusto", "mercury"]
                 elif is_treasury_page:
                     sorted_keys = ["mercury", "kalshi", "crest_capital"]
                 else:

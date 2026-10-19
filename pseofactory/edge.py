@@ -1690,6 +1690,18 @@ export async function onRequest(context) {{
   ) {{
     targetObj.searchParams.set("sid", effectiveSubid);
   }}
+  if (
+    effectiveSubid &&
+    (targetObj.searchParams.has("fpr") ||
+      targetObj.searchParams.has("fp_ref") ||
+      targetObj.searchParams.has("via")) &&
+    !targetObj.searchParams.has("fp_sid")
+  ) {{
+    const fpSid = effectiveSubid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 8);
+    if (fpSid) {{
+      targetObj.searchParams.set("fp_sid", fpSid);
+    }}
+  }}
   if (sourceTool || effectiveSubid || ctaSlot) {{
     if (!targetObj.searchParams.has("utm_source")) {{
       targetObj.searchParams.set("utm_source", "profithelm");

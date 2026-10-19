@@ -812,6 +812,12 @@ class PartnerTrackingEngine:
                 "account_identifier": "PayPal (arif.coskun@profithelm.com confirmed via code 679553 in Newsletter #1576)",
                 "tax_status": "COMPLETE",
             },
+            "firstpromoter_coinledger": {
+                "network": "FirstPromoter (CoinLedger)",
+                "payout_verified": True,
+                "account_identifier": "PayPal (arif.coskun@profithelm.com Selected on 2026-10-19 at affiliates.coinledger.io/my-payouts/payout-methods)",
+                "tax_status": "COMPLETE",
+            },
             "sovrn_commerce": {
                 "network": "Sovrn Commerce",
                 "payout_verified": sovrn_ok,
@@ -1147,6 +1153,7 @@ class PartnerTrackingEngine:
 
         partner_to_network = {
             "kalshi": "impact",
+            "gusto": "impact",
             "xendoo_impact": "impact",
             "efile": "cj_affiliate",
             "efile_com": "cj_affiliate",

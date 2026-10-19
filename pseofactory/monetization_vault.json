@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-19T17:15:00+00:00",
+    "updated_at": "2026-10-19T23:25:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -38,7 +38,7 @@
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
       "active_advertiser_contracts": 1,
-      "live_active_contracts_count": 2,
+      "live_active_contracts_count": 3,
       "live_active_contracts": [
         {
           "campaign_id": "37770",
@@ -54,10 +54,18 @@
           "commission_terms": "$500.00 USD CPA per Onboarded Client",
           "tracking_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
           "short_link": "https://xendoo.pxf.io/2Rq2rg"
+        },
+        {
+          "campaign_id": "15154",
+          "brand_name": "Gusto",
+          "status": "Active (Approved 2026-10-19, Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com)",
+          "commission_terms": "$200.00-$300.00 USD CPA per Valid US Small Business Sale",
+          "tracking_url": "https://gusto.pxf.io/c/7932737/1226287/15154"
         }
       ],
       "pending_advertiser_contracts": 17,
-      "verified_clicks": 3
+      "live_pending_advertiser_contracts": 15,
+      "verified_clicks": 5
     },
     "cj_affiliate": {
       "name": "CJ Affiliate",
@@ -216,17 +224,20 @@
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
           "active_partners": [
-            "coinledger",
+            "coinledger (fpr=arif-554004, PayPal payout arif.coskun@profithelm.com Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 4 clicks recorded)",
             "koinly",
             "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576; 1 verified click recorded on FirstPromoter dashboard)"
           ],
+          "verified_clicks": 5,
           "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
         },
         "impact_rest_api": {
           "provider": "Impact.com Publisher REST API",
           "account_id": "7932737",
           "active_campaigns": [
-            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770; 3 verified clicks recorded including referring domain profithelm.com)"
+            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770; 5 verified clicks / 11 raw clicks recorded including referring domain profithelm.com)",
+            "xendoo (#16354 - Contract Active since 2026-10-19, $500.00 CPA per Onboarded Client via https://xendoo.pxf.io/c/7932737/1357375/16354; 1 raw click recorded)",
+            "gusto (#15154 - Contract Active since 2026-10-19 via Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com, $200-$300 CPA per sale via https://gusto.pxf.io/c/7932737/1226287/15154)"
           ],
           "submitted_campaigns": [
             "gusto (#15154 - uContractId 30477112, Inbox #967 + publisher intro Sent #271 to noelle.hyra@gusto.com)",
@@ -278,14 +289,14 @@
           "ipx1031",
           "mercury",
           "kalshi",
-          "crest_capital"
+          "crest_capital",
+          "gusto"
         ],
         "answered_action_required": [
           "rho",
           "stripe"
         ],
         "awaiting_vendor_response": [
-          "gusto",
           "ramp",
           "exeter1031",
           "first_american",
@@ -311,7 +322,8 @@
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
           "bounty": "$35-$90",
-          "correspondence_status": "Approved & Live (FirstPromoter token fpr=arif-554004 verified active via /r/coinledger -> https://coinledger.io/?fpr=arif-554004)"
+          "payout_method": "PayPal (arif.coskun@profithelm.com - Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods)",
+          "correspondence_status": "Approved & Live (FirstPromoter token fpr=arif-554004 verified active via /r/coinledger -> https://coinledger.io/?fpr=arif-554004; PayPal payout arif.coskun@profithelm.com Selected on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 4 clicks recorded)"
         },
         "koinly": {
           "status": "live",
@@ -390,19 +402,17 @@
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/stripe"
         },
         "gusto": {
-          "status": "awaiting_response",
-          "pipeline_tier": "awaiting_vendor_response",
-          "url": "https://gusto.com/",
-          "direct_url": "https://gusto.com/",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://gusto.pxf.io/c/7932737/1226287/15154",
+          "direct_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
+          "impact_tracking_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
           "edge_route": "/r/gusto",
           "category": "PAYROLL_HR",
           "network": "Impact.com",
           "campaign_id": "15154",
-          "bounty": "$300",
-          "correspondence_status": "Application Submitted, Confirmed by Email & Publisher Intro Sent (Inbox #967 on 2026-10-12T17:17Z confirming Gusto Campaign #15154 on Impact Account 7932737 / Branded Account 3161796 + publisher intro Sent #271 to noelle.hyra@gusto.com; Verified Insertion Order Payout: $300.00 USD per Sale; CJ Affiliate ADP #5275573 [3m EPC $1,776.97] & Intuit Small Business - QuickBooks, GoPayment, Payroll #2271086 submitted on CID 8101803 + publisher intro Sent #265 to cj_intuit@cj.com)",
-          "active_fallback_merchant": "rippling",
-          "active_fallback_url": "https://try.rippling.com/mcfo1m09qiwt",
-          "active_fallback_payout": "$600-$1600 via PartnerStack + Sovrn Commerce /r/gusto"
+          "bounty": "$200-$300",
+          "correspondence_status": "Approved & Live on Impact.com (Inbox #1003 & #1004 on 2026-10-19T19:14Z from noelle.hyra@gusto.com confirming approval to Gusto Campaign #15154 on Impact Account 7932737 / Branded Account 3161796 after Inbox #967 & Sent #271; Verified Insertion Order Payout: $200.00-$300.00 USD per Sale via https://gusto.pxf.io/c/7932737/1226287/15154; CJ Affiliate ADP #5275573 & Intuit Small Business #2271086 pending on CID 8101803 per Sent #265)"
         },
         "ramp": {
           "status": "awaiting_response",
