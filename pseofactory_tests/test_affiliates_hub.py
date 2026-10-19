@@ -951,3 +951,165 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
     assert 'class="ftc-disclosure-banner"' in norm_home
     assert "source_tool=homepage" in norm_home
     assert "subid=homepage_cta" in norm_home
+
+
+def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
+    """
+    Verifies via Node.js and Python that:
+    1. /r/:partner normalizes amp;-prefixed query params, forwards CJ sid, Impact subId1/sharedid,
+       and UTM parameters, and records server-side click telemetry to KV and in-memory buffer.
+    2. /api/telemetry persists and exports events across PROFITHELM_TELEMETRY_KV, PROFITHELM_LEADS,
+       and the in-isolate buffer (for Prexvo).
+    3. visual_primitives runtime synchronizer dispatches affiliate_click beacons unconditionally
+       on both ProfitHelm and Prexvo without requiring /static/js/app.js.
+    """
+    import subprocess
+    import pseofactory.edge as edge_mod
+    from pseofactory.edge import (
+        generate_edge_redirect_function,
+        sync_tenant_edge_redirect_function,
+    )
+    from pseofactory.visual_primitives import (
+        detect_visual_and_ux_contract_issues,
+        normalize_html_visual_primitives,
+        render_runtime_synchronizer_script,
+    )
+
+    # 1. Verify sync_tenant_edge_redirect_function writes both functions/r/[partner].js and functions/api/telemetry.js
+    assert hasattr(edge_mod, "generate_edge_telemetry_function")
+    for prop in ("profithelm", "prexvo"):
+        repo_dir = tmp_path / prop
+        (repo_dir / "functions" / "r").mkdir(parents=True, exist_ok=True)
+        res = sync_tenant_edge_redirect_function(repo_dir, property_id=prop)
+        assert res["status"] == "UPDATED"
+        assert (repo_dir / "functions" / "r" / "[partner].js").is_file()
+        assert (repo_dir / "functions" / "api" / "telemetry.js").is_file()
+
+    # 2. Execute Node.js verification against generated ProfitHelm and Prexvo edge functions
+    ph_r = tmp_path / "profithelm" / "functions" / "r" / "[partner].js"
+    ph_tel = tmp_path / "profithelm" / "functions" / "api" / "telemetry.js"
+    px_r = tmp_path / "prexvo" / "functions" / "r" / "[partner].js"
+    px_tel = tmp_path / "prexvo" / "functions" / "api" / "telemetry.js"
+
+    node_script = f"""
+    (async () => {{
+      const phRedirect = await import({json.dumps(ph_r.as_uri())});
+      const phTelemetry = await import({json.dumps(ph_tel.as_uri())});
+      const pxRedirect = await import({json.dumps(px_r.as_uri())});
+      const pxTelemetry = await import({json.dumps(px_tel.as_uri())});
+
+      // Test A: ProfitHelm /r/kalshi with HTML-encoded &amp; query params and PROFITHELM_LEADS KV fallback
+      const leadsKV = {{}};
+      const phEnv = {{
+        PROFITHELM_LEADS: {{
+          put: async (k, v) => {{ leadsKV[k] = v; }},
+          list: async (opts) => ({{
+            keys: Object.keys(leadsKV).filter(k => k.startsWith(opts.prefix || "evt_")).map(name => ({{ name }})),
+            list_complete: true
+          }}),
+          get: async (k) => leadsKV[k]
+        }}
+      }};
+
+      const kalshiReq = new Request("https://profithelm.com/r/kalshi?source_tool=prediction-market-odds&amp;cta_slot=calculator_result_inline&amp;ph_tier=enterprise");
+      const kalshiRes = await phRedirect.onRequest({{
+        request: kalshiReq,
+        env: phEnv,
+        params: {{ partner: "kalshi" }}
+      }});
+      if (kalshiRes.status !== 302) process.exit(10);
+      const kalshiLoc = new URL(kalshiRes.headers.get("Location"));
+      if (kalshiLoc.hostname !== "kalshi.pxf.io") process.exit(11);
+      if (kalshiLoc.searchParams.get("subid") !== "prediction-market-odds_calculator_result_inline") process.exit(12);
+      if (kalshiLoc.searchParams.get("subId1") !== "prediction-market-odds_calculator_result_inline") process.exit(13);
+      if (kalshiLoc.searchParams.get("sharedid") !== "prediction-market-odds") process.exit(14);
+      if (kalshiLoc.searchParams.get("ph_tier") !== "enterprise") process.exit(15);
+      if (kalshiRes.headers.get("X-Edge-Telemetry") !== "recorded") process.exit(16);
+
+      // Test B: ProfitHelm /r/efile CJ Affiliate link forwards sid parameter
+      const cjReq = new Request("https://profithelm.com/r/efile?source_tool=irs-2027-tax-brackets&cta_slot=partner_card_1");
+      const cjRes = await phRedirect.onRequest({{
+        request: cjReq,
+        env: phEnv,
+        params: {{ partner: "efile" }}
+      }});
+      if (cjRes.status !== 302) process.exit(20);
+      const cjLoc = new URL(cjRes.headers.get("Location"));
+      if (cjLoc.hostname !== "www.jdoqocy.com") process.exit(21);
+      if (cjLoc.searchParams.get("sid") !== "irs-2027-tax-brackets_partner_card_1") process.exit(22);
+      if (cjLoc.searchParams.get("subid") !== "irs-2027-tax-brackets_partner_card_1") process.exit(23);
+
+      // Verify server-side edge clicks were persisted to PROFITHELM_LEADS KV and are returned by GET /api/telemetry
+      const getPhRes = await phTelemetry.onRequestGet({{
+        request: new Request("https://profithelm.com/api/telemetry"),
+        env: phEnv
+      }});
+      const getPhData = await getPhRes.json();
+      if (!getPhData.ok || getPhData.count < 2) process.exit(30);
+      const recordedPartners = getPhData.events.map(e => e.partner_key);
+      if (!recordedPartners.includes("kalshi") || !recordedPartners.includes("efile")) process.exit(31);
+
+      // Test C: Prexvo /r/splash_financial + POST /api/telemetry without KV binding uses in-isolate buffer
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+      const pxReq = new Request("https://prexvo.com/r/splash_financial?source_tool=student-loan-repayment-calculator&amp;cta_slot=calculator_result_inline&amp;ph_tier=high_balance");
+      const pxRes = await pxRedirect.onRequest({{
+        request: pxReq,
+        env: {{}},
+        params: {{ partner: "splash_financial" }}
+      }});
+      if (pxRes.status !== 302) process.exit(40);
+      const pxLoc = new URL(pxRes.headers.get("Location"));
+      if (pxLoc.hostname !== "www.splashfinancial.com") process.exit(41);
+      if (pxLoc.searchParams.get("subid") !== "student-loan-repayment-calculator_calculator_result_inline") process.exit(42);
+      if (pxLoc.searchParams.get("ref") !== "prexvo") process.exit(43);
+
+      const beaconReq = new Request("https://prexvo.com/api/telemetry", {{
+        method: "POST",
+        headers: {{ "Content-Type": "text/plain;charset=UTF-8" }},
+        body: JSON.stringify({{
+          event_type: "affiliate_click",
+          tool_slug: "rap-payment-calculator",
+          partner_key: "sofi",
+          cta_slot: "partner_card_2",
+          subid: "rap-payment-calculator_card_2",
+          value_tier: "standard"
+        }})
+      }});
+      const beaconRes = await pxTelemetry.onRequestPost({{ request: beaconReq, env: {{}} }});
+      const beaconData = await beaconRes.json();
+      if (!beaconData.ok || beaconData.partner_key !== "sofi") process.exit(44);
+
+      const getPxRes = await pxTelemetry.onRequestGet({{
+        request: new Request("https://prexvo.com/api/telemetry"),
+        env: {{}}
+      }});
+      const getPxData = await getPxRes.json();
+      if (!getPxData.ok || getPxData.count !== 2) process.exit(45);
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Node edge redirect & telemetry test failed (exit {proc.returncode}): {proc.stderr}"
+
+    # 3. Verify visual_primitives runtime synchronizer script no longer gates sendBeacon on /static/js/app.js
+    sync_js = render_runtime_synchronizer_script()
+    assert 'document.querySelector(\'script[src*="/static/js/app.js"]\')' not in sync_js
+    assert 'navigator.sendBeacon("/api/telemetry"' in sync_js
+    assert 'window.fetch("/api/telemetry"' in sync_js
+
+    stale_doc = (
+        '<!DOCTYPE html><html><head></head><body>'
+        '<form class="calculator-form"><input type="number" name="amount" value="1000" min="0" max="10000" step="100" aria-label="Amount"></form>'
+        '<a href="/r/splash_financial?source_tool=rap-payment-calculator" data-partner="splash_financial">Refinance</a>'
+        + sync_js.replace(
+            "var sentBeacon = false;",
+            'if (document.querySelector(\'script[src*="/static/js/app.js"]\')) {} var sentBeacon = false;',
+        )
+        + "</body></html>"
+    )
+    issues = detect_visual_and_ux_contract_issues(stale_doc, require_primitives=True)
+    assert any("calculator synchronizer" in i for i in issues)
+    healed_doc, repairs = normalize_html_visual_primitives(stale_doc, is_tenant_porcelain=True)
+    assert "interactive_runtime_sync" in repairs
+    assert 'document.querySelector(\'script[src*="/static/js/app.js"]\')' not in healed_doc
+

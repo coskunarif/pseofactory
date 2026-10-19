@@ -1094,6 +1094,64 @@ const TRACKING_PARAMS = [
   "ph_tier",
 ];
 
+const CJ_DOMAINS = [
+  "jdoqocy.com",
+  "dpbolvw.net",
+  "anrdoezrs.net",
+  "tkqlhce.com",
+  "kqzyfj.com",
+];
+
+const IMPACT_DOMAINS = [
+  "pxf.io",
+  "ojrq.net",
+  "evyy.net",
+  "7eer.net",
+];
+
+function extractNormalizedParams(reqUrl) {{
+  const map = new Map();
+  for (const [rawKey, val] of reqUrl.searchParams.entries()) {{
+    const cleanKey = rawKey.replace(/^(?:amp;)+/i, "");
+    if (val !== null && val !== "" && !map.has(cleanKey)) {{
+      map.set(cleanKey, val);
+    }}
+  }}
+  return map;
+}}
+
+async function persistEdgeRedirectTelemetry(context, eventPayload) {{
+  try {{
+    if (!globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+    }}
+    globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.unshift(eventPayload);
+    if (globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length > 250) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length = 250;
+    }}
+    const env = context && context.env ? context.env : null;
+    const kv =
+      env &&
+      (env.PROFITHELM_TELEMETRY_KV ||
+        env.PREXVO_TELEMETRY_KV ||
+        env.PROFITHELM_LEADS ||
+        env.PREXVO_LEADS ||
+        null);
+    if (kv && typeof kv.put === "function") {{
+      const putPromise = kv
+        .put(eventPayload.event_id, JSON.stringify(eventPayload), {{
+          expirationTtl: 60 * 86400,
+        }})
+        .catch(() => {{}});
+      if (context && typeof context.waitUntil === "function") {{
+        context.waitUntil(putPromise);
+      }} else {{
+        await putPromise;
+      }}
+    }}
+  }} catch (_) {{}}
+}}
+
 function isSafeAndCompliantUrl(urlStr) {{
   try {{
     const parsed = new URL(urlStr);
@@ -1156,13 +1214,14 @@ function isSafeAndCompliantUrl(urlStr) {{
   }}
 }}
 
-function makeRedirectResponse(locationUrl) {{
+function makeRedirectResponse(locationUrl, extraHeaders = {{}}) {{
   return new Response(null, {{
     status: 302,
     headers: {{
       Location: locationUrl,
       "Cache-Control": "private, no-cache, no-store, must-revalidate",
       "X-Robots-Tag": "noindex, nofollow",
+      ...extraHeaders,
     }},
   }});
 }}
@@ -1201,22 +1260,43 @@ export async function onRequest(context) {{
   }}
 
   const reqUrl = new URL(request.url);
+  const normParams = extractNormalizedParams(reqUrl);
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
-    const val = reqUrl.searchParams.get(param);
-    if (val !== null && val !== "") {{
+    const val = normParams.get(param);
+    if (val !== undefined && val !== "") {{
       targetObj.searchParams.set(param, val);
     }}
   }}
 
-  const sourceTool = reqUrl.searchParams.get("source_tool") || "";
-  const ctaSlot = reqUrl.searchParams.get("cta_slot") || "";
+  const sourceTool = normParams.get("source_tool") || "";
+  const ctaSlot = normParams.get("cta_slot") || "";
+  const phTier = normParams.get("ph_tier") || "";
   const effectiveSubid =
-    reqUrl.searchParams.get("subid") ||
-    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : "");
+    normParams.get("subid") ||
+    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || "");
 
   if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
     targetObj.searchParams.set("subid", effectiveSubid);
+  }}
+  const targetHost = targetObj.hostname.toLowerCase();
+  if (
+    effectiveSubid &&
+    IMPACT_DOMAINS.some((d) => targetHost === d || targetHost.endsWith(`.${{d}}`))
+  ) {{
+    if (!targetObj.searchParams.has("subId1")) {{
+      targetObj.searchParams.set("subId1", effectiveSubid);
+    }}
+    if (sourceTool && !targetObj.searchParams.has("sharedid")) {{
+      targetObj.searchParams.set("sharedid", sourceTool);
+    }}
+  }}
+  if (
+    effectiveSubid &&
+    CJ_DOMAINS.some((d) => targetHost === d || targetHost.endsWith(`.${{d}}`)) &&
+    !targetObj.searchParams.has("sid")
+  ) {{
+    targetObj.searchParams.set("sid", effectiveSubid);
   }}
   if (!targetObj.searchParams.has("utm_source")) {{
     targetObj.searchParams.set("utm_source", "prexvo");
@@ -1240,7 +1320,30 @@ export async function onRequest(context) {{
     return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
   }}
 
-  return makeRedirectResponse(finalRedirectUrl);
+  const eventId =
+    "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
+  await persistEdgeRedirectTelemetry(context, {{
+    event_id: eventId,
+    event: "affiliate_click",
+    event_type: "affiliate_click",
+    property_id: "prexvo",
+    partner_key: rawPartner,
+    tool_slug: sourceTool || "direct",
+    source_tool: sourceTool || "direct",
+    cta_slot: ctaSlot || "edge_redirect",
+    subid: effectiveSubid || `${{rawPartner}}_edge`,
+    value_tier: phTier || "standard",
+    ph_tier: phTier || "standard",
+    path: reqUrl.pathname,
+    destination_url: finalRedirectUrl,
+    timestamp: new Date().toISOString(),
+  }});
+
+  return makeRedirectResponse(finalRedirectUrl, {{
+    "X-Edge-Partner": rawPartner,
+    "X-Edge-Subid": effectiveSubid || "default",
+    "X-Edge-Telemetry": "recorded",
+  }});
 }}
 """
         assert_no_forbidden_dashes(prexvo_js, "generate_edge_redirect_function(prexvo)")
@@ -1344,6 +1447,25 @@ export async function onRequest(context) {{
             )
             ordered_keys.append(v_key)
 
+    direct_network_aliases = {
+        "efile": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL"),
+        "efile_com": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL"),
+        "eztaxreturn": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
+        "eztaxreturn_com": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
+        "lawdepot": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
+        "xendoo_impact": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_IMPACT_URL"),
+    }
+    for d_key, (d_url, d_env) in direct_network_aliases.items():
+        if d_key not in ordered_keys:
+            catalog_entries.append(
+                f'  {d_key}: {{\n'
+                f'    defaultUrl: "{d_url}",\n'
+                f'    envVar: "{d_env}",\n'
+                f'    isDirect: true,\n'
+                f'  }},'
+            )
+            ordered_keys.append(d_key)
+
     catalog_block = "\n".join(catalog_entries)
 
     js_code = f"""/**
@@ -1373,8 +1495,66 @@ const TRACKING_PARAMS = [
   "cta_slot",
 ];
 
+const CJ_DOMAINS = [
+  "jdoqocy.com",
+  "dpbolvw.net",
+  "anrdoezrs.net",
+  "tkqlhce.com",
+  "kqzyfj.com",
+];
+
+const IMPACT_DOMAINS = [
+  "pxf.io",
+  "ojrq.net",
+  "evyy.net",
+  "7eer.net",
+];
+
 const DEFAULT_SOVRN_KEY = "{sovrn_key}";
 const SOVRN_REDIRECT_BASE = "https://redirect.viglink.com";
+
+function extractNormalizedParams(reqUrl) {{
+  const map = new Map();
+  for (const [rawKey, val] of reqUrl.searchParams.entries()) {{
+    const cleanKey = rawKey.replace(/^(?:amp;)+/i, "");
+    if (val !== null && val !== "" && !map.has(cleanKey)) {{
+      map.set(cleanKey, val);
+    }}
+  }}
+  return map;
+}}
+
+async function persistEdgeRedirectTelemetry(context, eventPayload) {{
+  try {{
+    if (!globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+    }}
+    globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.unshift(eventPayload);
+    if (globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length > 250) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length = 250;
+    }}
+    const env = context && context.env ? context.env : null;
+    const kv =
+      env &&
+      (env.PROFITHELM_TELEMETRY_KV ||
+        env.PREXVO_TELEMETRY_KV ||
+        env.PROFITHELM_LEADS ||
+        env.PREXVO_LEADS ||
+        null);
+    if (kv && typeof kv.put === "function") {{
+      const putPromise = kv
+        .put(eventPayload.event_id, JSON.stringify(eventPayload), {{
+          expirationTtl: 60 * 86400,
+        }})
+        .catch(() => {{}});
+      if (context && typeof context.waitUntil === "function") {{
+        context.waitUntil(putPromise);
+      }} else {{
+        await putPromise;
+      }}
+    }}
+  }} catch (_) {{}}
+}}
 
 /**
  * Validates that a destination URL is strictly safe against SSRF and open redirect attacks.
@@ -1474,23 +1654,55 @@ export async function onRequest(context) {{
 
   // Propagate tracking parameters and synthesize sub-attribution
   const reqUrl = new URL(request.url);
+  const normParams = extractNormalizedParams(reqUrl);
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
-    const val = reqUrl.searchParams.get(param);
-    if (val !== null && val !== "") {{
+    const val = normParams.get(param);
+    if (val !== undefined && val !== "") {{
       targetObj.searchParams.set(param, val);
     }}
   }}
-  const sourceTool = reqUrl.searchParams.get("source_tool") || "";
-  const ctaSlot = reqUrl.searchParams.get("cta_slot") || "";
+  const sourceTool = normParams.get("source_tool") || "";
+  const ctaSlot = normParams.get("cta_slot") || "";
+  const phTier = normParams.get("ph_tier") || "";
   const effectiveSubid =
-    reqUrl.searchParams.get("subid") ||
-    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : "");
+    normParams.get("subid") ||
+    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || "");
   if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
     targetObj.searchParams.set("subid", effectiveSubid);
   }}
-  if (effectiveSubid && targetObj.hostname.toLowerCase().includes("pxf.io") && !targetObj.searchParams.has("subId1")) {{
-    targetObj.searchParams.set("subId1", effectiveSubid);
+  const targetHost = targetObj.hostname.toLowerCase();
+  if (
+    effectiveSubid &&
+    IMPACT_DOMAINS.some((d) => targetHost === d || targetHost.endsWith(`.${{d}}`))
+  ) {{
+    if (!targetObj.searchParams.has("subId1")) {{
+      targetObj.searchParams.set("subId1", effectiveSubid);
+    }}
+    if (sourceTool && !targetObj.searchParams.has("sharedid")) {{
+      targetObj.searchParams.set("sharedid", sourceTool);
+    }}
+  }}
+  if (
+    effectiveSubid &&
+    CJ_DOMAINS.some((d) => targetHost === d || targetHost.endsWith(`.${{d}}`)) &&
+    !targetObj.searchParams.has("sid")
+  ) {{
+    targetObj.searchParams.set("sid", effectiveSubid);
+  }}
+  if (sourceTool || effectiveSubid || ctaSlot) {{
+    if (!targetObj.searchParams.has("utm_source")) {{
+      targetObj.searchParams.set("utm_source", "profithelm");
+    }}
+    if (!targetObj.searchParams.has("utm_medium")) {{
+      targetObj.searchParams.set("utm_medium", "affiliate");
+    }}
+    if (sourceTool && !targetObj.searchParams.has("utm_campaign")) {{
+      targetObj.searchParams.set("utm_campaign", sourceTool);
+    }}
+    if ((effectiveSubid || ctaSlot) && !targetObj.searchParams.has("utm_content")) {{
+      targetObj.searchParams.set("utm_content", effectiveSubid || ctaSlot);
+    }}
   }}
   const populatedTargetUrl = targetObj.toString();
 
@@ -1515,18 +1727,386 @@ export async function onRequest(context) {{
     }});
   }}
 
+  const eventId =
+    "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
+  await persistEdgeRedirectTelemetry(context, {{
+    event_id: eventId,
+    event: "affiliate_click",
+    event_type: "affiliate_click",
+    property_id: "profithelm",
+    partner_key: rawPartner,
+    tool_slug: sourceTool || "direct",
+    source_tool: sourceTool || "direct",
+    cta_slot: ctaSlot || "edge_redirect",
+    subid: effectiveSubid || `${{rawPartner}}_edge`,
+    value_tier: phTier || "starter",
+    ph_tier: phTier || "starter",
+    path: reqUrl.pathname,
+    destination_url: finalRedirectUrl,
+    timestamp: new Date().toISOString(),
+  }});
+
   return new Response(null, {{
     status: 302,
     headers: {{
       Location: finalRedirectUrl,
       "Cache-Control": "private, no-cache, no-store, must-revalidate",
       "X-Robots-Tag": "noindex, nofollow",
+      "X-Edge-Partner": rawPartner,
+      "X-Edge-Subid": effectiveSubid || "default",
+      "X-Edge-Telemetry": "recorded",
     }},
   }});
 }}
 """
     assert_no_forbidden_dashes(js_code, "generate_edge_redirect_function")
     return js_code
+
+
+def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
+    """
+    Generates the deterministic Cloudflare Pages Function (functions/api/telemetry.js)
+    for ProfitHelm or Prexvo calculation, slider, and affiliate click telemetry ingestion.
+    Supports multi-KV fallback (PROFITHELM_TELEMETRY_KV, PREXVO_TELEMETRY_KV, PROFITHELM_LEADS,
+    PREXVO_LEADS) plus an in-isolate ring buffer so events persist and round-trip cleanly.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop_clean = (property_id or "profithelm").strip().lower()
+    if prop_clean not in ("profithelm", "prexvo"):
+        raise ValueError(
+            f"Edge telemetry function generation is only supported for profithelm or prexvo (got '{property_id}')."
+        )
+
+    telemetry_js = f"""/**
+ * Cloudflare Pages Function: /api/telemetry ({prop_clean})
+ * Handles incoming calculation interaction, slider drag, and affiliate click conversion events.
+ * Strips PII and returns HTTP 200 JSON {{ ok: true, status: "RECORDED" }}.
+ * Zero em-dashes. Zero en-dashes.
+ */
+
+const CORS_HEADERS = {{
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+  "Access-Control-Max-Age": "86400",
+}};
+
+export async function onRequestOptions() {{
+  return new Response(null, {{
+    status: 204,
+    headers: CORS_HEADERS,
+  }});
+}}
+
+function resolveTelemetryKV(env) {{
+  if (!env || typeof env !== "object") return null;
+  const candidates = [
+    env.PROFITHELM_TELEMETRY_KV,
+    env.PREXVO_TELEMETRY_KV,
+    env.PROFITHELM_LEADS,
+    env.PREXVO_LEADS,
+  ];
+  for (const kv of candidates) {{
+    if (kv && (typeof kv.put === "function" || typeof kv.list === "function")) {{
+      return kv;
+    }}
+  }}
+  return null;
+}}
+
+function appendInMemoryTelemetry(payload) {{
+  try {{
+    if (!globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+    }}
+    const buf = globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__;
+    if (!buf.some((item) => item && item.event_id === payload.event_id)) {{
+      buf.unshift(payload);
+      if (buf.length > 250) {{
+        buf.length = 250;
+      }}
+    }}
+  }} catch (_) {{}}
+}}
+
+function deepSanitizePII(obj) {{
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) {{
+    return obj.map(deepSanitizePII);
+  }}
+  const clean = {{}};
+  const forbidden = ["email", "password", "token", "secret", "name", "ssn", "phone"];
+  for (const [key, value] of Object.entries(obj)) {{
+    const kLower = key.toLowerCase();
+    if (forbidden.some((term) => kLower.includes(term))) {{
+      continue;
+    }}
+    if (
+      (kLower === "ip" ||
+        kLower === "ip_address" ||
+        kLower === "client_ip" ||
+        kLower === "remote_ip") &&
+      typeof value === "string"
+    ) {{
+      clean[key] = value.trim().replace(/^(\\d+\\.\\d+\\.\\d+)\\.\\d+$/, "$1.0");
+      continue;
+    }}
+    if (typeof value === "string") {{
+      if (/[^\\s@]+@[^\\s@]+\\.[^\\s@]+/.test(value)) {{
+        continue;
+      }}
+      if (/^(\\d+\\.\\d+\\.\\d+)\\.\\d+$/.test(value.trim())) {{
+        clean[key] = value.trim().replace(/^(\\d+\\.\\d+\\.\\d+)\\.\\d+$/, "$1.0");
+      }} else {{
+        clean[key] = value.length > 500 ? value.substring(0, 500) : value;
+      }}
+    }} else if (typeof value === "object" && value !== null) {{
+      clean[key] = deepSanitizePII(value);
+    }} else {{
+      clean[key] = value;
+    }}
+  }}
+  return clean;
+}}
+
+export async function onRequestPost(context) {{
+  try {{
+    const {{ request, env }} = context;
+    const contentType = (request.headers.get("content-type") || "").toLowerCase();
+    let payload = {{}};
+
+    if (contentType.includes("application/json")) {{
+      payload = await request.json().catch(() => ({{}}));
+    }} else {{
+      const rawText = await request.text().catch(() => "");
+      if (rawText && rawText.trim().startsWith("{{")) {{
+        try {{
+          payload = JSON.parse(rawText);
+        }} catch (_) {{
+          payload = {{}};
+        }}
+      }}
+    }}
+
+    // Sanitize PII recursively (both top-level and inside properties/parameters)
+    payload = deepSanitizePII(payload) || {{}};
+
+    const props =
+      payload.properties && typeof payload.properties === "object"
+        ? payload.properties
+        : {{}};
+    const eventName =
+      typeof payload.event === "string" && payload.event
+        ? payload.event
+        : typeof payload.event_type === "string" && payload.event_type
+        ? payload.event_type
+        : "unknown_event";
+    payload.event = eventName;
+    if (!payload.event_type) {{
+      payload.event_type = eventName;
+    }}
+    if (!payload.property_id) {{
+      payload.property_id = "{prop_clean}";
+    }}
+    if (!payload.tool_slug && (payload.source_tool || props.source_tool || props.tool)) {{
+      payload.tool_slug = payload.source_tool || props.source_tool || props.tool;
+    }}
+    if (!payload.partner_key && (payload.partner || props.partner_key || props.partner)) {{
+      payload.partner_key = payload.partner || props.partner_key || props.partner;
+    }}
+    if (!payload.cta_slot && props.cta_slot) {{
+      payload.cta_slot = props.cta_slot;
+    }}
+    if (!payload.subid && props.subid) {{
+      payload.subid = props.subid;
+    }}
+    if (!payload.value_tier && (payload.ph_tier || props.value_tier || props.tier)) {{
+      payload.value_tier = payload.ph_tier || props.value_tier || props.tier;
+    }}
+
+    const path =
+      typeof payload.path === "string" && payload.path
+        ? payload.path
+        : typeof props.path === "string" && props.path
+        ? props.path
+        : "/";
+    payload.path = path;
+
+    const eventId =
+      "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
+    payload.event_id = eventId;
+    if (!payload.timestamp) {{
+      payload.timestamp = new Date().toISOString();
+    }}
+
+    appendInMemoryTelemetry(payload);
+
+    // If Cloudflare KV binding exists (dedicated telemetry KV or shared leads KV), persist event
+    const kv = resolveTelemetryKV(env);
+    if (kv && typeof kv.put === "function") {{
+      try {{
+        await kv.put(eventId, JSON.stringify(payload), {{
+          expirationTtl: 60 * 86400,
+        }});
+      }} catch (_) {{}}
+    }}
+
+    return new Response(
+      JSON.stringify({{
+        ok: true,
+        status: "RECORDED",
+        event_id: eventId,
+        event: eventName,
+        property_id: payload.property_id,
+        partner_key: payload.partner_key || null,
+        tool_slug: payload.tool_slug || null,
+        cta_slot: payload.cta_slot || null,
+        subid: payload.subid || null,
+        path: path,
+        timestamp: payload.timestamp,
+      }}),
+      {{
+        status: 200,
+        headers: {{
+          "Content-Type": "application/json",
+          ...CORS_HEADERS,
+        }},
+      }}
+    );
+  }} catch (err) {{
+    return new Response(
+      JSON.stringify({{
+        ok: false,
+        status: "ERROR",
+        message: err.message || "Internal error",
+      }}),
+      {{
+        status: 500,
+        headers: {{
+          "Content-Type": "application/json",
+          ...CORS_HEADERS,
+        }},
+      }}
+    );
+  }}
+}}
+
+export async function onRequestGet(context) {{
+  try {{
+    const {{ request, env }} = context;
+    const url = new URL(request.url);
+    const authHeader = request.headers.get("authorization") || "";
+    const token =
+      authHeader.replace(/^Bearer\\s+/i, "") ||
+      url.searchParams.get("token") ||
+      "";
+
+    const secret =
+      env && (env.TELEMETRY_EXPORT_SECRET || env.CLOUDFLARE_API_TOKEN || "");
+    if (secret && token !== secret) {{
+      return new Response(JSON.stringify({{ ok: false, error: "Unauthorized" }}), {{
+        status: 401,
+        headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
+      }});
+    }}
+
+    const limit = Math.min(
+      1000,
+      parseInt(url.searchParams.get("limit") || "1000", 10)
+    );
+    const cursor = url.searchParams.get("cursor") || undefined;
+    const kv = resolveTelemetryKV(env);
+    const memEvents = Array.isArray(globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__)
+      ? globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__
+      : [];
+
+    if (!kv || typeof kv.list !== "function") {{
+      const sliced = memEvents.slice(0, limit);
+      return new Response(
+        JSON.stringify({{
+          ok: true,
+          events: sliced,
+          count: sliced.length,
+          note:
+            sliced.length > 0
+              ? "In-isolate memory telemetry buffer"
+              : "KV binding not found or empty",
+        }}),
+        {{
+          status: 200,
+          headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
+        }}
+      );
+    }}
+
+    const listOpts = {{ prefix: "evt_", limit }};
+    if (cursor) {{
+      listOpts.cursor = cursor;
+    }}
+    const listResult = await kv.list(listOpts);
+    const events = [];
+    const seenIds = new Set();
+
+    for (const key of listResult.keys || []) {{
+      const val = await kv.get(key.name);
+      if (val) {{
+        try {{
+          const parsed = JSON.parse(val);
+          if (typeof parsed === "object" && parsed !== null) {{
+            if (!parsed.event_id) {{
+              parsed.event_id = key.name;
+            }}
+            seenIds.add(parsed.event_id);
+            events.push(parsed);
+          }} else {{
+            seenIds.add(key.name);
+            events.push({{ event_id: key.name, raw: val }});
+          }}
+        }} catch (_) {{
+          seenIds.add(key.name);
+          events.push({{ event_id: key.name, raw: val }});
+        }}
+      }}
+    }}
+
+    for (const memEv of memEvents) {{
+      if (
+        memEv &&
+        memEv.event_id &&
+        !seenIds.has(memEv.event_id) &&
+        events.length < limit
+      ) {{
+        seenIds.add(memEv.event_id);
+        events.push(memEv);
+      }}
+    }}
+
+    return new Response(
+      JSON.stringify({{
+        ok: true,
+        events,
+        count: events.length,
+        cursor: listResult.list_complete ? null : listResult.cursor || null,
+        list_complete: listResult.list_complete !== false,
+      }}),
+      {{
+        status: 200,
+        headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
+      }}
+    );
+  }} catch (err) {{
+    return new Response(
+      JSON.stringify({{ ok: false, error: err.message || "Internal error" }}),
+      {{
+        status: 500,
+        headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
+      }}
+    );
+  }}
+}}
+"""
+    assert_no_forbidden_dashes(telemetry_js, "generate_edge_telemetry_function")
+    return telemetry_js
 
 
 def sync_tenant_edge_redirect_function(
@@ -1536,7 +2116,8 @@ def sync_tenant_edge_redirect_function(
 ) -> Dict[str, Any]:
     """
     Synchronizes the tenant Cloudflare Pages edge redirect handler (functions/r/[partner].js)
-    when repo_path contains a functions/r directory and property_id is profithelm or prexvo.
+    and edge telemetry endpoint (functions/api/telemetry.js) when repo_path contains a functions/r
+    directory and property_id is profithelm or prexvo.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
@@ -1556,6 +2137,7 @@ def sync_tenant_edge_redirect_function(
 
     active_hub = hub if hub is not None else MonetizationHub()
     js_code = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
+    telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
 
     prop_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {})
     registry_map = PREXVO_AFFILIATES if prop_clean == "prexvo" else PROFITHELM_AFFILIATES
@@ -1578,13 +2160,37 @@ def sync_tenant_edge_redirect_function(
         except Exception:
             pass
 
+    # Synchronize functions/api/telemetry.js (and dist/functions/api/telemetry.js when dist/functions exists)
+    api_dir = repo / "functions" / "api"
+    telemetry_file = api_dir / "telemetry.js"
+    telemetry_updated = False
+    try:
+        api_dir.mkdir(parents=True, exist_ok=True)
+        if not telemetry_file.is_file() or telemetry_file.read_text(encoding="utf-8") != telemetry_js:
+            telemetry_file.write_text(telemetry_js, encoding="utf-8")
+            telemetry_updated = True
+    except Exception:
+        pass
+
+    dist_api_dir = repo / "dist" / "functions" / "api"
+    if (repo / "dist" / "functions").is_dir():
+        try:
+            dist_api_dir.mkdir(parents=True, exist_ok=True)
+            dist_telemetry_file = dist_api_dir / "telemetry.js"
+            if not dist_telemetry_file.is_file() or dist_telemetry_file.read_text(encoding="utf-8") != telemetry_js:
+                dist_telemetry_file.write_text(telemetry_js, encoding="utf-8")
+                dist_needs_update = True
+        except Exception:
+            pass
+
     if target_file.is_file():
         try:
             existing = target_file.read_text(encoding="utf-8")
-            if existing == js_code and not dist_needs_update:
+            if existing == js_code and not dist_needs_update and not telemetry_updated:
                 return {
                     "status": "UNCHANGED",
                     "path": str(target_file),
+                    "telemetry_path": str(telemetry_file),
                     "live_direct_partners": live_direct_partners,
                 }
         except Exception:
@@ -1594,6 +2200,7 @@ def sync_tenant_edge_redirect_function(
     return {
         "status": "UPDATED",
         "path": str(target_file),
+        "telemetry_path": str(telemetry_file),
         "live_direct_partners": live_direct_partners,
     }
 

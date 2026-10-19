@@ -711,15 +711,37 @@ def render_runtime_synchronizer_script() -> str:
           var analyticsApi = window["Profit" + "HelmAnalytics"];
           if (analyticsApi && typeof analyticsApi.track === "function") {{
             analyticsApi.track("affiliate_click", evPayload);
-          }} else if (navigator.sendBeacon && document.querySelector('script[src*="/static/js/app.js"]')) {{
-            navigator.sendBeacon("/api/telemetry", JSON.stringify({{
+          }} else {{
+            var beaconBody = JSON.stringify({{
+              event: "affiliate_click",
               event_type: "affiliate_click",
               tool_slug: slug,
+              source_tool: slug,
               partner_key: pk,
               cta_slot: slot,
+              subid: subid,
               value_tier: tier,
+              ph_tier: tier,
+              path: window.location ? window.location.pathname : "/",
               properties: evPayload
-            }}));
+            }});
+            var sentBeacon = false;
+            if (navigator.sendBeacon) {{
+              try {{
+                var blob = typeof Blob === "function" ? new Blob([beaconBody], {{ type: "application/json" }}) : beaconBody;
+                sentBeacon = navigator.sendBeacon("/api/telemetry", blob);
+              }} catch (bErr) {{}}
+            }}
+            if (!sentBeacon && typeof window.fetch === "function") {{
+              try {{
+                window.fetch("/api/telemetry", {{
+                  method: "POST",
+                  headers: {{ "Content-Type": "application/json" }},
+                  body: beaconBody,
+                  keepalive: true
+                }}).catch(function() {{}});
+              }} catch (fErr) {{}}
+            }}
           }}
         }} catch (err) {{}}
         return;
@@ -1031,6 +1053,7 @@ def _detect_visual_and_ux_contract_issues_cached(
             or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
             or "__pseoRuntimeSyncInitialized" not in sync_match.group(1)
             or "updateOutputsSynchronously" not in sync_match.group(1)
+            or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_match.group(1)
         ):
             issues.append(
                 f"[{rel_path}] Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
@@ -1816,6 +1839,7 @@ def normalize_html_visual_primitives(
                 or "__pseoRuntimeSyncInitialized" not in sync_body
                 or "updateOutputsSynchronously" not in sync_body
                 or "syncOutboundAffiliateLinks" not in sync_body
+                or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:
                 updated = re.sub(
