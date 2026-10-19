@@ -4225,7 +4225,9 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
                 "implied",
                 "arbitrage",
                 "odds",
-                "vig",
+                "vigorish",
+                "-vig",
+                "vig-",
                 "174",
                 "r-and-d",
                 "r&d",
@@ -4263,12 +4265,18 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
     if is_non_179_vertical and "Section 179" in stat_src:
         stat_src = ""
         econ_src = ""
+    if _is_179_or_equipment_slug(s_low) and ("CFTC 17 CFR Part 40" in stat_src or "Section 1256" in stat_src):
+        stat_src = ""
+        econ_src = ""
     if "CFTC 17 CFR Part 40" in stat_src and not any(
-        k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig", "1256")
+        k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vigorish", "-vig", "vig-", "1256")
     ):
         stat_src = stat_src.replace("; CFTC 17 CFR Part 40", "; IRS Form 4562").replace("CFTC 17 CFR Part 40", "").strip(" ;")
 
-    if any(k in s_low for k in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "reasonable-salary", "1202", "qsbs", "amt", "niit")):
+    if _is_179_or_equipment_slug(s_low):
+        default_stat = "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562"
+        default_econ = "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
+    elif any(k in s_low for k in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "reasonable-salary", "1202", "qsbs", "amt", "niit")):
         default_stat = "IRC Section 1(j); IRC Section 199A; IRS Rev. Proc. 2025-32"
         default_econ = "IRS SOI Individual Tax Statistics and BLS Consumer Price Index (CPI-U)"
     elif any(k in s_low for k in ("1031", "like-kind", "exchange", "ftb-3840")):
@@ -4277,7 +4285,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
     elif any(k in s_low for k in ("crypto", "staking", "8949", "1099-da", "wash")):
         default_stat = "IRS Rev. Proc. 2024-28; Rev. Rul. 2023-14; IRC Section 6045"
         default_econ = "CFTC Commitments of Traders (COT) and Treasury Digital Asset Series"
-    elif any(k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig")):
+    elif any(k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vigorish", "-vig", "vig-")):
         default_stat = "CFTC 17 CFR Part 40; IRC Section 1256; IRC Section 165(d)"
         default_econ = "FRED 3-Month Treasury Bill (DTB3) and CFTC DCM Volume Series"
     elif any(k in s_low for k in ("174", "r-and-d", "r&d", "amortization")):
@@ -4302,12 +4310,19 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
 
 
 def _has_vertical_competitor_pollution(html_content: str) -> bool:
-    """Detects when a non-Section-179 tool page or homepage was polluted with Section 179 Heavy SUV content."""
-    if "heavy SUV (6,000 to 14,000 lbs GVWR)" not in html_content:
-        return False
+    """Detects when a non-Section-179 tool page or homepage was polluted with Section 179 Heavy SUV content, or when a Section 179/equipment page was polluted with CFTC prediction-market content."""
     canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
     if not canon_m:
         canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
+    if canon_m:
+        canon_url = canon_m.group(1).strip().lower()
+        if _is_179_or_equipment_slug(canon_url):
+            return (
+                "CFTC 17 CFR Part 40" in html_content
+                or "Quadratic Fee Drag" in html_content
+            )
+    if "heavy SUV (6,000 to 14,000 lbs GVWR)" not in html_content:
+        return False
     if canon_m:
         canon_url = canon_m.group(1).strip().lower()
         if canon_url.rstrip("/") == "https://profithelm.com":

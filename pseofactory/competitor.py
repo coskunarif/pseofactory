@@ -2293,7 +2293,9 @@ def _resolve_vertical_competitor_content(
                 "Verify read-only API key security (SOC 2 Type II) and automated IRS Form 8949, Schedule D, and Form 1099-DA reconciliation.",
                 "Check automated detection of DeFi liquidity pool wraps, bridges, and Rev. Rul. 2023-14 staking reward timestamps.",
             ]
-        elif any(tok in s_low for tok in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vig", "break-even")):
+        elif not any(k in s_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")) and any(
+            tok in s_low for tok in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vigorish", "-vig", "vig-", "break-even")
+        ):
             trap_title = "Immediate Quadratic Fee Drag and Section 1256 Tax Bifurcation Trap Alert"
             trap_body = (
                 "Event contract net expected value is compressed by exchange fee schedules that peak at 50-cent "

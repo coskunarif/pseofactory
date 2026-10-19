@@ -1210,6 +1210,22 @@ def test_spoke_quick_answer_word_bounds_commercial_context_and_equipment_healing
     )
     assert "Section 179" in equip_manifest["statutory_authority"]
 
+    nav_polluted_html = (
+        '<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>'
+        '<link rel="canonical" href="https://profithelm.com/tools/section-179-calculator/lincoln-navigator-l/"></head>'
+        '<body><main><h1>Lincoln Navigator L Heavy SUV Section 179</h1>'
+        '<aside data-mechanic="instant_edge_case_trap_immediacy"><p>Immediate Quadratic Fee Drag and Section 1256 Tax Bifurcation Trap Alert</p></aside>'
+        '<table class="statutory-pitfalls-table" data-statutory-source="CFTC 17 CFR Part 40; IRC Section 1256; IRC Section 165(d)" data-economic-source="FRED 3-Month Treasury Bill (DTB3)"></table>'
+        '</main></body></html>'
+    )
+    nav_manifest = RetroReflectionEngine._resolve_manifest_for_page(
+        nav_polluted_html,
+        property_id="profithelm",
+        slug="section-179-calculator/lincoln-navigator-l",
+    )
+    assert "Section 179" in nav_manifest["statutory_authority"]
+    assert "CFTC" not in nav_manifest["statutory_authority"]
+
     for st_slug, def_v, fed_v, st_v in (
         ("new-york", "$661,950", "$460,300", "$201,650"),
         ("district-of-columbia", "$460,300", "$460,300", "$0"),

@@ -914,8 +914,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             "kalshi",
             "kelly",
             "arbitrage",
-            "ev",
-            "vig",
+            "expected-value",
+            "-ev-",
+            "vigorish",
+            "-vig",
+            "vig-",
             "break-even",
         )
     )
