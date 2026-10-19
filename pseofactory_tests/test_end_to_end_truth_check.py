@@ -1174,3 +1174,118 @@ def test_unattended_timer_concurrency_and_distribution_verification(tmp_path):
     checker = TregChecker(check_ai_citations=True)
     assert hasattr(checker, "_max_live_ai_calls")
     assert checker._max_live_ai_calls >= 1
+
+
+def test_spoke_quick_answer_word_bounds_commercial_context_and_equipment_healing(tmp_path):
+    """
+    Verifies that:
+    1. Multi-word state Section 1031 spokes (e.g. New York, District of Columbia) and IRS 2027 tax-bracket
+       spokes retain state-specific dollar calculations, commercial property exchange context, and strict
+       40-60 word bounds in both .quick-answer-body and <aside class="quick-answer"> even after overlay injection.
+    2. Section 179 vehicle spokes (e.g. GMC Yukon XL) distinguish sec179-cost commercial acquisition cost
+       from sec179-res-writeoff and remain within 40-60 words.
+    3. Equipment vertical hubs without '179' in the slug (e.g. equipment-lease-tax-deduction) preserve
+       Section 179 statutory authority across _resolve_manifest_for_page and _overlay_spec_needs_heal.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import re
+    from pseofactory.gsc_remediation import compile_remediation_overlay_spec, inject_overlay_into_html
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    equip_html = (
+        '<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>'
+        '<link rel="canonical" href="https://profithelm.com/tools/equipment-lease-tax-deduction/"></head>'
+        '<body><main><h1>Equipment Lease Tax Deduction</h1>'
+        '<script type="application/json" id="calculation-manifest" class="calculation-manifest">'
+        '{"model_name": "Equipment Lease Tax Deduction Model", "formula": "gross_amount * (1.0 - effective_rate)", '
+        '"inputs": {"gross_amount": 100000.0, "effective_rate": 0.24}, "published_output": 76000.0, '
+        '"statutory_authority": "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562", '
+        '"economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"}'
+        '</script></main></body></html>'
+    )
+    equip_manifest = RetroReflectionEngine._resolve_manifest_for_page(
+        equip_html,
+        property_id="profithelm",
+        slug="equipment-lease-tax-deduction",
+    )
+    assert "Section 179" in equip_manifest["statutory_authority"]
+
+    for st_slug, def_v, fed_v, st_v in (
+        ("new-york", "$661,950", "$460,300", "$201,650"),
+        ("district-of-columbia", "$460,300", "$460,300", "$0"),
+    ):
+        spoke_1031_html = (
+            '<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>'
+            f'<title>{st_slug.title()} Section 1031 Real Estate Tax Deferral Rules &amp; Calculator (2026)</title>'
+            f'<meta name="description" content="Calculate {st_slug} Section 1031 tax deferral: {def_v} total tax deferred ({fed_v} federal + {st_v} state) under IRC Section 1031.">'
+            f'<meta property="og:description" content="Calculate {st_slug} Section 1031 tax deferral: {def_v} total tax deferred ({fed_v} federal + {st_v} state) under IRC Section 1031.">'
+            f'<link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/{st_slug}/"></head>'
+            '<body><main><h1>Section 1031 Calculator</h1>'
+            '<aside class="quick-answer"><div class="quick-answer-body"><p>Short initial answer.</p></div></aside>'
+            '<div id="calculator-workspace-anchor">'
+            '<input type="number" id="sec1031-sale-price" value="2500000">'
+            f'<span id="sec1031-res-deferred">{def_v}</span>'
+            f'<span id="sec1031-res-fed-tax">{fed_v}</span>'
+            f'<span id="sec1031-res-state-tax">{st_v}</span>'
+            '</div></main></body></html>'
+        )
+        ov_1031 = compile_remediation_overlay_spec(
+            {
+                "slug": f"section-1031-calculator/{st_slug}",
+                "target_url": f"https://profithelm.com/tools/section-1031-calculator/{st_slug}/",
+                "query": f"{st_slug.replace('-', ' ')} section 1031 exchange",
+                "position": 9.0,
+                "impressions": 60,
+            },
+            tenant_id="profithelm",
+        )
+        assert "commercial real estate" in ov_1031["quick_answer"].lower()
+        pre_retro_html, _ = RetroReflectionEngine.retrofit_html(
+            spoke_1031_html,
+            property_id="profithelm",
+            slug=f"section-1031-calculator/{st_slug}",
+        )
+        ov_injected = inject_overlay_into_html(pre_retro_html, ov_1031)
+        final_1031, _ = RetroReflectionEngine.retrofit_html(
+            ov_injected,
+            property_id="profithelm",
+            slug=f"section-1031-calculator/{st_slug}",
+        )
+        qa_m = re.search(r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>', final_1031, re.I)
+        qb_m = re.search(r'<div[^>]*class=["\'][^"\']*quick-answer-body[^"\']*["\'][^>]*>([\s\S]*?)</div>', qa_m.group(1), re.I)
+        aside_words = len(re.sub(r"<[^>]+>", " ", qa_m.group(1)).split())
+        body_words = len(re.sub(r"<[^>]+>", " ", qb_m.group(1)).split())
+        assert 40 <= body_words <= 60
+        assert 40 <= aside_words <= 60
+        assert "commercial property exchange" in qb_m.group(1)
+        assert def_v in qb_m.group(1) and fed_v in qb_m.group(1) and st_v in qb_m.group(1)
+        assert RetroReflectionEngine.audit_html_mechanics(final_1031) == []
+
+    veh_html = (
+        '<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>'
+        '<title>GMC Yukon XL 4WD Section 179 Tax Deduction Calculator (7,700 lbs GVWR)</title>'
+        '<meta name="description" content="Calculate GMC Yukon XL Section 179 write-off: $37,180 deduction and $13,013 tax savings (7,700 lbs GVWR) under IRC Section 179.">'
+        '<meta property="og:description" content="Calculate GMC Yukon XL Section 179 write-off: $37,180 deduction and $13,013 tax savings (7,700 lbs GVWR) under IRC Section 179.">'
+        '<link rel="canonical" href="https://profithelm.com/tools/section-179-calculator/gmc-yukon-xl/"></head>'
+        '<body><main><h1>GMC Yukon XL (7,700 lbs GVWR)</h1>'
+        '<aside class="quick-answer"><div class="quick-answer-body"><p>The GMC Yukon XL qualifies for passenger vehicle business depreciation write-offs with $13,013 tax savings.</p></div></aside>'
+        '<div id="calculator-workspace-anchor">'
+        '<input type="number" id="sec179-cost" value="63900">'
+        '<span id="sec179-res-writeoff">$37,180</span>'
+        '<span id="sec179-res-savings">$13,013</span>'
+        '<span id="sec179-res-netcost">$50,887</span>'
+        '</div></main></body></html>'
+    )
+    final_veh, _ = RetroReflectionEngine.retrofit_html(
+        veh_html,
+        property_id="profithelm",
+        slug="section-179-calculator/gmc-yukon-xl",
+    )
+    v_qa_m = re.search(r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>', final_veh, re.I)
+    v_qb_m = re.search(r'<div[^>]*class=["\'][^"\']*quick-answer-body[^"\']*["\'][^>]*>([\s\S]*?)</div>', v_qa_m.group(1), re.I)
+    assert 40 <= len(re.sub(r"<[^>]+>", " ", v_qb_m.group(1)).split()) <= 60
+    assert 40 <= len(re.sub(r"<[^>]+>", " ", v_qa_m.group(1)).split()) <= 60
+    assert "$63,900 commercial acquisition cost" in v_qb_m.group(1)
+    assert "$37,180 in first-year" in v_qb_m.group(1)
+    assert RetroReflectionEngine.audit_html_mechanics(final_veh) == []
+

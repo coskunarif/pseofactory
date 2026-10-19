@@ -1778,7 +1778,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     elif any(k in combined_low for k in ("1031", "like-kind", "like kind", "exchange", "3840")):
         base_words = (
             f"Under IRC Section 1031(a)(3) and Treasury Regulation Section 1.1031(k)-1, {short_q} "
-            f"defers 100 percent of federal capital gains (20 percent), Section 1250 depreciation recapture "
+            f"defers 100 percent of commercial real estate capital gains (20 percent), Section 1250 depreciation recapture "
             f"(25 percent), and 3.8 percent NIIT when proceeds roll via a Qualified Intermediary within "
             f"45-day identification and 180-day closing windows reported on IRS Form 8824."
         ).split()

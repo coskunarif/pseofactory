@@ -5212,7 +5212,7 @@ Compliance requires business use exceeding 50% across the statutory recovery per
 
     sec1031_md = """# Section 1031 Exchange Statutory Like-Kind Benchmarks
 
-Under IRC Section 1031, real property owners defer federal capital gains tax and Section 1250 depreciation recapture by exchanging held real estate for replacement property of like kind. Statutory deadlines require identifying replacement assets within 45 days of closing, followed by acquiring replacement title within 180 days.
+Under IRC Section 1031, real property owners defer federal capital gains tax and Section 1250 depreciation recapture by exchanging commercial real estate for replacement property of like kind. Statutory deadlines require identifying replacement assets within 45 days of closing, followed by acquiring replacement title within 180 days.
 
 | Exchange Parameter | Statutory Limit | Safe Harbor | Statutory Citation |
 | :--- | :--- | :--- | :--- |

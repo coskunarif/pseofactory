@@ -1222,10 +1222,6 @@ def resolve_true_asset_age_days(
         except Exception:
             mtime_age_days = 0.0
 
-    # Preserve synthetic os.utime behavior in unit tests
-    if mtime_age_days >= 1.0:
-        return round(mtime_age_days, 2)
-
     root = Path(repo_root) if repo_root else (eff_html_file.parent.parent if eff_html_file else Path.cwd())
     norm_path = eff_url_path.rstrip("/") or "/"
     slug = norm_path.split("/tools/", 1)[1].strip("/") if "/tools/" in norm_path else norm_path.strip("/")

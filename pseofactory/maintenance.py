@@ -4179,6 +4179,19 @@ def list_dlq(
     return engine.list_dlq(property_id=property_id)
 
 
+def _is_179_or_equipment_slug(slug_or_url: str) -> bool:
+    """Returns True when a slug or canonical URL belongs to the Section 179, equipment, depreciation, or heavy vehicle vertical."""
+    from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+
+    s_low = str(slug_or_url or "").lower().strip("/")
+    vehicle_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
+    return (
+        s_low in vehicle_slugs
+        or any(s_low.endswith(f"/{v}") for v in vehicle_slugs)
+        or any(k in s_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr"))
+    )
+
+
 def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tuple[str, str]:
     """Resolves vertical-accurate statutory authority and economic dataset for ProfitHelm pages, ignoring Section 179 pollution on non-179 verticals."""
     s_low = slug.lower()
@@ -4241,7 +4254,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
                 "1099-vs-w2",
             )
         )
-        and "179" not in s_low
+        and not _is_179_or_equipment_slug(s_low)
     )
     stat_m = re.search(r'data-statutory-(?:source|provenance)=["\']([^"\']+)["\']', html_content)
     econ_m = re.search(r'data-economic-source=["\']([^"\']+)["\']', html_content)
@@ -4299,14 +4312,14 @@ def _has_vertical_competitor_pollution(html_content: str) -> bool:
         canon_url = canon_m.group(1).strip().lower()
         if canon_url.rstrip("/") == "https://profithelm.com":
             return True
-        if "/tools/" not in canon_url or "179" in canon_url:
+        if "/tools/" not in canon_url or _is_179_or_equipment_slug(canon_url):
             return False
         ident_txt = canon_url
     else:
         title_m = re.search(r"<title[^>]*>(.*?)</title>", html_content, re.IGNORECASE | re.DOTALL)
         h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html_content, re.IGNORECASE | re.DOTALL)
         ident_txt = f"{title_m.group(1) if title_m else ''} {h1_m.group(1) if h1_m else ''}".lower()
-        if "179" in ident_txt:
+        if _is_179_or_equipment_slug(ident_txt):
             return False
     return any(
         k in ident_txt
@@ -4484,6 +4497,64 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
             )
         ):
             return True
+        og_m = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+        md_m = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+        if og_m and md_m:
+            og_val = og_m.group(1).strip()
+            md_val = md_m.group(1).strip()
+            if ("$" in og_val or "GVWR" in og_val) and md_val != og_val and 70 <= len(og_val) <= 160:
+                return True
+        qa_m = re.search(
+            r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
+            html_content,
+            re.IGNORECASE,
+        )
+        if qa_m:
+            qa_inner = qa_m.group(1)
+            qa_words = len(re.sub(r"<[^>]+>", " ", qa_inner).split())
+            if "/tools/irs-2027-tax-brackets/" in canon_url:
+                tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', html_content)
+                eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', html_content)
+                th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', html_content)
+                if tot_m and eff_m and th_m:
+                    if (
+                        tot_m.group(1).strip() not in qa_inner
+                        or th_m.group(1).strip() not in qa_inner
+                        or qa_words > 60
+                        or qa_words < 40
+                    ):
+                        return True
+            elif "/tools/section-1031-calculator/" in canon_url:
+                def_m = re.search(r'id=["\']sec1031-res-deferred["\'][^>]*>\s*([^<]+)<', html_content)
+                fed_m = re.search(r'id=["\']sec1031-res-fed-tax["\'][^>]*>\s*([^<]+)<', html_content)
+                st_m = re.search(r'id=["\']sec1031-res-state-tax["\'][^>]*>\s*([^<]+)<', html_content)
+                if def_m and fed_m and st_m:
+                    if (
+                        def_m.group(1).strip() not in qa_inner
+                        or fed_m.group(1).strip() not in qa_inner
+                        or "commercial property exchange" not in qa_inner
+                        or qa_words > 60
+                        or qa_words < 40
+                    ):
+                        return True
+            elif "/tools/section-179-calculator/" in canon_url:
+                wo_m = re.search(r'id=["\']sec179-res-writeoff["\'][^>]*>\s*([^<]+)<', html_content)
+                sav_m = re.search(r'id=["\']sec179-res-savings["\'][^>]*>\s*([^<]+)<', html_content)
+                net_m = re.search(r'id=["\']sec179-res-netcost["\'][^>]*>\s*([^<]+)<', html_content)
+                cost_m = re.search(r'id=["\']sec179-cost["\'][^>]*value=["\'](\d+)["\']', html_content)
+                if wo_m and sav_m and net_m:
+                    wo_val = wo_m.group(1).strip()
+                    sav_val = sav_m.group(1).strip()
+                    cost_val = f"${int(cost_m.group(1)):,}" if cost_m else wo_val
+                    if (
+                        sav_val not in qa_inner
+                        or wo_val not in qa_inner
+                        or cost_val not in qa_inner
+                        or "commercial acquisition cost" not in qa_inner
+                        or qa_words > 60
+                        or qa_words < 40
+                    ):
+                        return True
 
     if (
         "prexvo.com/tools/" in canon_url
@@ -4717,6 +4788,33 @@ def _normalize_spoke_and_synthesized_body_bloat(
         if comm_changed:
             changed = True
 
+    if slug == "tools-directory" and property_id.lower() != "prexvo":
+        qa_dir_pat = re.compile(
+            r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
+            re.IGNORECASE,
+        )
+        qa_dir_m = qa_dir_pat.search(updated)
+        if qa_dir_m:
+            qb_dir_m = re.search(
+                r'<div[^>]*class=["\'][^"\']*quick-answer-body[^"\']*["\'][^>]*>([\s\S]*?)</div>',
+                qa_dir_m.group(2),
+                re.IGNORECASE,
+            )
+            qb_txt = re.sub(r"<[^>]+>", " ", qb_dir_m.group(1) if qb_dir_m else qa_dir_m.group(2)).strip()
+            if len(qb_txt.split()) < 40 or "9 institutional" in qb_txt:
+                dir_qa = (
+                    "ProfitHelm provides a deterministic directory of 21 institutional commercial tax and financial "
+                    "modeling engines alongside 127 programmatic state and vehicle schedules. Each calculator computes "
+                    "federal and state statutory liabilities under active 2026 IRC rules and projected 2027 TCJA "
+                    "sunset schedules with zero AI hallucinations."
+                )
+                updated = qa_dir_pat.sub(
+                    rf'\g<1>\n  <div class="quick-answer-title">Key Finding: Statutory Verification Standard</div>\n  <div class="quick-answer-body"><p>{dir_qa}</p></div>\n\g<3>',
+                    updated,
+                    count=1,
+                )
+                changed = True
+
     # Synchronize state/vehicle spoke meta descriptions, titles, quick-answers, and JSON-LD descriptions
     if "/" in slug:
         og_m = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', updated, re.IGNORECASE)
@@ -4761,7 +4859,13 @@ def _normalize_spoke_and_synthesized_body_bloat(
                     re.IGNORECASE,
                 )
                 qa_m = qa_pat.search(updated)
-                if qa_m and tot_val not in qa_m.group(2):
+                qa_existing_words = len(re.sub(r"<[^>]+>", " ", qa_m.group(2)).split()) if qa_m else 0
+                if qa_m and (
+                    tot_val not in qa_m.group(2)
+                    or th_val not in qa_m.group(2)
+                    or qa_existing_words > 60
+                    or qa_existing_words < 40
+                ):
                     updated = qa_pat.sub(
                         rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {st_name} 2026-2027 Tax Liability</div>\n  <div class="quick-answer-body"><p>{spoke_qa}</p></div>\n\g<3>',
                         updated,
@@ -4778,10 +4882,10 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 fed_val = fed_m.group(1).strip()
                 st_val = st_m.group(1).strip()
                 spoke_1031_qa = (
-                    f"On a $2,500,000 {st_name} property exchange ($650,000 basis, $400,000 depreciation), "
+                    f"On a $2,500,000 {st_name} commercial property exchange ($650,000 basis, $400,000 depreciation), "
                     f"an IRC Section 1031 exchange defers {def_val} in capital gains tax ({fed_val} "
                     f"federal and {st_val} state tax) when proceeds transfer via a Qualified Intermediary "
-                    f"within the 45-day identification and 180-day closing windows on IRS Form 8824."
+                    f"within 45-day identification and 180-day closing windows on IRS Form 8824."
                 )
                 qa_pat = re.compile(
                     r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
@@ -4789,7 +4893,13 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 )
                 qa_m = qa_pat.search(updated)
                 qa_existing_words = len(re.sub(r"<[^>]+>", " ", qa_m.group(2)).split()) if qa_m else 0
-                if qa_m and (def_val not in qa_m.group(2) or qa_existing_words > 60):
+                if qa_m and (
+                    def_val not in qa_m.group(2)
+                    or fed_val not in qa_m.group(2)
+                    or "commercial property exchange" not in qa_m.group(2)
+                    or qa_existing_words > 60
+                    or qa_existing_words < 40
+                ):
                     updated = qa_pat.sub(
                         rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {st_name} Section 1031 Capital Gains Deferral</div>\n  <div class="quick-answer-body"><p>{spoke_1031_qa}</p></div>\n\g<3>',
                         updated,
@@ -4800,14 +4910,21 @@ def _normalize_spoke_and_synthesized_body_bloat(
             wo_m = re.search(r'id=["\']sec179-res-writeoff["\'][^>]*>\s*([^<]+)<', updated)
             sav_m = re.search(r'id=["\']sec179-res-savings["\'][^>]*>\s*([^<]+)<', updated)
             net_m = re.search(r'id=["\']sec179-res-netcost["\'][^>]*>\s*([^<]+)<', updated)
-            gvwr_m = re.search(r'GVWR\s+([0-9,]+\s*LBS)', updated, re.IGNORECASE)
+            cost_m = re.search(r'id=["\']sec179-cost["\'][^>]*value=["\'](\d+)["\']', updated)
+            gvwr_m = re.search(
+                r"(?:GVWR\s+([0-9,]+\s*LBS)|([0-9,]+\s*LBS)\s+GVWR)",
+                updated,
+                re.IGNORECASE,
+            )
             if wo_m and sav_m and net_m:
                 wo_val = wo_m.group(1).strip()
                 sav_val = sav_m.group(1).strip()
                 net_val = net_m.group(1).strip()
-                gvwr_str = gvwr_m.group(1).lower() if gvwr_m else "over 6,000 lbs"
+                cost_val = f"${int(cost_m.group(1)):,}" if cost_m else wo_val
+                gvwr_raw = (gvwr_m.group(1) or gvwr_m.group(2)) if gvwr_m else ""
+                gvwr_str = gvwr_raw.lower() if gvwr_raw else "over 6,000 lbs"
                 veh_qa = (
-                    f"With a certified GVWR of {gvwr_str} and {wo_val} baseline acquisition cost, the {topic_label} "
+                    f"With {gvwr_str} certified GVWR and {cost_val} commercial acquisition cost, the {topic_label} "
                     f"qualifies for {wo_val} in first-year IRC Section 179 and Section 168(k) expensing, generating "
                     f"{sav_val} in tax savings at a 35% marginal rate ({net_val} net effective cost) on IRS Form 4562."
                 )
@@ -4816,7 +4933,15 @@ def _normalize_spoke_and_synthesized_body_bloat(
                     re.IGNORECASE,
                 )
                 qa_m = qa_pat.search(updated)
-                if qa_m and sav_val not in qa_m.group(2):
+                qa_existing_words = len(re.sub(r"<[^>]+>", " ", qa_m.group(2)).split()) if qa_m else 0
+                if qa_m and (
+                    sav_val not in qa_m.group(2)
+                    or wo_val not in qa_m.group(2)
+                    or cost_val not in qa_m.group(2)
+                    or "commercial acquisition cost" not in qa_m.group(2)
+                    or qa_existing_words > 60
+                    or qa_existing_words < 40
+                ):
                     updated = qa_pat.sub(
                         rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {topic_label} Qualification</div>\n  <div class="quick-answer-body"><p>{veh_qa}</p></div>\n\g<3>',
                         updated,
@@ -5540,7 +5665,7 @@ class RetroReflectionEngine:
                     "sample_calculation": "Deterministic baseline evaluation at $100,000 gross input and 24% effective rate yields $76,000.00.",
                 }
         elif not is_prexvo and (
-            ("179" not in slug.lower() and "Section 179" in str(raw.get("statutory_authority") or ""))
+            (not _is_179_or_equipment_slug(slug) and "Section 179" in str(raw.get("statutory_authority") or ""))
             or (
                 "CFTC 17 CFR Part 40" in str(raw.get("statutory_authority") or "")
                 and not any(k in slug.lower() for k in ("prediction", "kalshi", "polymarket", "odds", "1256"))
@@ -5770,7 +5895,7 @@ class RetroReflectionEngine:
                 updated,
                 flags=re.IGNORECASE,
             )
-            if "179" not in slug.lower():
+            if not _is_179_or_equipment_slug(slug):
                 updated = updated.replace(
                     "<td>26 U.S.C. Section 179; IRC Section 168(k); CFTC 17 CFR Part 40</td>",
                     f"<td>{stat_auth}</td>",
@@ -6004,9 +6129,7 @@ class RetroReflectionEngine:
         qa_str = str(raw_ov.get("quick_answer") or "")
         q_str = str(raw_ov.get("query") or "").lower().strip()
         vehicle_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
-        is_179_or_equip_slug = ov_s_low in vehicle_slugs or any(
-            k in ov_s_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")
-        )
+        is_179_or_equip_slug = _is_179_or_equipment_slug(ov_s_low)
         is_spoke = (
             "/" in ov_s_low
             or ov_s_low in vehicle_slugs
@@ -6020,6 +6143,8 @@ class RetroReflectionEngine:
             )
         )
         if not is_179_or_equip_slug and "Section 179" in ov_body_dump:
+            return True
+        if "1031" in ov_s_low and "commercial" not in qa_str.lower():
             return True
         if ov_s_low == "student-loan-repayment-calculator" and "Tiered Standard" in ov_body_dump:
             return True
