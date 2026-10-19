@@ -3950,12 +3950,30 @@ class MaintenanceLifecycle:
             else:
                 current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
-            # Stage 11: Non-Blocking Partner Monetization Telemetry
+            # Stage 11: Non-Blocking Partner Monetization Telemetry & Portal Click Reconciliation
             partner_readiness_status_val: Optional[str] = None
             try:
                 from pseofactory.partner_tracker import PartnerTrackingEngine
                 partner_engine = PartnerTrackingEngine()
-                dash = partner_engine.sync_and_evaluate()
+                in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+                telemetry_sync = partner_engine.sync_edge_click_telemetry(
+                    fetch_live=(not dry_run and not in_pytest)
+                )
+                prop_agg = telemetry_sync.get(adapter.property_id, {}).get("aggregation")
+                dash = partner_engine.sync_and_evaluate(engagement_metrics=prop_agg)
+                recon_rep = partner_engine.reconcile_edge_clicks_with_portals(
+                    engagement_by_property={
+                        p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
+                        for p_id in ("profithelm", "prexvo")
+                    }
+                )
+                if not dry_run and getattr(adapter, "repo_path", None):
+                    try:
+                        recon_path = Path(adapter.repo_path) / ".agy" / "portal_click_reconciliation.json"
+                        recon_path.parent.mkdir(parents=True, exist_ok=True)
+                        recon_path.write_text(json.dumps(recon_rep, indent=2) + "\n", encoding="utf-8")
+                    except Exception:
+                        pass
                 if hasattr(dash, adapter.property_id):
                     p_report = getattr(dash, adapter.property_id)
                     partner_readiness_status_val = f"SCORE_{int(p_report.monetization_readiness_score)}"
@@ -3964,6 +3982,7 @@ class MaintenanceLifecycle:
             except Exception as part_err:
                 print(f"Warning: Partner telemetry stage error for '{adapter.property_id}': {part_err}")
                 partner_readiness_status_val = "EVALUATED"
+
 
             duration = time.time() - start_time
             if indexing_status_val == "FAILED":
@@ -7441,7 +7460,28 @@ def _execute_autonomous_downstream_chain(
         from pseofactory.partner_tracker import PartnerTrackingEngine
 
         tracker = PartnerTrackingEngine(action_bus=bus)
-        dash = tracker.sync_and_evaluate(force_mail_poll=False)
+        in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        telemetry_sync = tracker.sync_edge_click_telemetry(
+            fetch_live=(not dry_run and not in_pytest)
+        )
+        prop_agg = telemetry_sync.get(adapter.property_id, {}).get("aggregation", {})
+        dash = tracker.sync_and_evaluate(
+            force_mail_poll=False,
+            engagement_metrics=prop_agg,
+        )
+        recon_rep = tracker.reconcile_edge_clicks_with_portals(
+            engagement_by_property={
+                p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
+                for p_id in ("profithelm", "prexvo")
+            }
+        )
+        if not dry_run:
+            try:
+                recon_path = repo_root / ".agy" / "portal_click_reconciliation.json"
+                recon_path.parent.mkdir(parents=True, exist_ok=True)
+                recon_path.write_text(json.dumps(recon_rep, indent=2) + "\n", encoding="utf-8")
+            except Exception:
+                pass
         prop_rep = getattr(dash, adapter.property_id, None)
         if prop_rep is not None:
             summary["monetization_status"] = f"SCORE_{int(prop_rep.monetization_readiness_score)}"
@@ -7449,6 +7489,9 @@ def _execute_autonomous_downstream_chain(
             summary["requires_followup_count"] = prop_rep.requires_followup_count
         else:
             summary["monetization_status"] = "EVALUATED"
+        summary["edge_outbound_clicks_count"] = int(prop_agg.get("total_outbound_clicks", 0) or 0)
+        summary["portal_reconciliation_status"] = recon_rep.get("status", "RECONCILED")
+
 
         # Close conversion and external distribution gaps on impression-gaining tools
         conv_closed = 0

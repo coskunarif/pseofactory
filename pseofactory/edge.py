@@ -2183,14 +2183,54 @@ def sync_tenant_edge_redirect_function(
         except Exception:
             pass
 
+    # Synchronize durable Cloudflare KV bindings in wrangler.toml when wrangler.toml exists
+    wrangler_file = repo / "wrangler.toml"
+    wrangler_updated = False
+    if wrangler_file.is_file():
+        try:
+            w_content = wrangler_file.read_text(encoding="utf-8")
+            w_new = w_content
+            if prop_clean == "prexvo":
+                if 'binding = "PREXVO_TELEMETRY_KV"' not in w_new:
+                    kv_block = (
+                        "\n# Cloudflare KV Binding for Durable Prexvo Click & Calculation Telemetry\n"
+                        "[[kv_namespaces]]\n"
+                        'binding = "PREXVO_TELEMETRY_KV"\n'
+                        'id = "153917b16871453a9f07bfb39ff3fd98"\n'
+                    )
+                    w_new = w_new.rstrip() + "\n" + kv_block
+            elif prop_clean == "profithelm":
+                if 'binding = "PROFITHELM_LEADS"' not in w_new:
+                    w_new = (
+                        w_new.rstrip()
+                        + "\n\n# Cloudflare KV Binding for Lead Gen & Edge State\n"
+                        + "[[kv_namespaces]]\n"
+                        + 'binding = "PROFITHELM_LEADS"\n'
+                        + 'id = "983a21b6fcd54fbb884740017b7d96f1"\n'
+                    )
+                if 'binding = "PROFITHELM_TELEMETRY_KV"' not in w_new:
+                    w_new = (
+                        w_new.rstrip()
+                        + "\n\n# Cloudflare KV Binding for Dedicated ProfitHelm Click & Calculation Telemetry\n"
+                        + "[[kv_namespaces]]\n"
+                        + 'binding = "PROFITHELM_TELEMETRY_KV"\n'
+                        + 'id = "8c56efedd6214424b83e0e298c33ba27"\n'
+                    )
+            if w_new != w_content:
+                wrangler_file.write_text(w_new, encoding="utf-8")
+                wrangler_updated = True
+        except Exception:
+            pass
+
     if target_file.is_file():
         try:
             existing = target_file.read_text(encoding="utf-8")
-            if existing == js_code and not dist_needs_update and not telemetry_updated:
+            if existing == js_code and not dist_needs_update and not telemetry_updated and not wrangler_updated:
                 return {
                     "status": "UNCHANGED",
                     "path": str(target_file),
                     "telemetry_path": str(telemetry_file),
+                    "wrangler_path": str(wrangler_file),
                     "live_direct_partners": live_direct_partners,
                 }
         except Exception:
@@ -2201,8 +2241,10 @@ def sync_tenant_edge_redirect_function(
         "status": "UPDATED",
         "path": str(target_file),
         "telemetry_path": str(telemetry_file),
+        "wrangler_path": str(wrangler_file),
         "live_direct_partners": live_direct_partners,
     }
+
 
 
 

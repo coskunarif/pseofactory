@@ -1779,6 +1779,8 @@ def aggregate_outbound_partner_engagement(
     by_slug: Dict[str, Dict[str, Any]] = {}
     by_partner: Dict[str, Dict[str, Any]] = {}
     by_cta_slot: Dict[str, Dict[str, Any]] = {}
+    by_page_and_slot: Dict[str, Dict[str, Any]] = {}
+    by_subid: Dict[str, Dict[str, Any]] = {}
 
     def _ensure_slug(slug_val: str, prop_val: str) -> Dict[str, Any]:
         if slug_val not in by_slug:
@@ -1835,6 +1837,23 @@ def aggregate_outbound_partner_engagement(
                 "partners": {},
             }
         return by_cta_slot[slot_val]
+
+    def _ensure_page_and_slot(slug_val: str, slot_val: str, prop_val: str) -> Dict[str, Any]:
+        ps_key = f"{slug_val}:{slot_val}"
+        if ps_key not in by_page_and_slot:
+            by_page_and_slot[ps_key] = {
+                "page_slot_key": ps_key,
+                "tool_slug": slug_val,
+                "cta_slot": slot_val,
+                "property_id": prop_val,
+                "views": 0,
+                "intent_interactions": 0,
+                "outbound_clicks": 0,
+                "estimated_revenue_yield_usd": 0.0,
+                "partners": {},
+                "subids": {},
+            }
+        return by_page_and_slot[ps_key]
 
     for ev in raw_events:
         ev_prop = str(
@@ -1897,6 +1916,13 @@ def aggregate_outbound_partner_engagement(
             or ("calculator_preset_cta" if "preset" in etype else "primary_partner_cta")
         ).strip()
 
+        subid_val = str(
+            ev.get("subid")
+            or props.get("subid")
+            or mon.get("subid")
+            or f"{slug}_{cta_slot}"
+        ).strip()
+
         value_tier = str(
             ev.get("value_tier")
             or ev.get("tier")
@@ -1917,6 +1943,7 @@ def aggregate_outbound_partner_engagement(
 
         s_rec = _ensure_slug(slug, ev_prop)
         slot_rec = _ensure_cta_slot(cta_slot)
+        ps_rec = _ensure_page_and_slot(slug, cta_slot, ev_prop)
         s_slot = s_rec["cta_slots"].setdefault(
             cta_slot,
             {"cta_slot": cta_slot, "views": 0, "intent_interactions": 0, "outbound_clicks": 0, "estimated_revenue_yield_usd": 0.0},
@@ -1934,6 +1961,7 @@ def aggregate_outbound_partner_engagement(
             s_rec["page_views"] += 1
             s_slot["views"] += 1
             slot_rec["views_exposed"] += 1
+            ps_rec["views"] += 1
             if partner_key:
                 p_rec = _ensure_partner(partner_key, ev_prop)
                 p_rec["views_exposed"] += 1
@@ -1959,6 +1987,7 @@ def aggregate_outbound_partner_engagement(
                 s_rec["preset_clicks"] += 1
             s_slot["intent_interactions"] += 1
             slot_rec["intent_interactions"] += 1
+            ps_rec["intent_interactions"] += 1
             if partner_key:
                 p_rec = _ensure_partner(partner_key, ev_prop)
                 p_rec["calculator_interactions"] += 1
@@ -1983,6 +2012,7 @@ def aggregate_outbound_partner_engagement(
             s_Slot_clicks = s_slot["outbound_clicks"] + 1
             s_slot["outbound_clicks"] = s_Slot_clicks
             slot_rec["outbound_clicks"] += 1
+            ps_rec["outbound_clicks"] += 1
 
             eff_pk = partner_key or _select_partner_for_slug(ev_prop, slug) or "default_partner"
             p_rec = _ensure_partner(eff_pk, ev_prop)
@@ -1990,6 +2020,8 @@ def aggregate_outbound_partner_engagement(
             p_rec["cta_slots"][cta_slot] = p_rec["cta_slots"].get(cta_slot, 0) + 1
             p_rec["slugs"][slug] = p_rec["slugs"].get(slug, 0) + 1
             slot_rec["partners"][eff_pk] = slot_rec["partners"].get(eff_pk, 0) + 1
+            ps_rec["partners"][eff_pk] = ps_rec["partners"].get(eff_pk, 0) + 1
+            ps_rec["subids"][subid_val] = ps_rec["subids"].get(subid_val, 0) + 1
 
             bounty_mid = p_rec["bounty_midpoint_usd"]
             is_b2b_partner = eff_pk in ENTERPRISE_B2B_PARTNERS or is_commercial_b2b_slug(slug)
@@ -2001,6 +2033,25 @@ def aggregate_outbound_partner_engagement(
             s_rec["estimated_revenue_yield_usd"] = round(s_rec["estimated_revenue_yield_usd"] + click_yield, 4)
             s_slot["estimated_revenue_yield_usd"] = round(s_slot["estimated_revenue_yield_usd"] + click_yield, 4)
             slot_rec["estimated_revenue_yield_usd"] = round(slot_rec["estimated_revenue_yield_usd"] + click_yield, 4)
+            ps_rec["estimated_revenue_yield_usd"] = round(ps_rec["estimated_revenue_yield_usd"] + click_yield, 4)
+
+            if subid_val:
+                sub_entry = by_subid.setdefault(
+                    subid_val,
+                    {
+                        "subid": subid_val,
+                        "property_id": ev_prop,
+                        "partner_key": eff_pk,
+                        "tool_slug": slug,
+                        "cta_slot": cta_slot,
+                        "outbound_clicks": 0,
+                        "estimated_revenue_yield_usd": 0.0,
+                    },
+                )
+                sub_entry["outbound_clicks"] += 1
+                sub_entry["estimated_revenue_yield_usd"] = round(
+                    sub_entry["estimated_revenue_yield_usd"] + click_yield, 4
+                )
 
             p_rec["realized_revenue_usd"] = round(p_rec["realized_revenue_usd"] + payout, 4)
             p_rec["estimated_revenue_yield_usd"] = round(p_rec["estimated_revenue_yield_usd"] + click_yield, 4)
@@ -2086,8 +2137,11 @@ def aggregate_outbound_partner_engagement(
         "total_calculator_interactions": sum(s["calculator_interactions"] for s in by_slug.values()),
         "total_estimated_revenue_yield_usd": round(sum(s["estimated_revenue_yield_usd"] for s in by_slug.values()), 2),
         "by_slug": by_slug,
+        "by_page": by_slug,
         "by_partner": by_partner,
         "by_cta_slot": by_cta_slot,
+        "by_page_and_slot": by_page_and_slot,
+        "by_subid": by_subid,
     }
 
 

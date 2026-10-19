@@ -993,3 +993,238 @@ class PartnerTrackingEngine:
             "properties": properties_out,
         }
 
+    def sync_edge_click_telemetry(
+        self,
+        injected_events: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        ledger_dir: Optional[Any] = None,
+        fetch_live: bool = False,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Pulls or ingests recorded edge redirect and click beacon events for ProfitHelm and Prexvo,
+        deduplicates by event_id into durable local JSONL ledgers and summary JSON files,
+        and aggregates click volume by page (tool_slug), placement slot (cta_slot),
+        page-and-slot pair (by_page_and_slot), and subid (by_subid).
+        Zero em-dashes. Zero en-dashes.
+        """
+        import urllib.request
+        from pathlib import Path
+
+        endpoints = {
+            "profithelm": "https://profithelm.com/api/telemetry?limit=1000",
+            "prexvo": "https://prexvo.com/api/telemetry?limit=1000",
+        }
+        tenant_repos = {
+            "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
+            "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
+        }
+        base_ledger_dir = Path(ledger_dir) if ledger_dir is not None else None
+        results: Dict[str, Dict[str, Any]] = {}
+
+        for prop_id in ("profithelm", "prexvo"):
+            if base_ledger_dir is not None:
+                base_ledger_dir.mkdir(parents=True, exist_ok=True)
+                jsonl_path = base_ledger_dir / f"{prop_id}_telemetry_events.jsonl"
+                summary_path = base_ledger_dir / f"{prop_id}_outbound_partner_engagement.json"
+            else:
+                agy_dir = tenant_repos[prop_id] / ".agy"
+                agy_dir.mkdir(parents=True, exist_ok=True)
+                jsonl_path = agy_dir / "telemetry_events.jsonl"
+                summary_path = agy_dir / "outbound_partner_engagement.json"
+
+            existing_events: Dict[str, Dict[str, Any]] = {}
+            if jsonl_path.is_file():
+                try:
+                    for raw_line in jsonl_path.read_text(encoding="utf-8").splitlines():
+                        raw_line = raw_line.strip()
+                        if not raw_line:
+                            continue
+                        try:
+                            ev = json.loads(raw_line)
+                            if isinstance(ev, dict):
+                                ev_id = str(ev.get("event_id") or f"idx_{len(existing_events)}")
+                                existing_events[ev_id] = ev
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+            incoming: List[Dict[str, Any]] = []
+            if injected_events and isinstance(injected_events.get(prop_id), list):
+                incoming.extend(e for e in injected_events[prop_id] if isinstance(e, dict))
+            elif fetch_live:
+                try:
+                    req = urllib.request.Request(
+                        endpoints[prop_id],
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Accept": "application/json",
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        payload = json.loads(resp.read().decode("utf-8"))
+                        if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+                            incoming.extend(e for e in payload["events"] if isinstance(e, dict))
+                except Exception:
+                    pass
+
+            ingested_new = 0
+            for ev in incoming:
+                ev_copy = dict(ev)
+                ev_copy.setdefault("property_id", prop_id)
+                ev_id = str(ev_copy.get("event_id") or f"evt_{prop_id}_{len(existing_events) + ingested_new}")
+                ev_copy["event_id"] = ev_id
+                if ev_id not in existing_events:
+                    ingested_new += 1
+                existing_events[ev_id] = ev_copy
+
+            all_prop_events = list(existing_events.values())
+            if all_prop_events or base_ledger_dir is not None:
+                try:
+                    with open(jsonl_path, "w", encoding="utf-8") as fh:
+                        for ev_item in all_prop_events:
+                            fh.write(json.dumps(ev_item) + "\n")
+                except Exception:
+                    pass
+
+            agg = aggregate_outbound_partner_engagement(all_prop_events, property_id=prop_id)
+            try:
+                summary_path.write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+
+            results[prop_id] = {
+                "property_id": prop_id,
+                "ingested_count": len(incoming) if injected_events else ingested_new,
+                "total_durable_events": len(all_prop_events),
+                "ledger_path": str(jsonl_path),
+                "summary_path": str(summary_path),
+                "aggregation": agg,
+            }
+
+        return results
+
+    def reconcile_edge_clicks_with_portals(
+        self,
+        engagement_by_property: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Reconciles recorded edge redirects and click beacons (aggregated by partner, page/tool_slug,
+        placement slot/cta_slot, and subid) against the verified click reports across affiliate
+        partner portals (Impact.com, CJ Affiliate, PartnerStack, and FirstPromoter).
+        Zero em-dashes. Zero en-dashes.
+        """
+        if engagement_by_property is None:
+            sync_data = self.sync_edge_click_telemetry(fetch_live=False)
+            engagement_by_property = {
+                prop_id: sync_data[prop_id]["aggregation"]
+                for prop_id in ("profithelm", "prexvo")
+            }
+
+        master_nets = self.hub.vault_data.get("master_networks", {}) or {}
+        ph_api_progs = (
+            self.hub.vault_data.get("properties", {})
+            .get("profithelm", {})
+            .get("agentic_api_programs", {})
+        ) or {}
+
+        impact_cfg = master_nets.get("impact", {}) or {}
+        cj_cfg = master_nets.get("cj_affiliate", {}) or {}
+        ps_cfg = master_nets.get("partnerstack", {}) or {}
+        ps_api = ph_api_progs.get("partnerstack_api_v2", {}) or {}
+        fp_api = ph_api_progs.get("firstpromoter_api_v1", {}) or {}
+
+        # Portal reported click totals from monetization_vault.json
+        portal_clicks_by_network = {
+            "impact": int(impact_cfg.get("verified_clicks", 0) or 0),
+            "cj_affiliate": int(cj_cfg.get("verified_clicks", 0) or 0),
+            "partnerstack": int(
+                ps_api.get("live_verified_clicks")
+                or ps_cfg.get("verified_clicks")
+                or 0
+            ),
+            "firstpromoter": int(fp_api.get("verified_clicks", 1) or 1),
+        }
+
+        partner_to_network = {
+            "kalshi": "impact",
+            "xendoo_impact": "impact",
+            "efile": "cj_affiliate",
+            "efile_com": "cj_affiliate",
+            "eztaxreturn": "cj_affiliate",
+            "eztaxreturn_com": "cj_affiliate",
+            "lawdepot": "cj_affiliate",
+            "turbotax": "cj_affiliate",
+            "taxslayer": "cj_affiliate",
+            "suretybonds_direct": "cj_affiliate",
+            "rippling": "partnerstack",
+            "mercury": "partnerstack",
+            "coinledger": "firstpromoter",
+            "koinly": "firstpromoter",
+            "crest_capital": "firstpromoter",
+        }
+
+        edge_clicks_by_network: Dict[str, int] = {
+            "impact": 0,
+            "cj_affiliate": 0,
+            "partnerstack": 0,
+            "firstpromoter": 0,
+            "direct_or_other": 0,
+        }
+        properties_summary: Dict[str, Any] = {}
+
+        for prop_id in ("profithelm", "prexvo"):
+            agg = engagement_by_property.get(prop_id) or aggregate_outbound_partner_engagement([], property_id=prop_id)
+            by_partner = agg.get("by_partner", {}) or {}
+            for pk, p_data in by_partner.items():
+                clicks = int(p_data.get("outbound_clicks", 0) or 0)
+                net_key = partner_to_network.get(pk, "direct_or_other")
+                edge_clicks_by_network[net_key] = edge_clicks_by_network.get(net_key, 0) + clicks
+
+            properties_summary[prop_id] = {
+                "property_id": prop_id,
+                "total_edge_outbound_clicks": int(agg.get("total_outbound_clicks", 0) or 0),
+                "by_page": {
+                    slug: {
+                        "outbound_clicks": int(s_data.get("outbound_clicks", 0) or 0),
+                        "top_converting_partner": str(s_data.get("top_converting_partner") or ""),
+                        "top_converting_cta_slot": str(s_data.get("top_converting_cta_slot") or ""),
+                    }
+                    for slug, s_data in (agg.get("by_slug", {}) or {}).items()
+                },
+                "by_cta_slot": {
+                    slot: {
+                        "outbound_clicks": int(sl_data.get("outbound_clicks", 0) or 0),
+                        "partners": dict(sl_data.get("partners") or {}),
+                    }
+                    for slot, sl_data in (agg.get("by_cta_slot", {}) or {}).items()
+                },
+                "by_page_and_slot": dict(agg.get("by_page_and_slot") or {}),
+                "by_subid": dict(agg.get("by_subid") or {}),
+            }
+
+        networks_reconciliation: Dict[str, Any] = {}
+        any_discrepancy = False
+        for net_key, portal_count in portal_clicks_by_network.items():
+            edge_count = int(edge_clicks_by_network.get(net_key, 0))
+            delta = portal_count - edge_count
+            # Portal click reports have a 2-24h reporting latency on CJ and Impact;
+            # flag discrepancy only if portal reports 0 clicks while edge has > 25 clicks.
+            has_gap = portal_count == 0 and edge_count > 25
+            if has_gap:
+                any_discrepancy = True
+            networks_reconciliation[net_key] = {
+                "network_key": net_key,
+                "portal_reported_clicks": portal_count,
+                "recorded_edge_clicks": edge_count,
+                "delta_portal_minus_edge": delta,
+                "status": "DISCREPANCY_DETECTED" if has_gap else "RECONCILED",
+            }
+
+        return {
+            "reconciled_at": datetime.now(timezone.utc).isoformat(),
+            "status": "DISCREPANCY_DETECTED" if any_discrepancy else "RECONCILED",
+            "networks": networks_reconciliation,
+            "properties": properties_summary,
+        }
+
+

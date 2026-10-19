@@ -1589,3 +1589,135 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] == 76
     assert px_audit["compiled_dom_parity"]["ymyl_restricted_pages_clean"] is True
 
+
+def test_durable_kv_sync_page_slot_aggregation_and_portal_click_reconciliation(
+    tmp_path, temp_bus_path, temp_email_paths
+):
+    """
+    Verifies:
+    1. sync_tenant_edge_redirect_function synchronizes durable [[kv_namespaces]] bindings into
+       wrangler.toml for both Prexvo (PREXVO_TELEMETRY_KV) and ProfitHelm (PROFITHELM_LEADS and
+       PROFITHELM_TELEMETRY_KV), eliminating temporary isolate memory volatility on Prexvo.
+    2. aggregate_outbound_partner_engagement aggregates click volume by page (by_page / by_slug),
+       by placement slot (by_cta_slot), by (page, slot) pair (by_page_and_slot), and by subid (by_subid).
+    3. PartnerTrackingEngine.sync_edge_click_telemetry and reconcile_edge_clicks_with_portals
+       ingest edge redirect and click beacon events, aggregate volume by page and placement slot,
+       and reconcile recorded edge redirects against affiliate portal click reports across
+       Impact.com, CJ Affiliate, PartnerStack, and FirstPromoter.
+    """
+    from pseofactory.affiliates import aggregate_outbound_partner_engagement
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+
+    # 1. Verify Prexvo and ProfitHelm wrangler.toml KV namespace synchronization
+    px_repo = tmp_path / "prexvo"
+    (px_repo / "functions" / "r").mkdir(parents=True)
+    (px_repo / "wrangler.toml").write_text(
+        'name = "prexvo"\npages_build_output_dir = "dist"\ncompatibility_date = "2026-03-01"\n',
+        encoding="utf-8",
+    )
+    px_sync = sync_tenant_edge_redirect_function(px_repo, property_id="prexvo")
+    assert px_sync["status"] in ("UPDATED", "UNCHANGED")
+    px_wrangler = (px_repo / "wrangler.toml").read_text(encoding="utf-8")
+    assert 'binding = "PREXVO_TELEMETRY_KV"' in px_wrangler
+    assert 'id = "153917b16871453a9f07bfb39ff3fd98"' in px_wrangler
+
+    ph_repo = tmp_path / "profithelm-platform"
+    (ph_repo / "functions" / "r").mkdir(parents=True)
+    (ph_repo / "wrangler.toml").write_text(
+        'name = "profithelm"\npages_build_output_dir = "dist"\ncompatibility_date = "2024-09-23"\n',
+        encoding="utf-8",
+    )
+    ph_sync = sync_tenant_edge_redirect_function(ph_repo, property_id="profithelm")
+    assert ph_sync["status"] in ("UPDATED", "UNCHANGED")
+    ph_wrangler = (ph_repo / "wrangler.toml").read_text(encoding="utf-8")
+    assert 'binding = "PROFITHELM_LEADS"' in ph_wrangler
+    assert 'binding = "PROFITHELM_TELEMETRY_KV"' in ph_wrangler
+
+    # 2. Verify page + placement slot + subid click aggregation
+    sample_events = [
+        {
+            "event_id": "evt_test_1",
+            "event_type": "affiliate_click",
+            "property_id": "profithelm",
+            "partner_key": "rippling",
+            "tool_slug": "saas-runway-burn-rate-calculator",
+            "cta_slot": "hero_callout",
+            "subid": "rippling_runway_hero_test_oct19",
+            "value_tier": "premium",
+        },
+        {
+            "event_id": "evt_test_2",
+            "event_type": "affiliate_click",
+            "property_id": "profithelm",
+            "partner_key": "rippling",
+            "tool_slug": "saas-runway-burn-rate-calculator",
+            "cta_slot": "calculator_result_inline",
+            "subid": "rippling_runway_inline_test_oct19",
+            "value_tier": "premium",
+        },
+        {
+            "event_id": "evt_test_3",
+            "event_type": "affiliate_click",
+            "property_id": "profithelm",
+            "partner_key": "kalshi",
+            "tool_slug": "prediction-market-ev-calculator",
+            "cta_slot": "hero_callout",
+            "subid": "kalshi_ev_hero_test_oct19",
+            "value_tier": "premium",
+        },
+        {
+            "event_id": "evt_test_4",
+            "event_type": "affiliate_click",
+            "property_id": "prexvo",
+            "partner_key": "splash_financial",
+            "tool_slug": "student-loan-refinance-savings-calculator",
+            "cta_slot": "hero_callout",
+            "subid": "splash_refi_hero_test_oct19",
+            "value_tier": "starter",
+        },
+    ]
+
+    ph_agg = aggregate_outbound_partner_engagement(sample_events, property_id="profithelm")
+    assert ph_agg["total_outbound_clicks"] == 3
+    assert "by_page_and_slot" in ph_agg
+    assert "by_subid" in ph_agg
+    assert ph_agg["by_page_and_slot"]["saas-runway-burn-rate-calculator:hero_callout"]["outbound_clicks"] == 1
+    assert ph_agg["by_page_and_slot"]["saas-runway-burn-rate-calculator:calculator_result_inline"]["outbound_clicks"] == 1
+    assert ph_agg["by_page_and_slot"]["prediction-market-ev-calculator:hero_callout"]["outbound_clicks"] == 1
+    assert ph_agg["by_subid"]["rippling_runway_hero_test_oct19"]["outbound_clicks"] == 1
+    assert ph_agg["by_subid"]["kalshi_ev_hero_test_oct19"]["partner_key"] == "kalshi"
+
+    # 3. Verify PartnerTrackingEngine edge telemetry sync & portal click reconciliation
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+
+    ledger_dir = tmp_path / "telemetry_ledgers"
+    sync_res = tracker.sync_edge_click_telemetry(
+        injected_events={"profithelm": sample_events[:3], "prexvo": sample_events[3:]},
+        ledger_dir=ledger_dir,
+    )
+    assert sync_res["profithelm"]["ingested_count"] == 3
+    assert sync_res["prexvo"]["ingested_count"] == 1
+    assert (ledger_dir / "profithelm_telemetry_events.jsonl").is_file()
+    assert (ledger_dir / "prexvo_telemetry_events.jsonl").is_file()
+
+    recon = tracker.reconcile_edge_clicks_with_portals(
+        engagement_by_property={
+            "profithelm": sync_res["profithelm"]["aggregation"],
+            "prexvo": sync_res["prexvo"]["aggregation"],
+        }
+    )
+    assert recon["status"] in ("RECONCILED", "DISCREPANCY_DETECTED")
+    assert "networks" in recon
+    assert "impact" in recon["networks"]
+    assert "cj_affiliate" in recon["networks"]
+    assert "partnerstack" in recon["networks"]
+    assert "firstpromoter" in recon["networks"]
+    assert "properties" in recon
+    assert recon["properties"]["profithelm"]["total_edge_outbound_clicks"] == 3
+    assert recon["properties"]["prexvo"]["total_edge_outbound_clicks"] == 1
+    assert "by_page_and_slot" in recon["properties"]["profithelm"]
+
+
