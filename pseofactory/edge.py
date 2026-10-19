@@ -1536,10 +1536,20 @@ def sync_tenant_edge_redirect_function(
         if p_obj.status == "live" or v_status in ("live", "active_direct"):
             live_direct_partners.append(k)
 
+    dist_r_file = repo / "dist" / "functions" / "r" / "[partner].js"
+    dist_needs_update = False
+    if dist_r_file.parent.is_dir():
+        try:
+            if not dist_r_file.is_file() or dist_r_file.read_text(encoding="utf-8") != js_code:
+                dist_r_file.write_text(js_code, encoding="utf-8")
+                dist_needs_update = True
+        except Exception:
+            pass
+
     if target_file.is_file():
         try:
             existing = target_file.read_text(encoding="utf-8")
-            if existing == js_code:
+            if existing == js_code and not dist_needs_update:
                 return {
                     "status": "UNCHANGED",
                     "path": str(target_file),

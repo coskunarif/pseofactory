@@ -6086,12 +6086,6 @@ class RetroReflectionEngine:
             updated = re.sub(r"\bCalculator(?:\s+Calculator)+\b", "Calculator", updated, flags=re.IGNORECASE)
             if "title_dedup" not in repaired:
                 repaired.append("title_dedup")
-        if property_id.lower() == "profithelm" and "1031" in slug.lower() and 'data-partner="mercury"' in updated:
-            updated = updated.replace('data-partner="mercury"', 'data-partner="ipx1031"').replace(
-                "Mercury Startup Banking", "IPX1031 Qualified Intermediary"
-            ).replace("/r/mercury", "/r/ipx1031")
-            repaired.append("vertical_partner_alignment")
-
         try:
             from pseofactory.affiliates import normalize_html_callout_message_match
             norm_html = normalize_html_callout_message_match(updated, property_id=property_id)
@@ -6232,6 +6226,8 @@ class RetroReflectionEngine:
         if heal_legacy:
             try:
                 from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+                from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+                veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
                 for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
                     if not ov_dir.is_dir():
                         continue
@@ -6265,21 +6261,75 @@ class RetroReflectionEngine:
                                 raw_ov = healed_ov
                                 ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
 
-                            if (
-                                property_id.lower() in ("profithelm", "exchange1031")
-                                and any(k in ov_s.lower() for k in ("tax-bracket", "irs-2027", "ca-tax-brackets"))
-                                and isinstance(raw_ov.get("partner_offer"), dict)
-                                and str(raw_ov["partner_offer"].get("partner_key") or "").lower() in ("taxslayer", "turbotax")
-                            ):
+                            if isinstance(raw_ov.get("partner_offer"), dict) and not raw_ov.get("restricted_public_service"):
+                                ov_low = ov_s.lower()
                                 po = dict(raw_ov["partner_offer"])
-                                po["partner_key"] = "crest_capital"
-                                po["partner_name"] = "Xendoo Section 179 & Business Tax Accounting"
-                                po["url"] = "https://www.xendoo.com/?fp_ref=arif-4ac24e"
-                                po["redirect_path"] = "/r/crest_capital"
-                                po["cta_text"] = "Optimize Section 179 Accounting with Xendoo"
-                                po["cta_id"] = f"cta-{property_id.lower()}-{ov_s}-crest_capital"
-                                raw_ov["partner_offer"] = po
-                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+                                if property_id.lower() == "prexvo":
+                                    t_pk = "splash_financial"
+                                    t_name = "Splash Financial Student Loan Refinancing"
+                                    t_url = "https://www.splashfinancial.com/"
+                                    t_cta = "Compare Rates with Splash Financial"
+                                else:
+                                    if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
+                                        t_pk = "kalshi"
+                                        t_name = "Kalshi CFTC-Regulated Event Contract Exchange"
+                                        t_url = "https://kalshi.pxf.io/c/7932737/3078072/37770"
+                                        t_cta = "Trade Regulated Event Contracts on Kalshi"
+                                    elif any(k in ov_low for k in ("crypto", "1099-da", "8949", "prediction-market-tax")):
+                                        t_pk = "coinledger"
+                                        t_name = "CoinLedger Crypto Tax Automation"
+                                        t_url = "https://coinledger.io/?fpr=arif-554004"
+                                        t_cta = "Generate IRS Form 8949 with CoinLedger"
+                                    elif any(k in ov_low for k in ("s-corp", "reasonable-salary", "workers-comp", "payroll-burden")):
+                                        t_pk = "rippling"
+                                        t_name = "Rippling Workforce & Payroll Platform"
+                                        t_url = "https://try.rippling.com/mcfo1m09qiwt"
+                                        t_cta = "Schedule Rippling Demo"
+                                    elif (
+                                        ov_low in veh_slugs
+                                        or any(
+                                            k in ov_low
+                                            for k in (
+                                                "tax-bracket",
+                                                "irs-2027",
+                                                "ca-tax-brackets",
+                                                "capital-gains",
+                                                "tcja",
+                                                "1031",
+                                                "179",
+                                                "equipment",
+                                                "macrs",
+                                                "depreciation",
+                                                "vehicle",
+                                                "gvwr",
+                                                "174",
+                                                "r-and-d",
+                                            )
+                                        )
+                                    ):
+                                        t_pk = "crest_capital"
+                                        t_name = "Xendoo Section 179 & Business Tax Accounting"
+                                        t_url = "https://www.xendoo.com/?fp_ref=arif-4ac24e"
+                                        t_cta = "Optimize Section 179 Accounting with Xendoo"
+                                    else:
+                                        t_pk = "mercury"
+                                        t_name = "Mercury Business Banking"
+                                        t_url = "https://mercury.com/r/profithelm-llc"
+                                        t_cta = "Open a Mercury Account"
+                                if (
+                                    po.get("partner_key") != t_pk
+                                    or po.get("url") != t_url
+                                    or po.get("redirect_path") != f"/r/{t_pk}"
+                                    or po.get("partner_name") != t_name
+                                ):
+                                    po["partner_key"] = t_pk
+                                    po["partner_name"] = t_name
+                                    po["url"] = t_url
+                                    po["redirect_path"] = f"/r/{t_pk}"
+                                    po["cta_text"] = t_cta
+                                    po["cta_id"] = f"cta-{property_id.lower()}-{ov_s}-{t_pk}"
+                                    raw_ov["partner_offer"] = po
+                                    ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                         except Exception:
                             pass
             except Exception:
@@ -6621,11 +6671,22 @@ class RetroReflectionEngine:
                     rel_path=rel,
                     require_primitives=True,
                 )
-                if non_tool_issues or _needs_page_structure_geo_normalization(content):
+                if (
+                    non_tool_issues
+                    or _needs_page_structure_geo_normalization(content)
+                    or 'data-status="pending"' in content
+                ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
             scanned += 1
             missing = cls.audit_html_mechanics(content)
+            if (
+                'data-status="pending"' in content
+                or 'data-partner="ipx1031"' in content
+                or 'data-partner="sofi_refi"' in content
+            ):
+                if "callout_message_match" not in missing:
+                    missing.append("callout_message_match")
             if rel in active_overlays:
                 _, ov_spec = active_overlays[rel]
                 ov_s = str(ov_spec.get("slug") or "")
@@ -6638,6 +6699,18 @@ class RetroReflectionEngine:
                     or "Statutory analysis and compliance guidelines for " in content
                     or bool(re.search(r'<div\s+class=["\']faq-card["\']', content, re.IGNORECASE))
                     or cls._overlay_spec_needs_heal(ov_s, ov_spec)
+                    or bool(
+                        re.search(
+                            r'<section\s+class=["\'][^"\']*overlay-partner-offer[^"\']*["\'][^>]*>(?:(?!</section>).)*?href=["\']https?://',
+                            content,
+                            re.S | re.I,
+                        )
+                    )
+                    or (
+                        property_id.lower() == "prexvo"
+                        and 'class="overlay-section overlay-partner-offer' in content
+                        and 'data-partner="splash_financial"' not in content
+                    )
                 ):
                     if "gsc_striking_overlay" not in missing:
                         missing.append("gsc_striking_overlay")
@@ -6765,7 +6838,7 @@ class RetroReflectionEngine:
                 continue
             rel = html_file.relative_to(d).as_posix()
             if not cls.is_tool_or_calculator_page(html_file, d, content):
-                if "/r/" in content:
+                if "/r/" in content or "overlay-partner-offer" in content:
                     try:
                         from pseofactory.affiliates import normalize_html_callout_message_match
                         norm_non_tool = normalize_html_callout_message_match(content, property_id=property_id)
@@ -6828,7 +6901,7 @@ class RetroReflectionEngine:
             )
             if overlay_injected and "gsc_striking_overlay" not in repaired:
                 repaired.append("gsc_striking_overlay")
-            if "/r/" in updated_html:
+            if "/r/" in updated_html or "overlay-partner-offer" in updated_html:
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)

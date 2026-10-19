@@ -627,7 +627,7 @@ def test_edge_redirect_generation_profithelm_and_prexvo():
     assert 'defaultUrl: "https://mercury.com/r/profithelm-llc"' in ph_js
     assert 'defaultUrl: "https://www.taxact.com/"' in ph_js
     assert 'defaultUrl: "https://www.surepayroll.com/"' in ph_js
-    assert 'defaultUrl: "https://www.xendoo.com/"' in ph_js
+    assert 'defaultUrl: "https://www.xendoo.com/?fp_ref=arif-4ac24e"' in ph_js
     assert 'defaultUrl: "https://www.invoicesimple.com/"' in ph_js
     assert 'defaultUrl: "https://dlpcapital.com/"' in ph_js
     assert 'defaultUrl: "https://kalshi.pxf.io/c/7932737/3078072/37770"' in ph_js
@@ -750,11 +750,11 @@ def test_callout_expansion_for_prexvo_and_profithelm_approved_partners():
 
 
 def test_visitor_journey_cta_placement_and_live_first_ordering():
-    """Verifies inline calculator result CTA injection, live-first ordering, and removal of footer-polluted mismatches."""
+    """Verifies inline calculator result CTA injection, live-first ordering, and removal of pending/footer-polluted mismatches."""
     import re
     from pseofactory.affiliates import normalize_html_callout_message_match
 
-    # 1. Prediction-market odds page promotes live Kalshi ahead of pending Interactive Brokers and injects inline result CTA
+    # 1. Prediction-market odds page replaces pending Interactive Brokers with active approved Kalshi, CoinLedger, and Koinly
     pred_odds_html = """<!DOCTYPE html>
 <html><head><title>Prediction Market Odds & Arbitrage Calculator</title></head><body>
   <div class="calculator-grid">
@@ -779,7 +779,9 @@ def test_visitor_journey_cta_placement_and_live_first_ordering():
     r_links = re.findall(r'href="/r/([a-z0-9_]+)"', norm_pred)
     assert r_links[0] == "kalshi"
     assert r_links[1] == "kalshi"
-    assert r_links.index("kalshi") < r_links.index("interactive_brokers")
+    assert "interactive_brokers" not in r_links
+    assert "coinledger" in r_links
+    assert "koinly" in r_links
 
     # 2. Section 179 page with footer link to Kalshi strips mismatched Kalshi/National Funding Med and orders live Mercury/Rippling first
     sec179_html = """<!DOCTYPE html>
@@ -836,10 +838,13 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     r_tax = re.findall(r'href="/r/([a-z0-9_]+)"', norm_tax)
     assert "coinledger" not in r_tax
     assert "koinly" not in r_tax
+    assert "turbotax" not in r_tax
+    assert "taxslayer" not in r_tax
     assert r_tax[0] == "crest_capital"
     assert r_tax[1] == "crest_capital"
-    assert r_tax.index("crest_capital") < r_tax.index("turbotax") < r_tax.index("taxslayer")
+    assert r_tax.index("crest_capital") < r_tax.index("rippling") < r_tax.index("mercury")
     assert 'data-partner="crest_capital" data-status="live"' in norm_tax
+    assert 'data-status="pending"' not in norm_tax
 
     imp_turbotax = estimate_partner_approval_revenue_impact("profithelm", "turbotax")
     imp_taxslayer = estimate_partner_approval_revenue_impact("profithelm", "taxslayer")
@@ -873,5 +878,54 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert 'data-partner-url="https://www.xendoo.com/?fp_ref=arif-4ac24e"' in norm_overlay
     assert 'href="/r/crest_capital"' in norm_overlay
     assert "Optimize Section 179 Accounting with Xendoo" in norm_overlay
+
+
+def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
+    """Verifies that Section 1031, Section 174, Treasury Yield, Surety Bond, Homepage, and Prexvo overlays upgrade all pending/placeholder slots to active approved sponsors."""
+    import re
+    from pseofactory.affiliates import normalize_html_callout_message_match
+
+    # 1. Section 1031 state spoke replaces generic ipx1031 referral placeholder and pending exeter1031/first_american with active approved crest_capital, mercury, rippling
+    sec1031_html = """<!DOCTYPE html>
+<html><head><title>Alabama 1031 Exchange Calculator</title><link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/alabama/" /></head><body>
+  <div class="calculator-grid">
+    <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
+    <div class="card result-card"><div class="card-header"><h2>Deferred Capital Gains</h2></div></div>
+  </div>
+  <section class="affiliate-section affiliates-section">
+    <h2>Recommended 1031 Partners</h2>
+    <div class="affiliate-card partner-card"><a href="/r/ipx1031" class="btn-cta">Initiate Qualified 1031 Exchange with IPX1031</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/exeter1031" class="btn-cta" data-status="pending">Explore DLP Capital</a></div>
+    <div class="affiliate-card partner-card"><a href="/r/first_american" class="btn-cta" data-status="pending">Invest on GROUNDFLOOR</a></div>
+  </section>
+  <div id="gsc-striking-overlay" class="gsc-overlay-container">
+    <section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="profithelm" data-partner="ipx1031" data-partner-url="https://www.ipx1031.com/?utm_source=profithelm&amp;utm_medium=referral">
+      <h3 class="section-subtitle">Recommended Partner Solution: IPX1031 Qualified Intermediary</h3>
+      <a href="https://www.ipx1031.com/?utm_source=profithelm&amp;utm_medium=referral" class="btn-cta" rel="noopener sponsored nofollow" target="_blank">Open a Qualified 1031 Exchange Escrow Account</a>
+    </section>
+  </div>
+</body></html>"""
+    norm_1031 = normalize_html_callout_message_match(sec1031_html, property_id="profithelm")
+    r_1031 = re.findall(r'href="/r/([a-z0-9_]+)"', norm_1031)
+    assert r_1031 == ["crest_capital", "crest_capital", "mercury", "rippling", "crest_capital"]
+    assert 'data-status="pending"' not in norm_1031
+    assert "ipx1031.com" not in norm_1031
+
+    # 2. Prexvo calculator overlay upgrades legacy sofi_refi UTM placeholder to live splash_financial (/r/splash_financial)
+    prexvo_ov_html = """<!DOCTYPE html>
+<html><head><title>Student Loan Repayment Calculator</title><link rel="canonical" href="https://prexvo.com/tools/student-loan-repayment-calculator/" /></head><body>
+  <div id="gsc-striking-overlay" class="gsc-overlay-container" data-slug="student-loan-repayment-calculator">
+    <section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="prexvo" data-partner="sofi_refi" data-partner-url="https://www.sofi.com/refinance-student-loan/?utm_source=prexvo&amp;utm_medium=affiliate">
+      <h3 class="section-subtitle">Recommended Partner Solution: SoFi Student Loan Refinancing</h3>
+      <a href="https://www.sofi.com/refinance-student-loan/?utm_source=prexvo&amp;utm_medium=affiliate" class="btn-cta" rel="noopener sponsored nofollow" target="_blank">Check Refinance Rates Without Credit Impact</a>
+    </section>
+  </div>
+</body></html>"""
+    norm_px = normalize_html_callout_message_match(prexvo_ov_html, property_id="prexvo")
+    assert 'data-partner="splash_financial"' in norm_px
+    assert 'href="/r/splash_financial"' in norm_px
+    assert 'data-status="live"' in norm_px
+    assert "utm_source=prexvo" not in norm_px
+
 
 

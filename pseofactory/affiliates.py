@@ -3441,11 +3441,11 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "bench",
         "sovrn_merchant_id": 310373,
         "verified_merchant_name": "Xendoo Online Accounting",
-        "verified_url": "https://www.xendoo.com/",
-        "is_direct": False,
+        "verified_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+        "is_direct": True,
         "approved": True,
         "payout_rate": "$500.00 USD Onboarded",
-        "network": "Sovrn Commerce",
+        "network": "FirstPromoter / Impact.com",
         "swapped_from_non_paying": True,
         "replaced_domain": "bench.co",
     },
@@ -3453,11 +3453,11 @@ SOVRN_VERIFIED_PAYING_MERCHANTS: Dict[str, Dict[str, Any]] = {
         "partner_key": "pilot",
         "sovrn_merchant_id": 310373,
         "verified_merchant_name": "Xendoo Online Accounting",
-        "verified_url": "https://www.xendoo.com/",
-        "is_direct": False,
+        "verified_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+        "is_direct": True,
         "approved": True,
         "payout_rate": "$500.00 USD Onboarded",
-        "network": "Sovrn Commerce",
+        "network": "FirstPromoter / Impact.com",
         "swapped_from_non_paying": True,
         "replaced_domain": "pilot.com",
     },
@@ -3853,7 +3853,7 @@ def normalize_html_callout_message_match(
     """
     import html as html_lib
 
-    if not html or "/r/" not in html:
+    if not html or ("/r/" not in html and "overlay-partner-offer" not in html):
         return html
 
     prop = (property_id or "profithelm").strip().lower()
@@ -3877,12 +3877,12 @@ def normalize_html_callout_message_match(
         "bench": (
             "Xendoo Online Accounting & CPA Tax Advisory",
             "Automate Statutory Bookkeeping & Tax with Xendoo",
-            "https://www.xendoo.com/",
+            "https://www.xendoo.com/?fp_ref=arif-4ac24e",
         ),
         "pilot": (
             "Xendoo R&D Tax Credit & CPA Bookkeeping",
             "Claim Section 174 R&D Credits & Bookkeeping with Xendoo",
-            "https://www.xendoo.com/",
+            "https://www.xendoo.com/?fp_ref=arif-4ac24e",
         ),
         "guideline": (
             "Capitalize 401(k) & Retirement Rollover Platform",
@@ -3944,6 +3944,15 @@ def normalize_html_callout_message_match(
         re.sub(r"<[^>]+>", " ", h1_m.group(1) if h1_m else ""),
     ]).lower()
 
+    has_estate_structure = bool(
+        "affiliates-section" in html
+        or "affiliate-section" in html
+        or "refinance-partner-section" in html
+        or "data-slug=" in html
+        or 'id="calculation-manifest"' in html
+        or 'class="calculation-manifest"' in html
+    )
+
     is_prediction_page = any(
         tok in page_identity_lower
         for tok in ("prediction-market", "prediction market", "kalshi", "polymarket", "event-contract", "kelly", "arbitrage")
@@ -3975,6 +3984,14 @@ def normalize_html_callout_message_match(
         tok in page_identity_lower
         for tok in ("s-corp", "s corp", "reasonable-salary", "workers-comp", "payroll-burden")
     )
+    is_treasury_page = any(
+        tok in page_identity_lower
+        for tok in ("treasury-yield", "treasury yield")
+    )
+    is_179_or_174_page = any(
+        tok in page_identity_lower
+        for tok in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr", "section-174", "section 174", "r-and-d", "r&d")
+    )
 
     updated = html
 
@@ -3992,9 +4009,17 @@ def normalize_html_callout_message_match(
         flags=re.S | re.I,
     )
 
-    # If homepage (no /tools/ in canonical) only has pending crest_capital, upgrade to live mercury
-    if prop in ("profithelm", "exchange1031") and canon_m and "/tools/" not in canon_m.group(1).lower() and "/r/crest_capital" in updated and "/r/mercury" not in updated:
-        updated = updated.replace("/r/crest_capital", "/r/mercury").replace('data-partner="crest_capital"', 'data-partner="mercury"')
+    # Upgrade homepage standalone affiliate-cta-section from pending turbotax/taxslayer/ipx1031 to active approved crest_capital (Xendoo)
+    if prop in ("profithelm", "exchange1031") and canon_m and "/tools/" not in canon_m.group(1).lower():
+        if 'data-partner="turbotax"' in updated or "/r/turbotax" in updated:
+            updated = (
+                updated.replace('data-partner="turbotax"', 'data-partner="crest_capital"')
+                .replace("/r/turbotax", "/r/crest_capital")
+                .replace(
+                    "Verified Commercial Execution Partner: TaxAct Online Tax Filing & Xpert Assist",
+                    "Verified Commercial Execution Partner: Xendoo Section 179 & Business Tax Accounting",
+                )
+            )
 
     def _replace_overlay_section(match: re.Match) -> str:
         sec_html = match.group(0)
@@ -4005,20 +4030,25 @@ def normalize_html_callout_message_match(
             return sec_html
         old_pk = pk_match.group(1).lower()
         pk = old_pk
-        if prop in ("profithelm", "exchange1031"):
-            if (
-                is_general_tax_page
-                and not is_capital_gains_page
-                and pk in ("taxslayer", "turbotax")
-                and _effective_dom_status(pk, registry.get(pk)) != "live"
-            ):
-                pk = "crest_capital"
-            elif (
-                is_s_corp_or_workers_comp
-                and pk == "gusto"
-                and _effective_dom_status(pk, registry.get(pk)) != "live"
-            ):
-                pk = "rippling"
+        if has_estate_structure:
+            if prop == "prexvo":
+                if (
+                    'data-restricted-public-service="true"' not in sec_html
+                    and 'data-commercial-offers="none"' not in sec_html
+                    and pk in ("sofi_refi", "sofi", "earnest", "credible", "lendkey")
+                ):
+                    pk = "splash_financial"
+            elif prop in ("profithelm", "exchange1031"):
+                if is_general_tax_page or is_1031_page or is_179_or_174_page:
+                    pk = "crest_capital"
+                elif is_s_corp_or_workers_comp:
+                    pk = "rippling"
+                elif is_prediction_odds_page:
+                    pk = "kalshi"
+                elif is_crypto_page:
+                    pk = "coinledger"
+                else:
+                    pk = "mercury"
         if pk != old_pk:
             sec_html = re.sub(
                 rf'data-partner=["\']{re.escape(old_pk)}["\']',
@@ -4036,6 +4066,14 @@ def normalize_html_callout_message_match(
                 rf'(data-cta-id=["\'][^"\']*?)-{re.escape(old_pk)}(["\'])',
                 rf'\g<1>-{pk}\g<2>',
                 sec_html,
+                flags=re.I,
+            )
+        if has_estate_structure:
+            sec_html = re.sub(
+                r'(<a\s+[^>]*?)href=["\'][^"\']+["\']',
+                rf'\g<1>href="/r/{pk}"',
+                sec_html,
+                count=1,
                 flags=re.I,
             )
         resolved = _resolve_copy(pk)
@@ -4261,28 +4299,45 @@ def normalize_html_callout_message_match(
         def _expand_profithelm_affiliates_section(match: re.Match) -> str:
             nonlocal primary_inline_pk
             sec_html = match.group(0)
+            if "affiliate-card" in sec_html:
+                if is_general_tax_page:
+                    sorted_keys = (
+                        ["crest_capital", "coinledger", "koinly"]
+                        if is_capital_gains_page
+                        else ["crest_capital", "rippling", "mercury"]
+                    )
+                elif is_1031_page:
+                    sorted_keys = ["crest_capital", "mercury", "rippling"]
+                elif is_prediction_odds_page:
+                    sorted_keys = ["kalshi", "coinledger", "koinly"]
+                elif is_crypto_page:
+                    sorted_keys = (
+                        ["coinledger", "koinly", "kalshi"]
+                        if is_prediction_page
+                        else ["coinledger", "koinly", "crest_capital"]
+                    )
+                elif is_s_corp_or_workers_comp:
+                    sorted_keys = ["rippling", "mercury", "crest_capital"]
+                elif is_treasury_page:
+                    sorted_keys = ["mercury", "kalshi", "crest_capital"]
+                else:
+                    sorted_keys = ["mercury", "rippling", "crest_capital"]
+                primary_inline_pk = sorted_keys[0]
+                h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
+                h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
+                cards_joined = "\n".join(_build_profithelm_partner_card(k) for k in sorted_keys)
+                return (
+                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                    f'        {h2_html}'
+                    f'{cards_joined}\n'
+                    f'      </section>'
+                )
+
             found_keys: List[str] = []
             for m_k in re.finditer(r'href=["\']/r/([a-z0-9_]+)', sec_html, re.I):
                 k_val = m_k.group(1).lower()
                 if k_val in PROFITHELM_AFFILIATES and k_val not in found_keys:
                     found_keys.append(k_val)
-
-            # Filter out vertical mismatches caused by prior footer-link false positives
-            if not is_prediction_page and "kalshi" in found_keys and len(found_keys) > 1:
-                found_keys = [k for k in found_keys if k != "kalshi"]
-            if not is_medical_page and "national_funding_med" in found_keys and len(found_keys) > 1:
-                found_keys = [k for k in found_keys if k != "national_funding_med"]
-
-            # On non-crypto general income tax bracket pages, strip previously injected crypto-only offers
-            # and lead with live Xendoo CPA Tax & Business Accounting (crest_capital) + TaxAct + TaxSlayer
-            if is_general_tax_page:
-                if not is_capital_gains_page:
-                    found_keys = [k for k in found_keys if k not in ("coinledger", "koinly")]
-                for tax_k in ("crest_capital", "turbotax", "taxslayer"):
-                    if tax_k not in found_keys:
-                        found_keys.append(tax_k)
-                if is_capital_gains_page and "coinledger" not in found_keys:
-                    found_keys.append("coinledger")
 
             # Enrich with approved live direct sponsors matched to page vertical
             if is_prediction_page and "kalshi" not in found_keys:
@@ -4309,42 +4364,9 @@ def normalize_html_callout_message_match(
             ):
                 found_keys.append("mercury")
 
-            # Sort so live direct sponsors always lead before pending fallbacks
-            def _partner_sort_key(k: str) -> Tuple[int, int]:
-                p_obj = PROFITHELM_AFFILIATES.get(k)
-                st = p_obj.status if p_obj else "pending"
-                st_rank = 0 if st == "live" else (1 if st == "pending_expansion" else 2)
-                if is_general_tax_page:
-                    if k == "crest_capital":
-                        return (-2, 0)
-                    if k == "turbotax":
-                        return (-1, 1)
-                    if k == "taxslayer":
-                        return (-1, 2)
-                    if k == "coinledger":
-                        return (0, 3)
-                if is_prediction_odds_page and k == "kalshi":
-                    return (-1, 0)
-                if is_1031_page and k == "ipx1031":
-                    return (-1, 0)
-                if is_s_corp_or_workers_comp and k == "rippling":
-                    return (-1, 0)
-                return (st_rank, found_keys.index(k))
-
-            sorted_keys = sorted(found_keys, key=_partner_sort_key)
+            sorted_keys = list(found_keys)
             if sorted_keys:
                 primary_inline_pk = sorted_keys[0]
-
-            if "affiliate-card" in sec_html and sorted_keys:
-                h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
-                h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
-                cards_joined = "\n".join(_build_profithelm_partner_card(k) for k in sorted_keys)
-                return (
-                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
-                    f'        {h2_html}'
-                    f'{cards_joined}\n'
-                    f'      </section>'
-                )
 
             # Fallback for minimal unit-test snippets without .affiliate-card
             extra_cards = ""
