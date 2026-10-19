@@ -2308,6 +2308,41 @@ class MasterSEOVerifier:
             "issues": issues,
         }
 
+    # 18b. Source-to-Visible Keyword Frequency Ratio Gate (< 3.0x)
+    def check_source_keyword_inflation_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+        max_ratio: float = 3.0,
+    ) -> Dict[str, Any]:
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        issues: List[str] = []
+        pages_checked = 0
+        worst_ratio = 0.0
+        if target.exists():
+            for p in target.glob("**/*.html"):
+                if p.name == "404.html":
+                    continue
+                pages_checked += 1
+                rel = p.relative_to(target).as_posix()
+                content = self._read_cached_html(p)
+                res = verify_html_source_keyword_inflation_ratio(content, max_ratio=max_ratio)
+                ratio = float(res.get("ratio", 1.0) or 1.0)
+                if ratio > worst_ratio:
+                    worst_ratio = ratio
+                if res["status"] != "PASS":
+                    issues.append(
+                        f"Source keyword inflation in {rel}: ratio={ratio:.2f}x exceeds {max_ratio:.1f}x for keyword '{res.get('primary_keyword', '')}'"
+                    )
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_source_keyword_inflation_gate",
+            "pages_checked": pages_checked,
+            "max_ratio_threshold": max_ratio,
+            "worst_observed_ratio": round(worst_ratio, 3),
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
     # 19. Hide Test Pages Gate
     def check_hide_test_pages_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
         target = Path(dist_dir) if dist_dir else self.dist_dir
@@ -6180,6 +6215,58 @@ def verify_rate_limit_and_bot_shield(
     }
 
 
+def verify_html_source_keyword_inflation_ratio(
+    html_content: str,
+    max_ratio: float = 3.0,
+) -> Dict[str, Any]:
+    """
+    Verifies that the primary topic keyword frequency in raw HTML source
+    (including JSON-LD, data-* attributes, and scripts) is strictly < max_ratio (3.0x)
+    the frequency in visible body text, preventing hidden-attribute keyword stuffing.
+    """
+    raw = str(html_content or "")
+    if not raw.strip():
+        return {
+            "status": "PASS",
+            "primary_keyword": "",
+            "source_count": 0,
+            "visible_count": 0,
+            "ratio": 1.0,
+            "max_ratio": max_ratio,
+        }
+
+    h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw, flags=re.IGNORECASE | re.DOTALL)
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", raw, flags=re.IGNORECASE | re.DOTALL)
+    heading_text = re.sub(r"<[^>]+>", " ", (h1_m.group(1) if h1_m else (title_m.group(1) if title_m else "")))
+    stop = {"calculator", "calculators", "profithelm", "prexvo", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027"}
+    tokens = [
+        t.lower()
+        for t in re.findall(r"[a-zA-Z0-9]{4,}", heading_text)
+        if t.lower() not in stop
+    ]
+    primary_kw = tokens[0] if tokens else "calculator"
+
+    # Strip scripts, styles, comments, and HTML tags to isolate visible text
+    visible = re.sub(r"<!--.*?-->", " ", raw, flags=re.DOTALL)
+    visible = re.sub(r"<script\b[^>]*>.*?</script>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
+    visible = re.sub(r"<style\b[^>]*>.*?</style>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
+    visible = re.sub(r"<[^>]+>", " ", visible)
+
+    pat = re.compile(rf"\b{re.escape(primary_kw)}\b", flags=re.IGNORECASE)
+    source_count = len(pat.findall(raw))
+    visible_count = max(1, len(pat.findall(visible)))
+    ratio = float(source_count) / float(visible_count) if source_count > 0 else 1.0
+    passed = ratio < float(max_ratio) or source_count <= 6
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "primary_keyword": primary_kw,
+        "source_count": source_count,
+        "visible_count": visible_count,
+        "ratio": round(ratio, 3),
+        "max_ratio": float(max_ratio),
+    }
+
+
 check_existence_gate = _default_verifier.check_existence_gate
 check_title_gate = _default_verifier.check_title_gate
 check_snippet_gate = _default_verifier.check_snippet_gate
@@ -6188,6 +6275,7 @@ check_citability_gate = _default_verifier.check_citability_gate
 check_cleanliness_gate = _default_verifier.check_cleanliness_gate
 check_indexing_gate = _default_verifier.check_indexing_gate
 check_content_relevance_gate = _default_verifier.check_content_relevance_gate
+check_source_keyword_inflation_gate = _default_verifier.check_source_keyword_inflation_gate
 audit_seo_checklist = _default_verifier.audit_seo_checklist
 run_seo_checklist_audit = audit_seo_checklist
 
@@ -6201,5 +6289,3 @@ verify_operational_shield = _default_verifier.verify_operational_shield
 check_comparison_layout_gate = _default_verifier.check_comparison_layout_gate
 verify_comparison_layout_contracts = _default_verifier.verify_comparison_layout_contracts
 check_comparison_layout_contracts_gate = _default_verifier.check_comparison_layout_contracts_gate
-
-

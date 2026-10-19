@@ -1740,7 +1740,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_seowf.add_argument("--dry-run", action="store_true", help="Evaluate workflows without writing overlays or ledger updates")
     p_seowf.add_argument("--json", action="store_true", help="Output workflow report as structured JSON")
 
+    # north-star
+    p_ns = subparsers.add_parser(
+        "north-star",
+        help="Evaluate 30-day and 60-day North Star SEO, AI citation, and conversion targets",
+    )
+    p_ns.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, or all)")
+    p_ns.add_argument("--dry-run", action="store_true", help="Evaluate North Star targets without persisting scorecard JSON")
+    p_ns.add_argument("--json", action="store_true", help="Output North Star scorecard as structured JSON")
+
     return parser
+
+
+def cmd_north_star(args: argparse.Namespace) -> int:
+    """
+    Evaluates 30-day and 60-day North Star targets for one or all properties.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.seo_growth_loops import evaluate_north_star_targets
+
+    prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
+    dry_run = bool(getattr(args, "dry_run", False))
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    cards = {}
+    for p_id in props:
+        cards[p_id] = evaluate_north_star_targets(property_id=p_id, persist=not dry_run)
+    out = cards[props[0]] if len(props) == 1 else {"status": "PASS", "properties": cards}
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2))
+    else:
+        for p_id, sc in cards.items():
+            p1 = sc.get("pillars", {}).get("1_search_impressions_and_ctr", {})
+            p3 = sc.get("pillars", {}).get("3_ai_citations_and_entity_authority", {})
+            print(
+                f"[{sc.get('status', 'PASS')}] North Star ({p_id}): "
+                f"30d_impr={p1.get('current_30d_impressions', 0)}/{p1.get('target_30d_impressions', 0)} | "
+                f"30d_clicks={p1.get('current_30d_clicks', 0)}/{p1.get('target_30d_clicks', 0)} | "
+                f"citation_ready={p3.get('citation_ready_briefs_coverage_pct', 0)}% | "
+                f"kw_ratio_gate={p3.get('source_keyword_inflation_gate_status', 'PASS')}"
+            )
+    return 0
 
 
 def cmd_seo_workflows(args: argparse.Namespace) -> int:
@@ -1847,6 +1886,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_indexing_feedback_loop(args)
     elif args.command == "seo-workflows":
         return cmd_seo_workflows(args)
+    elif args.command == "north-star":
+        return cmd_north_star(args)
     else:
         parser.print_help()
         return 1

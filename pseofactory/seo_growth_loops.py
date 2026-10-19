@@ -907,6 +907,41 @@ def discover_internal_linking_opportunities(
 # ==============================================================================
 # WORKFLOW 4: TURN SEARCH OPPORTUNITIES INTO CONTENT BRIEFS (& OVERLAY SPECS)
 # ==============================================================================
+def classify_ai_fan_out_query(query: str) -> Dict[str, Any]:
+    """
+    Detects 7+ word conversational or multi-constraint AI Fan-Out queries
+    (e.g., 'how much does an s corp save on 180k profit in 2026') so content briefs
+    and preset scenarios explicitly capture generative AI sub-query expansions.
+    """
+    clean_q = _clean_dashes(str(query or "").strip())
+    words = [w for w in re.findall(r"[a-zA-Z0-9$%]+", clean_q) if w]
+    word_count = len(words)
+    low = clean_q.lower()
+    conversational_markers = (
+        "how much",
+        "what is",
+        "should i",
+        "vs ",
+        "versus",
+        "when does",
+        "if i ",
+        "with ",
+        "under ",
+        "for a ",
+        "after ",
+    )
+    has_marker = any(m in low for m in conversational_markers)
+    has_numeric_constraint = bool(re.search(r"\b\d+[kKmM%]?\b|\$\d+", clean_q))
+    is_fan_out = bool(word_count >= 7 or (word_count >= 5 and has_marker and has_numeric_constraint))
+    return {
+        "query": clean_q,
+        "word_count": word_count,
+        "is_ai_fan_out": is_fan_out,
+        "has_conversational_marker": has_marker,
+        "has_numeric_constraint": has_numeric_constraint,
+    }
+
+
 def compile_search_opportunity_briefs(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -988,6 +1023,23 @@ def compile_search_opportunity_briefs(
             continue
         by_path.setdefault(c_path, []).append(r)
 
+    # Load empirical conversion-slot engagement telemetry if available
+    eng_file = root / ".agy" / "outbound_partner_engagement.json"
+    conversion_slot_weights: Dict[str, float] = {}
+    if eng_file.is_file():
+        try:
+            eng_data = json.loads(eng_file.read_text(encoding="utf-8"))
+            if isinstance(eng_data, dict):
+                by_tool = eng_data.get("tools_by_slug") or eng_data.get("by_tool") or {}
+                if isinstance(by_tool, dict):
+                    for t_slug, t_stats in by_tool.items():
+                        if isinstance(t_stats, dict):
+                            clicks_cnt = int(t_stats.get("affiliate_clicks", 0) or t_stats.get("clicks", 0) or 0)
+                            preset_cnt = int(t_stats.get("preset_clicks", 0) or t_stats.get("calculator_interactions", 0) or 0)
+                            conversion_slot_weights[str(t_slug).lower()] = 1.0 + min(0.5, (clicks_cnt * 0.08) + (preset_cnt * 0.03))
+        except Exception:
+            pass
+
     briefs: List[Dict[str, Any]] = []
     overlays_compiled = 0
     html_pages_injected = 0
@@ -1044,6 +1096,8 @@ def compile_search_opportunity_briefs(
             query=primary_query,
             tenant_id=prop,
         )
+        fan_out_queries = [q_item for q_item in grouped_qs if classify_ai_fan_out_query(q_item)["is_ai_fan_out"]]
+        primary_fan_out = classify_ai_fan_out_query(primary_query)
 
         candidate_payload = {
             "slug": leaf_slug,
@@ -1077,11 +1131,15 @@ def compile_search_opportunity_briefs(
             if (math_info["needs_deterministic_math"] and (ai_res["losing_to_weaker_domains"] or ai_res["missing_ai_overview"]))
             else 1.0
         )
+        conv_slot_mult = float(conversion_slot_weights.get(leaf_slug.lower(), 1.15 if overlay_spec.get("commercial_offers_allowed", True) else 1.0))
+        fan_out_mult = 1.2 if (primary_fan_out["is_ai_fan_out"] or len(fan_out_queries) > 0) else 1.0
         roi_score = round(
             max(
                 float(roi_eval["roi_score"]),
                 tot_impr * (2.5 if best_pos <= 15.0 else (1.6 if best_pos <= 30.0 else 1.0)) * (1.0 + ctr_gap * 5.0) * ai_math_boost,
-            ),
+            )
+            * conv_slot_mult
+            * fan_out_mult,
             2,
         )
 
@@ -1095,6 +1153,8 @@ def compile_search_opportunity_briefs(
             "opportunity_class": opportunity_class,
             "primary_query": primary_query,
             "supporting_queries": grouped_qs[1:10],
+            "ai_fan_out_queries": fan_out_queries[:10],
+            "is_ai_fan_out_cluster": bool(primary_fan_out["is_ai_fan_out"] or len(fan_out_queries) > 0),
             "total_cluster_queries": len(grouped_qs),
             "total_impressions": tot_impr,
             "total_clicks": tot_clicks,
@@ -1104,6 +1164,9 @@ def compile_search_opportunity_briefs(
             "target_ctr": target_ctr,
             "ctr_shortfall": ctr_gap,
             "roi_score": roi_score,
+            "conversion_slot_weight": round(conv_slot_mult, 3),
+            "top_20_stability_lock_days": overlay_spec.get("top_20_stability_lock_days", 14),
+            "rank_stability_freeze_active": bool(overlay_spec.get("rank_stability_freeze_active", False)),
             "ai_citation_vacant": ai_res["ai_citation_vacant"],
             "ai_cited_domains": ai_res["ai_cited_domains"],
             "weaker_cited_domains": ai_res["weaker_cited_domains"],
@@ -1114,8 +1177,11 @@ def compile_search_opportunity_briefs(
             "math_domain": math_info["math_domain"],
             "compiled_brief_spec": {
                 "title_rewrite": overlay_spec.get("title_rewrite", ""),
+                "secondary_title_modifier": overlay_spec.get("secondary_title_modifier", ""),
                 "meta_description": overlay_spec.get("meta_description", ""),
                 "quick_answer": overlay_spec.get("quick_answer", ""),
+                "autonomous_citation_assertions": overlay_spec.get("autonomous_citation_assertions", []),
+                "ai_mode_decision_matrix": overlay_spec.get("ai_mode_decision_matrix", []),
                 "h2_headings": overlay_spec.get("h2_headings", []),
                 "faq_questions": [f.get("question") for f in (overlay_spec.get("faq_entries") or []) if isinstance(f, dict)],
                 "hub_links": overlay_spec.get("hub_links", []),
@@ -1162,6 +1228,7 @@ def compile_search_opportunity_briefs(
         "total_briefs_compiled": len(briefs),
         "briefs_count": len(briefs),
         "striking_distance_briefs_count": sum(1 for b in briefs if "STRIKING_DISTANCE" in b["opportunity_class"]),
+        "ai_fan_out_clusters_count": sum(1 for b in briefs if b.get("is_ai_fan_out_cluster")),
         "missing_ai_overview_briefs_count": sum(1 for b in briefs if b.get("missing_ai_overview")),
         "losing_to_weaker_domains_briefs_count": sum(1 for b in briefs if b.get("losing_to_weaker_domains")),
         "deterministic_math_briefs_count": sum(1 for b in briefs if b.get("needs_deterministic_math")),
@@ -1378,13 +1445,17 @@ def evaluate_content_portfolio_decisions(
                 action = "PRUNE_NOINDEX"
                 decision_label = "NOINDEX_OR_CONSOLIDATE"
                 rationale = f"Zero impressions after {age_days:.1f} days (>= {eff_max_age:.0f}d threshold); flag for noindex/consolidation."
+                parent_hub = "/tools/" if site_p.startswith("/tools/") else "/"
                 zero_candidates.append(
                     {
                         "file": str(rel),
                         "url_path": site_p,
+                        "target_url": f"https://{domain}{site_p}/",
                         "age_days": round(age_days, 1),
                         "impressions": 0,
                         "status": "FLAG_NOINDEX",
+                        "consolidation_queue_status": "QUEUED_FOR_301_OR_SITEMAP_EXCLUSION",
+                        "recommended_consolidation_target": parent_hub,
                         "noindex_applied": False,
                     }
                 )
@@ -1457,6 +1528,16 @@ def evaluate_content_portfolio_decisions(
         out_path = root / ".agy" / "content_portfolio_decisions.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         AtomicStateLedger.save_json(out_path, report)
+        prune_q_path = root / ".agy" / "prune_noindex_queue.json"
+        AtomicStateLedger.save_json(
+            prune_q_path,
+            {
+                "property_id": prop,
+                "timestamp": report["timestamp"],
+                "queued_count": len(zero_candidates),
+                "candidates": zero_candidates,
+            },
+        )
 
     return report
 
@@ -1995,6 +2076,13 @@ def compile_ai_citation_digital_pr_queue(
         item_out = {"pr_item_id": f"pr_{prop}_{idx + 1:02d}", **item}
         pr_queue.append(item_out)
 
+    from pseofactory.distributor import (
+        compile_broken_calculator_link_reclamation_briefs,
+        compile_public_benchmark_citation_hubs,
+    )
+    stats_hub_info = compile_public_benchmark_citation_hubs(tenant=prop)
+    reclaim_info = compile_broken_calculator_link_reclamation_briefs(tenant=prop)
+
     report = {
         "workflow": "ai_citation_digital_pr_queue",
         "status": "PASS",
@@ -2003,6 +2091,8 @@ def compile_ai_citation_digital_pr_queue(
         "llms_txt_verified": has_llms_txt,
         "llms_full_txt_verified": has_llms_full_txt,
         "ai_benchmark_nodes_count": bench_res.get("nodes_count", 0),
+        "public_statistics_citation_hub": stats_hub_info["payload"],
+        "broken_calculator_link_reclamation_briefs": reclaim_info["briefs"],
         "candidate_queue_evaluated_count": candidate_queue_evaluated,
         "gsc_remediation_queue_evaluated_count": gsc_rem_evaluated,
         "freshness_log_evaluated": freshness_log_evaluated,
@@ -2467,6 +2557,210 @@ def sync_real_gsc_baselines_to_recovery_ledger(
     }
 
 
+def evaluate_north_star_targets(
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
+    consolidated_gsc: Optional[Dict[str, Any]] = None,
+    daily_records: Optional[List[GSCDailyMetricRecord]] = None,
+    briefs_report: Optional[Dict[str, Any]] = None,
+    portfolio_report: Optional[Dict[str, Any]] = None,
+    pr_queue_report: Optional[Dict[str, Any]] = None,
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 30-day and 60-day North Star targets across all 4 growth pillars
+    (Search Impressions & CTR, Indexed Coverage & Hygiene, AI Citations & Entity Authority,
+    and Sponsor Readiness & Reader Conversions) and persists <repo_root>/.agy/north_star_scorecard.json.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.verifier import MasterSEOVerifier
+
+    prop = _resolve_property_id(property_id, repo_root)
+    root = _resolve_tenant_repo_root(prop, repo_root)
+    d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+
+    gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
+    d_recs = daily_records if daily_records is not None else harvest_and_sync_gsc_daily_timeline(prop, repo_root=root, live_gsc=False, persist=False)
+    current_rows = list(gsc_bundle.get("current_rows") or [])
+
+    # Pillar 1: Search Impressions, Clicks & CTR
+    recent_30 = d_recs[-30:] if len(d_recs) >= 30 else d_recs
+    impr_30d = sum(int(r.impressions) for r in recent_30) if recent_30 else sum(int(float(r.get("impressions", 0) or 0)) for r in current_rows)
+    clicks_30d = sum(int(r.clicks) for r in recent_30) if recent_30 else sum(int(float(r.get("clicks", 0) or 0)) for r in current_rows)
+    ctr_30d_pct = round((clicks_30d / float(max(1, impr_30d))) * 100.0, 2) if impr_30d > 0 else 0.0
+
+    striking_rows = [
+        r for r in current_rows
+        if isinstance(r, dict) and 4.0 <= float(r.get("position", 100.0) or 100.0) <= 20.0
+    ]
+    striking_impr = sum(int(float(r.get("impressions", 0) or 0)) for r in striking_rows)
+    striking_clicks = sum(int(float(r.get("clicks", 0) or 0)) for r in striking_rows)
+    striking_ctr_pct = round((striking_clicks / float(max(1, striking_impr))) * 100.0, 2) if striking_impr > 0 else ctr_30d_pct
+
+    top10_queries = {
+        str(r.get("query") or "").strip().lower()
+        for r in current_rows
+        if isinstance(r, dict) and 1.0 <= float(r.get("position", 100.0) or 100.0) <= 10.0 and str(r.get("query") or "").strip()
+    }
+
+    p1_targets = (
+        {
+            "impressions_30d_target": 2500,
+            "impressions_60d_target": 6000,
+            "clicks_30d_target": 45,
+            "clicks_60d_target": 150,
+            "striking_ctr_30d_pct": 1.8,
+            "striking_ctr_60d_pct": 2.8,
+            "top_10_queries_30d": 15,
+            "top_10_queries_60d": 35,
+        }
+        if prop == "prexvo"
+        else {
+            "impressions_30d_target": 8500,
+            "impressions_60d_target": 18000,
+            "clicks_30d_target": 120,
+            "clicks_60d_target": 400,
+            "striking_ctr_30d_pct": 1.8,
+            "striking_ctr_60d_pct": 2.8,
+            "top_10_queries_30d": 40,
+            "top_10_queries_60d": 85,
+        }
+    )
+
+    # Pillar 2: Indexed Coverage & Portfolio Hygiene
+    if portfolio_report is None:
+        port_file = root / ".agy" / "content_portfolio_decisions.json"
+        if port_file.is_file():
+            try:
+                portfolio_report = json.loads(port_file.read_text(encoding="utf-8"))
+            except Exception:
+                portfolio_report = {}
+        else:
+            portfolio_report = {}
+
+    pages_audited = int((portfolio_report or {}).get("pages_audited", 0) or 0)
+    action_bd = (portfolio_report or {}).get("action_breakdown") or {}
+    prune_count = int(action_bd.get("PRUNE_NOINDEX", 0) or 0)
+    consolidate_301_count = int(action_bd.get("CONSOLIDATE_301", 0) or 0)
+    active_impr_routes = int(action_bd.get("SCALE_EXPAND", 0) or 0) + int(action_bd.get("OPTIMIZE_STRIKING_DISTANCE", 0) or 0)
+    indexed_coverage_ratio_pct = round((active_impr_routes / float(max(1, pages_audited))) * 100.0, 2) if pages_audited > 0 else 100.0
+
+    gov_file = root / ".agy" / "gsc_quota_governor.json"
+    quota_exhaustion_events = 0
+    if gov_file.is_file():
+        try:
+            g_data = json.loads(gov_file.read_text(encoding="utf-8"))
+            if isinstance(g_data, dict):
+                quota_exhaustion_events = int(g_data.get("http_429_events", 0) or 0)
+        except Exception:
+            pass
+
+    # Pillar 3: AI Citations, Entity Authority & Source Hygiene
+    verifier = MasterSEOVerifier(dist_dir=d_dir) if d_dir.is_dir() else None
+    kw_inflation_res = verifier.check_source_keyword_inflation_gate(d_dir, max_ratio=3.0) if verifier else {"status": "PASS", "worst_observed_ratio": 1.0, "violations_count": 0}
+
+    if briefs_report is None:
+        b_file = root / ".agy" / "search_opportunity_briefs.json"
+        if b_file.is_file():
+            try:
+                briefs_report = json.loads(b_file.read_text(encoding="utf-8"))
+            except Exception:
+                briefs_report = {}
+        else:
+            briefs_report = {}
+
+    briefs_list = (briefs_report or {}).get("briefs") or []
+    citation_ready_briefs = sum(
+        1 for b in briefs_list
+        if isinstance(b, dict)
+        and (b.get("compiled_brief_spec") or {}).get("autonomous_citation_assertions")
+        and (b.get("compiled_brief_spec") or {}).get("ai_mode_decision_matrix")
+    )
+    citation_ready_coverage_pct = round((citation_ready_briefs / float(max(1, len(briefs_list)))) * 100.0, 2) if briefs_list else 100.0
+
+    from pseofactory.distributor import generate_ai_benchmark_nodes
+    bench_nodes = generate_ai_benchmark_nodes(tenant=prop)
+
+    # Pillar 4: Sponsor Readiness & Reader Conversions
+    eng_path = root / ".agy" / "outbound_partner_engagement.json"
+    calculator_Preset_events = 0
+    sponsor_clicks = 0
+    unapproved_partner_leaks = 0
+    if eng_path.is_file():
+        try:
+            e_data = json.loads(eng_path.read_text(encoding="utf-8"))
+            if isinstance(e_data, dict):
+                sponsor_clicks = int(e_data.get("total_affiliate_clicks", 0) or e_data.get("total_clicks", 0) or 0)
+                calculator_Preset_events = int(e_data.get("total_preset_interactions", 0) or e_data.get("total_calculator_interactions", 0) or 0)
+                unapproved_partner_leaks = int(e_data.get("unapproved_partner_leaks", 0) or 0)
+        except Exception:
+            pass
+
+    scorecard = {
+        "workflow": "north_star_scorecard",
+        "status": "PASS" if (kw_inflation_res["status"] == "PASS" and unapproved_partner_leaks == 0 and quota_exhaustion_events == 0) else "WARN",
+        "property_id": prop,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "pillars": {
+            "1_search_impressions_and_ctr": {
+                "current_30d_impressions": impr_30d,
+                "target_30d_impressions": p1_targets["impressions_30d_target"],
+                "target_60d_impressions": p1_targets["impressions_60d_target"],
+                "current_30d_clicks": clicks_30d,
+                "target_30d_clicks": p1_targets["clicks_30d_target"],
+                "target_60d_clicks": p1_targets["clicks_60d_target"],
+                "current_overall_ctr_pct": ctr_30d_pct,
+                "current_striking_distance_ctr_pct": striking_ctr_pct,
+                "target_30d_striking_ctr_pct": p1_targets["striking_ctr_30d_pct"],
+                "target_60d_striking_ctr_pct": p1_targets["striking_ctr_60d_pct"],
+                "current_top_10_queries_count": len(top10_queries),
+                "target_30d_top_10_queries": p1_targets["top_10_queries_30d"],
+                "target_60d_top_10_queries": p1_targets["top_10_queries_60d"],
+                "top_20_rank_stability_freeze_days": 60,
+            },
+            "2_indexed_coverage_and_hygiene": {
+                "pages_audited": pages_audited,
+                "active_impression_routes_count": active_impr_routes,
+                "indexed_impression_ratio_pct": indexed_coverage_ratio_pct,
+                "target_30d_indexed_coverage_pct": 55.0 if prop == "profithelm" else 65.0,
+                "target_60d_indexed_coverage_pct": 80.0 if prop == "profithelm" else 85.0,
+                "consolidate_301_routes_count": consolidate_301_count,
+                "zero_impression_prune_queue_count": prune_count,
+                "gsc_daily_quota_limit": 180,
+                "gsc_429_quota_exhaustion_events": quota_exhaustion_events,
+            },
+            "3_ai_citations_and_entity_authority": {
+                "citation_ready_briefs_coverage_pct": citation_ready_coverage_pct,
+                "target_30d_citation_ready_coverage_pct": 100.0,
+                "ai_benchmark_nodes_published": int(bench_nodes.get("nodes_count", 0) or 0),
+                "public_statistics_citation_hub_active": "public_statistics_citation_hub.md" in (bench_nodes.get("files") or {}),
+                "source_keyword_inflation_gate_status": kw_inflation_res["status"],
+                "worst_source_to_visible_keyword_ratio": kw_inflation_res.get("worst_observed_ratio", 1.0),
+                "max_allowed_keyword_inflation_ratio": 3.0,
+            },
+            "4_sponsor_readiness_and_conversions": {
+                "calculator_preset_interactions_30d": calculator_Preset_events,
+                "target_30d_preset_interactions": 300 if prop == "profithelm" else 120,
+                "target_60d_preset_interactions": 950 if prop == "profithelm" else 400,
+                "verified_sponsor_clicks_30d": sponsor_clicks,
+                "target_30d_sponsor_clicks": 25 if prop == "profithelm" else 10,
+                "target_60d_sponsor_clicks": 85 if prop == "profithelm" else 35,
+                "ai_mode_referrer_attribution_active": True,
+                "unapproved_partner_url_leaks": unapproved_partner_leaks,
+            },
+        },
+    }
+
+    if persist:
+        out_path = root / ".agy" / "north_star_scorecard.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        AtomicStateLedger.save_json(out_path, scorecard)
+
+    assert_no_forbidden_dashes(json.dumps(scorecard), context="north_star_scorecard")
+    return scorecard
+
+
 def run_all_seo_growth_workflows(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -2486,7 +2780,8 @@ def run_all_seo_growth_workflows(
       6. Make content portfolio decisions
       7. Turn AI citation gaps into a digital PR queue
       8. Monitor SEO regressions after releases or migrations
-    Persists all 8 workflow artifacts under <repo_root>/.agy/ and updates metric_recovery_ledger.json.
+    Persists all 8 workflow artifacts + north_star_scorecard.json under <repo_root>/.agy/
+    and updates metric_recovery_ledger.json.
     Zero em-dashes. Zero en-dashes.
     """
     prop = _resolve_property_id(property_id, repo_root)
@@ -2545,6 +2840,17 @@ def run_all_seo_growth_workflows(
         briefs_report=wf4_briefs,
         persist=persist,
     )
+    north_star = evaluate_north_star_targets(
+        prop,
+        repo_root=root,
+        dist_dir=d_dir,
+        consolidated_gsc=consolidated_gsc,
+        daily_records=daily_records,
+        briefs_report=wf4_briefs,
+        portfolio_report=wf6_portfolio,
+        pr_queue_report=wf7_pr_queue,
+        persist=persist,
+    )
 
     if persist:
         sync_real_gsc_baselines_to_recovery_ledger(
@@ -2562,6 +2868,11 @@ def run_all_seo_growth_workflows(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "daily_gsc_records_synced": len(daily_records),
         "consolidated_gsc_rows_count": len(consolidated_gsc.get("current_rows") or []),
+        "north_star_scorecard": {
+            "status": north_star["status"],
+            "artifact": str(root / ".agy" / "north_star_scorecard.json"),
+            "pillars": north_star["pillars"],
+        },
         "workflows": {
             "1_identify_content_decay": {
                 "status": wf1_decay["status"],

@@ -502,4 +502,132 @@ def test_live_queue_ai_citation_detector_and_prexvo_vertical_overlays(tmp_path: 
     assert pslf_spec["citation_gap_status"] == "LOSING_TO_WEAKER_DOMAINS"
 
 
+def test_capabilities_1_through_6_and_north_star_scorecard(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    """
+    Verifies CAP-1 through CAP-6 and the automated 30-day/60-day North Star scorecard:
+      - CAP-1: Secondary title modifier inside [50, 60] chars + 60-day top-20 rank stability freeze
+      - CAP-2: Token-bucket daily GSC quota governor + priority-weighted URL allocation + prune queue
+      - CAP-3: First-10%-viewport autonomous statutory assertions + AI Mode decision-branch matrix
+      - CAP-4: Public Statistics Citation-Hub nodes + broken calculator link-reclamation briefs
+      - CAP-5: Source-to-visible keyword frequency ratio gate (< 3.0x)
+      - CAP-6: AI Fan-Out query segmentation + google.com/goto AI Mode referrer attribution
+      - North Star CLI & scorecard evaluation
+    """
+    from pseofactory.distributor import (
+        compile_broken_calculator_link_reclamation_briefs,
+        compile_public_benchmark_citation_hubs,
+        generate_ai_benchmark_nodes,
+    )
+    from pseofactory.gsc_remediation import (
+        _normalize_title_50_60,
+        compile_remediation_overlay_spec,
+        inject_overlay_into_html,
+    )
+    from pseofactory.indexer import PushIndexer
+    from pseofactory.seo_growth_loops import (
+        classify_ai_fan_out_query,
+        evaluate_north_star_targets,
+    )
+    from pseofactory.verifier import verify_html_source_keyword_inflation_ratio
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
 
+    # CAP-1: Secondary title modifier strictly inside [50, 60] chars & 60-day top-20 freeze
+    t_str = _normalize_title_50_60(
+        "1031 Exchange Calculator",
+        brand="ProfitHelm",
+        tenant_id="profithelm",
+        secondary_modifier="Form 8824",
+    )
+    assert 50 <= len(t_str) <= 60
+    assert "(" in t_str and ")" in t_str
+
+    spec_top20 = compile_remediation_overlay_spec(
+        {
+            "slug": "1031-exchange-calculator",
+            "query": "1031 exchange boot calculator",
+            "target_url": "https://profithelm.com/tools/1031-exchange-calculator/",
+            "position": 9.2,
+            "impressions": 140,
+            "clicks": 3,
+        },
+        tenant_id="profithelm",
+    )
+    assert spec_top20["top_20_stability_lock_days"] == 60
+    assert spec_top20["rank_stability_freeze_active"] is True
+
+    # CAP-2: Priority indexing allocation & token-bucket GSC quota governor
+    indexer = PushIndexer(dist_dir=tmp_path / "dist", domain="profithelm.com")
+    indexer.repo_root = tmp_path
+    prioritized = indexer.prioritize_urls_for_indexing_allocation(
+        [
+            "https://profithelm.com/scenarios/some-long-tail/",
+            "https://profithelm.com/tools/1031-exchange-calculator/",
+            "https://profithelm.com/",
+            "https://profithelm.com/tools",
+        ]
+    )
+    assert prioritized[0] == "https://profithelm.com/"
+    assert prioritized[1] == "https://profithelm.com/tools"
+    assert prioritized[2] == "https://profithelm.com/tools/1031-exchange-calculator/"
+    q_res = indexer.check_and_consume_gsc_quota(units=2, bucket="inspection")
+    assert q_res["allowed"] is True
+    assert q_res["used"] == 2
+
+    # CAP-3: Autonomous statutory assertions & second-level AI Mode decision matrix
+    assert len(spec_top20["autonomous_citation_assertions"]) == 3
+    assert len(spec_top20["ai_mode_decision_matrix"]) == 3
+    sample_html = (
+        "<html><head><title>Old Title</title></head><body>"
+        '<main><aside class="quick-answer"><p>Old answer</p></aside></main></body></html>'
+    )
+    injected_html = inject_overlay_into_html(sample_html, spec_top20)
+    assert 'data-ai-citation-block="true"' in injected_html
+    assert 'data-prominence="first-10-percent"' in injected_html
+    assert 'data-ai-decision-matrix="true"' in injected_html
+
+    # CAP-4: Public Statistics Citation-Hub nodes & broken calculator link reclamation
+    ph_hub = compile_public_benchmark_citation_hubs(tenant="profithelm")
+    assert ph_hub["payload"]["citable_statistics_count"] >= 3
+    reclaim = compile_broken_calculator_link_reclamation_briefs(tenant="prexvo")
+    assert reclaim["briefs_count"] >= 2
+    nodes_res = generate_ai_benchmark_nodes(tenant="profithelm")
+    assert "public_statistics_citation_hub.md" in nodes_res["files"]
+    assert "broken_calculator_link_reclamation.json" in nodes_res["files"]
+
+    # CAP-5: Source-to-visible keyword frequency ratio gate (< 3.0x)
+    clean_page = (
+        "<html><head><title>1031 Exchange Calculator</title></head>"
+        "<body><h1>1031 Exchange Calculator</h1><p>Use this 1031 exchange calculator to defer capital gains.</p></body></html>"
+    )
+    assert verify_html_source_keyword_inflation_ratio(clean_page)["status"] == "PASS"
+    stuffed_page = (
+        '<html><head><title>Depreciation Calculator</title>'
+        '<script>var x = "' + ("depreciation " * 30) + '";</script></head>'
+        "<body><h1>Depreciation Calculator</h1><p>Simple depreciation model.</p></body></html>"
+    )
+    assert verify_html_source_keyword_inflation_ratio(stuffed_page, max_ratio=3.0)["status"] == "FAIL"
+
+    # CAP-6: AI Fan-Out query segmentation & google.com/goto AI Mode referrer attribution
+    fan_out = classify_ai_fan_out_query("how much does an s corp save on 185k profit in 2026")
+    assert fan_out["is_ai_fan_out"] is True
+    sync_js = render_runtime_synchronizer_script()
+    assert "google.com/goto" in sync_js
+    assert "google_ai_mode" in sync_js
+
+    # North Star scorecard & CLI evaluation
+    repo_root = _seed_tenant_fixture(tmp_path / "tenant_ns")
+    ns_card = evaluate_north_star_targets(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        persist=True,
+    )
+    assert ns_card["workflow"] == "north_star_scorecard"
+    assert "1_search_impressions_and_ctr" in ns_card["pillars"]
+    assert "3_ai_citations_and_entity_authority" in ns_card["pillars"]
+    assert (repo_root / ".agy" / "north_star_scorecard.json").is_file()
+
+    rc_ns = cli_main(["north-star", "--property", "profithelm", "--dry-run", "--json"])
+    assert rc_ns == 0
+    ns_out = json.loads(capsys.readouterr().out)
+    assert ns_out["workflow"] == "north_star_scorecard"

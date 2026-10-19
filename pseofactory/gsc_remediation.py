@@ -1530,10 +1530,59 @@ def calculate_candidate_roi(
     }
 
 
-def _normalize_title_50_60(raw_title: str, brand: str, tenant_id: str) -> str:
+def _resolve_secondary_title_modifier(
+    query_clean: str,
+    slug: str,
+    tenant_id: str,
+    candidate: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Deterministically derives a compact parenthetical secondary query modifier
+    from grouped GSC queries or statutory domain context so primary pages capture
+    long-tail query variants without creating cannibalizing spin-off URLs.
+    """
+    cand = candidate or {}
+    explicit = str(cand.get("secondary_modifier") or "").strip(" ()|-:")
+    if explicit:
+        return _strip_forbidden_dashes(explicit)
+
+    grouped = cand.get("grouped_queries") or cand.get("secondary_queries") or []
+    blob = f"{query_clean} {slug} " + " ".join(
+        str(g.get("query", g) if isinstance(g, dict) else g) for g in grouped
+    )
+    low = blob.lower()
+    if tenant_id == "prexvo":
+        if "pslf" in low or "120" in low or "public service" in low:
+            return "PSLF Rules"
+        if "rap" in low or "repayment assistance" in low:
+            return "2026 RAP"
+        if "ibr" in low or "save" in low or "income" in low:
+            return "IDR Plan"
+        return "34 CFR Rules"
+
+    if "1031" in low or "8824" in low or "boot" in low or "exchange" in low:
+        return "Form 8824"
+    if "s-corp" in low or "s corp" in low or "1120-s" in low or "salary" in low:
+        return "Form 1120-S"
+    if "179" in low or "4562" in low or "depreciation" in low or "bonus" in low:
+        return "Form 4562"
+    if "199a" in low or "qbi" in low or "8995" in low:
+        return "IRC 199A"
+    if "burn" in low or "runway" in low or "saas" in low or "cac" in low:
+        return "2026 Model"
+    return "2026 Rules"
+
+
+def _normalize_title_50_60(
+    raw_title: str,
+    brand: str,
+    tenant_id: str,
+    secondary_modifier: Optional[str] = None,
+) -> str:
     """
     Deterministically normalizes any title string into [50, 60] characters
-    with brand attribution, whole-word boundaries, zero duplicate 'Calculator Calculator',
+    with brand attribution, whole-word boundaries, optional parenthetical
+    secondary query modifier, zero duplicate 'Calculator Calculator',
     and zero forbidden dashes.
     """
     clean = _strip_forbidden_dashes(raw_title).strip()
@@ -1568,6 +1617,27 @@ def _normalize_title_50_60(raw_title: str, brand: str, tenant_id: str) -> str:
         else:
             base = f"{base} Calculator"
 
+    # Attempt parenthetical secondary modifier injection if requested or beneficial
+    mod_clean = _strip_forbidden_dashes(str(secondary_modifier or "")).strip(" ()|-:")
+    if mod_clean and "(" not in base and ")" not in base:
+        paren_token = f"({mod_clean})"
+        if mod_clean.lower() not in base.lower():
+            if len(base) + 1 + len(paren_token) <= max_base:
+                base = f"{base} {paren_token}"
+            else:
+                # Try compact short parenthetical modifiers that fit within max_base
+                short_mods = (
+                    [mod_clean, "2026 RAP", "PSLF", "34 CFR", "2026"]
+                    if tenant_id == "prexvo"
+                    else [mod_clean, "IRC Rules", "Form 8824", "2026 Tax", "2026"]
+                )
+                for sm in short_mods:
+                    sm_clean = _strip_forbidden_dashes(sm).strip(" ()|-:")
+                    pt = f"({sm_clean})"
+                    if sm_clean.lower() not in base.lower() and len(base) + 1 + len(pt) <= max_base:
+                        base = f"{base} {pt}"
+                        break
+
     if len(base) > max_base:
         b_words = base.split()
         while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
@@ -1580,16 +1650,19 @@ def _normalize_title_50_60(raw_title: str, brand: str, tenant_id: str) -> str:
     if 50 <= len(cand) <= 60:
         return _strip_forbidden_dashes(cand)
 
-    # Pad with whole words if shorter than 50 chars
+    # Pad with parenthetical modifier or whole words if shorter than 50 chars
     pad_tokens = (
-        ["2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
+        ["(2026 Rules)", "(34 CFR)", "2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
         if tenant_id == "prexvo"
-        else ["2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
+        else ["(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
     )
     for tok in pad_tokens:
         if len(cand) >= 50:
             break
-        if tok.lower() not in base.lower():
+        if "(" in tok and ("(" in base or ")" in base):
+            continue
+        tok_plain = tok.strip("()")
+        if tok_plain.lower() not in base.lower():
             trial_base = f"{base} {tok}".strip()
             if len(trial_base) <= max_base:
                 base = trial_base
@@ -2933,7 +3006,18 @@ def compile_remediation_overlay_spec(
     heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
     heading_label = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", heading_label)
 
-    title_rewrite = _normalize_title_50_60(f"{heading_label} 2026", brand=brand, tenant_id=resolved_tenant)
+    secondary_mod = _resolve_secondary_title_modifier(
+        query_clean=query_clean,
+        slug=slug,
+        tenant_id=resolved_tenant,
+        candidate=candidate,
+    )
+    title_rewrite = _normalize_title_50_60(
+        f"{heading_label} 2026",
+        brand=brand,
+        tenant_id=resolved_tenant,
+        secondary_modifier=secondary_mod,
+    )
     meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label)
     quick_answer = _normalize_quick_answer_40_60_words(heading_label, tenant_id=resolved_tenant, slug=slug)
 
@@ -2999,6 +3083,15 @@ def compile_remediation_overlay_spec(
 
     now = datetime.now(timezone.utc)
     locked_until = (now + timedelta(days=int(lock_days))).isoformat()
+    top_20_stability_lock_days = 60 if (1.0 <= pos <= 20.0) else int(lock_days)
+    top_20_stability_locked_until = (now + timedelta(days=top_20_stability_lock_days)).isoformat()
+
+    citation_struct = _build_autonomous_citation_assertions_and_matrix(
+        tenant_id=resolved_tenant,
+        slug=slug,
+        query_clean=query_clean,
+        heading_label=heading_label,
+    )
 
     from pseofactory.indexer import classify_url_template_section
     sec_info = classify_url_template_section(
@@ -3031,6 +3124,7 @@ def compile_remediation_overlay_spec(
         "tenant_id": resolved_tenant,
         "target_url": target_url,
         "query": query_clean,
+        "secondary_title_modifier": secondary_mod,
         "section": sec_name,
         "template_section": sec_name,
         "child_sitemap": child_sm,
@@ -3051,6 +3145,9 @@ def compile_remediation_overlay_spec(
         "lock_days": int(lock_days),
         "locked_until": locked_until,
         "lock_until": locked_until,
+        "top_20_stability_lock_days": top_20_stability_lock_days,
+        "top_20_stability_locked_until": top_20_stability_locked_until,
+        "rank_stability_freeze_active": bool(1.0 <= pos <= 20.0),
         "created_at": now.isoformat(),
         "baseline_position": pos,
         "baseline_impressions": impr,
@@ -3061,6 +3158,8 @@ def compile_remediation_overlay_spec(
         "meta_description": meta_description,
         "description": meta_description,
         "quick_answer": quick_answer,
+        "autonomous_citation_assertions": citation_struct["autonomous_citation_assertions"],
+        "ai_mode_decision_matrix": citation_struct["ai_mode_decision_matrix"],
         "h2_headings": h2_headings,
         "preset_scenarios": preset_scenarios,
         "comparison_rows": comparison_rows,
@@ -3081,6 +3180,203 @@ def compile_remediation_overlay_spec(
         if ai_key in candidate:
             spec_out[ai_key] = candidate[ai_key]
     return spec_out
+
+
+def _build_autonomous_citation_assertions_and_matrix(
+    tenant_id: str,
+    slug: str,
+    query_clean: str,
+    heading_label: str,
+) -> Dict[str, Any]:
+    """
+    Builds first-10%-viewport autonomous statutory assertions (zero dangling pronouns,
+    explicit 2026/2027 year, numeric threshold, and IRC / 34 CFR citation) plus a
+    second-level AI Mode decision-branch matrix anticipating follow-up queries.
+    """
+    low = f"{slug} {query_clean} {heading_label}".lower()
+    if tenant_id == "prexvo":
+        if "pslf" in low or "public service" in low or "120" in low:
+            assertions = [
+                f"In 2026, {heading_label} requires exactly 120 qualifying monthly payments under a qualifying Income-Driven Repayment plan while employed full-time (30+ hours per week) by a 501(c)(3) or government employer under 34 CFR 685.219.",
+                "Under IRC Section 108(f)(1), 100% of federal Direct Loan balances forgiven through Public Service Loan Forgiveness (PSLF) are permanently excluded from federal gross income in 2026 and 2027.",
+                "Under 34 CFR 685.209, borrowers consolidating non-Direct FFEL or Perkins loans in 2026 receive a weighted-average qualifying payment count toward the 120-payment PSLF threshold.",
+            ]
+            matrix = [
+                {
+                    "profile": "501(c)(3) / Government Employee ($65k AGI, $85k Debt)",
+                    "statutory_threshold": "120 Monthly Payments (34 CFR 685.219)",
+                    "optimal_path": "IBR / RAP Lowest-Monthly-Payment Track + Annual ECF",
+                    "net_dollar_impact": "$48,200 Tax-Free Principal Forgiveness (IRC Section 108(f))",
+                    "next_action": "Certify Employment via FormOMB 1845-0110",
+                },
+                {
+                    "profile": "High-Income Medical / Legal Borrower ($180k AGI, $240k Debt)",
+                    "statutory_threshold": "Standard 10-Year Cap under IBR (34 CFR 685.221)",
+                    "optimal_path": "Married Filing Separately (IRC Section 6013) + IBR Cap",
+                    "net_dollar_impact": "$114,500 Forgiveness Preserved vs Joint Filing",
+                    "next_action": "Run Married Filing Separately AGI Split Scenario",
+                },
+                {
+                    "profile": "Private-Sector Employer Switch Before 120 Payments",
+                    "statutory_threshold": "20-Year / 25-Year IDR Forgiveness (34 CFR 685.209)",
+                    "optimal_path": "Evaluate Private Refinance vs IDR Accrued Interest Subsidy",
+                    "net_dollar_impact": "$16,800 Interest Savings over 10-Year Amortization",
+                    "next_action": "Compare Private Refinance APR vs Federal Statutory Rate",
+                },
+            ]
+        else:
+            assertions = [
+                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the federal poverty guideline ($22,590 single baseline) under 34 CFR 685.209.",
+                "Under the 2026-2027 Repayment Assistance Plan (RAP) and amended IBR rules under 34 CFR 685.221, unpaid monthly interest accrual is waived when scheduled payments are less than monthly interest.",
+                "Starting January 1, 2026, non-PSLF 20-year and 25-year IDR balance forgiveness is includible in federal gross income under IRC Section 108(f)(5) unless the borrower qualifies for the IRC Section 108(a)(1)(B) insolvency exclusion.",
+            ]
+            matrix = [
+                {
+                    "profile": "Early-Career Borrower ($45k AGI, $55k Direct Loans)",
+                    "statutory_threshold": "150% Federal Poverty Exemption ($22,590 Single)",
+                    "optimal_path": "2026 RAP / IBR with 100% Unpaid Interest Waiver",
+                    "net_dollar_impact": "$187/mo Payment + $1,420/yr Interest Subsidy (34 CFR 685.209)",
+                    "next_action": "Lock 2026 IDR Recertification Baseline",
+                },
+                {
+                    "profile": "Mid-Career Dual-Earner Household ($135k Combined AGI)",
+                    "statutory_threshold": "IRC Section 6013 Separate vs Joint AGI Isolation",
+                    "optimal_path": "Married Filing Separately to Exclude Spouse Income",
+                    "net_dollar_impact": "$410/mo Payment Reduction ($4,920 Annual Cash Flow)",
+                    "next_action": "Compare MFS Tax Delta vs IDR Payment Savings",
+                },
+                {
+                    "profile": "High-Earners Above Statutory IDR Cap ($195k+ AGI, >6.8% APR)",
+                    "statutory_threshold": "Zero Federal Forgiveness Remaining at 10-Year Cap",
+                    "optimal_path": "Fixed-Rate Private Refinance Evaluation (SoFi / Credible)",
+                    "net_dollar_impact": "$9,640 Interest Reduction over 7-Year Term",
+                    "next_action": "Check Rate Reduction Without Hard Credit Pull",
+                },
+            ]
+    else:
+        if "1031" in low or "8824" in low or "boot" in low or "exchange" in low:
+            assertions = [
+                f"In 2026, {heading_label} defers 100% of federal capital gains (up to 20% under IRC Section 1(h)) and 25% unrecaptured Section 1250 depreciation recapture only when replacement real property of equal or greater fair market value and debt is acquired under IRC Section 1031(a).",
+                "Under IRC Section 1031(a)(3) and Treasury Regulation 1.1031(k)-1, exchangers must identify replacement real property in writing within 45 calendar days and close acquisition within 180 calendar days of relinquishing property.",
+                "Under IRC Section 1031(b) and IRS Form 8824 Part III, any net mortgage relief or cash proceeds retained at closing is taxed immediately as recognized boot up to total realized gain in 2026 and 2027.",
+            ]
+            matrix = [
+                {
+                    "profile": "Full Reinvestment ($1.2M Sale -> $1.35M Replacement, Equal Debt)",
+                    "statutory_threshold": "Zero Cash Boot & Zero Net Debt Relief (IRC Section 1031(a))",
+                    "optimal_path": "Qualified Intermediary Escrow + 45-Day Three-Property Rule",
+                    "net_dollar_impact": "$142,000 Federal Capital Gains & Section 1250 Tax Deferred",
+                    "next_action": "Model IRS Form 8824 Line 15-25 Basis Carryover",
+                },
+                {
+                    "profile": "Partial Cash Out or Debt Reduction ($85k Mortgage Boot)",
+                    "statutory_threshold": "Recognized Boot Cap = Lower of Boot or Realized Gain (IRC 1031(b))",
+                    "optimal_path": "Inject Fresh Cash Equity at Closing to Offset Mortgage Boot",
+                    "net_dollar_impact": "$24,480 Immediate Boot Tax Avoided (25% + 3.8% NIIT)",
+                    "next_action": "Calculate Cash Injection Offset Before Day 180 Closing",
+                },
+                {
+                    "profile": "Depreciated Commercial Asset with Post-Acquisition CapEx",
+                    "statutory_threshold": "IRC Section 168(k) Bonus Depreciation + Cost Segregation",
+                    "optimal_path": "Pair 1031 Exchange Carryover Basis with Excess Cost Segregation",
+                    "net_dollar_impact": "$68,500 First-Year Accelerated Depreciation Shield",
+                    "next_action": "Run Form 4562 Accelerated Depreciation Overlay",
+                },
+            ]
+        elif "s-corp" in low or "s corp" in low or "1120-s" in low or "salary" in low:
+            assertions = [
+                f"In 2026, {heading_label} eliminates the 15.3% self-employment tax (IRC Section 1401) on net business profits distributed above a reasonable W-2 officer salary reported on IRS Form 1120-S Line 7.",
+                "For tax year 2026, the 12.4% OASDI Social Security payroll tax applies up to the $176,100 statutory wage base under IRC Section 3121, while the 2.9% Medicare tax and 0.9% Additional Medicare Tax (above $200,000 single) apply to all W-2 wages.",
+                "Under IRC Section 199A, 2026 S-Corp K-1 pass-through distributions qualify for up to a 20% Qualified Business Income (QBI) deduction subject to the greater of 50% of W-2 wages or 25% of W-2 wages plus 2.5% UBIA.",
+            ]
+            matrix = [
+                {
+                    "profile": "Solo Service Operator ($185k Net Profit, Single Filer)",
+                    "statutory_threshold": "40% Reasonable Compensation Safe-Harbor Benchmark ($74k W-2)",
+                    "optimal_path": "S-Corp Election (Form 2553) + Automated Officer Payroll",
+                    "net_dollar_impact": "$15,240 Annual Payroll Tax Savings vs Sole Proprietorship",
+                    "next_action": "Configure Reasonable W-2 Salary & K-1 Split",
+                },
+                {
+                    "profile": "High-Margin Agency / Practice ($420k Net Profit, Above QBI Phaseout)",
+                    "statutory_threshold": "IRC Section 199A(b)(2) 50% W-2 Wage Limitation",
+                    "optimal_path": "Set Officer W-2 at 28.57% ($120k) to Maximize QBI + FICA Shield",
+                    "net_dollar_impact": "$28,900 Combined FICA + Section 199A Tax Reduction",
+                    "next_action": "Optimize W-2 Wage Cap for Form 8995-A Line 16",
+                },
+                {
+                    "profile": "Early-Stage Business (<$65k Net Profit)",
+                    "statutory_threshold": "Compliance Overhead Breakeven ($2,400 Payroll + Form 1120-S)",
+                    "optimal_path": "Retain Schedule C LLC Until Net Profit Exceeds $75,000",
+                    "net_dollar_impact": "Avoids $1,850 Net Compliance Drag vs Payroll Savings",
+                    "next_action": "Track Monthly Net Margin Against $75k S-Corp Trigger",
+                },
+            ]
+        elif "179" in low or "4562" in low or "depreciation" in low or "equipment" in low:
+            assertions = [
+                f"In 2026, {heading_label} allows immediate first-year expensing of up to $1,250,000 in qualifying equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $3,130,000 in total asset purchases.",
+                "Under IRC Section 179(b)(3), first-year Section 179 expensing cannot exceed aggregate taxable income from active trades or businesses, whereas IRC Section 168(k) bonus depreciation can create an carryforward Net Operating Loss (NOL) under IRC Section 172.",
+                "Under IRC Section 280F(d)(7) and IRS Form 4562 Part V, heavy SUVs rated between 6,000 and 14,000 lbs GVWR are capped at a $31,300 Section 179 deduction in 2026 before applying remaining bonus and MACRS depreciation.",
+            ]
+            matrix = [
+                {
+                    "profile": "Profitable Operating Company ($250k Equipment Purchase, $400k Income)",
+                    "statutory_threshold": "$1,250,000 Section 179 Cap (IRC Section 179(b)(1))",
+                    "optimal_path": "100% Section 179 Election on IRS Form 4562 Part I",
+                    "net_dollar_impact": "$80,000 Immediate Cash Tax Shield (at 32% Marginal Rate)",
+                    "next_action": "Verify Placed-in-Service Date Before December 31, 2026",
+                },
+                {
+                    "profile": "Equipment Financing / Lease Acquisition ($180k Financed Asset)",
+                    "statutory_threshold": "IRC Section 1012 Full Basis Expensing in Year 1",
+                    "optimal_path": "Deduct 100% of Financed Cost in Year 1 While Paying Over 60 Months",
+                    "net_dollar_impact": "+$42,600 Positive Year-1 Cash Flow Surplus After Down Payment",
+                    "next_action": "Compare Section 179 Equipment Financing APRs",
+                },
+                {
+                    "profile": "CapEx Intensive Expansion ($3.6M Total Equipment Placed in Service)",
+                    "statutory_threshold": "$3,130,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))",
+                    "optimal_path": "Combine Remaining $780k Section 179 Allowance + IRC 168(k) Bonus",
+                    "net_dollar_impact": "$412,000 First-Year Combined Depreciation Tax Shield",
+                    "next_action": "Run Form 4562 Section 179 Phase-Out & MACRS Schedule",
+                },
+            ]
+        else:
+            assertions = [
+                f"In 2026, {heading_label} computes exact after-tax cash flow, marginal tax brackets, and statutory compliance thresholds under Internal Revenue Code Sections 61, 162, 199A, and 1401.",
+                "For tax years 2026 and 2027, federal pass-through and corporate treasury models must account for the $176,100 OASDI wage cap (IRC Section 3121), the 20% QBI deduction (IRC Section 199A), and quarterly estimated tax safe harbors (100% or 110% of prior-year tax under IRC Section 6654).",
+                "Operating businesses maintaining at least 12 to 18 months of net cash runway and sub-1.5x net burn multiples reduce working-capital financing cost by 220 to 380 basis points across 2026 credit facilities.",
+            ]
+            matrix = [
+                {
+                    "profile": "High-Growth Operator ($1.5M ARR, 14-Month Runway)",
+                    "statutory_threshold": "IRC Section 162 Ordinary & Necessary Expense Optimization + R&D Section 174",
+                    "optimal_path": "Reallocate Non-Core OpEx + Treasury High-Yield Sweep (4.85% APY)",
+                    "net_dollar_impact": "+5.4 Months Extended Cash Runway ($184,000 Preserved)",
+                    "next_action": "Load Baseline ARR & Monthly Burn into Calculator",
+                },
+                {
+                    "profile": "Pass-Through Owner Optimizing Quarterly Estimated Taxes",
+                    "statutory_threshold": "110% Prior-Year Tax Safe Harbor (IRC Section 6654(d)(1)(C))",
+                    "optimal_path": "Annualized Income Installment Method (IRS Form 2210 Schedule AI)",
+                    "net_dollar_impact": "$11,400 Underpayment Penalty & Working Capital Preserved",
+                    "next_action": "Calculate Quarterly Safe-Harbor Voucher Schedule",
+                },
+                {
+                    "profile": "Capital-Intensive Expansion Evaluating Working Capital Facility",
+                    "statutory_threshold": "IRC Section 163(j) 30% ATI Business Interest Deduction Limit",
+                    "optimal_path": "Structure Equipment & Working Capital Below 30% Adjusted Taxable Income",
+                    "net_dollar_impact": "100% Tax Deductibility of Financing Interest Preserved",
+                    "next_action": "Compare Commercial Treasury & Credit Options",
+                },
+            ]
+    return {
+        "autonomous_citation_assertions": [_strip_forbidden_dashes(a) for a in assertions],
+        "ai_mode_decision_matrix": [
+            {k: _strip_forbidden_dashes(str(v)) for k, v in row.items()}
+            for row in matrix
+        ],
+    }
 
 
 def _build_vertical_prexvo_overlay_blocks(
@@ -4469,15 +4765,35 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         if qa_pattern.search(html):
             html = qa_pattern.sub(
-                r'\g<1>\n  <div class="quick-answer-body"><p>' + escaped_qa + r'</p></div>\n\g<3>',
+                r'\g<1>\n  <div class="quick-answer-body" data-ai-citation-block="true" data-prominence="first-10-percent"><p>'
+                + escaped_qa
+                + r"</p></div>\n\g<3>",
                 html,
                 count=1,
             )
         elif 'class="quick-answer' not in html and 'id="quick-answer"' not in html:
             injected_sections.append(
-                f'<aside id="quick-answer" class="quick-answer answer-box">\n'
-                f'  <div class="quick-answer-body"><p>{escaped_qa}</p></div>\n'
+                f'<aside id="quick-answer" class="quick-answer answer-box" data-ai-citation-block="true" data-prominence="first-10-percent">\n'
+                f'  <div class="quick-answer-body" data-ai-citation-block="true" data-prominence="first-10-percent"><p>{escaped_qa}</p></div>\n'
                 f'</aside>'
+            )
+
+    assertions = overlay_data.get("autonomous_citation_assertions") or []
+    if isinstance(assertions, list) and assertions:
+        li_items = [
+            f'    <li data-autonomous-assertion="{idx + 1}">{html_lib.escape(_strip_forbidden_dashes(str(a)))}</li>'
+            for idx, a in enumerate(assertions[:3])
+            if str(a).strip()
+        ]
+        if li_items:
+            injected_sections.append(
+                '<section class="overlay-section overlay-autonomous-assertions card pseo-card" '
+                'data-ai-citation-block="true" data-prominence="first-10-percent">\n'
+                '  <h3 class="section-subtitle">Key Statutory Takeaways (2026-2027)</h3>\n'
+                '  <ul class="autonomous-citation-list" data-ai-citation-assertions="true" '
+                'style="margin: 0.5rem 0 0 1.25rem; font-size: 0.9rem; line-height: 1.55;">\n'
+                + "\n".join(li_items)
+                + "\n  </ul>\n</section>"
             )
 
     # 4a. Injected H2 Headings
@@ -4532,7 +4848,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         sc_section_markup = "\n".join(sc_parts)
         injected_sections.append(sc_section_markup)
 
-    # 4c. Injected Comparison Table Rows
+    # 4c. Injected Comparison Table Rows & Second-Level AI Mode Decision-Branch Matrix
     comparison_rows = overlay_data.get("comparison_rows", [])
     tbl_section_markup = ""
     if comparison_rows:
@@ -4573,6 +4889,45 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         ])
         tbl_section_markup = "\n".join(tbl_parts)
         injected_sections.append(tbl_section_markup)
+
+    ai_matrix = overlay_data.get("ai_mode_decision_matrix", [])
+    if isinstance(ai_matrix, list) and ai_matrix:
+        dm_parts = [
+            '<section class="overlay-section overlay-ai-decision-matrix card pseo-card" data-ai-decision-matrix="true">',
+            '  <h3 class="section-subtitle">2026-2027 Statutory Decision-Branch Matrix</h3>',
+            '  <div class="table-wrap pseo-table-wrap">',
+            '    <table class="overlay-decision-matrix-table">',
+            "      <thead>",
+            "        <tr>",
+            '          <th scope="col">Operator / Borrower Profile</th>',
+            '          <th scope="col">Statutory Threshold</th>',
+            '          <th scope="col">Optimal Execution Path</th>',
+            '          <th scope="col">Net Dollar Impact</th>',
+            '          <th scope="col">Next Action</th>',
+            "        </tr>",
+            "      </thead>",
+            "      <tbody>",
+        ]
+        for mrow in ai_matrix:
+            if not isinstance(mrow, dict):
+                continue
+            prof_col = html_lib.escape(_strip_forbidden_dashes(str(mrow.get("profile", ""))))
+            thr_col = html_lib.escape(_strip_forbidden_dashes(str(mrow.get("statutory_threshold", ""))))
+            path_col = html_lib.escape(_strip_forbidden_dashes(str(mrow.get("optimal_path", ""))))
+            imp_col = html_lib.escape(_strip_forbidden_dashes(str(mrow.get("net_dollar_impact", ""))))
+            act_col = html_lib.escape(_strip_forbidden_dashes(str(mrow.get("next_action", ""))))
+            dm_parts.append(
+                f'        <tr class="overlay-decision-matrix-row">'
+                f"<td>{prof_col}</td><td>{thr_col}</td><td>{path_col}</td><td>{imp_col}</td><td>{act_col}</td>"
+                f"</tr>"
+            )
+        dm_parts.extend([
+            "      </tbody>",
+            "    </table>",
+            "  </div>",
+            "</section>",
+        ])
+        injected_sections.append("\n".join(dm_parts))
 
     # 4d. Injected Hub Links (for crawl budget signal lag / internal linking)
     hub_links = overlay_data.get("hub_links", [])

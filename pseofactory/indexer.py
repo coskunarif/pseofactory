@@ -2465,6 +2465,73 @@ class PushIndexer:
                 "error": str(ex),
             }
 
+    GSC_DAILY_INSPECTION_QUOTA = 180
+
+    def _get_gsc_quota_governor_path(self) -> Path:
+        repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent))
+        return repo_root / ".agy" / "gsc_quota_governor.json"
+
+    def check_and_consume_gsc_quota(self, units: int = 1, bucket: str = "inspection") -> Dict[str, Any]:
+        """
+        Token-bucket daily GSC quota governor preventing HTTP 429 exhaustion
+        across URL Inspection and Indexing API dispatches.
+        """
+        gov_path = self._get_gsc_quota_governor_path()
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        state: Dict[str, Any] = {"date": today_str, "inspection_used": 0, "indexing_used": 0, "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA}
+        try:
+            if gov_path.is_file():
+                loaded = json.loads(gov_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and loaded.get("date") == today_str:
+                    state.update(loaded)
+        except Exception:
+            pass
+
+        key = "inspection_used" if bucket == "inspection" else "indexing_used"
+        limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
+        used = int(state.get(key, 0) or 0)
+        allowed = (used + units) <= limit
+        if allowed:
+            state[key] = used + units
+            try:
+                gov_path.parent.mkdir(parents=True, exist_ok=True)
+                gov_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+        return {
+            "allowed": allowed,
+            "date": today_str,
+            "bucket": bucket,
+            "used": int(state.get(key, 0) or 0),
+            "remaining": max(0, limit - int(state.get(key, 0) or 0)),
+            "limit": limit,
+        }
+
+    def prioritize_urls_for_indexing_allocation(self, urls: List[str]) -> List[str]:
+        """
+        Deterministically sorts candidate URLs by priority tier for GSC Indexing and URL Inspection
+        so Tier-1 hubs, striking-distance calculators (/tools/), and commercial comparisons
+        receive quota allocation before long-tail scenarios while preserving relative order within each tier.
+        """
+        def _priority_tier(u: str) -> int:
+            raw = str(u or "").strip()
+            path = urllib.parse.urlparse(raw).path.rstrip("/")
+            if not path or path == "":
+                return 0
+            if path in ("/tools", "/guides", "/comparisons", "/glossary"):
+                return 1
+            if path.startswith("/tools/"):
+                return 2
+            if path.startswith("/comparisons/") or "-vs-" in path:
+                return 3
+            if path.startswith("/guides/"):
+                return 4
+            if path.startswith("/scenarios/"):
+                return 5
+            return 6
+
+        return sorted(list(urls or []), key=_priority_tier)
+
     def inspect_gsc_url(self, url: str, site: Optional[str] = None, timeout: int = 15) -> Dict[str, Any]:
         target_site = site or self.gsc_site
         parsed_u = urllib.parse.urlparse(str(url or ""))
@@ -2502,6 +2569,19 @@ class PushIndexer:
                 "coverage_state": "Submitted and indexed",
                 "last_crawl_time": datetime.now().isoformat(),
                 "note": "gsccli binary not found, simulated inspection pass",
+            }
+
+        quota_check = self.check_and_consume_gsc_quota(units=1, bucket="inspection")
+        if not quota_check["allowed"]:
+            return {
+                "url": url,
+                "site": target_site,
+                "status": "QUOTA_GOVERNOR_DEFERRED",
+                "quota_exhausted": True,
+                "is_indexed": False,
+                "verdict": "DEFERRED",
+                "coverage_state": f"Deferred by token-bucket GSC quota governor ({quota_check['used']}/{quota_check['limit']})",
+                "last_crawl_time": datetime.now().isoformat(),
             }
 
         try:
@@ -3175,6 +3255,8 @@ class PushIndexer:
 
         if hubs_only:
             urls, _ = self.partition_indexing_urls(urls)
+
+        urls = self.prioritize_urls_for_indexing_allocation(urls)
 
         rollover_spillover = []
         if len(urls) > GOOGLE_INDEXING_DAILY_QUOTA:

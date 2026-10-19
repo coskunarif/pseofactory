@@ -589,9 +589,35 @@ def render_runtime_synchronizer_script() -> str:
       }}
     }}
 
+    function resolveTrafficSourceAttribution() {{
+      try {{
+        var ref = String(document.referrer || "").toLowerCase();
+        var locSearch = String((window.location && window.location.search) || "").toLowerCase();
+        if (ref.indexOf("google.com/goto") !== -1 || ref.indexOf("google.com/url?q=") !== -1 && locSearch.indexOf("ai_mode") !== -1 || locSearch.indexOf("utm_source=google_ai_mode") !== -1 || locSearch.indexOf("ai_mode=1") !== -1) {{
+          return "google_ai_mode";
+        }}
+        if (ref.indexOf("chatgpt.com") !== -1 || ref.indexOf("openai.com") !== -1 || locSearch.indexOf("utm_source=chatgpt") !== -1) {{
+          return "chatgpt_search";
+        }}
+        if (ref.indexOf("perplexity.ai") !== -1) {{
+          return "perplexity_ai";
+        }}
+        if (ref.indexOf("claude.ai") !== -1) {{
+          return "claude_ai";
+        }}
+        if (ref.indexOf("google.") !== -1) {{
+          return "google_organic";
+        }}
+        return "direct_or_referral";
+      }} catch (e) {{
+        return "direct_or_referral";
+      }}
+    }}
+
     function syncOutboundAffiliateLinks() {{
       try {{
         var slug = resolveCurrentToolSlug();
+        var trafficSource = resolveTrafficSourceAttribution();
         var numEl = document.querySelector('input[type="number"], input[type="range"]');
         var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
         var tier = (!isNaN(numVal) && numVal >= 100000) ? "premium" : "starter";
@@ -608,12 +634,14 @@ def render_runtime_synchronizer_script() -> str:
           if (!qs.get("source_tool")) qs.set("source_tool", slug);
           if (!qs.get("subid")) qs.set("subid", subid);
           if (!qs.get("cta_slot")) qs.set("cta_slot", slot);
+          if (!qs.get("traffic_source")) qs.set("traffic_source", trafficSource);
           qs.set("ph_tier", tier);
           lnk.setAttribute("href", basePath + "?" + qs.toString());
           if (!lnk.getAttribute("data-partner")) lnk.setAttribute("data-partner", pk);
           if (!lnk.getAttribute("data-tool")) lnk.setAttribute("data-tool", slug);
           if (!lnk.getAttribute("data-subid")) lnk.setAttribute("data-subid", subid);
           if (!lnk.getAttribute("data-cta-slot")) lnk.setAttribute("data-cta-slot", slot);
+          lnk.setAttribute("data-traffic-source", trafficSource);
           lnk.setAttribute("data-tier", tier);
         }}
       }} catch (err) {{}}
@@ -692,6 +720,7 @@ def render_runtime_synchronizer_script() -> str:
           var slot = affLink.getAttribute("data-cta-slot") || "partner_matrix_card";
           var subid = affLink.getAttribute("data-subid") || (slug + "_" + slot);
           var tier = affLink.getAttribute("data-tier") || "starter";
+          var trafficSource = affLink.getAttribute("data-traffic-source") || resolveTrafficSourceAttribution();
           var label = (affLink.textContent || "").replace(/\\s+/g, " ").trim();
           var evPayload = {{
             tool: slug,
@@ -702,6 +731,7 @@ def render_runtime_synchronizer_script() -> str:
             subid: subid,
             tier: tier,
             value_tier: tier,
+            traffic_source: trafficSource,
             target: href,
             label: label
           }};
@@ -723,6 +753,7 @@ def render_runtime_synchronizer_script() -> str:
               value_tier: tier,
               ph_tier: tier,
               path: window.location ? window.location.pathname : "/",
+              traffic_source: trafficSource,
               properties: evPayload
             }});
             var sentBeacon = false;
