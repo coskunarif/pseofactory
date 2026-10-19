@@ -1981,11 +1981,18 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             "Section", "1045", "tax-free", "rollover", "thresholds.",
         ]
     elif any(k in combined_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")):
+        clean_179_q = re.sub(
+            r"\b(?:heavy\s+suv|suv|heavy\s+vehicle)s?\b",
+            "Section 179 asset",
+            short_q,
+            flags=re.IGNORECASE,
+        )
+        clean_179_q = re.sub(r"\s+", " ", clean_179_q).strip()
         base_words = (
-            f"Under IRC Section 179 and Section 168(k), {short_q} computes immediate first-year "
+            f"Under IRC Section 179 and Section 168(k), {clean_179_q} computes immediate first-year "
             f"capital expensing up to the $2,560,000 statutory deduction cap ($4,090,000 phase-out threshold) "
             f"plus 20 percent bonus depreciation on IRS Form 4562 for qualifying commercial equipment, "
-            f"off-the-shelf software, and heavy vehicles exceeding 6,000 pounds GVWR."
+            f"off-the-shelf software, and commercial work trucks exceeding 6,000 pounds GVWR."
         ).split()
         filler_pool = [
             "Verified", "against", "IRS", "Publication", "946", "MACRS",
@@ -3197,17 +3204,17 @@ def _build_autonomous_citation_assertions_and_matrix(
     if tenant_id == "prexvo":
         if "pslf" in low or "public service" in low or "120" in low:
             assertions = [
-                f"In 2026, {heading_label} requires exactly 120 qualifying monthly payments under a qualifying Income-Driven Repayment plan while employed full-time (30+ hours per week) by a 501(c)(3) or government employer under 34 CFR 685.219.",
-                "Under IRC Section 108(f)(1), 100% of federal Direct Loan balances forgiven through Public Service Loan Forgiveness (PSLF) are permanently excluded from federal gross income in 2026 and 2027.",
-                "Under 34 CFR 685.209, borrowers consolidating non-Direct FFEL or Perkins loans in 2026 receive a weighted-average qualifying payment count toward the 120-payment PSLF threshold.",
+                f"In 2026, {heading_label} requires 120 qualifying monthly payments under an eligible Income-Driven Repayment plan while employed full-time (30+ hours per week) by a 501(c)(3) or government employer under 34 CFR 685.219.",
+                "Under IRC Section 108(f)(1), 100% of federal Direct Loan balances forgiven through Public Service Loan Forgiveness (PSLF) after 120 qualifying monthly payments are permanently excluded from federal gross income in 2026 and 2027.",
+                "Under 34 CFR 685.209, borrowers consolidating non-Direct FFEL or Perkins loans in 2026 receive a weighted-average qualifying payment count toward the 120 qualifying monthly payments required for PSLF.",
             ]
             matrix = [
                 {
                     "profile": "501(c)(3) / Government Employee ($65k AGI, $85k Debt)",
-                    "statutory_threshold": "120 Monthly Payments (34 CFR 685.219)",
+                    "statutory_threshold": "120 Qualifying Monthly Payments (34 CFR 685.219)",
                     "optimal_path": "IBR / RAP Lowest-Monthly-Payment Track + Annual ECF",
                     "net_dollar_impact": "$48,200 Tax-Free Principal Forgiveness (IRC Section 108(f))",
-                    "next_action": "Certify Employment via FormOMB 1845-0110",
+                    "next_action": "Certify Employment via Form OMB 1845-0110",
                 },
                 {
                     "profile": "High-Income Medical / Legal Borrower ($180k AGI, $240k Debt)",
@@ -3217,40 +3224,40 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Run Married Filing Separately AGI Split Scenario",
                 },
                 {
-                    "profile": "Private-Sector Employer Switch Before 120 Payments",
-                    "statutory_threshold": "20-Year / 25-Year IDR Forgiveness (34 CFR 685.209)",
-                    "optimal_path": "Evaluate Private Refinance vs IDR Accrued Interest Subsidy",
+                    "profile": "Private-Sector Employer Transition",
+                    "statutory_threshold": "Standard 10-Year Cap vs IDR Accrued Interest Subsidy (34 CFR 685.209)",
+                    "optimal_path": "Evaluate IDR Interest Waiver vs Standard 10-Year Repayment Schedule",
                     "net_dollar_impact": "$16,800 Interest Savings over 10-Year Amortization",
-                    "next_action": "Compare Private Refinance APR vs Federal Statutory Rate",
+                    "next_action": "Compare IDR Subsidy vs Standard 10-Year Schedule",
                 },
             ]
         else:
             assertions = [
-                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the federal poverty guideline ($22,590 single baseline) under 34 CFR 685.209.",
+                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% to 225% of the federal poverty guideline ($15,650 single baseline) under 34 CFR 685.209.",
                 "Under the 2026-2027 Repayment Assistance Plan (RAP) and amended IBR rules under 34 CFR 685.221, unpaid monthly interest accrual is waived when scheduled payments are less than monthly interest.",
-                "Starting January 1, 2026, non-PSLF 20-year and 25-year IDR balance forgiveness is includible in federal gross income under IRC Section 108(f)(5) unless the borrower qualifies for the IRC Section 108(a)(1)(B) insolvency exclusion.",
+                "Starting January 1, 2026, standard 20-year and 25-year IDR balance forgiveness is includible in federal gross income under IRC Section 108(f)(5) unless the borrower qualifies for the IRC Section 108(a)(1)(B) insolvency exclusion.",
             ]
             matrix = [
                 {
                     "profile": "Early-Career Borrower ($45k AGI, $55k Direct Loans)",
-                    "statutory_threshold": "150% Federal Poverty Exemption ($22,590 Single)",
+                    "statutory_threshold": "225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)",
                     "optimal_path": "2026 RAP / IBR with 100% Unpaid Interest Waiver",
-                    "net_dollar_impact": "$187/mo Payment + $1,420/yr Interest Subsidy (34 CFR 685.209)",
+                    "net_dollar_impact": "$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)",
                     "next_action": "Lock 2026 IDR Recertification Baseline",
                 },
                 {
                     "profile": "Mid-Career Dual-Earner Household ($135k Combined AGI)",
                     "statutory_threshold": "IRC Section 6013 Separate vs Joint AGI Isolation",
                     "optimal_path": "Married Filing Separately to Exclude Spouse Income",
-                    "net_dollar_impact": "$410/mo Payment Reduction ($4,920 Annual Cash Flow)",
+                    "net_dollar_impact": "$4,920 Annual Payment Reduction Under Separate Filing",
                     "next_action": "Compare MFS Tax Delta vs IDR Payment Savings",
                 },
                 {
                     "profile": "High-Earners Above Statutory IDR Cap ($195k+ AGI, >6.8% APR)",
                     "statutory_threshold": "Zero Federal Forgiveness Remaining at 10-Year Cap",
-                    "optimal_path": "Fixed-Rate Private Refinance Evaluation (SoFi / Credible)",
-                    "net_dollar_impact": "$9,640 Interest Reduction over 7-Year Term",
-                    "next_action": "Check Rate Reduction Without Hard Credit Pull",
+                    "optimal_path": "Fixed-Rate 10-Year Cap vs Rate Reduction Evaluation",
+                    "net_dollar_impact": "$9,640 Interest Reduction over 7-Year Amortization",
+                    "next_action": "Compare 10-Year Standard Cap vs Accelerated Payoff",
                 },
             ]
     else:
@@ -3313,10 +3320,17 @@ def _build_autonomous_citation_assertions_and_matrix(
                 },
             ]
         elif "179" in low or "4562" in low or "depreciation" in low or "equipment" in low:
+            clean_179_label = re.sub(
+                r"\b(?:heavy\s+suv|suv|heavy\s+vehicle)s?\b",
+                "Commercial Asset",
+                heading_label,
+                flags=re.IGNORECASE,
+            )
+            clean_179_label = re.sub(r"\s+", " ", clean_179_label).strip()
             assertions = [
-                f"In 2026, {heading_label} allows immediate first-year expensing of up to $1,250,000 in qualifying equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $3,130,000 in total asset purchases.",
-                "Under IRC Section 179(b)(3), first-year Section 179 expensing cannot exceed aggregate taxable income from active trades or businesses, whereas IRC Section 168(k) bonus depreciation can create an carryforward Net Operating Loss (NOL) under IRC Section 172.",
-                "Under IRC Section 280F(d)(7) and IRS Form 4562 Part V, heavy SUVs rated between 6,000 and 14,000 lbs GVWR are capped at a $31,300 Section 179 deduction in 2026 before applying remaining bonus and MACRS depreciation.",
+                f"In 2026, {clean_179_label} allows immediate first-year expensing of up to $1,250,000 in qualifying commercial equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $3,130,000 in total asset purchases.",
+                "Under IRC Section 179(b)(3), first-year Section 179 expensing cannot exceed aggregate taxable income from active trades or businesses, whereas IRC Section 168(k) bonus depreciation can create a carryforward Net Operating Loss (NOL) under IRC Section 172.",
+                "Under IRC Section 280F(d)(7) and IRS Form 4562 Part V, heavy SUVs rated between 6,000 and 14,000 lbs GVWR are capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules) before applying remaining bonus and MACRS depreciation.",
             ]
             matrix = [
                 {
@@ -4897,6 +4911,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             )
 
     assertions = overlay_data.get("autonomous_citation_assertions") or []
+    assertions_section_markup = ""
     if isinstance(assertions, list) and assertions:
         li_items = [
             f'    <li data-autonomous-assertion="{idx + 1}">{html_lib.escape(_strip_forbidden_dashes(str(a)))}</li>'
@@ -4904,7 +4919,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             if str(a).strip()
         ]
         if li_items:
-            injected_sections.append(
+            assertions_section_markup = (
                 '<section class="overlay-section overlay-autonomous-assertions card pseo-card" '
                 'data-ai-citation-block="true" data-prominence="first-10-percent">\n'
                 '  <h3 class="section-subtitle">Key Statutory Takeaways (2026-2027)</h3>\n'
@@ -4913,6 +4928,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 + "\n".join(li_items)
                 + "\n  </ul>\n</section>"
             )
+            injected_sections.append(assertions_section_markup)
 
     # 4a. Injected H2 Headings
     h2_headings = overlay_data.get("h2_headings") or overlay_data.get("h2_blocks") or []
@@ -5009,6 +5025,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         injected_sections.append(tbl_section_markup)
 
     ai_matrix = overlay_data.get("ai_mode_decision_matrix", [])
+    dm_section_markup = ""
     if isinstance(ai_matrix, list) and ai_matrix:
         dm_parts = [
             '<section class="overlay-section overlay-ai-decision-matrix card pseo-card" data-ai-decision-matrix="true">',
@@ -5045,7 +5062,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             "  </div>",
             "</section>",
         ])
-        injected_sections.append("\n".join(dm_parts))
+        dm_section_markup = "\n".join(dm_parts)
+        injected_sections.append(dm_section_markup)
 
     # 4d. Injected Hub Links (for crawl budget signal lag / internal linking)
     hub_links = overlay_data.get("hub_links", [])
@@ -5264,6 +5282,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         if 'id="gsc-striking-overlay"' in html:
             incremental_parts: List[str] = []
+            if assertions_section_markup:
+                if 'class="overlay-section overlay-autonomous-assertions' in html:
+                    html = re.sub(
+                        r'<section\s+class=["\']overlay-section\s+overlay-autonomous-assertions[^>]*>.*?</section>',
+                        assertions_section_markup,
+                        html,
+                        count=1,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+                else:
+                    incremental_parts.append(assertions_section_markup)
             if h2_section_markup and 'class="overlay-section overlay-headings' in html:
                 html = re.sub(
                     r'<section\s+class=["\']overlay-section\s+overlay-headings[^>]*>.*?</section>',
@@ -5288,6 +5317,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     count=1,
                     flags=re.DOTALL | re.IGNORECASE,
                 )
+            if dm_section_markup:
+                if 'class="overlay-section overlay-ai-decision-matrix' in html:
+                    html = re.sub(
+                        r'<section\s+class=["\']overlay-section\s+overlay-ai-decision-matrix[^>]*>.*?</section>',
+                        dm_section_markup,
+                        html,
+                        count=1,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+                else:
+                    incremental_parts.append(dm_section_markup)
             if faq_section_markup and 'class="overlay-section overlay-faqs' in html:
                 html = re.sub(
                     r'<section\s+class=["\']overlay-section\s+overlay-faqs[^>]*>.*?</section>',

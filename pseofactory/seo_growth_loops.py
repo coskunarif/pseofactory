@@ -3353,9 +3353,16 @@ def evaluate_closed_loop_cohort_reflection(
         except Exception:
             continue
 
+        has_stale_suv_assertion = (
+            prop == "profithelm"
+            and "SUV Section 179 allows immediate first-year expensing of up to $1,250,000" in raw_html
+        )
         has_assertions_before = (
-            'class="overlay-section overlay-autonomous-assertions' in raw_html
-            or "data-autonomous-assertion=" in raw_html
+            (
+                'class="overlay-section overlay-autonomous-assertions' in raw_html
+                or "data-autonomous-assertion=" in raw_html
+            )
+            and not has_stale_suv_assertion
         )
         has_matrix_before = (
             'class="overlay-section overlay-ai-decision-matrix' in raw_html
@@ -3366,7 +3373,7 @@ def evaluate_closed_loop_cohort_reflection(
             already_aligned_count += 1
         elif propagate_winning_patterns and rel_slug not in cooldown_hold_slugs:
             # Double down on winning pattern across remaining calculator/guide inventory
-            ov_existing_path = overlay_files_by_slug.get(rel_slug)
+            ov_existing_path = overlay_files_by_slug.get(rel_slug) or overlay_files_by_slug.get(rel_slug.replace("/", "-"))
             ov_spec: Optional[Dict[str, Any]] = None
             if ov_existing_path and ov_existing_path.is_file():
                 try:
@@ -3404,6 +3411,32 @@ def evaluate_closed_loop_cohort_reflection(
                     try:
                         target_ov_file.write_text(json.dumps(ov_spec, indent=2), encoding="utf-8")
                         overlay_files_by_slug[rel_slug] = target_ov_file
+                    except Exception:
+                        pass
+            elif (
+                not ov_spec.get("autonomous_citation_assertions")
+                or not ov_spec.get("ai_mode_decision_matrix")
+                or "SUV Section 179 allows immediate first-year expensing of up to $1,250,000" in json.dumps(ov_spec)
+            ):
+                fresh_spec = compile_remediation_overlay_spec(
+                    {
+                        "slug": rel_slug,
+                        "tenant_id": prop,
+                        "target_url": str(ov_spec.get("target_url") or f"https://{domain}/tools/{rel_slug}/"),
+                        "query": q_for_spec,
+                        "impressions": int(ov_spec.get("baseline_impressions") or c_m.get("impressions", 50) or 50),
+                        "position": float(ov_spec.get("baseline_position") or c_m.get("position", 12.0) or 12.0),
+                        "clicks": int(ov_spec.get("baseline_clicks") or c_m.get("clicks", 0) or 0),
+                        "ctr": float(ov_spec.get("baseline_ctr") or c_m.get("ctr", 0.02) or 0.02),
+                        "conversion_slot_weights": conversion_slot_weights,
+                    },
+                    tenant_id=prop,
+                )
+                ov_spec["autonomous_citation_assertions"] = fresh_spec["autonomous_citation_assertions"]
+                ov_spec["ai_mode_decision_matrix"] = fresh_spec["ai_mode_decision_matrix"]
+                if persist and ov_existing_path:
+                    try:
+                        ov_existing_path.write_text(json.dumps(ov_spec, indent=2), encoding="utf-8")
                     except Exception:
                         pass
 
