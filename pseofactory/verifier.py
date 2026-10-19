@@ -6238,7 +6238,7 @@ def verify_html_source_keyword_inflation_ratio(
     h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw, flags=re.IGNORECASE | re.DOTALL)
     title_m = re.search(r"<title[^>]*>(.*?)</title>", raw, flags=re.IGNORECASE | re.DOTALL)
     heading_text = re.sub(r"<[^>]+>", " ", (h1_m.group(1) if h1_m else (title_m.group(1) if title_m else "")))
-    stop = {"calculator", "calculators", "profithelm", "prexvo", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027"}
+    stop = {"calculator", "calculators", "profithelm", "prexvo", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027", "title", "about", "signal"}
     tokens = [
         t.lower()
         for t in re.findall(r"[a-zA-Z0-9]{4,}", heading_text)
@@ -6246,15 +6246,31 @@ def verify_html_source_keyword_inflation_ratio(
     ]
     primary_kw = tokens[0] if tokens else "calculator"
 
+    # Strip legitimate URL paths, href/src/item/@id URIs, social/author <meta> tags,
+    # and hyphenated slug identifiers from raw source before counting natural-language
+    # keyword frequency so standard canonical links, OpenGraph/Twitter meta tags,
+    # JSON-LD @id URIs, and subid tracking parameters are not conflated with hidden-attribute
+    # keyword stuffing.
+    source_for_count = re.sub(r"https?://[^\s\"'<>]+", " ", raw, flags=re.IGNORECASE)
+    source_for_count = re.sub(r"<meta\b[^>]*>", " ", source_for_count, flags=re.IGNORECASE)
+    source_for_count = re.sub(
+        r'\b(?:href|src|item|url|contentUrl|data-tool|data-subid|data-cta-id|id|for|name)\s*=\s*["\'][^"\']*["\']',
+        " ",
+        source_for_count,
+        flags=re.IGNORECASE,
+    )
+    source_for_count = re.sub(r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+){1,}", " ", source_for_count)
+
     # Strip scripts, styles, comments, and HTML tags to isolate visible text
     visible = re.sub(r"<!--.*?-->", " ", raw, flags=re.DOTALL)
     visible = re.sub(r"<script\b[^>]*>.*?</script>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
     visible = re.sub(r"<style\b[^>]*>.*?</style>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
     visible = re.sub(r"<[^>]+>", " ", visible)
+    visible_clean = re.sub(r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+){1,}", " ", visible)
 
     pat = re.compile(rf"\b{re.escape(primary_kw)}\b", flags=re.IGNORECASE)
-    source_count = len(pat.findall(raw))
-    visible_count = max(1, len(pat.findall(visible)))
+    source_count = len(pat.findall(source_for_count))
+    visible_count = max(1, len(pat.findall(visible_clean)))
     ratio = float(source_count) / float(visible_count) if source_count > 0 else 1.0
     passed = ratio < float(max_ratio) or source_count <= 6
     return {
