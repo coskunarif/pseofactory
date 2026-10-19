@@ -3353,20 +3353,39 @@ def evaluate_closed_loop_cohort_reflection(
         except Exception:
             continue
 
-        has_stale_suv_assertion = (
-            prop == "profithelm"
-            and "SUV Section 179 allows immediate first-year expensing of up to $1,250,000" in raw_html
+        has_stale_overlay_claims = (
+            (
+                prop == "profithelm"
+                and (
+                    "SUV Section 179 allows immediate first-year expensing of up to $1,250,000" in raw_html
+                    or "Heavy Vehicle Section 179 Weight Calculator allows immediate first-year expensing of up to $1,250,000" in raw_html
+                    or bool(
+                        re.search(
+                            r"(?:suv|heavy\s*vehicle)[^\.\n]{0,140}?expensing[^\.\n]{0,80}?\$1,250,000",
+                            raw_html,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                )
+            )
+            or (
+                prop == "prexvo"
+                and ("$187/mo" in raw_html or "$410/mo" in raw_html)
+            )
         )
         has_assertions_before = (
             (
                 'class="overlay-section overlay-autonomous-assertions' in raw_html
                 or "data-autonomous-assertion=" in raw_html
             )
-            and not has_stale_suv_assertion
+            and not has_stale_overlay_claims
         )
         has_matrix_before = (
-            'class="overlay-section overlay-ai-decision-matrix' in raw_html
-            or 'data-ai-decision-matrix="true"' in raw_html
+            (
+                'class="overlay-section overlay-ai-decision-matrix' in raw_html
+                or 'data-ai-decision-matrix="true"' in raw_html
+            )
+            and not has_stale_overlay_claims
         )
         if has_assertions_before and has_matrix_before:
             before_citation_ready_count += 1
@@ -3416,7 +3435,11 @@ def evaluate_closed_loop_cohort_reflection(
             elif (
                 not ov_spec.get("autonomous_citation_assertions")
                 or not ov_spec.get("ai_mode_decision_matrix")
+                or has_stale_overlay_claims
                 or "SUV Section 179 allows immediate first-year expensing of up to $1,250,000" in json.dumps(ov_spec)
+                or "Heavy Vehicle Section 179 Weight Calculator allows immediate first-year expensing of up to $1,250,000" in json.dumps(ov_spec)
+                or "$187/mo" in json.dumps(ov_spec)
+                or "$410/mo" in json.dumps(ov_spec)
             ):
                 fresh_spec = compile_remediation_overlay_spec(
                     {
