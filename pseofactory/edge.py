@@ -1090,6 +1090,8 @@ const TRACKING_PARAMS = [
   "utm_content",
   "gclid",
   "source_tool",
+  "cta_slot",
+  "ph_tier",
 ];
 
 function isSafeAndCompliantUrl(urlStr) {{
@@ -1207,11 +1209,28 @@ export async function onRequest(context) {{
     }}
   }}
 
-  if (
-    !targetObj.searchParams.has("ref") &&
-    !targetObj.searchParams.has("utm_source") &&
-    !targetObj.searchParams.has("aff")
-  ) {{
+  const sourceTool = reqUrl.searchParams.get("source_tool") || "";
+  const ctaSlot = reqUrl.searchParams.get("cta_slot") || "";
+  const effectiveSubid =
+    reqUrl.searchParams.get("subid") ||
+    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : "");
+
+  if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
+    targetObj.searchParams.set("subid", effectiveSubid);
+  }}
+  if (!targetObj.searchParams.has("utm_source")) {{
+    targetObj.searchParams.set("utm_source", "prexvo");
+  }}
+  if (!targetObj.searchParams.has("utm_medium")) {{
+    targetObj.searchParams.set("utm_medium", "affiliate");
+  }}
+  if (sourceTool && !targetObj.searchParams.has("utm_campaign")) {{
+    targetObj.searchParams.set("utm_campaign", sourceTool);
+  }}
+  if ((effectiveSubid || ctaSlot) && !targetObj.searchParams.has("utm_content")) {{
+    targetObj.searchParams.set("utm_content", effectiveSubid || ctaSlot);
+  }}
+  if (!targetObj.searchParams.has("ref") && !targetObj.searchParams.has("aff")) {{
     targetObj.searchParams.set("ref", "prexvo");
   }}
 
@@ -1351,6 +1370,7 @@ const TRACKING_PARAMS = [
   "gclid",
   "ph_tier",
   "source_tool",
+  "cta_slot",
 ];
 
 const DEFAULT_SOVRN_KEY = "{sovrn_key}";
@@ -1452,7 +1472,7 @@ export async function onRequest(context) {{
     }});
   }}
 
-  // Propagate tracking parameters
+  // Propagate tracking parameters and synthesize sub-attribution
   const reqUrl = new URL(request.url);
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
@@ -1461,15 +1481,27 @@ export async function onRequest(context) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
+  const sourceTool = reqUrl.searchParams.get("source_tool") || "";
+  const ctaSlot = reqUrl.searchParams.get("cta_slot") || "";
+  const effectiveSubid =
+    reqUrl.searchParams.get("subid") ||
+    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : "");
+  if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
+    targetObj.searchParams.set("subid", effectiveSubid);
+  }}
+  if (effectiveSubid && targetObj.hostname.toLowerCase().includes("pxf.io") && !targetObj.searchParams.has("subId1")) {{
+    targetObj.searchParams.set("subId1", effectiveSubid);
+  }}
   const populatedTargetUrl = targetObj.toString();
 
-  // Route directly or wrap with Sovrn Commerce fallback
+  // Route directly or wrap with Sovrn Commerce fallback (including cuid sub-attribution)
   let finalRedirectUrl;
   if (isDirect) {{
     finalRedirectUrl = populatedTargetUrl;
   }} else {{
     const sovrnKey = (env && env.SOVRN_COMMERCE_DOMAIN_KEY) || DEFAULT_SOVRN_KEY;
-    finalRedirectUrl = `${{SOVRN_REDIRECT_BASE}}?key=${{sovrnKey}}&u=${{encodeURIComponent(populatedTargetUrl)}}`;
+    const cuidParam = effectiveSubid ? `&cuid=${{encodeURIComponent(effectiveSubid)}}` : "";
+    finalRedirectUrl = `${{SOVRN_REDIRECT_BASE}}?key=${{sovrnKey}}&u=${{encodeURIComponent(populatedTargetUrl)}}${{cuidParam}}`;
   }}
 
   // Final SSRF validation of redirect destination

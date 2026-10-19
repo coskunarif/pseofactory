@@ -119,17 +119,19 @@ def get_contextual_ftc_disclosure(
         return PREXVO_DISCLOSURES.get("ftc_disclosure", "")
     s_lower = (slug or "").strip().lower()
     if any(k in s_lower for k in ("1031", "like-kind", "exchange", "real-estate")):
-        vertical_partners = "IPX1031, DLP Capital, GROUNDFLOOR, and verified Qualified Intermediary or real estate capital partners"
-    elif any(k in s_lower for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "truck", "suv")):
-        vertical_partners = "Xendoo, Stax Payments, Mercury, and verified Section 179 accounting or commercial capital partners"
+        vertical_partners = "IPX1031, Xendoo, Mercury, DLP Capital, GROUNDFLOOR, and verified Qualified Intermediary or real estate capital partners"
+    elif any(k in s_lower for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "truck", "suv", "lease")):
+        vertical_partners = "Xendoo, Mercury, Rippling, Stax Payments, and verified Section 179 accounting or commercial capital partners"
     elif any(k in s_lower for k in ("saas", "runway", "burn", "s-corp", "payroll", "174", "workers-comp", "factoring", "tariff", "surety")):
-        vertical_partners = "Mercury, Rippling, SurePayroll, Stax Payments, Simply Business, Next Insurance, Hiscox, Invoice Simple, and verified commercial treasury or payroll partners"
+        vertical_partners = "Mercury, Rippling, Xendoo, SurePayroll, Stax Payments, Simply Business, Next Insurance, Hiscox, Invoice Simple, and verified commercial treasury or payroll partners"
     elif any(k in s_lower for k in ("treasury", "tbill", "hysa", "yield", "qsbs", "1202")):
-        vertical_partners = "Zacks Investment Research, Valley Bank, Quontic Bank, Mercury, and verified institutional yield partners"
+        vertical_partners = "Mercury, Kalshi, Xendoo, Zacks Investment Research, Valley Bank, Quontic Bank, and verified institutional yield partners"
     elif any(k in s_lower for k in ("crypto", "8949", "1099-da", "prediction", "1256", "kalshi", "polymarket")):
-        vertical_partners = "CoinLedger, Koinly, Moby Investment Research, TaxAct, TaxSlayer, and verified digital asset or tax reporting partners"
+        vertical_partners = "CoinLedger, Koinly, Kalshi, Xendoo, Moby Investment Research, TaxAct, TaxSlayer, and verified digital asset or tax reporting partners"
+    elif any(k in s_lower for k in ("tax-bracket", "tax bracket", "irs-2027", "ca-tax", "capital-gains", "tcja")):
+        vertical_partners = "Xendoo, Rippling, Mercury, CoinLedger, Koinly, TaxAct, TaxSlayer, and verified tax or accounting partners"
     elif partner_name:
-        vertical_partners = f"{partner_name} and approved tax or financial research partners (including CoinLedger and Koinly)"
+        vertical_partners = f"{partner_name} and approved tax or financial research partners (including Xendoo, Mercury, CoinLedger, and Koinly)"
     else:
         return PROFITHELM_DISCLOSURES["ftc_disclosure"]
     return (
@@ -3771,8 +3773,8 @@ FORBIDDEN_REPLACED_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "deel": ("deel",),
     "bench": ("bench",),
     "pilot": ("pilot",),
-    "crest_capital": ("crest capital", "alt lending"),
-    "equipment_macrs": ("crest capital", "alt lending"),
+    "crest_capital": ("crest capital", "alt lending", "taxact", "turbotax", "taxslayer"),
+    "equipment_macrs": ("crest capital", "alt lending", "taxact", "turbotax", "taxslayer"),
     "national_funding_med": ("national funding", "viva finance"),
     "national_funding": ("national funding", "viva finance"),
     "exeter1031": ("exeter",),
@@ -3944,6 +3946,31 @@ def normalize_html_callout_message_match(
         re.sub(r"<[^>]+>", " ", h1_m.group(1) if h1_m else ""),
     ]).lower()
 
+    data_slug_m = re.search(r'data-slug=["\']([^"\']+)["\']', html, re.I)
+    page_slug = ""
+    if canon_m:
+        canon_u = canon_m.group(1).split("?")[0].rstrip("/")
+        if "/tools/" in canon_u:
+            page_slug = canon_u.split("/tools/", 1)[1].strip("/").replace("/", "-")
+        elif canon_u.endswith("/tools"):
+            page_slug = "tools-directory"
+        else:
+            page_slug = "homepage"
+    elif data_slug_m:
+        page_slug = data_slug_m.group(1).strip("/").replace("/", "-")
+    elif title_m:
+        raw_t = re.sub(r"<[^>]+>", " ", title_m.group(1)).lower()
+        raw_t = re.sub(r"[^a-z0-9]+", "-", raw_t).strip("-")
+        page_slug = raw_t[:60].strip("-") or "calculator"
+    else:
+        page_slug = "calculator"
+
+    def _build_r_href(pk: str, subid_suffix: str, cta_slot: str) -> str:
+        safe_s = html_lib.escape(page_slug)
+        safe_sub = html_lib.escape(f"{page_slug}_{subid_suffix}")
+        safe_slot = html_lib.escape(cta_slot)
+        return f"/r/{pk}?source_tool={safe_s}&amp;subid={safe_sub}&amp;cta_slot={safe_slot}"
+
     has_estate_structure = bool(
         "affiliates-section" in html
         or "affiliate-section" in html
@@ -3990,7 +4017,25 @@ def normalize_html_callout_message_match(
     )
     is_179_or_174_page = any(
         tok in page_identity_lower
-        for tok in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr", "section-174", "section 174", "r-and-d", "r&d")
+        for tok in (
+            "179",
+            "equipment",
+            "lease",
+            "macrs",
+            "depreciation",
+            "vehicle",
+            "gvwr",
+            "truck",
+            "suv",
+            "section-174",
+            "section 174",
+            "r-and-d",
+            "r&d",
+        )
+    )
+    is_179_equipment_page = any(
+        tok in page_identity_lower
+        for tok in ("179", "equipment", "lease", "macrs", "depreciation", "vehicle", "gvwr", "truck", "suv")
     )
 
     updated = html
@@ -4011,13 +4056,21 @@ def normalize_html_callout_message_match(
 
     # Upgrade homepage standalone affiliate-cta-section from pending turbotax/taxslayer/ipx1031 to active approved crest_capital (Xendoo)
     if prop in ("profithelm", "exchange1031") and canon_m and "/tools/" not in canon_m.group(1).lower():
-        if 'data-partner="turbotax"' in updated or "/r/turbotax" in updated:
+        if (
+            'data-partner="turbotax"' in updated
+            or "/r/turbotax" in updated
+            or "Calculate & File Taxes Online with TaxAct" in updated
+        ):
             updated = (
                 updated.replace('data-partner="turbotax"', 'data-partner="crest_capital"')
                 .replace("/r/turbotax", "/r/crest_capital")
                 .replace(
                     "Verified Commercial Execution Partner: TaxAct Online Tax Filing & Xpert Assist",
                     "Verified Commercial Execution Partner: Xendoo Section 179 & Business Tax Accounting",
+                )
+                .replace(
+                    "Calculate & File Taxes Online with TaxAct",
+                    "Optimize Section 179 Accounting with Xendoo",
                 )
             )
 
@@ -4039,7 +4092,9 @@ def normalize_html_callout_message_match(
                 ):
                     pk = "splash_financial"
             elif prop in ("profithelm", "exchange1031"):
-                if is_general_tax_page or is_1031_page or is_179_or_174_page:
+                if is_1031_page:
+                    pk = "ipx1031"
+                elif is_general_tax_page or is_179_or_174_page:
                     pk = "crest_capital"
                 elif is_s_corp_or_workers_comp:
                     pk = "rippling"
@@ -4068,10 +4123,11 @@ def normalize_html_callout_message_match(
                 sec_html,
                 flags=re.I,
             )
+        ov_href = _build_r_href(pk, "overlay", "overlay_primary_cta")
         if has_estate_structure:
             sec_html = re.sub(
                 r'(<a\s+[^>]*?)href=["\'][^"\']+["\']',
-                rf'\g<1>href="/r/{pk}"',
+                rf'\g<1>href="{ov_href}"',
                 sec_html,
                 count=1,
                 flags=re.I,
@@ -4237,17 +4293,20 @@ def normalize_html_callout_message_match(
             ):
                 return sec_html
             cards_html: List[str] = []
-            for pk in ("splash_financial", "sofi", "credible", "earnest", "lendkey"):
+            for idx, pk in enumerate(("splash_financial", "sofi", "credible", "earnest", "lendkey"), start=1):
                 p_obj = PREXVO_AFFILIATES.get(pk)
                 if not p_obj:
                     continue
                 slot = "calculator_primary_cta" if pk == "splash_financial" else "partner_matrix_card"
+                card_href = _build_r_href(pk, f"card_{idx}", slot)
+                safe_s = html_lib.escape(page_slug)
+                safe_sub = html_lib.escape(f"{page_slug}_card_{idx}")
                 cards_html.append(
                     f'      <div class="partner-card" data-partner="{pk}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
                     f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
                     f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
                     f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
-                    f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
+                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
                     f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                     f'        </a>\n'
                     f'      </div>'
@@ -4275,11 +4334,15 @@ def normalize_html_callout_message_match(
             primary_inline_pk = "splash_financial"
 
     elif prop in ("profithelm", "exchange1031"):
-        def _build_profithelm_partner_card(pk: str) -> str:
+        def _build_profithelm_partner_card(pk: str, card_idx: int = 1) -> str:
             p_obj = PROFITHELM_AFFILIATES.get(pk)
             if not p_obj:
                 return ""
             eff_st = _effective_dom_status(pk, p_obj)
+            slot = "calculator_primary_cta" if card_idx == 1 else "partner_matrix_card"
+            card_href = _build_r_href(pk, f"card_{card_idx}", slot)
+            safe_s = html_lib.escape(page_slug)
+            safe_sub = html_lib.escape(f"{page_slug}_card_{card_idx}")
             return (
                 f'\n    <div class="affiliate-card partner-card">\n'
                 f'      <div class="affiliate-info">\n'
@@ -4289,7 +4352,7 @@ def normalize_html_callout_message_match(
                 f'        <p class="affiliate-desc">{html_lib.escape(p_obj.description)}</p>\n'
                 f'      </div>\n'
                 f'      <div>\n'
-                f'        <a href="/r/{pk}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
+                f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-tool="{safe_s}" data-subid="{safe_sub}" data-cta-slot="{slot}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
                 f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                 f'        </a>\n'
                 f'      </div>\n'
@@ -4307,6 +4370,8 @@ def normalize_html_callout_message_match(
                         else ["crest_capital", "rippling", "mercury"]
                     )
                 elif is_1031_page:
+                    sorted_keys = ["ipx1031", "crest_capital", "mercury"]
+                elif is_179_equipment_page:
                     sorted_keys = ["crest_capital", "mercury", "rippling"]
                 elif is_prediction_odds_page:
                     sorted_keys = ["kalshi", "coinledger", "koinly"]
@@ -4325,7 +4390,10 @@ def normalize_html_callout_message_match(
                 primary_inline_pk = sorted_keys[0]
                 h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
                 h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
-                cards_joined = "\n".join(_build_profithelm_partner_card(k) for k in sorted_keys)
+                cards_joined = "\n".join(
+                    _build_profithelm_partner_card(k, idx)
+                    for idx, k in enumerate(sorted_keys, start=1)
+                )
                 return (
                     f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
                     f'        {h2_html}'
@@ -4370,9 +4438,9 @@ def normalize_html_callout_message_match(
 
             # Fallback for minimal unit-test snippets without .affiliate-card
             extra_cards = ""
-            for k in sorted_keys:
+            for idx, k in enumerate(sorted_keys, start=1):
                 if f"/r/{k}" not in sec_html:
-                    extra_cards += _build_profithelm_partner_card(k)
+                    extra_cards += _build_profithelm_partner_card(k, idx)
             if not extra_cards:
                 return sec_html
             return re.sub(
@@ -4407,6 +4475,9 @@ def normalize_html_callout_message_match(
         safe_name = html_lib.escape(p_inline.name)
         safe_cta = html_lib.escape(p_inline.cta_text)
         safe_status = html_lib.escape(_effective_dom_status(primary_inline_pk, p_inline))
+        safe_s = html_lib.escape(page_slug)
+        safe_sub = html_lib.escape(f"{page_slug}_inline")
+        inline_href = _build_r_href(primary_inline_pk, "inline", "calculator_result_inline")
         inline_cta_html = (
             f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
@@ -4414,7 +4485,7 @@ def normalize_html_callout_message_match(
             f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
             f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
             f'            </div>\n'
-            f'            <a href="/r/{primary_inline_pk}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
+            f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
             f'              {safe_cta} &rarr;\n'
             f'            </a>\n'
             f'          </div>'
@@ -4449,6 +4520,76 @@ def normalize_html_callout_message_match(
                 '  </style>\n'
             )
             updated = updated.replace("</head>", f"{fold_css}</head>", 1)
+
+    # Stamp any remaining bare /r/<partner> anchors with page (source_tool) and slot (subid, cta_slot) attribution
+    def _stamp_attribution_on_r_anchor(match: re.Match) -> str:
+        full_open = match.group(1)
+        raw_href = match.group(2)
+        pk = match.group(3).lower()
+        start_ctx = max(0, match.start() - 350)
+        ctx_before = updated[start_ctx : match.start()].lower()
+        if "calc-inline-cta" in ctx_before:
+            slot = "calculator_result_inline"
+            suffix = "inline"
+        elif "overlay-partner-offer" in ctx_before:
+            slot = "overlay_primary_cta"
+            suffix = "overlay"
+        elif "affiliate-cta-section" in ctx_before:
+            slot = "standalone_primary_cta"
+            suffix = "cta"
+        else:
+            slot_m = re.search(r'data-cta-slot=["\']([^"\']+)["\']', full_open, re.I)
+            slot = slot_m.group(1) if slot_m else "partner_matrix_card"
+            suffix = "inline" if slot == "calculator_result_inline" else ("overlay" if "overlay" in slot else "card")
+
+        safe_s = html_lib.escape(page_slug)
+        sub_m = re.search(r'data-subid=["\']([^"\']+)["\']', full_open, re.I)
+        safe_sub = sub_m.group(1) if sub_m else html_lib.escape(f"{page_slug}_{suffix}")
+
+        if "source_tool=" not in raw_href:
+            new_href = f"/r/{pk}?source_tool={safe_s}&amp;subid={safe_sub}&amp;cta_slot={html_lib.escape(slot)}"
+            full_open = full_open.replace(f'href="{raw_href}"', f'href="{new_href}"', 1).replace(
+                f"href='{raw_href}'", f'href="{new_href}"', 1
+            )
+        if "data-partner=" not in full_open:
+            full_open = full_open[:-1] + f' data-partner="{pk}">'
+        if "data-tool=" not in full_open:
+            full_open = full_open[:-1] + f' data-tool="{safe_s}">'
+        if "data-subid=" not in full_open:
+            full_open = full_open[:-1] + f' data-subid="{safe_sub}">'
+        if "data-cta-slot=" not in full_open:
+            full_open = full_open[:-1] + f' data-cta-slot="{html_lib.escape(slot)}">'
+        return full_open
+
+    updated = re.sub(
+        r'(<a\s+[^>]*href=["\'](/r/([a-z0-9_]+)[^"\']*)["\'][^>]*>)',
+        _stamp_attribution_on_r_anchor,
+        updated,
+        flags=re.S | re.I,
+    )
+
+    # Ensure every ProfitHelm page with outbound /r/ links has an above-the-fold .ftc-disclosure-banner with vertical-matched partner disclosure
+    if prop in ("profithelm", "exchange1031") and "/r/" in updated:
+        ctx_ftc_text = get_contextual_ftc_disclosure(prop, slug=page_slug)
+        banner_inner = f"<strong>FTC Disclosure:</strong> {html_lib.escape(ctx_ftc_text)}"
+        if 'class="ftc-disclosure-banner"' in updated:
+            updated = re.sub(
+                r'(<div\s+class=["\']ftc-disclosure-banner["\'][^>]*>)(.*?)(</div>)',
+                rf"\g<1>{banner_inner}\g<3>",
+                updated,
+                count=1,
+                flags=re.S | re.I,
+            )
+        elif 'class="ftc-disclosure-card"' not in updated and "</section>" in updated and "<main" in updated:
+            banner_div = (
+                f'\n      <div class="ftc-disclosure-banner" data-mechanic="compliant_intent_monetization" '
+                f'style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem; padding: 0.625rem 0.875rem; '
+                f'background: var(--bg-surface, #f8fafc); border: 1px solid var(--border-hairline, #e2e8f0); border-radius: 6px; line-height: 1.4;">'
+                f"{banner_inner}</div>"
+            )
+            hero_m = re.search(r'(<section\s+class=["\'][^"\']*hero-section[^"\']*["\'][^>]*>.*?</section>)', updated, re.S | re.I)
+            if hero_m:
+                updated = updated[: hero_m.end()] + banner_div + updated[hero_m.end() :]
 
     return updated
 

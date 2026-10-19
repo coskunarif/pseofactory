@@ -6300,6 +6300,11 @@ class RetroReflectionEngine:
                                         t_name = "Rippling Workforce & Payroll Platform"
                                         t_url = "https://try.rippling.com/mcfo1m09qiwt"
                                         t_cta = "Schedule Rippling Demo"
+                                    elif "1031" in ov_low:
+                                        t_pk = "ipx1031"
+                                        t_name = "IPX1031 Qualified Intermediary"
+                                        t_url = "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator"
+                                        t_cta = "Initiate Qualified 1031 Exchange with IPX1031"
                                     elif (
                                         ov_low in veh_slugs
                                         or any(
@@ -6310,9 +6315,9 @@ class RetroReflectionEngine:
                                                 "ca-tax-brackets",
                                                 "capital-gains",
                                                 "tcja",
-                                                "1031",
                                                 "179",
                                                 "equipment",
+                                                "lease",
                                                 "macrs",
                                                 "depreciation",
                                                 "vehicle",
@@ -6690,6 +6695,8 @@ class RetroReflectionEngine:
                     non_tool_issues
                     or _needs_page_structure_geo_normalization(content)
                     or 'data-status="pending"' in content
+                    or "Calculate & File Taxes Online with TaxAct" in content
+                    or ('href="/r/' in content and "source_tool=" not in content)
                 ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
@@ -6697,8 +6704,9 @@ class RetroReflectionEngine:
             missing = cls.audit_html_mechanics(content)
             if (
                 'data-status="pending"' in content
-                or 'data-partner="ipx1031"' in content
                 or 'data-partner="sofi_refi"' in content
+                or ("1031" in rel and 'data-partner="ipx1031"' not in content)
+                or ('href="/r/' in content and "source_tool=" not in content)
             ):
                 if "callout_message_match" not in missing:
                     missing.append("callout_message_match")
@@ -7630,6 +7638,31 @@ def reflect_and_recompile_all_assets(
                     )
                     if old_stub_block in vg_src:
                         vg_file.write_text(vg_src.replace(old_stub_block, new_no_stub_block, 1), encoding="utf-8")
+
+                app_js_file = Path(adapter.repo_path) / "profithelm" / "static" / "js" / "app.js"
+                if app_js_file.is_file():
+                    app_js_src = app_js_file.read_text(encoding="utf-8")
+                    app_js_changed = False
+                    old_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href*=\"aff=\"], a[href*=\"ref=\"]');"
+                    new_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href^=\"/r/\"], a[href*=\"aff=\"], a[href*=\"ref=\"]');"
+                    if old_esc_sel in app_js_src:
+                        app_js_src = app_js_src.replace(old_esc_sel, new_esc_sel, 1)
+                        app_js_changed = True
+                    old_vb_sel = "document.querySelectorAll('.btn-affiliate-cta, .calc-primary-cta, [data-affiliate-cta], .affiliate-cta, a.btn-primary')"
+                    new_vb_sel = "document.querySelectorAll('a[href^=\"/r/\"], .calc-inline-cta a, .partner-card a, .overlay-partner-offer a, .btn-affiliate-cta, .calc-primary-cta, [data-affiliate-cta], .affiliate-cta, a.btn-primary')"
+                    if old_vb_sel in app_js_src:
+                        app_js_src = app_js_src.replace(old_vb_sel, new_vb_sel, 1)
+                        app_js_changed = True
+                    old_clk_sel = "document.querySelectorAll('a[href*=\"aff=\"], a[href*=\"ref=\"], a.btn-primary').forEach(link => {"
+                    new_clk_sel = "document.querySelectorAll('a[href^=\"/r/\"], .calc-inline-cta a, .partner-card a, .overlay-partner-offer a, .affiliate-cta-link, a[href*=\"aff=\"], a[href*=\"ref=\"], a.btn-primary').forEach(link => {"
+                    if old_clk_sel in app_js_src:
+                        app_js_src = app_js_src.replace(old_clk_sel, new_clk_sel, 1)
+                        app_js_changed = True
+                    if app_js_changed:
+                        app_js_file.write_text(app_js_src, encoding="utf-8")
+                        dist_app_js = Path(adapter.dist_dir) / "static" / "js" / "app.js"
+                        if dist_app_js.is_file():
+                            dist_app_js.write_text(app_js_src, encoding="utf-8")
             except Exception:
                 pass
 

@@ -776,16 +776,16 @@ def test_visitor_journey_cta_placement_and_live_first_ordering():
     norm_pred = normalize_html_callout_message_match(pred_odds_html, property_id="profithelm")
     assert 'class="calc-inline-cta"' in norm_pred
     assert 'data-cta-slot="calculator_result_inline"' in norm_pred
-    r_links = re.findall(r'href="/r/([a-z0-9_]+)"', norm_pred)
+    r_links = re.findall(r'href="/r/([a-z0-9_]+)', norm_pred)
     assert r_links[0] == "kalshi"
     assert r_links[1] == "kalshi"
     assert "interactive_brokers" not in r_links
     assert "coinledger" in r_links
     assert "koinly" in r_links
 
-    # 2. Section 179 page with footer link to Kalshi strips mismatched Kalshi/National Funding Med and orders live Mercury/Rippling first
+    # 2. Section 179 / Equipment Lease page strips mismatched Kalshi/National Funding Med and orders live Section 179 specialist Xendoo (crest_capital) first, followed by Mercury and Rippling
     sec179_html = """<!DOCTYPE html>
-<html><head><title>Section 179 Deduction Calculator</title></head><body>
+<html><head><title>Section 179 Deduction Calculator</title><link rel="canonical" href="https://profithelm.com/tools/equipment-lease-vs-buy-section-179-calculator/" /></head><body>
   <div class="calculator-grid">
     <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
     <div class="card result-card"><div class="card-header"><h2>Projected First-Year Tax Savings</h2></div></div>
@@ -800,12 +800,15 @@ def test_visitor_journey_cta_placement_and_live_first_ordering():
   <footer><a href="/tools/prediction-market-odds/">Kalshi Prediction Market Odds</a></footer>
 </body></html>"""
     norm_179 = normalize_html_callout_message_match(sec179_html, property_id="profithelm")
-    r_179 = re.findall(r'href="/r/([a-z0-9_]+)"', norm_179)
+    r_179 = re.findall(r'href="/r/([a-z0-9_]+)', norm_179)
     assert "kalshi" not in r_179
     assert "national_funding_med" not in r_179
-    assert r_179[0] == "mercury"
-    assert r_179.index("mercury") < r_179.index("crest_capital")
-    assert r_179.index("rippling") < r_179.index("crest_capital")
+    assert r_179[0] == "crest_capital"
+    assert r_179[1] == "crest_capital"
+    assert r_179.index("crest_capital") < r_179.index("mercury") < r_179.index("rippling")
+    assert "source_tool=equipment-lease-vs-buy-section-179-calculator" in norm_179
+    assert "subid=equipment-lease-vs-buy-section-179-calculator_inline" in norm_179
+    assert 'data-tool="equipment-lease-vs-buy-section-179-calculator"' in norm_179
 
 
 def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
@@ -835,7 +838,7 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
   </section>
 </body></html>"""
     norm_tax = normalize_html_callout_message_match(tax_bracket_html, property_id="profithelm")
-    r_tax = re.findall(r'href="/r/([a-z0-9_]+)"', norm_tax)
+    r_tax = re.findall(r'href="/r/([a-z0-9_]+)', norm_tax)
     assert "coinledger" not in r_tax
     assert "koinly" not in r_tax
     assert "turbotax" not in r_tax
@@ -876,7 +879,7 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert 'data-partner="crest_capital"' in norm_overlay
     assert 'data-status="live"' in norm_overlay
     assert 'data-partner-url="https://www.xendoo.com/?fp_ref=arif-4ac24e"' in norm_overlay
-    assert 'href="/r/crest_capital"' in norm_overlay
+    assert 'href="/r/crest_capital' in norm_overlay
     assert "Optimize Section 179 Accounting with Xendoo" in norm_overlay
 
 
@@ -885,7 +888,7 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
     import re
     from pseofactory.affiliates import normalize_html_callout_message_match
 
-    # 1. Section 1031 state spoke replaces generic ipx1031 referral placeholder and pending exeter1031/first_american with active approved crest_capital, mercury, rippling
+    # 1. Section 1031 state spoke routes to live Qualified Intermediary ipx1031 first (inline, card #1, and overlay), followed by crest_capital and mercury
     sec1031_html = """<!DOCTYPE html>
 <html><head><title>Alabama 1031 Exchange Calculator</title><link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/alabama/" /></head><body>
   <div class="calculator-grid">
@@ -906,10 +909,12 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
   </div>
 </body></html>"""
     norm_1031 = normalize_html_callout_message_match(sec1031_html, property_id="profithelm")
-    r_1031 = re.findall(r'href="/r/([a-z0-9_]+)"', norm_1031)
-    assert r_1031 == ["crest_capital", "crest_capital", "mercury", "rippling", "crest_capital"]
+    r_1031 = re.findall(r'href="/r/([a-z0-9_]+)', norm_1031)
+    assert r_1031 == ["ipx1031", "ipx1031", "crest_capital", "mercury", "ipx1031"]
     assert 'data-status="pending"' not in norm_1031
-    assert "ipx1031.com" not in norm_1031
+    assert "source_tool=section-1031-calculator-alabama" in norm_1031
+    assert "subid=section-1031-calculator-alabama_inline" in norm_1031
+    assert "subid=section-1031-calculator-alabama_overlay" in norm_1031
 
     # 2. Prexvo calculator overlay upgrades legacy sofi_refi UTM placeholder to live splash_financial (/r/splash_financial)
     prexvo_ov_html = """<!DOCTYPE html>
@@ -923,9 +928,26 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
 </body></html>"""
     norm_px = normalize_html_callout_message_match(prexvo_ov_html, property_id="prexvo")
     assert 'data-partner="splash_financial"' in norm_px
-    assert 'href="/r/splash_financial"' in norm_px
+    assert 'href="/r/splash_financial' in norm_px
+    assert "source_tool=student-loan-repayment-calculator" in norm_px
+    assert "subid=student-loan-repayment-calculator_overlay" in norm_px
     assert 'data-status="live"' in norm_px
     assert "utm_source=prexvo" not in norm_px
 
-
-
+    # 3. Homepage standalone affiliate-cta-section replaces stale TaxAct button label with Xendoo and injects above-the-fold FTC disclosure banner
+    homepage_html = """<!DOCTYPE html>
+<html><head><title>ProfitHelm Tax & Capital Allocation Hub</title><link rel="canonical" href="https://profithelm.com/" /></head><body>
+  <main class="main">
+    <section class="hero-section"><h1>Precision Tax Models</h1></section>
+    <section class="affiliate-cta-section card pseo-card" data-property="profithelm" data-partner="crest_capital" data-mechanic="compliant_intent_monetization">
+      <h2>Verified Commercial Execution Partner: Xendoo Section 179 & Business Tax Accounting</h2>
+      <p><a href="/r/crest_capital" rel="noopener sponsored nofollow" target="_blank" class="affiliate-cta-link touch-target" data-status="live">Calculate & File Taxes Online with TaxAct</a></p>
+    </section>
+  </main>
+</body></html>"""
+    norm_home = normalize_html_callout_message_match(homepage_html, property_id="profithelm")
+    assert "Calculate & File Taxes Online with TaxAct" not in norm_home
+    assert "Optimize Section 179 Accounting with Xendoo" in norm_home
+    assert 'class="ftc-disclosure-banner"' in norm_home
+    assert "source_tool=homepage" in norm_home
+    assert "subid=homepage_cta" in norm_home

@@ -572,6 +572,51 @@ def render_runtime_synchronizer_script() -> str:
           outEl.textContent = formatOutNum(baseOut);
         }}
       }}
+      syncOutboundAffiliateLinks();
+    }}
+
+    function resolveCurrentToolSlug() {{
+      try {{
+        var p = (window.location && window.location.pathname) ? window.location.pathname : "";
+        var clean = p.replace(/^\\/+|\\/+$/g, "");
+        if (!clean) return "homepage";
+        if (clean.indexOf("tools/") === 0) {{
+          return clean.slice(6).replace(/\\//g, "-") || "tools-directory";
+        }}
+        return clean.replace(/\\//g, "-");
+      }} catch (e) {{
+        return "calculator";
+      }}
+    }}
+
+    function syncOutboundAffiliateLinks() {{
+      try {{
+        var slug = resolveCurrentToolSlug();
+        var numEl = document.querySelector('input[type="number"], input[type="range"]');
+        var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
+        var tier = (!isNaN(numVal) && numVal >= 100000) ? "premium" : "starter";
+        var rLinks = document.querySelectorAll('a[href^="/r/"]');
+        for (var i = 0; i < rLinks.length; i++) {{
+          var lnk = rLinks[i];
+          var rawHref = lnk.getAttribute("href") || "";
+          var qPos = rawHref.indexOf("?");
+          var basePath = qPos !== -1 ? rawHref.slice(0, qPos) : rawHref;
+          var pk = (lnk.getAttribute("data-partner") || basePath.replace(/^\\/r\\//, "")).toLowerCase();
+          var slot = lnk.getAttribute("data-cta-slot") || (lnk.closest(".calc-inline-cta") ? "calculator_result_inline" : (lnk.closest(".overlay-partner-offer") ? "overlay_primary_cta" : (lnk.closest(".affiliate-cta-section") ? "standalone_primary_cta" : "partner_matrix_card")));
+          var subid = lnk.getAttribute("data-subid") || (slug + "_" + (slot === "calculator_result_inline" ? "inline" : (slot === "overlay_primary_cta" ? "overlay" : "card")));
+          var qs = new URLSearchParams(qPos !== -1 ? rawHref.slice(qPos + 1).replace(/&amp;/g, "&") : "");
+          if (!qs.get("source_tool")) qs.set("source_tool", slug);
+          if (!qs.get("subid")) qs.set("subid", subid);
+          if (!qs.get("cta_slot")) qs.set("cta_slot", slot);
+          qs.set("ph_tier", tier);
+          lnk.setAttribute("href", basePath + "?" + qs.toString());
+          if (!lnk.getAttribute("data-partner")) lnk.setAttribute("data-partner", pk);
+          if (!lnk.getAttribute("data-tool")) lnk.setAttribute("data-tool", slug);
+          if (!lnk.getAttribute("data-subid")) lnk.setAttribute("data-subid", subid);
+          if (!lnk.getAttribute("data-cta-slot")) lnk.setAttribute("data-cta-slot", slot);
+          lnk.setAttribute("data-tier", tier);
+        }}
+      }} catch (err) {{}}
     }}
 
     function initBaseValues() {{
@@ -585,6 +630,7 @@ def render_runtime_synchronizer_script() -> str:
           }}
         }}
       }}
+      syncOutboundAffiliateLinks();
     }}
 
     document.addEventListener("input", function(e) {{
@@ -636,6 +682,49 @@ def render_runtime_synchronizer_script() -> str:
     }}, true);
 
     document.addEventListener("click", function(e) {{
+      var affLink = e.target && e.target.closest ? e.target.closest('a[href^="/r/"]') : null;
+      if (affLink) {{
+        try {{
+          syncOutboundAffiliateLinks();
+          var href = affLink.getAttribute("href") || "";
+          var pk = affLink.getAttribute("data-partner") || "";
+          var slug = affLink.getAttribute("data-tool") || resolveCurrentToolSlug();
+          var slot = affLink.getAttribute("data-cta-slot") || "partner_matrix_card";
+          var subid = affLink.getAttribute("data-subid") || (slug + "_" + slot);
+          var tier = affLink.getAttribute("data-tier") || "starter";
+          var label = (affLink.textContent || "").replace(/\\s+/g, " ").trim();
+          var evPayload = {{
+            tool: slug,
+            source_tool: slug,
+            partner: pk,
+            partner_key: pk,
+            cta_slot: slot,
+            subid: subid,
+            tier: tier,
+            value_tier: tier,
+            target: href,
+            label: label
+          }};
+          if (typeof window.gtag === "function") {{
+            window.gtag("event", "affiliate_click", evPayload);
+          }}
+          var analyticsApi = window["Profit" + "HelmAnalytics"];
+          if (analyticsApi && typeof analyticsApi.track === "function") {{
+            analyticsApi.track("affiliate_click", evPayload);
+          }} else if (navigator.sendBeacon && document.querySelector('script[src*="/static/js/app.js"]')) {{
+            navigator.sendBeacon("/api/telemetry", JSON.stringify({{
+              event_type: "affiliate_click",
+              tool_slug: slug,
+              partner_key: pk,
+              cta_slot: slot,
+              value_tier: tier,
+              properties: evPayload
+            }}));
+          }}
+        }} catch (err) {{}}
+        return;
+      }}
+
       var presetBtn = e.target && e.target.closest ? e.target.closest("button[data-calc-preset], a[data-calc-preset], .btn-preset[data-calc-preset], .calc-switcher-btn[data-calc-preset], .calc-scenario-btn[data-calc-preset]") : null;
       if (presetBtn) {{
         e.preventDefault();
@@ -1709,6 +1798,8 @@ def normalize_html_visual_primitives(
             "data-calc-preset",
             "scenario-preset-link",
             "output-value",
+            'href="/r/',
+            "href='/r/",
         )
     )
     if has_interactive_controls:
@@ -1724,11 +1815,12 @@ def normalize_html_visual_primitives(
                 f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
                 or "__pseoRuntimeSyncInitialized" not in sync_body
                 or "updateOutputsSynchronously" not in sync_body
+                or "syncOutboundAffiliateLinks" not in sync_body
             )
             if needs_sync_repair:
                 updated = re.sub(
                     r'\s*<script[^>]*id=["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?</script>',
-                    "\n" + script_block,
+                    lambda _m: "\n" + script_block,
                     updated,
                     count=1,
                     flags=re.IGNORECASE,
