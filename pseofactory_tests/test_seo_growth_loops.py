@@ -631,3 +631,212 @@ def test_capabilities_1_through_6_and_north_star_scorecard(tmp_path: Path, capsy
     assert rc_ns == 0
     ns_out = json.loads(capsys.readouterr().out)
     assert ns_out["workflow"] == "north_star_scorecard"
+
+
+def test_closed_loop_cohort_reflection_rollback_and_winning_pattern_propagation(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """
+    Verifies the closed-loop cohort reflection and maintenance mechanism:
+      1. Correlates historical run manifests, Search Console snapshots, freshness audits,
+         and partner click logs across all 4 cohorts (title_remediation, priority_indexing_push,
+         citation_restructure, sponsor_slot_update).
+      2. Automatically rolls back degraded overlays (including stripping injected HTML overlay
+         elements and restoring baseline <title>) and flags early regressions during active locks.
+      3. Doubles down on winning patterns across legacy ACTIVE_LOCKED calculator and guide inventory
+         by backfilling secondary_title_modifier, autonomous_citation_assertions, ai_mode_decision_matrix,
+         and conversion_slot_weights without breaking measurement lock timestamps.
+      4. Enforces engine and tenant contracts via verify_cohort_reflection_contract and
+         PushIndexer.prioritize_urls_for_indexing_allocation.
+    """
+    from pseofactory.gsc_remediation import (
+        evaluate_expired_overlays,
+        inject_overlay_into_html,
+        rollback_degraded_overlay_from_html,
+    )
+    from pseofactory.indexer import PushIndexer
+    from pseofactory.seo_growth_loops import evaluate_closed_loop_cohort_reflection
+    from pseofactory.verifier import MasterSEOVerifier, verify_cohort_reflection_contract
+
+    repo_root = _seed_tenant_fixture(tmp_path / "tenant_cr")
+    agy_dir = repo_root / ".agy"
+    overlays_dir = agy_dir / "overlays"
+    overlays_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed partner click log with real outbound clicks and CTA slot attribution
+    (agy_dir / "outbound_partner_engagement.json").write_text(
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "total_events_processed": 10,
+                "total_outbound_clicks": 6,
+                "total_calculator_interactions": 4,
+                "total_estimated_revenue_yield_usd": 495.0,
+                "by_slug": {
+                    "section-179-calculator": {
+                        "outbound_clicks": 4,
+                        "calculator_interactions": 3,
+                        "estimated_revenue_yield_usd": 340.0,
+                    },
+                    "s-corp-tax-calculator": {
+                        "outbound_clicks": 2,
+                        "calculator_interactions": 1,
+                        "estimated_revenue_yield_usd": 155.0,
+                    },
+                },
+                "by_partner": {
+                    "gusto_payroll": {"clicks": 4, "estimated_yield_usd": 340.0},
+                    "collective_scorp": {"clicks": 2, "estimated_yield_usd": 155.0},
+                },
+                "by_cta_slot": {
+                    "post_calculation_verdict": 4,
+                    "comparison_table_winner": 2,
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # Seed an active overlay with early position regression (> 2.0 drop) and legacy missing CAP-1/CAP-3 fields
+    active_lock_future = "2099-12-31T00:00:00+00:00"
+    (overlays_dir / "s-corp-tax-calculator.json").write_text(
+        json.dumps(
+            {
+                "slug": "s-corp-tax-calculator",
+                "query": "s corp tax calculator",
+                "target_url": "https://profithelm.com/tools/s-corp-tax-calculator/",
+                "baseline_impressions": 100,
+                "baseline_clicks": 4,
+                "baseline_ctr": 0.04,
+                "baseline_position": 6.0,
+                "locked_until": active_lock_future,
+                "status": "ACTIVE_LOCKED",
+                "title_rewrite": "S Corp Tax Calculator (2026 Savings Model) | ProfitHelm",
+                "quick_answer": "Calculate S-Corp FICA tax savings under IRC Section 1366.",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    scorp_html_dir = repo_root / "dist" / "tools" / "s-corp-tax-calculator"
+    scorp_html_dir.mkdir(parents=True, exist_ok=True)
+    (scorp_html_dir / "index.html").write_text(
+        "<html><head><title>S Corp Tax Calculator | ProfitHelm</title></head>"
+        '<body><main><aside class="quick-answer"><p>Initial answer</p></aside></main></body></html>',
+        encoding="utf-8",
+    )
+
+    # Seed an expired overlay that degraded in position so evaluate_expired_overlays rolls it back
+    expired_lock_past = "2020-01-01T00:00:00+00:00"
+    degraded_html_dir = repo_root / "dist" / "tools" / "degraded-tool"
+    degraded_html_dir.mkdir(parents=True, exist_ok=True)
+    degraded_spec = {
+        "slug": "degraded-tool",
+        "query": "degraded tax tool",
+        "target_url": "https://profithelm.com/tools/degraded-tool/",
+        "baseline_impressions": 80,
+        "baseline_clicks": 4,
+        "baseline_ctr": 0.05,
+        "baseline_position": 5.0,
+        "locked_until": expired_lock_past,
+        "status": "ACTIVE_LOCKED",
+        "title_rewrite": "Degraded Tax Tool (Experimental Title) | ProfitHelm",
+        "secondary_title_modifier": "Experimental Title",
+        "quick_answer": "Experimental quick answer.",
+        "autonomous_citation_assertions": ["Assertion 1", "Assertion 2", "Assertion 3"],
+    }
+    injected_degraded = inject_overlay_into_html(
+        "<html><head><title>Degraded Tool Original | ProfitHelm</title></head>"
+        '<body><main><aside class="quick-answer"><p>Base</p></aside></main></body></html>',
+        degraded_spec,
+    )
+    assert 'id="gsc-striking-overlay"' in injected_degraded
+    (degraded_html_dir / "index.html").write_text(injected_degraded, encoding="utf-8")
+    (overlays_dir / "degraded-tool.json").write_text(json.dumps(degraded_spec, indent=2), encoding="utf-8")
+
+    live_q = [
+        # s-corp-tax-calculator dropped from pos 6.0 to pos 9.5 while still under active lock -> early regression flag
+        {"query": "s corp tax calculator", "impressions": 60, "clicks": 1, "ctr": 0.0167, "position": 9.5},
+        # degraded-tool dropped from pos 5.0 to pos 11.2 after lock expired -> automatic rollback
+        {"query": "degraded tax tool", "impressions": 30, "clicks": 0, "ctr": 0.0, "position": 11.2},
+        # section-179-calculator improved to pos 6.2 with strong impressions
+        {"query": "section 179 deduction calculator", "impressions": 150, "clicks": 9, "ctr": 0.06, "position": 6.2},
+    ]
+
+    eval_res = evaluate_expired_overlays(
+        site_url="sc-domain:profithelm.com",
+        base_dir=repo_root,
+        live_queries=live_q,
+    )
+    assert eval_res["summary"]["DEGRADED_ROLLED_BACK"] >= 1
+    assert eval_res["summary"]["FLAGGED_EARLY_REGRESSION"] >= 1
+
+    # Verify degraded HTML had its remediation overlay stripped and baseline title restored
+    rolled_back_html = (degraded_html_dir / "index.html").read_text(encoding="utf-8")
+    assert 'id="gsc-striking-overlay"' not in rolled_back_html
+    assert "Experimental Title" not in rolled_back_html
+
+    # Run closed-loop cohort reflection and winning pattern propagation
+    cr_report = evaluate_closed_loop_cohort_reflection(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        live_queries=live_q,
+        propagate_winning_patterns=True,
+        persist=True,
+    )
+    assert cr_report["workflow"] == "closed_loop_cohort_reflection"
+    assert cr_report["status"] == "PASS"
+    assert "1_title_remediation" in cr_report["cohorts"]
+    assert "2_priority_indexing_push" in cr_report["cohorts"]
+    assert "3_citation_restructure" in cr_report["cohorts"]
+    assert "4_sponsor_slot_update" in cr_report["cohorts"]
+
+    # Check rollback and early regression tracking
+    rf_actions = cr_report["rollback_and_flag_actions"]
+    assert rf_actions["rolled_back_count"] >= 1
+    assert "degraded-tool" in rf_actions["rolled_back_slugs"]
+    assert rf_actions["early_regression_flagged_count"] >= 1
+    assert "s-corp-tax-calculator" in rf_actions["early_regression_flagged_slugs"]
+
+    # Check winning pattern propagation onto s-corp-tax-calculator without breaking its lock
+    scorp_overlay = json.loads((overlays_dir / "s-corp-tax-calculator.json").read_text(encoding="utf-8"))
+    assert scorp_overlay["locked_until"] == active_lock_future
+    assert scorp_overlay.get("secondary_title_modifier")
+    assert len(scorp_overlay.get("autonomous_citation_assertions", [])) == 3
+    assert len(scorp_overlay.get("ai_mode_decision_matrix", [])) == 3
+    assert scorp_overlay.get("conversion_slot_weights", {}).get("post_calculation_verdict", 0) >= 0.6
+
+    # Verify engine contract and MasterSEOVerifier gate
+    contract_check = verify_cohort_reflection_contract(cr_report, repo_root=repo_root)
+    assert contract_check["status"] == "PASS"
+    verifier = MasterSEOVerifier(dist_dir=repo_root / "dist", repo_root=repo_root)
+    assert verifier.check_cohort_reflection_gate()["status"] == "PASS"
+
+    # Verify PushIndexer auto-loads priority_indexing_urls from cohort_reflection_ledger.json
+    indexer = PushIndexer(dist_dir=repo_root / "dist", domain="profithelm.com")
+    indexer.repo_root = repo_root
+    boosted_url = "https://profithelm.com/guides/special-priority-guide"
+    cr_ledger_path = agy_dir / "cohort_reflection_ledger.json"
+    cr_saved = json.loads(cr_ledger_path.read_text(encoding="utf-8"))
+    cr_saved["next_maintenance_directives"]["priority_indexing_urls"] = [boosted_url]
+    cr_ledger_path.write_text(json.dumps(cr_saved, indent=2), encoding="utf-8")
+
+    ordered = indexer.prioritize_urls_for_indexing_allocation(
+        [
+            "https://profithelm.com/scenarios/long-tail-1",
+            "https://profithelm.com/tools/section-179-calculator/",
+            boosted_url,
+            "https://profithelm.com/",
+        ]
+    )
+    assert ordered[0] == "https://profithelm.com/"
+    assert ordered[1] == boosted_url
+
+    # Verify CLI cohort-reflection subcommand
+    rc_cr = cli_main(["cohort-reflection", "--property", "profithelm", "--dry-run", "--json"])
+    assert rc_cr == 0
+    cr_cli_out = json.loads(capsys.readouterr().out)
+    assert cr_cli_out["workflow"] == "closed_loop_cohort_reflection"
+

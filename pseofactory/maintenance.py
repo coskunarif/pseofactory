@@ -7435,6 +7435,13 @@ def _execute_autonomous_downstream_chain(
                     )
                     summary["seo_workflows_status"] = wf_res.get("status", "PASS")
                     summary["seo_workflows_executed"] = wf_res.get("workflows_executed", 8)
+                    cr_res = wf_res.get("cohort_reflection", {}) if isinstance(wf_res, dict) else {}
+                    summary["cohort_reflection_status"] = cr_res.get("status", "PASS")
+                    summary["cohort_propagated_count"] = (
+                        cr_res.get("inventory_propagation", {}).get("overlays_enriched_with_winning_patterns_count", 0)
+                        if isinstance(cr_res, dict)
+                        else 0
+                    )
                 except Exception:
                     pass
             summary["overlay_evaluations_count"] = overlay_eval_res.get("total_evaluated", 0)

@@ -4251,10 +4251,12 @@ def evaluate_expired_overlays(
         "total_evaluated": 0,
         "accretive": [],
         "degraded_rolled_back": [],
+        "flagged_early_regressions": [],
         "monitoring": [],
         "summary": {
             "ACCRETIVE": 0,
             "DEGRADED_ROLLED_BACK": 0,
+            "FLAGGED_EARLY_REGRESSION": 0,
             "MONITORING": 0,
         },
     }
@@ -4271,8 +4273,9 @@ def evaluate_expired_overlays(
     paths_by_slug: Dict[str, List[Path]] = {}
     for ov_dir in candidate_dirs:
         if ov_dir.is_dir():
-            for p in sorted(ov_dir.glob("*.json")):
-                paths_by_slug.setdefault(p.stem, []).append(p)
+            for p in sorted(ov_dir.rglob("*.json")):
+                rel_stem = p.relative_to(ov_dir).with_suffix("").as_posix()
+                paths_by_slug.setdefault(rel_stem, []).append(p)
 
     if not paths_by_slug:
         reconcile_metric_recovery_ledger(root, property_id=prop)
@@ -4333,18 +4336,6 @@ def evaluate_expired_overlays(
                 is_expired = not locked
         else:
             is_expired = not locked
-
-        if not is_expired and locked:
-            eval_item = {
-                "slug": slug,
-                "status": "MONITORING",
-                "locked_until": lock_until_str,
-                "reason": "Measurement lock active; within observation window",
-            }
-            results["monitoring"].append(eval_item)
-            results["summary"]["MONITORING"] += 1
-            results["total_evaluated"] += 1
-            continue
 
         scenarios = overlay_data.get("preset_scenarios", [])
         baseline_sc = scenarios[0] if scenarios and isinstance(scenarios[0], dict) else {}
@@ -4457,9 +4448,52 @@ def evaluate_expired_overlays(
             or impr_pct_delta <= -25.0
         )
 
+        if not is_expired and locked:
+            early_flagged = bool(is_degraded and current_perf)
+            if early_flagged:
+                overlay_data["early_regression_flagged"] = True
+                overlay_data["early_regression_at"] = now.isoformat()
+                overlay_data["early_regression_reason"] = (
+                    f"Early regression observed during lock window: rank delta {pos_delta:+.2f}, impr delta {impr_pct_delta:+.1f}%"
+                )
+                for p_write in slug_paths:
+                    try:
+                        p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
+            eval_item = {
+                "slug": slug,
+                "status": "MONITORING",
+                "locked_until": lock_until_str,
+                "baseline_position": base_pos,
+                "current_position": curr_pos,
+                "position_delta": round(pos_delta, 2),
+                "baseline_impressions": base_impr,
+                "current_impressions": curr_impr,
+                "impressions_pct_delta": round(impr_pct_delta, 2),
+                "early_regression_flagged": early_flagged,
+                "reason": (
+                    f"Early regression flagged during measurement lock (rank {pos_delta:+.2f}, impr {impr_pct_delta:+.1f}%)"
+                    if early_flagged
+                    else "Measurement lock active; within observation window"
+                ),
+            }
+            if early_flagged:
+                results["flagged_early_regressions"].append(eval_item)
+                results["summary"]["FLAGGED_EARLY_REGRESSION"] += 1
+            results["monitoring"].append(eval_item)
+            results["summary"]["MONITORING"] += 1
+            results["total_evaluated"] += 1
+            continue
+
         if is_degraded:
+            if overlay_data.get("title_rewrite"):
+                overlay_data["rolled_back_title_rewrite"] = overlay_data.get("title_rewrite")
+            if overlay_data.get("secondary_title_modifier"):
+                overlay_data["rolled_back_modifier"] = overlay_data.get("secondary_title_modifier")
             overlay_data["status"] = "DEGRADED_ROLLED_BACK"
             overlay_data["rolled_back_at"] = now.isoformat()
+            overlay_data["rollback_reason"] = f"Performance degraded: rank shifted by {pos_delta:+.2f}, CTR delta {ctr_delta:+.4f}"
             for active_key in (
                 "title_rewrite",
                 "meta_description",
@@ -4478,6 +4512,17 @@ def evaluate_expired_overlays(
                 except Exception:
                     pass
 
+            # Immediately roll back the degraded title/overlay from dist HTML if present on disk
+            html_target = root / "dist" / "tools" / slug / "index.html"
+            if html_target.is_file():
+                try:
+                    raw_h = html_target.read_text(encoding="utf-8")
+                    cleaned_h = rollback_degraded_overlay_from_html(raw_h, overlay_data)
+                    if cleaned_h != raw_h:
+                        html_target.write_text(cleaned_h, encoding="utf-8")
+                except Exception:
+                    pass
+
             eval_item = {
                 "slug": slug,
                 "status": "DEGRADED_ROLLED_BACK",
@@ -4490,6 +4535,7 @@ def evaluate_expired_overlays(
                 "baseline_clicks": base_clicks,
                 "current_clicks": curr_clicks,
                 "clicks_delta": clicks_delta,
+                "rolled_back_title_rewrite": overlay_data.get("rolled_back_title_rewrite"),
                 "decision": "AUTOMATIC_ROLLBACK",
                 "reason": f"Performance degraded: rank shifted by {pos_delta:+.2f}, CTR delta {ctr_delta:+.4f}",
             }
@@ -4503,6 +4549,7 @@ def evaluate_expired_overlays(
         ):
             overlay_data["status"] = "ACCRETIVE_CONFIRMED"
             overlay_data["confirmed_at"] = now.isoformat()
+            overlay_data.pop("early_regression_flagged", None)
             for p_write in slug_paths:
                 try:
                     p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
@@ -4521,6 +4568,7 @@ def evaluate_expired_overlays(
                 "baseline_clicks": base_clicks,
                 "current_clicks": curr_clicks,
                 "clicks_delta": clicks_delta,
+                "secondary_title_modifier": overlay_data.get("secondary_title_modifier"),
                 "decision": "PERMANENT_ADOPTION",
                 "reason": f"Accretive outcome: rank shifted by {pos_delta:+.2f}, CTR delta {ctr_delta:+.4f}",
             }
@@ -4701,6 +4749,76 @@ def _build_overlay_heading_guidance_html(
     )
 
 
+def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any]) -> str:
+    """
+    Rolls back a degraded overlay's title rewrite and heading overrides from HTML,
+    restoring a clean 50-60 character canonical title and stripping degraded headings.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not html or not isinstance(overlay_data, dict):
+        return _strip_forbidden_dashes(html or "")
+
+    rolled_title = _strip_forbidden_dashes(str(overlay_data.get("rolled_back_title_rewrite") or "")).strip()
+    baseline_title = _strip_forbidden_dashes(str(overlay_data.get("baseline_title") or "")).strip()
+    brand = "Prexvo" if str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").lower() == "prexvo" else "ProfitHelm"
+
+    if not baseline_title:
+        h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
+        raw_h1 = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else str(overlay_data.get("slug") or "Statutory Calculator").replace("-", " ").title()
+        raw_h1 = re.sub(r"\s*\([^)]*\)\s*", " ", raw_h1).strip()
+        suffix = f" | {brand}"
+        core = f"{raw_h1} 2026 Calculator" if "calculator" not in raw_h1.lower() else f"{raw_h1} 2026 Model"
+        if len(core) + len(suffix) > 60:
+            core = core[: 60 - len(suffix)].rsplit(" ", 1)[0].strip(" -|:,")
+        while len(core) + len(suffix) < 50:
+            pad = "Tax & Cash Flow Guide" if brand == "ProfitHelm" else "Title IV Repayment Guide"
+            for tok in pad.split():
+                if len(core) + 1 + len(tok) + len(suffix) <= 60:
+                    core = f"{core} {tok}"
+            break
+        if len(core) + len(suffix) < 50:
+            core = (core + " 2026 Statutory Guide")[: 60 - len(suffix)].strip()
+        baseline_title = f"{core}{suffix}"
+
+    title_m = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+    cur_title = html_lib.unescape(title_m.group(1).strip()) if title_m else ""
+    if (rolled_title and cur_title == rolled_title) or (overlay_data.get("rolled_back_modifier") and str(overlay_data["rolled_back_modifier"]) in cur_title):
+        escaped_base = html_lib.escape(baseline_title)
+        html = re.sub(
+            r"<title>.*?</title>",
+            f"<title>{escaped_base}</title>",
+            html,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        html = re.sub(
+            r'(<meta\s+property=["\']og:title["\']\s+content=["\'])([^"\']*)(["\'])',
+            rf"\g<1>{escaped_base}\g<3>",
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = re.sub(
+            r'(<meta\s+name=["\']twitter:title["\']\s+content=["\'])([^"\']*)(["\'])',
+            rf"\g<1>{escaped_base}\g<3>",
+            html,
+            flags=re.IGNORECASE,
+        )
+
+    html = re.sub(
+        r'<section\s+class=["\']overlay-section[^>]*>.*?</section>\s*',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    html = re.sub(
+        r'<div\s+id=["\']gsc-striking-overlay["\'][^>]*>\s*</div>\s*',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return _strip_forbidden_dashes(html)
+
+
 def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     """
     Non-destructively injects remediated overlay components into rendered page HTML:
@@ -4716,7 +4834,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         return _strip_forbidden_dashes(html or "")
 
     if str(overlay_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
-        return _strip_forbidden_dashes(html)
+        return rollback_degraded_overlay_from_html(html, overlay_data)
 
     # 1. Upgrade <title>
     title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()

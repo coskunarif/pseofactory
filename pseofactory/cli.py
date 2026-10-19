@@ -1749,6 +1749,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_ns.add_argument("--dry-run", action="store_true", help="Evaluate North Star targets without persisting scorecard JSON")
     p_ns.add_argument("--json", action="store_true", help="Output North Star scorecard as structured JSON")
 
+    p_cr = subparsers.add_parser(
+        "cohort-reflection",
+        help="Execute closed-loop cohort reflection across title remediation, indexing push, citation restructure, and sponsor slot updates",
+    )
+    p_cr.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, or all)")
+    p_cr.add_argument("--dry-run", action="store_true", help="Evaluate cohort reflection without persisting ledger or propagating winning patterns")
+    p_cr.add_argument("--json", action="store_true", help="Output cohort reflection report as structured JSON")
+
     return parser
 
 
@@ -1778,6 +1786,43 @@ def cmd_north_star(args: argparse.Namespace) -> int:
                 f"30d_clicks={p1.get('current_30d_clicks', 0)}/{p1.get('target_30d_clicks', 0)} | "
                 f"citation_ready={p3.get('citation_ready_briefs_coverage_pct', 0)}% | "
                 f"kw_ratio_gate={p3.get('source_keyword_inflation_gate_status', 'PASS')}"
+            )
+    return 0
+
+
+def cmd_cohort_reflection(args: argparse.Namespace) -> int:
+    """
+    Executes closed-loop cohort reflection and winning-pattern inventory propagation for one or all properties.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.seo_growth_loops import evaluate_closed_loop_cohort_reflection
+
+    prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
+    dry_run = bool(getattr(args, "dry_run", False))
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    reports = {}
+    for p_id in props:
+        reports[p_id] = evaluate_closed_loop_cohort_reflection(
+            property_id=p_id,
+            propagate_winning_patterns=not dry_run,
+            persist=not dry_run,
+        )
+    out = reports[props[0]] if len(props) == 1 else {"status": "PASS", "properties": reports}
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2))
+    else:
+        for p_id, rep in reports.items():
+            cohorts = rep.get("cohorts", {})
+            c1 = cohorts.get("1_title_remediation", {})
+            c3 = cohorts.get("3_citation_restructure", {})
+            c4 = cohorts.get("4_sponsor_slot_update", {})
+            prop_summary = rep.get("inventory_propagation", {})
+            print(
+                f"[{rep.get('status', 'PASS')}] Cohort Reflection ({p_id}): "
+                f"title_verdict={c1.get('cohort_verdict', 'PASS')} | "
+                f"citation_coverage={c3.get('autonomous_assertions_coverage_pct', 0)}% | "
+                f"sponsor_clicks={c4.get('total_outbound_clicks', 0)} (${c4.get('total_estimated_revenue_yield_usd', 0)}) | "
+                f"propagated={prop_summary.get('overlays_enriched_with_winning_patterns_count', 0)}"
             )
     return 0
 
@@ -1888,6 +1933,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_seo_workflows(args)
     elif args.command == "north-star":
         return cmd_north_star(args)
+    elif args.command == "cohort-reflection":
+        return cmd_cohort_reflection(args)
     else:
         parser.print_help()
         return 1

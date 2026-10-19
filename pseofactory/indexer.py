@@ -2507,18 +2507,40 @@ class PushIndexer:
             "limit": limit,
         }
 
-    def prioritize_urls_for_indexing_allocation(self, urls: List[str]) -> List[str]:
+    def prioritize_urls_for_indexing_allocation(
+        self,
+        urls: List[str],
+        priority_boost_urls: Optional[List[str]] = None,
+    ) -> List[str]:
         """
         Deterministically sorts candidate URLs by priority tier for GSC Indexing and URL Inspection
-        so Tier-1 hubs, striking-distance calculators (/tools/), and commercial comparisons
-        receive quota allocation before long-tail scenarios while preserving relative order within each tier.
+        so Tier-1 hubs, cohort-reflection priority boost URLs, striking-distance calculators (/tools/),
+        and commercial comparisons receive quota allocation before long-tail scenarios while preserving
+        relative order within each tier.
         """
+        effective_boosts = list(priority_boost_urls or [])
+        if not effective_boosts:
+            try:
+                repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent))
+                cr_path = repo_root / ".agy" / "cohort_reflection_ledger.json"
+                if cr_path.is_file():
+                    cr_data = json.loads(cr_path.read_text(encoding="utf-8"))
+                    if isinstance(cr_data, dict):
+                        effective_boosts = list(
+                            cr_data.get("next_maintenance_directives", {}).get("priority_indexing_urls", []) or []
+                        )
+            except Exception:
+                pass
+        boost_set = {str(b).strip().rstrip("/") for b in effective_boosts if b}
+
         def _priority_tier(u: str) -> int:
             raw = str(u or "").strip()
             path = urllib.parse.urlparse(raw).path.rstrip("/")
             if not path or path == "":
                 return 0
             if path in ("/tools", "/guides", "/comparisons", "/glossary"):
+                return 1
+            if boost_set and (raw.rstrip("/") in boost_set or path in boost_set):
                 return 1
             if path.startswith("/tools/"):
                 return 2

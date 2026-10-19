@@ -1477,7 +1477,9 @@ class MasterSEOVerifier:
         code_dirs: Optional[List[Path]] = None,
         min_manifests: int = 8,
         strict_robots: bool = False,
+        repo_root: Optional[Path] = None,
     ):
+        self.repo_root = Path(repo_root) if repo_root is not None else None
         self.canonical_base = (
             canonical_base
             if canonical_base is not None
@@ -2342,6 +2344,15 @@ class MasterSEOVerifier:
             "violations_count": len(issues),
             "issues": issues,
         }
+
+    # 18c. Closed-Loop Cohort Reflection & Rollback Contract Gate
+    def check_cohort_reflection_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        repo_root = target.parent if target.name == "dist" else target
+        return verify_cohort_reflection_contract(repo_root=repo_root, dist_dir=target)
 
     # 19. Hide Test Pages Gate
     def check_hide_test_pages_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -6283,6 +6294,100 @@ def verify_html_source_keyword_inflation_ratio(
     }
 
 
+def verify_cohort_reflection_contract(
+    repo_root_or_report: Optional[Union[str, Path, Dict[str, Any]]] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """
+    Verifies the Closed-Loop Cohort Reflection and Rollback Contract for a tenant property:
+      1. Any overlay in .agy/overlays or content/overlays with status == 'DEGRADED_ROLLED_BACK'
+         must not have its rolled_back_title_rewrite still active in dist/ HTML.
+      2. When .agy/cohort_reflection_ledger.json (or an in-memory report dict) is provided, it must contain
+         all 4 required cohorts (1_title_remediation, 2_priority_indexing_push, 3_citation_restructure,
+         4_sponsor_slot_update), historical_evidence_sources, rollback_and_flag_actions, winning_patterns,
+         inventory_propagation, and next_maintenance_directives, with zero forbidden dashes.
+    """
+    import html as html_lib
+
+    inline_report = repo_root_or_report if isinstance(repo_root_or_report, dict) else None
+    resolved_root_arg = repo_root if repo_root is not None else (repo_root_or_report if not isinstance(repo_root_or_report, dict) else None)
+    root = Path(resolved_root_arg) if resolved_root_arg is not None else Path.cwd()
+    d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    issues: List[str] = []
+    rolled_back_verified = 0
+
+    for ov_dir in (root / "content" / "overlays", root / ".agy" / "overlays"):
+        if not ov_dir.is_dir():
+            continue
+        for ov_file in sorted(ov_dir.rglob("*.json")):
+            try:
+                ov_data = json.loads(ov_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(ov_data, dict):
+                continue
+            if str(ov_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                rolled_back_verified += 1
+                rb_title = str(ov_data.get("rolled_back_title_rewrite") or "").strip()
+                rel_slug = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix())
+                html_path = d_dir / "tools" / rel_slug / "index.html"
+                if rb_title and html_path.is_file():
+                    raw_h = html_path.read_text(encoding="utf-8", errors="ignore")
+                    m_t = re.search(r"<title>(.*?)</title>", raw_h, flags=re.IGNORECASE | re.DOTALL)
+                    if m_t and html_lib.unescape(m_t.group(1).strip()) == rb_title:
+                        issues.append(
+                            f"Rolled-back title '{rb_title}' still active in {html_path.relative_to(d_dir)}"
+                        )
+
+    ledger_path = root / ".agy" / "cohort_reflection_ledger.json"
+    ledger_present = ledger_path.is_file() or inline_report is not None
+    if ledger_present:
+        try:
+            if inline_report is not None:
+                raw_txt = json.dumps(inline_report)
+                l_data = inline_report
+            else:
+                raw_txt = ledger_path.read_text(encoding="utf-8")
+                l_data = json.loads(raw_txt)
+            if "\u2014" in raw_txt or "\u2013" in raw_txt:
+                issues.append("Forbidden em-dash or en-dash in cohort_reflection_ledger.json")
+            if not isinstance(l_data, dict):
+                issues.append("cohort_reflection_ledger.json is not a JSON object")
+            else:
+                for req_top in (
+                    "historical_evidence_sources",
+                    "cohorts",
+                    "rollback_and_flag_actions",
+                    "winning_patterns",
+                    "inventory_propagation",
+                    "next_maintenance_directives",
+                ):
+                    if req_top not in l_data:
+                        issues.append(f"Missing top-level key '{req_top}' in cohort_reflection_ledger.json")
+                cohorts_obj = l_data.get("cohorts") if isinstance(l_data.get("cohorts"), dict) else {}
+                for req_c in (
+                    "1_title_remediation",
+                    "2_priority_indexing_push",
+                    "3_citation_restructure",
+                    "4_sponsor_slot_update",
+                ):
+                    if req_c not in cohorts_obj:
+                        issues.append(f"Missing cohort '{req_c}' in cohort_reflection_ledger.json")
+        except Exception as exc:
+            issues.append(f"Failed to parse cohort_reflection_ledger.json: {exc}")
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": len(issues) == 0,
+        "gate": "check_cohort_reflection_gate",
+        "ledger_present": ledger_present,
+        "rolled_back_overlays_verified": rolled_back_verified,
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
 check_existence_gate = _default_verifier.check_existence_gate
 check_title_gate = _default_verifier.check_title_gate
 check_snippet_gate = _default_verifier.check_snippet_gate
@@ -6292,6 +6397,7 @@ check_cleanliness_gate = _default_verifier.check_cleanliness_gate
 check_indexing_gate = _default_verifier.check_indexing_gate
 check_content_relevance_gate = _default_verifier.check_content_relevance_gate
 check_source_keyword_inflation_gate = _default_verifier.check_source_keyword_inflation_gate
+check_cohort_reflection_gate = _default_verifier.check_cohort_reflection_gate
 audit_seo_checklist = _default_verifier.audit_seo_checklist
 run_seo_checklist_audit = audit_seo_checklist
 
