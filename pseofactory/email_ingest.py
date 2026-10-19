@@ -31,6 +31,33 @@ from pseofactory.contracts import assert_no_forbidden_dashes
 DEFAULT_MIN_POLL_INTERVAL_SECONDS = 300  # 5 minutes minimum between live IMAP queries
 DEFAULT_SAFETY_FLOOR_SECONDS = 5  # minimum seconds between forced queries
 
+ZOHO_NOTIFICATION_PARTNER_DOMAINS: Tuple[str, ...] = (
+    "mercury.com",
+    "rho.co",
+    "ramp.com",
+    "rippling.com",
+    "crestcapital.com",
+    "exeterco.com",
+    "firstam.com",
+    "splashfinancial.com",
+    "interactivebrokers.com",
+    "suretybonds.com",
+    "ipx1031.com",
+    "simplybusiness.com",
+    "xendoo.com",
+    "katalystcomms.com",
+    "dlpcapital.com",
+    "cj.com",
+    "e-file.com",
+    "eztaxreturn.com",
+    "lawdepot.com",
+    "impact.com",
+    "sofi.com",
+    "lendkey.com",
+    "gusto.com",
+    "freetaxusa.com",
+)
+
 
 @dataclass
 class EmailMessage:
@@ -353,23 +380,7 @@ class EmailIngestionEngine:
             ingested.append(msg)
 
         if self.himalaya_bin == "himalaya" and "PYTEST_CURRENT_TEST" not in os.environ:
-            sent_partner_domains = (
-                "mercury.com",
-                "rho.co",
-                "ramp.com",
-                "rippling.com",
-                "crestcapital.com",
-                "exeterco.com",
-                "firstam.com",
-                "splashfinancial.com",
-                "interactivebrokers.com",
-                "suretybonds.com",
-                "ipx1031.com",
-                "simplybusiness.com",
-                "xendoo.com",
-                "katalystcomms.com",
-                "dlpcapital.com",
-            )
+            sent_partner_domains = ZOHO_NOTIFICATION_PARTNER_DOMAINS
             skipped_sent_recipients = (
                 "partnerships@rho.co",
                 "advisory@studentloaninquiry.org",
@@ -429,7 +440,7 @@ class EmailIngestionEngine:
                 if not (
                     "claude startups" in notif_check
                     or "google for startups" in notif_check
-                    or any(tok in notif_check for tok in sent_partner_domains)
+                    or any(tok in notif_check for tok in ZOHO_NOTIFICATION_PARTNER_DOMAINS)
                 ):
                     continue
 
@@ -651,6 +662,7 @@ class EmailIngestionEngine:
             "contact@splashfinancial.com": ("prexvo", "splash_financial", "Splash Financial", "Impact.com"),
             "pleimkuehler@splashfinancial.com": ("prexvo", "splash_financial", "Splash Financial", "Impact.com"),
             "cfels@lqdigital.com": ("prexvo", "sofi", "SoFi Student Loan Refinancing", "Impact.com"),
+            "affiliates@sofi.com": ("prexvo", "sofi", "SoFi Student Loan Refinancing", "Impact.com"),
             "accounting@lendkey.com": ("prexvo", "lendkey", "LendKey Student Loan Refinancing", "Impact.com"),
             "publishers@interactivebrokers.com": ("profithelm", "interactive_brokers", "Interactive Brokers CPC Publisher Program", "In-House Direct"),
             "customercare@suretybonds.com": ("profithelm", "suretybonds_direct", "SuretyBonds.com", "In-House Direct"),
@@ -784,6 +796,93 @@ class EmailIngestionEngine:
                         date=msg.date,
                         candidate_url="https://www.xendoo.com/?fp_ref=arif-4ac24e",
                         network="FirstPromoter",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "aaron@e-file.com" in sender_lower
+                or "e-file.com" in combined_text
+            ) and (
+                "your application has been approved" in combined_text
+                or "welcome to the e-file.com affiliate program" in combined_text
+                or "approved" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="turbotax",
+                        partner_name="E-file.com Affiliate Program",
+                        category="TAX_INTELLIGENCE",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="E-file.com Affiliate Program (#4355234) approved on CJ Affiliate (30%-40% commission on paid tax returns, 120-day cookie via https://www.jdoqocy.com/click-101906407-11917161).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.jdoqocy.com/click-101906407-11917161",
+                        network="CJ Affiliate",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and "eztaxreturn" in combined_text and (
+                "welcome to the eztaxreturn" in combined_text
+                or "your application has been approved" in combined_text
+                or "approved" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="taxslayer",
+                        partner_name="ezTaxReturn.com Affiliate Program",
+                        category="TAX_INTELLIGENCE",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="ezTaxReturn.com Affiliate Program (#6874782) approved on CJ Affiliate (15% new customer / 5% returning customer commission, 90-day cookie via https://www.dpbolvw.net/click-101906407-15704796).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.dpbolvw.net/click-101906407-15704796",
+                        network="CJ Affiliate",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and "lawdepot" in combined_text and (
+                "welcome to the lawdepot" in combined_text
+                or "your application has been approved" in combined_text
+                or "approved" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="suretybonds_direct",
+                        partner_name="LawDepot Affiliate Program",
+                        category="COMMERCIAL_SURETY",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="LawDepot Affiliate Program (#4544498) approved on CJ Affiliate (30% orders + $6.50 free trial, 120-day cookie via https://www.jdoqocy.com/click-101906407-16985242).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://www.jdoqocy.com/click-101906407-16985242",
+                        network="CJ Affiliate",
                     )
                 )
                 continue

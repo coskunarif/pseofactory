@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
     "version": "1.0.0",
-    "updated_at": "2026-10-18T19:45:00+00:00",
+    "updated_at": "2026-10-19T17:15:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -33,10 +33,29 @@
       "marketplace_status": "active",
       "identity_verification_status": "COMPLETE",
       "tax_form_status": "Comply Exchange Form W-9 submitted and active (Confirmation Code L5CBN6, EIN 41-2311423)",
+      "payout_method_status": "COMPLETE - EFT Withdrawal (free) configured and active (ProfitHelm LLC, Choice Financial Group US CHECKING, Routing XXXXXXX29, Account XXXXXXXX1395, updated 2026-10-19T18:01Z, confirmed via Zoho Inbox #1002)",
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
       "active_advertiser_contracts": 1,
+      "live_active_contracts_count": 2,
+      "live_active_contracts": [
+        {
+          "campaign_id": "37770",
+          "brand_name": "Kalshi",
+          "status": "Active (Approved 2026-10-17)",
+          "commission_terms": "$40.00 USD CPA per Trade",
+          "tracking_url": "https://kalshi.pxf.io/c/7932737/3078072/37770"
+        },
+        {
+          "campaign_id": "16354",
+          "brand_name": "Xendoo Online Accounting",
+          "status": "Active (Approved 2026-10-19)",
+          "commission_terms": "$500.00 USD CPA per Onboarded Client",
+          "tracking_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+          "short_link": "https://xendoo.pxf.io/2Rq2rg"
+        }
+      ],
       "pending_advertiser_contracts": 17,
       "verified_clicks": 3
     },
@@ -45,6 +64,8 @@
       "company_cid": "7792582",
       "publisher_id": "8101803",
       "promotional_property_id": "101725461",
+      "live_promotional_property_id": "101906407",
+      "promotional_property_name": "ProfitHelmPrimary",
       "account_user": "Arif Coskun",
       "onboarding_progress": "9_of_9_completed",
       "account_status": "ACTIVE",
@@ -52,6 +73,51 @@
       "tax_form_status": "IRS Form W-9 submitted and active (EIN ******1423)",
       "payment_method": "Direct Deposit / CJ Payments (Choice Financial Group, Routing *****1229, Account ********1395)",
       "pending_advertiser_applications": 28,
+      "live_pending_advertiser_applications": 24,
+      "active_joined_advertisers_count": 3,
+      "active_joined_advertisers": {
+        "efile_com": {
+          "advertiser_id": "4355234",
+          "advertiser_name": "E-file.com",
+          "status": "Active (Accepted 2026-10-19, Notification #846 & Inbox #999 from Aaron Rosenthal)",
+          "commission_terms": "30.00% on paid federal/state tax preparation sales (Welcome email #846 also notes 40% tier + $1.40 free return)",
+          "cookie_duration_days": 120,
+          "primary_tracking_url": "https://www.jdoqocy.com/click-101906407-11917161",
+          "alternate_tracking_urls": [
+            "https://www.dpbolvw.net/click-101906407-11917165",
+            "https://www.tkqlhce.com/click-101906407-11917138"
+          ]
+        },
+        "eztaxreturn_com": {
+          "advertiser_id": "6874782",
+          "advertiser_name": "ezTaxReturn.com",
+          "status": "Active (Accepted 2026-10-19, Notification #848)",
+          "commission_terms": "15.00% New Customer (Param 675960) / 5.00% Returning Customer (Param 675961) on federal and state filing fees",
+          "cookie_duration_days": 90,
+          "primary_tracking_url": "https://www.dpbolvw.net/click-101906407-15704796",
+          "alternate_tracking_urls": [
+            "https://www.anrdoezrs.net/click-101906407-15719586",
+            "https://www.anrdoezrs.net/click-101906407-17230749"
+          ]
+        },
+        "lawdepot": {
+          "advertiser_id": "4544498",
+          "advertiser_name": "LawDepot",
+          "status": "Active (Accepted 2026-10-19, Notification #847)",
+          "commission_terms": "30.00% Subscription & One-Time Orders | $6.50 USD per Free Trial | $35.00 USD Incorporation (CA) | $5.00 USD Online Notary (US)",
+          "cookie_duration_days": 120,
+          "primary_tracking_url": "https://www.jdoqocy.com/click-101906407-16985242",
+          "alternate_tracking_urls": [
+            "https://www.tkqlhce.com/click-101906407-16944777",
+            "https://www.jdoqocy.com/click-101906407-16995515",
+            "https://www.tkqlhce.com/click-101906407-16995795",
+            "https://www.kqzyfj.com/click-101906407-15906211",
+            "https://www.tkqlhce.com/click-101906407-16945498",
+            "https://www.kqzyfj.com/click-101906407-16995693",
+            "https://www.dpbolvw.net/click-101906407-16995712"
+          ]
+        }
+      },
       "enabled": true
     }
   },
@@ -142,6 +208,9 @@
             "rippling",
             "mercury"
           ],
+          "live_verified_clicks": 44,
+          "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
+          "payout_method": "PayPal (arif.coskun@profithelm.com - confirmed and active via Zoho Newsletter #1580)",
           "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 28 verified clicks recorded in PartnerStack Performance Overview)"
         },
         "firstpromoter_api_v1": {
@@ -355,11 +424,13 @@
           "pipeline_tier": "live_revenue_ready",
           "url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
           "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+          "impact_tracking_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+          "impact_short_link": "https://xendoo.pxf.io/2Rq2rg",
           "edge_route": "/r/crest_capital",
           "category": "COMMERCIAL_REAL_ESTATE",
           "network": "FirstPromoter / Impact.com",
           "bounty": "$250-$500",
-          "correspondence_status": "Approved & Live on FirstPromoter (Newsletter #1575 Welcome & #1576 PayPal payout verification code 679553 for arif.coskun@profithelm.com; FirstPromoter token fp_ref=arif-4ac24e active at https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client with 1 verified click recorded on FirstPromoter dashboard + Impact #16354 uContractId 30705024 [$500 Onboarded] submitted on 2026-10-18 + follow-up Sent #261 to luanne.bryant@xendoo.com & Sent #269 to lil.roberts@xendoo.com)"
+          "correspondence_status": "Approved & Live on FirstPromoter AND Impact.com (Newsletter #1575 Welcome & #1576 PayPal payout verification code 679553 for arif.coskun@profithelm.com; FirstPromoter token fp_ref=arif-4ac24e active at https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client + Impact #16354 uContractId 30705024 APPROVED on 2026-10-19 at $500.00 USD CPA per Onboarded client via https://xendoo.pxf.io/c/7932737/1357375/16354)"
         },
         "exeter1031": {
           "status": "awaiting_response",
@@ -394,11 +465,14 @@
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://turbotax.intuit.com/",
           "direct_url": "https://turbotax.intuit.com/",
+          "cj_approved_tracking_url": "https://www.jdoqocy.com/click-101906407-11917161",
+          "cj_approved_alternate_url": "https://www.dpbolvw.net/click-101906407-11917165",
+          "cj_approved_advertiser": "E-file.com (#4355234 - 30%-40% paid tax prep sale + $1.40 free return, 120-day cookie)",
           "edge_route": "/r/turbotax",
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$45-$120",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + Advertiser Applications Submitted + Publisher Intros Sent (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z after IRS Form W-9 [EIN ******1423] and Direct Deposit ACH [Routing *****1229, Account ********1395] confirmed via Inbox #991, #992, #995 & #996; submitted CJ Advertiser ID #1905878 TurboTax [$284.78 7d EPC], #4110283 TaxAct [10% Sale, $43.64 3m EPC], #4526117 FreeTaxUSA, #4355234 E-file.com & #6874782 ezTaxReturn.com + publisher intros Sent #264 to turbotax@cj.com, Sent #266 to affiliates@freetaxusa.com & Sent #267 to aaron@e-file.com; wrapped via Sovrn Commerce /r/turbotax)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + E-file.com (#4355234) Approved on 2026-10-19 (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z after IRS Form W-9 [EIN ******1423] and Direct Deposit ACH [Routing *****1229, Account ********1395] confirmed via Inbox #991, #992, #995 & #996; E-file.com CJ Advertiser ID #4355234 approved via Notification #846 & Inbox #999 from Aaron Rosenthal [aaron@e-file.com] with tracking link https://www.jdoqocy.com/click-101906407-11917161 at 30%-40% commission / 120-day cookie; TurboTax #1905878 & TaxAct #4110283 pending; wrapped via Sovrn Commerce /r/turbotax)",
           "cj_advertiser_id": "4110283",
           "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
@@ -407,11 +481,15 @@
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.taxslayer.com/",
           "direct_url": "https://www.taxslayer.com/",
+          "cj_approved_tracking_url": "https://www.dpbolvw.net/click-101906407-15704796",
+          "cj_approved_promo_10_off_url": "https://www.anrdoezrs.net/click-101906407-15719586",
+          "cj_approved_promo_20_off_url": "https://www.anrdoezrs.net/click-101906407-17230749",
+          "cj_approved_advertiser": "ezTaxReturn.com (#6874782 - 15% new customer / 5% returning customer, 90-day cookie)",
           "edge_route": "/r/taxslayer",
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + TaxSlayer Application Submitted + Publisher Intro Sent (Company CID 7792582 / Publisher ID 8101803 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; TaxSlayer CJ Advertiser ID #5273914 [0%-10% Sale], LibertyTax #3835168 & Ownwell #6784655 submitted and verified in Status: Pending Applications [28 Results] + publisher intro Sent #268 to allwyn.symon@eztaxreturn.com; wrapped via Sovrn Commerce /r/taxslayer)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + ezTaxReturn.com (#6874782) Approved on 2026-10-19 (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; ezTaxReturn.com CJ Advertiser ID #6874782 approved via Notification #848 with tracking link https://www.dpbolvw.net/click-101906407-15704796 at 15% new customer / 5% returning customer commission and 90-day cookie + publisher intro Sent #268 to allwyn.symon@eztaxreturn.com; TaxSlayer CJ Advertiser ID #5273914 pending; wrapped via Sovrn Commerce /r/taxslayer)",
           "cj_advertiser_id": "5273914",
           "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
@@ -458,11 +536,14 @@
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.suretybonds.com/",
           "direct_url": "https://www.suretybonds.com/",
+          "cj_approved_lawdepot_tracking_url": "https://www.jdoqocy.com/click-101906407-16985242",
+          "cj_approved_lawdepot_llc_url": "https://www.jdoqocy.com/click-101906407-16995515",
+          "cj_approved_lawdepot_terms": "LawDepot (#4544498 - 30% Subscription & One-Time Orders | $6.50 Free Trial | $35 Incorporation CA | $5 Online Notary US, 120-day cookie)",
           "edge_route": "/r/suretybonds_direct",
           "category": "COMMERCIAL_SURETY",
           "network": "In-House Direct",
           "bounty": "$75-$300",
-          "correspondence_status": "Application Submitted & Receipt Confirmed (Sent #251 to customercare@suretybonds.com on 2026-10-16T22:56Z; confirmed by SuretyBonds.com Customer Care in Inbox #987 on 2026-10-17T05:56Z + CJ Affiliate Hiscox Small Business Insurance #4165310 & Simply Business US #5808859 submitted on CID 8101803; awaiting agency referral tracking URL)"
+          "correspondence_status": "Application Submitted & Receipt Confirmed + CJ LawDepot (#4544498) Approved (Sent #251 to customercare@suretybonds.com on 2026-10-16T22:56Z; confirmed by SuretyBonds.com Customer Care in Inbox #987 on 2026-10-17T05:56Z + CJ Affiliate Hiscox Small Business Insurance #4165310 & Simply Business US #5808859 submitted on CID 8101803 + LawDepot CJ Advertiser ID #4544498 approved on 2026-10-19 via Notification #847 with tracking link https://www.jdoqocy.com/click-101906407-16985242; awaiting SuretyBonds agency referral tracking URL)"
         },
         "next_insurance_b2b": {
           "status": "awaiting_response",
@@ -503,7 +584,7 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted & Followed Up (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984; awaiting referral tracking URL)",
+          "correspondence_status": "Application Submitted & Direct Reply Sent to Wade Fenton (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied directly to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z requesting unique referral partner tracking link for profithelm.com/tools/invoice-factoring-vs-business-line-of-credit-calculator/)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"

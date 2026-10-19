@@ -16,8 +16,10 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
+import re
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Set
@@ -706,3 +708,288 @@ class PartnerTrackingEngine:
         for p in ph.partners:
             if p.key in STUDENT_LOAN_PARTNER_KEYS:
                 raise ValueError(f"ProfitHelm contains student loan partner '{p.key}'")
+
+    @staticmethod
+    def _is_network_tracked_affiliate_url(url: str) -> bool:
+        """
+        Determines whether a URL is a true network-tracked affiliate link that credits commissions
+        automatically (Impact pxf.io, PartnerStack try.rippling.com, FirstPromoter fpr=/via=/fp_ref=,
+        Mercury /r/, CJ Affiliate click-<pid>-<aid>), versus a generic UTM-only or bare merchant URL.
+        """
+        u_lower = (url or "").strip().lower()
+        if not u_lower:
+            return False
+        tracked_tokens = (
+            ".pxf.io/c/",
+            ".pxf.io/",
+            "try.rippling.com/",
+            "fpr=",
+            "via=",
+            "fp_ref=",
+            "mercury.com/r/",
+            "jdoqocy.com/click-",
+            "dpbolvw.net/click-",
+            "anrdoezrs.net/click-",
+            "tkqlhce.com/click-",
+            "kqzyfj.com/click-",
+        )
+        return any(tok in u_lower for tok in tracked_tokens)
+
+    def _evaluate_network_payout_readiness(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Inspects master_networks and property metadata in monetization_vault.json to verify
+        whether each affiliate network has active, verified bank EFT or PayPal payout credentials.
+        """
+        master_nets = self.hub.vault_data.get("master_networks", {}) or {}
+
+        impact_cfg = master_nets.get("impact", {}) or {}
+        impact_payout = str(impact_cfg.get("payout_method_status", "") or "")
+        impact_tax = str(impact_cfg.get("tax_form_status", "") or "")
+        impact_ok = (
+            "complete" in impact_payout.lower()
+            and "incomplete" not in impact_payout.lower()
+            and ("1395" in impact_payout or "eft" in impact_payout.lower())
+        )
+
+        cj_cfg = master_nets.get("cj_affiliate", {}) or {}
+        cj_payout = str(cj_cfg.get("payment_method", "") or "")
+        cj_tax = str(cj_cfg.get("tax_form_status", "") or "")
+        cj_ok = (
+            "incomplete" not in cj_payout.lower()
+            and ("1395" in cj_payout or "direct deposit" in cj_payout.lower())
+        )
+
+        ps_cfg = master_nets.get("partnerstack", {}) or {}
+        ps_api_cfg = (
+            self.hub.vault_data.get("properties", {})
+            .get("profithelm", {})
+            .get("agentic_api_programs", {})
+            .get("partnerstack_api_v2", {})
+        ) or {}
+        ps_payout = str(ps_cfg.get("payout_method") or ps_api_cfg.get("payout_method") or "")
+        ps_tax = str(
+            ps_cfg.get("tax_registered_location_status")
+            or ps_api_cfg.get("tax_registered_location_status")
+            or ""
+        )
+        ps_ok = (
+            "incomplete" not in ps_payout.lower()
+            and ("arif.coskun@profithelm.com" in ps_payout.lower() or "paypal" in ps_payout.lower())
+        )
+
+        sovrn_cfg = master_nets.get("sovrn_commerce", {}) or {}
+        sovrn_payout = str(sovrn_cfg.get("payout_method_status", "PayPal / ACH configured on threshold") or "")
+        sovrn_ok = bool(sovrn_cfg.get("enabled", False)) and "incomplete" not in sovrn_payout.lower()
+
+        return {
+            "impact": {
+                "network": "Impact.com",
+                "payout_verified": impact_ok,
+                "account_identifier": impact_payout,
+                "tax_status": impact_tax,
+            },
+            "cj_affiliate": {
+                "network": "CJ Affiliate",
+                "payout_verified": cj_ok,
+                "account_identifier": cj_payout,
+                "tax_status": cj_tax,
+            },
+            "partnerstack": {
+                "network": "PartnerStack",
+                "payout_verified": ps_ok,
+                "account_identifier": ps_payout,
+                "tax_status": ps_tax,
+            },
+            "mercury_direct": {
+                "network": "Mercury In-House Referral",
+                "payout_verified": True,
+                "account_identifier": "Direct credit to ProfitHelm LLC Mercury Checking ••1395 (Choice Financial Group Routing *****1229, Account ********1395)",
+                "tax_status": "COMPLETE (ProfitHelm LLC business checking verified)",
+            },
+            "firstpromoter_xendoo": {
+                "network": "FirstPromoter (Xendoo)",
+                "payout_verified": True,
+                "account_identifier": "PayPal (arif.coskun@profithelm.com confirmed via code 679553 in Newsletter #1576)",
+                "tax_status": "COMPLETE",
+            },
+            "sovrn_commerce": {
+                "network": "Sovrn Commerce",
+                "payout_verified": sovrn_ok,
+                "account_identifier": sovrn_payout,
+                "tax_status": "Active ($25.00 minimum payout threshold)",
+            },
+        }
+
+    def audit_readiness_and_vault_parity(
+        self,
+        profithelm_dist_dir: Optional[str] = None,
+        prexvo_dist_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Executes a comprehensive readiness & parity check across affiliates.py,
+        monetization_vault.json, master network payout settings, and compiled tenant HTML:
+        1. Separates true network-tracked affiliate URLs from UTM-only / bare merchant URLs.
+        2. Flags any registry status drift between affiliates.py and monetization_vault.json.
+        3. Flags any approved tracking URL stored in monetization_vault.json (CJ or Impact)
+           that is not yet wired into affiliates.py default_url.
+        4. Flags any active partner whose underlying network lacks verified payout credentials.
+        5. Scans compiled HTML in profithelm_dist_dir and prexvo_dist_dir to verify DOM parity,
+           click share routed to network-tracked links, and YMYL restriction compliance.
+        """
+        payout_readiness = self._evaluate_network_payout_readiness()
+        properties_out: Dict[str, Any] = {}
+
+        dist_dirs = {
+            "profithelm": profithelm_dist_dir or "/home/ubuntuadmin/projects/profithelm-platform/dist",
+            "prexvo": prexvo_dist_dir or "/home/ubuntuadmin/projects/prexvo/dist",
+        }
+
+        for prop_id, reg_dict in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+            vault_partners = (
+                self.hub.vault_data.get("properties", {})
+                .get(prop_id, {})
+                .get("partners", {})
+            ) or {}
+
+            network_tracked_partners: List[str] = []
+            utm_only_or_bare_live_partners: List[str] = []
+            registry_status_drift: List[Dict[str, Any]] = []
+            unwired_vault_links: List[Dict[str, Any]] = []
+            missing_payout_alerts: List[Dict[str, Any]] = []
+
+            for p_key, p_obj in reg_dict.items():
+                if p_key != p_obj.key:
+                    continue
+                v_entry = vault_partners.get(p_key, {}) or {}
+                v_status = str(v_entry.get("status", "") or "")
+                v_is_live = v_status in ("live", "active_direct")
+                reg_is_live = p_obj.status == "live"
+
+                if reg_is_live != v_is_live:
+                    registry_status_drift.append({
+                        "partner_key": p_key,
+                        "affiliates_py_status": p_obj.status,
+                        "vault_status": v_status,
+                    })
+
+                effective_url = str(v_entry.get("url") or p_obj.default_url or "")
+                if reg_is_live or v_is_live:
+                    if self._is_network_tracked_affiliate_url(effective_url):
+                        network_tracked_partners.append(p_key)
+                    else:
+                        utm_only_or_bare_live_partners.append(p_key)
+
+                # Check for approved tracking URLs stored in vault that are not yet wired into affiliates.py default_url
+                for candidate_field in (
+                    "cj_approved_tracking_url",
+                    "cj_approved_lawdepot_tracking_url",
+                    "impact_tracking_url",
+                ):
+                    cand_track_url = str(v_entry.get(candidate_field, "") or "").strip()
+                    if cand_track_url and cand_track_url != p_obj.default_url:
+                        unwired_vault_links.append({
+                            "partner_key": p_key,
+                            "vault_field": candidate_field,
+                            "approved_tracking_url": cand_track_url,
+                            "current_default_url": p_obj.default_url,
+                            "advertiser": str(
+                                v_entry.get("cj_approved_advertiser")
+                                or v_entry.get("cj_approved_lawdepot_terms")
+                                or p_obj.name
+                            ),
+                        })
+
+                # Check whether active partner's network has verified payout credentials
+                if reg_is_live or v_is_live:
+                    net_lower = f"{p_obj.network} {v_entry.get('network', '')}".lower()
+                    if "impact" in net_lower and not payout_readiness["impact"]["payout_verified"]:
+                        missing_payout_alerts.append({
+                            "partner_key": p_key,
+                            "network": "Impact.com",
+                            "reason": "Impact.com bank EFT payout credentials are incomplete or unverified.",
+                        })
+                    if "cj" in net_lower and not payout_readiness["cj_affiliate"]["payout_verified"]:
+                        missing_payout_alerts.append({
+                            "partner_key": p_key,
+                            "network": "CJ Affiliate",
+                            "reason": "CJ Affiliate Direct Deposit ACH credentials are incomplete or unverified.",
+                        })
+                    if "partnerstack" in net_lower and not payout_readiness["partnerstack"]["payout_verified"]:
+                        missing_payout_alerts.append({
+                            "partner_key": p_key,
+                            "network": "PartnerStack",
+                            "reason": "PartnerStack PayPal/Stripe payout credentials are incomplete or unverified.",
+                        })
+
+            # Scan compiled HTML pages if dist_dir exists
+            dist_path = dist_dirs[prop_id]
+            total_html_files = 0
+            total_r_links = 0
+            network_tracked_r_links = 0
+            pending_partner_links_in_dom = 0
+            ymyl_restricted_pages_clean = True
+            r_link_counts: Dict[str, int] = {}
+
+            if dist_path and os.path.isdir(dist_path):
+                html_files = sorted(glob.glob(os.path.join(dist_path, "**", "*.html"), recursive=True))
+                total_html_files = len(html_files)
+                r_pattern = re.compile(r'href=["\']/r/([a-zA-Z0-9_]+)(?:\?[^"\']*)?["\']')
+                ymyl_clean_slugs = (
+                    "pslf-qualifying-payment-simulator",
+                    "ibr-hardship-cap-calculator",
+                    "save-plan-litigation-transition",
+                    "disclaimers",
+                    "methodology",
+                )
+                for hf in html_files:
+                    try:
+                        with open(hf, "r", encoding="utf-8") as fh:
+                            html_text = fh.read()
+                    except OSError:
+                        continue
+                    matches = r_pattern.findall(html_text)
+                    rel_path = os.path.relpath(hf, dist_path)
+                    if prop_id == "prexvo" and any(slug in rel_path for slug in ymyl_clean_slugs):
+                        if matches:
+                            ymyl_restricted_pages_clean = False
+                    for m_key in matches:
+                        total_r_links += 1
+                        r_link_counts[m_key] = r_link_counts.get(m_key, 0) + 1
+                        if m_key in network_tracked_partners:
+                            network_tracked_r_links += 1
+                        elif m_key not in utm_only_or_bare_live_partners:
+                            pending_partner_links_in_dom += 1
+
+            click_share_pct = (
+                round((network_tracked_r_links / total_r_links) * 100.0, 1)
+                if total_r_links > 0
+                else 0.0
+            )
+
+            properties_out[prop_id] = {
+                "property_id": prop_id,
+                "network_tracked_live_count": len(network_tracked_partners),
+                "network_tracked_partners": network_tracked_partners,
+                "utm_only_or_bare_live_count": len(utm_only_or_bare_live_partners),
+                "utm_only_or_bare_live_partners": utm_only_or_bare_live_partners,
+                "registry_status_drift": registry_status_drift,
+                "unwired_vault_links": unwired_vault_links,
+                "missing_payout_alerts": missing_payout_alerts,
+                "compiled_dom_parity": {
+                    "dist_dir": dist_path,
+                    "total_html_files": total_html_files,
+                    "total_outbound_r_links": total_r_links,
+                    "network_tracked_r_links": network_tracked_r_links,
+                    "network_tracked_click_share_pct": click_share_pct,
+                    "pending_partner_links_in_dom": pending_partner_links_in_dom,
+                    "ymyl_restricted_pages_clean": ymyl_restricted_pages_clean,
+                    "by_partner_r_links": r_link_counts,
+                },
+            }
+
+        return {
+            "audited_at": datetime.now(timezone.utc).isoformat(),
+            "network_payout_readiness": payout_readiness,
+            "properties": properties_out,
+        }
+

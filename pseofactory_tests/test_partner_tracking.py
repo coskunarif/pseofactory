@@ -1387,3 +1387,205 @@ def test_publisher_introduction_sent_emails_classification():
     assert by_id["274"].property_id == "prexvo"
 
 
+def test_cj_and_impact_inbound_approval_parsing_and_notification_filter():
+    """
+    Asserts that:
+    1. Inbound approval replies from outbound_partner_map contacts (e.g., Aaron Rosenthal at
+       aaron@e-file.com in Inbox #999: 'Your application has been approved') are classified
+       as APPLICATION_APPROVED rather than swallowed as APPLICATION_SUBMITTED.
+    2. CJ Affiliate welcome notifications (#846 E-file.com, #847 LawDepot, #848 ezTaxReturn.com)
+       and Impact banking/approval notifications (#1002) are matched by Notification filter domains
+       and classified accurately.
+    3. Re-sent SoFi publisher introductions to affiliates@sofi.com (Sent #275) classify cleanly.
+    """
+    import pseofactory.email_ingest as email_ingest_mod
+
+    notif_domains = getattr(email_ingest_mod, "ZOHO_NOTIFICATION_PARTNER_DOMAINS", ())
+    for required_dom in ("cj.com", "e-file.com", "eztaxreturn.com", "lawdepot.com", "impact.com", "sofi.com"):
+        assert required_dom in notif_domains
+
+    engine = EmailIngestionEngine()
+    messages = [
+        EmailMessage(
+            id="999",
+            message_id="msg-inbox-999",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-19T12:57:55Z",
+            subject="Re: CJ Affiliate Application Follow-Up (CID #8101803) - ProfitHelm LLC Tax Calculators",
+            sender_name="Aaron Rosenthal",
+            sender_email="aaron@e-file.com",
+            body_snippet="Hello, Thank you for your email. Your application has been approved. Regards, Aaron Rosenthal, Director of Marketing | E-file",
+        ),
+        EmailMessage(
+            id="notif-846",
+            message_id="msg-notif-846",
+            account="zoho",
+            mailbox="Notification",
+            date="2026-10-19T12:25:34Z",
+            subject="Welcome to the E-file.com affiliate program",
+            sender_name="E-file.com",
+            sender_email="noreply@cj.com",
+            body_snippet="Welcome to the E-file.com affiliate program on CJ Affiliate (#4355234). Earn 40% commission on all paid tax returns.",
+        ),
+        EmailMessage(
+            id="notif-848",
+            message_id="msg-notif-848",
+            account="zoho",
+            mailbox="Notification",
+            date="2026-10-19T13:20:01Z",
+            subject="Welcome to the ezTaxReturn.com Affiliate Program",
+            sender_name="ezTaxReturn.com",
+            sender_email="noreply@cj.com",
+            body_snippet="Welcome to the ezTaxReturn.com Affiliate Program (#6874782). 90-day cookie.",
+        ),
+        EmailMessage(
+            id="notif-847",
+            message_id="msg-notif-847",
+            account="zoho",
+            mailbox="Notification",
+            date="2026-10-19T12:35:05Z",
+            subject="Welcome to the LawDepot Affiliate Program!",
+            sender_name="LawDepot",
+            sender_email="noreply@cj.com",
+            body_snippet="Welcome to the LawDepot Affiliate Program (#4544498). Earn 30% on orders and $6.50 per free trial.",
+        ),
+        EmailMessage(
+            id="sent-275",
+            message_id="msg-sent-275",
+            account="zoho",
+            mailbox="Sent",
+            date="2026-10-18T21:39:34Z",
+            subject="Impact.com Publisher Introduction: Prexvo.com (Account #7932737) - SoFi Student Loan Refinancing (#11190)",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            body_snippet="We submitted our publisher application to SoFi (#11190) on Impact.com.",
+            raw_headers={"to_email": "affiliates@sofi.com"},
+        ),
+    ]
+
+    cls = engine.classify_partner_emails(messages)
+    by_id = {c.email_id: c for c in cls}
+
+    assert by_id["999"].partner_key == "turbotax"
+    assert by_id["999"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["999"].requires_operator_decision is False
+    assert "click-101906407-11917161" in by_id["999"].candidate_url
+
+    assert by_id["notif-846"].partner_key == "turbotax"
+    assert by_id["notif-846"].classification_type == "APPLICATION_APPROVED"
+    assert "click-101906407-11917161" in by_id["notif-846"].candidate_url
+
+    assert by_id["notif-848"].partner_key == "taxslayer"
+    assert by_id["notif-848"].classification_type == "APPLICATION_APPROVED"
+    assert "click-101906407-15704796" in by_id["notif-848"].candidate_url
+
+    assert by_id["notif-847"].partner_key == "suretybonds_direct"
+    assert by_id["notif-847"].classification_type == "APPLICATION_APPROVED"
+    assert "click-101906407-16985242" in by_id["notif-847"].candidate_url
+
+    assert by_id["sent-275"].partner_key == "sofi"
+    assert by_id["sent-275"].property_id == "prexvo"
+    assert by_id["sent-275"].classification_type == "APPLICATION_SUBMITTED"
+
+
+def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts(temp_bus_path, temp_email_paths):
+    """
+    Asserts that PartnerTrackingEngine.audit_readiness_and_vault_parity():
+    1. Flags any registry status drift where monetization_vault.json is live/active_direct
+       while static affiliates.py still has status='pending' (crest_capital and ipx1031 on ProfitHelm,
+       and the 5 student loan partners on Prexvo).
+    2. Distinguishes true network-tracked affiliate URLs (is_network_tracked_link=True) from
+       UTM-only / bare merchant URLs (ipx1031 on ProfitHelm and the 5 pending Impact contracts on Prexvo).
+    3. Flags whenever an approved tracking link in monetization_vault.json (such as CJ E-file.com,
+       ezTaxReturn.com, LawDepot, or Impact Xendoo $500 CPA) is not yet wired as default_url in affiliates.py.
+    4. Flags whenever an active partner's network or dashboard lacks verified payout credentials
+       (and triggers an explicit alert if a simulated vault has missing EFT/PayPal credentials).
+    5. Verifies vault-to-placement parity across compiled HTML pages in profithelm-platform and prexvo.
+    """
+    import copy
+    from pseofactory.affiliates_hub import MonetizationHub
+
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+
+    audit = tracker.audit_readiness_and_vault_parity(
+        profithelm_dist_dir="/home/ubuntuadmin/projects/profithelm-platform/dist",
+        prexvo_dist_dir="/home/ubuntuadmin/projects/prexvo/dist",
+    )
+
+    # 1. Verify registry status drift detection between affiliates.py and monetization_vault.json
+    ph_audit = audit["properties"]["profithelm"]
+    px_audit = audit["properties"]["prexvo"]
+    drift_keys = {d["partner_key"] for d in ph_audit["registry_status_drift"]}
+    assert drift_keys == {"crest_capital"}
+    px_drift_keys = {d["partner_key"] for d in px_audit["registry_status_drift"]}
+    assert px_drift_keys == set()
+
+    assert ph_audit["network_tracked_live_count"] == 6
+    assert set(ph_audit["network_tracked_partners"]) == {
+        "coinledger",
+        "koinly",
+        "rippling",
+        "mercury",
+        "kalshi",
+        "crest_capital",
+    }
+    assert ph_audit["utm_only_or_bare_live_partners"] == ["ipx1031"]
+    assert px_audit["network_tracked_live_count"] == 0
+    assert set(px_audit["utm_only_or_bare_live_partners"]) == {
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
+    }
+
+    # 3. Verify unwired approved vault links are flagged automatically
+    unwired_keys = {it["partner_key"] for it in ph_audit["unwired_vault_links"]}
+    assert "turbotax" in unwired_keys  # CJ E-file.com #4355234 approved link in vault
+    assert "taxslayer" in unwired_keys  # CJ ezTaxReturn.com #6874782 approved link in vault
+    assert "suretybonds_direct" in unwired_keys  # CJ LawDepot #4544498 approved link in vault
+    assert "crest_capital" in unwired_keys  # Impact Xendoo #16354 $500 CPA upgrade link in vault
+
+    # 4. Verify master network payout credentials are verified for Impact, CJ, PartnerStack, Mercury
+    payout_map = audit["network_payout_readiness"]
+    assert payout_map["impact"]["payout_verified"] is True
+    assert "XXXXXXXX1395" in payout_map["impact"]["account_identifier"]
+    assert payout_map["cj_affiliate"]["payout_verified"] is True
+    assert "********1395" in payout_map["cj_affiliate"]["account_identifier"]
+    assert payout_map["partnerstack"]["payout_verified"] is True
+    assert "arif.coskun@profithelm.com" in payout_map["partnerstack"]["account_identifier"]
+    assert payout_map["mercury_direct"]["payout_verified"] is True
+
+    # Simulate missing payout credentials on Impact and verify the guardrail flags affected active partners
+    broken_vault = copy.deepcopy(tracker.hub.vault_data)
+    broken_vault["master_networks"]["impact"]["payout_method_status"] = "INCOMPLETE - missing bank account"
+    with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as tf:
+        json.dump(broken_vault, tf)
+        broken_vault_path = tf.name
+    try:
+        broken_tracker = PartnerTrackingEngine(
+            email_engine=email_engine,
+            action_bus=action_bus,
+            monetization_hub=MonetizationHub(vault_path=broken_vault_path),
+        )
+        broken_audit = broken_tracker.audit_readiness_and_vault_parity()
+        assert broken_audit["network_payout_readiness"]["impact"]["payout_verified"] is False
+        flagged_payout_partners = {
+            it["partner_key"] for it in broken_audit["properties"]["profithelm"]["missing_payout_alerts"]
+        }
+        assert "kalshi" in flagged_payout_partners
+    finally:
+        if os.path.exists(broken_vault_path):
+            os.remove(broken_vault_path)
+
+    # 5. Verify compiled tenant placement parity across profithelm-platform and prexvo
+    assert ph_audit["compiled_dom_parity"]["total_outbound_r_links"] == 671
+    assert ph_audit["compiled_dom_parity"]["network_tracked_click_share_pct"] == 78.8
+    assert ph_audit["compiled_dom_parity"]["pending_partner_links_in_dom"] == 0
+    assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] == 76
+    assert px_audit["compiled_dom_parity"]["ymyl_restricted_pages_clean"] is True
+
