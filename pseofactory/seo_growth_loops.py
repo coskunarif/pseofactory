@@ -3140,7 +3140,7 @@ def evaluate_closed_loop_cohort_reflection(
                 ov_changed = True
             if ov_changed and persist:
                 try:
-                    ov_path.write_text(json.dumps(ov_data, indent=2), encoding="utf-8")
+                    ov_path.write_text(json.dumps(ov_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                 except Exception:
                     pass
 
@@ -3435,7 +3435,7 @@ def evaluate_closed_loop_cohort_reflection(
                 target_ov_file = root / ".agy" / "overlays" / f"{flat_rel_slug}.json"
                 target_ov_file.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    target_ov_file.write_text(json.dumps(ov_spec_missing, indent=2), encoding="utf-8")
+                    target_ov_file.write_text(json.dumps(ov_spec_missing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                     overlay_files_by_slug[rel_slug] = target_ov_file
                     overlay_files_by_slug[flat_rel_slug] = target_ov_file
                 except Exception:
@@ -3478,7 +3478,7 @@ def evaluate_closed_loop_cohort_reflection(
                     target_ov_file = root / ".agy" / "overlays" / f"{flat_rel_slug}.json"
                     target_ov_file.parent.mkdir(parents=True, exist_ok=True)
                     try:
-                        target_ov_file.write_text(json.dumps(ov_spec, indent=2), encoding="utf-8")
+                        target_ov_file.write_text(json.dumps(ov_spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                         overlay_files_by_slug[rel_slug] = target_ov_file
                         overlay_files_by_slug[flat_rel_slug] = target_ov_file
                     except Exception:
@@ -3510,7 +3510,7 @@ def evaluate_closed_loop_cohort_reflection(
                 ov_spec["ai_mode_decision_matrix"] = fresh_spec["ai_mode_decision_matrix"]
                 if persist and ov_existing_path:
                     try:
-                        ov_existing_path.write_text(json.dumps(ov_spec, indent=2), encoding="utf-8")
+                        ov_existing_path.write_text(json.dumps(ov_spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                     except Exception:
                         pass
 

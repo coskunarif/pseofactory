@@ -59,7 +59,7 @@ def _slug_from_url_or_query(target_url: str = "", query: str = "", default_slug:
             if p.strip() and p.strip().lower() not in ("tools", "index.html")
         ]
         clean_parts = [p for p in clean_parts if p]
-        if len(clean_parts) >= 2 and clean_parts[-2] in ("irs-2027-tax-brackets", "section-1031-calculator"):
+        if len(clean_parts) >= 2 and clean_parts[-2] in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
             return f"{clean_parts[-2]}/{clean_parts[-1]}"
         if clean_parts:
             return clean_parts[-1]
@@ -67,7 +67,7 @@ def _slug_from_url_or_query(target_url: str = "", query: str = "", default_slug:
         parsed = urllib.parse.urlparse(str(target_url))
         parts = [p for p in parsed.path.split("/") if p and p.lower() not in ("tools", "index.html")]
         if parts:
-            if len(parts) >= 2 and parts[-2].lower() in ("irs-2027-tax-brackets", "section-1031-calculator"):
+            if len(parts) >= 2 and parts[-2].lower() in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
                 parent = re.sub(r"[^a-z0-9-]+", "-", parts[-2].lower()).strip("-")
                 child = re.sub(r"[^a-z0-9-]+", "-", parts[-1].lower()).strip("-")
                 if parent and child:
@@ -4312,7 +4312,9 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                     merged[faq_key] = cur_faqs
 
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+            serialized_merged = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+            if not path.is_file() or path.read_text(encoding="utf-8") != serialized_merged:
+                path.write_text(serialized_merged, encoding="utf-8")
             return merged, True
 
     spec_to_write = dict(spec)
@@ -4320,7 +4322,9 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
     if all_qs and "grouped_queries" not in spec_to_write:
         spec_to_write["grouped_queries"] = all_qs
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(spec_to_write, indent=2), encoding="utf-8")
+    serialized_spec = json.dumps(spec_to_write, indent=2, ensure_ascii=False) + "\n"
+    if not path.is_file() or path.read_text(encoding="utf-8") != serialized_spec:
+        path.write_text(serialized_spec, encoding="utf-8")
     return spec_to_write, True
 
 
@@ -5362,11 +5366,19 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     existing_data = json.loads(match.group(1).strip())
                     if isinstance(existing_data, dict) and "@graph" in existing_data and isinstance(existing_data["@graph"], list):
                         faq_node = next((n for n in existing_data["@graph"] if n.get("@type") == "FAQPage"), None)
+                        faq_modified = False
                         if faq_node:
-                            existing_qs = {q.get("name") for q in faq_node.get("mainEntity", []) if isinstance(q, dict)}
+                            existing_qs = {
+                                html_lib.unescape(str(q.get("name") or "")).strip()
+                                for q in faq_node.get("mainEntity", [])
+                                if isinstance(q, dict)
+                            }
                             for q in schema_entities:
-                                if q.get("name") not in existing_qs:
+                                q_norm = html_lib.unescape(str(q.get("name") or "")).strip()
+                                if q_norm not in existing_qs:
                                     faq_node.setdefault("mainEntity", []).append(q)
+                                    existing_qs.add(q_norm)
+                                    faq_modified = True
                         else:
                             faq_copy = dict(faq_ld_json)
                             faq_copy.pop("@context", None)
@@ -5375,9 +5387,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                                 faq_copy["@id"] = f"{webpage_node['@id'].split('#')[0]}#faq"
                                 faq_copy["isPartOf"] = {"@id": webpage_node["@id"]}
                             existing_data["@graph"].append(faq_copy)
+                            faq_modified = True
 
-                        new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
-                        html = html[: match.start()] + new_script + html[match.end() :]
+                        if faq_modified:
+                            new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
+                            html = html[: match.start()] + new_script + html[match.end() :]
                     else:
                         json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
                         if "</head>" in html:

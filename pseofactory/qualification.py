@@ -2523,6 +2523,29 @@ def reconcile_tenant_topical_authority_and_cannibalization(
                 except Exception:
                     pass
 
+    if prop == "profithelm":
+        from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+        veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
+        for ov_dir in (agy_ov_dir, cnt_ov_dir):
+            if not ov_dir.is_dir():
+                continue
+            for v_slug in sorted(veh_slugs):
+                unpref_f = ov_dir / f"{v_slug}.json"
+                pref_stem = f"section-179-calculator-{v_slug}"
+                pref_f = ov_dir / f"{pref_stem}.json"
+                if unpref_f.is_file() and pref_f.is_file():
+                    try:
+                        ov_data = json.loads(unpref_f.read_text(encoding="utf-8"))
+                        if isinstance(ov_data, dict):
+                            bucket = grouped_queries_by_leaf.setdefault(pref_stem, [])
+                            for q_item in [ov_data.get("query"), ov_data.get("target_query"), *(ov_data.get("grouped_queries") or [])]:
+                                q_str = str(q_item or "").strip().lower()
+                                if q_str and q_str not in bucket:
+                                    bucket.append(q_str)
+                        unpref_f.unlink()
+                    except Exception:
+                        pass
+
     all_ov_names = sorted(
         {f.name for f in agy_ov_dir.glob("*.json")}
         | ({f.name for f in cnt_ov_dir.glob("*.json")} if cnt_ov_dir.is_dir() else set())
@@ -3414,6 +3437,36 @@ def reconcile_metric_recovery_ledger(
     root = Path(repo_root)
     prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
     domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    if prop == "profithelm":
+        from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+        veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
+        for ov_dir in (root / ".agy" / "overlays", root / "content" / "overlays"):
+            if not ov_dir.is_dir():
+                continue
+            for v_slug in sorted(veh_slugs):
+                unpref_f = ov_dir / f"{v_slug}.json"
+                pref_f = ov_dir / f"section-179-calculator-{v_slug}.json"
+                if unpref_f.is_file() and pref_f.is_file():
+                    try:
+                        unpref_data = json.loads(unpref_f.read_text(encoding="utf-8"))
+                        pref_data = json.loads(pref_f.read_text(encoding="utf-8"))
+                        if isinstance(unpref_data, dict) and isinstance(pref_data, dict):
+                            existing_gq = [str(x).strip() for x in (pref_data.get("grouped_queries") or []) if str(x).strip()]
+                            base_q = str(pref_data.get("query") or pref_data.get("target_query") or "").strip()
+                            if base_q and base_q.lower() not in {x.lower() for x in existing_gq}:
+                                existing_gq.insert(0, base_q)
+                            seen_lower = {x.lower() for x in existing_gq}
+                            for q_item in [unpref_data.get("query"), unpref_data.get("target_query"), *(unpref_data.get("grouped_queries") or [])]:
+                                q_str = str(q_item or "").strip()
+                                if q_str and q_str.lower() not in seen_lower:
+                                    existing_gq.append(q_str)
+                                    seen_lower.add(q_str.lower())
+                            if existing_gq:
+                                pref_data["grouped_queries"] = existing_gq
+                            pref_f.write_text(json.dumps(pref_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                        unpref_f.unlink()
+                    except Exception:
+                        pass
     ledger_path = root / ".agy" / "metric_recovery_ledger.json"
     result = {
         "retired_snapshots_rolled_up": 0,

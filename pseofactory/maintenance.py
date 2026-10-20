@@ -4417,6 +4417,8 @@ def _extract_faq_schema_and_body_counts(html_content: str) -> Tuple[List[Tuple[s
         except Exception:
             pass
 
+    import html as _html_lib
+
     body_pairs: List[Tuple[str, str]] = []
     seen_body_q: set = set()
     for dm in re.finditer(r"<details\b[^>]*>([\s\S]*?)</details>", html_content, re.IGNORECASE):
@@ -4424,8 +4426,8 @@ def _extract_faq_schema_and_body_counts(html_content: str) -> Tuple[List[Tuple[s
         sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", d_inner, re.IGNORECASE)
         pm = re.search(r"<p\b[^>]*>([\s\S]*?)</p>", d_inner, re.IGNORECASE)
         if sm and pm:
-            q_clean = re.sub(r"<[^>]+>", "", sm.group(1)).replace("&amp;", "&").strip()
-            a_clean = re.sub(r"<[^>]+>", "", pm.group(1)).replace("&amp;", "&").strip()
+            q_clean = _html_lib.unescape(re.sub(r"<[^>]+>", "", sm.group(1))).strip()
+            a_clean = _html_lib.unescape(re.sub(r"<[^>]+>", "", pm.group(1))).strip()
             q_key = q_clean.lower()
             if q_clean and a_clean and q_key not in seen_body_q:
                 seen_body_q.add(q_key)
@@ -5237,6 +5239,7 @@ def _normalize_page_structure_and_geo_parity(
         changed = True
 
     # 6. Deduplicate visible <details> FAQs in <body> and synchronize 1:1 with FAQPage JSON-LD in <head>
+    import html as _html_lib
     seen_dom_q: set = set()
 
     def _dedup_details_faq(dm: re.Match) -> str:
@@ -5244,7 +5247,7 @@ def _normalize_page_structure_and_geo_parity(
         sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", d_full, re.IGNORECASE)
         if not sm:
             return d_full
-        q_norm = re.sub(r"<[^>]+>", "", sm.group(1)).replace("&amp;", "&").strip().lower()
+        q_norm = _html_lib.unescape(re.sub(r"<[^>]+>", "", sm.group(1))).strip().lower()
         if q_norm in seen_dom_q:
             return ""
         seen_dom_q.add(q_norm)
@@ -5282,8 +5285,8 @@ def _normalize_page_structure_and_geo_parity(
         schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(updated)
 
     if body_faqs:
-        schema_q_list = [q.replace("&amp;", "&").strip() for q, _ in schema_faqs]
-        body_q_list = [q.replace("&amp;", "&").strip() for q, _ in body_faqs]
+        schema_q_list = [_html_lib.unescape(q).strip() for q, _ in schema_faqs]
+        body_q_list = [_html_lib.unescape(q).strip() for q, _ in body_faqs]
         if schema_q_list != body_q_list:
             faq_entities = [
                 {
@@ -6224,7 +6227,24 @@ class RetroReflectionEngine:
             if sidecar_path.is_file():
                 try:
                     existing_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-                    if existing_sidecar != manifest:
+                    sidecar_stat = str(existing_sidecar.get("statutory_authority") or "")
+                    sidecar_needs_heal = (
+                        not isinstance(existing_sidecar, dict)
+                        or not existing_sidecar.get("formula")
+                        or not isinstance(existing_sidecar.get("inputs"), dict)
+                        or existing_sidecar.get("published_output") is None
+                        or (
+                            property_id.lower() != "prexvo"
+                            and (
+                                (not _is_179_or_equipment_slug(slug) and "Section 179" in sidecar_stat)
+                                or (
+                                    "CFTC 17 CFR Part 40" in sidecar_stat
+                                    and not any(k in slug.lower() for k in ("prediction", "kalshi", "polymarket", "odds", "1256"))
+                                )
+                            )
+                        )
+                    )
+                    if sidecar_needs_heal and existing_sidecar != manifest:
                         sidecar_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
                 except Exception:
                     pass
@@ -7032,36 +7052,6 @@ class RetroReflectionEngine:
         scanned = 0
         retrofitted_paths: List[str] = []
         agy_dir = d.parent / ".agy"
-        if agy_dir.is_dir():
-            try:
-                from pseofactory.seo_growth_loops import evaluate_closed_loop_cohort_reflection
-                from pseofactory.verifier import verify_cohort_reflection_contract
-                cr_file = agy_dir / "cohort_reflection_ledger.json"
-                if cr_file.is_file() and not verify_cohort_reflection_contract(d.parent, dist_dir=d).get("passed", True):
-                    ov_dir = agy_dir / "overlays"
-                    if ov_dir.is_dir():
-                        for ov_f in sorted(ov_dir.glob("*.json")):
-                            try:
-                                ov_d = json.loads(ov_f.read_text(encoding="utf-8"))
-                                if (
-                                    isinstance(ov_d, dict)
-                                    and ov_d.get("status") == "ACCRETIVE_CONFIRMED"
-                                    and float(ov_d.get("baseline_clicks", 0.0) or 0.0) <= 0.0
-                                    and float(ov_d.get("post_lock_clicks", 0.0) or 0.0) <= 0.0
-                                ):
-                                    ov_d["status"] = "MONITORING"
-                                    ov_f.write_text(json.dumps(ov_d, indent=2), encoding="utf-8")
-                            except Exception:
-                                pass
-                    evaluate_closed_loop_cohort_reflection(
-                        property_id=property_id,
-                        repo_root=d.parent,
-                        dist_dir=d,
-                        persist=True,
-                    )
-                    retrofitted_paths.append(".agy/cohort_reflection_ledger.json")
-            except Exception:
-                pass
 
         active_overlays = cls._resolve_active_estate_overlays(
             d,
@@ -7154,6 +7144,37 @@ class RetroReflectionEngine:
             if (repaired or overlay_injected) and updated_html != content:
                 html_file.write_text(updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
+
+        if agy_dir.is_dir():
+            try:
+                from pseofactory.seo_growth_loops import evaluate_closed_loop_cohort_reflection
+                from pseofactory.verifier import verify_cohort_reflection_contract
+                cr_file = agy_dir / "cohort_reflection_ledger.json"
+                if cr_file.is_file() and not verify_cohort_reflection_contract(d.parent, dist_dir=d).get("passed", True):
+                    ov_dir = agy_dir / "overlays"
+                    if ov_dir.is_dir():
+                        for ov_f in sorted(ov_dir.glob("*.json")):
+                            try:
+                                ov_d = json.loads(ov_f.read_text(encoding="utf-8"))
+                                if (
+                                    isinstance(ov_d, dict)
+                                    and ov_d.get("status") == "ACCRETIVE_CONFIRMED"
+                                    and float(ov_d.get("baseline_clicks", 0.0) or 0.0) <= 0.0
+                                    and float(ov_d.get("post_lock_clicks", 0.0) or 0.0) <= 0.0
+                                ):
+                                    ov_d["status"] = "MONITORING"
+                                    ov_f.write_text(json.dumps(ov_d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                            except Exception:
+                                pass
+                    evaluate_closed_loop_cohort_reflection(
+                        property_id=property_id,
+                        repo_root=d.parent,
+                        dist_dir=d,
+                        persist=True,
+                    )
+                    retrofitted_paths.append(".agy/cohort_reflection_ledger.json")
+            except Exception:
+                pass
 
         # Synchronize llms.txt and llms-full.txt machine endpoints with retrofitted HTML inventory
         for llms_rel in cls.sync_tenant_llms_manifests(d, property_id, canonical_base=canonical_base):

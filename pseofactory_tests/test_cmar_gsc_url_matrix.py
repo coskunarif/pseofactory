@@ -379,3 +379,103 @@ def test_audit_html_mechanics_passes_on_sentinel_cluster_pages_without_self_link
         )
         assert RetroReflectionEngine.audit_html_mechanics(retro_px) == []
 
+
+def test_overlay_re_injection_faq_entity_and_sidecar_manifest_idempotency(tmp_path: Path):
+    from pseofactory.qualification import reconcile_metric_recovery_ledger
+
+    veh_slug = _slug_from_url_or_query(
+        target_url="https://profithelm.com/tools/section-179-calculator/tesla-cybertruck/"
+    )
+    assert veh_slug == "section-179-calculator/tesla-cybertruck"
+
+    dist_dir = tmp_path / "dist"
+    manifests_dir = dist_dir / "manifests"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    slug = "workers-comp-and-payroll-burden-calculator"
+    sidecar_file = manifests_dir / f"{slug}.json"
+    tenant_manifest = {
+        "slug": slug,
+        "title": "Workers' Comp & Payroll Burden Calculator",
+        "entity_type": "TaxCalculationModel",
+        "model_name": "WorkersCompPayrollBurdenModel",
+        "statutory_authority": "IRC Section 3111 FICA, IRC Section 3301 FUTA, and NCCI Workers Compensation Class Manuals",
+        "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC) and State Rating Bureau Filings",
+        "inputs": {"annual_payroll": 500000, "statutory_tax_rate": 0.0865, "workers_comp_rate_per_100": 3.45},
+        "formula": "annual_payroll * statutory_tax_rate + (annual_payroll / 100.0) * workers_comp_rate_per_100",
+        "published_output": 60500.0,
+        "sample_calculation": "Annual payroll of $500,000 yields $60,500 employer burden",
+        "canonical_url": f"https://profithelm.com/tools/{slug}/",
+    }
+    sidecar_file.write_text(json.dumps(tenant_manifest, indent=2), encoding="utf-8")
+
+    raw_html = f"""<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
+    <title>Workers Comp and Payroll Burden Calculator</title>
+    <link rel="canonical" href="https://profithelm.com/tools/{slug}/" />
+    <script type="application/ld+json">
+    {{"@context": "https://schema.org", "@graph": [{{"@type": "WebPage", "@id": "https://profithelm.com/tools/{slug}/#webpage"}}]}}
+    </script>
+    </head><body><main>
+    <h1>Workers Comp and Payroll Burden Calculator</h1>
+    <aside class="quick-answer"><p>Initial answer.</p></aside>
+    <div id="calculator-workspace-anchor" class="interactive-calculator-container">
+      <div class="calc-results-column"><h3 class="calc-column-title">Results</h3><input type="number" id="payroll" value="500000" aria-label="Payroll" /></div>
+    </div>
+    </main></body></html>"""
+
+    overlay_spec = compile_remediation_overlay_spec(
+        {
+            "slug": slug,
+            "tenant_id": "profithelm",
+            "target_url": f"https://profithelm.com/tools/{slug}/",
+            "query": "workers comp payroll burden calculator",
+            "impressions": 65,
+            "position": 11.2,
+        },
+        tenant_id="profithelm",
+    )
+    overlay_spec["faq_entries"] = [
+        {
+            "question": "How does NCCI treat overtime pay during a workers' compensation payroll audit?",
+            "answer": "In most NCCI jurisdictions, employers deduct the 0.5x overtime premium increment back to straight-time wages.",
+        }
+    ]
+
+    h1 = inject_overlay_into_html(raw_html, overlay_spec)
+    h2, _ = RetroReflectionEngine.retrofit_html(
+        h1,
+        property_id="profithelm",
+        slug=slug,
+        canonical_url=f"https://profithelm.com/tools/{slug}/",
+        dist_dir=dist_dir,
+    )
+    assert json.loads(sidecar_file.read_text(encoding="utf-8"))["model_name"] == "WorkersCompPayrollBurdenModel"
+    assert "title" in json.loads(sidecar_file.read_text(encoding="utf-8"))
+
+    h3 = inject_overlay_into_html(h2, overlay_spec)
+    assert h3 == h2
+    assert RetroReflectionEngine.audit_html_mechanics(h3) == []
+
+    # Verify duplicate unprefixed vehicle overlay consolidation
+    agy_ov = tmp_path / ".agy" / "overlays"
+    agy_ov.mkdir(parents=True, exist_ok=True)
+    (agy_ov / "tesla-cybertruck.json").write_text(
+        json.dumps({"slug": "tesla-cybertruck", "query": "cybertruck section 179 write off"}, indent=2),
+        encoding="utf-8",
+    )
+    (agy_ov / "section-179-calculator-tesla-cybertruck.json").write_text(
+        json.dumps(
+            {
+                "slug": "section-179-calculator/tesla-cybertruck",
+                "query": "tesla cybertruck 6000 lb gvwr section 179",
+                "grouped_queries": ["tesla cybertruck 6000 lb gvwr section 179"],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    reconcile_metric_recovery_ledger(tmp_path, property_id="profithelm")
+    assert not (agy_ov / "tesla-cybertruck.json").exists()
+    merged_veh = json.loads((agy_ov / "section-179-calculator-tesla-cybertruck.json").read_text(encoding="utf-8"))
+    assert "cybertruck section 179 write off" in [q.lower() for q in merged_veh.get("grouped_queries", [])]
+
+

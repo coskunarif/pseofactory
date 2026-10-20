@@ -4571,7 +4571,19 @@ def normalize_html_callout_message_match(
                 '    .calc-panel-header, .card-header { margin-bottom: 0.625rem !important; padding-bottom: 0.5rem !important; }\n'
                 '  </style>\n'
             )
-            updated = updated.replace("</head>", f"{fold_css}</head>", 1)
+            vp_match = re.search(
+                r'([ \t]*<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>)',
+                updated,
+                flags=re.I,
+            )
+            if vp_match:
+                updated = (
+                    updated[: vp_match.start()]
+                    + fold_css
+                    + updated[vp_match.start() :]
+                )
+            else:
+                updated = updated.replace("</head>", f"{fold_css}</head>", 1)
 
     # Stamp any remaining bare /r/<partner> anchors with page (source_tool) and slot (subid, cta_slot) attribution
     def _stamp_attribution_on_r_anchor(match: re.Match) -> str:
