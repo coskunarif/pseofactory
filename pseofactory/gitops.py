@@ -3093,6 +3093,37 @@ def reconcile_workspace_tracking_state(
                                     timeout=10,
                                 )
                                 healed_tenant_trees += 1
+
+                            # Re-enforce any untracked DEGRADED_ROLLED_BACK overlay rollbacks on dist/
+                            # so restoring dist/ from HEAD never re-activates rolled-back overlay markup
+                            try:
+                                from pseofactory.gsc_remediation import rollback_degraded_overlay_from_html
+                                d_root = rp / "dist"
+                                if d_root.is_dir():
+                                    for ov_dir_cand in (rp / ".agy" / "overlays", rp / "content" / "overlays"):
+                                        if not ov_dir_cand.is_dir():
+                                            continue
+                                        for ov_f in sorted(ov_dir_cand.rglob("*.json")):
+                                            try:
+                                                ov_d = json.loads(ov_f.read_text(encoding="utf-8"))
+                                            except Exception:
+                                                continue
+                                            if not isinstance(ov_d, dict) or str(ov_d.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
+                                                continue
+                                            raw_s = str(ov_d.get("slug") or ov_f.relative_to(ov_dir_cand).with_suffix("").as_posix()).strip("/")
+                                            cand_slugs = [raw_s]
+                                            for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                                                if raw_s.startswith(f"{hub_pfx}-"):
+                                                    cand_slugs.append(f"{hub_pfx}/{raw_s[len(hub_pfx) + 1:]}")
+                                            for cs in cand_slugs:
+                                                for h_cand in (d_root / "tools" / cs / "index.html", d_root / f"{cs}.html", d_root / cs / "index.html"):
+                                                    if h_cand.is_file():
+                                                        raw_h = h_cand.read_text(encoding="utf-8", errors="ignore")
+                                                        cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_d)
+                                                        if cleaned_h != raw_h:
+                                                            h_cand.write_text(cleaned_h, encoding="utf-8")
+                            except Exception:
+                                pass
                     finally:
                         try:
                             if lock_fd is not None:

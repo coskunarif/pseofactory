@@ -987,7 +987,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
             env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
             env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
-            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=120)
+            res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
             if res.returncode == 0:
                 return True
             if res.returncode == 75:
@@ -1010,10 +1010,10 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         except (LockContentionError, SubprocessCrashError):
             raise
         except subprocess.TimeoutExpired as te:
-            stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 120s"
+            stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
             stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
             raise SubprocessCrashError(
-                f"Isolated builder for '{self._property_id}' timed out after 120s",
+                f"Isolated builder for '{self._property_id}' timed out after 600s",
                 returncode=124,
                 stderr_tail=stderr_tail,
                 stdout_tail=stdout_tail,
@@ -2644,10 +2644,21 @@ class AssetIntegrityEvaluator:
                 )
                 if seo_report.get("status") == "FAIL":
                     for issue in seo_report.get("issues", []):
+                        issue_path = str(adapter.dist_dir)
+                        issue_slug: Optional[str] = None
+                        m_rel = re.search(
+                            r"(?:Page\s+|in\s+|for\s+)?(tools/[a-zA-Z0-9_/-]+/index\.html|[a-zA-Z0-9_/-]+\.html|llms(?:-full)?\.txt|sitemap(?:-index)?\.xml|robots\.txt|feed\.xml)",
+                            str(issue),
+                        )
+                        if m_rel:
+                            cand_file = (adapter.dist_dir / m_rel.group(1)).resolve()
+                            if cand_file.is_file():
+                                issue_path = str(cand_file)
+                                issue_slug = self.extract_slug(cand_file, adapter.dist_dir)
                         drifted.append(
                             AssetDriftRecord(
-                                asset_path=str(adapter.dist_dir),
-                                slug=None,
+                                asset_path=issue_path,
+                                slug=issue_slug,
                                 reasons=[DriftReason.CONTENT_RELEVANCE_GAP],
                                 details=[f"Master SEO Checklist: {issue}"],
                             )
@@ -3094,10 +3105,60 @@ class RefactorCascadeEngine:
 
                 # 2. Rebuild in isolated environment
                 with adapter.scoped_environment():
-                    try:
-                        build_ok = adapter.build_asset(slug, target_file=target_path)
-                    except TypeError:
-                        build_ok = adapter.build_asset(slug)
+                    if target_path.is_dir() or target_path == adapter.dist_dir.resolve():
+                        RetroReflectionEngine.retrofit_estate(
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                            canonical_base=adapter.canonical_base,
+                        )
+                        if hasattr(self.evaluator, "_seo_verifier") and self.evaluator._seo_verifier is not None:
+                            try:
+                                from pseofactory.verifier import MasterSEOVerifier
+                                MasterSEOVerifier._GLOBAL_AUDIT_CACHE.clear()
+                            except Exception:
+                                pass
+                        post_rep = self.evaluator.audit_all(
+                            adapter,
+                            check_engine_drift=False,
+                            check_ledger=False,
+                        )
+                        if post_rep.drifted_assets_count == 0:
+                            self.replay_quarantine(
+                                property_id=adapter.property_id,
+                                slug=record.slug,
+                                asset_path=record.asset_path,
+                            )
+                            return True
+                        build_ok = adapter.build_all()
+                        if build_ok:
+                            RetroReflectionEngine.retrofit_estate(
+                                dist_dir=adapter.dist_dir,
+                                property_id=adapter.property_id,
+                                canonical_base=adapter.canonical_base,
+                            )
+                            self.replay_quarantine(
+                                property_id=adapter.property_id,
+                                slug=record.slug,
+                                asset_path=record.asset_path,
+                            )
+                            return True
+                        raise RuntimeError(f"Estate rebuild failed for property '{adapter.property_id}'")
+                    if target_path.is_file() and target_path.suffix == ".html" and any(
+                        "Rolled-back " in str(d) for d in (record.details or [])
+                    ):
+                        self._reapply_active_overlay(slug, target_path, adapter)
+                        if self.evaluator.audit_asset(target_path, adapter) is None:
+                            build_ok = True
+                        else:
+                            try:
+                                build_ok = adapter.build_asset(slug, target_file=target_path)
+                            except TypeError:
+                                build_ok = adapter.build_asset(slug)
+                    else:
+                        try:
+                            build_ok = adapter.build_asset(slug, target_file=target_path)
+                        except TypeError:
+                            build_ok = adapter.build_asset(slug)
                     if not target_path.is_file():
                         for candidate in (
                             adapter.dist_dir / "tools" / slug / "index.html",
@@ -3110,7 +3171,7 @@ class RefactorCascadeEngine:
                     if not build_ok and not target_path.exists():
                         raise RuntimeError(f"Builder failed to generate asset for slug '{slug}'")
 
-                # 2b. Reapply active GSC remediation overlay if present
+                # 2b. Reapply active GSC remediation overlay if present (or roll back DEGRADED_ROLLED_BACK overlay)
                 self._reapply_active_overlay(slug, target_path, adapter)
 
                 # 2c. Self-heal visual/UX primitives if HTML asset still has visual/UX contract issues
@@ -3223,11 +3284,15 @@ class RefactorCascadeEngine:
             return
         try:
             overlay_data = json.loads(overlay_path.read_text(encoding="utf-8"))
-            if overlay_data.get("status") == "DEGRADED_ROLLED_BACK":
-                return
-            from pseofactory.gsc_remediation import inject_overlay_into_html
+            from pseofactory.gsc_remediation import (
+                inject_overlay_into_html,
+                rollback_degraded_overlay_from_html,
+            )
             html_content = target_path.read_text(encoding="utf-8")
-            updated_html = inject_overlay_into_html(html_content, overlay_data)
+            if str(overlay_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                updated_html = rollback_degraded_overlay_from_html(html_content, overlay_data)
+            else:
+                updated_html = inject_overlay_into_html(html_content, overlay_data)
             if updated_html != html_content:
                 target_path.write_text(updated_html, encoding="utf-8")
         except Exception:
@@ -7072,7 +7137,10 @@ class RetroReflectionEngine:
         while normalizing deterministic visual primitives across all HTML pages in the estate.
         """
         from pseofactory.visual_primitives import normalize_html_visual_primitives
-        from pseofactory.gsc_remediation import inject_overlay_into_html
+        from pseofactory.gsc_remediation import (
+            inject_overlay_into_html,
+            rollback_degraded_overlay_from_html,
+        )
 
         d = Path(dist_dir).resolve()
         if not d.is_dir():
@@ -7087,6 +7155,38 @@ class RetroReflectionEngine:
         scanned = 0
         retrofitted_paths: List[str] = []
         agy_dir = d.parent / ".agy"
+
+        # Scrub any DEGRADED_ROLLED_BACK overlays from dist HTML before active overlay resolution
+        for overlays_dir in (d.parent / "content" / "overlays", agy_dir / "overlays"):
+            if not overlays_dir.is_dir():
+                continue
+            for ov_file in sorted(overlays_dir.rglob("*.json")):
+                try:
+                    ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(ov_spec, dict) or str(ov_spec.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
+                    continue
+                rel_s = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
+                spec_s = str(ov_spec.get("slug") or "").strip("/")
+                rb_cands = [s for s in (rel_s, spec_s) if s]
+                for s in list(rb_cands):
+                    for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                        if s.startswith(f"{hub_pfx}-"):
+                            rb_cands.append(f"{hub_pfx}/{s[len(hub_pfx) + 1:]}")
+                for rb_s in rb_cands:
+                    for h_cand in (d / "tools" / rb_s / "index.html", d / f"{rb_s}.html", d / rb_s / "index.html"):
+                        if h_cand.is_file():
+                            try:
+                                raw_h = h_cand.read_text(encoding="utf-8", errors="ignore")
+                                cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_spec)
+                                if cleaned_h != raw_h:
+                                    h_cand.write_text(cleaned_h, encoding="utf-8")
+                                    rel_rb = h_cand.relative_to(d).as_posix()
+                                    if rel_rb not in retrofitted_paths:
+                                        retrofitted_paths.append(rel_rb)
+                            except Exception:
+                                pass
 
         active_overlays = cls._resolve_active_estate_overlays(
             d,

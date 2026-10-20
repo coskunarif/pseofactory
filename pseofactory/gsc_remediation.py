@@ -4796,19 +4796,24 @@ def evaluate_expired_overlays(
                         pass
 
                 # Immediately roll back the degraded title/overlay from dist HTML if present on disk
-                for html_target in (
-                    root / "dist" / "tools" / slug / "index.html",
-                    root / "dist" / f"{slug}.html",
-                    root / "dist" / slug / "index.html",
-                ):
-                    if html_target.is_file():
-                        try:
-                            raw_h = html_target.read_text(encoding="utf-8")
-                            cleaned_h = rollback_degraded_overlay_from_html(raw_h, overlay_data)
-                            if cleaned_h != raw_h:
-                                html_target.write_text(cleaned_h, encoding="utf-8")
-                        except Exception:
-                            pass
+                rb_slug_cands = [slug]
+                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if slug.startswith(f"{hub_pfx}-"):
+                        rb_slug_cands.append(f"{hub_pfx}/{slug[len(hub_pfx) + 1:]}")
+                for rb_s in rb_slug_cands:
+                    for html_target in (
+                        root / "dist" / "tools" / rb_s / "index.html",
+                        root / "dist" / f"{rb_s}.html",
+                        root / "dist" / rb_s / "index.html",
+                    ):
+                        if html_target.is_file():
+                            try:
+                                raw_h = html_target.read_text(encoding="utf-8")
+                                cleaned_h = rollback_degraded_overlay_from_html(raw_h, overlay_data)
+                                if cleaned_h != raw_h:
+                                    html_target.write_text(cleaned_h, encoding="utf-8")
+                            except Exception:
+                                pass
 
             eval_item = {
                 "slug": slug,

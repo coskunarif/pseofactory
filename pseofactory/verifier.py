@@ -6385,9 +6385,18 @@ def verify_cohort_reflection_contract(
             if str(ov_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
                 rolled_back_verified += 1
                 rb_title = str(ov_data.get("rolled_back_title_rewrite") or "").strip()
-                rel_slug = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix())
-                html_path = d_dir / "tools" / rel_slug / "index.html"
-                if html_path.is_file():
+                rel_slug = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix()).strip("/")
+                cand_slugs = [rel_slug]
+                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if rel_slug.startswith(f"{hub_pfx}-"):
+                        cand_slugs.append(f"{hub_pfx}/{rel_slug[len(hub_pfx) + 1:]}")
+                html_path = None
+                for cs in cand_slugs:
+                    cand_p = d_dir / "tools" / cs / "index.html"
+                    if cand_p.is_file():
+                        html_path = cand_p
+                        break
+                if html_path and html_path.is_file():
                     raw_h = html_path.read_text(encoding="utf-8", errors="ignore")
                     m_t = re.search(r"<title>(.*?)</title>", raw_h, flags=re.IGNORECASE | re.DOTALL)
                     if rb_title and m_t and html_lib.unescape(m_t.group(1).strip()) == rb_title:

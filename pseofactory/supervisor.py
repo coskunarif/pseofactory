@@ -240,6 +240,16 @@ def extract_failure_reason(failed_records: List[Dict[str, Any]]) -> str:
                     return ln[:300]
         if rec.get("error"):
             return str(rec["error"])[:300]
+        details = rec.get("details")
+        if isinstance(details, list) and details:
+            first_detail = str(details[0]).strip()
+            if first_detail:
+                return first_detail[:300]
+        elif isinstance(details, str) and details.strip():
+            return details.strip()[:300]
+        reasons = rec.get("reasons")
+        if isinstance(reasons, list) and reasons:
+            return ", ".join(str(r) for r in reasons)[:300]
     return ""
 
 
@@ -948,9 +958,23 @@ class AutonomousLifecycleSupervisor:
                         scoped=bool(property_ids),
                     )
                 if not dry_run and not any_deferred:
-                    if not property_ids:
-                        from pseofactory.maintenance import RefactorCascadeEngine
-                        RefactorCascadeEngine().replay_quarantine()
+                    from pseofactory.maintenance import RefactorCascadeEngine
+                    cascade_replayer = RefactorCascadeEngine()
+                    for pid, res_obj in fleet_results.items():
+                        if getattr(res_obj, "assets_drifted", 0) == 0 or (
+                            getattr(res_obj, "assets_refactored", 0) >= getattr(res_obj, "assets_drifted", 0)
+                            and getattr(res_obj, "assets_failed", 0) == 0
+                        ):
+                            cascade_replayer.replay_quarantine(property_id=pid)
+                    if not property_ids and all(
+                        getattr(r, "assets_drifted", 0) == 0
+                        or (
+                            getattr(r, "assets_refactored", 0) >= getattr(r, "assets_drifted", 0)
+                            and getattr(r, "assets_failed", 0) == 0
+                        )
+                        for r in fleet_results.values()
+                    ):
+                        cascade_replayer.replay_quarantine()
                     record_engine_hash(self.state_file, hash_value=current_engine_hash)
                     if str(self.workspace_root) == "/home/ubuntuadmin/projects":
                         record_engine_hash(

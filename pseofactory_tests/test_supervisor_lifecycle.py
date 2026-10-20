@@ -562,3 +562,91 @@ def test_e2e_drift_cascade_multi_tenant(tmp_path):
     idempotent_res = supervisor.run_cycle(force=False)
     assert idempotent_res["status"] == "SKIPPED_ALIGNED"
     assert idempotent_res["drift_detected"] is False
+
+
+def test_supervisor_overlay_rollback_reconcile_and_streak_extraction(tmp_path):
+    """
+    Regression test for FAILED.pseofactory_supervisor oscillation:
+    1. reconcile_workspace_tracking_state(restore_tenant_dist=True) preserves untracked
+       DEGRADED_ROLLED_BACK overlay rollbacks on dist/ HTML after git checkout HEAD -- dist.
+    2. verify_cohort_reflection_contract resolves flat spoke overlay filenames
+       (e.g. irs-2027-tax-brackets-illinois.json -> tools/irs-2027-tax-brackets/illinois/index.html).
+    3. extract_failure_reason extracts drift details from AssetDriftRecord.to_dict() payloads.
+    4. Supervisor cycle does not wipe DLQ quarantine when SKIPPED_NO_CHANGES had unrefactored quarantined drift.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import subprocess
+    from pseofactory.gitops import reconcile_workspace_tracking_state
+    from pseofactory.maintenance import AssetDriftRecord, DriftReason, RefactorCascadeEngine
+    from pseofactory.supervisor import extract_failure_reason
+    from pseofactory.verifier import verify_cohort_reflection_contract
+
+    # 1. Verify extract_failure_reason extracts details from AssetDriftRecord dicts
+    drift_rec = AssetDriftRecord(
+        asset_path=str(tmp_path / "dist" / "tools" / "irs-2027-tax-brackets" / "illinois" / "index.html"),
+        slug="irs-2027-tax-brackets/illinois",
+        reasons=[DriftReason.CONTENT_RELEVANCE_GAP],
+        details=["Master SEO Checklist: Rolled-back title 'Illinois 2027 Tax Brackets Calculator (Rules) | ProfitHelm' still active in tools/irs-2027-tax-brackets/illinois/index.html"],
+    )
+    reason = extract_failure_reason([drift_rec.to_dict()])
+    assert "Rolled-back title" in reason
+    assert "tools/irs-2027-tax-brackets/illinois/index.html" in reason
+
+    # 2. Setup simulated tenant git repo with tracked dist/ containing an injected overlay,
+    #    and an untracked .agy/overlays/irs-2027-tax-brackets-illinois.json with DEGRADED_ROLLED_BACK
+    tenant_repo = tmp_path / "profithelm-platform"
+    spoke_dir = tenant_repo / "dist" / "tools" / "irs-2027-tax-brackets" / "illinois"
+    spoke_dir.mkdir(parents=True, exist_ok=True)
+    spoke_html_path = spoke_dir / "index.html"
+    injected_html = (
+        "<!DOCTYPE html><html lang=\"en\"><head>"
+        "<title>Illinois 2027 Tax Brackets Calculator (Rules) | ProfitHelm</title>"
+        "</head><body><h1>Illinois 2027 Tax Brackets Calculator</h1>"
+        "<main><div id=\"gsc-striking-overlay\" class=\"gsc-overlay-container\">"
+        "<section class=\"overlay-section\">Degraded content</section></div></main></body></html>"
+    )
+    spoke_html_path.write_text(injected_html, encoding="utf-8")
+    (tenant_repo / "substrate_lock.json").write_text('{"property_id": "profithelm"}\n', encoding="utf-8")
+
+    subprocess.run(["git", "init"], cwd=str(tenant_repo), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@profithelm.com"], cwd=str(tenant_repo), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test Runner"], cwd=str(tenant_repo), check=True, capture_output=True)
+    (tenant_repo / ".gitignore").write_text(".agy/\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(tenant_repo), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial commit with overlay in dist"], cwd=str(tenant_repo), check=True, capture_output=True)
+
+    # Create untracked rolled-back overlay spec with flat spoke filename
+    ov_dir = tenant_repo / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    ov_file = ov_dir / "irs-2027-tax-brackets-illinois.json"
+    ov_payload = {
+        "slug": "irs-2027-tax-brackets-illinois",
+        "tenant_id": "profithelm",
+        "status": "DEGRADED_ROLLED_BACK",
+        "rolled_back_title_rewrite": "Illinois 2027 Tax Brackets Calculator (Rules) | ProfitHelm",
+        "rolled_back_modifier": "Rules",
+    }
+    ov_file.write_text(json.dumps(ov_payload, indent=2), encoding="utf-8")
+
+    # Before reconciliation, verify_cohort_reflection_contract detects the rolled-back title in nested spoke HTML
+    pre_check = verify_cohort_reflection_contract(tenant_repo, dist_dir=tenant_repo / "dist")
+    assert pre_check["passed"] is False
+    assert any("irs-2027-tax-brackets/illinois/index.html" in issue for issue in pre_check["issues"])
+
+    # Modify dist/ slightly (uncommitted) and run reconcile_workspace_tracking_state(restore_tenant_dist=True)
+    spoke_html_path.write_text(injected_html + "\n", encoding="utf-8")
+    reconcile_workspace_tracking_state(
+        tenant_repos=[tenant_repo],
+        restore_tenant_dist=True,
+    )
+
+    # After reconciliation, rolled-back overlay is scrubbed from dist/ even after git checkout HEAD -- dist
+    post_check = verify_cohort_reflection_contract(tenant_repo, dist_dir=tenant_repo / "dist")
+    assert post_check["passed"] is True, f"Expected cohort reflection pass, got: {post_check}"
+
+    # 3. Verify DLQ quarantine is not prematurely cleared when SKIPPED_NO_CHANGES had unrefactored drift
+    dlq_path = tmp_path / "test_dlq.json"
+    cascade = RefactorCascadeEngine(dlq_path=dlq_path)
+    cascade.route_to_dlq("profithelm", drift_rec, "Simulated quarantine")
+    assert len(cascade.list_dlq(property_id="profithelm")) == 1
+
