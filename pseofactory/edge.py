@@ -1359,6 +1359,7 @@ export async function onRequest(context) {{
         "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
         "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
         "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
@@ -1670,8 +1671,13 @@ export async function onRequest(context) {{
   // Resolve target URL and determine if active direct or fallback
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
+  const sovrnApproved = Boolean(
+    env && String(env.SOVRN_COMMERCE_APPROVED || "").toLowerCase() === "true"
+  );
   const hasDirectContract = Boolean(
-    partnerConfig.directContractUrl && partnerConfig.directContractUrl.trim().length > 0
+    !(sovrnApproved && partnerConfig.sovrnFallbackUrl) &&
+      partnerConfig.directContractUrl &&
+      partnerConfig.directContractUrl.trim().length > 0
   );
   const isDirect = partnerConfig.isDirect || hasDirectConfig || hasDirectContract;
   const rawTargetUrl = (

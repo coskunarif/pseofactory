@@ -1188,10 +1188,21 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (sbLoc.hostname !== "www.jdoqocy.com" || !sbLoc.pathname.includes("click-101906407-16985242")) process.exit(40);
       if (sbLoc.searchParams.get("sid") !== "contractor-surety-bond-cost-calculator_partner_card_1") process.exit(41);
 
-      // 5. ipx1031 -> Sovrn Commerce DLP Capital ($250/lead) when env.AFFILIATE_IPX1031_URL is unset
-      const ipxRes = await phRedirect.onRequest({{
+      // 5. ipx1031 -> Impact Xendoo #16354 ($500 CPA) by default while Sovrn Commerce is Denied and Impact DLP Capital is pending
+      const ipxDirectRes = await phRedirect.onRequest({{
         request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
         env: {{}},
+        params: {{ partner: "ipx1031" }}
+      }});
+      const ipxDirectLoc = new URL(ipxDirectRes.headers.get("Location"));
+      if (ipxDirectLoc.hostname !== "xendoo.pxf.io" || !ipxDirectLoc.pathname.includes("/16354")) process.exit(48);
+      if (ipxDirectLoc.searchParams.get("subId1") !== "1031-exchange-boot-calculator-california_inline") process.exit(49);
+      if (ipxDirectRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(54);
+
+      // 6. ipx1031 -> Sovrn Commerce DLP Capital ($250/lead) when SOVRN_COMMERCE_APPROVED=true and env.AFFILIATE_IPX1031_URL is unset
+      const ipxRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
+        env: {{ SOVRN_COMMERCE_APPROVED: "true" }},
         params: {{ partner: "ipx1031" }}
       }});
       const ipxLoc = new URL(ipxRes.headers.get("Location"));
