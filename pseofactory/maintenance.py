@@ -6711,8 +6711,16 @@ class RetroReflectionEngine:
             h1_txt = h1_txt.replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
             desc_txt = desc_txt.replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
             qa_txt = qa_txt.replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ")
-            if not desc_txt and qa_txt:
+            if (
+                not desc_txt
+                or "Deterministic mathematical model and planning calculator for " in desc_txt
+            ) and qa_txt and "Deterministic mathematical model and planning calculator for " not in qa_txt:
                 desc_txt = qa_txt.split(". ")[0].rstrip(".") + "."
+            if "Deterministic mathematical model and planning calculator for " in desc_txt:
+                desc_txt = desc_txt.replace(
+                    "Deterministic mathematical model and planning calculator for ",
+                    "Deterministic statutory financial model and compliance calculator for ",
+                )
             tool_meta[td.name] = {
                 "title": h1_txt,
                 "description": desc_txt,
@@ -6755,6 +6763,9 @@ class RetroReflectionEngine:
                     _fix_llms_bullet,
                     new_llms,
                     flags=re.MULTILINE,
+                ).replace(
+                    "Deterministic mathematical model and planning calculator for ",
+                    "Deterministic statutory financial model and compliance calculator for ",
                 )
 
 
