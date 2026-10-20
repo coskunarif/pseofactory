@@ -3387,12 +3387,41 @@ def evaluate_closed_loop_cohort_reflection(
             )
             and not has_stale_overlay_claims
         )
+        ov_existing_path = overlay_files_by_slug.get(rel_slug) or overlay_files_by_slug.get(rel_slug.replace("/", "-"))
         if has_assertions_before and has_matrix_before:
             before_citation_ready_count += 1
             already_aligned_count += 1
+            if persist and (ov_existing_path is None or not ov_existing_path.is_file()):
+                c_m = curr_gsc_by_slug.get(rel_slug) or curr_gsc_by_slug.get(rel_slug.split("/")[0]) or {}
+                q_for_spec = str(
+                    c_m.get("top_query")
+                    or rel_slug.replace("/", " ").replace("-", " ")
+                ).strip()
+                ov_spec_missing = compile_remediation_overlay_spec(
+                    {
+                        "slug": rel_slug,
+                        "tenant_id": prop,
+                        "target_url": f"https://{domain}/tools/{rel_slug}/",
+                        "query": q_for_spec,
+                        "impressions": int(c_m.get("impressions", 50) or 50),
+                        "position": float(c_m.get("position", 12.0) or 12.0),
+                        "clicks": int(c_m.get("clicks", 0) or 0),
+                        "ctr": float(c_m.get("ctr", 0.02) or 0.02),
+                        "conversion_slot_weights": conversion_slot_weights,
+                    },
+                    tenant_id=prop,
+                )
+                flat_rel_slug = rel_slug.replace("/", "-")
+                target_ov_file = root / ".agy" / "overlays" / f"{flat_rel_slug}.json"
+                target_ov_file.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    target_ov_file.write_text(json.dumps(ov_spec_missing, indent=2), encoding="utf-8")
+                    overlay_files_by_slug[rel_slug] = target_ov_file
+                    overlay_files_by_slug[flat_rel_slug] = target_ov_file
+                except Exception:
+                    pass
         elif propagate_winning_patterns and rel_slug not in cooldown_hold_slugs:
             # Double down on winning pattern across remaining calculator/guide inventory
-            ov_existing_path = overlay_files_by_slug.get(rel_slug) or overlay_files_by_slug.get(rel_slug.replace("/", "-"))
             ov_spec: Optional[Dict[str, Any]] = None
             if ov_existing_path and ov_existing_path.is_file():
                 try:
@@ -3424,12 +3453,14 @@ def evaluate_closed_loop_cohort_reflection(
                     },
                     tenant_id=prop,
                 )
-                if "/" not in rel_slug and persist:
-                    target_ov_file = root / ".agy" / "overlays" / f"{rel_slug}.json"
+                if persist:
+                    flat_rel_slug = rel_slug.replace("/", "-")
+                    target_ov_file = root / ".agy" / "overlays" / f"{flat_rel_slug}.json"
                     target_ov_file.parent.mkdir(parents=True, exist_ok=True)
                     try:
                         target_ov_file.write_text(json.dumps(ov_spec, indent=2), encoding="utf-8")
                         overlay_files_by_slug[rel_slug] = target_ov_file
+                        overlay_files_by_slug[flat_rel_slug] = target_ov_file
                     except Exception:
                         pass
             elif (

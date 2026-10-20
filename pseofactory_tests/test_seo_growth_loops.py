@@ -840,3 +840,53 @@ def test_closed_loop_cohort_reflection_rollback_and_winning_pattern_propagation(
     cr_cli_out = json.loads(capsys.readouterr().out)
     assert cr_cli_out["workflow"] == "closed_loop_cohort_reflection"
 
+
+def test_cohort_reflection_persists_nested_leaf_overlays_for_idempotent_rebuild(tmp_path):
+    """
+    Verifies that evaluate_closed_loop_cohort_reflection persists remediation overlays
+    for nested spoke slugs containing '/' (e.g. 'irs-2027-tax-brackets/alabama') into
+    .agy/overlays/<flat_slug>.json so subsequent RetroReflectionEngine.retrofit_estate()
+    rebuilds preserve <div id="gsc-striking-overlay"> without mid-build working tree churn.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.seo_growth_loops import evaluate_closed_loop_cohort_reflection
+
+    repo_root = tmp_path / "profithelm-platform"
+    dist_dir = repo_root / "dist"
+    leaf_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "alabama"
+    leaf_dir.mkdir(parents=True, exist_ok=True)
+
+    base_leaf_html = (
+        "<!DOCTYPE html><html lang='en'><head>"
+        "<title>Alabama 2027 Income Tax Brackets Calculator | ProfitHelm</title>"
+        "<link rel='canonical' href='https://profithelm.com/tools/irs-2027-tax-brackets/alabama/'>"
+        "</head><body><main><h1>Alabama 2027 Tax Brackets</h1>"
+        "<section class='calculator-card'><p>Interactive state tax bracket model.</p></section>"
+        "</main></body></html>"
+    )
+    leaf_html_file = leaf_dir / "index.html"
+    leaf_html_file.write_text(base_leaf_html, encoding="utf-8")
+
+    evaluate_closed_loop_cohort_reflection(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=dist_dir,
+        live_queries=[],
+        persist=True,
+    )
+
+    persisted_ov = repo_root / ".agy" / "overlays" / "irs-2027-tax-brackets-alabama.json"
+    assert persisted_ov.is_file(), "Expected nested leaf overlay JSON to be persisted to .agy/overlays/"
+
+    # Simulate builder.build_all() overwriting the leaf HTML from base template, followed by retrofit_estate()
+    leaf_html_file.write_text(base_leaf_html, encoding="utf-8")
+    RetroReflectionEngine.retrofit_estate(
+        dist_dir=dist_dir,
+        property_id="profithelm",
+        canonical_base="https://profithelm.com",
+    )
+    rebuilt_html = leaf_html_file.read_text(encoding="utf-8")
+    assert 'id="gsc-striking-overlay"' in rebuilt_html
+    assert 'data-ai-citation-assertions="true"' in rebuilt_html
+
+

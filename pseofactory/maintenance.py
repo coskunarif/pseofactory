@@ -7863,6 +7863,10 @@ def reflect_and_recompile_all_assets(
                                     if cand_html.is_file():
                                         target_html = cand_html
                                         break
+                            if not target_html.is_file() and adapter.property_id == "profithelm":
+                                cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / ov_slug / "index.html"
+                                if cand_veh.is_file():
+                                    target_html = cand_veh
                         if target_html.is_file():
                             ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
                             if isinstance(ov_spec, dict) and ov_spec.get("status") != "DEGRADED_ROLLED_BACK":
@@ -7904,20 +7908,21 @@ def reflect_and_recompile_all_assets(
         evaluator._audit_cache.clear()
         evaluator._fingerprint_cache.clear()
 
+        will_run_downstream = bool(
+            run_downstream
+            and not is_foreign_pytest
+            and (recompiled_count > 0 or retrofitted_count > 0 or _has_pending_downstream_work(adapter))
+        )
         build_verified = (
             evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
-            if (recompiled_count > 0 or retrofitted_count > 0)
+            if ((recompiled_count > 0 or retrofitted_count > 0) and not will_run_downstream)
             else report
         )
 
         # Execute autonomous downstream chain whenever assets recompiled/retrofitted or pending downstream work exists
         downstream_summary: Dict[str, Any] = {"status": "SKIPPED"}
         downstream_executed = False
-        if (
-            run_downstream
-            and not is_foreign_pytest
-            and (recompiled_count > 0 or retrofitted_count > 0 or _has_pending_downstream_work(adapter))
-        ):
+        if will_run_downstream:
             try:
                 downstream_executed = True
                 downstream_summary = _execute_autonomous_downstream_chain(
@@ -7945,8 +7950,19 @@ def reflect_and_recompile_all_assets(
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
+                evaluator._audit_cache.clear()
+                evaluator._fingerprint_cache.clear()
+                build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
 
-        if (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed) and build_verified.status == "PASS":
+        is_unmerged_worktree = (
+            "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
+            and scanner.workspace_root == Path("/home/ubuntuadmin/projects").resolve()
+        )
+        if (
+            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed)
+            and build_verified.status == "PASS"
+            and not is_unmerged_worktree
+        ):
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
@@ -8066,7 +8082,7 @@ def reflect_and_recompile_all_assets(
                                 push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
                     except Exception:
                         pass
-                    if adapter.property_id == "profithelm":
+                    if adapter.property_id == "profithelm" and not is_unmerged_worktree:
                         try:
                             import sqlite3
                             jev_db = adapter.dist_dir.parent / ".agy" / "jev_decision_cache.db"
@@ -8075,10 +8091,20 @@ def reflect_and_recompile_all_assets(
                                     conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
                                     conn.commit()
                             from profithelm.freshness import run_freshness_audit
-                            run_freshness_audit(dist_dir=adapter.dist_dir, in_pipeline=True)
+                            from profithelm.seo_verifier import compute_dist_digest
+                            cached_seo = (
+                                {"status": "PASS", "_dist_digest": compute_dist_digest(adapter.dist_dir)}
+                                if build_verified.status == "PASS"
+                                else None
+                            )
+                            run_freshness_audit(
+                                dist_dir=adapter.dist_dir,
+                                in_pipeline=True,
+                                cached_seo_summary=cached_seo,
+                            )
                         except Exception:
                             pass
-                    elif adapter.property_id == "prexvo":
+                    elif adapter.property_id == "prexvo" and not is_unmerged_worktree:
                         try:
                             from prexvo.freshness import run_freshness_audit as run_prexvo_freshness_audit
                             px_rep = run_prexvo_freshness_audit(dist_dir=adapter.dist_dir)
@@ -8133,7 +8159,7 @@ def reflect_and_recompile_all_assets(
                     except Exception:
                         pass
 
-                if adapter.dist_dir.parent != scanner.workspace_root:
+                if adapter.dist_dir.parent != scanner.workspace_root and not is_unmerged_worktree:
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                     asset_hashes = {
                         a.relative_to(adapter.dist_dir).as_posix(): compute_asset_fingerprint(a)
@@ -8174,11 +8200,9 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
 
-        evaluator._audit_cache.clear()
-        evaluator._fingerprint_cache.clear()
         post_report = (
             evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
-            if ((recompiled_count > 0 or retrofitted_count > 0) and latch_state)
+            if ((recompiled_count > 0 or retrofitted_count > 0) and latch_state and not is_unmerged_worktree)
             else build_verified
         )
 
