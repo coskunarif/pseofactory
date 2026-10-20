@@ -65,7 +65,8 @@
       ],
       "pending_advertiser_contracts": 17,
       "live_pending_advertiser_contracts": 15,
-      "verified_clicks": 5
+      "verified_clicks": 8,
+      "raw_clicks": 19
     },
     "cj_affiliate": {
       "name": "CJ Affiliate",
@@ -83,6 +84,7 @@
       "pending_advertiser_applications": 28,
       "live_pending_advertiser_applications": 24,
       "active_joined_advertisers_count": 3,
+      "verified_clicks": 31,
       "active_joined_advertisers": {
         "efile_com": {
           "advertiser_id": "4355234",
@@ -216,19 +218,19 @@
             "rippling",
             "mercury"
           ],
-          "live_verified_clicks": 44,
+          "live_verified_clicks": 73,
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
-          "payout_method": "PayPal (arif.coskun@profithelm.com - confirmed and active via Zoho Newsletter #1580)",
-          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 28 verified clicks recorded in PartnerStack Performance Overview)"
+          "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",
+          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 73 verified clicks recorded in PartnerStack Performance Overview)"
         },
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
           "active_partners": [
             "coinledger (fpr=arif-554004, PayPal payout arif.coskun@profithelm.com Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 4 clicks recorded)",
-            "koinly",
+            "koinly (via=A4FABF09, PayPal payout arif.coskun@profithelm.com saved and verified via HTTP 200 on app.koinly.io/affiliate; 3 clicks recorded)",
             "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576; 1 verified click recorded on FirstPromoter dashboard)"
           ],
-          "verified_clicks": 5,
+          "verified_clicks": 8,
           "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
         },
         "impact_rest_api": {
@@ -335,7 +337,8 @@
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
           "bounty": "$40-$100",
-          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?via=A4FABF09&utm_source=affiliate)"
+          "payout_method": "PayPal (arif.coskun@profithelm.com - verified and saved via HTTP 200 on app.koinly.io/affiliate)",
+          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?via=A4FABF09&utm_source=affiliate; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
         },
         "rippling": {
           "status": "live",

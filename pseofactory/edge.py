@@ -1751,7 +1751,7 @@ export async function onRequest(context) {{
       targetObj.searchParams.has("via")) &&
     !targetObj.searchParams.has("fp_sid")
   ) {{
-    const fpSid = effectiveSubid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 8);
+    const fpSid = effectiveSubid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
     if (fpSid) {{
       targetObj.searchParams.set("fp_sid", fpSid);
     }}

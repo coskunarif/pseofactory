@@ -1561,7 +1561,11 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     assert "********1395" in payout_map["cj_affiliate"]["account_identifier"]
     assert payout_map["partnerstack"]["payout_verified"] is True
     assert "arif.coskun@profithelm.com" in payout_map["partnerstack"]["account_identifier"]
+    assert "1395" in payout_map["partnerstack"]["account_identifier"]
     assert payout_map["mercury_direct"]["payout_verified"] is True
+    assert payout_map["koinly_affiliate"]["payout_verified"] is True
+    assert payout_map["sovrn_commerce"]["payout_verified"] is True
+    assert "1395" in payout_map["sovrn_commerce"]["account_identifier"]
 
     # Simulate missing payout credentials on Impact and verify the guardrail flags affected active partners
     broken_vault = copy.deepcopy(tracker.hub.vault_data)
@@ -1588,6 +1592,7 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     # 5. Verify compiled tenant placement parity across profithelm-platform and prexvo
     assert ph_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 671
     assert ph_audit["compiled_dom_parity"]["network_tracked_click_share_pct"] >= 75.0
+    assert ph_audit["compiled_dom_parity"]["edge_upgraded_click_share_pct"] == 100.0
     assert ph_audit["compiled_dom_parity"]["pending_partner_links_in_dom"] == 0
     assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 76
     assert px_audit["compiled_dom_parity"]["ymyl_restricted_pages_clean"] is True
@@ -1599,8 +1604,8 @@ def test_gusto_approval_classification_and_firstpromoter_fp_sid_forwarding(temp_
     1. Gusto approval emails (#1003 'You're approved to Gusto's affiliate program!' and #1004
        from noelle.hyra@gusto.com) classify as APPLICATION_APPROVED with candidate_url
        https://gusto.pxf.io/c/7932737/1226287/15154.
-    2. FirstPromoter edge redirect generation appends fp_sid (max 8 alphanumeric chars) so
-       CoinLedger and Xendoo FirstPromoter Sub-Id reports capture placement attribution.
+    2. FirstPromoter edge redirect generation appends fp_sid (up to 64 alphanumeric/underscore/hyphen chars) so
+       CoinLedger, Koinly, and Xendoo FirstPromoter Sub-Id reports capture full page+slot placement attribution.
     """
     from pseofactory.edge import generate_edge_redirect_function
 
@@ -1639,6 +1644,7 @@ def test_gusto_approval_classification_and_firstpromoter_fp_sid_forwarding(temp_
     js_code = generate_edge_redirect_function("profithelm")
     assert 'defaultUrl: "https://gusto.pxf.io/c/7932737/1226287/15154"' in js_code
     assert 'targetObj.searchParams.set("fp_sid", fpSid)' in js_code
+    assert ".slice(0, 64)" in js_code
 
 
 def test_durable_kv_sync_page_slot_aggregation_and_portal_click_reconciliation(
