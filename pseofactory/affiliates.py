@@ -1564,6 +1564,29 @@ def resolve_optimal_partner_for_slug(
                     if p.key == "coinledger" and not (explicit_vault_live_keys - {"coinledger"}):
                         return p
             if matched_bucket_name in (
+                "medical-equipment",
+                "workers-comp",
+                "surety-bond",
+                "tariff-landed-cost",
+                "invoice-factoring",
+            ) and not explicit_vault_live_keys and not engagement_metrics:
+                specialist = next(
+                    (
+                        p
+                        for p in candidates
+                        if p.key
+                        in (
+                            "national_funding_med",
+                            "simply_business",
+                            "suretybonds_direct",
+                            "freightos_marketplace",
+                            "otr_solutions_factoring",
+                        )
+                    ),
+                    candidates[0],
+                )
+                return specialist
+            if matched_bucket_name in (
                 "section-1031",
                 "1031",
                 "section-179",
