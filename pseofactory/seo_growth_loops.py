@@ -740,8 +740,14 @@ def discover_internal_linking_opportunities(
     href_re = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
     title_re = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
+    noindex_paths: Set[str] = set()
+    robots_noindex_re = re.compile(
+        r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex',
+        re.IGNORECASE,
+    )
+
     for hf in sorted(d_dir.rglob("*.html")):
-        if "syndication" in hf.parts or hf.name.startswith("."):
+        if "syndication" in hf.parts or hf.name.startswith(".") or hf.name == "404.html":
             continue
         rel = hf.relative_to(d_dir)
         if rel.name == "index.html":
@@ -749,6 +755,8 @@ def discover_internal_linking_opportunities(
         else:
             site_p = "/" + str(rel).replace(".html", "")
         site_p = site_p.rstrip("/") or "/"
+        if site_p in ("/404", "/signal") or site_p.startswith("/signal/"):
+            continue
         path_to_file[site_p] = hf
         out_links.setdefault(site_p, set())
         in_links.setdefault(site_p, set())
@@ -758,6 +766,8 @@ def discover_internal_linking_opportunities(
             raw_html = hf.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             continue
+        if robots_noindex_re.search(raw_html):
+            noindex_paths.add(site_p)
         t_m = title_re.search(raw_html)
         if t_m:
             clean_t = _clean_dashes(re.sub(r"\s+", " ", t_m.group(1)).strip())
@@ -810,7 +820,10 @@ def discover_internal_linking_opportunities(
     orphaned_pages: List[str] = []
 
     for site_p in sorted(path_to_file.keys()):
-        if site_p in ("/", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology"):
+        if (
+            site_p in ("/", "/404", "/signal", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology")
+            or site_p in noindex_paths
+        ):
             continue
         in_deg = len(in_links.get(site_p, set()))
         out_deg = len(out_links.get(site_p, set()))
@@ -3177,7 +3190,14 @@ def evaluate_closed_loop_cohort_reflection(
             cohort_outcome = "DEGRADED_ROLLED_BACK"
         elif ov_data.get("early_regression_flagged"):
             cohort_outcome = "FLAGGED_EARLY_REGRESSION"
-        elif pos_delta <= -0.5 or clicks_delta > 0 or ctr_delta >= 0.002 or (curr_impr > 0 and impr_delta >= 0 and curr_pos <= 20.0):
+        elif (
+            ov_status == "ACCRETIVE_CONFIRMED"
+            or pos_delta <= -0.5
+            or clicks_delta > 0
+            or ctr_delta >= 0.002
+            or (impr_delta > 0 and curr_pos <= 20.0)
+            or (curr_clicks > 0 and impr_delta >= 0 and pos_delta <= 0.0 and curr_pos <= 20.0)
+        ):
             cohort_outcome = "WINNING_ACCRETIVE"
         elif is_overlay_locked(ov_data):
             cohort_outcome = "MEASUREMENT_LOCKED_OBSERVING"

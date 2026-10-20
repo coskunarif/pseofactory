@@ -27,7 +27,11 @@ from typing import Any, Dict, List, Optional, Union
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
     assert_valid_jsonld,
+    detect_placeholder_verification_token_issues,
+    detect_sentence_truncation_issues,
+    detect_title_year_conflict_issues,
     detect_ungrounded_synthetic_claims,
+    detect_uninitialized_ssr_calculator_metrics,
     safe_eval_mathematical_formula,
 )
 
@@ -489,23 +493,65 @@ def audit_rendered_asset(
                     break
     gate_results["table_cell_truthfulness"] = g6_ok
 
-    # -------------------------------------------------------------
-    # Gate 7: Empty Template / Format Leakage Gate
-    # -------------------------------------------------------------
+    no_scripts_text = _audit_template_and_structure_gates(
+        html_content=html_content,
+        slug=slug,
+        violations=violations,
+        gate_results=gate_results,
+    )
+
+    _audit_schema_and_fact_gates(
+        html_content=html_content,
+        expected_title=expected_title,
+        slug=slug,
+        statutory=statutory,
+        economic=economic,
+        formula=formula,
+        no_scripts_text=no_scripts_text,
+        tenant=tenant,
+        candidate_spec=candidate_spec,
+        violations=violations,
+        gate_results=gate_results,
+    )
+
+    passed = len(violations) == 0
+    return ContentAccuracyAuditReport(
+        passed=passed,
+        violations=violations,
+        gate_results=gate_results,
+        tenant=tenant,
+        slug=slug,
+        evaluated_output=calc_output,
+        published_output=html_output_val,
+        tolerance=tolerance,
+        metadata={
+            "expected_title": expected_title,
+            "statutory_authority": statutory,
+            "economic_dataset": economic,
+            "formula": formula,
+            "model_name": model_name,
+        },
+    )
+
+
+def _audit_template_and_structure_gates(
+    html_content: str,
+    slug: str,
+    violations: List[str],
+    gate_results: Dict[str, bool],
+) -> str:
+    """Executes Gates 7 and 8 for audit_rendered_asset and returns stripped visible text."""
     g7_ok = True
-    # Format strings {[a-zA-Z0-9_]+}
     fmt_matches = re.findall(r'\{\s*[a-zA-Z0-9_]+\s*\}', html_content)
     if fmt_matches:
         g7_ok = False
         violations.append(f"Gate 7 (Template Leakage): Unrendered format strings detected: {fmt_matches}")
 
-    # Jinja/Mustache {{...}}
     jinja_matches = re.findall(r'\{\{.*?\}\}', html_content)
     if jinja_matches:
         g7_ok = False
         violations.append(f"Gate 7 (Template Leakage): Unrendered template brackets detected: {jinja_matches}")
 
-    # Leakage of undefined or None in text (excluding script and style blocks)
     no_scripts_text = re.sub(
         r'<(script|style)[^>]*>.*?</\1>',
         '',
@@ -521,11 +567,15 @@ def audit_rendered_asset(
     if re.search(r'\bNaN\b', no_scripts_text):
         g7_ok = False
         violations.append("Gate 7 (Template Leakage): Rendered HTML contains uninitialized NaN text outside script tags")
+    if "google-site-verification" in html_content.lower():
+        for tok_err in detect_placeholder_verification_token_issues(html_content, context=slug):
+            g7_ok = False
+            violations.append(f"Gate 7 (Template Leakage): {tok_err}")
+    for ssr_err in detect_uninitialized_ssr_calculator_metrics(html_content, context=slug):
+        g7_ok = False
+        violations.append(f"Gate 7 (Template Leakage): {ssr_err}")
     gate_results["template_leakage_free"] = g7_ok
 
-    # -------------------------------------------------------------
-    # Gate 8: Mandatory Structural Components Gate
-    # -------------------------------------------------------------
     g8_ok = True
     required_components = [
         ("calculator-form", r'<form[^>]*class=["\'][^"\']*calculator-form[^"\']*["\']'),
@@ -585,40 +635,46 @@ def audit_rendered_asset(
         g8_ok = False
         violations.append("Gate 8 (Structural Components): H2 heading contains unsplit CamelCase identifier")
 
+    title_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", html_content, re.IGNORECASE)
+    if title_m:
+        title_txt = html.unescape(re.sub(r"<[^>]+>", "", title_m.group(1))).strip()
+        for t_err in detect_title_year_conflict_issues(title_txt, context=slug):
+            g8_ok = False
+            violations.append(f"Gate 8 (Structural Components): {t_err}")
+
+    meta_m = re.search(
+        r'<meta\b[^>]*name=["\']description["\'][^>]*content=(["\'])([\s\S]*?)\1',
+        html_content,
+        re.IGNORECASE,
+    )
+    if not meta_m:
+        meta_m = re.search(
+            r'<meta\b[^>]*content=(["\'])([\s\S]*?)\1[^>]*name=["\']description["\']',
+            html_content,
+            re.IGNORECASE,
+        )
+    if meta_m:
+        meta_txt = html.unescape(meta_m.group(2)).strip()
+        for m_err in detect_sentence_truncation_issues(meta_txt, context=f"{slug} meta description"):
+            g8_ok = False
+            violations.append(f"Gate 8 (Structural Components): {m_err}")
+
+    qa_block_m = re.search(
+        r'<aside[^>]*class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
+        html_content,
+        re.IGNORECASE,
+    )
+    if qa_block_m:
+        qa_p_m = re.search(r"<p[^>]*>([\s\S]*?)</p>", qa_block_m.group(1), re.IGNORECASE)
+        qa_txt = html.unescape(re.sub(r"<[^>]+>", " ", (qa_p_m.group(1) if qa_p_m else qa_block_m.group(1)))).strip()
+        qa_txt = re.sub(r"^\s*Quick\s+Answer\s*:?\s*", "", qa_txt, flags=re.IGNORECASE).strip()
+        if qa_txt:
+            for q_err in detect_sentence_truncation_issues(qa_txt, context=f"{slug} quick-answer"):
+                g8_ok = False
+                violations.append(f"Gate 8 (Structural Components): {q_err}")
+
     gate_results["structural_components"] = g8_ok
-
-    _audit_schema_and_fact_gates(
-        html_content=html_content,
-        expected_title=expected_title,
-        slug=slug,
-        statutory=statutory,
-        economic=economic,
-        formula=formula,
-        no_scripts_text=no_scripts_text,
-        tenant=tenant,
-        candidate_spec=candidate_spec,
-        violations=violations,
-        gate_results=gate_results,
-    )
-
-    passed = len(violations) == 0
-    return ContentAccuracyAuditReport(
-        passed=passed,
-        violations=violations,
-        gate_results=gate_results,
-        tenant=tenant,
-        slug=slug,
-        evaluated_output=calc_output,
-        published_output=html_output_val,
-        tolerance=tolerance,
-        metadata={
-            "expected_title": expected_title,
-            "statutory_authority": statutory,
-            "economic_dataset": economic,
-            "formula": formula,
-            "model_name": model_name,
-        },
-    )
+    return no_scripts_text
 
 
 def _audit_schema_and_fact_gates(

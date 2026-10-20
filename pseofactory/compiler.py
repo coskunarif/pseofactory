@@ -1119,8 +1119,18 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     )
     if len(raw_meta_desc) < 55:
         raw_meta_desc = f"{raw_meta_desc.rstrip('.')} grounded in {statutory_authority} and {economic_dataset}."
-    if len(raw_meta_desc) > 160:
-        raw_meta_desc = raw_meta_desc[:157].rsplit(" ", 1)[0].rstrip(".,;:") + "."
+    if len(raw_meta_desc) > 155:
+        short_t = re.sub(r"\s+and\s+Statutory\s+Analysis$", "", title, flags=re.IGNORECASE).strip()
+        short_t = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", short_t, flags=re.IGNORECASE)
+        raw_meta_desc = f"Verified quantitative calculation engine evaluating {short_t} deterministically under {statutory_authority}."
+    if len(raw_meta_desc) > 155:
+        words_m = raw_meta_desc.rstrip(".!?").split()
+        while len(words_m) > 6 and (
+            len(" ".join(words_m).rstrip(".,;:") + ".") > 155
+            or words_m[-1].lower().rstrip(".,;:") in ("under", "and", "or", "with", "for", "of", "in", "to", "by", "from", "the", "a", "an")
+        ):
+            words_m.pop()
+        raw_meta_desc = " ".join(words_m).rstrip(".,;:") + "."
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">

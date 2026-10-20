@@ -7205,4 +7205,135 @@ def test_strict_anti_slop_across_modules():
         assert chr(0x2013) not in text, f"Forbidden en-dash detected in {f.name}"
 
 
+def test_zyppy_2026_empirical_ranking_evidence_spec_and_blind_spot_contracts(tmp_path):
+    """
+    Verifies ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC (27 positive factors from Zyppy 2026 study)
+    and the enforceable contracts for sentence truncation, title year conflict, placeholder GSC tokens,
+    SSR calculator metric initialization, cohort reflection, and internal linking hygiene.
+    """
+    from pseofactory.contracts import (
+        ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC,
+        detect_sentence_truncation_issues,
+        assert_no_sentence_truncation,
+        detect_title_year_conflict_issues,
+        assert_no_title_year_conflict,
+        detect_placeholder_verification_token_issues,
+        assert_valid_verification_token,
+        detect_uninitialized_ssr_calculator_metrics,
+        assert_initialized_ssr_calculator_metrics,
+    )
+    from pseofactory.gsc_remediation import (
+        _normalize_title_50_60,
+        _normalize_meta_120_155,
+        _normalize_quick_answer_40_60_words,
+        evaluate_expired_overlays,
+    )
+    from pseofactory.seo_growth_loops import (
+        discover_internal_linking_opportunities,
+        evaluate_closed_loop_cohort_reflection,
+    )
+    from pseofactory.verifier import verify_cohort_reflection_contract
+
+    # 1. Empirical factor table completeness & backwards compatibility
+    assert len(ZYPPY_2026_FACTORS_SPEC) == 12
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC) == 27
+    assert ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC[0]["name"] == "Search Intent Match"
+    assert ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC[0]["weight"] == 2.60
+    assert ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC[-1]["name"] == "Backlink Anchor Text Diversity"
+    assert ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC[-1]["weight"] == 1.18
+
+    # 2. Sentence truncation detection & healing
+    for truncated_sample in (
+        "Calculate 2027 Tax Brackets using deterministic IRC statutory formulas and IRS compliance benchmar.",
+        "Calculate Crypto Tax Form 1099-DA modeling short-term vs long-term capital gains, staking yie.",
+        "Calculate S Corp Reasonable Salary modeling FICA payroll savings, W-2 distributions, and QB.",
+        "Calculate Income Contingent Repayment using 225% HHS Poverty Guidelines, discretionary caps, and forgiven.",
+        "Calculate Equipment Lease Vs Buy Section 179 Calculator using deterministic IRC statutory formulas, federal brackets, depreciation limits, and.",
+        "Qualifying borrowers receive a 100 percent unpaid interest subsidy and complete principal forgiveness after 120 to 240.",
+        "Calculate Invoice Factoring Vs Business Line of using deterministic IRC statutory formulas and IRS compliance benc.",
+    ):
+        assert detect_sentence_truncation_issues(truncated_sample), f"Expected truncation issue on: {truncated_sample}"
+        with pytest.raises(ValueError):
+            assert_no_sentence_truncation(truncated_sample)
+
+    clean_meta = _normalize_meta_120_155("", "profithelm", "Invoice Factoring vs Business Line of Credit Calculator")
+    assert 120 <= len(clean_meta) <= 155
+    assert not detect_sentence_truncation_issues(clean_meta)
+
+    clean_qa = _normalize_quick_answer_40_60_words("Married Filing Separately Student Loan Calculator", "prexvo", slug="married-filing-separately-student-loan-calculator")
+    assert 40 <= len(clean_qa.split()) <= 60
+    assert not detect_sentence_truncation_issues(clean_qa)
+
+    # 3. Title year conflict detection & healing
+    bad_title = "California 2027 Tax Brackets 2026 Calculator | ProfitHelm"
+    assert detect_title_year_conflict_issues(bad_title)
+    with pytest.raises(ValueError):
+        assert_no_title_year_conflict(bad_title)
+
+    healed_title = _normalize_title_50_60(bad_title, "ProfitHelm", "profithelm")
+    assert 50 <= len(healed_title) <= 60
+    assert not detect_title_year_conflict_issues(healed_title)
+
+    # 4. Placeholder verification token detection
+    bad_gsc_html = '<head><meta name="google-site-verification" content="PREXVO_GSC_VERIFICATION_TOKEN"></head>'
+    assert detect_placeholder_verification_token_issues(bad_gsc_html)
+    with pytest.raises(ValueError):
+        assert_valid_verification_token(bad_gsc_html)
+
+    # 5. Uninitialized SSR calculator metrics detection
+    bad_ssr_html = (
+        '<input id="field-loan_balance" value="60000">'
+        '<div class="metric-value" id="metric-tiered_payment">$0.00</div>'
+        '<div class="metric-value" id="metric-std_10yr_payment">$0.00</div>'
+    )
+    assert len(detect_uninitialized_ssr_calculator_metrics(bad_ssr_html)) == 2
+    with pytest.raises(ValueError):
+        assert_initialized_ssr_calculator_metrics(bad_ssr_html)
+
+    # 6. Internal linking opportunities exclude 404.html and /signal
+    dist_d = tmp_path / "dist"
+    (dist_d / "tools" / "alpha-calc").mkdir(parents=True)
+    (dist_d / "404.html").write_text("<html><head><meta name='robots' content='noindex'></head><body><h1>404</h1></body></html>", encoding="utf-8")
+    (dist_d / "signal").mkdir(parents=True)
+    (dist_d / "signal" / "index.html").write_text("<html><body><h1>Signal</h1></body></html>", encoding="utf-8")
+    (dist_d / "tools" / "alpha-calc" / "index.html").write_text("<html><body><h1>Alpha</h1></body></html>", encoding="utf-8")
+    il_res = discover_internal_linking_opportunities(property_id="profithelm", repo_root=tmp_path, dist_dir=dist_d, persist=True)
+    assert "/404" not in il_res["orphaned_pages"]
+    assert "/signal" not in il_res["orphaned_pages"]
+
+    # 7. Cohort reflection requires real empirical lift for WINNING_ACCRETIVE
+    ov_dir = tmp_path / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    (ov_dir / "alpha-calc.json").write_text(
+        json.dumps({
+            "slug": "alpha-calc",
+            "query": "alpha calculator",
+            "status": "MONITORING",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "locked_until": "2020-01-15T00:00:00+00:00",
+            "baseline_impressions": 100,
+            "baseline_clicks": 0,
+            "baseline_ctr": 0.0,
+            "baseline_position": 12.0,
+        }),
+        encoding="utf-8",
+    )
+    eval_res = evaluate_expired_overlays(site_url="sc-domain:profithelm.com", base_dir=tmp_path, live_queries=[])
+    assert eval_res["summary"]["ACCRETIVE"] == 0
+    assert len(eval_res["accretive"]) == 0
+    cr_res = evaluate_closed_loop_cohort_reflection(property_id="profithelm", repo_root=tmp_path, dist_dir=dist_d, persist=True)
+    assert cr_res["cohorts"]["1_title_remediation"]["winning_accretive_count"] == 0
+    clean_contract_res = verify_cohort_reflection_contract(tmp_path, dist_dir=dist_d)
+    assert clean_contract_res["passed"] is True
+    assert clean_contract_res["issues"] == []
+
+    faked_report = json.loads(json.dumps(cr_res))
+    faked_report["cohorts"]["1_title_remediation"]["records"][0]["cohort_outcome"] = "WINNING_ACCRETIVE"
+    faked_contract_res = verify_cohort_reflection_contract(faked_report, dist_dir=dist_d)
+    assert faked_contract_res["passed"] is False
+    assert any("Unmeasured zero-lift baseline" in issue for issue in faked_contract_res["issues"])
+
+
+
 

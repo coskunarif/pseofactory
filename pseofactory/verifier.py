@@ -1494,7 +1494,12 @@ class MasterSEOVerifier:
         self.brand_name = (
             brand_name
             if brand_name is not None
-            else os.environ.get("FACTORY_BRAND_NAME", "")
+            else os.environ.get(
+                "FACTORY_BRAND_NAME",
+                "Prexvo"
+                if "prexvo" in self.domain.lower()
+                else ("ProfitHelm" if "profithelm" in self.domain.lower() else ""),
+            )
         )
         self.dist_dir = (
             Path(dist_dir)
@@ -1666,6 +1671,9 @@ class MasterSEOVerifier:
                         issues.append(f"Title length ({t_len} chars) outside 50-60 range in {rel}: '{title}'")
                     if re.search(r'\s&\s+[A-Za-z](?:\s*\||$)', title):
                         issues.append(f"Mid-word truncated title suffix detected in {rel}: '{title}'")
+                    from pseofactory.contracts import detect_title_year_conflict_issues
+                    for yr_err in detect_title_year_conflict_issues(title, context=rel):
+                        issues.append(yr_err)
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -2103,6 +2111,27 @@ class MasterSEOVerifier:
                 if len(internal_links) < 3:
                     issues.append(f"Tool page {rel} has only {len(internal_links)} internal links (expected >= 3)")
 
+        if target.name == "dist" and target.parent.is_dir():
+            opp_file = target.parent / ".agy" / "internal_linking_opportunities.json"
+            if opp_file.is_file():
+                try:
+                    opp_data = json.loads(opp_file.read_text(encoding="utf-8"))
+                    if isinstance(opp_data, dict):
+                        for bad_target in ("/404", "/404/", "/signal", "/signal/"):
+                            if bad_target in (opp_data.get("orphaned_pages") or []):
+                                issues.append(
+                                    f"internal_linking_opportunities.json lists non-indexable route '{bad_target}' in orphaned_pages"
+                                )
+                        for opp_item in (opp_data.get("opportunities") or []):
+                            if isinstance(opp_item, dict):
+                                t_path = str(opp_item.get("target_path") or "").rstrip("/") or "/"
+                                if t_path in ("/404", "/signal") or t_path.startswith("/signal/"):
+                                    issues.append(
+                                        f"internal_linking_opportunities.json recommends non-indexable route '{t_path}' as internal link target"
+                                    )
+                except Exception:
+                    pass
+
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_internal_linking_gate",
@@ -2146,6 +2175,8 @@ class MasterSEOVerifier:
 
     # 16. Meta Descriptions Gate
     def check_meta_descriptions_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
+        from pseofactory.contracts import detect_sentence_truncation_issues
+
         target = Path(dist_dir) if dist_dir else self.dist_dir
         issues = []
         pages_checked = 0
@@ -2165,6 +2196,8 @@ class MasterSEOVerifier:
                     desc = html.unescape(m.group(1).strip())
                     if len(desc) < 50 or len(desc) > 165:
                         issues.append(f"Meta description length {len(desc)} outside 50-165 range in {rel}")
+                    for trunc_err in detect_sentence_truncation_issues(desc, context=rel):
+                        issues.append(trunc_err)
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -2286,6 +2319,8 @@ class MasterSEOVerifier:
 
     # 18. Search Console Tag Gate
     def check_search_console_tag_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
+        from pseofactory.contracts import detect_placeholder_verification_token_issues
+
         target = Path(dist_dir) if dist_dir else self.dist_dir
         issues = []
         pages_checked = 0
@@ -2301,6 +2336,9 @@ class MasterSEOVerifier:
                     m = re.search(r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']google-site-verification["\']', content, re.IGNORECASE)
                 if not m or not m.group(1).strip():
                     issues.append(f"Missing or empty google-site-verification meta tag in {rel}")
+                else:
+                    for tok_err in detect_placeholder_verification_token_issues(m.group(1).strip(), context=rel):
+                        issues.append(tok_err)
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -4201,7 +4239,7 @@ class MasterSEOVerifier:
                     continue
                 if len(h1) < 20 or len(h1) > 70:
                     gaps_8.append(f"{rel}: H1 length {len(h1)} outside 20-70 range ('{h1}')")
-                if self.brand_name in h1 or f"| {self.brand_name}" in h1:
+                if self.brand_name and (self.brand_name in h1 or f"| {self.brand_name}" in h1):
                     gaps_8.append(f"{rel}: H1 contains brand suffix '| {self.brand_name}' ('{h1}')")
 
         findings.append({
@@ -4458,6 +4496,8 @@ class MasterSEOVerifier:
         g_operational_shield = self.check_operational_shield_gate(target)
         g_comparison_layout = self.check_comparison_layout_gate(target)
         g_ai_mode_manifest = self.check_ai_mode_manifest_gate(target)
+        g_source_kw_inflation = self.check_source_keyword_inflation_gate(target)
+        g_cohort_reflection = self.check_cohort_reflection_gate(target)
         g_existence = self.check_existence_gate(target)
         g_title_length = self.check_title_gate(target)
         g_snippet = self.check_snippet_gate(target)
@@ -4548,6 +4588,8 @@ class MasterSEOVerifier:
             "check_operational_shield_gate": g_operational_shield,
             "check_comparison_layout_gate": g_comparison_layout,
             "check_comparison_layout_contracts_gate": g_comparison_layout,
+            "check_source_keyword_inflation_gate": g_source_kw_inflation,
+            "check_cohort_reflection_gate": g_cohort_reflection,
             "check_content_relevance_gate": content_relevance_gate,
             "check_host_hygiene_gate": g_host_hygiene,
             "check_edge_cache_policy_gate": g_edge_cache_policy,
@@ -4604,6 +4646,8 @@ class MasterSEOVerifier:
             "check_operational_shield_gate",
             "check_comparison_layout_gate",
             "check_ai_mode_manifest_gate",
+            "check_source_keyword_inflation_gate",
+            "check_cohort_reflection_gate",
             "check_indexing_gate",
         ]
         try:
@@ -5001,6 +5045,9 @@ def verify_html_query_answer_match(
     # Sentence boundaries (1 to 5 sentences with terminal punctuation)
     if not re.search(r'[.!?]["\']?\s*$', qa_text.strip()):
         issues.append(f"Page {rel_path}: Quick-answer passage missing terminal sentence punctuation")
+    from pseofactory.contracts import detect_sentence_truncation_issues
+    for trunc_err in detect_sentence_truncation_issues(qa_text, context=f"Page {rel_path} quick-answer"):
+        issues.append(f"Page {rel_path}: {trunc_err}")
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', qa_text.strip()) if s.strip()]
     if len(sentences) < 1 or len(sentences) > 5:
         issues.append(f"Page {rel_path}: Quick-answer sentence count ({len(sentences)}) outside valid 1-5 sentence bounds")
@@ -6122,7 +6169,11 @@ def verify_html_tool_utility_contract(
     5. Touch targets meeting 44x44px standard.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.contracts import detect_tool_utility_issues, assert_tool_utility_contract
+    from pseofactory.contracts import (
+        detect_tool_utility_issues,
+        assert_tool_utility_contract,
+        detect_uninitialized_ssr_calculator_metrics,
+    )
 
     issues: List[str] = []
     if not isinstance(html_content, str):
@@ -6136,6 +6187,9 @@ def verify_html_tool_utility_contract(
 
     detected = detect_tool_utility_issues(html_content, rel_path=rel_path)
     issues.extend(detected)
+    for ssr_err in detect_uninitialized_ssr_calculator_metrics(html_content, context=f"Page {rel_path}"):
+        if ssr_err not in issues:
+            issues.append(ssr_err)
 
     try:
         assert_tool_utility_contract(html_content, context=f"Page {rel_path}")
@@ -6270,14 +6324,14 @@ def verify_html_source_keyword_inflation_ratio(
         source_for_count,
         flags=re.IGNORECASE,
     )
-    source_for_count = re.sub(r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+){1,}", " ", source_for_count)
+    source_for_count = re.sub(r"\b[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+", " ", source_for_count)
 
     # Strip scripts, styles, comments, and HTML tags to isolate visible text
     visible = re.sub(r"<!--.*?-->", " ", raw, flags=re.DOTALL)
     visible = re.sub(r"<script\b[^>]*>.*?</script>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
     visible = re.sub(r"<style\b[^>]*>.*?</style>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
     visible = re.sub(r"<[^>]+>", " ", visible)
-    visible_clean = re.sub(r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+){1,}", " ", visible)
+    visible_clean = re.sub(r"\b[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+", " ", visible)
 
     pat = re.compile(rf"\b{re.escape(primary_kw)}\b", flags=re.IGNORECASE)
     source_count = len(pat.findall(source_for_count))
@@ -6306,7 +6360,8 @@ def verify_cohort_reflection_contract(
       2. When .agy/cohort_reflection_ledger.json (or an in-memory report dict) is provided, it must contain
          all 4 required cohorts (1_title_remediation, 2_priority_indexing_push, 3_citation_restructure,
          4_sponsor_slot_update), historical_evidence_sources, rollback_and_flag_actions, winning_patterns,
-         inventory_propagation, and next_maintenance_directives, with zero forbidden dashes.
+         inventory_propagation, and next_maintenance_directives, with zero forbidden dashes and zero
+         unmeasured zero-delta synthetic baselines falsely promoted to WINNING_ACCRETIVE.
     """
     import html as html_lib
 
@@ -6374,6 +6429,28 @@ def verify_cohort_reflection_contract(
                 ):
                     if req_c not in cohorts_obj:
                         issues.append(f"Missing cohort '{req_c}' in cohort_reflection_ledger.json")
+                c1_obj = cohorts_obj.get("1_title_remediation") if isinstance(cohorts_obj.get("1_title_remediation"), dict) else {}
+                for rec in (c1_obj.get("records") or []):
+                    if not isinstance(rec, dict):
+                        continue
+                    if str(rec.get("cohort_outcome") or "") == "WINNING_ACCRETIVE":
+                        r_status = str(rec.get("status") or "").upper()
+                        c_delta = int(rec.get("clicks_delta", 0) or 0)
+                        c_curr = int(rec.get("current_clicks", 0) or 0)
+                        i_delta = int(rec.get("impressions_delta", 0) or 0)
+                        p_delta = float(rec.get("position_delta", 0.0) or 0.0)
+                        ctr_d = float(rec.get("ctr_delta", 0.0) or 0.0)
+                        if (
+                            r_status != "ACCRETIVE_CONFIRMED"
+                            and c_delta <= 0
+                            and c_curr == 0
+                            and i_delta <= 0
+                            and p_delta >= 0.0
+                            and ctr_d <= 0.0
+                        ):
+                            issues.append(
+                                f"Unmeasured zero-lift baseline '{rec.get('slug')}' falsely classified as WINNING_ACCRETIVE in cohort_reflection_ledger.json"
+                            )
         except Exception as exc:
             issues.append(f"Failed to parse cohort_reflection_ledger.json: {exc}")
 

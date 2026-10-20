@@ -7547,6 +7547,286 @@ def assert_schema_graph_connectivity(
 
 
 # =============================================================================
+# Empirical Traditional & Generative Search Ranking Evidence (Zyppy 2026 Study)
+# =============================================================================
+
+ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC: List[Dict[str, Any]] = [
+    {"id": "search_intent_match", "name": "Search Intent Match", "weight": 2.60, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "links_from_highly_trusted_domains", "name": "Links from Highly trusted domains", "weight": 2.47, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "page_semantic_relevance", "name": "Page Semantic Relevance", "weight": 2.34, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "site_topical_authority", "name": "Site Topical Authority", "weight": 2.29, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "title_relevance", "name": "Title Relevance", "weight": 2.26, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "links_from_topically_relevant_pages", "name": "Links from Topically Relevant Pages", "weight": 2.22, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "ai_crawl_access_and_snippet_eligibility", "name": "AI Crawl Access & Snippet Eligibility", "weight": 2.20, "tier": "Strongly Positive", "channel": "GEO"},
+    {"id": "original_research_first_party_data", "name": "Original Research / First-Party Data", "weight": 2.19, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "query_answer_match", "name": "Query-Answer Match", "weight": 2.15, "tier": "Strongly Positive", "channel": "GEO"},
+    {"id": "satisfaction_task_completion", "name": "Satisfaction/Task Completion", "weight": 2.14, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "brand_entity_prominence_in_llm_memory", "name": "Brand/Entity Prominence in LLM Memory", "weight": 2.08, "tier": "Strongly Positive", "channel": "GEO"},
+    {"id": "sitewide_content_quality", "name": "Sitewide Content Quality", "weight": 2.07, "tier": "Strongly Positive", "channel": "Traditional & GEO"},
+    {"id": "content_effort", "name": "Content Effort", "weight": 1.61, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "creator_expertise_authority", "name": "Creator Expertise/Authority", "weight": 1.60, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "main_answer_near_beginning_of_page", "name": "Main Answer Near Beginning of Page", "weight": 1.59, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "correct_canonicalization", "name": "Correct Canonicalization", "weight": 1.56, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "factual_accuracy", "name": "Factual Accuracy", "weight": 1.52, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "number_of_internal_links_to_url", "name": "Number of Internal Links to URL", "weight": 1.49, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "user_selected_preferred_source", "name": "User-Selected Preferred Source", "weight": 1.48, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "links_from_sitewide_navigation", "name": "Links from Sitewide Navigation", "weight": 1.47, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "unlinked_brand_mentions", "name": "Unlinked Brand mentions", "weight": 1.30, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "https_security", "name": "HTTPS", "weight": 1.28, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "readability", "name": "Readability", "weight": 1.28, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "keywords_in_subheadings", "name": "Keywords in Subheadings", "weight": 1.27, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "matches_expert_consensus", "name": "Matches Expert Consensus", "weight": 1.23, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "site_speed", "name": "Site Speed", "weight": 1.23, "tier": "Positive", "channel": "Traditional & GEO"},
+    {"id": "backlink_anchor_text_diversity", "name": "Backlink Anchor Text Diversity", "weight": 1.18, "tier": "Positive", "channel": "Traditional & GEO"},
+]
+
+_SENTENCE_TRUNCATION_DANGLING_END_WORDS: Set[str] = {
+    "a", "an", "the", "and", "or", "but", "nor", "for", "yet", "so",
+    "of", "in", "to", "with", "by", "from", "at", "on", "into", "onto",
+    "upon", "via", "per", "as", "than", "between", "among", "through",
+    "during", "without", "within", "under", "over", "after", "before",
+    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "benchmar", "benc", "ben", "yie", "forgiven", "calculat", "amortiz",
+    "deduct", "withhold", "repay", "schedul", "compoun", "est", "approx",
+    "qb",
+}
+
+_SENTENCE_TRUNCATION_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"\bafter\s+\d+\s+to\s+\d+\s*[.!?]\s*$", re.IGNORECASE),
+        "Truncated numeric range clause before final punctuation ('after X to Y.')",
+    ),
+    (
+        re.compile(r"\b(?:of|for|to|in|on|with|by|from|and|or)\s+using\b", re.IGNORECASE),
+        "Mid-clause dangling preposition before 'using' caused by label word slicing",
+    ),
+    (
+        re.compile(
+            r"Compare exact cost waterfalls,\s+margin impacts,\s+and amortization schedule\.\s*$",
+            re.IGNORECASE,
+        ),
+        "Character-sliced plural noun 'schedules.' truncated into singular 'schedule.' at 154-char boundary",
+    ),
+    (
+        re.compile(r"(?:\.\.\.|…)\s*$"),
+        "Trailing ellipsis truncation",
+    ),
+]
+
+
+def detect_sentence_truncation_issues(text: str, context: str = "") -> List[str]:
+    """
+    Detects mid-word or mid-clause character slicing and sentence truncation
+    in meta descriptions, quick-answer passages, and llms.txt summaries.
+    Enforces Page Semantic Relevance (+2.34), AI Crawl Access & Snippet Eligibility (+2.20),
+    Query-Answer Match (+2.15), Sitewide Content Quality (+2.07), and Readability (+1.28).
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" ({context})" if context else ""
+    if not isinstance(text, str) or not text.strip():
+        return [f"Empty text cannot satisfy sentence completeness contract{ctx}"]
+
+    clean = " ".join(text.strip().split())
+    issues: List[str] = []
+
+    for pat, msg in _SENTENCE_TRUNCATION_PATTERNS:
+        if pat.search(clean):
+            issues.append(f"{msg}{ctx}: '{clean}'")
+
+    m_last = re.search(r"([A-Za-z0-9_-]+)\s*[.!?]?\s*$", clean)
+    if m_last:
+        last_token = m_last.group(1)
+        last_lower = last_token.lower()
+        if last_lower in _SENTENCE_TRUNCATION_DANGLING_END_WORDS:
+            issues.append(
+                f"Sentence ends with dangling or mid-word truncated token '{last_token}.'{ctx}: '{clean}'"
+            )
+
+    return issues
+
+
+def assert_no_sentence_truncation(text: str, context: str = "") -> bool:
+    """
+    Contract assertion verifying zero mid-word or mid-clause sentence truncations.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_sentence_truncation_issues(text, context=context)
+    if issues:
+        raise ValueError(f"Sentence truncation contract violation: {'; '.join(issues)}")
+    return True
+
+
+def detect_title_year_conflict_issues(title: str, context: str = "") -> List[str]:
+    """
+    Detects contradictory multi-year stuffing or duplicate year tokens in <title> tags
+    (e.g. 'Alabama 2027 Tax Brackets 2026 Calculator | ProfitHelm' or
+    'District of Columbia 2027 Tax Calculator (2026) | ProfitHelm').
+    Enforces Search Intent Match (+2.60) and Title Relevance (+2.26).
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" ({context})" if context else ""
+    if not isinstance(title, str) or not title.strip():
+        return [f"Empty title{ctx}"]
+
+    clean = " ".join(title.strip().split())
+    # Allow explicit hyphenated or slash fiscal ranges like 2026-2027 or 2026/2027
+    scrubbed = re.sub(r"\b(202\d)\s*[-/]\s*(202\d)\b", "FISCAL_RANGE", clean)
+    years = re.findall(r"\b(202[4-9]|203\d)\b", scrubbed)
+    issues: List[str] = []
+    if len(years) >= 2:
+        unique_years = sorted(set(years))
+        if len(unique_years) >= 2:
+            issues.append(
+                f"Contradictory multi-year tokens {unique_years} stuffed in title{ctx}: '{clean}'"
+            )
+        else:
+            issues.append(
+                f"Duplicate year token '{years[0]}' repeated in title{ctx}: '{clean}'"
+            )
+    return issues
+
+
+def assert_no_title_year_conflict(title: str, context: str = "") -> bool:
+    """
+    Contract assertion verifying zero contradictory or duplicate year tokens in page titles.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_title_year_conflict_issues(title, context=context)
+    if issues:
+        raise ValueError(f"Title year conflict contract violation: {'; '.join(issues)}")
+    return True
+
+
+_PLACEHOLDER_VERIFICATION_PATTERNS: Tuple[str, ...] = (
+    "_token",
+    "placeholder",
+    "your_",
+    "todo",
+    "changeme",
+    "example",
+    "dummy",
+    "replace_me",
+    "insert_",
+)
+
+
+def detect_placeholder_verification_token_issues(
+    token_or_html: str, context: str = ""
+) -> List[str]:
+    """
+    Detects placeholder or unconfigured google-site-verification meta tokens
+    (such as 'PREXVO_GSC_VERIFICATION_TOKEN').
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" ({context})" if context else ""
+    if not isinstance(token_or_html, str) or not token_or_html.strip():
+        return [f"Missing verification token input{ctx}"]
+
+    raw = token_or_html.strip()
+    tokens: List[str] = []
+    if "<meta" in raw.lower():
+        for m in re.finditer(
+            r'<meta\b[^>]*name=["\']google-site-verification["\'][^>]*>',
+            raw,
+            re.IGNORECASE,
+        ):
+            tag = m.group(0)
+            c_m = re.search(r'content=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+            tokens.append(c_m.group(1).strip() if c_m else "")
+    else:
+        tokens.append(raw)
+
+    issues: List[str] = []
+    for tok in tokens:
+        if not tok:
+            issues.append(f"Empty google-site-verification content attribute{ctx}")
+            continue
+        low = tok.lower()
+        if any(pat in low for pat in _PLACEHOLDER_VERIFICATION_PATTERNS) or re.fullmatch(
+            r"[A-Z0-9]+(?:_[A-Z0-9]+){2,}", tok
+        ):
+            issues.append(
+                f"Placeholder google-site-verification token '{tok}' detected in production output{ctx}"
+            )
+    return issues
+
+
+def assert_valid_verification_token(token_or_html: str, context: str = "") -> bool:
+    """
+    Contract assertion verifying google-site-verification is non-empty and not a placeholder token.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_placeholder_verification_token_issues(token_or_html, context=context)
+    if issues:
+        raise ValueError(f"Search Console verification token violation: {'; '.join(issues)}")
+    return True
+
+
+def detect_uninitialized_ssr_calculator_metrics(
+    html_content: str, context: str = ""
+) -> List[str]:
+    """
+    Detects interactive calculator pages where a positive default principal/loan balance
+    is pre-populated in SSR HTML, but primary payment output metrics (such as
+    id='metric-tiered_payment' or id='metric-std_10yr_payment') render as '$0.00'.
+    Enforces Satisfaction/Task Completion (+2.14), Factual Accuracy (+1.52), and
+    AI Crawl Access & Snippet Eligibility (+2.20).
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" ({context})" if context else ""
+    if not isinstance(html_content, str) or not html_content.strip():
+        return []
+
+    bal_match = re.search(
+        r'id=["\']field-(?:loan_balance|principal|balance|amount)["\'][^>]*value=["\']([0-9]+(?:\.[0-9]+)?)["\']',
+        html_content,
+        re.IGNORECASE,
+    )
+    if not bal_match:
+        bal_match = re.search(
+            r'value=["\']([0-9]+(?:\.[0-9]+)?)["\'][^>]*id=["\']field-(?:loan_balance|principal|balance|amount)["\']',
+            html_content,
+            re.IGNORECASE,
+        )
+    if not bal_match:
+        return []
+
+    try:
+        principal_val = float(bal_match.group(1))
+    except ValueError:
+        return []
+
+    if principal_val <= 0:
+        return []
+
+    issues: List[str] = []
+    for metric_id in ("metric-tiered_payment", "metric-std_10yr_payment"):
+        m_pat = re.search(
+            rf'id=["\']{re.escape(metric_id)}["\'][^>]*>\s*(\$0(?:\.00)?)\s*<',
+            html_content,
+            re.IGNORECASE,
+        )
+        if m_pat:
+            issues.append(
+                f"SSR calculator metric '{metric_id}' renders uninitialized '{m_pat.group(1)}' for positive principal ${principal_val:,.2f}{ctx}"
+            )
+    return issues
+
+
+def assert_initialized_ssr_calculator_metrics(
+    html_content: str, context: str = ""
+) -> bool:
+    """
+    Contract assertion verifying SSR calculator payment metrics are non-zero when principal > 0.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_uninitialized_ssr_calculator_metrics(html_content, context=context)
+    if issues:
+        raise ValueError(f"SSR calculator metric initialization violation: {'; '.join(issues)}")
+    return True
+
+
+# =============================================================================
 # Factor 13: llms.txt File (+0.05) Contracts & Parsing Engine
 # =============================================================================
 
@@ -7681,6 +7961,12 @@ def extract_llms_txt_metadata(content: str) -> Dict[str, Any]:
                 category_hubs.append(l)
 
     blockquote_summary = " ".join(blockquote_lines).strip()
+    truncated_summaries: List[str] = []
+    for l_item in all_links:
+        s_txt = l_item.get("summary", "").strip()
+        if s_txt and detect_sentence_truncation_issues(s_txt):
+            truncated_summaries.append(f"{l_item.get('title', l_item.get('url', ''))}: {s_txt}")
+
     is_compliant = bool(
         title
         and blockquote_summary
@@ -7688,6 +7974,7 @@ def extract_llms_txt_metadata(content: str) -> Dict[str, Any]:
         and all_links
         and not leaked_routes
         and not forbidden_dashes
+        and not truncated_summaries
     )
 
     return {
@@ -7700,6 +7987,7 @@ def extract_llms_txt_metadata(content: str) -> Dict[str, Any]:
         "category_hubs": category_hubs,
         "leaked_routes": sorted(list(set(leaked_routes))),
         "forbidden_dashes": forbidden_dashes,
+        "truncated_summaries": truncated_summaries,
         "is_llmstxt_compliant": is_compliant,
         "total_links": len(all_links),
         "total_hubs": len(category_hubs),
@@ -7721,6 +8009,7 @@ def detect_llms_txt_issues(
     4. Top category hubs include concise markdown summaries.
     5. Zero exposure or leaking of private administrative routes or internal paths.
     6. Zero prompt leakage terms or forbidden jargon.
+    7. Zero mid-word or mid-clause sentence truncations in bullet summaries.
     Zero em-dashes. Zero en-dashes.
     """
     issues: List[str] = []
@@ -7755,6 +8044,13 @@ def detect_llms_txt_issues(
                 issue_msg = f"{rel_path}: Disallowed internal route leaked in link target: '{url}'"
                 if issue_msg not in issues:
                     issues.append(issue_msg)
+        link_summary = (link.get("summary") or "").strip()
+        if link_summary:
+            trunc_errs = detect_sentence_truncation_issues(link_summary)
+            for terr in trunc_errs:
+                issues.append(
+                    f"{rel_path}: Link '{link.get('title') or url}' summary has sentence truncation ({terr}): '{link_summary}'"
+                )
 
     if not meta.get("has_h1"):
         issues.append(f"{rel_path}: Missing required H1 project title ('# <Title>')")
@@ -8642,6 +8938,15 @@ __all__ = [
     "detect_rate_limit_and_bot_shield_issues",
     "assert_rate_limit_and_bot_shield",
     "detect_interactive_touch_target_gaps",
+    "ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC",
+    "detect_sentence_truncation_issues",
+    "assert_no_sentence_truncation",
+    "detect_title_year_conflict_issues",
+    "assert_no_title_year_conflict",
+    "detect_placeholder_verification_token_issues",
+    "assert_valid_verification_token",
+    "detect_uninitialized_ssr_calculator_metrics",
+    "assert_initialized_ssr_calculator_metrics",
     "DatasetManifest",
     "compute_file_sha256",
 ]

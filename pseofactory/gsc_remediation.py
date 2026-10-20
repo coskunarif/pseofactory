@@ -1583,7 +1583,7 @@ def _normalize_title_50_60(
     Deterministically normalizes any title string into [50, 60] characters
     with brand attribution, whole-word boundaries, optional parenthetical
     secondary query modifier, zero duplicate 'Calculator Calculator',
-    and zero forbidden dashes.
+    zero contradictory multi-year stuffing, and zero forbidden dashes.
     """
     clean = _strip_forbidden_dashes(raw_title).strip()
     clean = re.sub(r"\s+", " ", clean)
@@ -1593,6 +1593,26 @@ def _normalize_title_50_60(
         base = clean[: -len(suffix)].strip(" |-:")
     else:
         base = clean.strip(" |-:")
+
+    # Strip conflicting secondary year tokens when a primary tax/fiscal year (e.g. 2027) is already present
+    if re.search(r"\b202[7-9]\b", base):
+        base = re.sub(r"\s*\(2026(?:\s+(?:Tax|Rules|RAP))?\)", "", base, flags=re.IGNORECASE)
+        base = re.sub(r"(?<!-)(?<!/)\b2026\b(?!-)(?!/)", "", base)
+        base = re.sub(r"\s+", " ", base).strip(" |-:")
+
+    # Deduplicate repeated year tokens if multiple standalone years remain
+    scrubbed_range = re.sub(r"\b(202\d)\s*[-/]\s*(202\d)\b", "FISCAL_RANGE", base)
+    if len(re.findall(r"\b(202[4-9]|203\d)\b", scrubbed_range)) >= 2:
+        seen_yr: set[str] = set()
+        dedup_words: List[str] = []
+        for w in base.split():
+            w_yr = re.sub(r"^[^\w]+|[^\w]+$", "", w)
+            if re.fullmatch(r"202[4-9]|203\d", w_yr):
+                if seen_yr:
+                    continue
+                seen_yr.add(w_yr)
+            dedup_words.append(w)
+        base = " ".join(dedup_words).strip(" |-:")
 
     if not base:
         base = (
@@ -1617,8 +1637,14 @@ def _normalize_title_50_60(
         else:
             base = f"{base} Calculator"
 
+    def _has_year(s: str) -> bool:
+        return bool(re.search(r"\b(202[4-9]|203\d)\b", s))
+
     # Attempt parenthetical secondary modifier injection if requested or beneficial
     mod_clean = _strip_forbidden_dashes(str(secondary_modifier or "")).strip(" ()|-:")
+    if mod_clean and _has_year(base) and _has_year(mod_clean):
+        mod_clean = re.sub(r"\b(202[4-9]|203\d)\b", "", mod_clean).strip(" ()|-:")
+        mod_clean = re.sub(r"\s+", " ", mod_clean)
     if mod_clean and "(" not in base and ")" not in base:
         paren_token = f"({mod_clean})"
         if mod_clean.lower() not in base.lower():
@@ -1627,12 +1653,14 @@ def _normalize_title_50_60(
             else:
                 # Try compact short parenthetical modifiers that fit within max_base
                 short_mods = (
-                    [mod_clean, "2026 RAP", "PSLF", "34 CFR", "2026"]
+                    [mod_clean, "2026 RAP", "PSLF", "34 CFR", "2026", "Title IV"]
                     if tenant_id == "prexvo"
-                    else [mod_clean, "IRC Rules", "Form 8824", "2026 Tax", "2026"]
+                    else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
                 )
                 for sm in short_mods:
                     sm_clean = _strip_forbidden_dashes(sm).strip(" ()|-:")
+                    if not sm_clean or (_has_year(base) and _has_year(sm_clean)):
+                        continue
                     pt = f"({sm_clean})"
                     if sm_clean.lower() not in base.lower() and len(base) + 1 + len(pt) <= max_base:
                         base = f"{base} {pt}"
@@ -1659,6 +1687,8 @@ def _normalize_title_50_60(
     for tok in pad_tokens:
         if len(cand) >= 50:
             break
+        if _has_year(base) and _has_year(tok):
+            continue
         if "(" in tok and ("(" in base or ")" in base):
             continue
         tok_plain = tok.strip("()")
@@ -1682,8 +1712,17 @@ def _normalize_title_50_60(
                 break
 
     while len(cand) < 50:
-        add_tok = "2026" if "2026" not in base else ("Model" if "model" not in base.lower() else "Tool")
-        if len(base) + 1 + len(add_tok) <= max_base:
+        if not _has_year(base):
+            add_tok = "2026"
+        elif "model" not in base.lower():
+            add_tok = "Model"
+        elif "tool" not in base.lower():
+            add_tok = "Tool"
+        elif "guide" not in base.lower():
+            add_tok = "Guide"
+        else:
+            add_tok = "Rules"
+        if len(base) + 1 + len(add_tok) <= max_base and add_tok.lower() not in base.lower():
             base = f"{base} {add_tok}"
         else:
             break
@@ -1695,7 +1734,9 @@ def _normalize_title_50_60(
             b_words.pop()
         trimmed = " ".join(b_words).rstrip(" |-&:")
         if len(trimmed) < min_base:
-            for short_tok in ("2026", "Tool", "Guide", "Model", "Tax", "Plan"):
+            for short_tok in ("2026", "Tool", "Guide", "Model", "Tax", "Plan", "Rules"):
+                if _has_year(trimmed) and _has_year(short_tok):
+                    continue
                 if short_tok.lower() not in trimmed.lower() and min_base <= len(f"{trimmed} {short_tok}") <= max_base:
                     trimmed = f"{trimmed} {short_tok}"
                     break
@@ -1707,83 +1748,119 @@ def _normalize_title_50_60(
     return _strip_forbidden_dashes(cand)
 
 
+_TRAILING_LABEL_STOPWORDS = (
+    "of", "for", "to", "in", "on", "with", "by", "from", "and", "or",
+    "vs", "versus", "the", "a", "an", "under", "into", "between",
+)
+
+
+def _clean_short_label(words_list: List[str], max_chars: int = 32) -> str:
+    w_copy = [w for w in words_list[:6] if w.strip()]
+    while len(w_copy) > 2 and len(" ".join(w_copy)) > max_chars:
+        w_copy.pop()
+    while len(w_copy) > 1 and w_copy[-1].lower().rstrip(".,;:-") in _TRAILING_LABEL_STOPWORDS:
+        w_copy.pop()
+    return " ".join(w_copy).strip(" ,;:-")
+
+
 def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> str:
     """
     Deterministically normalizes meta description length into [120, 155] characters
-    with domain-isolated statutory terminology and zero forbidden dashes.
+    with domain-isolated statutory terminology, complete whole-word sentences,
+    and zero forbidden dashes.
     """
+    from pseofactory.contracts import detect_sentence_truncation_issues
+
     clean = _strip_forbidden_dashes(raw_meta).strip()
     clean = re.sub(r"\s+", " ", clean)
-    if 120 <= len(clean) <= 155 and not clean.endswith("and audit-ready."):
+    if (
+        120 <= len(clean) <= 155
+        and not clean.endswith("and audit-ready.")
+        and not detect_sentence_truncation_issues(clean)
+    ):
         return clean
 
     q_words = [w for w in _strip_forbidden_dashes(query_label).split() if w.strip()]
-    short_label = " ".join(q_words[:6]) if len(" ".join(q_words)) > 44 else " ".join(q_words)
+    short_label = _clean_short_label(q_words, max_chars=28)
     if not short_label:
         short_label = "Title IV student loan repayment" if tenant_id == "prexvo" else "statutory tax liability"
     q_low = f"{query_label.lower()} {short_label.lower()}"
 
-    if tenant_id == "prexvo":
-        default_meta = (
-            f"Calculate {short_label} under Title IV 34 CFR Part 685 using 225% HHS Poverty "
-            f"Guidelines, discretionary income caps, and forgiveness schedules."
+    def _build_default_meta(lbl: str) -> Tuple[str, str]:
+        if tenant_id == "prexvo":
+            return (
+                f"Calculate {lbl} under Title IV 34 CFR Part 685 using 225% HHS Poverty "
+                f"Guidelines, discretionary income caps, and forgiveness rules.",
+                " Verified under Title IV 34 CFR Part 685 statutory rules.",
+            )
+        if "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
+            return (
+                f"Calculate {lbl} under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
+                f"Section 1250 recapture, boot, and state clawback rules.",
+                " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824.",
+            )
+        if "crypto" in q_low or "8949" in q_low or "1099-da" in q_low:
+            return (
+                f"Calculate {lbl} under IRC Section 1012 and Form 1099-DA, modeling capital "
+                f"gains, staking yield, and 3.8% NIIT compliance rules.",
+                " Grounded in IRS Form 8949 and Schedule D compliance rules.",
+            )
+        if "saas" in q_low or "runway" in q_low or "burn" in q_low:
+            return (
+                f"Calculate {lbl} under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
+                f"MRR growth, and exact Zero Cash Date horizons.",
+                " Grounded in institutional corporate treasury benchmarks.",
+            )
+        if "treasury" in q_low or "tbill" in q_low or "hysa" in q_low or "3124" in q_low:
+            return (
+                f"Calculate {lbl} under 31 U.S.C. Section 3124 state tax exemption rules, "
+                f"comparing US Treasury Bill Tax-Equivalent Yield vs HYSA APY.",
+                " Grounded in federal statutory yield exemption formulas.",
+            )
+        if "s-corp" in q_low or "reasonable salary" in q_low or "199a" in q_low:
+            return (
+                f"Calculate {lbl} under IRC Section 1366 and Section 199A, modeling W-2 FICA "
+                f"payroll splits, K-1 distributions, and QBI deduction limits.",
+                " Grounded in IRS reasonable compensation audit benchmarks.",
+            )
+        return (
+            f"Calculate {lbl} using deterministic IRC statutory formulas, federal "
+            f"brackets, depreciation limits, and IRS compliance benchmarks.",
+            " Grounded in deterministic IRS and federal statutory schedules.",
         )
-        tail_pad = " Verified under Title IV 34 CFR Part 685 statutory rules."
-    elif "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
-        default_meta = (
-            f"Calculate {short_label} under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
-            f"Section 1250 recapture, boot, and state clawback rules."
-        )
-        tail_pad = " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824."
-    elif "crypto" in q_low or "8949" in q_low or "1099-da" in q_low:
-        default_meta = (
-            f"Calculate {short_label} under IRC Section 1012 and Form 1099-DA, modeling short-term "
-            f"vs long-term capital gains, staking yield, and 3.8% NIIT."
-        )
-        tail_pad = " Grounded in IRS Form 8949 and Schedule D compliance rules."
-    elif "saas" in q_low or "runway" in q_low or "burn" in q_low:
-        default_meta = (
-            f"Calculate {short_label} under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
-            f"collected MRR growth, and exact Zero Cash Date horizons."
-        )
-        tail_pad = " Grounded in institutional corporate treasury benchmarks."
-    elif "treasury" in q_low or "tbill" in q_low or "hysa" in q_low or "3124" in q_low:
-        default_meta = (
-            f"Calculate {short_label} under 31 U.S.C. Section 3124 state tax exemption rules, "
-            f"comparing US Treasury Bill Tax-Equivalent Yield against HYSA APY."
-        )
-        tail_pad = " Grounded in federal statutory yield exemption formulas."
-    elif "s-corp" in q_low or "reasonable salary" in q_low or "199a" in q_low:
-        default_meta = (
-            f"Calculate {short_label} under IRC Section 1366 and Section 199A, modeling W-2 FICA "
-            f"payroll tax splits, K-1 distributions, and QBI deduction limits."
-        )
-        tail_pad = " Grounded in IRS reasonable compensation audit benchmarks."
-    else:
-        default_meta = (
-            f"Calculate {short_label} using deterministic IRC statutory formulas, federal "
-            f"brackets, depreciation limits, and IRS compliance benchmarks."
-        )
-        tail_pad = " Grounded in deterministic IRS and federal statutory schedules."
 
-    cand = clean if (len(clean) >= 60 and not clean.endswith("and audit-ready.")) else default_meta
+    default_meta, tail_pad = _build_default_meta(short_label)
+    while len(default_meta) > 155 and len(q_words) > 2:
+        q_words.pop()
+        short_label = _clean_short_label(q_words, max_chars=24) or (
+            "Title IV loan repayment" if tenant_id == "prexvo" else "statutory tax liability"
+        )
+        default_meta, tail_pad = _build_default_meta(short_label)
+
+    use_clean = (
+        len(clean) >= 60
+        and not clean.endswith("and audit-ready.")
+        and not detect_sentence_truncation_issues(clean)
+    )
+    cand = clean if use_clean else default_meta
     while len(cand) < 120:
         cand = f"{cand.rstrip('.')}." + tail_pad
 
     if len(cand) > 155:
-        words = cand[:154].split()
-        while len(words) > 6 and (
-            len(" ".join(words)) > 154
-            or words[-1].lower().rstrip(".,;:-") in (
-                "and", "or", "with", "for", "to", "in", "of", "by", "on", "under",
-                "the", "a", "an", "audit-ready", "statutory", "federal", "empirical",
-            )
-        ):
-            words.pop()
-        trimmed = " ".join(words).rstrip(" ,;:-") + "."
-        if len(trimmed) < 120:
-            trimmed = cand[:154].rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
-        cand = trimmed
+        if 120 <= len(default_meta) <= 155 and not detect_sentence_truncation_issues(default_meta):
+            cand = default_meta
+        else:
+            words = cand.rstrip(".!?").split()
+            while len(words) > 6 and (
+                len(" ".join(words).rstrip(" ,;:-") + ".") > 155
+                or detect_sentence_truncation_issues(" ".join(words).rstrip(" ,;:-") + ".")
+            ):
+                words.pop()
+            trimmed = " ".join(words).rstrip(" ,;:-") + "."
+            if len(trimmed) < 120 or detect_sentence_truncation_issues(trimmed):
+                cand = default_meta
+            else:
+                cand = trimmed
 
     return _strip_forbidden_dashes(cand)
 
@@ -1792,10 +1869,12 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     """
     Synthesizes a Princeton GEO Sentence-1 statutory quick answer strictly
     between 40 and 60 words with vertical-specific IRC/Title IV citations,
-    zero cross-tenant tokens, and zero dashes.
+    complete grammatical sentences, zero cross-tenant tokens, and zero dashes.
     """
     clean_q = _strip_forbidden_dashes(query_label).strip()
-    q_words = [w for w in clean_q.split() if w.strip()][:6]
+    q_words = [w for w in clean_q.split() if w.strip()][:5]
+    while len(q_words) > 1 and q_words[-1].lower().rstrip(".,;:-") in _TRAILING_LABEL_STOPWORDS:
+        q_words.pop()
     short_q = " ".join(q_words) if q_words else ("repayment options" if tenant_id == "prexvo" else "tax deductions")
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
@@ -1838,10 +1917,10 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             ).split()
         else:
             base_words = (
-                f"Under Title IV regulation 34 CFR Part 685, {short_q} determines monthly borrower "
+                f"Under Title IV regulation 34 CFR Part 685, {short_q} determines monthly "
                 f"obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected "
-                f"income for single filers) and a 10 percent discretionary rate. Qualifying borrowers "
-                f"receive a 100 percent unpaid interest subsidy and complete principal forgiveness after "
+                f"single-filer income) and a 10 percent discretionary rate. Qualifying borrowers "
+                f"receive a 100 percent unpaid interest subsidy and full principal forgiveness after "
                 f"120 to 240 certified monthly payments."
             ).split()
         filler_pool = [
@@ -2015,8 +2094,8 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         base_words.append(filler_pool[idx])
         idx += 1
 
-    if len(base_words) > 56:
-        base_words = base_words[:55]
+    if len(base_words) > 58:
+        base_words = base_words[:57]
         if not base_words[-1].endswith("."):
             base_words[-1] = base_words[-1].rstrip(",;:-") + "."
 
@@ -3019,8 +3098,13 @@ def compile_remediation_overlay_spec(
         tenant_id=resolved_tenant,
         candidate=candidate,
     )
+    title_seed = (
+        heading_label
+        if re.search(r"\b(202[4-9]|203\d)\b", heading_label)
+        else f"{heading_label} 2026"
+    )
     title_rewrite = _normalize_title_50_60(
-        f"{heading_label} 2026",
+        title_seed,
         brand=brand,
         tenant_id=resolved_tenant,
         secondary_modifier=secondary_mod,
@@ -4358,16 +4442,18 @@ def evaluate_expired_overlays(
             or baseline_sc.get("target_position")
             or 10.0
         )
-        base_ctr = float(
+        raw_base_ctr = (
             overlay_data.get("baseline_ctr")
-            or baseline_sc.get("baseline_ctr")
-            or 0.02
+            if overlay_data.get("baseline_ctr") is not None
+            else baseline_sc.get("baseline_ctr")
         )
-        base_impr = int(
+        base_ctr = float(raw_base_ctr if raw_base_ctr is not None else 0.02)
+        raw_base_impr = (
             overlay_data.get("baseline_impressions")
-            or baseline_sc.get("impressions")
-            or 100
+            if overlay_data.get("baseline_impressions") is not None
+            else baseline_sc.get("impressions")
         )
+        base_impr = int(raw_base_impr if raw_base_impr is not None else 100)
         base_clicks = int(
             overlay_data.get("baseline_clicks")
             if overlay_data.get("baseline_clicks") is not None
@@ -4447,7 +4533,7 @@ def evaluate_expired_overlays(
         curr_clicks = int(
             current_perf.get("clicks")
             if current_perf.get("clicks") is not None
-            else round(curr_impr * curr_ctr)
+            else (round(curr_impr * curr_ctr) if current_perf else base_clicks)
         )
 
         pos_delta = curr_pos - base_pos
@@ -4557,9 +4643,14 @@ def evaluate_expired_overlays(
             results["summary"]["DEGRADED_ROLLED_BACK"] += 1
         elif (
             pos_delta < -0.5
-            or (pos_delta <= 0.0 and ctr_delta >= 0.0)
             or ctr_delta > 0.005
-            or clicks_delta >= 0
+            or clicks_delta > 0
+            or (
+                bool(current_perf)
+                and pos_delta <= 0.0
+                and ctr_delta >= 0.0
+                and (curr_clicks > 0 or impr_pct_delta > 0.0)
+            )
         ):
             overlay_data["status"] = "ACCRETIVE_CONFIRMED"
             overlay_data["confirmed_at"] = now.isoformat()
