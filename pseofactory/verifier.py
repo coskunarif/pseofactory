@@ -6387,12 +6387,16 @@ def verify_cohort_reflection_contract(
                 rb_title = str(ov_data.get("rolled_back_title_rewrite") or "").strip()
                 rel_slug = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix())
                 html_path = d_dir / "tools" / rel_slug / "index.html"
-                if rb_title and html_path.is_file():
+                if html_path.is_file():
                     raw_h = html_path.read_text(encoding="utf-8", errors="ignore")
                     m_t = re.search(r"<title>(.*?)</title>", raw_h, flags=re.IGNORECASE | re.DOTALL)
-                    if m_t and html_lib.unescape(m_t.group(1).strip()) == rb_title:
+                    if rb_title and m_t and html_lib.unescape(m_t.group(1).strip()) == rb_title:
                         issues.append(
                             f"Rolled-back title '{rb_title}' still active in {html_path.relative_to(d_dir)}"
+                        )
+                    if 'id="gsc-striking-overlay"' in raw_h:
+                        issues.append(
+                            f"Rolled-back overlay markup still active in {html_path.relative_to(d_dir)}"
                         )
 
     ledger_path = root / ".agy" / "cohort_reflection_ledger.json"
@@ -6433,6 +6437,12 @@ def verify_cohort_reflection_contract(
                 for rec in (c1_obj.get("records") or []):
                     if not isinstance(rec, dict):
                         continue
+                    i_base = int(rec.get("baseline_impressions", 0) or 0)
+                    i_curr = int(rec.get("current_impressions", 0) or 0)
+                    if i_base == 160 and i_curr == 0:
+                        issues.append(
+                            f"Synthetic 160-impression fallback baseline retained on '{rec.get('slug')}' in cohort_reflection_ledger.json"
+                        )
                     if str(rec.get("cohort_outcome") or "") == "WINNING_ACCRETIVE":
                         r_status = str(rec.get("status") or "").upper()
                         c_delta = int(rec.get("clicks_delta", 0) or 0)
@@ -6440,7 +6450,11 @@ def verify_cohort_reflection_contract(
                         i_delta = int(rec.get("impressions_delta", 0) or 0)
                         p_delta = float(rec.get("position_delta", 0.0) or 0.0)
                         ctr_d = float(rec.get("ctr_delta", 0.0) or 0.0)
-                        if (
+                        if i_curr <= 0:
+                            issues.append(
+                                f"Zero-impression page '{rec.get('slug')}' falsely classified as WINNING_ACCRETIVE in cohort_reflection_ledger.json"
+                            )
+                        elif (
                             r_status != "ACCRETIVE_CONFIRMED"
                             and c_delta <= 0
                             and c_curr == 0

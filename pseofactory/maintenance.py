@@ -6299,6 +6299,8 @@ class RetroReflectionEngine:
     @classmethod
     def _overlay_spec_needs_heal(cls, ov_s: str, raw_ov: Dict[str, Any]) -> bool:
         """Determines whether a persisted remediation overlay spec contains polluted queries or cross-vertical drift."""
+        if not isinstance(raw_ov, dict) or str(raw_ov.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+            return False
         from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, PROFITHELM_US_STATES
 
         ov_s_low = str(ov_s or "").lower().strip("/")
@@ -6533,6 +6535,22 @@ class RetroReflectionEngine:
             except Exception:
                 pass
 
+        rolled_back_slugs: Set[str] = set()
+        for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+            if not overlays_dir.is_dir():
+                continue
+            for ov_file in sorted(overlays_dir.rglob("*.json")):
+                try:
+                    ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if isinstance(ov_spec, dict) and str(ov_spec.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                    rel_s = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
+                    spec_s = str(ov_spec.get("slug") or "").strip("/")
+                    rolled_back_slugs.add(rel_s)
+                    if spec_s:
+                        rolled_back_slugs.add(spec_s)
+
         resolved: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
         for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
             if not overlays_dir.is_dir():
@@ -6546,6 +6564,8 @@ class RetroReflectionEngine:
                     continue
                 rel_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
                 spec_slug = str(ov_spec.get("slug") or "").strip("/")
+                if rel_slug in rolled_back_slugs or (spec_slug and spec_slug in rolled_back_slugs):
+                    continue
                 target_url = str(ov_spec.get("target_url") or "")
                 url_slug = ""
                 if "/tools/" in target_url:
@@ -7781,24 +7801,38 @@ def _execute_autonomous_downstream_chain(
                 candidate=t,
             )
             if readiness["conversion_gap_detected"] and not dry_run:
-                spec = compile_remediation_overlay_spec(
-                    {
-                        "slug": t_slug,
-                        "tenant_id": adapter.property_id,
-                        "target_url": f"{canon_base}/tools/{t_slug}/",
-                        "query": t_query,
-                        "impressions": 100,
-                        "position": 12.0,
-                    },
-                    tenant_id=adapter.property_id,
-                )
-                html_file = adapter.dist_dir / "tools" / t_slug / "index.html"
-                if html_file.is_file():
-                    raw_h = html_file.read_text(encoding="utf-8")
-                    sharpened_h = inject_overlay_into_html(raw_h, spec)
-                    if sharpened_h != raw_h:
-                        html_file.write_text(sharpened_h, encoding="utf-8")
-                        conv_closed += 1
+                is_rb_slug = False
+                for rb_ov_cand in (
+                    repo_root / ".agy" / "overlays" / f"{t_slug.replace('/', '-')}.json",
+                    repo_root / "content" / "overlays" / f"{t_slug}.json",
+                ):
+                    if rb_ov_cand.is_file():
+                        try:
+                            rb_check = json.loads(rb_ov_cand.read_text(encoding="utf-8"))
+                            if isinstance(rb_check, dict) and str(rb_check.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                                is_rb_slug = True
+                                break
+                        except Exception:
+                            pass
+                if not is_rb_slug:
+                    spec = compile_remediation_overlay_spec(
+                        {
+                            "slug": t_slug,
+                            "tenant_id": adapter.property_id,
+                            "target_url": f"{canon_base}/tools/{t_slug}/",
+                            "query": t_query,
+                            "impressions": 100,
+                            "position": 12.0,
+                        },
+                        tenant_id=adapter.property_id,
+                    )
+                    html_file = adapter.dist_dir / "tools" / t_slug / "index.html"
+                    if html_file.is_file():
+                        raw_h = html_file.read_text(encoding="utf-8")
+                        sharpened_h = inject_overlay_into_html(raw_h, spec)
+                        if sharpened_h != raw_h:
+                            html_file.write_text(sharpened_h, encoding="utf-8")
+                            conv_closed += 1
             if readiness["distribution_gap_detected"]:
                 dist_closed += 1
             if readiness["manual_requirement_detected"] and isinstance(readiness.get("manual_requirement"), dict) and not dry_run:
@@ -8137,7 +8171,7 @@ def reflect_and_recompile_all_assets(
                         except Exception:
                             pass
                 seen_ov_slugs = set()
-                for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+                for overlays_dir in (repo_root / ".agy" / "overlays", repo_root / "content" / "overlays"):
                     if not overlays_dir.is_dir():
                         continue
                     for ov_file in sorted(overlays_dir.rglob("*.json")):
@@ -8160,7 +8194,7 @@ def reflect_and_recompile_all_assets(
                                     target_html = cand_veh
                         if target_html.is_file():
                             ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                            if isinstance(ov_spec, dict) and ov_spec.get("status") != "DEGRADED_ROLLED_BACK":
+                            if isinstance(ov_spec, dict):
                                 raw_h = target_html.read_text(encoding="utf-8")
                                 updated_h = inject_overlay_into_html(raw_h, ov_spec)
                                 if updated_h != raw_h:

@@ -890,3 +890,303 @@ def test_cohort_reflection_persists_nested_leaf_overlays_for_idempotent_rebuild(
     assert 'data-ai-citation-assertions="true"' in rebuilt_html
 
 
+def test_empirical_cohort_truth_emergency_rollback_consolidation_and_probe_filtering(tmp_path: Path) -> None:
+    """
+    Verifies the 3 owner-approved empirical cohort truth & portfolio hygiene contracts:
+      A1: Immediate emergency rollback during active locks for Page-1 dropouts and severe
+          rank/impression regressions (pos_delta >= +10 or impr_drop <= -50%), stripping
+          synthetic 160-impression (CRAWL_BUDGET_SIGNAL_LAG) and parent-hub (378-impr)
+          fallbacks so zero-impression spokes are never marked WINNING_ACCRETIVE.
+      A2: Executing noindex/301 hub consolidation on aged zero-impression spokes (>= 60d),
+          freezing new cluster expansion when pre-consolidation coverage < threshold, and
+          evaluating North Star indexed coverage against active indexable routes.
+      A3: Filtering synthetic probe subIDs (*_oct19, *_card_*, *_edge) from cohort
+          conversion slot weights and canonicalizing legacy Prexvo/ProfitHelm click slugs.
+    """
+    from pseofactory.gsc_remediation import inject_overlay_into_html
+    from pseofactory.seo_growth_loops import (
+        evaluate_closed_loop_cohort_reflection,
+        evaluate_content_portfolio_decisions,
+        evaluate_north_star_targets,
+    )
+    from pseofactory.verifier import verify_cohort_reflection_contract
+
+    repo_root = _seed_tenant_fixture(tmp_path / "empirical_truth_tenant")
+    agy_dir = repo_root / ".agy"
+    overlays_dir = agy_dir / "overlays"
+    overlays_dir.mkdir(parents=True, exist_ok=True)
+    active_lock_future = "2099-12-31T00:00:00+00:00"
+
+    # 1. Seed a Page-1 dropout overlay still under active lock (pos 7.0 -> 14.0, impr 41 -> 12)
+    dropout_dir = repo_root / "dist" / "tools" / "llc-vs-s-corp-calculator"
+    dropout_dir.mkdir(parents=True, exist_ok=True)
+    dropout_spec = {
+        "slug": "llc-vs-s-corp-calculator",
+        "query": "llc vs s corp tax calculator",
+        "target_url": "https://profithelm.com/tools/llc-vs-s-corp-calculator/",
+        "baseline_impressions": 41,
+        "baseline_clicks": 0,
+        "baseline_ctr": 0.0,
+        "baseline_position": 7.0,
+        "locked_until": active_lock_future,
+        "status": "ACTIVE_LOCKED",
+        "title_rewrite": "LLC vs S-Corp Tax Calculator (2026 Savings) | ProfitHelm",
+        "secondary_title_modifier": "(2026 Savings)",
+        "quick_answer": "Compare LLC and S-Corp self-employment tax savings.",
+        "autonomous_citation_assertions": ["A1", "A2", "A3"],
+    }
+    (dropout_dir / "index.html").write_text(
+        inject_overlay_into_html(
+            "<html><head><title>LLC vs S-Corp Calculator | ProfitHelm</title></head>"
+            "<body><main><h1>LLC vs S-Corp Calculator</h1><aside class='quick-answer'><p>Base</p></aside></main></body></html>",
+            dropout_spec,
+        ),
+        encoding="utf-8",
+    )
+    (overlays_dir / "llc-vs-s-corp-calculator.json").write_text(
+        json.dumps(dropout_spec, indent=2), encoding="utf-8"
+    )
+
+    # 2. Seed a synthetic 160-impression CRAWL_BUDGET_SIGNAL_LAG overlay with 0 empirical impressions
+    synth_dir = repo_root / "dist" / "tools" / "self-employment-tax-calculator"
+    synth_dir.mkdir(parents=True, exist_ok=True)
+    (synth_dir / "index.html").write_text(
+        "<html><head><title>Self Employment Tax Calculator | ProfitHelm</title></head>"
+        "<body><main><h1>Self Employment Tax Calculator</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (overlays_dir / "self-employment-tax-calculator.json").write_text(
+        json.dumps(
+            {
+                "slug": "self-employment-tax-calculator",
+                "query": "self employment tax calculator",
+                "target_url": "https://profithelm.com/tools/self-employment-tax-calculator/",
+                "baseline_impressions": 160,
+                "baseline_clicks": 0,
+                "baseline_ctr": 0.0,
+                "baseline_position": 10.0,
+                "baseline_source": "CRAWL_BUDGET_SIGNAL_LAG",
+                "locked_until": active_lock_future,
+                "status": "ACTIVE_LOCKED",
+                "title_rewrite": "Self-Employment Tax Calculator (2026 SECA) | ProfitHelm",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # 3. Seed a zero-impression child spoke under irs-2027-tax-brackets (parent hub has 378 impr)
+    zero_spoke_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets" / "wyoming"
+    zero_spoke_dir.mkdir(parents=True, exist_ok=True)
+    wy_html_file = zero_spoke_dir / "index.html"
+    wy_html_file.write_text(
+        "<html><head><title>Wyoming 2027 Tax Brackets | ProfitHelm</title></head>"
+        "<body><main><h1>Wyoming 2027 Tax Brackets</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+    os.utime(wy_html_file, (old_ts, old_ts))
+    (overlays_dir / "irs-2027-tax-brackets-wyoming.json").write_text(
+        json.dumps(
+            {
+                "slug": "irs-2027-tax-brackets/wyoming",
+                "query": "wyoming tax brackets 2027",
+                "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/wyoming/",
+                "baseline_impressions": 378,
+                "baseline_clicks": 0,
+                "baseline_ctr": 0.0,
+                "baseline_position": 12.0,
+                "locked_until": active_lock_future,
+                "status": "ACTIVE_LOCKED",
+                "title_rewrite": "Wyoming 2027 Tax Brackets (2026 Brackets) | ProfitHelm",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # 4. Seed partner engagement with legacy slug and synthetic probe subIDs
+    refi_dir = repo_root / "dist" / "tools" / "student-loan-refinance-break-even-calculator"
+    refi_dir.mkdir(parents=True, exist_ok=True)
+    (refi_dir / "index.html").write_text(
+        "<html><head><title>Student Loan Refinance Break-Even Calculator | ProfitHelm</title></head>"
+        "<body><main><h1>Student Loan Refinance Break-Even Calculator</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (agy_dir / "outbound_partner_clicks.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event_type": "outbound_partner_click",
+                        "property_id": "profithelm",
+                        "slug": "student-loan-refinance-savings-calculator",
+                        "partner_key": "splash_financial",
+                        "cta_slot": "post_calculation_verdict",
+                        "sub_id": "px_refi_card_1",
+                        "clicks": 1,
+                        "estimated_revenue_yield_usd": 145.0,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event_type": "outbound_partner_click",
+                        "property_id": "profithelm",
+                        "slug": "student-loan-refinance-savings-calculator",
+                        "partner_key": "splash_financial",
+                        "cta_slot": "post_calculation_verdict",
+                        "sub_id": "px_ibr_oct19",
+                        "clicks": 1,
+                        "estimated_revenue_yield_usd": 145.0,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (agy_dir / "outbound_partner_engagement.json").write_text(
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "total_events_processed": 2,
+                "total_outbound_clicks": 2,
+                "total_calculator_interactions": 1,
+                "total_estimated_revenue_yield_usd": 290.0,
+                "by_slug": {
+                    "student-loan-refinance-savings-calculator": {
+                        "outbound_clicks": 2,
+                        "calculator_interactions": 1,
+                        "estimated_revenue_yield_usd": 290.0,
+                        "partners": {"splash_financial": 2},
+                        "cta_slots": {"post_calculation_verdict": 2},
+                    }
+                },
+                "by_partner": {"splash_financial": {"clicks": 2, "estimated_yield_usd": 290.0}},
+                "by_cta_slot": {"post_calculation_verdict": {"outbound_clicks": 2, "estimated_revenue_yield_usd": 290.0}},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    consolidated_gsc = {
+        "baseline_rows": [
+            {
+                "query": "llc vs s corp tax calculator",
+                "canonical_path": "/tools/llc-vs-s-corp-calculator",
+                "canonical_slug": "llc-vs-s-corp-calculator",
+                "impressions": 41,
+                "clicks": 0,
+                "ctr": 0.0,
+                "position": 7.0,
+            },
+            {
+                "query": "irs 2027 tax brackets",
+                "canonical_path": "/tools/irs-2027-tax-brackets",
+                "canonical_slug": "irs-2027-tax-brackets",
+                "impressions": 300,
+                "clicks": 1,
+                "ctr": 0.0033,
+                "position": 18.0,
+            },
+        ],
+        "current_rows": [
+            {
+                "query": "llc vs s corp tax calculator",
+                "canonical_path": "/tools/llc-vs-s-corp-calculator",
+                "canonical_slug": "llc-vs-s-corp-calculator",
+                "impressions": 12,
+                "clicks": 0,
+                "ctr": 0.0,
+                "position": 14.0,
+            },
+            {
+                "query": "irs 2027 tax brackets",
+                "canonical_path": "/tools/irs-2027-tax-brackets",
+                "canonical_slug": "irs-2027-tax-brackets",
+                "impressions": 378,
+                "clicks": 2,
+                "ctr": 0.0053,
+                "position": 15.0,
+            },
+        ],
+        "impressions_by_path": {
+            "/tools/llc-vs-s-corp-calculator": 12,
+            "/tools/irs-2027-tax-brackets": 378,
+            "/tools/irs-2027-tax-brackets/california": 45,
+            "/tools/section-179-calculator": 120,
+            "/tools/section-1031-calculator/texas": 25,
+        },
+        "clicks_by_path": {"/tools/irs-2027-tax-brackets": 2, "/tools/section-179-calculator": 3},
+    }
+
+    cr_rep = evaluate_closed_loop_cohort_reflection(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        consolidated_gsc=consolidated_gsc,
+        propagate_winning_patterns=True,
+        enforce_rollback_contracts=True,
+        persist=True,
+    )
+
+    # A1: Page-1 dropout rolled back immediately despite active lock
+    assert "llc-vs-s-corp-calculator" in cr_rep["rollback_and_flag_actions"]["rolled_back_slugs"]
+    rb_html = (dropout_dir / "index.html").read_text(encoding="utf-8")
+    assert 'id="gsc-striking-overlay"' not in rb_html
+    assert "(2026 Savings)" not in rb_html
+
+    # A1: Synthetic 160-impression fallback and zero-impression child spoke stripped and not WINNING_ACCRETIVE
+    c1_by_slug = {r["slug"]: r for r in cr_rep["cohorts"]["1_title_remediation"]["records"]}
+    assert c1_by_slug["self-employment-tax-calculator"]["baseline_impressions"] == 0
+    assert c1_by_slug["self-employment-tax-calculator"]["cohort_outcome"] != "WINNING_ACCRETIVE"
+    assert c1_by_slug["irs-2027-tax-brackets/wyoming"]["current_impressions"] == 0
+    assert c1_by_slug["irs-2027-tax-brackets/wyoming"]["cohort_outcome"] != "WINNING_ACCRETIVE"
+
+    # A3: Legacy partner click slug canonicalized and synthetic probe subIDs filtered from slot weights
+    c4 = cr_rep["cohorts"]["4_sponsor_slot_update"]
+    assert c4["synthetic_probe_clicks_filtered"] == 2
+    assert c4["verified_non_probe_outbound_clicks"] == 0
+    assert (
+        c4["canonicalized_legacy_slugs"].get("student-loan-refinance-savings-calculator")
+        == "student-loan-refinance-break-even-calculator"
+    )
+    slot_weights = {s["cta_slot"]: s["empirical_weight"] for s in c4["by_cta_slot"]}
+    assert slot_weights.get("post_calculation_verdict") == 1.0
+
+    # A2: Portfolio consolidation and North Star active coverage
+    os.utime(wy_html_file, (old_ts, old_ts))
+    port_rep = evaluate_content_portfolio_decisions(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        consolidated_gsc=consolidated_gsc,
+        max_age_days=30.0,
+        persist=True,
+    )
+    assert port_rep["cluster_expansion_frozen"] is True
+    wy_cand = next(
+        (c for c in port_rep["zero_impression_candidates"] if c["url_path"] == "/tools/irs-2027-tax-brackets/wyoming"),
+        None,
+    )
+    assert wy_cand is not None
+    assert wy_cand["status"] == "CONSOLIDATED_NOINDEX_301"
+    assert wy_cand["recommended_consolidation_target"] == "/tools/irs-2027-tax-brackets/"
+    assert wy_cand["noindex_applied"] is True
+
+    ns_rep = evaluate_north_star_targets(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        consolidated_gsc=consolidated_gsc,
+        portfolio_report=port_rep,
+        persist=True,
+    )
+    p2 = ns_rep["pillars"]["2_indexed_coverage_and_hygiene"]
+    assert p2["cluster_expansion_frozen"] is True
+    assert p2["indexed_impression_ratio_pct"] >= p2["pre_consolidation_indexed_coverage_pct"]
+    assert verify_cohort_reflection_contract(cr_rep, repo_root=repo_root)["status"] == "PASS"
+
+
+
