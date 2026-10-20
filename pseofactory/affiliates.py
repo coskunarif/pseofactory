@@ -940,23 +940,23 @@ INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
     "macrs": ["crest_capital", "ramp", "mercury"],
     "depreciation": ["crest_capital", "ramp", "mercury"],
     "equipment": ["crest_capital", "ramp", "mercury"],
-    "medical-equipment": ["national_funding_med", "crest_capital", "ramp"],
-    "workers-comp": ["simply_business", "next_insurance_b2b", "suretybonds_direct"],
-    "surety-bond": ["suretybonds_direct", "simply_business", "next_insurance_b2b"],
-    "tariff-landed-cost": ["freightos_marketplace", "otr_solutions_factoring", "mercury", "ramp"],
-    "invoice-factoring": ["otr_solutions_factoring", "mercury", "ramp", "rho"],
+    "medical-equipment": ["crest_capital", "national_funding_med", "ramp", "mercury"],
+    "workers-comp": ["rippling", "gusto", "simply_business", "next_insurance_b2b", "suretybonds_direct"],
+    "surety-bond": ["suretybonds_direct", "crest_capital", "rippling", "simply_business", "next_insurance_b2b", "mercury"],
+    "tariff-landed-cost": ["rippling", "crest_capital", "freightos_marketplace", "otr_solutions_factoring", "mercury", "ramp"],
+    "invoice-factoring": ["crest_capital", "rippling", "otr_solutions_factoring", "mercury", "ramp", "rho"],
     "s-corp-payroll": ["rippling", "gusto", "mercury", "ramp"],
     "treasury": ["interactive_brokers", "public_com", "wealthfront", "mercury"],
     "yield": ["interactive_brokers", "public_com", "wealthfront", "mercury"],
-    "tbill": ["interactive_brokers", "public_com", "wealthfront"],
+    "tbill": ["mercury", "interactive_brokers", "public_com", "wealthfront"],
     "qsbs": ["mercury", "interactive_brokers", "wealthfront", "stripe"],
     "1202": ["mercury", "interactive_brokers", "wealthfront", "stripe"],
-    "corporate-amt": ["mercury", "ramp", "rho", "stripe"],
-    "r-and-d": ["mercury", "ramp", "gusto", "rippling", "stripe"],
-    "runway": ["mercury", "ramp", "rho", "gusto", "rippling", "stripe"],
-    "burn": ["mercury", "ramp", "rho", "stripe"],
-    "saas": ["mercury", "ramp", "rho", "gusto", "rippling", "stripe"],
-    "payroll": ["gusto", "rippling", "mercury", "ramp"],
+    "corporate-amt": ["crest_capital", "rippling", "mercury", "ramp", "rho", "stripe"],
+    "r-and-d": ["rippling", "crest_capital", "gusto", "mercury", "ramp", "stripe"],
+    "runway": ["rippling", "gusto", "mercury", "ramp", "rho", "stripe"],
+    "burn": ["rippling", "crest_capital", "mercury", "ramp", "rho", "stripe"],
+    "saas": ["rippling", "gusto", "mercury", "ramp", "rho", "stripe"],
+    "payroll": ["rippling", "gusto", "mercury", "ramp"],
     "crypto": ["coinledger", "koinly", "turbotax", "taxslayer"],
     "capital-gains": ["wealthfront", "interactive_brokers", "turbotax", "taxslayer"],
     "tax": ["turbotax", "taxslayer", "freetaxusa"],
@@ -4089,6 +4089,10 @@ def normalize_html_callout_message_match(
         tok in page_identity_lower
         for tok in ("179", "equipment", "lease", "macrs", "depreciation", "vehicle", "gvwr", "truck", "suv")
     )
+    is_174_page = any(
+        tok in page_identity_lower
+        for tok in ("section-174", "section 174", "r-and-d", "r&d")
+    )
 
     updated = html
 
@@ -4154,8 +4158,10 @@ def normalize_html_callout_message_match(
                     pk = "kalshi"
                 elif is_crypto_page:
                     pk = "coinledger"
-                else:
+                elif is_treasury_page:
                     pk = "mercury"
+                else:
+                    pk = "rippling"
         if pk != old_pk:
             sec_html = re.sub(
                 rf'data-partner=["\']{re.escape(old_pk)}["\']',
@@ -4425,6 +4431,8 @@ def normalize_html_callout_message_match(
                     sorted_keys = ["ipx1031", "crest_capital", "mercury"]
                 elif is_179_equipment_page:
                     sorted_keys = ["crest_capital", "mercury", "rippling"]
+                elif is_174_page:
+                    sorted_keys = ["crest_capital", "rippling", "mercury"]
                 elif is_prediction_odds_page:
                     sorted_keys = ["kalshi", "coinledger", "koinly"]
                 elif is_crypto_page:
@@ -4438,7 +4446,7 @@ def normalize_html_callout_message_match(
                 elif is_treasury_page:
                     sorted_keys = ["mercury", "kalshi", "crest_capital"]
                 else:
-                    sorted_keys = ["mercury", "rippling", "crest_capital"]
+                    sorted_keys = ["rippling", "crest_capital", "mercury"]
                 primary_inline_pk = sorted_keys[0]
                 h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
                 h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'

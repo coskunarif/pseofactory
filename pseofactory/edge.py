@@ -1342,6 +1342,7 @@ export async function onRequest(context) {{
   return makeRedirectResponse(finalRedirectUrl, {{
     "X-Edge-Partner": rawPartner,
     "X-Edge-Subid": effectiveSubid || "default",
+    "X-Edge-Contract-Tier": hasDirectConfig ? "direct_env_override" : "direct_lending_marketplace",
     "X-Edge-Telemetry": "recorded",
   }});
 }}
@@ -1351,6 +1352,21 @@ export async function onRequest(context) {{
 
     prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
     sovrn_key = getattr(active_hub, "sovrn_domain_key", "0a5ac1bfe04034bff021b394f5e71d90")
+
+    direct_contract_upgrades = {
+        "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
+        "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
+        "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
+        "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
+    }
+    sovrn_fallback_upgrades = {
+        "ipx1031": "https://dlpcapital.com/",
+    }
 
     preferred_order = [
         "coinledger",
@@ -1395,10 +1411,20 @@ export async function onRequest(context) {{
             default_url = v_url
         else:
             default_url = p_obj.default_url
+        direct_contract_url = direct_contract_upgrades.get(k) or direct_contract_upgrades.get(p_obj.key)
+        sovrn_fallback_url = sovrn_fallback_upgrades.get(k) or sovrn_fallback_upgrades.get(p_obj.key)
+        if sovrn_fallback_url:
+            is_direct = False
         is_direct_js = "true" if is_direct else "false"
+        extra_lines = ""
+        if direct_contract_url:
+            extra_lines += f'    directContractUrl: "{direct_contract_url}",\n'
+        if sovrn_fallback_url:
+            extra_lines += f'    sovrnFallbackUrl: "{sovrn_fallback_url}",\n'
         catalog_entries.append(
             f'  {k}: {{\n'
             f'    defaultUrl: "{default_url}",\n'
+            f'{extra_lines}'
             f'    envVar: "{p_obj.env_var}",\n'
             f'    isDirect: {is_direct_js},\n'
             f'  }},'
@@ -1424,9 +1450,12 @@ export async function onRequest(context) {{
             v_meta = SOVRN_VERIFIED_PAYING_MERCHANTS.get(ext_k, {})
             ext_url = str(v_meta.get("verified_url") or f"https://www.{ext_k}.com/").strip()
             ext_direct_js = "true" if v_meta.get("is_direct") else "false"
+            ext_direct_contract = direct_contract_upgrades.get(ext_k)
+            ext_extra = f'    directContractUrl: "{ext_direct_contract}",\n' if ext_direct_contract else ""
             catalog_entries.append(
                 f'  {ext_k}: {{\n'
                 f'    defaultUrl: "{ext_url}",\n'
+                f'{ext_extra}'
                 f'    envVar: "{ext_env}",\n'
                 f'    isDirect: {ext_direct_js},\n'
                 f'  }},'
@@ -1438,9 +1467,12 @@ export async function onRequest(context) {{
             v_url = str(v_meta.get("verified_url") or "").strip()
             v_env = f"AFFILIATE_{v_key.upper()}_URL"
             v_direct_js = "true" if v_meta.get("is_direct") else "false"
+            v_direct_contract = direct_contract_upgrades.get(v_key)
+            v_extra = f'    directContractUrl: "{v_direct_contract}",\n' if v_direct_contract else ""
             catalog_entries.append(
                 f'  {v_key}: {{\n'
                 f'    defaultUrl: "{v_url}",\n'
+                f'{v_extra}'
                 f'    envVar: "{v_env}",\n'
                 f'    isDirect: {v_direct_js},\n'
                 f'  }},'
@@ -1638,8 +1670,24 @@ export async function onRequest(context) {{
   // Resolve target URL and determine if active direct or fallback
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
-  const isDirect = partnerConfig.isDirect || hasDirectConfig;
-  const rawTargetUrl = (hasDirectConfig ? envUrl : partnerConfig.defaultUrl).trim();
+  const hasDirectContract = Boolean(
+    partnerConfig.directContractUrl && partnerConfig.directContractUrl.trim().length > 0
+  );
+  const isDirect = partnerConfig.isDirect || hasDirectConfig || hasDirectContract;
+  const rawTargetUrl = (
+    hasDirectConfig
+      ? envUrl
+      : hasDirectContract
+      ? partnerConfig.directContractUrl
+      : partnerConfig.sovrnFallbackUrl || partnerConfig.defaultUrl
+  ).trim();
+  const contractTier = hasDirectConfig
+    ? "direct_env_override"
+    : hasDirectContract
+    ? "direct_contract_upgraded"
+    : isDirect
+    ? "direct_default"
+    : "sovrn_fallback";
 
   // Validate raw target URL against SSRF
   if (!isSsrfSafe(rawTargetUrl)) {{
@@ -1753,6 +1801,7 @@ export async function onRequest(context) {{
     subid: effectiveSubid || `${{rawPartner}}_edge`,
     value_tier: phTier || "starter",
     ph_tier: phTier || "starter",
+    contract_tier: contractTier,
     path: reqUrl.pathname,
     destination_url: finalRedirectUrl,
     timestamp: new Date().toISOString(),
@@ -1766,6 +1815,7 @@ export async function onRequest(context) {{
       "X-Robots-Tag": "noindex, nofollow",
       "X-Edge-Partner": rawPartner,
       "X-Edge-Subid": effectiveSubid || "default",
+      "X-Edge-Contract-Tier": contractTier,
       "X-Edge-Telemetry": "recorded",
     }},
   }});

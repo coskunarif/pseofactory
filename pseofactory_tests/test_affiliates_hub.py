@@ -1113,3 +1113,142 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
     assert "interactive_runtime_sync" in repairs
     assert 'document.querySelector(\'script[src*="/static/js/app.js"]\')' not in healed_doc
 
+
+def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
+    """
+    Verifies that:
+    1. /r/crest_capital upgrades from $250 FirstPromoter to $500 Impact.com Xendoo (#16354)
+       with subId1 and sharedid attribution and X-Edge-Contract-Tier: direct_contract_upgraded.
+    2. /r/turbotax, /r/taxslayer, /r/freetaxusa, and /r/suretybonds_direct upgrade from
+       Sovrn wrappers to direct approved CJ Affiliate contracts (E-file.com #4355234,
+       ezTaxReturn.com #6874782, LawDepot #4544498) with sid attribution.
+    3. /r/ipx1031 routes through Sovrn Commerce DLP Capital ($250/lead) with cuid attribution
+       when env.AFFILIATE_IPX1031_URL is not set, eliminating $0 unmonetized UTM leaks.
+    4. Section 174 R&D and B2B commercial calculators prioritize highest-CPA live contracts
+       (crest_capital $500 CPA and rippling $600-$1,600 CPA ahead of mercury $250 CPA).
+    """
+    import re
+    import subprocess
+    from pseofactory.affiliates import (
+        INTENT_ROUTING_TABLE,
+        normalize_html_callout_message_match,
+    )
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+
+    repo_dir = tmp_path / "profithelm"
+    (repo_dir / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    sync_tenant_edge_redirect_function(repo_dir, property_id="profithelm")
+    ph_r = repo_dir / "functions" / "r" / "[partner].js"
+
+    node_script = f"""
+    (async () => {{
+      const phRedirect = await import({json.dumps(ph_r.as_uri())});
+
+      // 1. crest_capital -> Impact Xendoo #16354 ($500 CPA)
+      const crestRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=calculator_result_inline&subid=equipment-lease-calculator_inline&ph_tier=enterprise"),
+        env: {{}},
+        params: {{ partner: "crest_capital" }}
+      }});
+      if (crestRes.status !== 302) process.exit(10);
+      const crestLoc = new URL(crestRes.headers.get("Location"));
+      if (crestLoc.hostname !== "xendoo.pxf.io" || !crestLoc.pathname.includes("/16354")) process.exit(11);
+      if (crestLoc.searchParams.get("subId1") !== "equipment-lease-calculator_inline") process.exit(12);
+      if (crestLoc.searchParams.get("sharedid") !== "equipment-lease-calculator") process.exit(13);
+      if (crestRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(14);
+
+      // 2. turbotax -> CJ E-file.com #4355234 (30%-40% commission)
+      const ttRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_1"),
+        env: {{}},
+        params: {{ partner: "turbotax" }}
+      }});
+      const ttLoc = new URL(ttRes.headers.get("Location"));
+      if (ttLoc.hostname !== "www.jdoqocy.com" || !ttLoc.pathname.includes("click-101906407-11917161")) process.exit(20);
+      if (ttLoc.searchParams.get("sid") !== "irs-2027-tax-brackets-tcja-sunset-calculator_partner_card_1") process.exit(21);
+      if (ttRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(22);
+
+      // 3. taxslayer -> CJ ezTaxReturn.com #6874782 (15% commission)
+      const tsRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_2"),
+        env: {{}},
+        params: {{ partner: "taxslayer" }}
+      }});
+      const tsLoc = new URL(tsRes.headers.get("Location"));
+      if (tsLoc.hostname !== "www.dpbolvw.net" || !tsLoc.pathname.includes("click-101906407-15704796")) process.exit(30);
+      if (tsLoc.searchParams.get("sid") !== "california-tax-brackets-calculator_partner_card_2") process.exit(31);
+
+      // 4. suretybonds_direct -> CJ LawDepot #4544498 (30% + $6.50 Free Trial)
+      const sbRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/suretybonds_direct?source_tool=contractor-surety-bond-cost-calculator&cta_slot=partner_card_1"),
+        env: {{}},
+        params: {{ partner: "suretybonds_direct" }}
+      }});
+      const sbLoc = new URL(sbRes.headers.get("Location"));
+      if (sbLoc.hostname !== "www.jdoqocy.com" || !sbLoc.pathname.includes("click-101906407-16985242")) process.exit(40);
+      if (sbLoc.searchParams.get("sid") !== "contractor-surety-bond-cost-calculator_partner_card_1") process.exit(41);
+
+      // 5. ipx1031 -> Sovrn Commerce DLP Capital ($250/lead) when env.AFFILIATE_IPX1031_URL is unset
+      const ipxRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
+        env: {{}},
+        params: {{ partner: "ipx1031" }}
+      }});
+      const ipxLoc = new URL(ipxRes.headers.get("Location"));
+      if (ipxLoc.hostname !== "redirect.viglink.com") process.exit(50);
+      if (!ipxLoc.searchParams.get("u").startsWith("https://dlpcapital.com/")) process.exit(51);
+      if (ipxLoc.searchParams.get("cuid") !== "1031-exchange-boot-calculator-california_inline") process.exit(52);
+      if (ipxRes.headers.get("X-Edge-Contract-Tier") !== "sovrn_fallback") process.exit(53);
+
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Direct contract upgrade Node test failed (exit {proc.returncode}): {proc.stderr}"
+
+    # Verify Section 174 R&D calculator aligns inline, card 1, and overlay to crest_capital ($500 CPA) then rippling ($600-$1,600 CPA)
+    sec174_html = """<!DOCTYPE html>
+<html><head><title>R&D Tax Credit & Section 174 Amortization Calculator</title><link rel="canonical" href="https://profithelm.com/tools/r-and-d-tax-credit-section-174-amortization-calculator/" /></head><body>
+  <div class="calculator-grid">
+    <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
+    <div class="card result-card"><div class="card-header"><h2>Section 174 Amortization Schedule</h2></div></div>
+  </div>
+  <section class="affiliate-section affiliates-section">
+    <h2>Partners</h2>
+    <div class="affiliate-card partner-card"><a href="/r/mercury" class="btn-cta">Apply for Mercury</a></div>
+  </section>
+  <div id="gsc-striking-overlay" class="gsc-overlay-container">
+    <section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="profithelm" data-partner="mercury">
+      <a href="/r/mercury" class="btn-cta">Apply for Mercury</a>
+    </section>
+  </div>
+</body></html>"""
+    norm_174 = normalize_html_callout_message_match(sec174_html, property_id="profithelm")
+    r_174 = re.findall(r'href="/r/([a-z0-9_]+)', norm_174)
+    assert r_174 == ["crest_capital", "crest_capital", "rippling", "mercury", "crest_capital"]
+
+    # Verify B2B commercial calculators prioritize rippling ($600-$1,600 CPA) then crest_capital ($500 CPA) ahead of mercury ($250 CPA)
+    b2b_html = """<!DOCTYPE html>
+<html><head><title>Invoice Factoring vs Business Line of Credit Calculator</title><link rel="canonical" href="https://profithelm.com/tools/invoice-factoring-vs-business-line-of-credit-calculator/" /></head><body>
+  <div class="calculator-grid">
+    <div class="card"><div class="card-header"><h2>Inputs</h2></div></div>
+    <div class="card result-card"><div class="card-header"><h2>Effective APR Comparison</h2></div></div>
+  </div>
+  <section class="affiliate-section affiliates-section">
+    <h2>Partners</h2>
+    <div class="affiliate-card partner-card"><a href="/r/mercury" class="btn-cta">Apply for Mercury</a></div>
+  </section>
+  <div id="gsc-striking-overlay" class="gsc-overlay-container">
+    <section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="profithelm" data-partner="mercury">
+      <a href="/r/mercury" class="btn-cta">Apply for Mercury</a>
+    </section>
+  </div>
+</body></html>"""
+    norm_b2b = normalize_html_callout_message_match(b2b_html, property_id="profithelm")
+    r_b2b = re.findall(r'href="/r/([a-z0-9_]+)', norm_b2b)
+    assert r_b2b == ["rippling", "rippling", "crest_capital", "mercury", "rippling"]
+    assert INTENT_ROUTING_TABLE["workers-comp"][0] == "rippling"
+    assert INTENT_ROUTING_TABLE["invoice-factoring"][0] == "crest_capital"
+    assert INTENT_ROUTING_TABLE["tariff-landed-cost"][0] == "rippling"
+
+
