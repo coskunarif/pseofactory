@@ -2091,15 +2091,18 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             "revenue", "procedures", "and", "statutory", "inflation", "adjustments.",
         ]
 
-    idx = 0
-    while len(base_words) < 44 and idx < len(filler_pool):
-        base_words.append(filler_pool[idx])
-        idx += 1
+    if len(base_words) < 44 and len(base_words) + len(filler_pool) <= 58:
+        base_words.extend(filler_pool)
+    else:
+        idx = 0
+        while len(base_words) < 44 and idx < len(filler_pool):
+            base_words.append(filler_pool[idx])
+            idx += 1
 
     if len(base_words) > 58:
         base_words = base_words[:57]
-        if not base_words[-1].endswith("."):
-            base_words[-1] = base_words[-1].rstrip(",;:-") + "."
+    if base_words and not base_words[-1].endswith("."):
+        base_words[-1] = base_words[-1].rstrip(",;:-") + "."
 
     return _strip_forbidden_dashes(" ".join(base_words))
 
@@ -5179,6 +5182,10 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     # 3. Upgrade .quick-answer if quick_answer is present (or inject one if missing)
     quick_answer = _strip_forbidden_dashes(str(overlay_data.get("quick_answer") or "")).strip()
+    if quick_answer.endswith(". Verified"):
+        quick_answer = quick_answer[: -len(" Verified")].strip()
+    if quick_answer and not quick_answer.endswith((".", "!", "?")):
+        quick_answer = quick_answer.rstrip(",;:-") + "."
     if quick_answer:
         escaped_qa = html_lib.escape(quick_answer)
         qa_pattern = re.compile(

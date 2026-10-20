@@ -6331,7 +6331,7 @@ class RetroReflectionEngine:
             return True
         if ov_s_low == "student-loan-repayment-calculator" and "Tiered Standard" in ov_body_dump:
             return True
-        if "and audit-ready." in ov_body_dump or not qa_str.strip():
+        if "and audit-ready." in ov_body_dump or not qa_str.strip() or not qa_str.strip().endswith(".") or qa_str.strip().endswith(". Verified"):
             return True
         if " (1)" in qa_str or "Audit-Ready-S-Corp" in qa_str:
             return True
