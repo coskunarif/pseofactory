@@ -1559,7 +1559,7 @@ def _resolve_secondary_title_modifier(
             return "2026 RAP"
         if "ibr" in low or "save" in low or "income" in low:
             return "IDR Plan"
-        return "34 CFR Rules"
+        return "Title IV Rules"
 
     if "1031" in low or "8824" in low or "boot" in low or "exchange" in low:
         return "Form 8824"
@@ -1587,6 +1587,7 @@ def _normalize_title_50_60(
     zero contradictory multi-year stuffing, and zero forbidden dashes.
     """
     clean = _strip_forbidden_dashes(raw_title).strip()
+    clean = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", clean, flags=re.IGNORECASE)
     clean = re.sub(r"\s+", " ", clean)
     clean = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", clean, flags=re.IGNORECASE)
     suffix = f" | {brand}"
@@ -1654,7 +1655,7 @@ def _normalize_title_50_60(
             else:
                 # Try compact short parenthetical modifiers that fit within max_base
                 short_mods = (
-                    [mod_clean, "2026 RAP", "PSLF", "34 CFR", "2026", "Title IV"]
+                    [mod_clean, "2026 RAP", "PSLF", "Title IV", "2026", "IDR Plan"]
                     if tenant_id == "prexvo"
                     else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
                 )
@@ -1681,7 +1682,7 @@ def _normalize_title_50_60(
 
     # Pad with parenthetical modifier or whole words if shorter than 50 chars
     pad_tokens = (
-        ["(2026 Rules)", "(34 CFR)", "2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
+        ["(2026 Rules)", "(Title IV)", "2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
         if tenant_id == "prexvo"
         else ["(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
     )
@@ -5140,6 +5141,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     # 1. Upgrade <title>
     title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
+    title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
     if title_rewrite:
         escaped_title = html_lib.escape(title_rewrite)
         html = re.sub(

@@ -6323,6 +6323,8 @@ class RetroReflectionEngine:
         )
         if not is_179_or_equip_slug and "Section 179" in ov_body_dump:
             return True
+        if re.search(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", ov_body_dump, flags=re.IGNORECASE):
+            return True
         if ov_s_low in ("disclaimers", "methodology", "pslf-qualifying-payment-simulator", "ibr-hardship-cap-calculator", "save-plan-litigation-transition") and raw_ov.get("partner_offer"):
             return True
         if "1031" in ov_s_low and "commercial" not in qa_str.lower():

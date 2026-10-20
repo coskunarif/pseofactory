@@ -3437,16 +3437,20 @@ def evaluate_closed_loop_cohort_reflection(
                 )
                 ov_data["secondary_title_modifier"] = sec_mod
                 ov_changed = True
-                cur_tr = str(ov_data.get("title_rewrite") or "").strip()
-                if cur_tr and "(" not in cur_tr and not in_pytest:
-                    base_core = cur_tr.split("|")[0].strip()
-                    ov_data["title_rewrite"] = _normalize_title_50_60(
-                        base_core,
-                        brand=brand,
-                        tenant_id=prop,
-                        secondary_modifier=sec_mod,
-                    )
-                    ov_data["title"] = ov_data["title_rewrite"]
+            cur_tr = str(ov_data.get("title_rewrite") or "").strip()
+            if cur_tr and not in_pytest and (
+                "(" not in cur_tr
+                or bool(re.search(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", cur_tr, flags=re.IGNORECASE))
+            ):
+                base_core = cur_tr.split("|")[0].strip()
+                ov_data["title_rewrite"] = _normalize_title_50_60(
+                    base_core,
+                    brand=brand,
+                    tenant_id=prop,
+                    secondary_modifier=sec_mod,
+                )
+                ov_data["title"] = ov_data["title_rewrite"]
+                ov_changed = True
             if not ov_data.get("autonomous_citation_assertions") or not ov_data.get("ai_mode_decision_matrix"):
                 cit_bundle = _build_autonomous_citation_assertions_and_matrix(
                     tenant_id=prop,
@@ -3762,7 +3766,11 @@ def evaluate_closed_loop_cohort_reflection(
             )
             or (
                 prop == "prexvo"
-                and ("$187/mo" in raw_html or "$410/mo" in raw_html)
+                and (
+                    "$187/mo" in raw_html
+                    or "$410/mo" in raw_html
+                    or bool(re.search(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", raw_html, flags=re.IGNORECASE))
+                )
             )
         )
         has_assertions_before = (
