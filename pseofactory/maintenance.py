@@ -3056,6 +3056,7 @@ class RefactorCascadeEngine:
         adapter: PropertyAdapter,
         force: bool = False,
         dry_run: bool = False,
+        abort_event: Optional[Any] = None,
     ) -> bool:
         """
         Refactors an individual drifted asset with atomic staged swap and rollback.
@@ -3089,6 +3090,8 @@ class RefactorCascadeEngine:
             return True
 
         for attempt in range(1, self.max_retries + 1):
+            if abort_event is not None and abort_event.is_set():
+                return False
             backup_path: Optional[Path] = None
             try:
                 # 1. Transactional isolation & backup in scratch outside dist (HWL-1370)
@@ -3171,6 +3174,15 @@ class RefactorCascadeEngine:
                     if not build_ok and not target_path.exists():
                         raise RuntimeError(f"Builder failed to generate asset for slug '{slug}'")
 
+                if abort_event is not None and abort_event.is_set():
+                    if backup_path and backup_path.exists():
+                        try:
+                            shutil.copy2(backup_path, target_path)
+                            backup_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    return False
+
                 # 2b. Reapply active GSC remediation overlay if present (or roll back DEGRADED_ROLLED_BACK overlay)
                 self._reapply_active_overlay(slug, target_path, adapter)
 
@@ -3241,10 +3253,20 @@ class RefactorCascadeEngine:
                     except Exception as rb_ex:
                         print(f"Warning: Rollback error: {rb_ex}")
 
+                if abort_event is not None and abort_event.is_set():
+                    if backup_path and backup_path.exists():
+                        backup_path.unlink(missing_ok=True)
+                    return False
                 if attempt < self.max_retries:
-                    time.sleep(backoff)
+                    if abort_event is not None:
+                        if abort_event.wait(timeout=backoff):
+                            return False
+                    else:
+                        time.sleep(backoff)
                     backoff *= self.backoff_multiplier
 
+        if abort_event is not None and abort_event.is_set():
+            return False
         # All retries exhausted: Route to DLQ
         self.route_to_dlq(adapter.property_id, record, last_error)
         return False
@@ -3304,6 +3326,7 @@ class RefactorCascadeEngine:
         adapter: PropertyAdapter,
         force: bool = False,
         dry_run: bool = False,
+        abort_event: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Refactors all provided drifted records serially with dependency cascade.
@@ -3339,8 +3362,20 @@ class RefactorCascadeEngine:
                 }
 
             try:
+                if abort_event is not None and abort_event.is_set():
+                    return {
+                        "refactored": 0,
+                        "failed": len(actionable_records),
+                        "dependencies": [],
+                    }
                 with adapter.scoped_environment():
                     build_ok = adapter.build_all()
+                    if abort_event is not None and abort_event.is_set():
+                        return {
+                            "refactored": 0,
+                            "failed": len(actionable_records),
+                            "dependencies": [],
+                        }
                     if build_ok:
                         RetroReflectionEngine.retrofit_estate(
                             dist_dir=adapter.dist_dir,
@@ -3413,8 +3448,15 @@ class RefactorCascadeEngine:
                 self.replay_quarantine(property_id=adapter.property_id)
         else:
             for rec in actionable_records:
+                if abort_event is not None and abort_event.is_set():
+                    break
                 try:
-                    success = self.refactor_asset(rec, adapter, force=force, dry_run=dry_run)
+                    try:
+                        success = self.refactor_asset(
+                            rec, adapter, force=force, dry_run=dry_run, abort_event=abort_event
+                        )
+                    except TypeError:
+                        success = self.refactor_asset(rec, adapter, force=force, dry_run=dry_run)
                     if success:
                         refactored_count += 1
                         deps = self.map_dependencies(rec.asset_path, adapter)
@@ -3477,6 +3519,7 @@ class MaintenanceLifecycle:
         skip_ci: bool = False,
         workflow: Optional[str] = None,
         edge_url: Optional[str] = None,
+        abort_event: Optional[Any] = None,
     ) -> MaintenanceResult:
         """
         Executes single-tenant closed-loop maintenance lifecycle.
@@ -3570,9 +3613,25 @@ class MaintenanceLifecycle:
             # Stage 3: Retrofit-First Recompile & Quality Gate
             cascade_res = {"refactored": 0, "failed": 0, "dependencies": []}
             if actionable_drifted:
-                cascade_res = self.cascade_engine.refactor_all(
-                    actionable_drifted, adapter, force=force, dry_run=dry_run
-                )
+                try:
+                    cascade_res = self.cascade_engine.refactor_all(
+                        actionable_drifted, adapter, force=force, dry_run=dry_run, abort_event=abort_event
+                    )
+                except TypeError:
+                    cascade_res = self.cascade_engine.refactor_all(
+                        actionable_drifted, adapter, force=force, dry_run=dry_run
+                    )
+                if abort_event is not None and abort_event.is_set():
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="TIMEOUT",
+                        assets_audited=report.total_assets_checked,
+                        assets_drifted=report.drifted_assets_count,
+                        assets_refactored=cascade_res.get("refactored", 0),
+                        assets_failed=1,
+                        engine_hash=None,
+                        duration_seconds=time.time() - start_time,
+                    )
                 if cascade_res.get("lock_contention"):
                     return MaintenanceResult(
                         property_id=adapter.property_id,
@@ -3589,6 +3648,8 @@ class MaintenanceLifecycle:
                     check_engine_drift=False,
                     check_ledger=False,
                 )
+                if retrofit_report.drifted_assets_count == 0 and not dry_run:
+                    self.cascade_engine.replay_quarantine(property_id=adapter.property_id)
                 lingering_drifted = [
                     rec for rec in retrofit_report.drifted_assets
                     if not self.cascade_engine.is_quarantined(rec, adapter.property_id)
@@ -3617,6 +3678,17 @@ class MaintenanceLifecycle:
             elif force and not dry_run and hasattr(adapter, "build_all"):
                 try:
                     if adapter.build_all():
+                        if abort_event is not None and abort_event.is_set():
+                            return MaintenanceResult(
+                                property_id=adapter.property_id,
+                                status="TIMEOUT",
+                                assets_audited=report.total_assets_checked,
+                                assets_drifted=report.drifted_assets_count,
+                                assets_refactored=0,
+                                assets_failed=1,
+                                engine_hash=None,
+                                duration_seconds=time.time() - start_time,
+                            )
                         RetroReflectionEngine.retrofit_estate(
                             dist_dir=adapter.dist_dir,
                             property_id=adapter.property_id,
@@ -3625,6 +3697,18 @@ class MaintenanceLifecycle:
                         cascade_res["refactored"] = report.total_assets_checked
                 except Exception as f_err:
                     print(f"Warning: Forced full rebuild error for '{adapter.property_id}': {f_err}")
+
+            if abort_event is not None and abort_event.is_set():
+                return MaintenanceResult(
+                    property_id=adapter.property_id,
+                    status="TIMEOUT",
+                    assets_audited=report.total_assets_checked,
+                    assets_drifted=report.drifted_assets_count,
+                    assets_refactored=cascade_res.get("refactored", 0),
+                    assets_failed=1,
+                    engine_hash=None,
+                    duration_seconds=time.time() - start_time,
+                )
 
             # Stage 4: Opportunity Discovery (TrendCronRunner)
             trend_status_val: Optional[str] = None

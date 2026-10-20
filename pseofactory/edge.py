@@ -1132,10 +1132,9 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
     const env = context && context.env ? context.env : null;
     const kv =
       env &&
-      (env.PROFITHELM_TELEMETRY_KV ||
-        env.PREXVO_TELEMETRY_KV ||
-        env.PROFITHELM_LEADS ||
+      (env.PREXVO_TELEMETRY_KV ||
         env.PREXVO_LEADS ||
+        env.TELEMETRY_KV ||
         null);
     if (kv && typeof kv.put === "function") {{
       const putPromise = kv
@@ -1570,9 +1569,8 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
     const kv =
       env &&
       (env.PROFITHELM_TELEMETRY_KV ||
-        env.PREXVO_TELEMETRY_KV ||
         env.PROFITHELM_LEADS ||
-        env.PREXVO_LEADS ||
+        env.TELEMETRY_KV ||
         null);
     if (kv && typeof kv.put === "function") {{
       const putPromise = kv
@@ -1844,6 +1842,7 @@ def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
         raise ValueError(
             f"Edge telemetry function generation is only supported for profithelm or prexvo (got '{property_id}')."
         )
+    prop_upper = prop_clean.upper()
 
     telemetry_js = f"""/**
  * Cloudflare Pages Function: /api/telemetry ({prop_clean})
@@ -1869,10 +1868,9 @@ export async function onRequestOptions() {{
 function resolveTelemetryKV(env) {{
   if (!env || typeof env !== "object") return null;
   const candidates = [
-    env.PROFITHELM_TELEMETRY_KV,
-    env.PREXVO_TELEMETRY_KV,
-    env.PROFITHELM_LEADS,
-    env.PREXVO_LEADS,
+    env.{prop_upper}_TELEMETRY_KV,
+    env.{prop_upper}_LEADS,
+    env.TELEMETRY_KV,
   ];
   for (const kv of candidates) {{
     if (kv && (typeof kv.put === "function" || typeof kv.list === "function")) {{

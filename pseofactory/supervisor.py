@@ -371,6 +371,7 @@ class AsyncFleetCoordinator:
         run_id: Optional[str],
         skip_ci: bool,
         enable_distribution: Optional[bool] = None,
+        abort_event: Optional[Any] = None,
     ) -> MaintenanceResult:
         """
         Runs tenant lifecycle synchronously with isolation guards.
@@ -379,15 +380,27 @@ class AsyncFleetCoordinator:
         if enable_distribution is None:
             enable_distribution = enable_gitops
         try:
-            return self.lifecycle.run(
-                adapter,
-                force=force,
-                enable_gitops=enable_gitops,
-                run_id=run_id,
-                dry_run=dry_run,
-                skip_ci=skip_ci,
-                enable_distribution=enable_distribution,
-            )
+            try:
+                return self.lifecycle.run(
+                    adapter,
+                    force=force,
+                    enable_gitops=enable_gitops,
+                    run_id=run_id,
+                    dry_run=dry_run,
+                    skip_ci=skip_ci,
+                    enable_distribution=enable_distribution,
+                    abort_event=abort_event,
+                )
+            except TypeError:
+                return self.lifecycle.run(
+                    adapter,
+                    force=force,
+                    enable_gitops=enable_gitops,
+                    run_id=run_id,
+                    dry_run=dry_run,
+                    skip_ci=skip_ci,
+                    enable_distribution=enable_distribution,
+                )
         except SubprocessCrashError as sce:
             record = {
                 "error": str(sce),
@@ -509,6 +522,8 @@ class AsyncFleetCoordinator:
             loop = asyncio.get_running_loop()
             t0 = time.time()
             tenant_budget = self.get_tenant_budget(adapter.property_id)
+            import threading
+            abort_event = threading.Event()
             try:
                 result = await asyncio.wait_for(
                     loop.run_in_executor(
@@ -521,12 +536,14 @@ class AsyncFleetCoordinator:
                             run_id=run_id,
                             skip_ci=skip_ci,
                             enable_distribution=enable_distribution,
+                            abort_event=abort_event,
                         ),
                     ),
                     timeout=tenant_budget,
                 )
                 return result
             except asyncio.TimeoutError:
+                abort_event.set()
                 duration = time.time() - t0
                 return MaintenanceResult(
                     property_id=adapter.property_id,

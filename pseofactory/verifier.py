@@ -1146,19 +1146,19 @@ class MockSearchEngineCrawler:
             rel = p.relative_to(target).as_posix()
             content = p.read_text(encoding="utf-8", errors="ignore")
             t0 = time.perf_counter()
-            c0 = time.process_time()
+            c0 = time.thread_time()
             parser = SinglePassSEODocumentParser(brand_domain=self.base_domain)
             parser.feed(content)
-            latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.process_time() - c0) * 1000.0)
+            latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.thread_time() - c0) * 1000.0)
             if latency_ms >= max_lat:
                 t1 = time.perf_counter()
-                c1 = time.process_time()
+                c1 = time.thread_time()
                 retry_parser = SinglePassSEODocumentParser(brand_domain=self.base_domain)
                 retry_parser.feed(content)
                 latency_ms = min(
                     latency_ms,
                     (time.perf_counter() - t1) * 1000.0,
-                    (time.process_time() - c1) * 1000.0,
+                    (time.thread_time() - c1) * 1000.0,
                 )
 
             pages_crawled += 1
@@ -1308,19 +1308,19 @@ class MockSearchEngineCrawler:
             pages_crawled += 1
 
             t0 = time.perf_counter()
-            c0 = time.process_time()
+            c0 = time.thread_time()
             parser = SinglePassSEODocumentParser(brand_domain=domain)
             parser.feed(content)
-            latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.process_time() - c0) * 1000.0)
+            latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.thread_time() - c0) * 1000.0)
             if latency_ms >= max_lat:
                 t1 = time.perf_counter()
-                c1 = time.process_time()
+                c1 = time.thread_time()
                 retry_parser = SinglePassSEODocumentParser(brand_domain=domain)
                 retry_parser.feed(content)
                 latency_ms = min(
                     latency_ms,
                     (time.perf_counter() - t1) * 1000.0,
-                    (time.process_time() - c1) * 1000.0,
+                    (time.thread_time() - c1) * 1000.0,
                 )
 
             if "\u2014" in content:

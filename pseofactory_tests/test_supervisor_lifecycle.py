@@ -650,3 +650,12 @@ def test_supervisor_overlay_rollback_reconcile_and_streak_extraction(tmp_path):
     cascade.route_to_dlq("profithelm", drift_rec, "Simulated quarantine")
     assert len(cascade.list_dlq(property_id="profithelm")) == 1
 
+    # 4. Verify generated edge functions for profithelm and prexvo have zero cross-tenant KV token contamination
+    from pseofactory.edge import generate_edge_redirect_function, generate_edge_telemetry_function
+    from pseofactory.maintenance import CrossPropertyContaminationScanner
+    scanner = CrossPropertyContaminationScanner()
+    for pid in ("profithelm", "prexvo"):
+        assert scanner.scan_text(generate_edge_redirect_function(property_id=pid), pid) == []
+        assert scanner.scan_text(generate_edge_telemetry_function(property_id=pid), pid) == []
+
+
