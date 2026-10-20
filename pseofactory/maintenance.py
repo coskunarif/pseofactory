@@ -6323,6 +6323,8 @@ class RetroReflectionEngine:
         )
         if not is_179_or_equip_slug and "Section 179" in ov_body_dump:
             return True
+        if ov_s_low in ("disclaimers", "methodology", "pslf-qualifying-payment-simulator", "ibr-hardship-cap-calculator", "save-plan-litigation-transition") and raw_ov.get("partner_offer"):
+            return True
         if "1031" in ov_s_low and "commercial" not in qa_str.lower():
             return True
         if ov_s_low == "student-loan-repayment-calculator" and "Tiered Standard" in ov_body_dump:

@@ -2998,7 +2998,7 @@ def evaluate_closed_loop_cohort_reflection(
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
     current_rows = list(live_queries) if live_queries is not None else list(gsc_bundle.get("current_rows") or [])
-    baseline_rows = list(gsc_bundle.get("baseline_rows") or current_rows)
+    baseline_rows = list(gsc_bundle.get("baseline_rows") or [])
     d_recs = (
         daily_records
         if daily_records is not None
@@ -3460,6 +3460,24 @@ def evaluate_closed_loop_cohort_reflection(
             if conversion_slot_weights and ov_data.get("conversion_slot_weights") != conversion_slot_weights:
                 ov_data["conversion_slot_weights"] = dict(conversion_slot_weights)
                 ov_changed = True
+            if prop == "prexvo" and (
+                is_restricted_public_service_slug(canon_ov_slug)
+                or canon_ov_slug in ("disclaimers", "methodology")
+            ):
+                if ov_data.get("partner_offer") is not None or not ov_data.get("restricted_public_service"):
+                    ov_data["restricted_public_service"] = True
+                    ov_data["commercial_offers_allowed"] = False
+                    ov_data["partner_offer"] = None
+                    ov_changed = True
+                top_html_cand = d_dir / canon_ov_slug / "index.html"
+                if persist and top_html_cand.is_file():
+                    try:
+                        raw_top_h = top_html_cand.read_text(encoding="utf-8", errors="ignore")
+                        upd_top_h = inject_overlay_into_html(raw_top_h, ov_data)
+                        if upd_top_h != raw_top_h:
+                            top_html_cand.write_text(upd_top_h, encoding="utf-8")
+                    except Exception:
+                        pass
 
         if ov_changed and persist:
             try:

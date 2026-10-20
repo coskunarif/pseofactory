@@ -6452,7 +6452,7 @@ def verify_cohort_reflection_contract(
                         ctr_d = float(rec.get("ctr_delta", 0.0) or 0.0)
                         if i_curr <= 0:
                             issues.append(
-                                f"Zero-impression page '{rec.get('slug')}' falsely classified as WINNING_ACCRETIVE in cohort_reflection_ledger.json"
+                                f"Unmeasured zero-lift baseline / zero-impression page '{rec.get('slug')}' falsely classified as WINNING_ACCRETIVE in cohort_reflection_ledger.json"
                             )
                         elif (
                             r_status != "ACCRETIVE_CONFIRMED"

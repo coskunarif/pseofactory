@@ -479,6 +479,7 @@ def _resolve_partner_offer_and_manual_gate(
     # 1. Enforce Prexvo YMYL public-service commercial offer suppression
     if eff_tenant == "prexvo" and (
         is_restricted_public_service_slug(s_norm)
+        or s_norm in ("disclaimers", "methodology")
         or any(
             ymyl_tok in combined
             for ymyl_tok in (
@@ -4607,6 +4608,20 @@ def evaluate_expired_overlays(
             else:
                 current_perf = {}
 
+        min_live_pos = min(
+            (float(r.get("position", 100.0) or 100.0) for r in live_rows_by_path.get(c_p, [])),
+            default=100.0,
+        )
+        if (
+            not in_pytest
+            and not baseline_rows_by_path
+            and current_perf
+            and min_live_pos <= base_pos + 1.0
+            and abs(float(current_perf.get("position") or base_pos) - base_pos) >= 10.0
+        ):
+            is_synthetic_baseline = True
+            overlay_data.pop("emergency_lock_override", None)
+
         if is_synthetic_baseline:
             c_emp_impr = int(current_perf.get("impressions", 0) or 0) if current_perf else 0
             if c_emp_impr > 0:
@@ -4678,7 +4693,7 @@ def evaluate_expired_overlays(
             or (base_impr >= 10 and impr_pct_delta <= -25.0)
         )
 
-        if was_rolled_back and not is_expired and locked and not emergency_rollback and not overlay_data.get("emergency_lock_override"):
+        if was_rolled_back and not is_expired and locked and not emergency_rollback:
             overlay_data["status"] = "ACTIVE_LOCKED"
             if overlay_data.get("rolled_back_title_rewrite") and not overlay_data.get("title_rewrite"):
                 overlay_data["title_rewrite"] = overlay_data.pop("rolled_back_title_rewrite")
@@ -5393,20 +5408,35 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     # 4e. Injected Partner Offer Placement or YMYL Public-Service Guardrail
     partner_section_markup = ""
-    restricted_ps = bool(overlay_data.get("restricted_public_service"))
+    ov_slug_norm = str(overlay_data.get("slug") or "").strip().lower()
+    restricted_ps = bool(overlay_data.get("restricted_public_service")) or ov_slug_norm in (
+        "disclaimers",
+        "methodology",
+        "pslf-qualifying-payment-simulator",
+        "ibr-hardship-cap-calculator",
+        "save-plan-litigation-transition",
+    )
     p_offer = overlay_data.get("partner_offer")
     if restricted_ps:
-        if 'data-restricted-public-service="true"' not in html:
-            partner_section_markup = (
-                '<section class="overlay-section overlay-partner-guardrail ymyl-public-service-guardrail card" '
-                'data-commercial-offers="none" data-restricted-public-service="true" '
-                'data-mechanic="compliant_intent_monetization">\n'
-                '  <div class="partner-card">\n'
-                '    <h3 class="section-subtitle">Title IV Public Service Protection</h3>\n'
-                '    <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">Direct consolidation and federal repayment plans preserve statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685. Commercial private lender offers are strictly suppressed on restricted public-service pages.</p>\n'
-                '  </div>\n'
-                '</section>'
+        guardrail_markup = (
+            '<section class="overlay-section overlay-partner-guardrail ymyl-public-service-guardrail card" '
+            'data-commercial-offers="none" data-restricted-public-service="true" '
+            'data-mechanic="compliant_intent_monetization">\n'
+            '  <div class="partner-card">\n'
+            '    <h3 class="section-subtitle">Title IV Public Service Protection</h3>\n'
+            '    <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">Direct consolidation and federal repayment plans preserve statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685. Commercial private lender offers are strictly suppressed on restricted public-service pages.</p>\n'
+            '  </div>\n'
+            '</section>'
+        )
+        if 'class="overlay-section overlay-partner-offer' in html:
+            html = re.sub(
+                r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',
+                guardrail_markup if 'data-restricted-public-service="true"' not in html else "",
+                html,
+                flags=re.DOTALL | re.IGNORECASE,
             )
+        elif 'data-restricted-public-service="true"' not in html:
+            partner_section_markup = guardrail_markup
             injected_sections.append(partner_section_markup)
     elif isinstance(p_offer, dict) and overlay_data.get("commercial_offers_allowed", True) is not False:
         raw_p_key = _strip_forbidden_dashes(str(p_offer.get("partner_key") or "ramp")).strip()
