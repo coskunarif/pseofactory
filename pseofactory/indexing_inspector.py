@@ -613,6 +613,206 @@ class DailyIndexingInspector:
             "section_coverage": section_cov,
         }
 
+    def audit_crawl_staleness_and_sitemap_health(
+        self,
+        dist_dir: Optional[Union[str, Path]] = None,
+        stale_crawl_warning_days: float = 90.0,
+        index_drop_risk_days: float = 130.0,
+        lastmod_uniformity_threshold: float = 0.95,
+        now_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Audits three deterministic search-mechanics guarantees:
+          1. 90-Day Stale Crawl & 130-Day Index Drop Risk: Flags indexed/pushed URLs whose
+             last crawl or push timestamp exceeds 90 days (warning) or 130 days (Google index drop threshold).
+          2. Sitemap <lastmod> Uniformity & Future-Date Check: Flags multi-URL XML sitemaps where >=95% of
+             entries share an identical build timestamp (which trains crawlers to ignore <lastmod>) or contain
+             future dates.
+          3. Reverse-Orphan Sitemap Hygiene: Identifies indexable HTML pages in dist/ linked from the
+             internal graph that are missing from sitemap.xml.
+        Zero em-dashes. Zero en-dashes.
+        """
+        import re
+        import xml.etree.ElementTree as ET
+
+        eff_now = float(now_ts) if now_ts is not None else datetime.now(timezone.utc).timestamp()
+        d_dir = Path(dist_dir).resolve() if dist_dir else (self.base_dir / "dist")
+        domain = "prexvo.com" if self.tenant_id == "prexvo" else "profithelm.com"
+
+        # 1. Audit 90d stale crawl & 130d index drop risk across push and velocity ledgers
+        stale_90d_urls: List[Dict[str, Any]] = []
+        drop_risk_130d_urls: List[Dict[str, Any]] = []
+        monitored_crawl_urls = 0
+        seen_crawl_urls: set = set()
+
+        def _parse_iso_age_days(ts_val: Any) -> Optional[float]:
+            if not ts_val or not isinstance(ts_val, str):
+                return None
+            try:
+                clean_iso = ts_val.strip().replace("Z", "+00:00")
+                dt = datetime.fromisoformat(clean_iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return round(max(0.0, (eff_now - dt.timestamp()) / 86400.0), 2)
+            except Exception:
+                return None
+
+        push_paths = [
+            self.base_dir / ".agy" / "index_push_ledger.json",
+            self.agy_dir / "index_push_ledger.json",
+        ]
+        for pp in push_paths:
+            if not pp.is_file():
+                continue
+            try:
+                p_data = json.loads(pp.read_text(encoding="utf-8"))
+                if not isinstance(p_data, dict):
+                    continue
+                for u_key, u_val in p_data.items():
+                    if not isinstance(u_val, dict):
+                        continue
+                    u_str = str(u_val.get("url") or u_key).strip()
+                    if not u_str or u_str in seen_crawl_urls or not self._url_belongs_to_tenant(u_str, u_val):
+                        continue
+                    if any(u_str.lower().endswith(ext) for ext in (".xml", ".txt")):
+                        continue
+                    age_d = _parse_iso_age_days(
+                        u_val.get("last_crawled_at")
+                        or u_val.get("last_crawl_time")
+                        or u_val.get("last_pushed")
+                        or u_val.get("pushed_at")
+                        or u_val.get("timestamp")
+                    )
+                    if age_d is None:
+                        continue
+                    seen_crawl_urls.add(u_str)
+                    monitored_crawl_urls += 1
+                    rec = {
+                        "url": u_str,
+                        "days_since_last_crawl": age_d,
+                        "risk_tier": (
+                            "INDEX_DROP_130D_CRITICAL"
+                            if age_d >= index_drop_risk_days
+                            else ("CRAWL_STALE_90D_RISK" if age_d >= stale_crawl_warning_days else "FRESH_ACTIVE")
+                        ),
+                    }
+                    if age_d >= index_drop_risk_days:
+                        drop_risk_130d_urls.append(rec)
+                        stale_90d_urls.append(rec)
+                    elif age_d >= stale_crawl_warning_days:
+                        stale_90d_urls.append(rec)
+            except Exception:
+                continue
+
+        # 2. Sitemap <lastmod> uniformity, future-date check, and URL inventory
+        sitemap_urls_paths: set = set()
+        lastmod_values: List[str] = []
+        future_lastmod_urls: List[str] = []
+        sitemap_files_checked = 0
+
+        if d_dir.is_dir():
+            for sm_file in sorted(d_dir.glob("sitemap*.xml")):
+                if not sm_file.is_file():
+                    continue
+                sitemap_files_checked += 1
+                try:
+                    tree = ET.parse(sm_file)
+                    root_el = tree.getroot()
+                    for elem in root_el.iter():
+                        tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                        if tag_name == "url":
+                            loc_text = ""
+                            lmod_text = ""
+                            for child in elem:
+                                c_tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                                if c_tag == "loc" and child.text:
+                                    loc_text = child.text.strip()
+                                elif c_tag == "lastmod" and child.text:
+                                    lmod_text = child.text.strip()
+                            if loc_text:
+                                parsed_p = urllib.parse.urlsplit(loc_text).path.rstrip("/") or "/"
+                                sitemap_urls_paths.add(parsed_p)
+                            if lmod_text:
+                                lastmod_values.append(lmod_text)
+                                try:
+                                    clean_lm = lmod_text.replace("Z", "+00:00")
+                                    dt_lm = (
+                                        datetime.fromisoformat(clean_lm)
+                                        if "T" in clean_lm
+                                        else datetime.fromisoformat(clean_lm + "T00:00:00+00:00")
+                                    )
+                                    if dt_lm.tzinfo is None:
+                                        dt_lm = dt_lm.replace(tzinfo=timezone.utc)
+                                    if dt_lm.timestamp() > (eff_now + 86400.0) and loc_text:
+                                        future_lastmod_urls.append(loc_text)
+                                except Exception:
+                                    pass
+                except Exception:
+                    continue
+
+        total_lastmod = len(lastmod_values)
+        most_common_lastmod = ""
+        most_common_count = 0
+        if lastmod_values:
+            counts: Dict[str, int] = {}
+            for lm in lastmod_values:
+                counts[lm] = counts.get(lm, 0) + 1
+            most_common_lastmod, most_common_count = max(counts.items(), key=lambda kv: kv[1])
+        uniformity_ratio = round(most_common_count / float(max(1, total_lastmod)), 4) if total_lastmod > 0 else 0.0
+        lastmod_uniform_build_stamp = bool(total_lastmod >= 5 and uniformity_ratio >= lastmod_uniformity_threshold and len(set(lastmod_values)) == 1 and "T" in most_common_lastmod)
+
+        # 3. Reverse-Orphan Check: Indexable dist/ HTML pages linked in internal graph but missing from sitemap.xml
+        reverse_orphan_urls: List[str] = []
+        noindex_re = re.compile(
+            r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex',
+            re.IGNORECASE,
+        )
+        if d_dir.is_dir() and sitemap_urls_paths:
+            for hf in sorted(d_dir.rglob("*.html")):
+                if "syndication" in hf.parts or hf.name.startswith(".") or hf.name == "404.html":
+                    continue
+                rel = hf.relative_to(d_dir)
+                site_p = ("/" + "/".join(rel.parent.parts) if rel.parent.parts else "/") if rel.name == "index.html" else ("/" + str(rel).replace(".html", ""))
+                site_p = site_p.rstrip("/") or "/"
+                if site_p in ("/404", "/signal") or site_p.startswith("/signal/"):
+                    continue
+                try:
+                    raw_h = hf.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                if noindex_re.search(raw_h):
+                    continue
+                if site_p not in sitemap_urls_paths:
+                    full_u = f"https://{domain}{site_p}/" if site_p != "/" else f"https://{domain}/"
+                    reverse_orphan_urls.append(full_u)
+
+        status = "PASS"
+        if drop_risk_130d_urls or future_lastmod_urls or reverse_orphan_urls:
+            status = "WARN"
+        elif stale_90d_urls:
+            status = "WARN"
+
+        return {
+            "status": status,
+            "tenant_id": self.tenant_id,
+            "monitored_crawl_urls_count": monitored_crawl_urls,
+            "stale_crawl_90d_count": len(stale_90d_urls),
+            "index_drop_risk_130d_count": len(drop_risk_130d_urls),
+            "stale_crawl_90d_urls": stale_90d_urls[:20],
+            "index_drop_risk_130d_urls": drop_risk_130d_urls[:20],
+            "sitemap_health": {
+                "sitemap_files_checked": sitemap_files_checked,
+                "sitemap_urls_count": len(sitemap_urls_paths),
+                "lastmod_entries_count": total_lastmod,
+                "lastmod_uniformity_ratio": uniformity_ratio,
+                "lastmod_uniform_build_timestamp_flagged": lastmod_uniform_build_stamp,
+                "future_lastmod_urls_count": len(future_lastmod_urls),
+                "future_lastmod_urls": future_lastmod_urls[:10],
+                "reverse_orphan_pages_count": len(reverse_orphan_urls),
+                "reverse_orphan_urls": reverse_orphan_urls[:20],
+            },
+        }
+
     def run_inspection(
         self,
         strict: bool = False,

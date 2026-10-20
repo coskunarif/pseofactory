@@ -689,6 +689,23 @@ def identify_content_decay(
 # ==============================================================================
 # WORKFLOW 5: FIND INTERNAL LINKING AND ORPHANED-PAGE OPPORTUNITIES
 # ==============================================================================
+GENERIC_ANCHOR_STOPWORDS: Set[str] = {
+    "click here",
+    "read more",
+    "learn more",
+    "here",
+    "link",
+    "this page",
+    "this link",
+    "more",
+    "more info",
+    "details",
+    "view",
+    "open",
+    "website",
+}
+
+
 def discover_internal_linking_opportunities(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -697,10 +714,15 @@ def discover_internal_linking_opportunities(
     persist: bool = True,
 ) -> Dict[str, Any]:
     """
-    Workflow 5: Parses published HTML pages in dist/, builds the directed internal link graph
-    (in_degree, out_degree, inbound sources, BFS crawl depth from '/'), joins with rolled-up
-    GSC impressions and striking-distance queries, and identifies:
+    Workflow 5: Parses published HTML pages in dist/, builds both the full-DOM directed
+    internal link graph (in_degree, out_degree, inbound sources, BFS crawl depth from '/')
+    and the contextual body-only internal link graph (stripping <nav>, <header>, <footer>,
+    <aside>, <script>, <style> boilerplate), audits generic anchor text ('click here',
+    'read more', 'learn more', 'here', 'link'), joins with rolled-up GSC impressions and
+    striking-distance queries, and identifies:
       - ORPHAN_PAGE (in_degree == 0 or unreachable from '/')
+      - BOILERPLATE_ONLY_INBOUND (in_degree > 0 but contextual_in_degree == 0)
+      - UNDER_THREE_CONTEXTUAL_LINKS (contextual_in_degree < 3 priority boost)
       - UNDERLINKED_STRIKING_DISTANCE (in_degree <= 3 and GSC impressions > 0)
       - DEEP_CRAWL_LEAF (crawl depth >= 2 with high impressions needing direct hub elevation)
     Emits concrete (source_hub -> target_path, anchor_text) injection pairs and persists
@@ -720,6 +742,10 @@ def discover_internal_linking_opportunities(
             "total_pages": 0,
             "orphaned_pages_count": 0,
             "orphaned_pages": [],
+            "contextual_orphans_count": 0,
+            "contextual_orphans": [],
+            "under_three_contextual_links_count": 0,
+            "generic_anchor_instances_count": 0,
             "underlinked_opportunities_count": 0,
             "injection_recommendations_count": 0,
             "opportunities": [],
@@ -728,6 +754,10 @@ def discover_internal_linking_opportunities(
                 "total_pages": 0,
                 "orphaned_pages": [],
                 "orphaned_count": 0,
+                "contextual_orphans": [],
+                "contextual_orphans_count": 0,
+                "under_three_contextual_count": 0,
+                "generic_anchor_instances_count": 0,
             },
         }
 
@@ -749,8 +779,21 @@ def discover_internal_linking_opportunities(
     title_by_path: Dict[str, str] = {}
     out_links: Dict[str, Set[str]] = {}
     in_links: Dict[str, Set[str]] = {}
+    contextual_out_links: Dict[str, Set[str]] = {}
+    contextual_in_links: Dict[str, Set[str]] = {}
+    generic_anchor_instances: List[Dict[str, str]] = []
+    generic_anchors_by_target: Dict[str, List[Dict[str, str]]] = {}
 
     href_re = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
+    anchor_tag_re = re.compile(
+        r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    boilerplate_strip_re = re.compile(
+        r"<(nav|header|footer|aside|script|style)\b[^>]*>.*?</\1>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    tag_strip_re = re.compile(r"<[^>]+>")
     title_re = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
     noindex_paths: Set[str] = set()
@@ -773,6 +816,26 @@ def discover_internal_linking_opportunities(
         path_to_file[site_p] = hf
         out_links.setdefault(site_p, set())
         in_links.setdefault(site_p, set())
+        contextual_out_links.setdefault(site_p, set())
+        contextual_in_links.setdefault(site_p, set())
+
+    def _resolve_internal_target(raw_href_val: str, source_site_p: str) -> Optional[str]:
+        raw_h = raw_href_val.strip()
+        if not raw_h or raw_h.startswith(("javascript:", "mailto:", "tel:", "#")):
+            return None
+        t_p = None
+        if raw_h.startswith(("http://", "https://")):
+            parsed = urllib.parse.urlsplit(raw_h)
+            if parsed.netloc.lower() in (domain, f"www.{domain}", "localhost:8080", "127.0.0.1:8080"):
+                t_p = parsed.path.rstrip("/") or "/"
+        elif raw_h.startswith("/"):
+            t_p = urllib.parse.urlsplit(raw_h).path.rstrip("/") or "/"
+        else:
+            joined = urllib.parse.urljoin(source_site_p + "/", raw_h)
+            t_p = urllib.parse.urlsplit(joined).path.rstrip("/") or "/"
+        if t_p and t_p in path_to_file and t_p != source_site_p:
+            return t_p
+        return None
 
     for site_p, hf in path_to_file.items():
         try:
@@ -789,23 +852,29 @@ def discover_internal_linking_opportunities(
             title_by_path[site_p] = site_p.strip("/").replace("/", " - ").replace("-", " ").title() or "Home"
 
         for m in href_re.findall(raw_html):
-            raw_href = m.strip()
-            if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "#")):
-                continue
-            target_p = None
-            if raw_href.startswith(("http://", "https://")):
-                parsed = urllib.parse.urlsplit(raw_href)
-                if parsed.netloc.lower() in (domain, f"www.{domain}", "localhost:8080", "127.0.0.1:8080"):
-                    target_p = parsed.path.rstrip("/") or "/"
-            elif raw_href.startswith("/"):
-                target_p = urllib.parse.urlsplit(raw_href).path.rstrip("/") or "/"
-            else:
-                joined = urllib.parse.urljoin(site_p + "/", raw_href)
-                target_p = urllib.parse.urlsplit(joined).path.rstrip("/") or "/"
-
-            if target_p and target_p in path_to_file and target_p != site_p:
+            target_p = _resolve_internal_target(m, site_p)
+            if target_p:
                 out_links[site_p].add(target_p)
                 in_links.setdefault(target_p, set()).add(site_p)
+
+        # Extract contextual body links (excluding <nav>, <header>, <footer>, <aside>, <script>, <style>)
+        contextual_html = boilerplate_strip_re.sub(" ", raw_html)
+        for href_match, anchor_inner in anchor_tag_re.findall(contextual_html):
+            target_p = _resolve_internal_target(href_match, site_p)
+            if not target_p:
+                continue
+            contextual_out_links[site_p].add(target_p)
+            contextual_in_links.setdefault(target_p, set()).add(site_p)
+            clean_anchor = _clean_dashes(re.sub(r"\s+", " ", tag_strip_re.sub(" ", anchor_inner)).strip())
+            norm_anchor = clean_anchor.lower().strip(" .,:;!?-()[]{}\"'")
+            if norm_anchor in GENERIC_ANCHOR_STOPWORDS:
+                g_rec = {
+                    "source_path": site_p + "/" if site_p != "/" else "/",
+                    "target_path": target_p + "/" if target_p != "/" else "/",
+                    "anchor_text": clean_anchor,
+                }
+                generic_anchor_instances.append(g_rec)
+                generic_anchors_by_target.setdefault(target_p, []).append(g_rec)
 
     # BFS from '/'
     distances: Dict[str, int] = {}
@@ -831,6 +900,8 @@ def discover_internal_linking_opportunities(
 
     opportunities: List[Dict[str, Any]] = []
     orphaned_pages: List[str] = []
+    contextual_orphans: List[str] = []
+    under_three_contextual_pages: List[str] = []
 
     for site_p in sorted(path_to_file.keys()):
         if (
@@ -840,6 +911,10 @@ def discover_internal_linking_opportunities(
             continue
         in_deg = len(in_links.get(site_p, set()))
         out_deg = len(out_links.get(site_p, set()))
+        ctx_in_deg = len(contextual_in_links.get(site_p, set()))
+        ctx_out_deg = len(contextual_out_links.get(site_p, set()))
+        boilerplate_only_inbound = bool(in_deg > 0 and ctx_in_deg == 0)
+        under_three_ctx = bool(ctx_in_deg < 3)
         depth = distances.get(site_p, -1)
         impr = int(impressions_by_path.get(site_p, 0) or impressions_by_path.get(site_p + "/", 0))
         clicks = int(clicks_by_path.get(site_p, 0) or clicks_by_path.get(site_p + "/", 0))
@@ -850,11 +925,20 @@ def discover_internal_linking_opportunities(
         is_orphan = in_deg == 0 or depth == -1
         if is_orphan:
             orphaned_pages.append(site_p)
+        if boilerplate_only_inbound:
+            contextual_orphans.append(site_p)
+        if under_three_ctx:
+            under_three_contextual_pages.append(site_p)
 
-        # Flag pages that are orphaned, or have GSC impressions/striking-distance rank with low internal link support
-        is_underlinked_demand = (impr > 0 and in_deg <= 15) or (in_deg <= 3 and site_p.startswith("/tools/"))
+        # Flag pages that are orphaned, have <3 contextual body links with search demand, or have striking-distance rank
+        is_underlinked_demand = (
+            (impr > 0 and (in_deg <= 15 or under_three_ctx))
+            or (in_deg <= 3 and site_p.startswith("/tools/"))
+            or (boilerplate_only_inbound and site_p.startswith("/tools/"))
+        )
         if is_orphan or is_underlinked_demand:
-            existing_sources = in_links.get(site_p, set())
+            existing_ctx_sources = contextual_in_links.get(site_p, set())
+            existing_sources = existing_ctx_sources if existing_ctx_sources else in_links.get(site_p, set())
             recommended_donors = [
                 d + "/" if not d.endswith("/") else d
                 for d in hub_donors
@@ -870,13 +954,19 @@ def discover_internal_linking_opportunities(
             opp_type = (
                 "ORPHAN_PAGE"
                 if is_orphan
-                else ("STRIKING_DISTANCE_LINK_BOOST" if (impr > 0 and pos <= 25.0) else "UNDERLINKED_AUTHORITY_TRANSFER")
+                else (
+                    "STRIKING_DISTANCE_LINK_BOOST"
+                    if (impr > 0 and pos <= 25.0)
+                    else ("BOILERPLATE_ONLY_INBOUND_BOOST" if boilerplate_only_inbound else "UNDERLINKED_AUTHORITY_TRANSFER")
+                )
             )
+            contextual_scarcity_boost = 15.0 if under_three_ctx else 0.0
             priority_score = round(
                 (100.0 if is_orphan else 0.0)
                 + (impr * 2.5)
                 + (35.0 if 3.0 < pos <= 20.0 else 0.0)
-                + max(0.0, 20.0 - in_deg),
+                + max(0.0, 20.0 - in_deg)
+                + contextual_scarcity_boost,
                 2,
             )
             opportunities.append(
@@ -887,6 +977,11 @@ def discover_internal_linking_opportunities(
                     "opportunity_type": opp_type,
                     "in_degree": in_deg,
                     "out_degree": out_deg,
+                    "contextual_in_degree": ctx_in_deg,
+                    "contextual_out_degree": ctx_out_deg,
+                    "boilerplate_only_inbound": boilerplate_only_inbound,
+                    "under_three_contextual_links": under_three_ctx,
+                    "generic_inbound_anchors_count": len(generic_anchors_by_target.get(site_p, [])),
                     "crawl_depth": depth,
                     "impressions": impr,
                     "clicks": clicks,
@@ -905,6 +1000,11 @@ def discover_internal_linking_opportunities(
         "total_pages": len(path_to_file),
         "orphaned_pages": orphaned_pages,
         "orphaned_count": len(orphaned_pages),
+        "contextual_orphans": contextual_orphans,
+        "contextual_orphans_count": len(contextual_orphans),
+        "under_three_contextual_count": len(under_three_contextual_pages),
+        "generic_anchor_instances_count": len(generic_anchor_instances),
+        "generic_anchor_samples": generic_anchor_instances[:15],
         "max_distance_from_root": max(distances.values()) if distances else 0,
     }
 
@@ -916,9 +1016,16 @@ def discover_internal_linking_opportunities(
         "total_pages": len(path_to_file),
         "orphaned_pages_count": len(orphaned_pages),
         "orphaned_pages": orphaned_pages,
+        "contextual_orphans_count": len(contextual_orphans),
+        "contextual_orphans": contextual_orphans,
+        "under_three_contextual_links_count": len(under_three_contextual_pages),
+        "generic_anchor_instances_count": len(generic_anchor_instances),
         "underlinked_opportunities_count": len(opportunities),
         "injection_recommendations_count": len(opportunities),
         "internal_link_graph": link_graph_summary,
+        "contextual_in_degree_by_path": {
+            p: len(contextual_in_links.get(p, set())) for p in sorted(path_to_file.keys())
+        },
         "opportunities": opportunities[:40],
     }
 
@@ -2341,6 +2448,92 @@ def monitor_post_release_seo_regressions(
 # ==============================================================================
 # WORKFLOW 2: TURN A SITE AUDIT INTO A TECHNICAL SEO SPRINT
 # ==============================================================================
+def audit_gsc_cannibalization_splits(
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    consolidated_gsc: Optional[Dict[str, Any]] = None,
+    min_split_share: float = 0.10,
+    dominance_threshold: float = 0.80,
+) -> Dict[str, Any]:
+    """
+    Audits Search Console query+page rows to separate true cannibalization splits
+    (>=2 active URLs each holding >=10% impression share, with no single URL exceeding >80% share)
+    from dominant-winner queries with incidental (<10%) or already-301-redirected secondary URLs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.qualification import evaluate_query_impression_split, load_property_redirect_map
+
+    prop = _resolve_property_id(property_id, repo_root)
+    root = _resolve_tenant_repo_root(prop, repo_root)
+    gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
+    redirect_map = load_property_redirect_map(repo_root=root, property_id=prop)
+
+    by_query: Dict[str, List[Dict[str, Any]]] = {}
+    for r in gsc_bundle.get("current_rows") or []:
+        if not isinstance(r, dict):
+            continue
+        q = _clean_dashes(str(r.get("query") or "").strip()).lower()
+        u = str(r.get("canonical_url") or r.get("page") or r.get("canonical_path") or "").strip()
+        if not q or not u:
+            continue
+        by_query.setdefault(q, []).append(r)
+
+    true_splits: List[Dict[str, Any]] = []
+    dominant_winner_suppressed: List[Dict[str, Any]] = []
+    multi_url_queries_count = 0
+
+    for q_text, q_rows in sorted(by_query.items()):
+        # Aggregate impressions by canonical URL for this query
+        by_url: Dict[str, Dict[str, Any]] = {}
+        for qr in q_rows:
+            u_str = str(qr.get("canonical_url") or qr.get("page") or qr.get("canonical_path") or "").strip()
+            imp = int(float(qr.get("impressions", 0) or 0))
+            clk = int(float(qr.get("clicks", 0) or 0))
+            pos = float(qr.get("position", 50.0) or 50.0)
+            entry = by_url.setdefault(u_str, {"url": u_str, "impressions": 0, "clicks": 0, "position": pos})
+            entry["impressions"] += imp
+            entry["clicks"] += clk
+            if pos < entry["position"]:
+                entry["position"] = pos
+
+        if len(by_url) <= 1:
+            continue
+        multi_url_queries_count += 1
+        split_res = evaluate_query_impression_split(
+            list(by_url.values()),
+            redirect_map=redirect_map,
+            min_split_share=min_split_share,
+            dominance_threshold=dominance_threshold,
+        )
+        record = {
+            "query": q_text,
+            "total_impressions": split_res.get("total_impressions", 0),
+            "dominant_url": split_res.get("dominant_url", ""),
+            "dominant_share": split_res.get("dominant_share", 0.0),
+            "classification": split_res.get("classification", ""),
+            "qualifying_split_urls": split_res.get("qualifying_split_urls", []),
+            "incidental_noise_urls": split_res.get("incidental_noise_urls", []),
+            "url_shares": split_res.get("url_shares", []),
+        }
+        if split_res.get("is_true_cannibalization_split"):
+            true_splits.append(record)
+        else:
+            dominant_winner_suppressed.append(record)
+
+    true_splits.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
+    dominant_winner_suppressed.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
+
+    return {
+        "status": "PASS",
+        "property_id": prop,
+        "multi_url_queries_evaluated": multi_url_queries_count,
+        "true_cannibalization_splits_count": len(true_splits),
+        "dominant_winner_noise_suppressed_count": len(dominant_winner_suppressed),
+        "true_cannibalization_splits": true_splits[:25],
+        "dominant_winner_suppressed": dominant_winner_suppressed[:25],
+    }
+
+
 def compile_technical_seo_sprint(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -4141,6 +4334,68 @@ def evaluate_closed_loop_cohort_reflection(
         "canonicalized_legacy_slugs": canonicalized_legacy_slugs,
     }
 
+    # Correlate high-signal search mechanics heuristics against historical cohort outcomes:
+    #   1. Contextual body inbound link depth (<3 vs >=3 contextual body links) vs cohort win rate & impressions
+    #   2. 10%-80% impression-share split cannibalization triage vs dominant-winner noise suppression
+    #   3. 90d/130d crawl freshness & sitemap <lastmod>/reverse-orphan hygiene
+    link_opp_audit = discover_internal_linking_opportunities(
+        prop, repo_root=root, dist_dir=d_dir, consolidated_gsc=gsc_bundle, persist=False
+    )
+    cannibalization_split_audit = audit_gsc_cannibalization_splits(
+        prop, repo_root=root, consolidated_gsc=gsc_bundle
+    )
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+
+    crawl_sitemap_audit = DailyIndexingInspector(tenant_id=prop, base_dir=root).audit_crawl_staleness_and_sitemap_health(
+        dist_dir=d_dir
+    )
+
+    ctx_deg_by_slug: Dict[str, int] = {}
+    for p_key, ctx_cnt in (link_opp_audit.get("contextual_in_degree_by_path") or {}).items():
+        t_p_str = str(p_key).strip("/")
+        if t_p_str.startswith("tools/"):
+            s_k = t_p_str[len("tools/"):].strip("/")
+            ctx_deg_by_slug[s_k] = int(ctx_cnt or 0)
+    for opp_item in link_opp_audit.get("opportunities") or []:
+        if not isinstance(opp_item, dict):
+            continue
+        t_p_str = str(opp_item.get("target_path") or "").strip("/")
+        if t_p_str.startswith("tools/"):
+            s_k = t_p_str[len("tools/"):].strip("/")
+            ctx_deg_by_slug.setdefault(s_k, int(opp_item.get("contextual_in_degree", 0) or 0))
+
+    well_linked_cohort = [
+        r for r in title_cohort_records if ctx_deg_by_slug.get(str(r["slug"]), 3) >= 3
+    ]
+    under_three_ctx_cohort = [
+        r for r in title_cohort_records if ctx_deg_by_slug.get(str(r["slug"]), 3) < 3
+    ]
+    well_linked_wins = sum(1 for r in well_linked_cohort if r["cohort_outcome"] == "WINNING_ACCRETIVE")
+    under_three_wins = sum(1 for r in under_three_ctx_cohort if r["cohort_outcome"] == "WINNING_ACCRETIVE")
+    well_linked_win_rate = round((well_linked_wins / float(max(1, len(well_linked_cohort)))) * 100.0, 2) if well_linked_cohort else 0.0
+    under_three_win_rate = round((under_three_wins / float(max(1, len(under_three_ctx_cohort)))) * 100.0, 2) if under_three_ctx_cohort else 0.0
+
+    search_mechanics_heuristics_audit = {
+        "contextual_body_link_cohort_correlation": {
+            "total_pages_in_graph": link_opp_audit.get("total_pages", 0),
+            "contextual_orphans_count": link_opp_audit.get("contextual_orphans_count", 0),
+            "under_three_contextual_links_count": link_opp_audit.get("under_three_contextual_links_count", 0),
+            "generic_anchor_instances_count": link_opp_audit.get("generic_anchor_instances_count", 0),
+            "cohort_pages_with_3plus_contextual_links": len(well_linked_cohort),
+            "cohort_pages_with_under_3_contextual_links": len(under_three_ctx_cohort),
+            "win_rate_3plus_contextual_links_pct": well_linked_win_rate,
+            "win_rate_under_3_contextual_links_pct": under_three_win_rate,
+            "avg_impressions_3plus_contextual_links": round(
+                sum(int(r["current_impressions"]) for r in well_linked_cohort) / float(max(1, len(well_linked_cohort))), 2
+            ) if well_linked_cohort else 0.0,
+            "avg_impressions_under_3_contextual_links": round(
+                sum(int(r["current_impressions"]) for r in under_three_ctx_cohort) / float(max(1, len(under_three_ctx_cohort))), 2
+            ) if under_three_ctx_cohort else 0.0,
+        },
+        "cannibalization_impression_split_triage": cannibalization_split_audit,
+        "crawl_staleness_and_sitemap_hygiene": crawl_sitemap_audit,
+    }
+
     reflection_report = {
         "workflow": "closed_loop_cohort_reflection",
         "status": "PASS" if worst_kw_ratio < 3.0 and http_429_events == 0 else "WARN",
@@ -4149,6 +4404,7 @@ def evaluate_closed_loop_cohort_reflection(
         "historical_evidence_sources": historical_evidence_sources,
         "empirical_cohort_comparison": empirical_cohort_comparison,
         "partner_click_attribution": partner_click_attribution,
+        "search_mechanics_heuristics_audit": search_mechanics_heuristics_audit,
         "cohorts": {
             "1_title_remediation": {
                 "total_pages_tracked": len(title_cohort_records),

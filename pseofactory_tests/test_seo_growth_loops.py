@@ -1189,4 +1189,202 @@ def test_empirical_cohort_truth_emergency_rollback_consolidation_and_probe_filte
     assert verify_cohort_reflection_contract(cr_rep, repo_root=repo_root)["status"] == "PASS"
 
 
+def test_search_mechanics_heuristics_contextual_links_impression_split_and_crawl_staleness(tmp_path: Path) -> None:
+    """
+    Verifies the 3 surgical search mechanics heuristics derived from ian.is/tools comparison:
+      1. Contextual body link vs <nav>/<header>/<footer> boilerplate link separation, <3 contextual
+         in-degree boost (+15.0), and generic anchor text ('click here', 'read more') detection.
+      2. 10%-80% impression-share split & dominance ratio cannibalization triage (suppressing
+         false-positive consolidation when a single winner holds >80% share and secondary URLs
+         are <10% noise or 301-redirected, while flagging true 60%/40% splits).
+      3. 90-day stale crawl / 130-day index drop risk, sitemap <lastmod> uniformity/future-date
+         detection, and reverse-orphan sitemap check.
+    """
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.qualification import evaluate_query_impression_split, qualify_search_intent
+    from pseofactory.seo_growth_loops import (
+        audit_gsc_cannibalization_splits,
+        discover_internal_linking_opportunities,
+    )
+
+    # 1. Contextual body links vs <nav>/<footer> boilerplate + generic anchors
+    repo_root = tmp_path / "profithelm-platform"
+    dist_dir = repo_root / "dist"
+    for p in ("", "tools", "tools/nav-only-spoke", "tools/contextual-winner"):
+        d = dist_dir / p if p else dist_dir
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Nav links to /tools/nav-only-spoke/ from every page, but 0 body links point to it.
+    # Meanwhile /tools/contextual-winner/ has a body link with a generic anchor 'click here'.
+    nav_html = "<nav><a href='/tools/'>Tools</a><a href='/tools/nav-only-spoke/'>Nav Spoke</a></nav>"
+    (dist_dir / "index.html").write_text(
+        f"<html><head><title>Home | ProfitHelm</title></head><body>{nav_html}"
+        "<main><p>For S-Corp savings, <a href='/tools/contextual-winner/'>click here</a>.</p></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "index.html").write_text(
+        f"<html><head><title>Tools Hub | ProfitHelm</title></head><body>{nav_html}"
+        "<main><p><a href='/tools/contextual-winner/'>Contextual Winner Calculator</a></p></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "nav-only-spoke" / "index.html").write_text(
+        f"<html><head><title>Nav Only Spoke | ProfitHelm</title></head><body>{nav_html}"
+        "<main><h1>Nav Only Spoke</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "contextual-winner" / "index.html").write_text(
+        f"<html><head><title>Contextual Winner | ProfitHelm</title></head><body>{nav_html}"
+        "<main><h1>Contextual Winner</h1></main></body></html>",
+        encoding="utf-8",
+    )
+
+    gsc_mock = {
+        "current_rows": [
+            {
+                "query": "nav only spoke calculator",
+                "canonical_path": "/tools/nav-only-spoke",
+                "canonical_url": "https://profithelm.com/tools/nav-only-spoke/",
+                "impressions": 40,
+                "clicks": 1,
+                "position": 11.0,
+            },
+            {
+                "query": "s corp tax calculator",
+                "canonical_path": "/tools/contextual-winner",
+                "canonical_url": "https://profithelm.com/tools/contextual-winner/",
+                "impressions": 92,
+                "clicks": 4,
+                "position": 6.0,
+            },
+            {
+                "query": "s corp tax calculator",
+                "canonical_path": "/tools/nav-only-spoke",
+                "canonical_url": "https://profithelm.com/tools/nav-only-spoke/",
+                "impressions": 5,
+                "clicks": 0,
+                "position": 19.0,
+            },
+            {
+                "query": "section 179 bonus depreciation",
+                "canonical_path": "/tools/contextual-winner",
+                "canonical_url": "https://profithelm.com/tools/contextual-winner/",
+                "impressions": 55,
+                "clicks": 2,
+                "position": 8.0,
+            },
+            {
+                "query": "section 179 bonus depreciation",
+                "canonical_path": "/tools/nav-only-spoke",
+                "canonical_url": "https://profithelm.com/tools/nav-only-spoke/",
+                "impressions": 45,
+                "clicks": 1,
+                "position": 9.5,
+            },
+        ],
+        "impressions_by_path": {
+            "/tools/nav-only-spoke": 40,
+            "/tools/contextual-winner": 92,
+        },
+        "clicks_by_path": {
+            "/tools/nav-only-spoke": 1,
+            "/tools/contextual-winner": 4,
+        },
+    }
+
+    link_res = discover_internal_linking_opportunities(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=dist_dir,
+        consolidated_gsc=gsc_mock,
+        persist=False,
+    )
+    assert "/tools/nav-only-spoke" in link_res["contextual_orphans"]
+    assert link_res["generic_anchor_instances_count"] == 1
+    opp_by_path = {o["target_path"]: o for o in link_res["opportunities"]}
+    nav_opp = opp_by_path["/tools/nav-only-spoke/"]
+    assert nav_opp["in_degree"] == 3  # linked in <nav> from 3 other pages
+    assert nav_opp["contextual_in_degree"] == 0
+    assert nav_opp["boilerplate_only_inbound"] is True
+    assert nav_opp["under_three_contextual_links"] is True
+
+    winner_opp = opp_by_path["/tools/contextual-winner/"]
+    assert winner_opp["contextual_in_degree"] == 2
+    assert winner_opp["generic_inbound_anchors_count"] == 1
+
+    # 2. 10%-80% Impression-Share Split & Dominance Ratio Cannibalization Triage
+    split_audit = audit_gsc_cannibalization_splits(
+        property_id="profithelm",
+        repo_root=repo_root,
+        consolidated_gsc=gsc_mock,
+    )
+    assert split_audit["multi_url_queries_evaluated"] == 2
+    assert split_audit["true_cannibalization_splits_count"] == 1
+    assert split_audit["dominant_winner_noise_suppressed_count"] == 1
+    assert split_audit["true_cannibalization_splits"][0]["query"] == "section 179 bonus depreciation"
+    assert split_audit["dominant_winner_suppressed"][0]["query"] == "s corp tax calculator"
+
+    # Verify qualify_search_intent preserves plain URL list behavior while suppressing >80% dominant noise when telemetry is present
+    plain_verdict = qualify_search_intent(
+        query="s corp tax calculator",
+        impressions=100,
+        position=8.0,
+        competing_pages=["/tools/contextual-winner/", "/tools/nav-only-spoke/"],
+    )
+    assert plain_verdict["action"] == "CONSOLIDATE_PAGES"
+
+    weighted_dominant_verdict = qualify_search_intent(
+        query="s corp tax calculator",
+        impressions=97,
+        position=6.0,
+        matching_tool="contextual-winner",
+        competing_pages=[
+            {"url": "/tools/contextual-winner/", "impressions": 92, "position": 6.0},
+            {"url": "/tools/nav-only-spoke/", "impressions": 5, "position": 19.0},
+        ],
+    )
+    assert weighted_dominant_verdict["action"] == "REFACTOR_PAGE"
+
+    # 3. 90d/130d Crawl Staleness & Sitemap <lastmod> Uniformity / Reverse-Orphan Check
+    agy_dir = repo_root / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    now_ts = datetime(2026, 10, 20, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+    stale_100d_iso = datetime.fromtimestamp(now_ts - 100 * 86400, tz=timezone.utc).isoformat()
+    drop_140d_iso = datetime.fromtimestamp(now_ts - 140 * 86400, tz=timezone.utc).isoformat()
+    (agy_dir / "index_push_ledger.json").write_text(
+        json.dumps(
+            {
+                "https://profithelm.com/tools/contextual-winner/": {
+                    "url": "https://profithelm.com/tools/contextual-winner/",
+                    "last_pushed": stale_100d_iso,
+                },
+                "https://profithelm.com/tools/nav-only-spoke/": {
+                    "url": "https://profithelm.com/tools/nav-only-spoke/",
+                    "last_pushed": drop_140d_iso,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Write a sitemap with 5 uniform timestamped <lastmod> entries and omitting /tools/nav-only-spoke/ (reverse orphan)
+    uniform_ts = "2026-10-20T08:00:00Z"
+    (dist_dir / "sitemap.xml").write_text(
+        "<?xml version='1.0' encoding='UTF-8'?>"
+        "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
+        f"<url><loc>https://profithelm.com/</loc><lastmod>{uniform_ts}</lastmod></url>"
+        f"<url><loc>https://profithelm.com/tools/</loc><lastmod>{uniform_ts}</lastmod></url>"
+        f"<url><loc>https://profithelm.com/tools/contextual-winner/</loc><lastmod>{uniform_ts}</lastmod></url>"
+        f"<url><loc>https://profithelm.com/tools/a/</loc><lastmod>{uniform_ts}</lastmod></url>"
+        f"<url><loc>https://profithelm.com/tools/b/</loc><lastmod>{uniform_ts}</lastmod></url>"
+        "</urlset>",
+        encoding="utf-8",
+    )
+    inspector = DailyIndexingInspector(tenant_id="profithelm", base_dir=repo_root, agy_dir=agy_dir)
+    cs_audit = inspector.audit_crawl_staleness_and_sitemap_health(dist_dir=dist_dir, now_ts=now_ts)
+    assert cs_audit["stale_crawl_90d_count"] == 2
+    assert cs_audit["index_drop_risk_130d_count"] == 1
+    assert cs_audit["sitemap_health"]["lastmod_uniform_build_timestamp_flagged"] is True
+    assert "https://profithelm.com/tools/nav-only-spoke/" in cs_audit["sitemap_health"]["reverse_orphan_urls"]
+
+
+
 

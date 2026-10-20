@@ -722,8 +722,160 @@ def check_search_intent_cannibalization(
     }
 
 
+def evaluate_query_impression_split(
+    competing_pages: List[Any],
+    redirect_map: Optional[Dict[str, Any]] = None,
+    min_split_share: float = 0.10,
+    dominance_threshold: float = 0.80,
+) -> Dict[str, Any]:
+    """
+    Evaluates whether a set of URLs competing for a query represents a true
+    cannibalization split or a single dominant winner with incidental (<10%) noise.
+    Heuristic derived from high-signal GSC impression-share triage:
+      - Filters out secondary URLs already 301-redirected in redirect_map.
+      - When impression telemetry is present on competing_pages, a query is a true
+        cannibalization split only when >=2 active URLs each hold >=min_split_share (10%)
+        of total query impressions AND no single URL dominates with >dominance_threshold (80%) share.
+      - When competing_pages are plain URL strings without impression counts, assumes
+        equal split share so legacy callers trigger CONSOLIDATE_PAGES unchanged.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.parse
+
+    eff_redirect_map = redirect_map or {}
+    normalized_entries: List[Dict[str, Any]] = []
+    has_impression_telemetry = False
+
+    for idx, item in enumerate(competing_pages or []):
+        if isinstance(item, dict):
+            url_str = str(item.get("url") or item.get("canonical_url") or item.get("page") or item.get("canonical_path") or "").strip()
+            has_impr_key = any(k in item for k in ("impressions", "impression_share", "share"))
+            if has_impr_key:
+                has_impression_telemetry = True
+            impr_val = float(item.get("impressions", 0.0) or 0.0)
+            explicit_share = item.get("impression_share", item.get("share"))
+            pos_val = float(item.get("position", 50.0) or 50.0)
+            clicks_val = int(float(item.get("clicks", 0) or 0))
+            is_301 = bool(item.get("is_redirected_301", False))
+        else:
+            url_str = str(item or "").strip()
+            impr_val = 0.0
+            explicit_share = None
+            pos_val = 50.0
+            clicks_val = 0
+            is_301 = False
+
+        if not url_str:
+            continue
+
+        path_part = urllib.parse.urlsplit(url_str).path if "://" in url_str else url_str
+        norm_path = (path_part.rstrip("/") or "/") if path_part else "/"
+        if not is_301 and eff_redirect_map:
+            if norm_path in eff_redirect_map or (norm_path + "/") in eff_redirect_map or norm_path.strip("/") in eff_redirect_map:
+                is_301 = True
+
+        normalized_entries.append({
+            "index": idx,
+            "url": url_str,
+            "canonical_path": norm_path,
+            "impressions": impr_val,
+            "explicit_share": float(explicit_share) if explicit_share is not None else None,
+            "position": pos_val,
+            "clicks": clicks_val,
+            "is_redirected_301": is_301,
+        })
+
+    active_entries = [e for e in normalized_entries if not e["is_redirected_301"]]
+    redirected_entries = [e for e in normalized_entries if e["is_redirected_301"]]
+
+    if len(active_entries) <= 1:
+        winner = active_entries[0]["url"] if active_entries else (normalized_entries[0]["url"] if normalized_entries else "")
+        return {
+            "is_true_cannibalization_split": False,
+            "classification": "SINGLE_ACTIVE_CANONICAL_URL" if not redirected_entries else "ALREADY_CONSOLIDATED_VIA_301",
+            "has_impression_telemetry": has_impression_telemetry,
+            "active_url_count": len(active_entries),
+            "redirected_301_Filtered_count": len(redirected_entries),
+            "dominant_url": winner,
+            "dominant_share": 1.0 if active_entries else 0.0,
+            "qualifying_split_urls": [winner] if winner else [],
+            "incidental_noise_urls": [e["url"] for e in redirected_entries],
+            "url_shares": [
+                {"url": e["url"], "impressions": int(e["impressions"]), "share": 1.0 if not e["is_redirected_301"] else 0.0, "is_redirected_301": e["is_redirected_301"]}
+                for e in normalized_entries
+            ],
+        }
+
+    if not has_impression_telemetry:
+        equal_share = round(1.0 / float(len(active_entries)), 4)
+        return {
+            "is_true_cannibalization_split": True,
+            "classification": "UNWEIGHTED_MULTI_URL_COMPETITION",
+            "has_impression_telemetry": False,
+            "active_url_count": len(active_entries),
+            "redirected_301_Filtered_count": len(redirected_entries),
+            "dominant_url": active_entries[0]["url"],
+            "dominant_share": equal_share,
+            "qualifying_split_urls": [e["url"] for e in active_entries],
+            "incidental_noise_urls": [e["url"] for e in redirected_entries],
+            "url_shares": [
+                {"url": e["url"], "impressions": 0, "share": equal_share if not e["is_redirected_301"] else 0.0, "is_redirected_301": e["is_redirected_301"]}
+                for e in normalized_entries
+            ],
+        }
+
+    total_impr = sum(max(0.0, e["impressions"]) for e in active_entries)
+    for e in active_entries:
+        if e["explicit_share"] is not None:
+            e["share"] = round(float(e["explicit_share"]), 4)
+        elif total_impr > 0.0:
+            e["share"] = round(max(0.0, e["impressions"]) / total_impr, 4)
+        else:
+            e["share"] = round(1.0 / float(len(active_entries)), 4)
+
+    active_sorted = sorted(
+        active_entries,
+        key=lambda x: (-float(x["share"]), -float(x["impressions"]), float(x["position"]), int(x["index"])),
+    )
+    dominant = active_sorted[0]
+    dominant_share = float(dominant["share"])
+    qualifying_split = [e for e in active_sorted if float(e["share"]) >= min_split_share]
+    incidental_noise = [e for e in active_sorted[1:] if float(e["share"]) < min_split_share]
+
+    is_true_split = bool(len(qualifying_split) >= 2 and dominant_share <= dominance_threshold)
+    classification = (
+        "TRUE_CANNIBALIZATION_SPLIT"
+        if is_true_split
+        else ("DOMINANT_WINNER_INCIDENTAL_NOISE" if dominant_share > dominance_threshold else "SUB_THRESHOLD_SECONDARY_SHARE")
+    )
+
+    return {
+        "is_true_cannibalization_split": is_true_split,
+        "classification": classification,
+        "has_impression_telemetry": True,
+        "total_impressions": int(total_impr),
+        "active_url_count": len(active_entries),
+        "redirected_301_Filtered_count": len(redirected_entries),
+        "dominant_url": dominant["url"],
+        "dominant_share": dominant_share,
+        "qualifying_split_urls": [e["url"] for e in qualifying_split],
+        "incidental_noise_urls": [e["url"] for e in incidental_noise] + [e["url"] for e in redirected_entries],
+        "url_shares": [
+            {
+                "url": e["url"],
+                "impressions": int(e["impressions"]),
+                "share": float(e.get("share", 0.0)),
+                "position": round(float(e["position"]), 2),
+                "clicks": int(e["clicks"]),
+                "is_redirected_301": e["is_redirected_301"],
+            }
+            for e in active_sorted + redirected_entries
+        ],
+    }
+
+
 def qualify_search_intent(
-    query_data: Optional[Dict[str, Any]] = None,
+    query_data: Optional[Union[Dict[str, Any], str]] = None,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     total_site_impressions: int = 500,
     sitemap_urls: Optional[List[str]] = None,
@@ -735,7 +887,7 @@ def qualify_search_intent(
     """
     Enforces Search Intent Doctrine triage across candidate queries:
     0. REJECT_SYNTHETIC: Rejects synthetic test fixtures (e.g. query-two-buildable).
-    1. CONSOLIDATE_PAGES: Multiple URLs competing for the same query.
+    1. CONSOLIDATE_PAGES: Multiple URLs competing for the same query (with 10%-80% impression-share split triage).
     2. PRUNE_PAGE: 0 impressions across >= 90 days.
     3. REFACTOR_PAGE: Striking distance query (pos 4-20) matching an existing tool.
        Generates overlay specification with 28-day measurement lock and target injections.
@@ -770,20 +922,39 @@ def qualify_search_intent(
             "reason": f"Synthetic test fixture candidate '{q_text}' rejected from production build queue",
         })
 
-    # 1. Check competing pages (Consolidation)
+    # 1. Check competing pages (Consolidation with 10%-80% impression-share split triage)
     competing = query_data.get("competing_pages") or query_data.get("urls") or []
     if len(competing) > 1:
-        return SearchIntentVerdict({
-            "action": "CONSOLIDATE_PAGES",
-            "status": "CONSOLIDATE_PAGES",
-            "query": q_text,
-            "position": pos,
-            "impressions": impr,
-            "competing_pages": competing,
-            "canonical_url": competing[0],
-            "redirect_candidates": competing[1:],
-            "reason": f"Multiple URLs ({len(competing)}) competing for query '{q_text}'",
-        })
+        split_eval = evaluate_query_impression_split(
+            competing,
+            redirect_map=query_data.get("redirect_map"),
+            min_split_share=float(query_data.get("min_split_share", 0.10)),
+            dominance_threshold=float(query_data.get("dominance_threshold", 0.80)),
+        )
+        plain_urls = [
+            str(c.get("url") or c.get("canonical_url") or c.get("page") or c.get("canonical_path") or "")
+            if isinstance(c, dict)
+            else str(c)
+            for c in competing
+        ]
+        canonical_winner = split_eval.get("dominant_url") or plain_urls[0]
+        redirect_cands = [u for u in plain_urls if u and u != canonical_winner]
+        suppress_incidental = bool(query_data.get("suppress_incidental_cannibalization", True))
+        if not split_eval["is_true_cannibalization_split"] and split_eval["has_impression_telemetry"] and suppress_incidental:
+            query_data["impression_split_analysis"] = split_eval
+        else:
+            return SearchIntentVerdict({
+                "action": "CONSOLIDATE_PAGES",
+                "status": "CONSOLIDATE_PAGES",
+                "query": q_text,
+                "position": pos,
+                "impressions": impr,
+                "competing_pages": competing,
+                "canonical_url": canonical_winner,
+                "redirect_candidates": redirect_cands,
+                "impression_split_analysis": split_eval,
+                "reason": f"Multiple URLs ({len(competing)}) competing for query '{q_text}' ({split_eval['classification']})",
+            })
 
     # 2. Check zero impressions over 90 days (Pruning)
     days_observed = int(query_data.get("days", query_data.get("period_days", 0)))
