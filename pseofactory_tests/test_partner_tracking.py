@@ -1778,3 +1778,111 @@ def test_durable_kv_sync_page_slot_aggregation_and_portal_click_reconciliation(
     assert "by_page_and_slot" in recon["properties"]["profithelm"]
 
 
+def test_non_active_partnership_state_reconciliation_and_latest_inbox_sync(
+    temp_bus_path, temp_email_paths
+):
+    """
+    Verifies:
+    1. Latest inbox & sent correspondence classification fixes:
+       - Newsletter #1588 ('Welcome to Koinly Affiliates!') classifies as koinly (APPLICATION_APPROVED)
+         with candidate_url https://koinly.io/?fpr=arif-4c0b88.
+       - Inbox #1000 ('Re: E-file.com Application Follow-Up' from aaron@e-file.com) classifies as
+         turbotax (APPLICATION_APPROVED) with CJ tracking link https://www.jdoqocy.com/click-101906407-11917161.
+       - Sent #278 ('Re: OTR Solutions Affiliate Program' to wade.fenton@otrsolutions.com) classifies as
+         otr_solutions_factoring (APPLICATION_SUBMITTED).
+    2. PartnerTrackingEngine.reconcile_non_active_partnerships_and_edge_routes() categorizes every
+       non-active partnership across ProfitHelm and Prexvo into the 4 operational states:
+       - PENDING_ADVERTISER_REVIEW
+       - AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION
+       - NEWLY_APPROVED_AND_WIRED_AT_EDGE
+       - DECLINED_COVERED_BY_FALLBACK
+       reconciled against live /r/:partner edge redirect routes and status deltas since the
+       2026-10-20T10:10-07:00 audit snapshot.
+    """
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+
+    msgs = [
+        EmailMessage(
+            id="1588",
+            message_id="<1588@firstpromoter.com>",
+            account="zoho",
+            mailbox="Newsletter",
+            subject="Welcome to Koinly Affiliates!",
+            sender_name="Koinly Affiliates",
+            sender_email="promoter@firstpromoter.com",
+            date="2026-10-20 19:14:05+00:00",
+            body_snippet="Welcome to Koinly Affiliates! Your referral link is http://koinly.io?fpr=arif-4c0b88",
+        ),
+        EmailMessage(
+            id="1000",
+            message_id="<1000@e-file.com>",
+            account="zoho",
+            mailbox="Inbox",
+            subject="Re: E-file.com Application Follow-Up",
+            sender_name="Aaron",
+            sender_email="aaron@e-file.com",
+            date="2026-10-19 19:53:48+00:00",
+            body_snippet="Sounds good Arif. Welcome aboard.",
+        ),
+        EmailMessage(
+            id="278",
+            message_id="<278@profithelm.com>",
+            account="zoho",
+            mailbox="Sent",
+            subject="Re: OTR Solutions Affiliate Program",
+            sender_name="Arif Coskun",
+            sender_email="arif.coskun@profithelm.com",
+            raw_headers={"to_email": "wade.fenton@otrsolutions.com"},
+            date="2026-10-20 17:34:43+00:00",
+            body_snippet="Hi Wade, thanks for reaching out. Here are the answers to your 7 qualification questions.",
+        ),
+    ]
+    classified = email_engine.classify_partner_emails(msgs)
+    by_id = {c.email_id: c for c in classified}
+
+    assert by_id["1588"].partner_key == "koinly"
+    assert by_id["1588"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["1588"].candidate_url == "https://koinly.io/?via=A4FABF09&utm_source=affiliate"
+
+    assert by_id["1000"].partner_key == "turbotax"
+    assert by_id["1000"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["1000"].candidate_url == "https://www.jdoqocy.com/click-101906407-11917161"
+
+    assert by_id["278"].partner_key == "otr_solutions_factoring"
+    assert by_id["278"].classification_type == "APPLICATION_SUBMITTED"
+
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    recon = tracker.reconcile_non_active_partnerships_and_edge_routes()
+
+    assert set(recon["operational_states"]) == {
+        "PENDING_ADVERTISER_REVIEW",
+        "AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION",
+        "NEWLY_APPROVED_AND_WIRED_AT_EDGE",
+        "DECLINED_COVERED_BY_FALLBACK",
+    }
+
+    ph_recon = recon["properties"]["profithelm"]
+    px_recon = recon["properties"]["prexvo"]
+
+    assert ph_recon["total_canonical_partners"] == 22
+    assert ph_recon["active_earning_count"] == 6
+    assert ph_recon["non_active_count"] == 16
+    assert ph_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 5
+    assert ph_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 6
+    assert ph_recon["counts_by_state"]["AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION"] == 3
+    assert ph_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 2
+
+    assert px_recon["total_canonical_partners"] == 5
+    assert px_recon["active_earning_count"] == 0
+    assert px_recon["non_active_count"] == 5
+    assert px_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 3
+    assert px_recon["counts_by_state"]["AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION"] == 1
+    assert px_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 1
+
+    delta_keys = {d["partner_key"] for d in recon["status_deltas_since_last_snapshot"]}
+    assert {"rippling", "koinly", "otr_solutions_factoring"} <= delta_keys
+
+
+

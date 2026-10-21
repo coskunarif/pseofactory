@@ -668,6 +668,7 @@ class EmailIngestionEngine:
             "customercare@suretybonds.com": ("profithelm", "suretybonds_direct", "SuretyBonds.com", "In-House Direct"),
             "info@ipx1031.com": ("profithelm", "ipx1031", "IPX1031 (Investment Property Exchange Services)", "In-House Direct"),
             "contactus@simplybusiness.com": ("profithelm", "simply_business", "Simply Business", "Impact.com"),
+            "wade.fenton@otrsolutions.com": ("profithelm", "otr_solutions_factoring", "OTR Solutions Freight Factoring", "In-House Direct"),
         }
 
         for msg in messages:
@@ -775,6 +776,33 @@ class EmailIngestionEngine:
 
             if msg.mailbox != "Sent" and (
                 "promoter@firstpromoter.com" in sender_lower
+                or "welcome to koinly" in subj_lower
+            ) and "koinly" in combined_text:
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="koinly",
+                        partner_name="Koinly Crypto Tax Software",
+                        category="DIGITAL_ASSETS",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="Koinly Affiliates program approved and active (native via=A4FABF09 on app.koinly.io/affiliate with verified PayPal arif.coskun@profithelm.com + FirstPromoter welcome link http://koinly.io?fpr=arif-4c0b88 in Newsletter #1588).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://koinly.io/?via=A4FABF09&utm_source=affiliate",
+                        network="FirstPromoter",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "promoter@firstpromoter.com" in sender_lower
                 or "welcome to xendoo" in subj_lower
             ):
                 classifications.append(
@@ -802,11 +830,14 @@ class EmailIngestionEngine:
 
             if msg.mailbox != "Sent" and (
                 "aaron@e-file.com" in sender_lower
-                or "e-file.com" in combined_text
-            ) and (
-                "your application has been approved" in combined_text
-                or "welcome to the e-file.com affiliate program" in combined_text
-                or "approved" in combined_text
+                or (
+                    "e-file.com" in combined_text
+                    and (
+                        "your application has been approved" in combined_text
+                        or "welcome to the e-file.com affiliate program" in combined_text
+                        or "approved" in combined_text
+                    )
+                )
             ):
                 classifications.append(
                     PartnerEmailClassification(
@@ -915,7 +946,9 @@ class EmailIngestionEngine:
                 )
                 continue
 
-            matched_outbound = outbound_partner_map.get(to_email)
+            matched_outbound = outbound_partner_map.get(to_email) if (
+                msg.mailbox == "Sent" or to_email != "wade.fenton@otrsolutions.com"
+            ) else None
             if not matched_outbound and msg.mailbox == "Sent":
                 for addr_key, p_tuple in outbound_partner_map.items():
                     domain_part = addr_key.split("@")[-1]

@@ -218,19 +218,20 @@
             "rippling",
             "mercury"
           ],
-          "live_verified_clicks": 73,
+          "live_verified_clicks": 81,
+          "network_marketplace_status": "Declined on stck_sHqgUkyEIAPgiL (cooldown until 2026-10-23T00:00:00Z; 4 marketplace program applications on hold; direct invite Rippling part_jp9R0iYpPGriHu is Active with 81 clicks)",
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
           "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",
-          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 73 verified clicks recorded in PartnerStack Performance Overview)"
+          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 81 verified clicks recorded in PartnerStack Performance Overview)"
         },
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
           "active_partners": [
-            "coinledger (fpr=arif-554004, PayPal payout arif.coskun@profithelm.com Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 4 clicks recorded)",
-            "koinly (via=A4FABF09, PayPal payout arif.coskun@profithelm.com saved and verified via HTTP 200 on app.koinly.io/affiliate; 3 clicks recorded)",
-            "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576; 1 verified click recorded on FirstPromoter dashboard)"
+            "coinledger (fpr=arif-554004, PayPal payout arif.coskun@profithelm.com Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 6 clicks recorded)",
+            "koinly (via=A4FABF09 on app.koinly.io/affiliate + FirstPromoter fpr=arif-4c0b88 in Newsletter #1588 on 2026-10-20; PayPal payout arif.coskun@profithelm.com saved and verified via HTTP 200 on app.koinly.io/affiliate; 3 clicks recorded)",
+            "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576; 1 verified click recorded on FirstPromoter dashboard; live route upgraded to Impact #16354 at $500 CPA)"
           ],
-          "verified_clicks": 8,
+          "verified_clicks": 10,
           "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
         },
         "impact_rest_api": {
@@ -337,8 +338,9 @@
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
           "bounty": "$40-$100",
+          "firstpromoter_welcome_url": "https://koinly.io/?fpr=arif-4c0b88",
           "payout_method": "PayPal (arif.coskun@profithelm.com - verified and saved via HTTP 200 on app.koinly.io/affiliate)",
-          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?via=A4FABF09&utm_source=affiliate; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
+          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?via=A4FABF09&utm_source=affiliate + FirstPromoter welcome link https://koinly.io/?fpr=arif-4c0b88 received in Newsletter #1588 & Inbox #1007 on 2026-10-20; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
         },
         "rippling": {
           "status": "live",
@@ -597,7 +599,7 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted & Direct Reply Sent to Wade Fenton (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied directly to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z requesting unique referral partner tracking link for profithelm.com/tools/invoice-factoring-vs-business-line-of-credit-calculator/)",
+          "correspondence_status": "Application Submitted & Qualification Questionnaire Answered in Full (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z + answered all 7 qualification questions from Inbox #1005 via Sent #278 on 2026-10-20T17:34:43Z confirming zero OTR Solutions brand references on live pages; awaiting partnership agreement review)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"
@@ -690,7 +692,7 @@
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Credible.brand",
           "bounty": "$75-$150",
           "gate_1_verified_payout": "$75.00 USD per Closed Loan - Refinancing",
-          "correspondence_status": "Live Multi-Lender Marketplace & Impact Application Confirmed (Impact Campaign #3874 IO #25024 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 5 -> 6; verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)"
+          "correspondence_status": "Live Multi-Lender Marketplace & Impact Application Submitted (Impact Campaign #3874 IO #25024 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 5 -> 6; absent from Impact Sent Invites on 2026-10-20 and awaiting marketplace re-verification; verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)"
         },
         "earnest": {
           "status": "live",
@@ -702,7 +704,7 @@
           "network": "In-House Direct",
           "bounty": "$150-$200",
           "gate_1_verified_payout": "$150.00-$200.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Custom-Term Lending Marketplace & Direct Partner Application Submitted (Completed https://www.earnest.com/partner-sign-up on 2026-10-16T22:50Z with \"Success - Form submitted successfully.\"; passes Gate 1 >= $45; active outbound route /r/earnest)",
+          "correspondence_status": "Live Custom-Term Lending Marketplace & Direct Partner Application Submitted (Impact Campaign #11739 declined per Inbox #994 on 2026-10-17; completed https://www.earnest.com/partner-sign-up on 2026-10-16T22:50Z with \"Success - Form submitted successfully.\"; covered on Prexvo by primary Splash Financial #9516 / SoFi #11190 / LendKey #3276; passes Gate 1 >= $45; active outbound route /r/earnest)",
           "direct_apply_url": "https://www.earnest.com/partner-sign-up"
         },
         "lendkey": {
