@@ -351,7 +351,7 @@ class AsyncFleetCoordinator:
         )
         self.default_tenant_budget: float = self.tenant_timeout_budget
         self.tenant_budgets: Dict[str, float] = (
-            dict(tenant_budgets) if tenant_budgets is not None else {"profithelm": 3600.0}
+            dict(tenant_budgets) if tenant_budgets is not None else {"profithelm": 3600.0, "prexvo": 1800.0}
         )
 
     def get_tenant_budget(self, tenant_id: str) -> float:
