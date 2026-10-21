@@ -707,6 +707,9 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
             tool_dict.setdefault("quick_answer", f"The {clean_title} model provides deterministic projections and statutory analysis.")
             tool_dict.setdefault("category", default_category)
             tool_dict.setdefault("affiliates", default_affiliates)
+            for _k in ("description", "quick_answer", "geo_summary", "direct_answer_summary"):
+                if isinstance(tool_dict.get(_k), str):
+                    tool_dict[_k] = tool_dict[_k].replace("$31,300", "$30,500")
             return tool_dict
 
         title = str(tool_or_slug.get("title", "") or "").strip()
@@ -743,6 +746,9 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
         c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
         res["title"] = c_title
         res["short_title"] = c_short
+        for _k in ("description", "quick_answer", "geo_summary", "direct_answer_summary"):
+            if isinstance(res.get(_k), str):
+                res[_k] = res[_k].replace("$31,300", "$30,500")
         return res
 
     try:
@@ -754,6 +760,9 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
             c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
             res["title"] = c_title
             res["short_title"] = c_short
+            for _k in ("description", "quick_answer", "geo_summary", "direct_answer_summary"):
+                if isinstance(res.get(_k), str):
+                    res[_k] = res[_k].replace("$31,300", "$30,500")
             return res
     except Exception:
         pass
@@ -780,7 +789,7 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
 def _sanitize_distribution_text(text: Any) -> Any:
     if not isinstance(text, str):
         return text
-    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-")
+    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-").replace("$31,300", "$30,500")
     from pseofactory.contracts import PROMPT_LEAKAGE_TERMS
     for term in PROMPT_LEAKAGE_TERMS:
         if term in sanitized.lower():
@@ -795,7 +804,7 @@ def _sanitize_youtube_text(text: Any) -> Any:
     """Sanitizes text for YouTube Data API v3 and ProfitHelm anti-slop standards (HWL-1202)."""
     if not isinstance(text, str):
         return text
-    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-")
+    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-").replace("$31,300", "$30,500")
     sanitized = sanitized.replace("<", "less than ").replace(">", "greater than ")
     while "  " in sanitized:
         sanitized = sanitized.replace("  ", " ")

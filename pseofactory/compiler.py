@@ -1444,10 +1444,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       --card-bg: #0f172a;
       --bg-elevated: #151f38;
       --bg-inset: #0b1329;
-      --bg-canvas: #fbfcfd;
-      --bg-surface: #ffffff;
-      --text-primary: #0f172a;
-      --brand-primary: #1d4ed8;
+      --bg-canvas: #07090e;
+      --bg-surface: #0f172a;
+      --text-primary: #f8fafc;
+      --brand-primary: #38bdf8;
 
       /* Borders & Separation */
       --border: rgba(255, 255, 255, 0.08);
@@ -1469,6 +1469,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       --card-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
     }}
     [data-theme="porcelain"] {{
+      --bg-canvas: #fbfcfd;
+      --bg-surface: #ffffff;
+      --text-primary: #090d16;
+      --brand-primary: #1d4ed8;
       --bg: var(--bg-canvas);
       --card-bg: var(--bg-surface);
       --bg-elevated: #f1f5f9;

@@ -4713,7 +4713,7 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     ):
         return True
 
-    if html_content.count('class="decision-framework-card') > 1:
+    if len(re.findall(r"<section\b[^>]*\bdecision-framework-card\b", html_content, re.IGNORECASE)) > 1:
         return True
 
     if re.search(r"with real-time(?: scenari[a-z]*|\s*)\.\.\.", html_content):
@@ -5016,8 +5016,8 @@ def _normalize_spoke_and_synthesized_body_bloat(
             updated = dedup_top_table
             changed = True
 
-    # Remove duplicate generic second .decision-framework-card on synthesized pages
-    if updated.count('class="decision-framework-card') > 1:
+    # Remove duplicate generic second .decision-framework-card on synthesized or retrofitted pages
+    if len(re.findall(r"<section\b[^>]*\bdecision-framework-card\b", updated, re.IGNORECASE)) > 1:
         dedup_df = re.sub(
             r'\s*<section[^>]*class=["\'][^"\']*decision-framework-card[^"\']*["\'][^>]*>\s*<h2[^>]*>\s*What Is The [^<]*Decision Framework\?\s*</h2>\s*<p[^>]*>\s*Deterministic mathematical model and planning calculator for[\s\S]*?</section>',
             "",
@@ -5025,6 +5025,14 @@ def _normalize_spoke_and_synthesized_body_bloat(
             count=1,
             flags=re.IGNORECASE,
         )
+        if dedup_df == updated:
+            dedup_df = re.sub(
+                r'\s*<section[^>]*class=["\'][^"\']*\bdecision-framework-card\b[^"\']*["\'][^>]*>\s*<h3[^>]*class=["\'][^"\']*calc-hub-subtitle[^"\']*["\'][^>]*>[\s\S]*?</section>',
+                "",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
         if dedup_df != updated:
             updated = dedup_df
             changed = True
@@ -5823,13 +5831,20 @@ class RetroReflectionEngine:
         if rel.startswith("tools/") and html_path.suffix == ".html":
             return True
         if html_content:
+            if 'id="calculation-manifest"' in html_content or "id='calculation-manifest'" in html_content:
+                return True
+            dom_only = re.sub(
+                r"<(style|script)\b[^>]*>[\s\S]*?</\1>",
+                "",
+                html_content,
+                flags=re.IGNORECASE,
+            )
             if any(
-                marker in html_content
+                marker in dom_only
                 for marker in (
                     'class="calculator-card"',
                     'class="calculator-form"',
                     'class="calculation-container"',
-                    'id="calculation-manifest"',
                     'class="calculation-manifest"',
                     'id="calculator-workspace"',
                 )

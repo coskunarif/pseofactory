@@ -293,7 +293,12 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
         live_gsc = "PYTEST_CURRENT_TEST" not in os.environ
 
     local_tdb = root / "pseofactory" / "trends" / "data" / "trend_history.db"
-    target_db_path = Path(db_path) if db_path else (local_tdb if local_tdb.parent.is_dir() else DEFAULT_DB_PATH)
+    sibling_tdb = root.parent / "trend_history.db"
+    target_db_path = (
+        Path(db_path)
+        if db_path
+        else (local_tdb if local_tdb.parent.is_dir() else (sibling_tdb if sibling_tdb.is_file() else DEFAULT_DB_PATH))
+    )
     if not target_db_path.is_file() and "PYTEST_CURRENT_TEST" not in os.environ:
         main_repo_db = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
         if main_repo_db.is_file():
@@ -1202,7 +1207,8 @@ def load_consolidated_gsc_query_rows(
             from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
 
             local_tdb = root / "pseofactory" / "trends" / "data" / "trend_history.db"
-            t_path = local_tdb if local_tdb.parent.is_dir() else DEFAULT_DB_PATH
+            sibling_tdb = root.parent / "trend_history.db"
+            t_path = local_tdb if local_tdb.parent.is_dir() else (sibling_tdb if sibling_tdb.is_file() else DEFAULT_DB_PATH)
             if t_path.is_file():
                 with TrendHistoryDB(t_path) as tdb:
                     prior_win_rows = tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")

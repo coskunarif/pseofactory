@@ -222,3 +222,125 @@ def test_ui_visual_quality_contract_verification():
     </style></head><body><h1>Dashboard</h1><div class="table-wrap"><table></table></div></body></html>"""
     res = verify_ui_visual_quality_contract(valid_ui, context="test_ui")
     assert res["passed"] is True
+
+
+def test_historical_commit_regressions_caught_and_self_healed():
+    """
+    Proves that the upgraded first-principles visual contract and self-healing normalizer
+    deterministically catch and heal historical commit/audit regressions:
+    - f91fe87 / 833157d: <style>/<script> substring leakage misclassifying non-calculator pages
+      as interactive_calculator, plus dark-theme :root token polarity inversion (--text-primary: #0f172a).
+    - 688d75f / b9f51df / fd91061 / 74d770c: post-overlay horizontal sibling left-edge drift
+      (max-width: 720px; margin: 1.75rem auto), excessive vertical margins (margin: 3rem 0),
+      and duplicate .decision-framework-card sections.
+    - 025c46d / 880035d: SERP workbench and preset key synchronization (bridgePrimaryInputsToSerpWorkbench,
+      SLIDER_TO_INPUT_MAP, PRESET_KEY_ALIASES, and .overlay-preset-readout).
+    """
+    from pathlib import Path
+    import re
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    # 1. f91fe87 / 833157d: <style>/<script> selector substrings must never misclassify non-calculator pages
+    guide_with_style_selectors = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<style id="pseo-visual-primitives">
+  .calculator-form { display: flex; }
+  input[type="range"] { min-height: 44px; }
+</style>
+<script>
+  var s = 'class="calculator-grid" data-calc-input="x"';
+</script>
+</head>
+<body>
+<main class="container">
+  <h1>Form 1099-DA Statutory Guide</h1>
+  <section class="card"><h2>Reporting Rules</h2><p>Statutory guidance.</p></section>
+</main>
+</body>
+</html>"""
+    assert (
+        classify_screen_archetype(
+            guide_with_style_selectors,
+            rel_path="tools/crypto-tax-form-1099-da-mandatory-reporting/index.html",
+        )
+        == "statutory_guide"
+    )
+    assert (
+        RetroReflectionEngine.is_tool_or_calculator_page(
+            Path("/tmp/dist/disclaimers/index.html"),
+            Path("/tmp/dist"),
+            guide_with_style_selectors,
+        )
+        is False
+    )
+
+    # 2. f91fe87 / 688d75f / b9f51df: Dark-theme :root polarity inversion + duplicate decision-framework-card + horizontal drift
+    regressed_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<style>
+  :root {
+    --bg: #07090e;
+    --bg-canvas: #07090e;
+    --bg-surface: #ffffff;
+    --text-primary: #0f172a;
+    --brand-primary: #1d4ed8;
+  }
+</style>
+</head>
+<body>
+<main class="container">
+  <h1>Statutory Tax Calculator</h1>
+  <section class="hero-section" style="max-width: 720px; margin: 1.75rem auto; margin-bottom: 3.5rem; padding: 1.25rem;">
+    <h2>Direct Statutory Answer</h2>
+    <p>Summary of IRC rules.</p>
+  </section>
+  <section class="decision-framework-card card">
+    <h2>Statutory Decision Framework &amp; Threshold Checklist</h2>
+    <p>First instance.</p>
+  </section>
+  <section class="decision-framework-card card">
+    <h2>Statutory Decision Framework &amp; Threshold Checklist</h2>
+    <p>Duplicate instance from repeated retrofit pass.</p>
+  </section>
+  <form class="calculator-form">
+    <label for="field-gross_income">Gross Income</label>
+    <input type="number" id="field-gross_income" name="gross_income" value="150000" min="0" max="1000000" step="1000">
+    <input type="range" id="field-income_slider" aria-label="Gross Income Slider" value="150000" min="0" max="1000000" step="1000">
+    <output class="output-value" id="val-total_federal_tax">$28,500</output>
+  </form>
+</main>
+</body>
+</html>"""
+    issues = detect_visual_and_ux_contract_issues(
+        regressed_html,
+        rel_path="tools/irs-2027-tax-brackets/index.html",
+        require_primitives=True,
+    )
+    issue_blob = " | ".join(issues).lower()
+    assert "dark-theme token polarity inversion" in issue_blob
+    assert "duplicate .decision-framework-card" in issue_blob
+    assert "sibling left-edge drift" in issue_blob
+    assert "excessive inline vertical margin" in issue_blob
+
+    healed_html, repaired_actions = normalize_html_visual_primitives(
+        regressed_html, is_tenant_porcelain=False
+    )
+    assert "visual_primitives_css" in repaired_actions
+    assert "visual_hierarchy_normalization" in repaired_actions
+    assert "interactive_runtime_sync" in repaired_actions
+    assert len(re.findall(r"<section\b[^>]*\bdecision-framework-card\b", healed_html)) == 1
+    assert "--text-primary: #0f172a" not in healed_html
+    assert "bridgePrimaryInputsToSerpWorkbench" in healed_html
+    assert "SLIDER_TO_INPUT_MAP" in healed_html
+    assert "PRESET_KEY_ALIASES" in healed_html
+    assert "overlay-preset-readout" in healed_html
+
+    post_issues = detect_visual_and_ux_contract_issues(
+        healed_html,
+        rel_path="tools/irs-2027-tax-brackets/index.html",
+        require_primitives=True,
+    )
+    assert post_issues == [], f"Expected 0 visual contract issues after self-healing, got: {post_issues}"
+

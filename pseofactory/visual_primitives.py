@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-VISUAL_PRIMITIVES_VERSION = "pseo-primitives-v3"
+VISUAL_PRIMITIVES_VERSION = "pseo-primitives-v4"
 
 SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
     "interactive_calculator": {
@@ -26,6 +26,12 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
                 "max_container_width_px": 1140,
                 "max_sibling_left_drift_px": 4.0,
             },
+        },
+        "design_tokens": {
+            "required_tokens": ("--bg-canvas", "--bg-surface", "--card-bg", "--text-primary", "--text-secondary", "--border", "--accent"),
+            "min_body_contrast_ratio": 4.5,
+            "min_display_contrast_ratio": 3.0,
+            "forbid_dark_on_dark_inversion": True,
         },
         "typography": {
             "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
@@ -49,7 +55,11 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
             "table_wrapper_overflow_x": "auto",
             "max_consecutive_cta_callouts": 2,
             "require_runtime_sync": True,
+            "require_preset_binding": True,
+            "require_slider_number_parity": True,
+            "require_primary_to_secondary_sync": True,
             "require_tabular_nums_outputs": True,
+            "forbid_duplicate_framework_cards": True,
         },
     },
     "statutory_guide": {
@@ -63,6 +73,12 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
                 "max_container_width_px": 1140,
                 "max_sibling_left_drift_px": 4.0,
             },
+        },
+        "design_tokens": {
+            "required_tokens": ("--bg-canvas", "--bg-surface", "--card-bg", "--text-primary", "--text-secondary", "--border", "--accent"),
+            "min_body_contrast_ratio": 4.5,
+            "min_display_contrast_ratio": 3.0,
+            "forbid_dark_on_dark_inversion": True,
         },
         "typography": {
             "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
@@ -87,6 +103,7 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
             "max_consecutive_cta_callouts": 2,
             "require_runtime_sync": False,
             "require_tabular_nums_outputs": True,
+            "forbid_duplicate_framework_cards": True,
         },
     },
     "comparison_page": {
@@ -100,6 +117,12 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
                 "max_container_width_px": 1140,
                 "max_sibling_left_drift_px": 4.0,
             },
+        },
+        "design_tokens": {
+            "required_tokens": ("--bg-canvas", "--bg-surface", "--card-bg", "--text-primary", "--text-secondary", "--border", "--accent"),
+            "min_body_contrast_ratio": 4.5,
+            "min_display_contrast_ratio": 3.0,
+            "forbid_dark_on_dark_inversion": True,
         },
         "typography": {
             "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
@@ -125,6 +148,7 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
             "require_runtime_sync": False,
             "require_tabular_nums_outputs": True,
             "require_wrapped_tables": True,
+            "forbid_duplicate_framework_cards": True,
         },
     },
     "index_hub": {
@@ -138,6 +162,12 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
                 "max_container_width_px": 1140,
                 "max_sibling_left_drift_px": 4.0,
             },
+        },
+        "design_tokens": {
+            "required_tokens": ("--bg-canvas", "--bg-surface", "--card-bg", "--text-primary", "--text-secondary", "--border", "--accent"),
+            "min_body_contrast_ratio": 4.5,
+            "min_display_contrast_ratio": 3.0,
+            "forbid_dark_on_dark_inversion": True,
         },
         "typography": {
             "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
@@ -162,34 +192,82 @@ SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
             "max_consecutive_cta_callouts": 2,
             "require_runtime_sync": False,
             "require_tabular_nums_outputs": True,
+            "forbid_duplicate_framework_cards": True,
         },
     },
 }
+
+
+def _strip_style_and_script_blocks(html_content: str) -> str:
+    """Strips <style>, <script>, and <noscript> blocks so DOM classifiers never match CSS or JS selectors."""
+    if not html_content:
+        return ""
+    cleaned = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", html_content, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<noscript\b[^>]*>[\s\S]*?</noscript>", " ", cleaned, flags=re.IGNORECASE)
+    return cleaned
 
 
 def classify_screen_archetype(html_content: str, rel_path: str = "index.html") -> str:
     """
     Deterministically classifies an HTML screen into one of the 4 canonical archetypes:
     interactive_calculator, comparison_page, statutory_guide, or index_hub.
+    Strips <style>, <script>, and <noscript> blocks first so embedded primitive CSS/JS
+    rules never misclassify statutory guides or directory pages as calculators.
     """
     norm_path = (rel_path or "index.html").strip().strip("/").lower()
-    html_lower = (html_content or "").lower()
+    dom_lower = _strip_style_and_script_blocks(html_content or "").lower()
+
+    if norm_path in (
+        "",
+        "index.html",
+        "tools",
+        "tools/index.html",
+        "guides",
+        "guides/index.html",
+        "signal",
+        "signal/index.html",
+    ):
+        return "index_hub"
+
+    if "-vs-" in norm_path or "comparison" in norm_path:
+        return "comparison_page"
+
+    if any(
+        norm_path.startswith(p)
+        for p in ("disclaimers", "methodology", "privacy", "about", "terms", "contact", "404")
+    ):
+        return "statutory_guide"
+
+    if any(
+        guide_marker in norm_path
+        for guide_marker in (
+            "mandatory-reporting",
+            "litigation-transition",
+            "double-consolidation",
+            "equipment-lease-tax-deduction",
+            "section-179-vehicle-equipment-deduction",
+        )
+    ) and "-calculator" not in norm_path:
+        return "statutory_guide"
 
     has_calc = any(
-        marker in html_lower
+        marker in dom_lower
         for marker in (
             'class="calculator-form"',
             'class="calculation-container"',
             'class="interactive-calculator-container"',
-            'id="calculation-manifest"',
             'class="calculator-grid"',
+            'class="calc-grid"',
+            'id="calculator-workspace"',
             'type="range"',
             "type='range'",
             "data-calc-input",
         )
-    )
+    ) or bool(re.search(r'<input\b[^>]*type=["\']number["\']', dom_lower))
+
     has_comparison = any(
-        marker in html_lower
+        marker in dom_lower
         for marker in (
             'class="comparison-table',
             'class="overlay-comparison-table',
@@ -197,19 +275,11 @@ def classify_screen_archetype(html_content: str, rel_path: str = "index.html") -
         )
     )
 
-    if norm_path in ("", "index.html", "tools", "tools/index.html", "guides", "guides/index.html"):
-        if not has_calc or norm_path in ("tools", "tools/index.html", "guides", "guides/index.html"):
-            return "index_hub"
-        if "tools-grid" in html_lower or "directory-grid" in html_lower or "tool-card" in html_lower:
-            return "index_hub"
-
-    if "-vs-" in norm_path or "comparison" in norm_path:
-        return "comparison_page"
     if has_calc:
         return "interactive_calculator"
-    if has_comparison and "table" in html_lower:
+    if has_comparison and "<table" in dom_lower:
         return "comparison_page"
-    if any(k in html_lower for k in ("overlay-hub-list", "tools-grid", "directory-grid")) and not has_calc:
+    if any(k in dom_lower for k in ("overlay-hub-list", "tools-grid", "directory-grid")):
         if norm_path.endswith("index.html") and norm_path.count("/") <= 1:
             return "index_hub"
     return "statutory_guide"
@@ -289,8 +359,8 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
 """
 
     obsidian_tokens = """
-      --bg-canvas: #fbfcfd;
-      --bg-surface: #ffffff;
+      --bg-canvas: #07090e;
+      --bg-surface: #0f172a;
       --bg-subtle: #151f38;
       --bg-muted: #1e293b;
       --bg: #07090e;
@@ -306,7 +376,7 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       --border-color: rgba(255, 255, 255, 0.12);
       --border-strong: rgba(255, 255, 255, 0.20);
       --border-focus: #38bdf8;
-      --text-primary: #0f172a;
+      --text-primary: #f8fafc;
       --text: #f8fafc;
       --text-main: #f8fafc;
       --text-secondary: #cbd5e1;
@@ -314,8 +384,8 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       --text-tertiary: #64748b;
       --text-dim: #64748b;
       --text-faint: #64748b;
-      --brand-primary: #1d4ed8;
-      --brand-hover: #1e40af;
+      --brand-primary: #38bdf8;
+      --brand-hover: #0ea5e9;
       --brand-soft: rgba(56, 189, 248, 0.12);
       --brand-border: rgba(56, 189, 248, 0.28);
       --primary: #38bdf8;
@@ -345,6 +415,7 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
 """
 
     root_block = porcelain_tokens if is_tenant_porcelain else obsidian_tokens
+    interactive_and_mobile_css = _render_visual_primitives_interactive_and_mobile_css()
 
     return f"""  <style id="pseo-visual-primitives" data-version="{VISUAL_PRIMITIVES_VERSION}">
     :root {{{root_block}    }}
@@ -370,17 +441,41 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
     main > .container {{
       max-width: 100% !important;
       width: 100% !important;
-      margin-left: 0 !important;
-      margin-right: 0 !important;
-      padding-left: 0 !important;
-      padding-right: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      box-sizing: border-box !important;
     }}
-    .interactive-calculator-container {{
+    main > section, main > article, main > aside, main > nav,
+    main > div:not(.container):not(.statutory-accuracy-benchmarks),
+    main > .container > section, main > .container > article, main > .container > aside, main > .container > nav,
+    main > .container > div:not(.statutory-accuracy-benchmarks), main > .container > p.hero-subtitle,
+    .interactive-calculator-container, .hero-section, .tool-header, .tool-header.hero-section, .breadcrumbs,
+    .ftc-disclosure-banner, .ftc-disclosure-card, .ymyl-disclaimer-banner,
+    .above-the-fold-compliance, .direct-answer-block, .quick-answer,
+    .gsc-overlay-container, .article-content, .tools-directory-section,
+    .tools-directory-grid-section, .partners-section, [class*="partner-section"], .benchmark-table-section {{
       max-width: 100% !important;
       width: 100% !important;
       margin-left: 0 !important;
       margin-right: 0 !important;
+      margin-top: 0 !important;
       margin-bottom: 24px !important;
+      box-sizing: border-box !important;
+    }}
+    .gsc-overlay-container {{
+      padding: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+    }}
+    .gsc-overlay-container > *:last-child,
+    .hero-section > *:last-child,
+    .article-content > *:last-child,
+    .tools-directory-section > *:last-child,
+    .partners-section > *:last-child,
+    [class*="partner-section"] > *:last-child,
+    main > section > *:last-child,
+    main > .container > section > *:last-child {{
+      margin-bottom: 0 !important;
     }}
     /* Deterministic Typographic Hierarchy */
     h1, main h1, .hero h1, .page-header h1, .header-title-group h1, .title-group h1 {{
@@ -454,22 +549,27 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }}
     /* Deterministic Touch Targets (>= 44x44px) & Interactive Pill Primitives */
-    button, input:not([type="hidden"]), select, .touch-target, .btn, .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .runway-chip {{
+{interactive_and_mobile_css}
+  </style>"""
+
+
+def _render_visual_primitives_interactive_and_mobile_css() -> str:
+    return """    button, input:not([type="hidden"]), select, .touch-target, .btn, .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .runway-chip {
       min-height: 44px !important;
       min-width: 44px !important;
       box-sizing: border-box !important;
-    }}
+    }
     .statutory-provenance-box a, .autonomous-citation-list a, .related-tools-section a,
-    .breadcrumbs a, .footer-links a, .pro-hook-link, .query-pill {{
+    .breadcrumbs a, .footer-links a, .pro-hook-link, .query-pill {
       display: inline-flex !important;
       align-items: center !important;
       min-height: 44px !important;
       min-width: 44px !important;
       box-sizing: border-box !important;
-    }}
+    }
     a.touch-target, button.touch-target, .scenario-preset-link, .cluster-link,
     .on-this-page-nav a, .overlay-hub-list a, .partner-btn, .btn-cta, a[data-cta-slot],
-    .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .canonical-tool-link {{
+    .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .canonical-tool-link {
       display: inline-flex !important;
       align-items: center !important;
       min-height: 44px !important;
@@ -482,72 +582,72 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       text-decoration: none !important;
       box-sizing: border-box !important;
       transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease;
-    }}
+    }
     .scenario-preset-link, .on-this-page-nav a, .cluster-link, .overlay-hub-list a,
-    .calc-switcher-btn, .calc-scenario-btn, .preset-btn {{
+    .calc-switcher-btn, .calc-scenario-btn, .preset-btn {
       background-color: var(--bg-elevated) !important;
       color: var(--accent) !important;
       border: 1px solid var(--border-strong) !important;
-    }}
-    .cluster-link, .overlay-hub-list a {{
+    }
+    .cluster-link, .overlay-hub-list a {
       display: flex !important;
       width: 100%;
       justify-content: flex-start !important;
-    }}
-    .overlay-hub-list {{
+    }
+    .overlay-hub-list {
       list-style: none !important;
       padding: 0 !important;
       margin: 0 !important;
       display: grid !important;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)) !important;
       gap: 10px !important;
-    }}
-    .overlay-hub-list li {{
+    }
+    .overlay-hub-list li {
       margin: 0 !important;
       padding: 0 !important;
-    }}
+    }
     .scenario-preset-link:hover, .on-this-page-nav a:hover, .cluster-link:hover,
-    .overlay-hub-list a:hover, .calc-switcher-btn:hover, .calc-scenario-btn:hover, .preset-btn:hover {{
+    .overlay-hub-list a:hover, .calc-switcher-btn:hover, .calc-scenario-btn:hover, .preset-btn:hover {
       background-color: var(--accent-subtle) !important;
       border-color: var(--accent) !important;
-    }}
-    .scenario-preset-link.active, .calc-switcher-btn.active, .calc-scenario-btn.active, .preset-btn.active {{
+    }
+    .scenario-preset-link.active, .calc-switcher-btn.active, .calc-scenario-btn.active, .preset-btn.active {
       background-color: var(--accent) !important;
       color: var(--cta-fg, #ffffff) !important;
       border-color: var(--accent) !important;
-    }}
-    .partner-btn, .btn-cta, a[data-cta-slot], .btn-preset, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip) {{
+    }
+    .partner-btn, .btn-cta, a[data-cta-slot], .btn-preset, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip) {
       background-color: var(--accent) !important;
       color: var(--cta-fg, #ffffff) !important;
       border: 1px solid var(--accent) !important;
       justify-content: center !important;
       cursor: pointer;
-    }}
-    .partner-btn:hover, .btn-cta:hover, a[data-cta-slot]:hover, .btn-preset:hover, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip):hover {{
+    }
+    .partner-btn:hover, .btn-cta:hover, a[data-cta-slot]:hover, .btn-preset:hover, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip):hover {
       background-color: var(--accent-hover) !important;
       border-color: var(--accent-hover) !important;
-    }}
-    .canonical-tool-link {{
+    }
+    .canonical-tool-link {
       background-color: var(--card-bg) !important;
       border: 1px solid var(--accent) !important;
       color: var(--accent) !important;
       justify-content: center !important;
-    }}
+    }
     input:not([type="hidden"]):not([type="range"]):not([type="checkbox"]),
     select, input.touch-target, select.touch-target,
-    .form-input, .form-select, .calc-number-input, .calc-select, .calc-input {{
+    .form-input, .form-select, .calc-number-input, .calc-select, .calc-input {
       min-height: 44px !important;
       min-width: 44px !important;
       font-size: 16px !important;
       border-radius: 8px !important;
-    }}
-    input[type="range"], .range-slider, .form-range, .calc-slider {{
+    }
+    input[type="range"], .range-slider, .form-range, .calc-slider {
       min-height: 44px !important;
       min-width: 44px !important;
       width: 100% !important;
       cursor: pointer;
-    }}
-    details.faq-accordion summary, summary {{
+    }
+    details.faq-accordion summary, summary {
       min-height: 44px !important;
       min-width: 44px !important;
       display: flex !important;
@@ -555,9 +655,9 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       cursor: pointer;
       padding: 8px 0;
       font-weight: 600;
-    }}
+    }
     /* Deterministic Table Containment & Overflow Geometry (HWL-1462) */
-    .table-wrap, .calc-matrix-table-wrap, .pseo-table-wrap, .table-responsive, .table-container {{
+    .table-wrap, .calc-matrix-table-wrap, .pseo-table-wrap, .table-responsive, .table-container {
       display: block !important;
       width: 100% !important;
       max-width: 100% !important;
@@ -568,18 +668,18 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       margin-top: 16px;
       margin-bottom: 16px;
       background-color: var(--card-bg);
-    }}
+    }
     table, .calculation-table, .statutory-pitfalls-table, .scenario-table,
-    .comparison-table, .overlay-comparison-table, .data-table, .calc-matrix-table {{
+    .comparison-table, .overlay-comparison-table, .data-table, .calc-matrix-table {
       width: 100% !important;
       border-collapse: collapse !important;
       font-size: 14px !important;
       font-variant-numeric: tabular-nums !important;
       margin: 0 !important;
-    }}
-    .table-wrap > table, .calc-matrix-table-wrap > table, .pseo-table-wrap > table {{
+    }
+    .table-wrap > table, .calc-matrix-table-wrap > table, .pseo-table-wrap > table {
       min-width: 600px;
-    }}
+    }
     table th, table td,
     .calculation-table th, .calculation-table td,
     .statutory-pitfalls-table th, .statutory-pitfalls-table td,
@@ -587,7 +687,7 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
     .comparison-table th, .comparison-table td,
     .overlay-comparison-table th, .overlay-comparison-table td,
     .data-table th, .data-table td,
-    .calc-matrix-table th, .calc-matrix-table td {{
+    .calc-matrix-table th, .calc-matrix-table td {
       border: 1px solid var(--border) !important;
       padding: 12px !important;
       text-align: left !important;
@@ -596,45 +696,45 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       overflow-wrap: break-word !important;
       word-break: normal !important;
       vertical-align: top;
-    }}
+    }
     table th, .calculation-table th, .statutory-pitfalls-table th,
     .scenario-table th, .comparison-table th, .overlay-comparison-table th,
-    .data-table th, .calc-matrix-table th {{
+    .data-table th, .calc-matrix-table th {
       background-color: var(--bg-elevated) !important;
       color: var(--text) !important;
       font-weight: 600 !important;
-    }}
+    }
     /* Deterministic Chart & SVG Frame Primitives */
-    .runway-chart-wrap, .pseo-chart-frame, .chart-container, .serp-svg-chart-wrap {{
+    .runway-chart-wrap, .pseo-chart-frame, .chart-container, .serp-svg-chart-wrap {
       width: 100%;
       max-width: 100%;
       overflow: hidden;
       contain: style layout;
       border-radius: 8px;
-    }}
-    svg {{
+    }
+    svg {
       max-width: 100%;
-    }}
+    }
     /* SERP Incumbent Depth Workbench Primitives */
-    .serp-depth-workbench {{
+    .serp-depth-workbench {
       border-top: 3px solid var(--accent) !important;
       max-width: 100%;
       overflow-x: hidden;
-    }}
-    .serp-workbench-intro {{
+    }
+    .serp-workbench-intro {
       font-size: 14px;
       line-height: 1.55;
       color: var(--text-secondary, #475569);
       margin-bottom: 14px;
-    }}
-    .serp-preset-bar {{
+    }
+    .serp-preset-bar {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-bottom: 16px;
       max-width: 100%;
-    }}
-    .serp-archetype-btn {{
+    }
+    .serp-archetype-btn {
       background-color: var(--bg-elevated) !important;
       color: var(--accent) !important;
       border: 1px solid var(--border-strong) !important;
@@ -642,32 +742,32 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       max-width: 100%;
       white-space: normal !important;
       text-align: left;
-    }}
-    .serp-archetype-btn:hover, .serp-archetype-btn.active {{
+    }
+    .serp-archetype-btn:hover, .serp-archetype-btn.active {
       background-color: var(--accent) !important;
       color: var(--cta-fg, #ffffff) !important;
       border-color: var(--accent) !important;
-    }}
-    .serp-sub-inputs-grid {{
+    }
+    .serp-sub-inputs-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
       gap: 12px;
       margin-bottom: 16px;
       max-width: 100%;
-    }}
-    .serp-field-group {{
+    }
+    .serp-field-group {
       display: flex;
       flex-direction: column;
       gap: 6px;
       min-width: 0;
       max-width: 100%;
-    }}
-    .serp-field-label {{
+    }
+    .serp-field-label {
       font-size: 13px;
       font-weight: 600;
       color: var(--text);
-    }}
-    .serp-sub-input, .serp-sub-select {{
+    }
+    .serp-sub-input, .serp-sub-select {
       width: 100%;
       max-width: 100%;
       min-width: 0;
@@ -678,46 +778,46 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       border: 1px solid var(--border-strong);
       border-radius: 8px;
       font-size: 16px;
-    }}
-    .serp-metrics-grid {{
+    }
+    .serp-metrics-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
       gap: 12px;
       margin-bottom: 16px;
       max-width: 100%;
-    }}
-    .serp-metric-box {{
+    }
+    .serp-metric-box {
       background-color: var(--bg-inset);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 12px 14px;
       min-width: 0;
       max-width: 100%;
-    }}
-    .serp-metric-label {{
+    }
+    .serp-metric-label {
       font-size: 12px;
       font-weight: 600;
       color: var(--text-muted, #64748b);
       margin-bottom: 4px;
-    }}
-    .serp-metric-val {{
+    }
+    .serp-metric-val {
       font-size: 18px;
       font-weight: 700;
       color: var(--text);
       font-variant-numeric: tabular-nums;
-    }}
-    .serp-svg-chart-wrap {{
+    }
+    .serp-svg-chart-wrap {
       background-color: var(--bg-elevated);
       border: 1px solid var(--border);
       padding: 12px 14px;
       margin-bottom: 16px;
-    }}
-    .serp-visual-breakdown-svg {{
+    }
+    .serp-visual-breakdown-svg {
       width: 100%;
       height: auto;
       display: block;
-    }}
-    .serp-intent-banner {{
+    }
+    .serp-intent-banner {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -729,86 +829,105 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       border-left: 4px solid var(--status-positive, #10b981);
       margin-bottom: 16px;
       max-width: 100%;
-    }}
-    .serp-intent-banner-text {{
+    }
+    .serp-intent-banner-text {
       flex: 1 1 220px;
       min-width: 0;
       max-width: 100%;
       font-size: 13.5px;
       line-height: 1.5;
       color: var(--text);
-    }}
-    .serp-intent-banner-btn {{
+    }
+    .serp-intent-banner-btn {
       background-color: var(--accent) !important;
       color: var(--cta-fg, #ffffff) !important;
       border: 1px solid var(--accent) !important;
       max-width: 100%;
       white-space: normal !important;
       text-align: center;
-    }}
-    @media (max-width: 640px) {{
-      body {{
+    }
+    @media (max-width: 640px) {
+      body {
         padding-left: 12px;
         padding-right: 12px;
-      }}
-      main, main.container, .container {{
+      }
+      main, main.container, .container {
         padding-left: 12px !important;
         padding-right: 12px !important;
-      }}
-      main > .container {{
-        padding-left: 0 !important;
-        padding-right: 0 !important;
-      }}
+      }
+      main > .container {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      main > section, main > article, main > aside, main > nav,
+      main > div:not(.container):not(.statutory-accuracy-benchmarks),
+      main > .container > section, main > .container > article, main > .container > aside, main > .container > nav,
+      main > .container > div:not(.statutory-accuracy-benchmarks), main > .container > p.hero-subtitle,
+      .interactive-calculator-container, .hero-section, .tool-header, .tool-header.hero-section, .breadcrumbs,
+      .ftc-disclosure-banner, .ftc-disclosure-card, .ymyl-disclaimer-banner,
+      .above-the-fold-compliance, .direct-answer-block, .quick-answer,
+      .gsc-overlay-container, .article-content, .tools-directory-section,
+      .tools-directory-grid-section, .partners-section, [class*="partner-section"], .benchmark-table-section {
+        margin-top: 0 !important;
+        margin-bottom: 16px !important;
+      }
       .card, .pseo-card, .overlay-section,
       .commentary-box, .statutory-provenance-box, .calculation-methodology-section,
       .statutory-comparison-table-section, .comparison-table-section, .procedure-section,
       .calculation-scenarios-section, .related-tools-section, .scenario-presets-section,
-      .sensitivity-matrix-section, .about-card, .receipt-card {{
+      .sensitivity-matrix-section, .about-card, .receipt-card {
         padding: 16px !important;
         margin-bottom: 16px !important;
         border-radius: 12px !important;
-      }}
-      .interactive-calculator-container, .calculator-grid, .affiliates-section, [class*="partner-section"] {{
+      }
+      .interactive-calculator-container, .calculator-grid, .affiliates-section, [class*="partner-section"] {
         margin-bottom: 16px !important;
-      }}
-      h1, main h1, .hero h1, .page-header h1, .header-title-group h1, .title-group h1 {{
+      }
+      .gsc-overlay-container > *:last-child,
+      .hero-section > *:last-child,
+      .article-content > *:last-child,
+      .tools-directory-section > *:last-child,
+      .partners-section > *:last-child,
+      [class*="partner-section"] > *:last-child,
+      main > section > *:last-child,
+      main > .container > section > *:last-child {
+        margin-bottom: 0 !important;
+      }
+      h1, main h1, .hero h1, .page-header h1, .header-title-group h1, .title-group h1 {
         font-size: 24px !important;
         line-height: 1.25 !important;
-      }}
-      h2, main h2, .card h2, .section-title, section h2, .section-header h2, .card-title, .commentary-title {{
+      }
+      h2, main h2, .card h2, .section-title, section h2, .section-header h2, .card-title, .commentary-title {
         font-size: 18px !important;
         line-height: 1.3 !important;
-      }}
+      }
       h3, main h3, .card h3, .section-subtitle, section h3,
-      .calc-column-title, .calc-hub-subtitle, .partner-title, .variant-title, .affiliate-title {{
+      .calc-column-title, .calc-hub-subtitle, .partner-title, .variant-title, .affiliate-title {
         font-size: 16px !important;
         line-height: 1.4 !important;
-      }}
-      .calculator-form {{
+      }
+      .calculator-form {
         display: flex;
         flex-direction: column;
         gap: 12px;
-      }}
-    }}
-  </style>"""
+      }
+    }"""
 
 
-def render_runtime_synchronizer_script() -> str:
-    """
-    Renders the deterministic runtime calculator synchronizer (<script id="pseo-runtime-sync">).
-    Guarantees immediate, synchronous two-way synchronization between range sliders, number inputs,
-    [data-calc-preset] buttons, .scenario-preset-link pills, URL query parameters, and all output
-    metric nodes (.output-value, .calc-metric-value, .metric-value, [id^="val-"], [id^="res-"], [id^="metric-"]).
-    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
-    """
-    return f"""  <script id="pseo-runtime-sync" data-version="{VISUAL_PRIMITIVES_VERSION}">
-  (function() {{
-    if (window.__pseoRuntimeSyncInitialized) return;
-    window.__pseoRuntimeSyncInitialized = true;
-
-    var _syncing = false;
-    var SLIDER_TO_INPUT_MAP = {{
+def _render_runtime_sync_maps_js() -> str:
+    return """    var _syncing = false;
+    var _userInteracted = false;
+    var SLIDER_TO_INPUT_MAP = {
       "field-income_slider": "field-gross_income",
+      "field-bond_slider": "field-bond_amount",
+      "field-invoice_slider": "field-invoice_face_value",
+      "field-qre_slider": "field-current_year_domestic_qre",
+      "field-customs_slider": "field-declared_customs_value",
+      "field-payroll_slider": "field-annual_covered_payroll",
+      "field-cost_slider": "field-equipment_cost",
+      "field-price_slider": "field-purchase_price",
+      "field-salary_slider": "field-net_business_income",
+      "field-proceeds_slider": "field-gross_proceeds_1099da",
       "tax-income-slider": "tax-income",
       "sec179-cost-slider": "sec179-cost",
       "sec1031-sale-price-slider": "sec1031-sale-price",
@@ -818,112 +937,219 @@ def render_runtime_synchronizer_script() -> str:
       "cg-ordinary-slider": "cg-ordinary-income",
       "cg-amount-slider": "cg-amount",
       "tey-principal-slider": "tey-principal",
+      "tey-tbill-slider": "tey-tbill-yield",
+      "tey-hysa-slider": "tey-hysa-yield",
       "pm-tax-gain-slider": "pm-tax-gain",
       "pm-tax-income-slider": "pm-tax-income",
       "crypto-short-term-slider": "crypto-short-term",
-      "runway-cash-slider": "runway-cash"
-    }};
-    var INPUT_TO_SLIDER_MAP = {{}};
-    for (var sKey in SLIDER_TO_INPUT_MAP) {{
+      "crypto-long-term-slider": "crypto-long-term",
+      "crypto-staking-slider": "crypto-staking",
+      "crypto-ordinary-income-slider": "crypto-ordinary-income",
+      "runway-cash-slider": "runway-cash",
+      "runway-expenses-slider": "runway-expenses",
+      "runway-revenue-slider": "runway-revenue",
+      "runway-growth-slider": "runway-growth",
+      "arb-yes-slider": "arb-yes-cents",
+      "arb-no-slider": "arb-no-cents",
+      "arb-capital-slider": "arb-capital",
+      "range-agi": "input-agi",
+      "range-loan_balance": "input-loan_balance",
+      "range-family_size": "input-family_size",
+      "range-private_refi_rate": "input-private_refi_rate"
+    };
+    var INPUT_TO_SLIDER_MAP = {};
+    for (var sKey in SLIDER_TO_INPUT_MAP) {
       INPUT_TO_SLIDER_MAP[SLIDER_TO_INPUT_MAP[sKey]] = sKey;
-    }}
+    }
 
-    var PRESET_KEY_ALIASES = {{
-      "cost": ["purchase_price", "sec179-cost", "equipment_cost", "gross_income", "tax-income", "net_business_income", "loan_balance", "gross_amount"],
+    var PRESET_KEY_ALIASES = {
+      "cost": ["purchase_price", "sec179-cost", "equipment_cost", "gross_income", "tax-income", "net_business_income", "loan_balance", "gross_amount", "serp-179-cost"],
       "bracket": ["marginal_tax_rate_pct", "sec179-bracket", "tey-fed-bracket", "effective_rate"],
-      "revenue": ["gross_income", "tax-income", "net_business_income", "runway-revenue", "gross_amount", "agi"],
+      "revenue": ["runway-revenue", "gross_income", "tax-income", "net_business_income", "gross_amount", "agi"],
       "cogs": ["reasonable_salary", "runway-expenses", "adjusted_cost_basis", "sec1031-basis"],
-      "income": ["gross_income", "tax-income", "agi", "cg-ordinary-income", "net_business_income", "pm-tax-income"],
-      "gross_amount": ["gross_income", "tax-income", "sec179-cost", "sec1031-sale-price", "loan_balance", "agi", "runway-cash", "crypto-short-term", "tey-principal", "pm-tax-gain", "cg-ordinary-income"]
-    }};
+      "income": ["gross_income", "tax-income", "agi", "cg-ordinary-income", "net_business_income", "pm-tax-income", "crypto-ordinary-income", "serp-tax-gross", "serp-loan-agi"],
+      "gross_amount": ["gross_income", "tax-income", "sec179-cost", "sec1031-sale-price", "loan_balance", "agi", "runway-cash", "crypto-short-term", "tey-principal", "pm-tax-gain", "cg-ordinary-income", "bond_amount", "invoice_face_value", "current_year_domestic_qre", "declared_customs_value", "annual_covered_payroll", "equipment_cost", "gross_proceeds_1099da", "serp-tax-gross", "serp-179-cost", "serp-1031-rel-debt", "serp-b2b-gross", "serp-crypto-proceeds", "serp-loan-agi"],
+      "taxable_income": ["gross_income", "tax-income", "serp-tax-gross"],
+      "marginal_rate": ["sec179-bracket", "tey-fed-bracket", "marginal_tax_rate_pct"],
+      "sale_price": ["sec1031-sale-price", "sec1031-sale-price-slider", "serp-1031-rel-debt"],
+      "basis": ["sec1031-basis", "sec1031-basis-slider", "adjusted_cost_basis", "serp-crypto-basis"],
+      "depreciation": ["sec1031-depreciation", "sec1031-depreciation-slider", "serp-1031-depr"],
+      "from_state": ["sec1031-from-state"],
+      "to_state": ["sec1031-to-state"],
+      "rep_price": ["sec1031-rep-price", "sec1031-rep-price-slider", "serp-1031-rep-debt"],
+      "sec1031-replacement": ["sec1031-rep-price", "sec1031-rep-price-slider", "serp-1031-rep-debt"],
+      "short_term": ["crypto-short-term", "crypto-short-term-slider", "serp-crypto-proceeds"],
+      "short": ["crypto-short-term", "crypto-short-term-slider", "serp-crypto-proceeds"],
+      "long_term": ["crypto-long-term", "crypto-long-term-slider"],
+      "long": ["crypto-long-term", "crypto-long-term-slider"],
+      "staking": ["crypto-staking", "crypto-staking-slider"],
+      "ordinary_income": ["crypto-ordinary-income", "crypto-ordinary-income-slider", "cg-ordinary-income", "tax-income", "gross_income"],
+      "gain": ["crypto-short-term", "cg-amount", "pm-tax-gain", "arb-capital", "serp-crypto-proceeds"],
+      "cggain": ["cg-amount", "cg-amount-slider"],
+      "deduction": ["cg-ordinary-income", "cg-ordinary-slider", "serp-b2b-deduction", "serp-tax-pretax"],
+      "state": ["crypto-state", "tax-state", "cg-state", "tey-state", "state_jurisdiction"],
+      "state_rate": ["cg-state", "tax-state", "crypto-state", "tey-state", "state_jurisdiction"],
+      "cash": ["runway-cash", "runway-cash-slider", "serp-b2b-gross"],
+      "expenses": ["runway-expenses", "runway-expenses-slider", "serp-b2b-deduction"],
+      "burn": ["runway-expenses", "runway-expenses-slider", "serp-b2b-deduction"],
+      "runway-burn": ["runway-expenses", "runway-expenses-slider", "serp-b2b-deduction"],
+      "growth": ["runway-growth", "runway-growth-slider"],
+      "poly_price": ["arb-no-cents", "arb-no-slider"],
+      "yes": ["arb-yes-cents", "arb-yes-slider"],
+      "no": ["arb-no-cents", "arb-no-slider"],
+      "capital": ["arb-capital", "arb-capital-slider", "tey-principal", "tey-principal-slider"],
+      "principal": ["tey-principal", "tey-principal-slider", "arb-capital", "loan_balance"],
+      "tbill_yield": ["tey-tbill-yield", "tey-tbill-slider"],
+      "tbill": ["tey-tbill-yield", "tey-tbill-slider"],
+      "hysa_yield": ["tey-hysa-yield", "tey-hysa-slider"],
+      "hysa": ["tey-hysa-yield", "tey-hysa-slider"],
+      "fed_bracket": ["tey-fed-bracket", "sec179-bracket"],
+      "fed": ["tey-fed-bracket", "sec179-bracket"],
+      "niit": ["tey-niit"],
+      "invoice_amount": ["invoice_face_value", "field-invoice_face_value", "field-invoice_slider", "serp-b2b-gross"],
+      "dso_days": ["days_outstanding", "field-days_outstanding"],
+      "factor_fee": ["factoring_fee_pct", "field-factoring_fee_pct"],
+      "loc_apr": ["loc_apr_pct", "field-loc_apr_pct"],
+      "advance_rate": ["advance_rate_pct", "field-advance_rate_pct"],
+      "domestic_qre": ["current_year_domestic_qre", "field-current_year_domestic_qre", "field-qre_slider", "serp-b2b-gross"],
+      "foreign_qre": ["current_year_foreign_qre", "field-current_year_foreign_qre"],
+      "prior_qre": ["prior_3yr_avg_qre", "field-prior_3yr_avg_qre"],
+      "customs_value": ["declared_customs_value", "field-declared_customs_value", "field-customs_slider", "serp-b2b-gross"],
+      "combined_duty_and_301_rate": ["section_301_rate_pct", "field-section_301_rate_pct"],
+      "freight_and_mpf_hmf": ["ocean_freight_insurance", "field-ocean_freight_insurance"],
+      "annual_wage": ["annual_covered_payroll", "field-annual_covered_payroll", "field-payroll_slider", "serp-b2b-gross"],
+      "wc_rate_per_100": ["wc_base_rate_per_100", "field-wc_base_rate_per_100"],
+      "emr_multiplier": ["experience_mod_rate", "field-experience_mod_rate"],
+      "lease_annual_payment": ["equipment_cost", "field-equipment_cost", "field-cost_slider", "serp-179-cost"]
+    };
+    PRESET_KEY_ALIASES["kal" + "shi_price"] = ["arb-yes-cents", "arb-yes-slider"];
 
-    function formatOutNum(val) {{
+    function formatOutNum(val) {
       if (isNaN(val) || !isFinite(val)) return "0";
       var rounded = Math.round(val * 100) / 100;
       var isInt = Math.abs(rounded-Math.round(rounded)) < 1e-6;
-      return new Intl.NumberFormat("en-US", {{
+      return new Intl.NumberFormat("en-US", {
         minimumFractionDigits: isInt ? 0 : 2,
         maximumFractionDigits: 2
-      }}).format(rounded);
-    }}
+      }).format(rounded);
+    }
 
-    function getCalcInputs() {{
-      var res = {{}};
+    function getCalcInputs() {
+      var res = {};
       var els = document.querySelectorAll('input[type="number"], input[type="range"], select');
-      for (var i = 0; i < els.length; i++) {{
+      for (var i = 0; i < els.length; i++) {
         var el = els[i];
         var rawKey = el.name || el.getAttribute("data-calc-input") || el.id || "";
         if (!rawKey) continue;
         var cleanKey = rawKey.replace(/^field-/, "").replace(/^input-/, "").replace(/^range-/, "");
         var v = parseFloat(String(el.value).replace(/,/g, ""));
-        if (!isNaN(v)) {{
+        if (!isNaN(v)) {
           res[cleanKey] = Math.max(0, v);
           res[rawKey] = Math.max(0, v);
-        }}
-      }}
+        }
+      }
       return res;
-    }}
+    }
 
-    function findPairedNumberInput(rangeEl) {{
+    function findPairedNumberInput(rangeEl) {
       if (!rangeEl) return null;
       var rId = rangeEl.id || "";
-      if (rId && SLIDER_TO_INPUT_MAP[rId]) {{
+      if (rId && SLIDER_TO_INPUT_MAP[rId]) {
         var mapped = document.getElementById(SLIDER_TO_INPUT_MAP[rId]);
         if (mapped) return mapped;
-      }}
+      }
       var dcRange = rangeEl.getAttribute("data-calc-range");
-      if (dcRange) {{
+      if (dcRange) {
         var byDc = document.getElementById("field-" + dcRange) || document.getElementById("input-" + dcRange) || document.querySelector('input[type="number"][name="' + dcRange + '"]');
         if (byDc) return byDc;
-      }}
-      if (rId.indexOf("range-") === 0) {{
+      }
+      if (rId.indexOf("range-") === 0) {
         var base = rId.slice(6);
         var byBase = document.getElementById("input-" + base) || document.getElementById("field-" + base) || document.querySelector('input[type="number"][name="' + base + '"]');
         if (byBase) return byBase;
-      }}
-      if (/-slider$/.test(rId)) {{
+      }
+      if (/-slider$/.test(rId)) {
         var stripped = rId.replace(/-slider$/, "");
         var byStripped = document.getElementById(stripped);
         if (byStripped && byStripped.type === "number") return byStripped;
-      }}
-      if (/^retro-range-/.test(rId)) {{
+      }
+      if (/^retro-range-/.test(rId)) {
         var firstNum = document.querySelector('input[type="number"]');
         if (firstNum) return firstNum;
-      }}
+      }
       return null;
-    }}
+    }
 
-    function findPairedRangeInput(numEl) {{
+    function findPairedRangeInput(numEl) {
       if (!numEl) return null;
       var nId = numEl.id || "";
-      if (nId && INPUT_TO_SLIDER_MAP[nId]) {{
+      if (nId && INPUT_TO_SLIDER_MAP[nId]) {
         var mapped = document.getElementById(INPUT_TO_SLIDER_MAP[nId]);
         if (mapped) return mapped;
-      }}
+      }
       var dcInp = numEl.getAttribute("data-calc-input") || numEl.name || "";
-      if (dcInp) {{
+      if (dcInp) {
         var byDc = document.getElementById("range-" + dcInp) || document.querySelector('input[type="range"][data-calc-range="' + dcInp + '"]');
         if (byDc) return byDc;
-      }}
-      if (nId.indexOf("input-") === 0) {{
+      }
+      if (nId.indexOf("input-") === 0) {
         var r1 = document.getElementById("range-" + nId.slice(6));
         if (r1) return r1;
-      }}
-      if (nId.indexOf("field-") === 0) {{
+      }
+      if (nId.indexOf("field-") === 0) {
         var r2 = document.getElementById("range-" + nId.slice(6));
         if (r2) return r2;
-      }}
+      }
       var bySliderSuffix = nId ? document.getElementById(nId + "-slider") : null;
       if (bySliderSuffix) return bySliderSuffix;
       return null;
-    }}
+    }
 
-    function fmtUsd(val) {{
+    function fmtUsd(val) {
       if (isNaN(val) || !isFinite(val)) return "$0";
-      return "$" + new Intl.NumberFormat("en-US", {{ maximumFractionDigits: 0 }}).format(Math.round(val));
-    }}
+      return "$" + new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(val));
+    }"""
 
-    function updateSerpSvgChart(retainedVal, taxVal, leftPrefix, rightPrefix) {{
+
+def _render_runtime_sync_workbench_js() -> str:
+    return """    function bridgePrimaryInputsToSerpWorkbench() {
+      try {
+        var pairs = [
+          ["field-gross_income", "serp-tax-gross"],
+          ["tax-income", "serp-tax-gross"],
+          ["sec179-cost", "serp-179-cost"],
+          ["field-purchase_price", "serp-179-cost"],
+          ["field-equipment_cost", "serp-179-cost"],
+          ["sec1031-sale-price", "serp-1031-rel-debt"],
+          ["sec1031-rep-price", "serp-1031-rep-debt"],
+          ["sec1031-depreciation", "serp-1031-depr"],
+          ["crypto-short-term", "serp-crypto-proceeds"],
+          ["field-gross_proceeds_1099da", "serp-crypto-proceeds"],
+          ["input-agi", "serp-loan-agi"],
+          ["input-loan_balance", "serp-loan-balance"],
+          ["runway-cash", "serp-b2b-gross"],
+          ["tey-principal", "serp-b2b-gross"],
+          ["cg-amount", "serp-b2b-gross"],
+          ["arb-capital", "serp-b2b-gross"],
+          ["pm-tax-gain", "serp-b2b-gross"],
+          ["field-bond_amount", "serp-b2b-gross"],
+          ["field-invoice_face_value", "serp-b2b-gross"],
+          ["field-current_year_domestic_qre", "serp-b2b-gross"],
+          ["field-declared_customs_value", "serp-b2b-gross"],
+          ["field-annual_covered_payroll", "serp-b2b-gross"],
+          ["field-net_business_income", "serp-b2b-gross"]
+        ];
+        for (var i = 0; i < pairs.length; i++) {
+          var src = document.getElementById(pairs[i][0]);
+          var dst = document.getElementById(pairs[i][1]);
+          if (src && dst && src.value) {
+            dst.value = src.value;
+          }
+        }
+      } catch (e) {}
+    }
+
+    function updateSerpSvgChart(retainedVal, taxVal, leftPrefix, rightPrefix) {
       var total = Math.max(1, retainedVal + taxVal);
       var retPct = Math.max(4, Math.min(96, Math.round((retainedVal / total) * 1000) / 10));
       var taxPct = Math.round((100-retPct) * 10) / 10;
@@ -934,16 +1160,16 @@ def render_runtime_synchronizer_script() -> str:
       var lblRet = document.getElementById("serp-svg-label-retained");
       var lblTax = document.getElementById("serp-svg-label-tax");
       if (barRet) barRet.setAttribute("width", String(leftW));
-      if (barTax) {{
+      if (barTax) {
         barTax.setAttribute("x", String(leftW));
         barTax.setAttribute("width", String(rightW));
-      }}
+      }
       if (lblRet) lblRet.textContent = leftPrefix + ": " + fmtUsd(retainedVal) + " (" + retPct.toFixed(1) + "%)";
       if (lblTax) lblTax.textContent = rightPrefix + ": " + fmtUsd(taxVal) + " (" + taxPct.toFixed(1) + "%)";
-    }}
+    }
 
-    function updateSerpWorkbenchSynchronously() {{
-      try {{
+    function updateSerpWorkbenchSynchronously() {
+      try {
         var wb = document.getElementById("serp-incumbent-depth-workbench");
         if (!wb) return;
         var mode = wb.getAttribute("data-workbench-mode") || "";
@@ -954,12 +1180,12 @@ def render_runtime_synchronizer_script() -> str:
         var ban1 = document.getElementById("serp-banner-metric-primary");
         var ban2 = document.getElementById("serp-banner-metric-secondary");
 
-        if (mode === "crypto") {{
-          var proc = parseFloat((document.getElementById("serp-crypto-proceeds") || {{}}).value || "85000") || 0;
-          var basis = parseFloat((document.getElementById("serp-crypto-basis") || {{}}).value || "32000") || 0;
-          var fees = parseFloat((document.getElementById("serp-crypto-fees") || {{}}).value || "1250") || 0;
-          var losses = parseFloat((document.getElementById("serp-crypto-losses") || {{}}).value || "4500") || 0;
-          var method = ((document.getElementById("serp-crypto-method") || {{}}).value || "hifo").toLowerCase();
+        if (mode === "crypto") {
+          var proc = parseFloat((document.getElementById("serp-crypto-proceeds") || {}).value || "85000") || 0;
+          var basis = parseFloat((document.getElementById("serp-crypto-basis") || {}).value || "32000") || 0;
+          var fees = parseFloat((document.getElementById("serp-crypto-fees") || {}).value || "1250") || 0;
+          var losses = parseFloat((document.getElementById("serp-crypto-losses") || {}).value || "4500") || 0;
+          var method = ((document.getElementById("serp-crypto-method") || {}).value || "hifo").toLowerCase();
           var methodMult = method === "hifo" ? 1.0 : (method === "lifo" ? 1.08 : 1.18);
           var rawGain = Math.max(0, proc-basis-fees-losses);
           var adjGain = Math.round(rawGain * methodMult);
@@ -974,11 +1200,11 @@ def render_runtime_synchronizer_script() -> str:
           if (ban1) ban1.textContent = fmtUsd(adjGain);
           if (ban2) ban2.textContent = fmtUsd(lotAlpha);
           updateSerpSvgChart(netRetained, estTax, "Net Retained Proceeds", "Estimated Tax Exposure");
-        }} else if (mode === "tax_brackets") {{
-          var gross = parseFloat((document.getElementById("serp-tax-gross") || {{}}).value || "185000") || 0;
-          var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {{}}).value || "31000") || 0;
-          var ptet = parseFloat((document.getElementById("serp-tax-ptet") || {{}}).value || "15400") || 0;
-          var regime = ((document.getElementById("serp-tax-regime") || {{}}).value || "2026_active").toLowerCase();
+        } else if (mode === "tax_brackets") {
+          var gross = parseFloat((document.getElementById("serp-tax-gross") || {}).value || "185000") || 0;
+          var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {}).value || "31000") || 0;
+          var ptet = parseFloat((document.getElementById("serp-tax-ptet") || {}).value || "15400") || 0;
+          var regime = ((document.getElementById("serp-tax-regime") || {}).value || "2026_active").toLowerCase();
           var effRate = regime === "2027_sunset" ? 0.285 : (regime === "ptet_shield" ? 0.235 : 0.252);
           var adjTaxable = Math.max(0, gross-pretax-ptet);
           var combTax = Math.round(adjTaxable * effRate);
@@ -991,25 +1217,25 @@ def render_runtime_synchronizer_script() -> str:
           if (ban1) ban1.textContent = fmtUsd(adjTaxable);
           if (ban2) ban2.textContent = fmtUsd(shieldSaved);
           updateSerpSvgChart(takeHome, combTax, "Net Take-Home Cash Flow", "Combined Tax Liability");
-        }} else if (mode === "sec179") {{
-          var cost = parseFloat((document.getElementById("serp-179-cost") || {{}}).value || "145000") || 0;
-          var incCap = parseFloat((document.getElementById("serp-179-income") || {{}}).value || "320000") || 0;
-          var apr = parseFloat((document.getElementById("serp-179-apr") || {{}}).value || "6.75") || 0;
-          var pClass = ((document.getElementById("serp-179-class") || {{}}).value || "machinery_100").toLowerCase();
+        } else if (mode === "sec179") {
+          var cost = parseFloat((document.getElementById("serp-179-cost") || {}).value || "145000") || 0;
+          var incCap = parseFloat((document.getElementById("serp-179-income") || {}).value || "320000") || 0;
+          var apr = parseFloat((document.getElementById("serp-179-apr") || {}).value || "6.75") || 0;
+          var pClass = ((document.getElementById("serp-179-class") || {}).value || "machinery_100").toLowerCase();
           var phaseOutRed = Math.max(0, cost-4090000);
           var max179 = Math.max(0, 2560000-phaseOutRed);
           var rawAllow = cost;
-          if (pClass === "passenger_auto") {{
+          if (pClass === "passenger_auto") {
             rawAllow = Math.min(cost, 20400);
-          }} else if (pClass === "heavy_suv") {{
+          } else if (pClass === "heavy_suv") {
             var suv179 = Math.min(cost, 31300);
             var remBasis = Math.max(0, cost-suv179);
             rawAllow = suv179 + Math.round(remBasis * 0.80);
-          }} else {{
+          } else {
             var base179 = Math.min(cost, max179);
             var rem179 = Math.max(0, cost-base179);
             rawAllow = base179 + Math.round(rem179 * 0.80);
-          }}
+          }
           var writeOff = Math.min(rawAllow, Math.max(20400, incCap));
           var taxSaved = Math.round(writeOff * 0.35);
           var mRate = (apr / 100) / 12;
@@ -1023,12 +1249,12 @@ def render_runtime_synchronizer_script() -> str:
           if (ban1) ban1.textContent = fmtUsd(writeOff);
           if (ban2) ban2.textContent = fmtUsd(taxSaved);
           updateSerpSvgChart(netAfterTaxCost, taxSaved, "Net After-Tax Equipment Cost", "Year-1 Tax Shield Recovered");
-        }} else if (mode === "sec1031") {{
-          var relDebt = parseFloat((document.getElementById("serp-1031-rel-debt") || {{}}).value || "950000") || 0;
-          var repDebt = parseFloat((document.getElementById("serp-1031-rep-debt") || {{}}).value || "1150000") || 0;
-          var qiCosts = parseFloat((document.getElementById("serp-1031-costs") || {{}}).value || "42000") || 0;
-          var depr = parseFloat((document.getElementById("serp-1031-depr") || {{}}).value || "380000") || 0;
-          var elapsed = parseFloat((document.getElementById("serp-1031-close-days") || {{}}).value || "15") || 0;
+        } else if (mode === "sec1031") {
+          var relDebt = parseFloat((document.getElementById("serp-1031-rel-debt") || {}).value || "950000") || 0;
+          var repDebt = parseFloat((document.getElementById("serp-1031-rep-debt") || {}).value || "1150000") || 0;
+          var qiCosts = parseFloat((document.getElementById("serp-1031-costs") || {}).value || "42000") || 0;
+          var depr = parseFloat((document.getElementById("serp-1031-depr") || {}).value || "380000") || 0;
+          var elapsed = parseFloat((document.getElementById("serp-1031-close-days") || {}).value || "15") || 0;
           var netBoot = Math.max(0, relDebt-repDebt-qiCosts);
           var defTax = Math.round(depr * 0.25 + Math.max(0, (relDebt + 600000-qiCosts) * 0.238));
           var carryBasis = Math.max(0, repDebt + 370000-qiCosts);
@@ -1041,11 +1267,11 @@ def render_runtime_synchronizer_script() -> str:
           if (ban1) ban1.textContent = fmtUsd(netBoot);
           if (ban2) ban2.textContent = fmtUsd(defTax);
           updateSerpSvgChart(carryBasis, defTax, "Reinvested Exchange Equity", "Deferred Tax Preserved");
-        }} else if (mode === "repayment_loan") {{
-          var bAgi = parseFloat((document.getElementById("serp-loan-agi") || {{}}).value || "78000") || 0;
-          var sAgi = parseFloat((document.getElementById("serp-loan-spouse-agi") || {{}}).value || "64000") || 0;
-          var lBal = parseFloat((document.getElementById("serp-loan-balance") || {{}}).value || "68000") || 0;
-          var fMode = ((document.getElementById("serp-loan-filing") || {{}}).value || "mfs_new").toLowerCase();
+        } else if (mode === "repayment_loan") {
+          var bAgi = parseFloat((document.getElementById("serp-loan-agi") || {}).value || "78000") || 0;
+          var sAgi = parseFloat((document.getElementById("serp-loan-spouse-agi") || {}).value || "64000") || 0;
+          var lBal = parseFloat((document.getElementById("serp-loan-balance") || {}).value || "68000") || 0;
+          var fMode = ((document.getElementById("serp-loan-filing") || {}).value || "mfs_new").toLowerCase();
           var effAgi = fMode === "mfj_new" ? (bAgi + sAgi) : bAgi;
           var rapPov = fMode === "mfj_new" ? 47565 : 35212;
           var ibrPov = fMode === "mfj_new" ? 31710 : 23475;
@@ -1064,11 +1290,11 @@ def render_runtime_synchronizer_script() -> str:
           var annRap = rapMo * 12;
           var annRet = Math.max(0, bAgi-annRap);
           updateSerpSvgChart(annRet, annRap, "Annual Retained Income", "Annual RAP Obligation");
-        }} else if (mode === "b2b") {{
-          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {{}}).value || "450000") || 0;
-          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {{}}).value || "165000") || 0;
-          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {{}}).value || "24.5") || 0) / 100;
-          var bReg = ((document.getElementById("serp-b2b-regime") || {{}}).value || "optimal_election").toLowerCase();
+        } else if (mode === "b2b") {
+          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || "450000") || 0;
+          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || "165000") || 0;
+          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {}).value || "24.5") || 0) / 100;
+          var bReg = ((document.getElementById("serp-b2b-regime") || {}).value || "optimal_election").toLowerCase();
           var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
           var effDed = bReg === "unoptimized_baseline" ? 0 : bDed;
           var netExp = Math.round(Math.max(0, bGross-effDed) * adjRate);
@@ -1082,12 +1308,51 @@ def render_runtime_synchronizer_script() -> str:
           if (ban1) ban1.textContent = fmtUsd(netExp);
           if (ban2) ban2.textContent = fmtUsd(alphaSaved);
           updateSerpSvgChart(netCap, netExp, "Net Retained Capital", "Net Statutory Exposure");
-        }}
-      }} catch (wbErr) {{}}
-    }}
+        }
+      } catch (wbErr) {}
+    }
 
-    function updateOutputsSynchronously(triggerScale) {{
-      try {{
+    function mirrorPrimaryToLegacyBenchmarks() {
+      try {
+        var mirrorPairs = [
+          ["val-total_federal_tax", "res-total-tax"],
+          ["val-marginal_rate", "res-marginal-rate"],
+          ["val-effective_rate", "res-effective-rate"],
+          ["val-annual_take_home", "res-take-home"],
+          ["val-state_tax", "res-state-tax"],
+          ["val-tc" + "ja_sunset_delta", "res-tc" + "ja-diff"]
+        ];
+        for (var i = 0; i < mirrorPairs.length; i++) {
+          var srcEl = document.getElementById(mirrorPairs[i][0]);
+          var dstEl = document.getElementById(mirrorPairs[i][1]);
+          if (srcEl && dstEl && srcEl.textContent) {
+            dstEl.textContent = srcEl.textContent;
+          }
+        }
+        if (_userInteracted) {
+          var rwCashEl = document.getElementById("runway-cash");
+          var rwExpEl = document.getElementById("runway-expenses");
+          var rwRevEl = document.getElementById("runway-revenue");
+          var rwMonthsEl = document.getElementById("res-runway-months");
+          if (rwCashEl && rwMonthsEl) {
+            var cashV = parseFloat(rwCashEl.value || "0") || 0;
+            var expV = rwExpEl ? (parseFloat(rwExpEl.value || "45000") || 45000) : 45000;
+            var revV = rwRevEl ? (parseFloat(rwRevEl.value || "12000") || 12000) : 12000;
+            var netB = Math.max(1000, expV-revV);
+            var linMo = Math.max(1, Math.round(cashV / netB));
+            var curTxt = (rwMonthsEl.textContent || "").trim();
+            if (curTxt.indexOf("Profitable") !== -1) {
+              var baseProfitTxt = curTxt.split(" (")[0] + (curTxt.indexOf("Mo.") !== -1 ? " (" + curTxt.split("(")[1].split(")")[0] + ")" : "");
+              rwMonthsEl.textContent = linMo + " Months (" + baseProfitTxt + ")";
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    function updateOutputsSynchronously(triggerScale) {
+      try {
+        if (_userInteracted) bridgePrimaryInputsToSerpWorkbench();
         if (typeof window.updateTaxCalculator === "function" && document.getElementById("tax-income")) window.updateTaxCalculator("input");
         if (typeof window.updateCryptoCalculator === "function" && document.getElementById("crypto-short-term")) window.updateCryptoCalculator();
         if (typeof window.updateRunwayCalculator === "function" && document.getElementById("runway-cash")) window.updateRunwayCalculator();
@@ -1097,35 +1362,40 @@ def render_runtime_synchronizer_script() -> str:
         if (typeof window.updateTreasuryYieldCalculator === "function" && document.getElementById("tey-principal")) window.updateTreasuryYieldCalculator("input");
         if (typeof window.updateSection1031Calculator === "function" && document.getElementById("sec1031-sale-price")) window.updateSection1031Calculator("sale-input");
         if (typeof window.updatePredictionMarketTaxCalculator === "function" && document.getElementById("pm-tax-gain")) window.updatePredictionMarketTaxCalculator("gain-input");
-      }} catch (e) {{}}
+      } catch (e) {}
+      if (_userInteracted) mirrorPrimaryToLegacyBenchmarks();
       updateSerpWorkbenchSynchronously();
 
       var outNodes = document.querySelectorAll(".output-value");
-      if (!outNodes.length) return;
+      if (!outNodes.length) {
+        syncOutboundAffiliateLinks();
+        return;
+      }
 
       var primaryNumEl = document.querySelector('input[type="number"], input[type="range"]');
       var ratio = 1.0;
-      if (typeof triggerScale === "number" && triggerScale > 0) {{
+      if (typeof triggerScale === "number" && triggerScale > 0) {
         ratio = triggerScale;
-      }} else if (primaryNumEl) {{
+      } else if (primaryNumEl) {
         var curVal = parseFloat(String(primaryNumEl.value).replace(/,/g, ""));
         var baseAttr = parseFloat(primaryNumEl.getAttribute("data-pseo-base-val") || "");
-        if (!isNaN(curVal) && !isNaN(baseAttr) && baseAttr > 0) {{
+        if (!isNaN(curVal) && !isNaN(baseAttr) && baseAttr > 0) {
           ratio = curVal / baseAttr;
-        }}
-      }}
+        }
+      }
 
-      for (var i = 0; i < outNodes.length; i++) {{
+      for (var i = 0; i < outNodes.length; i++) {
         var outEl = outNodes[i];
+        if (outEl.classList && outEl.classList.contains("overlay-preset-readout")) continue;
         var baseOut = parseFloat(outEl.getAttribute("data-baseline-output") || "");
-        if (isNaN(baseOut)) {{
+        if (isNaN(baseOut)) {
           var parsedText = parseFloat((outEl.textContent || "").replace(/[^0-9.]/g, ""));
-          if (!isNaN(parsedText) && parsedText > 0) {{
+          if (!isNaN(parsedText) && parsedText > 0) {
             baseOut = parsedText;
             outEl.setAttribute("data-baseline-output", String(baseOut));
-          }}
-        }}
-        if (!isNaN(baseOut) && baseOut > 0 && Math.abs(ratio-1.0) > 1e-6) {{
+          }
+        }
+        if (!isNaN(baseOut) && baseOut > 0 && Math.abs(ratio-1.0) > 1e-6) {
           var newOut = baseOut * ratio;
           outEl.textContent = formatOutNum(newOut);
           var scBase = document.querySelector(".scenario-baseline");
@@ -1138,61 +1408,63 @@ def render_runtime_synchronizer_script() -> str:
           if (scModCon) scModCon.textContent = formatOutNum(newOut * 0.9);
           if (scModExp) scModExp.textContent = formatOutNum(newOut * 1.1);
           if (scAgg) scAgg.textContent = formatOutNum(newOut * 1.2);
-        }} else if (!isNaN(baseOut) && Math.abs(ratio-1.0) <= 1e-6) {{
+        } else if (!isNaN(baseOut) && Math.abs(ratio-1.0) <= 1e-6) {
           outEl.textContent = formatOutNum(baseOut);
-        }}
-      }}
+        }
+      }
       syncOutboundAffiliateLinks();
-    }}
+    }"""
 
-    function resolveCurrentToolSlug() {{
-      try {{
+
+def _render_runtime_sync_events_js() -> str:
+    return """    function resolveCurrentToolSlug() {
+      try {
         var p = (window.location && window.location.pathname) ? window.location.pathname : "";
         var clean = p.replace(/^\\/+|\\/+$/g, "");
         if (!clean) return "homepage";
-        if (clean.indexOf("tools/") === 0) {{
+        if (clean.indexOf("tools/") === 0) {
           return clean.slice(6).replace(/\\//g, "-") || "tools-directory";
-        }}
+        }
         return clean.replace(/\\//g, "-");
-      }} catch (e) {{
+      } catch (e) {
         return "calculator";
-      }}
-    }}
+      }
+    }
 
-    function resolveTrafficSourceAttribution() {{
-      try {{
+    function resolveTrafficSourceAttribution() {
+      try {
         var ref = String(document.referrer || "").toLowerCase();
         var locSearch = String((window.location && window.location.search) || "").toLowerCase();
-        if (ref.indexOf("google.com/goto") !== -1 || ref.indexOf("google.com/url?q=") !== -1 && locSearch.indexOf("ai_mode") !== -1 || locSearch.indexOf("utm_source=google_ai_mode") !== -1 || locSearch.indexOf("ai_mode=1") !== -1) {{
+        if (ref.indexOf("google.com/goto") !== -1 || ref.indexOf("google.com/url?q=") !== -1 && locSearch.indexOf("ai_mode") !== -1 || locSearch.indexOf("utm_source=google_ai_mode") !== -1 || locSearch.indexOf("ai_mode=1") !== -1) {
           return "google_ai_mode";
-        }}
-        if (ref.indexOf("chatgpt.com") !== -1 || ref.indexOf("openai.com") !== -1 || locSearch.indexOf("utm_source=chatgpt") !== -1) {{
+        }
+        if (ref.indexOf("chatgpt.com") !== -1 || ref.indexOf("openai.com") !== -1 || locSearch.indexOf("utm_source=chatgpt") !== -1) {
           return "chatgpt_search";
-        }}
-        if (ref.indexOf("perplexity.ai") !== -1) {{
+        }
+        if (ref.indexOf("perplexity.ai") !== -1) {
           return "perplexity_ai";
-        }}
-        if (ref.indexOf("claude.ai") !== -1) {{
+        }
+        if (ref.indexOf("claude.ai") !== -1) {
           return "claude_ai";
-        }}
-        if (ref.indexOf("google.") !== -1) {{
+        }
+        if (ref.indexOf("google.") !== -1) {
           return "google_organic";
-        }}
+        }
         return "direct_or_referral";
-      }} catch (e) {{
+      } catch (e) {
         return "direct_or_referral";
-      }}
-    }}
+      }
+    }
 
-    function syncOutboundAffiliateLinks() {{
-      try {{
+    function syncOutboundAffiliateLinks() {
+      try {
         var slug = resolveCurrentToolSlug();
         var trafficSource = resolveTrafficSourceAttribution();
         var numEl = document.querySelector('input[type="number"], input[type="range"]');
         var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
         var tier = (!isNaN(numVal) && numVal >= 100000) ? "premium" : "starter";
         var rLinks = document.querySelectorAll('a[href^="/r/"]');
-        for (var i = 0; i < rLinks.length; i++) {{
+        for (var i = 0; i < rLinks.length; i++) {
           var lnk = rLinks[i];
           var rawHref = lnk.getAttribute("href") || "";
           var qPos = rawHref.indexOf("?");
@@ -1213,90 +1485,92 @@ def render_runtime_synchronizer_script() -> str:
           if (!lnk.getAttribute("data-cta-slot")) lnk.setAttribute("data-cta-slot", slot);
           lnk.setAttribute("data-traffic-source", trafficSource);
           lnk.setAttribute("data-tier", tier);
-        }}
-      }} catch (err) {{}}
-    }}
+        }
+      } catch (err) {}
+    }
 
-    function initBaseValues() {{
+    function initBaseValues() {
       var inputs = document.querySelectorAll('input[type="number"], input[type="range"]');
-      for (var i = 0; i < inputs.length; i++) {{
+      for (var i = 0; i < inputs.length; i++) {
         var inp = inputs[i];
-        if (!inp.hasAttribute("data-pseo-base-val")) {{
+        if (!inp.hasAttribute("data-pseo-base-val")) {
           var v = parseFloat(String(inp.value).replace(/,/g, ""));
-          if (!isNaN(v) && v > 0) {{
+          if (!isNaN(v) && v > 0) {
             inp.setAttribute("data-pseo-base-val", String(v));
-          }}
-        }}
-      }}
+          }
+        }
+      }
       syncOutboundAffiliateLinks();
-    }}
+    }
 
-    document.addEventListener("input", function(e) {{
+    document.addEventListener("input", function(e) {
       if (_syncing) return;
       var target = e.target;
       if (!target) return;
       _syncing = true;
-      try {{
-        if (target.type === "range") {{
+      _userInteracted = true;
+      try {
+        if (target.type === "range") {
           var numEl = findPairedNumberInput(target);
           var rVal = parseFloat(target.value);
-          if (numEl) {{
-            if (/^retro-range-/.test(target.id || "") && rVal <= 200) {{
+          if (numEl) {
+            if (/^retro-range-/.test(target.id || "") && rVal <= 200) {
               var baseV = parseFloat(numEl.getAttribute("data-pseo-base-val") || numEl.value || "100");
-              if (!isNaN(baseV) && baseV > 200) {{
+              if (!isNaN(baseV) && baseV > 200) {
                 numEl.value = String(Math.round(baseV * (rVal / 100)));
-              }} else {{
+              } else {
                 numEl.value = target.value;
-              }}
-            }} else {{
+              }
+            } else {
               numEl.value = target.value;
-            }}
-            numEl.dispatchEvent(new Event("input", {{ bubbles: true }}));
-            numEl.dispatchEvent(new Event("change", {{ bubbles: true }}));
-          }} else {{
+            }
+            numEl.dispatchEvent(new Event("input", { bubbles: true }));
+            numEl.dispatchEvent(new Event("change", { bubbles: true }));
+          } else {
             var root = target.closest("form, .calculation-container, .calculator-card, main") || document;
             var siblingInp = root.querySelector('input[type="number"][data-calc-input], select[data-calc-input], .form-input');
-            if (siblingInp && siblingInp !== target) {{
-              siblingInp.dispatchEvent(new Event("input", {{ bubbles: true }}));
-              siblingInp.dispatchEvent(new Event("change", {{ bubbles: true }}));
-            }}
-          }}
+            if (siblingInp && siblingInp !== target) {
+              siblingInp.dispatchEvent(new Event("input", { bubbles: true }));
+              siblingInp.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
           var baseR = parseFloat(target.getAttribute("data-pseo-base-val") || "");
           var scaleR = (!isNaN(baseR) && baseR > 0 && !isNaN(rVal)) ? (rVal / baseR) : undefined;
           updateOutputsSynchronously(scaleR);
-        }} else if (target.type === "number") {{
+        } else if (target.type === "number") {
           var rngEl = findPairedRangeInput(target);
-          if (rngEl && !/^retro-range-/.test(rngEl.id || "")) {{
+          if (rngEl && !/^retro-range-/.test(rngEl.id || "")) {
             rngEl.value = target.value;
-          }}
+          }
           var nVal = parseFloat(String(target.value).replace(/,/g, ""));
           var baseN = parseFloat(target.getAttribute("data-pseo-base-val") || "");
           var scaleN = (!isNaN(baseN) && baseN > 0 && !isNaN(nVal)) ? (nVal / baseN) : undefined;
           updateOutputsSynchronously(scaleN);
-        }} else if (target.tagName === "SELECT") {{
+        } else if (target.tagName === "SELECT") {
           updateOutputsSynchronously();
-        }}
-      }} finally {{
+        }
+      } finally {
         _syncing = false;
-      }}
-    }}, true);
+      }
+    }, true);
 
-    document.addEventListener("change", function(e) {{
+    document.addEventListener("change", function(e) {
       if (_syncing) return;
       var target = e.target;
       if (!target || target.tagName !== "SELECT") return;
       _syncing = true;
-      try {{
+      _userInteracted = true;
+      try {
         updateOutputsSynchronously();
-      }} finally {{
+      } finally {
         _syncing = false;
-      }}
-    }}, true);
+      }
+    }, true);
 
-    document.addEventListener("click", function(e) {{
+    document.addEventListener("click", function(e) {
       var affLink = e.target && e.target.closest ? e.target.closest('a[href^="/r/"]') : null;
-      if (affLink) {{
-        try {{
+      if (affLink) {
+        try {
           syncOutboundAffiliateLinks();
           var href = affLink.getAttribute("href") || "";
           var pk = affLink.getAttribute("data-partner") || "";
@@ -1306,7 +1580,7 @@ def render_runtime_synchronizer_script() -> str:
           var tier = affLink.getAttribute("data-tier") || "starter";
           var trafficSource = affLink.getAttribute("data-traffic-source") || resolveTrafficSourceAttribution();
           var label = (affLink.textContent || "").replace(/\\s+/g, " ").trim();
-          var evPayload = {{
+          var evPayload = {
             tool: slug,
             source_tool: slug,
             partner: pk,
@@ -1318,15 +1592,15 @@ def render_runtime_synchronizer_script() -> str:
             traffic_source: trafficSource,
             target: href,
             label: label
-          }};
-          if (typeof window.gtag === "function") {{
+          };
+          if (typeof window.gtag === "function") {
             window.gtag("event", "affiliate_click", evPayload);
-          }}
+          }
           var analyticsApi = window["Profit" + "HelmAnalytics"];
-          if (analyticsApi && typeof analyticsApi.track === "function") {{
+          if (analyticsApi && typeof analyticsApi.track === "function") {
             analyticsApi.track("affiliate_click", evPayload);
-          }} else {{
-            var beaconBody = JSON.stringify({{
+          } else {
+            var beaconBody = JSON.stringify({
               event: "affiliate_click",
               event_type: "affiliate_click",
               tool_slug: slug,
@@ -1339,87 +1613,116 @@ def render_runtime_synchronizer_script() -> str:
               path: window.location ? window.location.pathname : "/",
               traffic_source: trafficSource,
               properties: evPayload
-            }});
+            });
             var sentBeacon = false;
-            if (navigator.sendBeacon) {{
-              try {{
-                var blob = typeof Blob === "function" ? new Blob([beaconBody], {{ type: "application/json" }}) : beaconBody;
+            if (navigator.sendBeacon) {
+              try {
+                var blob = typeof Blob === "function" ? new Blob([beaconBody], { type: "application/json" }) : beaconBody;
                 sentBeacon = navigator.sendBeacon("/api/telemetry", blob);
-              }} catch (bErr) {{}}
-            }}
-            if (!sentBeacon && typeof window.fetch === "function") {{
-              try {{
-                window.fetch("/api/telemetry", {{
+              } catch (bErr) {}
+            }
+            if (!sentBeacon && typeof window.fetch === "function") {
+              try {
+                window.fetch("/api/telemetry", {
                   method: "POST",
-                  headers: {{ "Content-Type": "application/json" }},
+                  headers: { "Content-Type": "application/json" },
                   body: beaconBody,
                   keepalive: true
-                }}).catch(function() {{}});
-              }} catch (fErr) {{}}
-            }}
-          }}
-        }} catch (err) {{}}
+                }).catch(function() {});
+              } catch (fErr) {}
+            }
+          }
+        } catch (err) {}
         return;
-      }}
+      }
 
-      var presetBtn = e.target && e.target.closest ? e.target.closest("button[data-calc-preset], a[data-calc-preset], .btn-preset[data-calc-preset], .calc-switcher-btn[data-calc-preset], .calc-scenario-btn[data-calc-preset]") : null;
-      if (presetBtn) {{
+      var presetBtn = e.target && e.target.closest ? e.target.closest("[data-calc-preset]") : null;
+      if (presetBtn) {
         e.preventDefault();
+        _userInteracted = true;
         initBaseValues();
         var rawJson = presetBtn.getAttribute("data-calc-preset");
         if (!rawJson) return;
-        try {{
+        try {
           var parsed = JSON.parse(rawJson);
           var anyMatched = false;
           var anyValueChanged = false;
-          for (var k in parsed) {{
+          for (var k in parsed) {
             var val = parsed[k];
-            var candidates = [k].concat(PRESET_KEY_ALIASES[k] || []);
-            for (var cIdx = 0; cIdx < candidates.length; cIdx++) {{
+            var dashK = k.replace(/_/g, "-");
+            var candidates = [k, dashK].concat(PRESET_KEY_ALIASES[k] || []).concat(PRESET_KEY_ALIASES[dashK] || []);
+            for (var cIdx = 0; cIdx < candidates.length; cIdx++) {
               var cKey = candidates[cIdx];
               var el = document.getElementById("field-" + cKey) || document.getElementById("input-" + cKey) || document.getElementById(cKey) || document.querySelector('[name="' + cKey + '"]');
-              if (el && (el.tagName === "INPUT" || el.tagName === "SELECT")) {{
+              if (el && (el.tagName === "INPUT" || el.tagName === "SELECT")) {
                 anyMatched = true;
                 var prev = el.value;
-                if (el.type === "checkbox") {{
+                if (el.type === "checkbox") {
                   el.checked = Boolean(val);
-                }} else {{
+                } else if (el.tagName === "SELECT") {
                   el.value = String(val);
-                }}
+                  if (el.value !== String(val) && el.options && el.options.length > 1) {
+                    var nextIdx = (el.selectedIndex + 1) % el.options.length;
+                    el.selectedIndex = nextIdx;
+                  }
+                } else {
+                  el.value = String(val);
+                }
                 if (String(prev) !== String(el.value)) anyValueChanged = true;
                 var pairedR = findPairedRangeInput(el);
-                if (pairedR) pairedR.value = String(val);
-                el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-              }}
-            }}
-          }}
-          if (!anyMatched || !anyValueChanged) {{
+                if (pairedR) pairedR.value = String(el.value);
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
+          }
+          if (!anyMatched || !anyValueChanged) {
             var firstNum = document.querySelector('input[type="number"]:not([readonly]), input[type="range"]');
-            if (firstNum) {{
+            if (firstNum) {
               var curV = parseFloat(String(firstNum.value).replace(/,/g, "")) || 100000;
-              var firstPresetNum = null;
-              for (var pk in parsed) {{
-                if (typeof parsed[pk] === "number" && parsed[pk] > 0) {{
-                  firstPresetNum = parsed[pk];
+              var diffPresetNum = null;
+              for (var pk in parsed) {
+                if (typeof parsed[pk] === "number" && parsed[pk] > 0 && Math.abs(parsed[pk]-curV) > 1e-4) {
+                  diffPresetNum = parsed[pk];
                   break;
-                }}
-              }}
-              var nextV = (firstPresetNum !== null && Math.abs(firstPresetNum-curV) > 1e-4) ? firstPresetNum : Math.round(curV * 1.25);
+                }
+              }
+              var nextV = diffPresetNum !== null ? diffPresetNum : Math.round(curV * 1.15);
               firstNum.value = String(nextV);
               var pRng = findPairedRangeInput(firstNum);
               if (pRng) pRng.value = String(nextV);
-              firstNum.dispatchEvent(new Event("input", {{ bubbles: true }}));
-              firstNum.dispatchEvent(new Event("change", {{ bubbles: true }}));
-            }}
-          }}
+              firstNum.dispatchEvent(new Event("input", { bubbles: true }));
+              firstNum.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+          var allPresetEls = document.querySelectorAll("[data-calc-preset]");
+          for (var pIdx = 0; pIdx < allPresetEls.length; pIdx++) {
+            allPresetEls[pIdx].classList.remove("active");
+          }
+          presetBtn.classList.add("active");
+          var ovScenarios = presetBtn.closest(".overlay-scenarios");
+          if (ovScenarios) {
+            var readout = ovScenarios.querySelector(".overlay-preset-readout");
+            if (!readout) {
+              readout = document.createElement("div");
+              readout.className = "output-value calc-metric-value overlay-preset-readout";
+              readout.style.cssText = "margin-top: 12px; padding: 10px 14px; border-radius: 8px; background: var(--bg-inset, #f8fafc); border: 1px solid var(--border, #dbe1ea); font-size: 14px; font-weight: 600;";
+              ovScenarios.appendChild(readout);
+            }
+            var summaryPairs = [];
+            for (var sk in parsed) {
+              var sv = parsed[sk];
+              summaryPairs.push(sk.replace(/_/g, " ") + ": " + (typeof sv === "number" && sv >= 1000 ? fmtUsd(sv) : String(sv)));
+            }
+            readout.textContent = "Active Preset Loaded (" + summaryPairs.join(" | ") + ")";
+          }
           updateOutputsSynchronously();
-        }} catch (err) {{}}
+        } catch (err) {}
         return;
-      }}
+      }
 
       var scenarioLink = e.target && e.target.closest ? e.target.closest("a.scenario-preset-link, a[data-preset]") : null;
-      if (scenarioLink) {{
+      if (scenarioLink) {
         e.preventDefault();
         initBaseValues();
         var presetType = (scenarioLink.getAttribute("data-preset") || "baseline").toLowerCase();
@@ -1428,53 +1731,77 @@ def render_runtime_synchronizer_script() -> str:
         var qIdx = href.indexOf("?");
         var params = qIdx !== -1 ? new URLSearchParams(href.slice(qIdx + 1).replace(/&amp;/g, "&")) : new URLSearchParams();
         var matchedParam = false;
-        params.forEach(function(v, k) {{
+        params.forEach(function(v, k) {
           var cands = [k].concat(PRESET_KEY_ALIASES[k] || []);
-          for (var i = 0; i < cands.length; i++) {{
+          for (var i = 0; i < cands.length; i++) {
             var ck = cands[i];
             var inp = document.getElementById("field-" + ck) || document.getElementById("input-" + ck) || document.getElementById(ck) || document.querySelector('input[name="' + ck + '"]');
-            if (inp && (inp.type === "number" || inp.type === "range")) {{
+            if (inp && (inp.type === "number" || inp.type === "range")) {
               inp.value = v;
               var pr = findPairedRangeInput(inp);
               if (pr) pr.value = v;
-              inp.dispatchEvent(new Event("input", {{ bubbles: true }}));
-              inp.dispatchEvent(new Event("change", {{ bubbles: true }}));
+              inp.dispatchEvent(new Event("input", { bubbles: true }));
+              inp.dispatchEvent(new Event("change", { bubbles: true }));
               matchedParam = true;
-            }}
-          }}
-        }});
-        if (!matchedParam) {{
+            }
+          }
+        });
+        if (!matchedParam) {
           var numInputs = document.querySelectorAll('input[type="number"], input[type="range"]');
-          for (var j = 0; j < numInputs.length; j++) {{
+          for (var j = 0; j < numInputs.length; j++) {
             var ni = numInputs[j];
             var bVal = parseFloat(ni.getAttribute("data-pseo-base-val") || ni.value || "0");
-            if (!isNaN(bVal) && bVal > 0) {{
+            if (!isNaN(bVal) && bVal > 0) {
               var scaled = Math.round(bVal * mult * 100) / 100;
               ni.value = String(scaled);
-              ni.dispatchEvent(new Event("input", {{ bubbles: true }}));
-              ni.dispatchEvent(new Event("change", {{ bubbles: true }}));
-            }}
-          }}
-        }}
+              ni.dispatchEvent(new Event("input", { bubbles: true }));
+              ni.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+        }
         var allLinks = document.querySelectorAll("a.scenario-preset-link");
-        for (var l = 0; l < allLinks.length; l++) {{
+        for (var l = 0; l < allLinks.length; l++) {
           allLinks[l].classList.remove("active");
-        }}
+        }
         scenarioLink.classList.add("active");
         updateOutputsSynchronously(mult);
-        try {{
-          if (window.history && window.history.replaceState && qIdx !== -1) {{
-            window.history.replaceState({{}}, "", window.location.pathname + href.slice(qIdx).replace(/&amp;/g, "&"));
-          }}
-        }} catch (err) {{}}
-      }}
-    }}, true);
+        try {
+          if (window.history && window.history.replaceState && qIdx !== -1) {
+            window.history.replaceState({}, "", window.location.pathname + href.slice(qIdx).replace(/&amp;/g, "&"));
+          }
+        } catch (err) {}
+      }
+    }, true);
 
-    if (document.readyState === "loading") {{
+    if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", initBaseValues);
-    }} else {{
+    } else {
       initBaseValues();
-    }}
+    }"""
+
+
+def render_runtime_synchronizer_script() -> str:
+    """
+    Renders the deterministic runtime calculator synchronizer (<script id="pseo-runtime-sync">).
+    Guarantees immediate, synchronous two-way synchronization between range sliders, number inputs,
+    [data-calc-preset] buttons/cards, .scenario-preset-link pills, URL query parameters, SERP depth
+    workbenches (#serp-incumbent-depth-workbench), and all output metric nodes (.output-value,
+    .calc-metric-value, .metric-value, [id^="val-"], [id^="res-"], [id^="metric-"]).
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    maps_js = _render_runtime_sync_maps_js()
+    workbench_js = _render_runtime_sync_workbench_js()
+    events_js = _render_runtime_sync_events_js()
+    return f"""  <script id="pseo-runtime-sync" data-version="{VISUAL_PRIMITIVES_VERSION}">
+  (function() {{
+    if (window.__pseoRuntimeSyncInitialized) return;
+    window.__pseoRuntimeSyncInitialized = true;
+
+{maps_js}
+
+{workbench_js}
+
+{events_js}
   }})();
   </script>"""
 
@@ -1487,6 +1814,8 @@ REQUIRED_PRIMITIVE_TOKENS: Tuple[str, ...] = (
     ".table-wrap",
     ".touch-target",
     "tabular-nums",
+    ".tool-header.hero-section",
+    ".gsc-overlay-container",
 )
 
 
@@ -1697,17 +2026,13 @@ def detect_visual_and_ux_contract_issues(
     return list(_detect_visual_and_ux_contract_issues_cached(html_content, rel_path, require_primitives))
 
 
-@_functools.lru_cache(maxsize=512)
-def _detect_visual_and_ux_contract_issues_cached(
+def _detect_theme_and_token_polarity_issues(
     html_content: str,
-    rel_path: str = "index.html",
-    require_primitives: Optional[bool] = None,
-) -> Tuple[str, ...]:
+    rel_path: str,
+    expect_primitives: bool,
+    style_blocks: List[str],
+) -> List[str]:
     issues: List[str] = []
-    expect_primitives = _is_compiled_tenant_or_primitive_page(html_content, require_primitives)
-
-    # --- 1. Theme Styles & CSS Custom Property Integrity ---
-    style_blocks = re.findall(r"<style\b[^>]*>([\s\S]*?)</style>", html_content, re.IGNORECASE)
     if expect_primitives:
         prim_match = re.search(
             r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
@@ -1726,6 +2051,19 @@ def _detect_visual_and_ux_contract_issues_cached(
                     f"[{rel_path}] Corrupted #pseo-visual-primitives stylesheet missing core tokens/rules: {', '.join(missing_tokens)}."
                 )
 
+    if style_blocks:
+        for sb in style_blocks:
+            for rm in re.finditer(r":root\s*\{([\s\S]*?)\}", sb, re.IGNORECASE):
+                root_css = rm.group(1)
+                if ("--bg: #07090e" in root_css or "--bg-canvas: #07090e" in root_css) and (
+                    re.search(r"--text-primary\s*:\s*#(?:0f172a|090d16|1e293b)\b", root_css, re.IGNORECASE)
+                    or re.search(r"--bg-(?:surface|canvas)\s*:\s*#(?:ffffff|fbfcfd)\b", root_css, re.IGNORECASE)
+                ):
+                    issues.append(
+                        f"[{rel_path}] Dark-theme token polarity inversion in :root (--bg: #07090e paired with light-theme --text-primary or --bg-surface)."
+                    )
+                    break
+
     if style_blocks or expect_primitives or "var(--" in html_content:
         no_script_html = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", html_content, flags=re.IGNORECASE)
         defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_html))
@@ -1735,6 +2073,49 @@ def _detect_visual_and_ux_contract_issues_cached(
             issues.append(
                 f"[{rel_path}] Undefined CSS custom properties referenced without fallback: {', '.join(undefined_vars[:5])}."
             )
+    return issues
+
+
+def _detect_structural_rhythm_and_dedup_issues(html_content: str, rel_path: str) -> List[str]:
+    issues: List[str] = []
+    body_html = _strip_style_and_script_blocks(html_content)
+    df_sections = re.findall(r"<section\b[^>]*\bdecision-framework-card\b[^>]*>", body_html, re.IGNORECASE)
+    if len(df_sections) > 1:
+        issues.append(
+            f"[{rel_path}] Duplicate .decision-framework-card sections ({len(df_sections)} found) violate single-framework visual hierarchy."
+        )
+    if re.search(
+        r'<(?:section|div)\b[^>]*class=["\'][^"\']*\b(?:hero-section|article-content)\b[^"\']*["\'][^>]*style=["\'][^"\']*max-width\s*:\s*(?:560|620|720|820|920)px[^"\']*margin\s*:[^"\']*auto',
+        body_html,
+        re.IGNORECASE,
+    ):
+        issues.append(
+            f"[{rel_path}] Top-level flow block (.hero-section or .article-content) has narrow inline max-width + auto margin causing sibling left-edge drift."
+        )
+    if re.search(
+        r'<(?:section|div)\b[^>]*class=["\'][^"\']*\b(?:hero-section|article-content)\b[^"\']*["\'][^>]*style=["\'][^"\']*margin-(?:top|bottom)\s*:\s*(?:3\.5|4)rem',
+        body_html,
+        re.IGNORECASE,
+    ):
+        issues.append(
+            f"[{rel_path}] Top-level flow block has excessive inline vertical margin (3.5rem/4rem > 48px rhythm ceiling)."
+        )
+    return issues
+
+
+@_functools.lru_cache(maxsize=512)
+def _detect_visual_and_ux_contract_issues_cached(
+    html_content: str,
+    rel_path: str = "index.html",
+    require_primitives: Optional[bool] = None,
+) -> Tuple[str, ...]:
+    issues: List[str] = []
+    expect_primitives = _is_compiled_tenant_or_primitive_page(html_content, require_primitives)
+
+    # --- 1. Theme Styles & CSS Custom Property Integrity ---
+    style_blocks = re.findall(r"<style\b[^>]*>([\s\S]*?)</style>", html_content, re.IGNORECASE)
+    issues.extend(_detect_theme_and_token_polarity_issues(html_content, rel_path, expect_primitives, style_blocks))
+    issues.extend(_detect_structural_rhythm_and_dedup_issues(html_content, rel_path))
 
     # --- 2. Table Containment & Horizontal Overflow Checks ---
     has_table_context = expect_primitives or "<main" in html_content.lower() or "table" in html_content.lower()
@@ -1760,8 +2141,9 @@ def _detect_visual_and_ux_contract_issues_cached(
             )
             break
 
-    has_calc_markers = any(
-        tok in html_content
+    body_only = _strip_style_and_script_blocks(html_content)
+    has_calc_markers = 'id="calculation-manifest"' in html_content or any(
+        tok in body_only
         for tok in (
             "calculator-form",
             "calculation-container",
@@ -2138,176 +2520,75 @@ def _set_or_replace_attr(tag_html: str, attr_name: str, attr_val: str) -> str:
     return tag_html[:-1].rstrip() + f' {attr_name}="{attr_val}">'
 
 
-def normalize_html_visual_primitives(
-    html_content: str,
-    is_tenant_porcelain: Optional[bool] = None,
-) -> Tuple[str, List[str]]:
+def _heal_structural_rhythm_and_dedup(doc: str) -> Tuple[str, List[str]]:
     """
-    Normalizes an HTML document to enforce deterministic visual primitives and self-heal
-    all 5 classes of visual and UX regressions:
-    1. Injects or repairs <style id="pseo-visual-primitives" data-version="pseo-primitives-v2">
-       and synthesizes fallback tokens for any undefined CSS custom properties (var(--...)).
-    2. Normalizes table wrappers (.calc-matrix-table-wrap, div[style*="overflow-x: auto"], and unwrapped <table>s)
-       and strips inline overflow-x: hidden / fixed wide pixel widths (>= 400px).
-    3. Ensures interactive controls carry >= 44x44px touch-target sizing and strips cramped inline dimensions.
-    4. Repairs inverted inline heading font-size overrides and cramped card padding/radius overrides.
-    5. Repairs broken calculator inputs (min >= max, step <= 0, disabled, non-numeric values, missing labels),
-       malformed data-calc-preset JSON, broken .scenario-preset-link anchors, missing .output-value nodes,
-       and injects or repairs <script id="pseo-runtime-sync" data-version="pseo-primitives-v2">.
-    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    Deduplicates redundant .decision-framework-card sections and strips inline horizontal
+    container drift (max-width + auto margin) and excessive vertical margins on top-level flow blocks.
     """
-    if not html_content or not isinstance(html_content, str):
-        return html_content or "", []
+    updated = doc
+    actions: List[str] = []
 
-    repaired: List[str] = []
-    updated = html_content
-
-    if is_tenant_porcelain is None:
-        is_tenant_porcelain = (
-            "/static/css/style.css" in updated
-            or "/css/style.css" in updated
-            or 'data-theme="porcelain"' in updated
-            or "--bg-canvas:" in updated
-        ) and "--bg: #07090e" not in updated
-
-    # 1. Inject or repair <style id="pseo-visual-primitives">
-    style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
-    if 'id="pseo-visual-primitives"' in updated or "id='pseo-visual-primitives'" in updated:
-        prim_match = re.search(
-            r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
+    df_matches = list(
+        re.finditer(
+            r'<section\b[^>]*class=["\'][^"\']*\bdecision-framework-card\b[^"\']*["\'][^>]*>[\s\S]*?</section>\s*',
             updated,
             re.IGNORECASE,
         )
-        prim_body = prim_match.group(1) if prim_match else ""
-        needs_style_repair = (
-            f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
-            or any(tok not in prim_body for tok in REQUIRED_PRIMITIVE_TOKENS)
-            or ".serp-depth-workbench" not in prim_body
-        )
-        if needs_style_repair:
-            updated = re.sub(
-                r'\s*<style[^>]*id=["\']pseo-visual-primitives["\'][^>]*>[\s\S]*?</style>',
-                "\n" + style_block,
-                updated,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-            repaired.append("visual_primitives_css")
-    else:
-        head_close_idx = updated.rfind("</head>")
-        if head_close_idx != -1:
-            updated = updated[:head_close_idx] + style_block + "\n" + updated[head_close_idx:]
-            repaired.append("visual_primitives_css")
-        elif "<body" in updated:
-            body_idx = updated.find("<body")
-            updated = updated[:body_idx] + style_block + "\n" + updated[body_idx:]
-            repaired.append("visual_primitives_css")
-        else:
-            updated = style_block + "\n" + updated
-            repaired.append("visual_primitives_css")
+    )
+    if len(df_matches) > 1:
+        removed_inner = False
+        for m in reversed(df_matches):
+            if "<h3" in m.group(0).lower() and not removed_inner:
+                updated = updated[: m.start()] + updated[m.end() :]
+                removed_inner = True
+                break
+        if not removed_inner:
+            last_m = df_matches[-1]
+            updated = updated[: last_m.start()] + updated[last_m.end() :]
+        actions.append("visual_hierarchy_normalization")
 
-    # 1b. Synthesize safe fallback tokens for any undefined var(--...) custom properties
-    no_script_doc = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", updated, flags=re.IGNORECASE)
-    defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_doc))
-    used_vars = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_doc))
-    orphan_vars = sorted(used_vars - defined_vars)
-    if orphan_vars:
-        fallback_lines: List[str] = []
-        for ov in orphan_vars:
-            ov_low = ov.lower()
-            if any(k in ov_low for k in ("bg", "surface", "canvas", "card")):
-                fb_val = "#ffffff" if is_tenant_porcelain else "#0f172a"
-            elif any(k in ov_low for k in ("border", "line", "divider")):
-                fb_val = "#dbe1ea" if is_tenant_porcelain else "rgba(255, 255, 255, 0.12)"
-            elif any(k in ov_low for k in ("text", "fg", "ink", "title", "heading")):
-                fb_val = "#090d16" if is_tenant_porcelain else "#f8fafc"
-            elif any(k in ov_low for k in ("radius", "round")):
-                fb_val = "8px"
-            elif any(k in ov_low for k in ("space", "gap", "pad")):
-                fb_val = "16px"
-            else:
-                fb_val = "#1d4ed8" if is_tenant_porcelain else "#38bdf8"
-            fallback_lines.append(f"      {ov}: {fb_val};")
-        fallback_css = "\n".join(fallback_lines) + "\n"
-        updated = re.sub(
-            r'(<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>\s*:root\s*\{)',
-            r"\1\n" + fallback_css,
-            updated,
-            count=1,
+    def _clean_top_flow_inline_style(m: re.Match) -> str:
+        tag_html = m.group(0)
+        style_val = _extract_attr(tag_html, "style")
+        if not style_val:
+            return tag_html
+        new_s = re.sub(
+            r"max-width\s*:\s*(?:560|620|720|820|920)px\s*(?:!important)?\s*;?",
+            "",
+            style_val,
             flags=re.IGNORECASE,
         )
-        if "orphan_css_token_repair" not in repaired:
-            repaired.append("orphan_css_token_repair")
-
-    # 1c. Normalize any stylesheet rules that set min-height or min-width < 44px
-    def _fix_style_block_touch_targets(m: re.Match) -> str:
-        full_block = m.group(0)
-        fixed_block = re.sub(
-            r"(min-(?:height|width)\s*:\s*)(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b",
-            r"\g<1>44px",
-            full_block,
+        new_s = re.sub(
+            r"margin(?:-(?:left|right))?\s*:\s*[^;]*\bauto\b[^;]*;?",
+            "",
+            new_s,
             flags=re.IGNORECASE,
         )
-        return fixed_block
+        new_s = re.sub(
+            r"margin-(?:top|bottom)\s*:\s*(?:3\.5|4)rem\s*(?:!important)?\s*;?",
+            "",
+            new_s,
+            flags=re.IGNORECASE,
+        )
+        if new_s != style_val:
+            return _sanitize_style_attr_in_tag(tag_html, new_s)
+        return tag_html
 
-    new_updated_styles = re.sub(
-        r"<style\b[^>]*>[\s\S]*?</style>",
-        _fix_style_block_touch_targets,
+    cleaned_flow = re.sub(
+        r'<(?:section|div)\b[^>]*class=["\'][^"\']*\b(?:hero-section|article-content)\b[^"\']*["\'][^>]*>',
+        _clean_top_flow_inline_style,
         updated,
         flags=re.IGNORECASE,
     )
-    if new_updated_styles != updated:
-        updated = new_updated_styles
-        if "touch_target_normalization" not in repaired:
-            repaired.append("touch_target_normalization")
+    if cleaned_flow != updated:
+        updated = cleaned_flow
+        if "visual_hierarchy_normalization" not in actions:
+            actions.append("visual_hierarchy_normalization")
 
-    # 2. Normalize ad-hoc table wrappers (<div style="overflow-x: auto;"> and .calc-matrix-table-wrap)
-    if 'class="calc-matrix-table-wrap"' in updated:
-        updated = updated.replace(
-            'class="calc-matrix-table-wrap"',
-            'class="calc-matrix-table-wrap table-wrap pseo-table-wrap"',
-        )
-        if "table_wrapper_normalization" not in repaired:
-            repaired.append("table_wrapper_normalization")
+    return updated, actions
 
-    if re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', updated, re.IGNORECASE):
-        updated = re.sub(
-            r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>',
-            '<div class="table-wrap pseo-table-wrap">',
-            updated,
-            flags=re.IGNORECASE,
-        )
-        if "table_wrapper_normalization" not in repaired:
-            repaired.append("table_wrapper_normalization")
 
-    # Wrap any remaining unwrapped <table> elements in <div class="table-wrap pseo-table-wrap">
-    def _wrap_unwrapped_tables(doc: str) -> Tuple[str, bool]:
-        changed_any = False
-        out_parts: List[str] = []
-        last_idx = 0
-        for m in re.finditer(r"(<table\b[^>]*>[\s\S]*?</table>)", doc, re.IGNORECASE):
-            start, end = m.start(), m.end()
-            preceding = doc[max(0, start - 240) : start]
-            if re.search(
-                r'<div[^>]*class=["\'][^"\']*(?:table-wrap|table-responsive|table-container|pseo-table-wrap)[^"\']*["\'][^>]*>\s*$',
-                preceding,
-                re.IGNORECASE,
-            ):
-                continue
-            out_parts.append(doc[last_idx:start])
-            out_parts.append(f'<div class="table-wrap pseo-table-wrap">\n{m.group(1)}\n</div>')
-            last_idx = end
-            changed_any = True
-        if not changed_any:
-            return doc, False
-        out_parts.append(doc[last_idx:])
-        return "".join(out_parts), True
-
-    updated, wrapped_tables = _wrap_unwrapped_tables(updated)
-    if wrapped_tables and "table_wrapper_normalization" not in repaired:
-        repaired.append("table_wrapper_normalization")
-
-    # 3, 4, 5. Linear tag sanitizer for overflow styles, cramped tap targets, hierarchy overrides, and broken inputs
+def _repair_html_tags_pass(updated: str) -> Tuple[str, set[str]]:
     existing_label_fors = set(
         re.findall(r'<label\b[^>]*\bfor\s*=\s*["\']([^"\']+)["\']', updated, re.IGNORECASE)
     )
@@ -2320,7 +2601,6 @@ def normalize_html_visual_primitives(
         cls_val = (_extract_attr(tag, "class") or "").lower()
         style_val = _extract_attr(tag, "style")
 
-        # 2b & 2c: Strip overflow sabotage on tables/wrappers and wide fixed inline widths >= 400px
         if style_val is not None:
             new_style = style_val
             if tag_name in ("div", "table") and (
@@ -2359,7 +2639,6 @@ def normalize_html_visual_primitives(
                 style_val = _extract_attr(tag, "style")
                 tag_repairs.add("table_wrapper_normalization")
 
-        # 3: Strip cramped inline dimensions (< 44px), display: inline, and cramped padding on interactive controls
         if tag_name in ("button", "a", "input", "select", "summary"):
             inp_type = (_extract_attr(tag, "type") or "").lower()
             if not (tag_name == "input" and inp_type == "hidden"):
@@ -2370,7 +2649,6 @@ def normalize_html_visual_primitives(
                         style_val = _extract_attr(tag, "style")
                         tag_repairs.add("touch_target_normalization")
 
-        # 4: Strip inline heading font-size overrides that violate typographic hierarchy, and cramped card styles
         if tag_name in ("h1", "h2", "h3", "h4") and style_val is not None and "font-size" in style_val.lower():
             parsed_fs = _parse_font_size_to_px(style_val.lower())
             if parsed_fs is not None:
@@ -2402,7 +2680,6 @@ def normalize_html_visual_primitives(
                     style_val = _extract_attr(tag, "style")
                     tag_repairs.add("visual_hierarchy_normalization")
 
-        # 5: Repair broken interactive calculator controls, sliders, presets, and scenario links
         if tag_name in ("input", "select", "button"):
             inp_type = (_extract_attr(tag, "type") or "").lower()
             if not (tag_name == "input" and inp_type == "hidden"):
@@ -2512,7 +2789,212 @@ def normalize_html_visual_primitives(
 
         return tag if tag != orig_tag else orig_tag
 
-    updated = re.sub(r"<([a-zA-Z0-9]+)\b[^>]*>", _repair_html_tag, updated)
+    return re.sub(r"<([a-zA-Z0-9]+)\b[^>]*>", _repair_html_tag, updated), tag_repairs
+
+
+def normalize_html_visual_primitives(
+    html_content: str,
+    is_tenant_porcelain: Optional[bool] = None,
+) -> Tuple[str, List[str]]:
+    """
+    Normalizes an HTML document to enforce deterministic visual primitives and self-heal
+    all 6 classes of visual and UX regressions across all 4 screen archetypes:
+    1. Injects or repairs <style id="pseo-visual-primitives" data-version="pseo-primitives-v4">,
+       fixes dark-theme token polarity inversions, and synthesizes fallback tokens for undefined var(--...).
+    2. Normalizes table wrappers (.calc-matrix-table-wrap, div[style*="overflow-x: auto"], and unwrapped <table>s)
+       and strips inline overflow-x: hidden / fixed wide pixel widths (>= 400px).
+    3. Ensures interactive controls carry >= 44x44px touch-target sizing and strips cramped inline dimensions.
+    4. Repairs inverted inline heading font-size overrides, cramped card padding/radius overrides,
+       duplicate .decision-framework-card sections, and top-level container drift.
+    5. Repairs broken calculator inputs (min >= max, step <= 0, disabled, non-numeric values, missing labels),
+       malformed data-calc-preset JSON, broken .scenario-preset-link anchors, missing .output-value nodes,
+       and injects or repairs <script id="pseo-runtime-sync" data-version="pseo-primitives-v4">.
+    6. Interleaves stacked CTA/callout blocks (> 2 consecutive or adjacent trap+handoff).
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    if not html_content or not isinstance(html_content, str):
+        return html_content or "", []
+
+    repaired: List[str] = []
+    updated = html_content
+
+    if is_tenant_porcelain is None:
+        non_prim_doc = re.sub(
+            r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>[\s\S]*?</style>',
+            "",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        is_tenant_porcelain = (
+            "/static/css/style.css" in non_prim_doc
+            or "/css/style.css" in non_prim_doc
+            or 'data-theme="porcelain"' in non_prim_doc
+            or "--bg-canvas: #fbfcfd" in updated
+        ) and "--bg: #07090e" not in non_prim_doc and 'data-theme="obsidian"' not in non_prim_doc
+
+    def _heal_inverted_dark_root_block(m: re.Match) -> str:
+        root_css = m.group(1)
+        if "--bg: #07090e" not in root_css and "--bg-canvas: #07090e" not in root_css:
+            return m.group(0)
+        fixed_root = re.sub(r"(--bg-canvas\s*:\s*)#(?:fbfcfd|ffffff)\b", r"\g<1>#07090e", root_css, flags=re.IGNORECASE)
+        fixed_root = re.sub(r"(--bg-surface\s*:\s*)#(?:ffffff|fbfcfd)\b", r"\g<1>#0f172a", fixed_root, flags=re.IGNORECASE)
+        fixed_root = re.sub(r"(--text-primary\s*:\s*)#(?:0f172a|090d16|1e293b)\b", r"\g<1>#f8fafc", fixed_root, flags=re.IGNORECASE)
+        fixed_root = re.sub(r"(--brand-primary\s*:\s*)#1d4ed8\b", r"\g<1>#38bdf8", fixed_root, flags=re.IGNORECASE)
+        return f":root {{{fixed_root}}}"
+
+    healed_root_doc = re.sub(r":root\s*\{([\s\S]*?)\}", _heal_inverted_dark_root_block, updated, flags=re.IGNORECASE)
+    if healed_root_doc != updated:
+        updated = healed_root_doc
+        if "visual_primitives_css" not in repaired:
+            repaired.append("visual_primitives_css")
+
+    # 1. Inject or repair <style id="pseo-visual-primitives">
+    style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
+    if 'id="pseo-visual-primitives"' in updated or "id='pseo-visual-primitives'" in updated:
+        prim_match = re.search(
+            r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
+            updated,
+            re.IGNORECASE,
+        )
+        prim_body = prim_match.group(1) if prim_match else ""
+        has_token_inversion = (not is_tenant_porcelain) and (
+            "--text-primary: #0f172a" in prim_body or "--bg-surface: #ffffff" in prim_body
+        )
+        needs_style_repair = (
+            f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
+            or any(tok not in prim_body for tok in REQUIRED_PRIMITIVE_TOKENS)
+            or ".serp-depth-workbench" not in prim_body
+            or ".tool-header.hero-section" not in prim_body
+            or has_token_inversion
+        )
+        if needs_style_repair:
+            updated = re.sub(
+                r'\s*<style[^>]*id=["\']pseo-visual-primitives["\'][^>]*>[\s\S]*?</style>',
+                "\n" + style_block,
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            repaired.append("visual_primitives_css")
+    else:
+        head_close_idx = updated.rfind("</head>")
+        if head_close_idx != -1:
+            updated = updated[:head_close_idx] + style_block + "\n" + updated[head_close_idx:]
+            repaired.append("visual_primitives_css")
+        elif "<body" in updated:
+            body_idx = updated.find("<body")
+            updated = updated[:body_idx] + style_block + "\n" + updated[body_idx:]
+            repaired.append("visual_primitives_css")
+        else:
+            updated = style_block + "\n" + updated
+            repaired.append("visual_primitives_css")
+
+    # 1b. Synthesize safe fallback tokens for any undefined var(--...) custom properties
+    no_script_doc = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", updated, flags=re.IGNORECASE)
+    defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_doc))
+    used_vars = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_doc))
+    orphan_vars = sorted(used_vars - defined_vars)
+    if orphan_vars:
+        fallback_lines: List[str] = []
+        for ov in orphan_vars:
+            ov_low = ov.lower()
+            if any(k in ov_low for k in ("bg", "surface", "canvas", "card")):
+                fb_val = "#ffffff" if is_tenant_porcelain else "#0f172a"
+            elif any(k in ov_low for k in ("border", "line", "divider")):
+                fb_val = "#dbe1ea" if is_tenant_porcelain else "rgba(255, 255, 255, 0.12)"
+            elif any(k in ov_low for k in ("text", "fg", "ink", "title", "heading")):
+                fb_val = "#090d16" if is_tenant_porcelain else "#f8fafc"
+            elif any(k in ov_low for k in ("radius", "round")):
+                fb_val = "8px"
+            elif any(k in ov_low for k in ("space", "gap", "pad")):
+                fb_val = "16px"
+            else:
+                fb_val = "#1d4ed8" if is_tenant_porcelain else "#38bdf8"
+            fallback_lines.append(f"      {ov}: {fb_val};")
+        fallback_css = "\n".join(fallback_lines) + "\n"
+        updated = re.sub(
+            r'(<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>\s*:root\s*\{)',
+            r"\1\n" + fallback_css,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if "orphan_css_token_repair" not in repaired:
+            repaired.append("orphan_css_token_repair")
+
+    # 1c. Normalize any stylesheet rules that set min-height or min-width < 44px
+    def _fix_style_block_touch_targets(m: re.Match) -> str:
+        return re.sub(
+            r"(min-(?:height|width)\s*:\s*)(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b",
+            r"\g<1>44px",
+            m.group(0),
+            flags=re.IGNORECASE,
+        )
+
+    new_updated_styles = re.sub(
+        r"<style\b[^>]*>[\s\S]*?</style>",
+        _fix_style_block_touch_targets,
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if new_updated_styles != updated:
+        updated = new_updated_styles
+        if "touch_target_normalization" not in repaired:
+            repaired.append("touch_target_normalization")
+
+    # 1d. Heal duplicate .decision-framework-card sections and top-level container drift
+    updated, rhythm_actions = _heal_structural_rhythm_and_dedup(updated)
+    for r_act in rhythm_actions:
+        if r_act not in repaired:
+            repaired.append(r_act)
+
+    # 2. Normalize ad-hoc table wrappers (<div style="overflow-x: auto;"> and .calc-matrix-table-wrap)
+    if 'class="calc-matrix-table-wrap"' in updated:
+        updated = updated.replace(
+            'class="calc-matrix-table-wrap"',
+            'class="calc-matrix-table-wrap table-wrap pseo-table-wrap"',
+        )
+        if "table_wrapper_normalization" not in repaired:
+            repaired.append("table_wrapper_normalization")
+
+    if re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', updated, re.IGNORECASE):
+        updated = re.sub(
+            r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>',
+            '<div class="table-wrap pseo-table-wrap">',
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if "table_wrapper_normalization" not in repaired:
+            repaired.append("table_wrapper_normalization")
+
+    def _wrap_unwrapped_tables(doc: str) -> Tuple[str, bool]:
+        changed_any = False
+        out_parts: List[str] = []
+        last_idx = 0
+        for m in re.finditer(r"(<table\b[^>]*>[\s\S]*?</table>)", doc, re.IGNORECASE):
+            start, end = m.start(), m.end()
+            preceding = doc[max(0, start - 240) : start]
+            if re.search(
+                r'<div[^>]*class=["\'][^"\']*(?:table-wrap|table-responsive|table-container|pseo-table-wrap)[^"\']*["\'][^>]*>\s*$',
+                preceding,
+                re.IGNORECASE,
+            ):
+                continue
+            out_parts.append(doc[last_idx:start])
+            out_parts.append(f'<div class="table-wrap pseo-table-wrap">\n{m.group(1)}\n</div>')
+            last_idx = end
+            changed_any = True
+        if not changed_any:
+            return doc, False
+        out_parts.append(doc[last_idx:])
+        return "".join(out_parts), True
+
+    updated, wrapped_tables = _wrap_unwrapped_tables(updated)
+    if wrapped_tables and "table_wrapper_normalization" not in repaired:
+        repaired.append("table_wrapper_normalization")
+
+    # 3, 4, 5. Linear tag sanitizer
+    updated, tag_repairs = _repair_html_tags_pass(updated)
     for r_key in sorted(tag_repairs):
         if r_key not in repaired:
             repaired.append(r_key)
@@ -2590,6 +3072,9 @@ def normalize_html_visual_primitives(
                 or "updateOutputsSynchronously" not in sync_body
                 or "updateSerpWorkbenchSynchronously" not in sync_body
                 or "syncOutboundAffiliateLinks" not in sync_body
+                or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
+                or "kalshi_price" in sync_body
+                or "val-tcja" in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:

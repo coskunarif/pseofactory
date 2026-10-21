@@ -356,13 +356,15 @@ class UnifiedBrowserAuditor:
     JS_CHECK_VISUAL_PRIMITIVES = """(() => {
         const vw = window.innerWidth;
         const p = location.pathname;
+        const hasCalcControls = Boolean(document.querySelector('form.calculator-form, .interactive-calculator-container, .calculator-card, .calculation-container, input[type="number"], input[type="range"], [data-calc-input]'));
+        const hasComparison = Boolean(document.querySelector('.comparison-table-section, .statutory-comparison-table-section, table.comparison-table')) || p.includes('-vs-');
         let archetype = 'statutory_guide';
-        if (p === '/' || p === '/index.html' || p === '/tools/' || p === '/tools/index.html') {
+        if (['/', '/index.html', '/tools/', '/tools/index.html', '/about/', '/about.html', '/contact/', '/contact.html', '/privacy/', '/privacy.html', '/terms/', '/terms.html', '/404.html', '/editorial-standards/', '/editorial-standards/index.html'].includes(p)) {
             archetype = 'index_hub';
-        } else if (document.querySelector('form.calculator-form, .interactive-calculator-container, [data-calc-input]')) {
-            archetype = 'interactive_calculator';
-        } else if (document.querySelector('.comparison-table-section, .statutory-comparison-table-section') || p.includes('-vs-')) {
+        } else if (p.includes('-vs-') || (!hasCalcControls && hasComparison)) {
             archetype = 'comparison_page';
+        } else if (hasCalcControls) {
+            archetype = 'interactive_calculator';
         }
         const result = {
             screen_archetype: archetype,
@@ -411,6 +413,55 @@ class UnifiedBrowserAuditor:
             if (h3 !== null && h3 < 15.5) {
                 result.hierarchy_violations.push({ type: 'mobile_h3_under_16px', h3: h3, vw: vw });
             }
+        }
+        const parseRgb = str => {
+            const m = String(str || '').match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([0-9.]+))?\\)/);
+            if (!m) return null;
+            return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: m[4] !== undefined ? Number(m[4]) : 1 };
+        };
+        const relLum = rgb => {
+            const f = c => {
+                const s = c / 255;
+                return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+            };
+            return 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b);
+        };
+        const getEffectiveBg = el => {
+            let cur = el;
+            while (cur && cur !== document.documentElement) {
+                const bg = parseRgb(window.getComputedStyle(cur).backgroundColor);
+                if (bg && bg.a > 0.1) return bg;
+                cur = cur.parentElement;
+            }
+            return parseRgb(window.getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+        };
+        document.querySelectorAll('h1, main h2, main h3, .card-title, .calc-inline-cta strong').forEach(el => {
+            const r = el.getBoundingClientRect();
+            const cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || r.width === 0 || r.height === 0) return;
+            const fg = parseRgb(cs.color);
+            const bg = getEffectiveBg(el);
+            if (fg && bg) {
+                const l1 = relLum(fg);
+                const l2 = relLum(bg);
+                const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                if (ratio < 3.0) {
+                    result.hierarchy_violations.push({
+                        type: 'low_contrast_text',
+                        tag: el.tagName,
+                        ratio: Math.round(ratio * 100) / 100,
+                        fg: cs.color,
+                        vw: vw
+                    });
+                }
+            }
+        });
+        if (document.querySelectorAll('section.decision-framework-card').length > 1) {
+            result.card_geometry_violations.push({
+                type: 'duplicate_decision_framework_card',
+                count: document.querySelectorAll('section.decision-framework-card').length,
+                vw: vw
+            });
         }
         document.querySelectorAll('table').forEach((t, idx) => {
             const r = t.getBoundingClientRect();
@@ -470,34 +521,51 @@ class UnifiedBrowserAuditor:
             }
         });
         const mainEl = document.querySelector('main') || document.body;
-        const fullBlocks = Array.from(mainEl.querySelectorAll('section.card, .multi-dataset-join, .statutory-provenance-box, .calculation-methodology-section, .comparison-table-section, .statutory-comparison-table-section, .related-tools-section')).filter(el => {
-            const r = el.getBoundingClientRect();
-            const cs = window.getComputedStyle(el);
-            return r.width > vw * 0.5 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
+        const flowRoot = (mainEl.children.length === 1 && mainEl.children[0].classList.contains('container')) ? mainEl.children[0] : mainEl;
+        const topFlowBlocks = [];
+        Array.from(flowRoot.children).forEach(ch => {
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName) || ch.classList.contains('statutory-accuracy-benchmarks')) return;
+            const cs = window.getComputedStyle(ch);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return;
+            if (ch.classList.contains('gsc-overlay-container')) {
+                Array.from(ch.children).forEach(och => {
+                    if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(och.tagName)) return;
+                    const ocs = window.getComputedStyle(och);
+                    const or = och.getBoundingClientRect();
+                    if (ocs.display !== 'none' && ocs.visibility !== 'hidden' && or.height > 0 && or.width > vw * 0.45) {
+                        topFlowBlocks.push(och);
+                    }
+                });
+            } else {
+                const r = ch.getBoundingClientRect();
+                if (r.height > 0 && r.width > vw * 0.45) {
+                    topFlowBlocks.push(ch);
+                }
+            }
         });
-        if (fullBlocks.length >= 2) {
-            const lefts = fullBlocks.map(el => Math.round(el.getBoundingClientRect().left * 10) / 10);
+        if (topFlowBlocks.length >= 2) {
+            const lefts = topFlowBlocks.map(el => Math.round(el.getBoundingClientRect().left * 10) / 10);
             const drift = Math.max(...lefts) - Math.min(...lefts);
-            if (drift > 24) {
+            if (drift > 4.0) {
                 result.card_geometry_violations.push({ type: 'sibling_left_drift', drift: Math.round(drift * 10) / 10, vw: vw });
             }
         }
         if (vw >= 1280) {
-            fullBlocks.forEach((el, idx) => {
+            topFlowBlocks.forEach((el, idx) => {
                 const r = el.getBoundingClientRect();
                 if (r.width > 1142) {
                     result.card_geometry_violations.push({ type: 'full_bleed_section_width', index: idx, width: Math.round(r.width), vw: vw });
                 }
             });
         }
-        for (let i = 1; i < fullBlocks.length; i++) {
-            const prev = fullBlocks[i - 1];
-            const curr = fullBlocks[i];
+        for (let i = 1; i < topFlowBlocks.length; i++) {
+            const prev = topFlowBlocks[i - 1];
+            const curr = topFlowBlocks[i];
             if (prev.contains(curr) || curr.contains(prev)) continue;
             const pr = prev.getBoundingClientRect();
             const cr = curr.getBoundingClientRect();
             const gap = Math.round((cr.top - pr.bottom) * 10) / 10;
-            if (gap < -1) {
+            if (gap < 10 || gap > 52) {
                 result.whitespace_rhythm_violations.push({ index: i, gap: gap, vw: vw });
             }
         }
@@ -544,6 +612,47 @@ class UnifiedBrowserAuditor:
             result.cta_density_violations.push({ type: 'adjacent_trap_and_handoff' });
         }
         return result;
+    })()"""
+
+    JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {
+        const failures = [];
+        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary';
+        const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
+        const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
+        if (primaryInp && document.querySelectorAll(outSel).length > 0) {
+            const beforeSnap = snapshotOutputs();
+            const origVal = primaryInp.value;
+            const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 10000;
+            const maxNum = parseFloat(primaryInp.getAttribute('max') || '') || 10000000;
+            const minNum = parseFloat(primaryInp.getAttribute('min') || '0') || 0;
+            let nextNum = Math.round(curNum * 1.35 + 50);
+            if (nextNum > maxNum) nextNum = Math.max(minNum + 1, Math.round(curNum * 0.65));
+            if (nextNum === curNum) nextNum = curNum + 10;
+            primaryInp.value = String(nextNum);
+            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
+            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
+            const afterSnap = snapshotOutputs();
+            if (beforeSnap === afterSnap) {
+                failures.push({ widget_id: primaryInp.id || primaryInp.name || 'primary_input', detail: 'Primary calculator input change did not update any output metric' });
+            }
+            primaryInp.value = origVal;
+            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
+            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const presetButtons = Array.from(document.querySelectorAll('button[data-calc-preset], .btn-preset[data-calc-preset], .serp-archetype-btn[data-calc-preset]'));
+        if (presetButtons.length > 0) {
+            const btn = presetButtons[presetButtons.length > 1 ? 1 : 0];
+            const beforeOut = snapshotOutputs();
+            const beforeInps = Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
+            btn.click();
+            const afterOut = snapshotOutputs();
+            const afterInps = Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
+            const hasReadout = Boolean(document.querySelector('.overlay-preset-readout'));
+            if (beforeOut === afterOut && beforeInps === afterInps && !hasReadout && !btn.classList.contains('active')) {
+                failures.push({ widget_id: 'data-calc-preset', detail: 'Clicking [data-calc-preset] button did not synchronize inputs, outputs, or active state' });
+            }
+        }
+        return failures;
     })()"""
 
     JS_CHECK_RESIZE_AND_INTERACTION_CLS = """new Promise(resolve => {
@@ -671,7 +780,17 @@ class UnifiedBrowserAuditor:
         )
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
-        await asyncio.sleep(0.18)
+        for _ in range(25):
+            await asyncio.sleep(0.04)
+            msg_counter[0] += 1
+            rs = await self._eval_js(
+                ws,
+                "document.readyState === 'complete' && document.body && document.body.children.length > 0",
+                msg_id=msg_counter[0],
+            )
+            if rs:
+                break
+        await asyncio.sleep(0.04)
 
         # 1a. Wide Desktop Viewport (1440x900)
         msg_counter[0] += 1
@@ -836,6 +955,12 @@ class UnifiedBrowserAuditor:
                         "widget_id": spec.widget_id,
                         "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
                     })
+
+        # 8. Universal interactive state synchronization check (inputs, sliders, presets, and workbenches)
+        msg_counter[0] += 1
+        univ_failures = await self._eval_js(ws, self.JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC, msg_id=msg_counter[0])
+        if isinstance(univ_failures, list) and univ_failures:
+            defects["widget_failures"].extend(univ_failures)
 
         return defects
 
