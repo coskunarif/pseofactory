@@ -641,8 +641,18 @@ def test_supervisor_overlay_rollback_reconcile_and_streak_extraction(tmp_path):
     )
 
     # After reconciliation, rolled-back overlay is scrubbed from dist/ even after git checkout HEAD -- dist
+    # and substrate_lock.json is updated so a subsequent reconcile_workspace_tracking_state call preserves it
     post_check = verify_cohort_reflection_contract(tenant_repo, dist_dir=tenant_repo / "dist")
     assert post_check["passed"] is True, f"Expected cohort reflection pass, got: {post_check}"
+    reconcile_workspace_tracking_state(
+        tenant_repos=[tenant_repo],
+        restore_tenant_dist=True,
+    )
+    second_check = verify_cohort_reflection_contract(tenant_repo, dist_dir=tenant_repo / "dist")
+    assert second_check["passed"] is True, f"Expected second reconciliation to preserve scrubbed dist, got: {second_check}"
+    lock_json = json.loads((tenant_repo / "substrate_lock.json").read_text(encoding="utf-8"))
+    assert "dist_fingerprint" in lock_json
+    assert lock_json["total_assets"] == 1
 
     # 3. Verify DLQ quarantine is not prematurely cleared when SKIPPED_NO_CHANGES had unrefactored drift
     dlq_path = tmp_path / "test_dlq.json"

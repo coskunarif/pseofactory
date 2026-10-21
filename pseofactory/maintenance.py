@@ -7620,6 +7620,25 @@ def _has_pending_downstream_work(
     except Exception:
         return True
 
+    # 5. Check uncommitted git changes in production tenant repository
+    if (
+        str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
+        and repo_root.name in ("profithelm-platform", "prexvo")
+        and (repo_root / ".git").exists()
+    ):
+        try:
+            st_chk = subprocess.run(
+                ["git", "-C", str(repo_root), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if st_chk.returncode == 0 and st_chk.stdout.strip():
+                return True
+        except Exception:
+            pass
+
     return False
 
 

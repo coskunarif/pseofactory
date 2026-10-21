@@ -3099,6 +3099,7 @@ def reconcile_workspace_tracking_state(
                             try:
                                 from pseofactory.gsc_remediation import rollback_degraded_overlay_from_html
                                 d_root = rp / "dist"
+                                rolled_back_modified = False
                                 if d_root.is_dir():
                                     for ov_dir_cand in (rp / ".agy" / "overlays", rp / "content" / "overlays"):
                                         if not ov_dir_cand.is_dir():
@@ -3122,6 +3123,32 @@ def reconcile_workspace_tracking_state(
                                                         cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_d)
                                                         if cleaned_h != raw_h:
                                                             h_cand.write_text(cleaned_h, encoding="utf-8")
+                                                            rolled_back_modified = True
+                                    if rolled_back_modified and (rp / "substrate_lock.json").is_file():
+                                        try:
+                                            from pseofactory.maintenance import compute_asset_fingerprint, compute_engine_hash
+                                            cur_sub_hash = compute_engine_hash()
+                                            dist_fp_hasher = hashlib.sha256()
+                                            total_assets_cnt = 0
+                                            for a_file in sorted(d_root.glob("**/*")):
+                                                if a_file.is_file() and a_file.suffix in (".html", ".xml", ".txt", ".json"):
+                                                    if a_file.name.startswith((".tmp", ".orig", ".backup")):
+                                                        continue
+                                                    rel_a = a_file.relative_to(d_root).as_posix()
+                                                    dist_fp_hasher.update(f"{rel_a}:{compute_asset_fingerprint(a_file)}\n".encode("utf-8"))
+                                                    total_assets_cnt += 1
+                                            sl_data = json.loads((rp / "substrate_lock.json").read_text(encoding="utf-8"))
+                                            if isinstance(sl_data, dict):
+                                                sl_data["engine_hash"] = cur_sub_hash
+                                                sl_data["substrate_hash"] = cur_sub_hash
+                                                sl_data["dist_fingerprint"] = dist_fp_hasher.hexdigest()
+                                                sl_data["total_assets"] = total_assets_cnt
+                                                (rp / "substrate_lock.json").write_text(
+                                                    json.dumps(sl_data, indent=2, sort_keys=True) + "\n",
+                                                    encoding="utf-8",
+                                                )
+                                        except Exception:
+                                            pass
                             except Exception:
                                 pass
                     finally:
