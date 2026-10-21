@@ -1885,4 +1885,148 @@ def test_non_active_partnership_state_reconciliation_and_latest_inbox_sync(
     assert {"rippling", "koinly", "otr_solutions_factoring"} <= delta_keys
 
 
+def test_partner_earnings_ledger_sync_and_commission_email_ingestion(
+    tmp_path, temp_bus_path, temp_email_paths
+):
+    """
+    Verifies:
+    1. PartnerTrackingEngine.sync_partner_earnings_and_balances() builds the complete
+       portal-by-portal (8 portals) and partner-by-partner (17 canonical partners)
+       earnings and balance reconciliation ledger, writing it to ledger_path.
+    2. Strictly separates actual realized commissions (realized_commission_usd: $0.00 today),
+       pending commissions, paid-out totals, qualified leads, and conversions from
+       statistical modeled EPC projections (modeled_epc_pipeline_usd).
+    3. Classifies Zoho Newsletter #1591 ('Welcome to the Ramp Partner Program') as
+       APPLICATION_APPROVED for ramp on Impact.com (#51436).
+    4. Automatically ingests COMMISSION_EARNED, LEAD_CONVERTED, and PAYOUT_ISSUED email
+       alerts into the partner, portal, and network reconciliation ledgers.
+    """
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+
+    # 1. Baseline sync (zero realized commissions today vs positive modeled EPC pipeline)
+    ledger_file = tmp_path / "partner_earnings_ledger.json"
+    baseline_ledger = tracker.sync_partner_earnings_and_balances(
+        fetch_live_api=False,
+        ledger_path=ledger_file,
+    )
+    assert ledger_file.is_file()
+    assert baseline_ledger["has_earned_any_realized_commission_or_conversion"] is False
+    summary = baseline_ledger["cashflow_summary"]
+    assert summary["realized_commission_usd"] == 0.0
+    assert summary["pending_commission_usd"] == 0.0
+    assert summary["approved_payable_usd"] == 0.0
+    assert summary["paid_out_usd"] == 0.0
+    assert summary["qualified_leads_count"] == 0
+    assert summary["conversions_count"] == 0
+    assert summary["portal_verified_clicks_total"] >= 231
+    assert summary["modeled_epc_pipeline_usd"] > 0.0
+
+    # Verify all 8 portal dashboards are classified with auth_status & sync_mechanism
+    expected_portals = {
+        "partnerstack",
+        "firstpromoter_coinledger",
+        "firstpromoter_xendoo",
+        "koinly_native",
+        "sovrn_commerce",
+        "cj_affiliate",
+        "impact",
+        "mercury_direct",
+    }
+    assert set(baseline_ledger["portals"].keys()) == expected_portals
+    assert baseline_ledger["portals"]["partnerstack"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["partnerstack"]["portal_verified_clicks"] >= 182
+    assert baseline_ledger["portals"]["firstpromoter_coinledger"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["firstpromoter_xendoo"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["koinly_native"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["sovrn_commerce"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["mercury_direct"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["impact"]["is_authenticated_and_syncing"] is False
+    assert baseline_ledger["portals"]["cj_affiliate"]["is_authenticated_and_syncing"] is False
+
+    # 2. Verify Ramp approval (#1591) + simulated COMMISSION_EARNED / LEAD_CONVERTED / PAYOUT_ISSUED alerts
+    simulated_emails = [
+        EmailMessage(
+            id="1591",
+            message_id="<1591@app.impact.com>",
+            account="zoho",
+            mailbox="Newsletter",
+            subject="Welcome to the Ramp Partner Program",
+            sender_name="Ramp Partner Team",
+            sender_email="notifications@app.impact.com",
+            date="2026-10-21T14:54:06Z",
+            body_snippet="Congratulations - you've been approved to join the Ramp Partner Program!",
+        ),
+        EmailMessage(
+            id="2001",
+            message_id="<2001@partnerstack.com>",
+            account="zoho",
+            mailbox="Inbox",
+            subject="You earned a commission of $600.00 on Rippling!",
+            sender_name="PartnerStack",
+            sender_email="notifications@partnerstack.com",
+            date="2026-10-21T18:00:00Z",
+            body_snippet="Congratulations! You earned a commission of $600.00 for a Rippling SQO.",
+        ),
+        EmailMessage(
+            id="2002",
+            message_id="<2002@impact.com>",
+            account="zoho",
+            mailbox="Inbox",
+            subject="New qualified lead converted for Gusto",
+            sender_name="Impact Notifications",
+            sender_email="notifications@app.impact.com",
+            date="2026-10-21T18:05:00Z",
+            body_snippet="A new qualified lead converted on Gusto for $300.00.",
+        ),
+        EmailMessage(
+            id="2003",
+            message_id="<2003@mercury.com>",
+            account="zoho",
+            mailbox="Inbox",
+            subject="Payout issued: $250.00 Mercury referral bonus",
+            sender_name="Mercury",
+            sender_email="support@mercury.com",
+            date="2026-10-21T18:10:00Z",
+            body_snippet="Your payout issued for $250.00 to Mercury Checking.",
+        ),
+    ]
+    classified = email_engine.classify_partner_emails(simulated_emails)
+    by_id = {c.email_id: c for c in classified}
+    assert by_id["1591"].partner_key == "ramp"
+    assert by_id["1591"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["2001"].partner_key == "rippling"
+    assert by_id["2001"].classification_type == "COMMISSION_EARNED"
+    assert by_id["2001"].commission_amount_usd == 600.0
+    assert by_id["2002"].partner_key == "gusto"
+    assert by_id["2002"].classification_type == "LEAD_CONVERTED"
+    assert by_id["2002"].commission_amount_usd == 300.0
+    assert by_id["2003"].partner_key == "mercury"
+    assert by_id["2003"].classification_type == "PAYOUT_ISSUED"
+    assert by_id["2003"].commission_amount_usd == 250.0
+
+    updated_ledger = tracker.sync_partner_earnings_and_balances(
+        fetch_live_api=False,
+        ledger_path=ledger_file,
+        extra_email_messages=simulated_emails,
+    )
+    assert updated_ledger["has_earned_any_realized_commission_or_conversion"] is True
+    assert updated_ledger["cashflow_summary"]["realized_commission_usd"] == 900.0
+    assert updated_ledger["cashflow_summary"]["paid_out_usd"] == 250.0
+    assert updated_ledger["cashflow_summary"]["qualified_leads_count"] == 1
+    assert updated_ledger["cashflow_summary"]["conversions_count"] == 1
+    assert updated_ledger["partners"]["rippling"]["realized_commission_usd"] == 600.0
+    assert updated_ledger["partners"]["gusto"]["realized_commission_usd"] == 300.0
+    assert updated_ledger["partners"]["mercury"]["paid_out_usd"] == 250.0
+
+    recon = tracker.reconcile_edge_clicks_with_portals(earnings_ledger=updated_ledger)
+    assert recon["networks"]["partnerstack"]["realized_commission_usd"] == 600.0
+    assert recon["networks"]["impact"]["realized_commission_usd"] == 300.0
+    assert recon["networks"]["impact"]["qualified_leads_count"] == 1
+    assert_no_forbidden_dashes(json.dumps(updated_ledger), context="partner_earnings_ledger")
+
+
+
 

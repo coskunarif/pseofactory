@@ -99,6 +99,7 @@ class PartnerEmailClassification:
     candidate_url: str = ""
     network: str = "In-House Direct"
     action_required: str = ""
+    commission_amount_usd: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.action_required and self.summary:
@@ -144,6 +145,21 @@ def _extract_candidate_url(text: str) -> str:
             continue
         return cleaned
     return ""
+
+
+def _extract_commission_amount_usd(text: str) -> float:
+    """Extracts a dollar amount (e.g. $300.00 or $1,600) from a conversion or payout email."""
+    if not text:
+        return 0.0
+    matches = re.findall(r"\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)", text)
+    for raw in matches:
+        try:
+            val = float(raw.replace(",", ""))
+            if val > 0.0:
+                return round(val, 2)
+        except ValueError:
+            continue
+    return 0.0
 
 
 class EmailIngestionEngine:
@@ -945,6 +961,120 @@ class EmailIngestionEngine:
                     )
                 )
                 continue
+
+            if msg.mailbox != "Sent" and (
+                "welcome to the ramp partner program" in combined_text
+                or ("ramp partner team" in sender_lower and "welcome" in subj_lower)
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="ramp",
+                        partner_name="Ramp Corporate Card & Spend Management",
+                        category="CORPORATE_SPEND",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="Ramp Partner Program approved on Impact.com (#51436, $100-$4,000 Closed Won / $50-$2,000 SQL via Zoho Newsletter #1591).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url or "https://ramp.com/",
+                        network="Impact.com",
+                    )
+                )
+                continue
+
+            # Automated Conversion, Lead, and Payout Alert Ingestion
+            if msg.mailbox != "Sent":
+                is_commission_alert = any(
+                    tok in combined_text
+                    for tok in (
+                        "you earned a commission",
+                        "commission earned",
+                        "new commission",
+                        "action locked",
+                        "referral bonus credited",
+                        "you have earned a reward",
+                    )
+                )
+                is_lead_alert = any(
+                    tok in combined_text
+                    for tok in (
+                        "new qualified lead",
+                        "new referral signup",
+                        "lead converted",
+                        "new sqo",
+                    )
+                )
+                is_payout_alert = any(
+                    tok in combined_text
+                    for tok in (
+                        "payout issued",
+                        "payment sent",
+                        "withdrawal processed",
+                        "funds have been transferred",
+                    )
+                )
+                if is_commission_alert or is_lead_alert or is_payout_alert:
+                    alert_partner_map = (
+                        ("rippling", "profithelm", "rippling", "Rippling Unified Workforce Platform", "PAYROLL_HR", "PartnerStack"),
+                        ("gusto", "profithelm", "gusto", "Gusto Payroll, Benefits & HR Platform", "PAYROLL_HR", "Impact.com"),
+                        ("kalshi", "profithelm", "kalshi", "Kalshi Event Contracts", "MARKET_ARBITRAGE", "Impact.com"),
+                        ("xendoo", "profithelm", "crest_capital", "Xendoo Online Accounting", "COMMERCIAL_REAL_ESTATE", "Impact.com / FirstPromoter"),
+                        ("coinledger", "profithelm", "coinledger", "CoinLedger Crypto Tax", "DIGITAL_ASSETS", "FirstPromoter"),
+                        ("koinly", "profithelm", "koinly", "Koinly Crypto Tax Software", "DIGITAL_ASSETS", "FirstPromoter"),
+                        ("mercury", "profithelm", "mercury", "Mercury Startup Banking", "STARTUP_BANKING", "In-House Direct"),
+                        ("e-file.com", "profithelm", "turbotax", "E-file.com Affiliate Program", "TAX_INTELLIGENCE", "CJ Affiliate"),
+                        ("eztaxreturn", "profithelm", "taxslayer", "ezTaxReturn.com Affiliate Program", "TAX_INTELLIGENCE", "CJ Affiliate"),
+                        ("lawdepot", "profithelm", "suretybonds_direct", "LawDepot Affiliate Program", "COMMERCIAL_SURETY", "CJ Affiliate"),
+                        ("ramp", "profithelm", "ramp", "Ramp Corporate Card & Spend Management", "CORPORATE_SPEND", "Impact.com"),
+                        ("splash", "prexvo", "splash_financial", "Splash Financial", "STUDENT_LOAN_REFINANCE", "Impact.com"),
+                        ("sofi", "prexvo", "sofi", "SoFi Student Loan Refinancing", "STUDENT_LOAN_REFINANCE", "Impact.com"),
+                        ("credible", "prexvo", "credible", "Credible Student Loan Marketplace", "STUDENT_LOAN_COMPARISON", "Impact.com"),
+                        ("earnest", "prexvo", "earnest", "Earnest Student Loan Refinancing", "STUDENT_LOAN_REFINANCE", "In-House Direct"),
+                        ("lendkey", "prexvo", "lendkey", "LendKey Student Loan Refinancing", "STUDENT_LOAN_REFINANCE", "Impact.com"),
+                    )
+                    matched_alert = None
+                    for tok_kw, prop_id, p_key, p_name, p_cat, net_name in alert_partner_map:
+                        if tok_kw in combined_text:
+                            matched_alert = (prop_id, p_key, p_name, p_cat, net_name)
+                            break
+                    if matched_alert:
+                        prop_id, p_key, p_name, p_cat, net_name = matched_alert
+                        amt_usd = _extract_commission_amount_usd(f"{msg.subject} {msg.body_snippet}")
+                        c_type = (
+                            "PAYOUT_ISSUED"
+                            if is_payout_alert
+                            else ("COMMISSION_EARNED" if is_commission_alert else "LEAD_CONVERTED")
+                        )
+                        classifications.append(
+                            PartnerEmailClassification(
+                                email_id=msg.id,
+                                account=msg.account,
+                                property_id=prop_id,
+                                partner_key=p_key,
+                                partner_name=p_name,
+                                category=p_cat,
+                                classification_type=c_type,
+                                requires_operator_decision=False,
+                                summary=f"{c_type} notification for {p_name} on {net_name} (amount: ${amt_usd:.2f} USD).",
+                                urgency="LOW",
+                                deadline=None,
+                                missing_requirements=[],
+                                raw_subject=msg.subject,
+                                sender_email=msg.sender_email,
+                                date=msg.date,
+                                candidate_url=cand_url,
+                                network=net_name,
+                                commission_amount_usd=amt_usd,
+                            )
+                        )
+                        continue
 
             matched_outbound = outbound_partner_map.get(to_email) if (
                 msg.mailbox == "Sent" or to_email != "wade.fenton@otrsolutions.com"

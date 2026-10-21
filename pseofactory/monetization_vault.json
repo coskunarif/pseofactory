@@ -34,18 +34,25 @@
       "identity_verification_status": "COMPLETE",
       "tax_form_status": "Comply Exchange Form W-9 submitted and active (Confirmation Code L5CBN6, EIN 41-2311423)",
       "payout_method_status": "COMPLETE - EFT Withdrawal (free) configured and active (ProfitHelm LLC, Choice Financial Group US CHECKING, Routing XXXXXXX29, Account XXXXXXXX1395, updated 2026-10-19T18:01Z, confirmed via Zoho Inbox #1002)",
+      "sync_mechanism": "PORTAL_SESSION_AND_ZOHO_EMAIL_INGEST",
+      "auth_status": "EMAIL_SYNCING_PORTAL_SESSION_EXPIRED_RELOGIN_REQUIRED",
+      "is_authenticated_and_syncing": false,
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
       "active_advertiser_contracts": 1,
-      "live_active_contracts_count": 3,
+      "live_active_contracts_count": 4,
       "live_active_contracts": [
         {
           "campaign_id": "37770",
           "brand_name": "Kalshi",
           "status": "Active (Approved 2026-10-17)",
           "commission_terms": "$40.00 USD CPA per Trade",
-          "tracking_url": "https://kalshi.pxf.io/c/7932737/3078072/37770"
+          "tracking_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+          "raw_clicks": 13,
+          "verified_clicks": 7,
+          "actions": 0,
+          "realized_commission_usd": 0.0
         },
         {
           "campaign_id": "16354",
@@ -53,20 +60,46 @@
           "status": "Active (Approved 2026-10-19)",
           "commission_terms": "$500.00 USD CPA per Onboarded Client",
           "tracking_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-          "short_link": "https://xendoo.pxf.io/2Rq2rg"
+          "short_link": "https://xendoo.pxf.io/2Rq2rg",
+          "raw_clicks": 4,
+          "verified_clicks": 1,
+          "actions": 0,
+          "realized_commission_usd": 0.0
         },
         {
           "campaign_id": "15154",
           "brand_name": "Gusto",
           "status": "Active (Approved 2026-10-19, Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com)",
           "commission_terms": "$200.00-$300.00 USD CPA per Valid US Small Business Sale",
-          "tracking_url": "https://gusto.pxf.io/c/7932737/1226287/15154"
+          "tracking_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
+          "raw_clicks": 2,
+          "verified_clicks": 0,
+          "actions": 0,
+          "realized_commission_usd": 0.0
+        },
+        {
+          "campaign_id": "51436",
+          "brand_name": "Ramp",
+          "status": "Active (Approved 2026-10-21T14:54:06Z, Zoho Newsletter #1591 Welcome to the Ramp Partner Program)",
+          "commission_terms": "$100.00-$4,000.00 USD Closed Won / $50.00-$2,000.00 USD SQL",
+          "tracking_url": "https://ramp.com/",
+          "raw_clicks": 0,
+          "verified_clicks": 0,
+          "actions": 0,
+          "realized_commission_usd": 0.0
         }
       ],
       "pending_advertiser_contracts": 17,
-      "live_pending_advertiser_contracts": 15,
+      "live_pending_advertiser_contracts": 14,
       "verified_clicks": 8,
-      "raw_clicks": 19
+      "raw_clicks": 19,
+      "qualified_leads": 0,
+      "conversions": 0,
+      "realized_commission_usd": 0.0,
+      "pending_commission_usd": 0.0,
+      "approved_payable_usd": 0.0,
+      "paid_out_usd": 0.0,
+      "last_synced_at": "2026-10-21T14:54:06+00:00"
     },
     "cj_affiliate": {
       "name": "CJ Affiliate",
@@ -81,10 +114,20 @@
       "activation_date": "2026-10-18T09:36:19Z",
       "tax_form_status": "IRS Form W-9 submitted and active (EIN ******1423)",
       "payment_method": "Direct Deposit / CJ Payments (Choice Financial Group, Routing *****1229, Account ********1395)",
+      "sync_mechanism": "CDP_DOM_BALANCE_AND_ZOHO_EMAIL_INGEST",
+      "auth_status": "DOM_BALANCE_VERIFIED_BACKEND_SESSION_EXPIRED_RELOGIN_REQUIRED",
+      "is_authenticated_and_syncing": false,
       "pending_advertiser_applications": 28,
-      "live_pending_advertiser_applications": 24,
+      "live_pending_advertiser_applications": 23,
       "active_joined_advertisers_count": 3,
       "verified_clicks": 31,
+      "qualified_leads": 0,
+      "conversions": 0,
+      "realized_commission_usd": 0.0,
+      "pending_commission_usd": 0.0,
+      "approved_payable_usd": 0.0,
+      "paid_out_usd": 0.0,
+      "last_synced_at": "2026-10-21T17:16:12+00:00",
       "active_joined_advertisers": {
         "efile_com": {
           "advertiser_id": "4355234",
@@ -93,6 +136,10 @@
           "commission_terms": "30.00% on paid federal/state tax preparation sales (Welcome email #846 also notes 40% tier + $1.40 free return)",
           "cookie_duration_days": 120,
           "primary_tracking_url": "https://www.jdoqocy.com/click-101906407-11917161",
+          "verified_clicks": 9,
+          "sales": 0,
+          "leads": 0,
+          "realized_commission_usd": 0.0,
           "alternate_tracking_urls": [
             "https://www.dpbolvw.net/click-101906407-11917165",
             "https://www.tkqlhce.com/click-101906407-11917138"
@@ -105,6 +152,10 @@
           "commission_terms": "15.00% New Customer (Param 675960) / 5.00% Returning Customer (Param 675961) on federal and state filing fees",
           "cookie_duration_days": 90,
           "primary_tracking_url": "https://www.dpbolvw.net/click-101906407-15704796",
+          "verified_clicks": 9,
+          "sales": 0,
+          "leads": 0,
+          "realized_commission_usd": 0.0,
           "alternate_tracking_urls": [
             "https://www.anrdoezrs.net/click-101906407-15719586",
             "https://www.anrdoezrs.net/click-101906407-17230749"
@@ -117,6 +168,10 @@
           "commission_terms": "30.00% Subscription & One-Time Orders | $6.50 USD per Free Trial | $35.00 USD Incorporation (CA) | $5.00 USD Online Notary (US)",
           "cookie_duration_days": 120,
           "primary_tracking_url": "https://www.jdoqocy.com/click-101906407-16985242",
+          "verified_clicks": 13,
+          "sales": 0,
+          "leads": 0,
+          "realized_commission_usd": 0.0,
           "alternate_tracking_urls": [
             "https://www.tkqlhce.com/click-101906407-16944777",
             "https://www.jdoqocy.com/click-101906407-16995515",
@@ -218,11 +273,11 @@
             "rippling",
             "mercury"
           ],
-          "live_verified_clicks": 81,
-          "network_marketplace_status": "Declined on stck_sHqgUkyEIAPgiL (cooldown until 2026-10-23T00:00:00Z; 4 marketplace program applications on hold; direct invite Rippling part_jp9R0iYpPGriHu is Active with 81 clicks)",
+          "live_verified_clicks": 182,
+          "network_marketplace_status": "Declined on stck_sHqgUkyEIAPgiL (cooldown until 2026-10-23T00:00:00Z; 4 marketplace program applications on hold; direct invite Rippling part_jp9R0iYpPGriHu is Active with 182 clicks)",
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
           "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",
-          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 81 verified clicks recorded in PartnerStack Performance Overview)"
+          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 182 verified clicks recorded in PartnerStack Performance Overview)"
         },
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
@@ -429,7 +484,7 @@
           "network": "Impact.com / In-House",
           "campaign_id": "51436",
           "bounty": "$100-$4000",
-          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + Direct Follow-Up (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 submitted on 2026-10-18 in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL]; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
+          "correspondence_status": "Impact Marketplace Application Approved in Newsletter #1591 on 2026-10-21T14:54:06Z (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 submitted on 2026-10-18 in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL] + approved via Zoho Newsletter #1591 Welcome to the Ramp Partner Program from notifications@app.impact.com; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
