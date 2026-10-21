@@ -4892,8 +4892,6 @@ def classify_asset_archetype_and_intent(
     restricted_ps = False
     if prop == "prexvo":
         restricted_ps = is_restricted_public_service_slug(s_norm, q_norm)
-        if not restricted_ps and not any(tok in comb for tok in ("refinance", "refinancing", "private-lender", "private lender")):
-            restricted_ps = True
 
     if prop == "prexvo":
         vertical_family = "public_service_title_iv_ymyl" if restricted_ps else "student_loan_refinancing"
@@ -5865,7 +5863,7 @@ def run_gsc_affiliate_placement_feedback_pass(
     if tools_dir.is_dir():
         for html_file in sorted(tools_dir.rglob("index.html")):
             rel_slug = html_file.parent.relative_to(tools_dir).as_posix().strip("/")
-            if not rel_slug:
+            if not rel_slug or rel_slug == ".":
                 continue
             try:
                 raw_html = html_file.read_text(encoding="utf-8", errors="ignore")

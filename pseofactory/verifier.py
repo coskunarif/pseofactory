@@ -6593,6 +6593,8 @@ def audit_estate_partner_roster_and_compliance(
         for html_file in sorted(tools_dir.rglob("index.html")):
             rel_p = html_file.relative_to(d_path).as_posix()
             rel_slug = html_file.parent.relative_to(tools_dir).as_posix().strip("/")
+            if not rel_slug or rel_slug == ".":
+                continue
             try:
                 raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
             except Exception:
