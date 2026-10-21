@@ -7419,6 +7419,24 @@ class RetroReflectionEngine:
                 continue
             rel = html_file.relative_to(d).as_posix()
             if not cls.is_tool_or_calculator_page(html_file, d, content):
+                if rel == "tools/index.html" and "data-partner-roster=" not in content and "</main>" in content:
+                    if property_id.lower() == "prexvo":
+                        seed_sec = (
+                            '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+                            '      <a href="/r/splash_financial">Splash Financial</a>\n'
+                            '    </section>\n  '
+                        )
+                    else:
+                        seed_sec = (
+                            '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                            '        <h2>Verified Commercial Execution Partners</h2>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/crest_capital">Xendoo</a></div>\n'
+                            '      </section>\n    '
+                        )
+                    content = content.replace("</main>", f"{seed_sec}</main>", 1)
+                    html_file.write_text(content, encoding="utf-8")
+                    if rel not in retrofitted_paths:
+                        retrofitted_paths.append(rel)
                 if "/r/" in content or "overlay-partner-offer" in content:
                     try:
                         from pseofactory.affiliates import normalize_html_callout_message_match
@@ -7426,7 +7444,8 @@ class RetroReflectionEngine:
                         if norm_non_tool != content:
                             html_file.write_text(norm_non_tool, encoding="utf-8")
                             content = norm_non_tool
-                            retrofitted_paths.append(rel)
+                            if rel not in retrofitted_paths:
+                                retrofitted_paths.append(rel)
                     except Exception:
                         pass
                 canon_nt = (

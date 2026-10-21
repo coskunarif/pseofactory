@@ -4005,7 +4005,11 @@ def normalize_html_callout_message_match(
         return fallback_copy.get(pk)
 
     def _effective_dom_status(pk: str, p_obj: Optional[AffiliatePartner]) -> str:
-        if (p_obj and p_obj.status == "live") or SOVRN_VERIFIED_PAYING_MERCHANTS.get(pk, {}).get("is_direct"):
+        if (
+            (p_obj and p_obj.status == "live")
+            or pk in ("crest_capital", "rippling", "mercury", "gusto", "coinledger", "koinly", "kalshi", "ipx1031", "turbotax", "taxslayer", "suretybonds_direct", "splash_financial", "sofi", "earnest", "credible", "lendkey")
+            or SOVRN_VERIFIED_PAYING_MERCHANTS.get(pk, {}).get("is_direct")
+        ):
             return "live"
         return p_obj.status if p_obj else "live"
 
@@ -4118,6 +4122,19 @@ def normalize_html_callout_message_match(
     )
 
     updated = html
+
+    gsc_inline_meta: Dict[str, str] = {}
+    m_gsc_in = re.search(
+        r'<div\s+class=["\']calc-inline-cta["\'][^>]*data-gsc-repositioned=["\']true["\'][^>]*>',
+        updated,
+        flags=re.I,
+    )
+    if m_gsc_in:
+        tag_str = m_gsc_in.group(0)
+        for attr_k in ("data-partner", "data-company-brand", "data-gsc-tier", "data-yield-score"):
+            m_attr = re.search(rf'{attr_k}=["\']([^"\']+)["\']', tag_str, flags=re.I)
+            if m_attr:
+                gsc_inline_meta[attr_k] = m_attr.group(1)
 
     # Strip any prior idempotent inline calculator CTA and fold compaction style
     updated = re.sub(
@@ -4394,7 +4411,11 @@ def normalize_html_callout_message_match(
                 )
             grid_inner = "\n".join(cards_html)
             return (
-                '<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+                '<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" '
+                'data-partner="splash_financial" data-primary-partner="splash_financial" '
+                'data-partner-roster="splash_financial,sofi,credible,earnest,lendkey" '
+                'data-partner-companies="Splash Financial,SoFi,ELFI,Earnest,LendKey" '
+                'style="margin: 1.5rem 0;">\n'
                 '      <div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
                 f'{grid_inner}\n'
                 '      </div>\n'
@@ -4406,6 +4427,13 @@ def normalize_html_callout_message_match(
             _expand_prexvo_refinance_section,
             updated,
             flags=re.S | re.I,
+        )
+        updated = re.sub(
+            r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
+            r'<section class="partners-section"\g<1> data-partner="splash_financial" data-primary-partner="splash_financial" data-partner-roster="splash_financial,sofi,credible,earnest,lendkey" data-partner-companies="Splash Financial,SoFi,ELFI,Earnest,LendKey">',
+            updated,
+            count=1,
+            flags=re.I,
         )
         if (
             "ymyl-public-service-guardrail" not in updated
@@ -4424,8 +4452,10 @@ def normalize_html_callout_message_match(
             card_href = _build_r_href(pk, f"card_{card_idx}", slot)
             safe_s = html_lib.escape(page_slug)
             safe_sub = html_lib.escape(f"{page_slug}_card_{card_idx}")
+            c_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(pk, pk))
+            c_role = "primary" if card_idx == 1 else "secondary"
             return (
-                f'\n    <div class="affiliate-card partner-card">\n'
+                f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{html_lib.escape(p_obj.badge)}</span>\n'
                 f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
@@ -4433,7 +4463,7 @@ def normalize_html_callout_message_match(
                 f'        <p class="affiliate-desc">{html_lib.escape(p_obj.description)}</p>\n'
                 f'      </div>\n'
                 f'      <div>\n'
-                f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-tool="{safe_s}" data-subid="{safe_sub}" data-cta-slot="{slot}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
+                f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-tool="{safe_s}" data-subid="{safe_sub}" data-cta-slot="{slot}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
                 f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                 f'        </a>\n'
                 f'      </div>\n'
@@ -4443,6 +4473,11 @@ def normalize_html_callout_message_match(
         def _expand_profithelm_affiliates_section(match: re.Match) -> str:
             nonlocal primary_inline_pk
             sec_html = match.group(0)
+            if 'data-partner-roster="' in sec_html and (gsc_inline_meta or 'data-gsc-tier="' in sec_html):
+                m_prim = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', sec_html, re.I)
+                if m_prim:
+                    primary_inline_pk = m_prim.group(1).lower()
+                return sec_html
             if "affiliate-card" in sec_html:
                 if is_general_tax_page:
                     sorted_keys = (
@@ -4471,6 +4506,14 @@ def normalize_html_callout_message_match(
                 else:
                     sorted_keys = ["rippling", "crest_capital", "mercury"]
                 primary_inline_pk = sorted_keys[0]
+                lead_pk = html_lib.escape(sorted_keys[0])
+                roster_csv = html_lib.escape(",".join(sorted_keys))
+                brands_list: List[str] = []
+                for k_item in sorted_keys:
+                    b_nm = COMPANY_BRAND_BY_PARTNER_KEY.get(k_item, k_item)
+                    if b_nm not in brands_list:
+                        brands_list.append(b_nm)
+                brands_csv = html_lib.escape(",".join(brands_list))
                 h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
                 h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
                 cards_joined = "\n".join(
@@ -4478,7 +4521,9 @@ def normalize_html_callout_message_match(
                     for idx, k in enumerate(sorted_keys, start=1)
                 )
                 return (
-                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
+                    f'data-partner="{lead_pk}" data-primary-partner="{lead_pk}" '
+                    f'data-partner-roster="{roster_csv}" data-partner-companies="{brands_csv}">\n'
                     f'        {h2_html}'
                     f'{cards_joined}\n'
                     f'      </section>'
@@ -4552,6 +4597,8 @@ def normalize_html_callout_message_match(
                 updated = updated[:df_match_2.start()] + aff_block + "\n\n      " + updated[df_match_2.start():]
 
     # Inject above-the-fold inline calculator result CTA into the calculator output panel
+    if gsc_inline_meta.get("data-partner") in registry:
+        primary_inline_pk = gsc_inline_meta["data-partner"]
     if primary_inline_pk and primary_inline_pk in registry:
         p_inline = registry[primary_inline_pk]
         safe_badge = html_lib.escape(p_inline.badge)
@@ -4560,15 +4607,22 @@ def normalize_html_callout_message_match(
         safe_status = html_lib.escape(_effective_dom_status(primary_inline_pk, p_inline))
         safe_s = html_lib.escape(page_slug)
         safe_sub = html_lib.escape(f"{page_slug}_inline")
+        safe_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(primary_inline_pk, primary_inline_pk))
         inline_href = _build_r_href(primary_inline_pk, "inline", "calculator_result_inline")
+        gsc_extra_attrs = ""
+        if gsc_inline_meta:
+            gsc_t = html_lib.escape(gsc_inline_meta.get("data-gsc-tier", "baseline"))
+            gsc_y = html_lib.escape(gsc_inline_meta.get("data-yield-score", "0"))
+            gsc_extra_attrs = f'data-gsc-repositioned="true" data-gsc-tier="{gsc_t}" data-yield-score="{gsc_y}" '
         inline_cta_html = (
             f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
+            f'data-company-brand="{safe_brand}" {gsc_extra_attrs}'
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
             f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
             f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
             f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
             f'            </div>\n'
-            f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
+            f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
             f'              {safe_cta} &rarr;\n'
             f'            </a>\n'
             f'          </div>'
@@ -4851,24 +4905,24 @@ COMPANY_BRAND_BY_PARTNER_KEY: Dict[str, str] = {
 }
 
 VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
-    "1031_like_kind_exchange": ["lawdepot", "ipx1031", "crest_capital", "mercury", "taxslayer"],
-    "section_179_equipment_capex": ["crest_capital", "mercury", "national_funding", "taxslayer", "rippling"],
-    "s_corp_payroll_reasonable_comp": ["gusto", "rippling", "crest_capital", "mercury", "taxslayer"],
+    "1031_like_kind_exchange": ["ipx1031", "crest_capital", "mercury", "rippling", "gusto"],
+    "section_179_equipment_capex": ["crest_capital", "mercury", "rippling", "gusto"],
+    "s_corp_payroll_reasonable_comp": ["gusto", "rippling", "crest_capital", "mercury"],
     "workers_comp_labor_burden": ["rippling", "gusto", "crest_capital", "mercury"],
-    "prediction_market_event_contracts": ["kalshi", "moby", "zacks", "coinledger", "koinly"],
-    "prediction_market_tax_1256": ["coinledger", "koinly", "kalshi", "taxslayer", "crest_capital"],
-    "crypto_digital_asset_tax": ["coinledger", "koinly", "taxslayer", "kalshi", "crest_capital"],
-    "rd_section_174_bookkeeping": ["pilot", "gusto", "rippling", "mercury", "taxslayer"],
-    "tariff_customs_freight_trade": ["flexport", "mercury", "crest_capital", "suretybonds_direct", "rippling"],
-    "commercial_working_capital_factoring": ["otr_solutions_factoring", "mercury", "crest_capital", "national_funding", "rippling"],
-    "surety_bond_compliance": ["suretybonds_direct", "lawdepot", "mercury", "crest_capital"],
-    "treasury_cash_runway": ["wealthfront", "mercury", "crest_capital", "zacks", "rippling"],
-    "retirement_401k_rollover": ["guideline", "gusto", "rippling", "wealthfront", "mercury"],
-    "sales_tax_1099_nexus": ["stripe_tax", "crest_capital", "taxslayer", "mercury", "rippling"],
-    "federal_state_tax_brackets": ["taxslayer", "efile", "eztaxreturn", "crest_capital", "wealthfront"],
-    "saas_unit_economics_spend": ["mercury", "rippling", "gusto", "crest_capital", "national_funding"],
-    "student_loan_refinancing": ["splash_financial", "sofi", "earnest", "credible", "laurel_road"],
-    "general_b2b_commercial_finance": ["crest_capital", "gusto", "mercury", "rippling", "taxslayer"],
+    "prediction_market_event_contracts": ["kalshi", "coinledger", "koinly", "mercury", "crest_capital"],
+    "prediction_market_tax_1256": ["coinledger", "koinly", "kalshi", "crest_capital", "mercury"],
+    "crypto_digital_asset_tax": ["coinledger", "koinly", "kalshi", "crest_capital", "mercury"],
+    "rd_section_174_bookkeeping": ["crest_capital", "rippling", "gusto", "mercury"],
+    "tariff_customs_freight_trade": ["rippling", "crest_capital", "mercury", "gusto"],
+    "commercial_working_capital_factoring": ["crest_capital", "rippling", "mercury", "gusto"],
+    "surety_bond_compliance": ["suretybonds_direct", "crest_capital", "mercury", "rippling"],
+    "treasury_cash_runway": ["mercury", "crest_capital", "rippling", "gusto"],
+    "retirement_401k_rollover": ["gusto", "rippling", "mercury", "crest_capital"],
+    "sales_tax_1099_nexus": ["crest_capital", "rippling", "gusto", "mercury"],
+    "federal_state_tax_brackets": ["crest_capital", "rippling", "mercury", "gusto"],
+    "saas_unit_economics_spend": ["mercury", "rippling", "gusto", "crest_capital"],
+    "student_loan_refinancing": ["splash_financial", "sofi", "earnest", "credible", "lendkey"],
+    "general_b2b_commercial_finance": ["crest_capital", "rippling", "gusto", "mercury"],
 }
 
 
@@ -5683,6 +5737,22 @@ def reposition_affiliate_placements_from_gsc_signals(
                 count=1,
                 flags=re.S | re.I,
             )
+    elif matrix_cards and prop == "prexvo":
+        roster_keys_csv = html_lib.escape(",".join(roster["roster_keys"]))
+        companies_csv = html_lib.escape(",".join(roster["distinct_companies"]))
+        lead_pk_attr = html_lib.escape(str(slot_plan.get("promoted_partner_key") or "splash_financial"))
+        updated = re.sub(
+            r'<section\s+class=["\'][^"\']*refinance-partner-section[^"\']*["\'][^>]*>',
+            (
+                f'<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" '
+                f'data-partner="{lead_pk_attr}" data-primary-partner="{lead_pk_attr}" '
+                f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
+                f'data-gsc-tier="{html_lib.escape(gsc_tier)}" style="margin: 1.5rem 0;">'
+            ),
+            updated,
+            count=1,
+            flags=re.I,
+        )
 
     # 4. Update #gsc-striking-overlay .overlay-partner-offer if present
     if inline_offer and 'class="overlay-section overlay-partner-offer' in updated:
@@ -5883,6 +5953,13 @@ def run_gsc_affiliate_placement_feedback_pass(
             if rep.get("repositioned") or updated_html != raw_html:
                 repositioned_pages.append(rep)
                 if not dry_run and updated_html != raw_html:
+                    try:
+                        from pseofactory.maintenance import normalize_html_visual_primitives
+                        norm_h, _ = normalize_html_visual_primitives(updated_html, is_tenant_porcelain=True)
+                        if norm_h:
+                            updated_html = norm_h
+                    except Exception:
+                        pass
                     html_file.write_text(updated_html, encoding="utf-8")
                     pages_updated += 1
 
