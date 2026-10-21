@@ -3628,10 +3628,15 @@ class MaintenanceLifecycle:
             if state_file
             else adapter.dist_dir.parent / ".agy" / "engine_hash.json"
         )
+        default_ledger_name = (
+            "asset_ledger.json"
+            if (adapter.dist_dir.name == "dist" or getattr(adapter, "repo_path", None) is not None)
+            else f"asset_ledger_{adapter.property_id}.json"
+        )
         l_file = (
             Path(ledger_file).resolve()
             if ledger_file
-            else adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
+            else adapter.dist_dir.parent / ".agy" / default_ledger_name
         )
 
         with adapter.scoped_environment():
@@ -4193,35 +4198,38 @@ class MaintenanceLifecycle:
 
             # Stage 11: Non-Blocking Partner Monetization Telemetry & Portal Click Reconciliation
             partner_readiness_status_val: Optional[str] = None
-            try:
-                from pseofactory.partner_tracker import PartnerTrackingEngine
-                partner_engine = PartnerTrackingEngine()
-                in_pytest = "PYTEST_CURRENT_TEST" in os.environ
-                telemetry_sync = partner_engine.sync_edge_click_telemetry(
-                    fetch_live=(not dry_run and not in_pytest)
-                )
-                prop_agg = telemetry_sync.get(adapter.property_id, {}).get("aggregation")
-                dash = partner_engine.sync_and_evaluate(engagement_metrics=prop_agg)
-                recon_rep = partner_engine.reconcile_edge_clicks_with_portals(
-                    engagement_by_property={
-                        p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                        for p_id in ("profithelm", "prexvo")
-                    }
-                )
-                if not dry_run and getattr(adapter, "repo_path", None):
-                    try:
-                        recon_path = Path(adapter.repo_path) / ".agy" / "portal_click_reconciliation.json"
-                        recon_path.parent.mkdir(parents=True, exist_ok=True)
-                        recon_path.write_text(json.dumps(recon_rep, indent=2) + "\n", encoding="utf-8")
-                    except Exception:
-                        pass
-                if hasattr(dash, adapter.property_id):
-                    p_report = getattr(dash, adapter.property_id)
-                    partner_readiness_status_val = f"SCORE_{int(p_report.monetization_readiness_score)}"
-                else:
+            if adapter.property_id in ("profithelm", "prexvo"):
+                try:
+                    from pseofactory.partner_tracker import PartnerTrackingEngine
+                    partner_engine = PartnerTrackingEngine()
+                    in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+                    telemetry_sync = partner_engine.sync_edge_click_telemetry(
+                        fetch_live=(not dry_run and not in_pytest)
+                    )
+                    prop_agg = telemetry_sync.get(adapter.property_id, {}).get("aggregation")
+                    dash = partner_engine.sync_and_evaluate(engagement_metrics=prop_agg)
+                    recon_rep = partner_engine.reconcile_edge_clicks_with_portals(
+                        engagement_by_property={
+                            p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
+                            for p_id in ("profithelm", "prexvo")
+                        }
+                    )
+                    if not dry_run and getattr(adapter, "repo_path", None):
+                        try:
+                            recon_path = Path(adapter.repo_path) / ".agy" / "portal_click_reconciliation.json"
+                            recon_path.parent.mkdir(parents=True, exist_ok=True)
+                            recon_path.write_text(json.dumps(recon_rep, indent=2) + "\n", encoding="utf-8")
+                        except Exception:
+                            pass
+                    if hasattr(dash, adapter.property_id):
+                        p_report = getattr(dash, adapter.property_id)
+                        partner_readiness_status_val = f"SCORE_{int(p_report.monetization_readiness_score)}"
+                    else:
+                        partner_readiness_status_val = "EVALUATED"
+                except Exception as part_err:
+                    print(f"Warning: Partner telemetry stage error for '{adapter.property_id}': {part_err}")
                     partner_readiness_status_val = "EVALUATED"
-            except Exception as part_err:
-                print(f"Warning: Partner telemetry stage error for '{adapter.property_id}': {part_err}")
+            else:
                 partner_readiness_status_val = "EVALUATED"
 
 
