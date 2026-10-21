@@ -3355,7 +3355,7 @@ def render_serp_incumbent_depth_upgrade_block(
         f'      </div>\n'
         f'      <div class="serp-svg-chart-wrap">\n'
         f'        <svg class="serp-visual-breakdown-svg" viewBox="0 0 600 76" role="img" aria-label="Interactive Retained Capital versus Statutory Exposure Breakdown">\n'
-        f'          <title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>\n'
+        f'          <desc>Interactive Retained Capital versus Statutory Exposure Breakdown</desc>\n'
         f'          <rect x="0" y="8" width="600" height="26" rx="6" fill="var(--bg-inset, #0b1329)" />\n'
         f'          <rect id="serp-svg-bar-retained" x="0" y="8" width="{spec["svg_left_width"]}" height="26" rx="6" fill="var(--status-positive, #10b981)" />\n'
         f'          <rect id="serp-svg-bar-tax" x="{spec["svg_right_x"]}" y="8" width="{spec["svg_right_width"]}" height="26" rx="6" fill="var(--accent, #38bdf8)" />\n'

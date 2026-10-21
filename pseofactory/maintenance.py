@@ -4857,6 +4857,9 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if detect_uninitialized_ssr_calculator_metrics(html_content):
         return True
 
+    if "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in html_content:
+        return True
+
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", html_content, re.IGNORECASE)
     if t_m:
         raw_t_str = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
@@ -5650,6 +5653,13 @@ def _normalize_page_structure_and_geo_parity(
             updated = repaired_metrics
             changed = True
 
+    if "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in updated:
+        updated = updated.replace(
+            "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>",
+            "<desc>Interactive Retained Capital versus Statutory Exposure Breakdown</desc>",
+        )
+        changed = True
+
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
     if t_m:
         old_t_raw = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
@@ -5959,6 +5969,7 @@ class RetroReflectionEngine:
         if (
             'data-mechanic="serp_incumbent_depth_upgrade"' not in html_content
             or 'id="serp-incumbent-depth-workbench"' not in html_content
+            or "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in html_content
             or has_v_pollution
         ):
             missing.append("serp_incumbent_depth_upgrade")

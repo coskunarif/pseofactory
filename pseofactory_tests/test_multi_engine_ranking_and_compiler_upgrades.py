@@ -324,6 +324,8 @@ def test_serp_incumbent_depth_upgrade_workbench_and_title_modifiers():
         assert expected_input in block
         assert expected_fact in block
         assert 'id="serp-svg-bar-retained"' in block
+        assert "<title>" not in block
+        assert "<desc>Interactive Retained Capital versus Statutory Exposure Breakdown</desc>" in block
         assert 'id="dynamic-commercial-intent-banner"' in block
         assert 'class="comparison-table serp-statutory-reference-table"' in block
 
