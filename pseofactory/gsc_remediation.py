@@ -4443,10 +4443,12 @@ def evaluate_expired_overlays(
         try:
             from pseofactory.seo_growth_loops import load_consolidated_gsc_query_rows
             cons_q = load_consolidated_gsc_query_rows(property_id=prop, repo_root=root, live_gsc=True)
-            if live_queries is None:
-                live_queries = list(cons_q.get("current_rows") or [])
+            cons_curr = list(cons_q.get("current_rows") or [])
+            cons_base = list(cons_q.get("baseline_rows") or [])
+            if cons_curr and (live_queries is None or baseline_queries is None):
+                live_queries = cons_curr
             if baseline_queries is None:
-                baseline_queries = list(cons_q.get("baseline_rows") or [])
+                baseline_queries = cons_base
         except Exception:
             pass
     if live_queries:
@@ -4739,7 +4741,7 @@ def evaluate_expired_overlays(
             or (base_impr >= 10 and impr_pct_delta <= -25.0)
         )
 
-        if was_rolled_back and not is_expired and locked and not emergency_rollback:
+        if was_rolled_back and not is_expired and locked and not emergency_rollback and not is_degraded:
             overlay_data["status"] = "ACTIVE_LOCKED"
             if overlay_data.get("rolled_back_title_rewrite") and not overlay_data.get("title_rewrite"):
                 overlay_data["title_rewrite"] = overlay_data.pop("rolled_back_title_rewrite")
@@ -4751,6 +4753,42 @@ def evaluate_expired_overlays(
             ov_dirty = True
 
         if not is_expired and locked and not emergency_rollback and not was_rolled_back:
+            if (
+                not overlay_data.get("quick_answer")
+                or not overlay_data.get("preset_scenarios")
+                or not overlay_data.get("h2_headings")
+                or not overlay_data.get("faq_entries")
+            ):
+                try:
+                    canon_dom = "https://prexvo.com" if prop == "prexvo" else "https://profithelm.com"
+                    healed_spec = compile_remediation_overlay_spec(
+                        {
+                            "slug": slug,
+                            "target_url": overlay_data.get("target_url") or f"{canon_dom}/tools/{slug}/",
+                            "query": query,
+                            "position": base_pos,
+                            "impressions": max(1, base_impr),
+                        },
+                        tenant_id=prop,
+                    )
+                    for heal_k in (
+                        "title_rewrite",
+                        "title",
+                        "description",
+                        "meta_description",
+                        "quick_answer",
+                        "h2_headings",
+                        "preset_scenarios",
+                        "comparison_rows",
+                        "faq_schema",
+                        "faq_entries",
+                        "faq_additions",
+                    ):
+                        if not overlay_data.get(heal_k) and healed_spec.get(heal_k):
+                            overlay_data[heal_k] = healed_spec[heal_k]
+                            ov_dirty = True
+                except Exception:
+                    pass
             early_flagged = bool(is_degraded and has_empirical_eval)
             if early_flagged:
                 overlay_data["early_regression_flagged"] = True
@@ -4764,12 +4802,32 @@ def evaluate_expired_overlays(
                 overlay_data.pop("early_regression_at", None)
                 overlay_data.pop("early_regression_reason", None)
                 ov_dirty = True
-            if ov_dirty and persist:
-                for p_write in slug_paths:
-                    try:
-                        p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
-                    except Exception:
-                        pass
+            if persist:
+                if ov_dirty:
+                    for p_write in slug_paths:
+                        try:
+                            p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
+                act_slug_cands = [slug]
+                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if slug.startswith(f"{hub_pfx}-"):
+                        act_slug_cands.append(f"{hub_pfx}/{slug[len(hub_pfx) + 1:]}")
+                for act_s in act_slug_cands:
+                    for html_target in (
+                        root / "dist" / "tools" / act_s / "index.html",
+                        root / "dist" / f"{act_s}.html",
+                        root / "dist" / act_s / "index.html",
+                    ):
+                        if html_target.is_file():
+                            try:
+                                raw_h = html_target.read_text(encoding="utf-8")
+                                if 'id="gsc-striking-overlay"' not in raw_h and 'class="gsc-remediation-overlay"' not in raw_h:
+                                    inj_h = inject_overlay_into_html(raw_h, overlay_data)
+                                    if inj_h != raw_h:
+                                        html_target.write_text(inj_h, encoding="utf-8")
+                            except Exception:
+                                pass
             eval_item = {
                 "slug": slug,
                 "status": "MONITORING",

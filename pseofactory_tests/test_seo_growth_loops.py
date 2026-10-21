@@ -1386,5 +1386,116 @@ def test_search_mechanics_heuristics_contextual_links_impression_split_and_crawl
     assert "https://profithelm.com/tools/nav-only-spoke/" in cs_audit["sitemap_health"]["reverse_orphan_urls"]
 
 
+def test_evaluate_expired_overlays_rolled_back_recovery_heals_spec_and_injects_html(tmp_path: Path) -> None:
+    """
+    Verifies that evaluate_expired_overlays:
+      1. Keeps a DEGRADED_ROLLED_BACK overlay rolled back when it remains degraded (even if below emergency_rollback).
+      2. When a DEGRADED_ROLLED_BACK overlay recovers during its lock window, restores popped overlay content keys
+         (quick_answer, preset_scenarios, h2_headings, faq_entries) and re-injects id='gsc-striking-overlay' into dist HTML.
+    """
+    from pseofactory.gsc_remediation import evaluate_expired_overlays
+
+    repo_root = tmp_path / "profithelm-platform"
+    overlays_dir = repo_root / ".agy" / "overlays"
+    overlays_dir.mkdir(parents=True, exist_ok=True)
+    future_lock = "2099-12-31T00:00:00+00:00"
+
+    # Case 1: DEGRADED_ROLLED_BACK overlay still experiencing >25% impression drop (is_degraded=True, emergency_rollback=False)
+    utah_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets" / "utah"
+    utah_dir.mkdir(parents=True, exist_ok=True)
+    (utah_dir / "index.html").write_text(
+        "<html><head><title>Utah 2027 Tax Brackets | ProfitHelm</title></head>"
+        "<body><main><h1>Utah 2027 Tax Brackets</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (overlays_dir / "irs-2027-tax-brackets-utah.json").write_text(
+        json.dumps(
+            {
+                "slug": "irs-2027-tax-brackets/utah",
+                "query": "utah 2027 tax brackets",
+                "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/utah/",
+                "status": "DEGRADED_ROLLED_BACK",
+                "locked_until": future_lock,
+                "baseline_impressions": 36,
+                "baseline_position": 86.53,
+                "baseline_clicks": 0,
+                "baseline_ctr": 0.0,
+                "baseline_source": "GSC_EMPIRICAL_ROLLUP",
+                "rolled_back_title_rewrite": "Utah 2027 Tax Brackets Calculator (IRS Table) | ProfitHelm",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Case 2: DEGRADED_ROLLED_BACK overlay that genuinely recovered (impressions and rank improved)
+    tx_dir = repo_root / "dist" / "tools" / "section-1031-calculator" / "texas"
+    tx_dir.mkdir(parents=True, exist_ok=True)
+    (tx_dir / "index.html").write_text(
+        "<html><head><title>Texas Section 1031 Calculator | ProfitHelm</title></head>"
+        "<body><main><h1>Texas Section 1031 Calculator</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (overlays_dir / "section-1031-calculator-texas.json").write_text(
+        json.dumps(
+            {
+                "slug": "section-1031-calculator/texas",
+                "query": "texas section 1031 exchange",
+                "target_url": "https://profithelm.com/tools/section-1031-calculator/texas/",
+                "status": "DEGRADED_ROLLED_BACK",
+                "locked_until": future_lock,
+                "baseline_impressions": 20,
+                "baseline_position": 15.0,
+                "baseline_clicks": 0,
+                "baseline_ctr": 0.0,
+                "baseline_source": "GSC_EMPIRICAL_ROLLUP",
+                "rolled_back_title_rewrite": "Texas Section 1031 Exchange Calculator (Form 8824) | ProfitHelm",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    eval_res = evaluate_expired_overlays(
+        site_url="sc-domain:profithelm.com",
+        base_dir=repo_root,
+        live_queries=[
+            {
+                "query": "utah 2027 tax brackets",
+                "canonical_path": "/tools/irs-2027-tax-brackets/utah",
+                "impressions": 18,
+                "clicks": 0,
+                "ctr": 0.0,
+                "position": 85.0,
+            },
+            {
+                "query": "texas section 1031 exchange",
+                "canonical_path": "/tools/section-1031-calculator/texas",
+                "impressions": 25,
+                "clicks": 1,
+                "ctr": 0.04,
+                "position": 11.5,
+            },
+        ],
+        persist=True,
+    )
+
+    rb_slugs = {item["slug"] for item in eval_res["degraded_rolled_back"]}
+    mon_slugs = {item["slug"] for item in eval_res["monitoring"]}
+    assert "irs-2027-tax-brackets/utah" in rb_slugs
+    assert "section-1031-calculator/texas" in mon_slugs
+
+    utah_after = json.loads((overlays_dir / "irs-2027-tax-brackets-utah.json").read_text(encoding="utf-8"))
+    assert utah_after["status"] == "DEGRADED_ROLLED_BACK"
+
+    tx_after = json.loads((overlays_dir / "section-1031-calculator-texas.json").read_text(encoding="utf-8"))
+    assert tx_after["status"] == "ACTIVE_LOCKED"
+    assert tx_after.get("quick_answer")
+    assert tx_after.get("preset_scenarios")
+    assert tx_after.get("h2_headings")
+    assert tx_after.get("faq_entries")
+    tx_html_after = (tx_dir / "index.html").read_text(encoding="utf-8")
+    assert 'id="gsc-striking-overlay"' in tx_html_after
+
+
+
 
 
