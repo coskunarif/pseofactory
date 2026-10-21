@@ -153,6 +153,78 @@ def cmd_maintain(args: argparse.Namespace) -> int:
     return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES") else 1
 
 
+def _ancestor_or_inherited_fd_holds_lock(lock_file: Path) -> bool:
+    """
+    Returns True if the current process inherited a file descriptor (such as FD 209
+    from release_pipeline.sh) pointing to lock_file, or if an ancestor PID in our
+    process tree already holds a FLOCK on lock_file. Prevents self-deadlock when a
+    parent shell holds flock on lock_file without exporting PSEUFACTORY_SUPERVISOR_LOCK_HELD=1.
+    Zero em-dashes. Zero en-dashes.
+    """
+    try:
+        if not lock_file.exists():
+            return False
+        target_stat = lock_file.stat()
+        target_dev_ino = (target_stat.st_dev, target_stat.st_ino)
+    except OSError:
+        return False
+
+    # 1. Check inherited file descriptors (e.g., FD 209 from release_pipeline.sh)
+    fd_dir = Path("/proc/self/fd")
+    if fd_dir.is_dir():
+        try:
+            for fd_entry in fd_dir.iterdir():
+                try:
+                    fd_num = int(fd_entry.name)
+                    if fd_num in (0, 1, 2):
+                        continue
+                    st = os.fstat(fd_num)
+                    if (st.st_dev, st.st_ino) == target_dev_ino:
+                        return True
+                except (OSError, ValueError):
+                    continue
+        except OSError:
+            pass
+
+    # 2. Check /proc/locks for any ancestor PID holding a lock on this inode
+    proc_locks = Path("/proc/locks")
+    if proc_locks.is_file():
+        try:
+            ancestors = set()
+            curr_pid = os.getpid()
+            for _ in range(16):
+                ancestors.add(curr_pid)
+                stat_file = Path(f"/proc/{curr_pid}/stat")
+                if not stat_file.is_file():
+                    break
+                raw_stat = stat_file.read_text(encoding="utf-8", errors="ignore")
+                rpar = raw_stat.rfind(")")
+                if rpar == -1:
+                    break
+                fields = raw_stat[rpar + 2 :].split()
+                if len(fields) < 2:
+                    break
+                ppid = int(fields[1])
+                if ppid <= 1 or ppid == curr_pid:
+                    break
+                curr_pid = ppid
+
+            ino_str = str(target_stat.st_ino)
+            for line in proc_locks.read_text(encoding="utf-8", errors="ignore").splitlines():
+                parts = line.split()
+                if len(parts) >= 6 and parts[5].endswith(f":{ino_str}"):
+                    try:
+                        holder_pid = int(parts[4])
+                        if holder_pid in ancestors:
+                            return True
+                    except ValueError:
+                        continue
+        except OSError:
+            pass
+
+    return False
+
+
 def cmd_reflect(args: argparse.Namespace) -> int:
     """
     Reflects engine changes across existing assets and triggers re-auditing / recompiling.
@@ -162,6 +234,8 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     no_gitops = getattr(args, "no_gitops", False)
     lock_fd = None
     lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+    if _ancestor_or_inherited_fd_holds_lock(lock_file):
+        os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
     if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
         try:
             import fcntl
@@ -449,6 +523,8 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     if is_once:
         lock_fd = None
         lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+        if _ancestor_or_inherited_fd_holds_lock(lock_file):
+            os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
         if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
             try:
                 import fcntl

@@ -5355,7 +5355,10 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         if existing_qa_m:
             ex_qa_inner = existing_qa_m.group(1)
             ex_qa_words = len(re.sub(r"<[^>]+>", " ", ex_qa_inner).split())
-            if "$" in ex_qa_inner and "$" not in quick_answer and 40 <= ex_qa_words <= 60:
+            if (
+                ("$" in ex_qa_inner and "$" not in quick_answer)
+                or "certified GVWR" in ex_qa_inner
+            ) and 40 <= ex_qa_words <= 60:
                 quick_answer = ""
     if quick_answer:
         escaped_qa = html_lib.escape(quick_answer)
@@ -5780,7 +5783,23 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         if faq_modified:
                             new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
                             html = html[: match.start()] + new_script + html[match.end() :]
-                    else:
+                    elif isinstance(existing_data, dict) and existing_data.get("@type") == "FAQPage":
+                        faq_modified = False
+                        existing_qs = {
+                            html_lib.unescape(str(q.get("name") or "")).strip()
+                            for q in existing_data.get("mainEntity", [])
+                            if isinstance(q, dict)
+                        }
+                        for q in schema_entities:
+                            q_norm = html_lib.unescape(str(q.get("name") or "")).strip()
+                            if q_norm not in existing_qs:
+                                existing_data.setdefault("mainEntity", []).append(q)
+                                existing_qs.add(q_norm)
+                                faq_modified = True
+                        if faq_modified:
+                            new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
+                            html = html[: match.start()] + new_script + html[match.end() :]
+                    elif '"@type": "FAQPage"' not in html and '"@type":"FAQPage"' not in html:
                         json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
                         if "</head>" in html:
                             html = html.replace("</head>", f"{json_ld_script}\n</head>", 1)
@@ -5835,9 +5854,24 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     flags=re.DOTALL | re.IGNORECASE,
                 )
             if tbl_section_markup and 'class="overlay-section overlay-comparison' in html:
+                m_existing_bar = re.search(
+                    r'<section\s+class=["\']overlay-section\s+overlay-comparison[^>]*>.*?(\n\s*<div\s+class=["\']comparison-table-cta-bar["\'][^>]*>.*?</div>)\s*</section>',
+                    html,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
+                eff_tbl_markup = tbl_section_markup
+                if m_existing_bar and 'class="comparison-table-cta-bar"' not in eff_tbl_markup:
+                    bar_block = m_existing_bar.group(1)
+                    eff_tbl_markup = re.sub(
+                        r"(</table>\s*</div>)(\s*</section>)$",
+                        lambda m: m.group(1) + bar_block + m.group(2),
+                        eff_tbl_markup,
+                        count=1,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
                 html = re.sub(
                     r'<section\s+class=["\']overlay-section\s+overlay-comparison[^>]*>.*?</section>',
-                    tbl_section_markup,
+                    lambda _: eff_tbl_markup,
                     html,
                     count=1,
                     flags=re.DOTALL | re.IGNORECASE,
@@ -5874,13 +5908,23 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     incremental_parts.append(hub_links_markup)
             if partner_section_markup:
                 if 'class="overlay-section overlay-partner-offer' in html:
-                    html = re.sub(
+                    m_existing_po = re.search(
                         r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',
-                        partner_section_markup,
                         html,
-                        count=1,
                         flags=re.DOTALL | re.IGNORECASE,
                     )
+                    if not (
+                        m_existing_po
+                        and "data-gsc-tier=" in m_existing_po.group(0)
+                        and "data-partnership-model=" in m_existing_po.group(0)
+                    ):
+                        html = re.sub(
+                            r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',
+                            partner_section_markup,
+                            html,
+                            count=1,
+                            flags=re.DOTALL | re.IGNORECASE,
+                        )
                 elif 'class="overlay-section overlay-partner-guardrail' not in html:
                     incremental_parts.append(partner_section_markup)
             if incremental_parts:

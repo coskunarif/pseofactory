@@ -339,3 +339,69 @@ def test_serp_incumbent_depth_upgrade_workbench_and_title_modifiers():
     assert "Form 8949" in t_crypto
     assert 50 <= len(t_crypto) <= 60
 
+
+def test_supervisor_lock_inherited_fd_prevents_self_deadlock(tmp_path):
+    """Verifies _ancestor_or_inherited_fd_holds_lock detects an open FD on the lock file to prevent release_pipeline FD 209 self-deadlock."""
+    import fcntl
+    import pseofactory.cli as cli_mod
+
+    fn = getattr(cli_mod, "_ancestor_or_inherited_fd_holds_lock", None)
+    assert callable(fn), "Missing _ancestor_or_inherited_fd_holds_lock in pseofactory.cli"
+
+    lock_path = tmp_path / "supervisor_test.lock"
+    assert fn(lock_path) is False
+
+    with open(lock_path, "a+", encoding="utf-8") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert fn(lock_path) is True
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def test_overlay_injection_and_callout_normalization_idempotency():
+    """Verifies inject_overlay_into_html and normalize_html_callout_message_match are strictly idempotent after GSC affiliate placement feedback."""
+    from pseofactory.affiliates import (
+        normalize_html_callout_message_match,
+        reposition_affiliate_placements_from_gsc_signals,
+    )
+    from pseofactory.gsc_remediation import (
+        compile_remediation_overlay_spec,
+        inject_overlay_into_html,
+    )
+
+    spec = compile_remediation_overlay_spec(
+        {
+            "slug": "parent-plus-double-consolidation",
+            "tenant_id": "prexvo",
+            "target_url": "https://prexvo.com/tools/parent-plus-double-consolidation/",
+            "query": "parent plus double consolidation",
+            "impressions": 100,
+            "position": 12.0,
+        },
+        tenant_id="prexvo",
+    )
+    seed_html = (
+        "<!DOCTYPE html><html><head>"
+        "<title>Parent PLUS Double Consolidation Calculator | Prexvo</title>"
+        '<link rel="canonical" href="https://prexvo.com/tools/parent-plus-double-consolidation/">'
+        "</head><body><main>"
+        "<h1>Parent PLUS Double Consolidation Calculator</h1>"
+        '<aside class="quick-answer"><p>Initial quick answer.</p></aside>'
+        '<div class="calc-results-column"><h3 class="calc-column-title">Monthly Repayment Obligations</h3></div>'
+        '<section class="refinance-partner-section"><a href="/r/splash_financial">Splash Financial</a></section>'
+        "</main></body></html>"
+    )
+    with_ov = inject_overlay_into_html(seed_html, spec)
+    repositioned, _ = reposition_affiliate_placements_from_gsc_signals(
+        with_ov,
+        property_id="prexvo",
+        slug="parent-plus-double-consolidation",
+        query="parent plus double consolidation",
+    )
+    normalized_once = normalize_html_callout_message_match(repositioned, property_id="prexvo")
+    after_reinject = inject_overlay_into_html(normalized_once, spec)
+    normalized_twice = normalize_html_callout_message_match(after_reinject, property_id="prexvo")
+    assert after_reinject == normalized_once
+    assert normalized_twice == normalized_once
+
+
+

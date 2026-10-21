@@ -7747,6 +7747,7 @@ def retrofit_tenant_estate(
 def _has_pending_downstream_work(
     adapter: PropertyAdapter,
     check_in_pytest: bool = False,
+    ignore_git_dirty: bool = False,
 ) -> bool:
     """
     Detects whether any compiled tool assets in adapter.dist_dir / "tools"
@@ -7775,7 +7776,7 @@ def _has_pending_downstream_work(
     # 1. Check syndication packs (must have ghost.json + github_gist.json and zero reddit.md)
     synd_dir = repo_root / "syndication"
     central_synd = (
-        Path(__file__).resolve().parent.parent / "syndication" / ("prexvo" if adapter.property_id == "prexvo" else "profithelm")
+        Path("/home/ubuntuadmin/projects/pseofactory/syndication") / ("prexvo" if adapter.property_id == "prexvo" else "profithelm")
         if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo")
         else None
     )
@@ -7837,7 +7838,8 @@ def _has_pending_downstream_work(
 
     # 5. Check uncommitted git changes in production tenant repository
     if (
-        str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
+        not ignore_git_dirty
+        and str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
         and repo_root.name in ("profithelm-platform", "prexvo")
         and (repo_root / ".git").exists()
     ):
@@ -8541,10 +8543,16 @@ def reflect_and_recompile_all_assets(
             for d_rec in drifted_records
         )
 
-        if drifted_records or stale_mechanic_count > 0 or callout_mismatch_count > 0 or topical_reconciliation_changed or force:
+        estate_needed_mutation = bool(
+            has_structural_drift
+            or stale_mechanic_count > 0
+            or callout_mismatch_count > 0
+            or topical_reconciliation_changed
+        )
+
+        if estate_needed_mutation or drifted_records or force:
             should_run_full_build = (
-                force
-                or topical_reconciliation_changed
+                topical_reconciliation_changed
                 or has_structural_drift
                 or not isinstance(adapter, SubprocessPropertyAdapter)
             )
@@ -8562,143 +8570,159 @@ def reflect_and_recompile_all_assets(
                 except Exception as b_err:
                     if verbose:
                         print(f"Error rebuilding assets for '{p_id}': {b_err}")
+            elif not estate_needed_mutation and isinstance(adapter, SubprocessPropertyAdapter):
+                # Estate already passes structural/retro/callout audits; preserve compiled dist/
+                recompiled_count = max(report.total_assets_checked, 1)
 
             # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,
             # and heal any legacy cross-vertical polluted overlay specs in .agy/overlays/
-            try:
-                repo_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
-                from pseofactory.gsc_remediation import (
-                    compile_remediation_overlay_spec,
-                    inject_overlay_into_html,
-                )
-                agy_ov_dir = repo_root / ".agy" / "overlays"
-                if agy_ov_dir.is_dir() and not is_foreign_pytest:
-                    for agy_ov in sorted(agy_ov_dir.rglob("*.json")):
-                        try:
-                            raw_ov = json.loads(agy_ov.read_text(encoding="utf-8"))
-                            if not isinstance(raw_ov, dict):
-                                continue
-                            ov_s = str(raw_ov.get("slug") or agy_ov.stem)
-                            if RetroReflectionEngine._overlay_spec_needs_heal(ov_s, raw_ov):
-                                healed_ov = compile_remediation_overlay_spec(
-                                    {
-                                        "slug": ov_s,
-                                        "target_url": raw_ov.get("target_url") or f"{adapter.canonical_base}/tools/{ov_s}/",
-                                        "query": raw_ov.get("query") or ov_s.replace("-", " "),
-                                        "position": raw_ov.get("baseline_position", 12.0),
-                                        "impressions": raw_ov.get("baseline_impressions", 50),
-                                    },
-                                    tenant_id=adapter.property_id,
-                                )
-                                for preserve_key in (
-                                    "partner_offer",
-                                    "restricted_public_service",
-                                    "commercial_offers_allowed",
-                                    "locked_until",
-                                    "created_at",
-                                    "status",
-                                    "baseline_impressions",
-                                    "baseline_position",
-                                    "baseline_clicks",
-                                    "baseline_ctr",
-                                    "baseline_source",
-                                    "current_metrics",
-                                    "post_eval_metrics",
-                                    "grouped_queries",
-                                    "secondary_title_modifier",
-                                    "autonomous_citation_assertions",
-                                    "ai_mode_decision_matrix",
-                                    "conversion_slot_weights",
-                                    "early_regression_flagged",
-                                    "early_regression_at",
-                                    "early_regression_reason",
-                                    "current_position",
-                                    "position_delta",
-                                    "current_impressions",
-                                    "impressions_pct_delta",
-                                ):
-                                    if preserve_key in raw_ov:
-                                        healed_ov[preserve_key] = raw_ov[preserve_key]
-                                agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
-                        except Exception:
-                            pass
-                seen_ov_slugs = set()
-                for overlays_dir in (repo_root / ".agy" / "overlays", repo_root / "content" / "overlays"):
-                    if not overlays_dir.is_dir():
-                        continue
-                    for ov_file in sorted(overlays_dir.rglob("*.json")):
-                        ov_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix()
-                        if ov_slug in ("statutory-calculator", "index", "tools") or ov_slug in seen_ov_slugs:
+            if should_run_full_build or estate_needed_mutation:
+                try:
+                    repo_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
+                    from pseofactory.gsc_remediation import (
+                        compile_remediation_overlay_spec,
+                        inject_overlay_into_html,
+                    )
+                    agy_ov_dir = repo_root / ".agy" / "overlays"
+                    if agy_ov_dir.is_dir() and not is_foreign_pytest:
+                        for agy_ov in sorted(agy_ov_dir.rglob("*.json")):
+                            try:
+                                raw_ov = json.loads(agy_ov.read_text(encoding="utf-8"))
+                                if not isinstance(raw_ov, dict):
+                                    continue
+                                ov_s = str(raw_ov.get("slug") or agy_ov.stem)
+                                if RetroReflectionEngine._overlay_spec_needs_heal(ov_s, raw_ov):
+                                    healed_ov = compile_remediation_overlay_spec(
+                                        {
+                                            "slug": ov_s,
+                                            "target_url": raw_ov.get("target_url") or f"{adapter.canonical_base}/tools/{ov_s}/",
+                                            "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                                            "position": raw_ov.get("baseline_position", 12.0),
+                                            "impressions": raw_ov.get("baseline_impressions", 50),
+                                        },
+                                        tenant_id=adapter.property_id,
+                                    )
+                                    for preserve_key in (
+                                        "partner_offer",
+                                        "restricted_public_service",
+                                        "commercial_offers_allowed",
+                                        "locked_until",
+                                        "created_at",
+                                        "status",
+                                        "baseline_impressions",
+                                        "baseline_position",
+                                        "baseline_clicks",
+                                        "baseline_ctr",
+                                        "baseline_source",
+                                        "current_metrics",
+                                        "post_eval_metrics",
+                                        "grouped_queries",
+                                        "secondary_title_modifier",
+                                        "autonomous_citation_assertions",
+                                        "ai_mode_decision_matrix",
+                                        "conversion_slot_weights",
+                                        "early_regression_flagged",
+                                        "early_regression_at",
+                                        "early_regression_reason",
+                                        "current_position",
+                                        "position_delta",
+                                        "current_impressions",
+                                        "impressions_pct_delta",
+                                    ):
+                                        if preserve_key in raw_ov:
+                                            healed_ov[preserve_key] = raw_ov[preserve_key]
+                                    agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
+                            except Exception:
+                                pass
+                    seen_ov_slugs = set()
+                    for overlays_dir in (repo_root / ".agy" / "overlays", repo_root / "content" / "overlays"):
+                        if not overlays_dir.is_dir():
                             continue
-                        seen_ov_slugs.add(ov_slug)
-                        target_html = adapter.dist_dir / "tools" / ov_slug / "index.html"
-                        if not target_html.is_file():
-                            for p_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
-                                if ov_slug.startswith(f"{p_hub}-"):
-                                    leaf_s = ov_slug[len(p_hub) + 1:]
-                                    cand_html = adapter.dist_dir / "tools" / p_hub / leaf_s / "index.html"
-                                    if cand_html.is_file():
-                                        target_html = cand_html
-                                        break
-                            if not target_html.is_file() and adapter.property_id == "profithelm":
-                                cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / ov_slug / "index.html"
-                                if cand_veh.is_file():
-                                    target_html = cand_veh
-                        if target_html.is_file():
-                            ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                            if isinstance(ov_spec, dict):
-                                raw_h = target_html.read_text(encoding="utf-8")
-                                updated_h = inject_overlay_into_html(raw_h, ov_spec)
-                                if updated_h != raw_h:
-                                    target_html.write_text(updated_h, encoding="utf-8")
-            except Exception:
-                pass
+                        for ov_file in sorted(overlays_dir.rglob("*.json")):
+                            ov_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix()
+                            if ov_slug in ("statutory-calculator", "index", "tools") or ov_slug in seen_ov_slugs:
+                                continue
+                            seen_ov_slugs.add(ov_slug)
+                            target_html = adapter.dist_dir / "tools" / ov_slug / "index.html"
+                            if not target_html.is_file():
+                                for p_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                                    if ov_slug.startswith(f"{p_hub}-"):
+                                        leaf_s = ov_slug[len(p_hub) + 1:]
+                                        cand_html = adapter.dist_dir / "tools" / p_hub / leaf_s / "index.html"
+                                        if cand_html.is_file():
+                                            target_html = cand_html
+                                            break
+                                if not target_html.is_file() and adapter.property_id == "profithelm":
+                                    cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / ov_slug / "index.html"
+                                    if cand_veh.is_file():
+                                        target_html = cand_veh
+                            if target_html.is_file():
+                                ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
+                                if isinstance(ov_spec, dict):
+                                    raw_h = target_html.read_text(encoding="utf-8")
+                                    updated_h = inject_overlay_into_html(raw_h, ov_spec)
+                                    if updated_h != raw_h:
+                                        target_html.write_text(updated_h, encoding="utf-8")
+                except Exception:
+                    pass
 
-            # Always execute single-pass retro-reflection across existing dist inventory after overlays
-            try:
-                retro_res = RetroReflectionEngine.retrofit_estate(
-                    dist_dir=adapter.dist_dir,
-                    property_id=adapter.property_id,
-                    canonical_base=adapter.canonical_base,
-                )
-                retrofitted_count = int(retro_res.get("pages_retrofitted", 0))
-                if recompiled_count == 0:
-                    recompiled_count = max(retrofitted_count, len(drifted_records), 1)
-            except Exception as r_err:
-                if verbose:
-                    print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
+            # Always execute single-pass retro-reflection across existing dist inventory when full build or mutation is needed
+            if should_run_full_build or estate_needed_mutation:
+                try:
+                    retro_res = RetroReflectionEngine.retrofit_estate(
+                        dist_dir=adapter.dist_dir,
+                        property_id=adapter.property_id,
+                        canonical_base=adapter.canonical_base,
+                    )
+                    retrofitted_count = int(retro_res.get("pages_retrofitted", 0))
+                    if recompiled_count == 0:
+                        recompiled_count = max(retrofitted_count, len(drifted_records), 1)
+                except Exception as r_err:
+                    if verbose:
+                        print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
             # Final pass to ensure all HTML pages in dist_dir pass callout destination message match
+            if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
+                try:
+                    from pseofactory.affiliates import normalize_html_callout_message_match
+                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
+                        if html_f.name.startswith("."):
+                            continue
+                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
+                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
+                        if norm_c != raw_c:
+                            html_f.write_text(norm_c, encoding="utf-8")
+                except Exception:
+                    pass
+
+        if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
+            # Clear evaluator cache after rebuild/retrofit so verification reads fresh files
+            evaluator._audit_cache.clear()
+            evaluator._fingerprint_cache.clear()
             try:
-                from pseofactory.affiliates import normalize_html_callout_message_match
-                for html_f in sorted(adapter.dist_dir.rglob("*.html")):
-                    if html_f.name.startswith("."):
-                        continue
-                    raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
-                    norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
-                    if norm_c != raw_c:
-                        html_f.write_text(norm_c, encoding="utf-8")
+                Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
             except Exception:
                 pass
-
-        # Clear evaluator cache after rebuild/retrofit so verification reads fresh files
-        evaluator._audit_cache.clear()
-        evaluator._fingerprint_cache.clear()
-        try:
-            Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
-        except Exception:
-            pass
 
         will_run_downstream = bool(
             run_downstream
             and not is_foreign_pytest
-            and (recompiled_count > 0 or retrofitted_count > 0 or _has_pending_downstream_work(adapter))
+            and (
+                estate_needed_mutation
+                or retrofitted_count > 0
+                or _has_pending_downstream_work(adapter, ignore_git_dirty=defer_live_indexing)
+            )
         )
-        build_verified = (
-            evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
-            if ((recompiled_count > 0 or retrofitted_count > 0) and not will_run_downstream)
-            else report
-        )
+        if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
+            build_verified = (
+                evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+                if not will_run_downstream
+                else report
+            )
+        elif not has_structural_drift and drifted_records:
+            build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+        else:
+            build_verified = report
 
         # Execute autonomous downstream chain whenever assets recompiled/retrofitted or pending downstream work exists
         downstream_summary: Dict[str, Any] = {"status": "SKIPPED"}
@@ -8787,10 +8811,10 @@ def reflect_and_recompile_all_assets(
                             "dist_fingerprint": dist_fp_hasher.hexdigest(),
                             "total_assets": build_verified.total_assets_checked,
                         }
-                        (t_repo / "substrate_lock.json").write_text(
-                            json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
-                            encoding="utf-8",
-                        )
+                        lock_text = json.dumps(lock_payload, indent=2, sort_keys=True) + "\n"
+                        lock_path = t_repo / "substrate_lock.json"
+                        if not lock_path.is_file() or lock_path.read_text(encoding="utf-8") != lock_text:
+                            lock_path.write_text(lock_text, encoding="utf-8")
                     except Exception:
                         pass
 
@@ -8804,10 +8828,19 @@ def reflect_and_recompile_all_assets(
                     f_rep_data = json.loads(f_rep_path.read_text(encoding="utf-8"))
                     if f_rep_data.get("verdict") != "CERTIFIED_FRESH":
                         freshness_needs_refresh = True
+                    elif (
+                        isinstance(f_rep_data.get("merkle_drift"), dict)
+                        and f_rep_data["merkle_drift"].get("substrate_hash") != compute_engine_hash()
+                    ):
+                        freshness_needs_refresh = True
             except Exception:
                 freshness_needs_refresh = True
 
-        if (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh) and latch_state and build_verified.status == "PASS":
+        if (
+            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh or substrate_lock_stale or force)
+            and latch_state
+            and build_verified.status == "PASS"
+        ):
             try:
                 s_file = adapter.dist_dir.parent / ".agy" / "engine_hash.json"
                 l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
@@ -8916,10 +8949,10 @@ def reflect_and_recompile_all_assets(
                         try:
                             from prexvo.freshness import run_freshness_audit as run_prexvo_freshness_audit
                             px_rep = run_prexvo_freshness_audit(dist_dir=adapter.dist_dir)
-                            (adapter.dist_dir.parent / "freshness_audit_report.json").write_text(
-                                json.dumps(px_rep, indent=2) + "\n",
-                                encoding="utf-8",
-                            )
+                            px_rep_text = json.dumps(px_rep, indent=2) + "\n"
+                            px_rep_file = adapter.dist_dir.parent / "freshness_audit_report.json"
+                            if not px_rep_file.is_file() or px_rep_file.read_text(encoding="utf-8") != px_rep_text:
+                                px_rep_file.write_text(px_rep_text, encoding="utf-8")
                         except Exception:
                             pass
 

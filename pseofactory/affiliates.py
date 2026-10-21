@@ -4791,16 +4791,29 @@ def normalize_html_callout_message_match(
 
     gsc_inline_meta: Dict[str, str] = {}
     m_gsc_in = re.search(
-        r'<div\s+class=["\']calc-inline-cta["\'][^>]*data-gsc-repositioned=["\']true["\'][^>]*>',
+        r'<div\s+class=["\']calc-inline-cta["\'][^>]*data-gsc-(?:repositioned=["\'](?:true|false)["\']|tier=["\'][^"\']+["\'])[^>]*>',
         updated,
         flags=re.I,
     )
     if m_gsc_in:
         tag_str = m_gsc_in.group(0)
-        for attr_k in ("data-partner", "data-company-brand", "data-gsc-tier", "data-yield-score"):
+        for attr_k in (
+            "data-partner",
+            "data-company-brand",
+            "data-partner-tier",
+            "data-gsc-tier",
+            "data-gsc-repositioned",
+            "data-yield-score",
+        ):
             m_attr = re.search(rf'{attr_k}=["\']([^"\']+)["\']', tag_str, flags=re.I)
             if m_attr:
                 gsc_inline_meta[attr_k] = m_attr.group(1)
+    m_gsc_in_block = re.search(
+        r'\n?[ \t]*<div\s+class=["\']calc-inline-cta["\'][^>]*data-gsc-tier=["\'][^"\']+["\'][^>]*>\s*<div\s+class=["\']calc-inline-cta-copy["\'][^>]*>.*?</div>\s*<a\s+[^>]*>.*?</a>\s*</div>',
+        updated,
+        flags=re.S | re.I,
+    )
+    preserved_gsc_inline_block = m_gsc_in_block.group(0) if m_gsc_in_block else ""
 
     # Strip any prior idempotent inline calculator CTA and fold compaction style
     updated = re.sub(
@@ -5054,6 +5067,7 @@ def normalize_html_callout_message_match(
                 or 'data-commercial-offers="none"' in sec_html
                 or "ymyl-public-service-guardrail" in sec_html
                 or "/r/splash_financial" not in sec_html
+                or ("data-gsc-tier=" in sec_html and "data-partner-roster=" in sec_html)
             ):
                 return sec_html
             cards_html: List[str] = []
@@ -5312,20 +5326,35 @@ def normalize_html_callout_message_match(
         if gsc_inline_meta:
             gsc_t = html_lib.escape(gsc_inline_meta.get("data-gsc-tier", "baseline"))
             gsc_y = html_lib.escape(gsc_inline_meta.get("data-yield-score", "0"))
-            gsc_extra_attrs = f'data-gsc-repositioned="true" data-gsc-tier="{gsc_t}" data-yield-score="{gsc_y}" '
-        inline_cta_html = (
-            f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
-            f'data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" {gsc_extra_attrs}'
-            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
-            f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
-            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
-            f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
-            f'            </div>\n'
-            f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
-            f'              {safe_cta} &rarr;\n'
-            f'            </a>\n'
-            f'          </div>'
-        )
+            gsc_rep_val = html_lib.escape(gsc_inline_meta.get("data-gsc-repositioned", "true"))
+            gsc_extra_attrs = f'data-gsc-repositioned="{gsc_rep_val}" data-gsc-tier="{gsc_t}" data-yield-score="{gsc_y}" '
+        if (
+            preserved_gsc_inline_block
+            and gsc_inline_meta.get("data-partner") == primary_inline_pk
+            and not any(
+                f_tok in preserved_gsc_inline_block.lower()
+                for f_tok in FORBIDDEN_REPLACED_BRAND_TOKENS.get(primary_inline_pk, ())
+            )
+        ):
+            inline_cta_html = (
+                preserved_gsc_inline_block
+                if preserved_gsc_inline_block.startswith("\n")
+                else f"\n{preserved_gsc_inline_block}"
+            )
+        else:
+            inline_cta_html = (
+                f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
+                f'data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" {gsc_extra_attrs}'
+                f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
+                f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
+                f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
+                f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
+                f'            </div>\n'
+                f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
+                f'              {safe_cta} &rarr;\n'
+                f'            </a>\n'
+                f'          </div>'
+            )
         injected_inline = False
         for pat in (
             r'(<div\s+class=["\']card\s+result-card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
@@ -6724,17 +6753,22 @@ def run_gsc_affiliate_placement_feedback_pass(
                 gsc_metrics=slug_gsc,
                 engagement_metrics=engagement_metrics,
             )
+            if updated_html != raw_html:
+                try:
+                    updated_html = normalize_html_callout_message_match(updated_html, property_id=prop)
+                except Exception:
+                    pass
+                try:
+                    from pseofactory.maintenance import normalize_html_visual_primitives
+                    norm_h, _ = normalize_html_visual_primitives(updated_html, is_tenant_porcelain=True)
+                    if norm_h:
+                        updated_html = norm_h
+                except Exception:
+                    pass
             page_reports.append(rep)
             if rep.get("repositioned") or updated_html != raw_html:
                 repositioned_pages.append(rep)
                 if not dry_run and updated_html != raw_html:
-                    try:
-                        from pseofactory.maintenance import normalize_html_visual_primitives
-                        norm_h, _ = normalize_html_visual_primitives(updated_html, is_tenant_porcelain=True)
-                        if norm_h:
-                            updated_html = norm_h
-                    except Exception:
-                        pass
                     html_file.write_text(updated_html, encoding="utf-8")
                     pages_updated += 1
 
@@ -6753,8 +6787,9 @@ def run_gsc_affiliate_placement_feedback_pass(
 
     if not dry_run and r_root.is_dir():
         ledger_path = r_root / ".agy" / "gsc_affiliate_placement_ledger.json"
-        ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        if pages_updated > 0 or not ledger_path.is_file():
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     return summary
 
