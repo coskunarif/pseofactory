@@ -8534,6 +8534,7 @@ def reflect_and_recompile_all_assets(
         drifted_records = list(report.drifted_assets)
         recompiled_count = 0
         retrofitted_count = 0
+        should_run_full_build = False
 
         has_structural_drift = any(
             any(

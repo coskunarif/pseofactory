@@ -404,4 +404,50 @@ def test_overlay_injection_and_callout_normalization_idempotency():
     assert normalized_twice == normalized_once
 
 
+def test_reflect_zero_drift_fastpath_does_not_raise_unbound_local(tmp_path, monkeypatch):
+    """Verifies reflect_and_recompile_all_assets succeeds when force=False and zero assets are drifted."""
+    from types import SimpleNamespace
+    import pseofactory.maintenance as maint_mod
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    mock_adapter = SimpleNamespace(
+        property_id="prexvo",
+        canonical_base="https://prexvo.com",
+        dist_dir=dist_dir,
+        repo_path=None,
+        tools=[],
+    )
+    mock_report = SimpleNamespace(
+        property_id="prexvo",
+        status="PASS",
+        total_assets_checked=10,
+        compliant_assets=10,
+        compliant_assets_count=10,
+        drifted_assets=[],
+        to_dict=lambda: {"property_id": "prexvo", "status": "PASS", "total_assets_checked": 10, "compliant_assets": 10, "drifted_assets": []},
+    )
+    mock_registry = SimpleNamespace(
+        list_adapters=lambda: {"prexvo": mock_adapter},
+    )
+    monkeypatch.setattr(
+        maint_mod.AssetIntegrityEvaluator,
+        "audit_all",
+        lambda self, adapter: mock_report,
+    )
+    res = maint_mod.reflect_and_recompile_all_assets(
+        properties=["prexvo"],
+        registry=mock_registry,
+        force=False,
+        latch_state=False,
+        run_downstream=False,
+        defer_live_indexing=True,
+    )
+    assert res["status"] == "PASS"
+    assert res["total_drifted"] == 0
+    assert res["total_recompiled"] == 0
+
+
+
 
