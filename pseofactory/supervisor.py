@@ -896,7 +896,11 @@ class AutonomousLifecycleSupervisor:
             }
 
         if not force and not drift_detected:
-            from pseofactory.maintenance import AssetIntegrityEvaluator, RefactorCascadeEngine
+            from pseofactory.maintenance import (
+                AssetIntegrityEvaluator,
+                RefactorCascadeEngine,
+                RetroReflectionEngine,
+            )
             evaluator = AssetIntegrityEvaluator()
             cascade_engine = RefactorCascadeEngine(evaluator=evaluator)
             any_drift = False
@@ -905,6 +909,14 @@ class AutonomousLifecycleSupervisor:
                 if rep.drifted_assets_count > 0:
                     any_drift = True
                     break
+                if getattr(a, "dist_dir", None) and Path(a.dist_dir).is_dir():
+                    try:
+                        retro_rep = RetroReflectionEngine.audit_estate(a.dist_dir, pid)
+                        if int(retro_rep.get("stale_count", 0)) > 0:
+                            any_drift = True
+                            break
+                    except Exception:
+                        pass
                 if (
                     not dry_run
                     and enable_gitops
@@ -917,6 +929,19 @@ class AutonomousLifecycleSupervisor:
                         and t_repo.name in ("profithelm-platform", "prexvo")
                         and (t_repo / ".git").exists()
                     ):
+                        lock_f = t_repo / "substrate_lock.json"
+                        if lock_f.is_file():
+                            try:
+                                l_data = json.loads(lock_f.read_text(encoding="utf-8"))
+                                if (
+                                    l_data.get("engine_hash") != current_engine_hash
+                                    or l_data.get("substrate_hash") != current_engine_hash
+                                ):
+                                    any_drift = True
+                                    break
+                            except Exception:
+                                any_drift = True
+                                break
                         st_chk = subprocess.run(
                             ["git", "-C", str(t_repo), "status", "--porcelain"],
                             capture_output=True,

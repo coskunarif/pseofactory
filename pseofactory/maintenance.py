@@ -2426,6 +2426,14 @@ class AssetIntegrityEvaluator:
                     reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
                 details.extend([f"Visual/UX contract violation: {vi}" for vi in visual_issues])
 
+            if (
+                RetroReflectionEngine.is_tool_or_calculator_page(p, adapter.dist_dir, content)
+                and _needs_page_structure_geo_normalization(content)
+            ):
+                if DriftReason.STRUCTURAL_CONTRACT_VIOLATION not in reasons:
+                    reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
+                details.append("Visual/UX contract violation: Page structure GEO normalization required (quick-answer / meta description / semantic density)")
+
         # 7. JSON-LD Schemas (HTML)
         if p.suffix == ".html" and '<script type="application/ld+json"' in content:
             try:
@@ -2554,6 +2562,20 @@ class AssetIntegrityEvaluator:
             if s_file is not None and (state_file is not None or s_file.exists()):
                 drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
+            if not engine_drifted and getattr(adapter, "repo_path", None) and state_file is None:
+                t_repo = Path(adapter.repo_path)
+                lock_file = t_repo / "substrate_lock.json"
+                if lock_file.is_file():
+                    try:
+                        lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+                        expected_eng = compute_engine_hash(base_dirs=b_dirs)
+                        if (
+                            lock_data.get("engine_hash") != expected_eng
+                            or lock_data.get("substrate_hash") != expected_eng
+                        ):
+                            engine_drifted = True
+                    except Exception:
+                        engine_drifted = True
 
         resolved_dist_str = str(adapter.dist_dir.resolve()) if adapter.dist_dir else ""
         use_disk_eval_cache = (
@@ -3186,7 +3208,7 @@ class RefactorCascadeEngine:
                 # 2b. Reapply active GSC remediation overlay if present (or roll back DEGRADED_ROLLED_BACK overlay)
                 self._reapply_active_overlay(slug, target_path, adapter)
 
-                # 2c. Self-heal visual/UX primitives if HTML asset still has visual/UX contract issues
+                # 2c. Self-heal visual/UX primitives & page structure GEO normalization after overlay injection
                 if target_path.is_file() and target_path.suffix == ".html":
                     from pseofactory.visual_primitives import (
                         detect_visual_and_ux_contract_issues,
@@ -3194,8 +3216,14 @@ class RefactorCascadeEngine:
                     )
 
                     raw_html = target_path.read_text(encoding="utf-8", errors="ignore")
-                    if detect_visual_and_ux_contract_issues(raw_html, rel_path=target_path.name):
-                        if RetroReflectionEngine.is_tool_or_calculator_page(target_path, adapter.dist_dir, raw_html):
+                    is_tool_page = RetroReflectionEngine.is_tool_or_calculator_page(
+                        target_path, adapter.dist_dir, raw_html
+                    )
+                    if (
+                        detect_visual_and_ux_contract_issues(raw_html, rel_path=target_path.name)
+                        or (is_tool_page and _needs_page_structure_geo_normalization(raw_html))
+                    ):
+                        if is_tool_page:
                             retro_html, _ = RetroReflectionEngine.retrofit_html(
                                 raw_html,
                                 property_id=adapter.property_id,
@@ -3208,6 +3236,14 @@ class RefactorCascadeEngine:
                         norm_html, _ = normalize_html_visual_primitives(raw_html)
                         if norm_html != raw_html:
                             target_path.write_text(norm_html, encoding="utf-8")
+                            raw_html = norm_html
+                    try:
+                        from pseofactory.affiliates import normalize_html_callout_message_match
+                        callout_html = normalize_html_callout_message_match(raw_html, property_id=adapter.property_id)
+                        if callout_html != raw_html:
+                            target_path.write_text(callout_html, encoding="utf-8")
+                    except Exception:
+                        pass
 
                 # 3. Fail-Closed Verification Gate
                 audit_record = self.evaluator.audit_asset(target_path, adapter)
@@ -3404,6 +3440,26 @@ class RefactorCascadeEngine:
             for rec in actionable_records:
                 if rec.slug is not None and Path(rec.asset_path).resolve().is_file():
                     self._reapply_active_overlay(rec.slug, Path(rec.asset_path).resolve(), adapter)
+
+            if build_ok:
+                try:
+                    RetroReflectionEngine.retrofit_estate(
+                        dist_dir=adapter.dist_dir,
+                        property_id=adapter.property_id,
+                        canonical_base=adapter.canonical_base,
+                    )
+                    from pseofactory.affiliates import normalize_html_callout_message_match
+                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
+                        if html_f.name.startswith("."):
+                            continue
+                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
+                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
+                        if norm_c != raw_c:
+                            html_f.write_text(norm_c, encoding="utf-8")
+                except Exception:
+                    pass
+                self.evaluator._audit_cache.clear()
+                self.evaluator._fingerprint_cache.clear()
 
             post_audit_map = {
                 str(Path(rec.asset_path).resolve()): self.evaluator.audit_asset(Path(rec.asset_path).resolve(), adapter)
@@ -8510,8 +8566,27 @@ def reflect_and_recompile_all_assets(
             "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
             and scanner.workspace_root == Path("/home/ubuntuadmin/projects").resolve()
         )
+        substrate_lock_stale = False
+        if getattr(adapter, "repo_path", None) and not is_unmerged_worktree:
+            t_repo = Path(adapter.repo_path)
+            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                lock_file = t_repo / "substrate_lock.json"
+                if not lock_file.is_file():
+                    substrate_lock_stale = True
+                else:
+                    try:
+                        cur_sub_hash = compute_engine_hash()
+                        lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+                        if (
+                            lock_data.get("engine_hash") != cur_sub_hash
+                            or lock_data.get("substrate_hash") != cur_sub_hash
+                            or lock_data.get("total_assets") != build_verified.total_assets_checked
+                        ):
+                            substrate_lock_stale = True
+                    except Exception:
+                        substrate_lock_stale = True
         if (
-            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed)
+            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or force or substrate_lock_stale)
             and build_verified.status == "PASS"
             and not is_unmerged_worktree
         ):

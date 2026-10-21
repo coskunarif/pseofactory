@@ -2773,6 +2773,68 @@ def reconcile_workspace_tracking_state(
             except Exception:
                 pass
 
+    # 1b. Reconcile FIFO staging queues in .agy/queue/*_queue.json (prune test leaks and reconcile stale PROCESSING/CONFLICT_BLOCKED items)
+    eff_staging_queue_dir = eff_queues_dir.parent / "queue"
+    if eff_staging_queue_dir.is_dir() and not in_test:
+        canonical_staging_slugs = {
+            "pseofactory",
+            "profithelm-platform",
+            "prexvo",
+            "MindBall",
+            "ai-field-service-dispatcher",
+            "x-likes-explorer",
+            "social",
+        }
+        for sq_file in list(eff_staging_queue_dir.glob("*_queue.json")):
+            slug = sq_file.name[: -len("_queue.json")]
+            if slug not in canonical_staging_slugs:
+                try:
+                    sq_file.unlink(missing_ok=True)
+                    pruned_queue_files += 1
+                except Exception:
+                    pass
+                continue
+            try:
+                sq_data = json.loads(sq_file.read_text(encoding="utf-8"))
+                if not isinstance(sq_data, dict) or not isinstance(sq_data.get("items"), list):
+                    continue
+                repo_p_str = str(sq_data.get("repo_path") or (Path("/home/ubuntuadmin/projects") / slug))
+                repo_p = Path(repo_p_str)
+                sq_modified = False
+                now_ts = datetime.now(timezone.utc).isoformat()
+                for item in sq_data["items"]:
+                    if not isinstance(item, dict):
+                        continue
+                    item_status = str(item.get("status") or "")
+                    if item_status in ("PROCESSING", "REBASING", "CONFLICT_BLOCKED", "ENQUEUED"):
+                        r_id = str(item.get("run_id") or "")
+                        br_name = str(item.get("branch") or f"agy-wt-{r_id}")
+                        wt_dir = eff_queues_dir.parent / "worktrees" / r_id
+                        has_wt = wt_dir.is_dir()
+                        has_branch = False
+                        if (repo_p / ".git").exists():
+                            br_chk = subprocess.run(
+                                ["git", "-C", str(repo_p), "show-ref", "--verify", "--quiet", f"refs/heads/{br_name}"],
+                                capture_output=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            has_branch = (br_chk.returncode == 0)
+                        if not has_wt and not has_branch:
+                            item["prior_status"] = item_status
+                            item["status"] = "COMPLETED"
+                            item["error"] = None
+                            item["updated_at"] = now_ts
+                            item.setdefault("completed_at", now_ts)
+                            sq_modified = True
+                            reconciled_wal_events += 1
+                if sq_modified:
+                    tmp_sq = sq_file.with_suffix(".tmp")
+                    tmp_sq.write_text(json.dumps(sq_data, indent=2), encoding="utf-8")
+                    tmp_sq.replace(sq_file)
+            except Exception:
+                pass
+
     # 2. Prune test-contaminated tokens from idempotency ledger
     if eff_ledger_path.exists():
         ledger = IdempotencyLedger(ledger_path=eff_ledger_path)

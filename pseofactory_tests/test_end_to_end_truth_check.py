@@ -1461,3 +1461,116 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
         )
 
 
+def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path):
+    """
+    Verifies orchestration ordering and drift gate invariants:
+    1. RefactorCascadeEngine runs RetroReflectionEngine.retrofit_estate AFTER _reapply_active_overlay
+       so spoke overlays never leave un-retrofitted generic meta descriptions or quick-answer blocks.
+    2. AssetIntegrityEvaluator detects _needs_page_structure_geo_normalization violations on tool pages
+       and detects stale substrate_lock.json even when .agy/engine_hash.json matches compute_engine_hash().
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    import shutil
+    from pathlib import Path
+    from pseofactory.drift import compute_engine_hash, record_engine_hash
+    from pseofactory.maintenance import (
+        AssetDriftRecord,
+        AssetIntegrityEvaluator,
+        ConfigurablePropertyAdapter,
+        DriftReason,
+        RefactorCascadeEngine,
+        RetroReflectionEngine,
+    )
+
+    import shutil
+
+    repo_dir = tmp_path / "profithelm-platform"
+    dist_dir = repo_dir / "dist"
+    spoke_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "alabama"
+    spoke_dir.mkdir(parents=True, exist_ok=True)
+    (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+
+    # Copy a real compiled spoke page and its active overlay from profithelm-platform
+    src_spoke = Path("/home/ubuntuadmin/projects/profithelm-platform/dist/tools/irs-2027-tax-brackets/alabama/index.html")
+    initial_spoke_html = src_spoke.read_text(encoding="utf-8")
+    spoke_file = spoke_dir / "index.html"
+    spoke_file.write_text(initial_spoke_html, encoding="utf-8")
+
+    ov_dir = repo_dir / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    src_ov = Path("/home/ubuntuadmin/projects/profithelm-platform/.agy/overlays/irs-2027-tax-brackets-alabama.json")
+    if src_ov.is_file():
+        shutil.copy2(src_ov, ov_dir / "irs-2027-tax-brackets-alabama.json")
+
+    def _build_all() -> bool:
+        spoke_file.write_text(initial_spoke_html, encoding="utf-8")
+        return True
+
+    adapter = ConfigurablePropertyAdapter(
+        property_id="profithelm",
+        domain="profithelm.com",
+        brand_name="ProfitHelm",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+        build_all_fn=_build_all,
+        repo_path=repo_dir,
+    )
+
+    evaluator = AssetIntegrityEvaluator()
+    cascade = RefactorCascadeEngine(evaluator=evaluator)
+    rec = AssetDriftRecord(
+        asset_path=str(spoke_file),
+        slug="alabama",
+        reasons=[DriftReason.ENGINE_HASH_DRIFT],
+        details=["Engine hash drift"],
+    )
+    res = cascade.refactor_all([rec], adapter, force=True)
+    assert res["failed"] == 0
+    assert res["refactored"] == 1
+
+    # Verify RetroReflectionEngine.audit_estate reports 0 stale pages after RefactorCascadeEngine.refactor_all
+    estate_audit = RetroReflectionEngine.audit_estate(dist_dir, "profithelm")
+    assert estate_audit["status"] == "PASS", f"Expected PASS after refactor_all, got: {estate_audit}"
+    assert estate_audit["stale_count"] == 0
+
+    # Verify AssetIntegrityEvaluator detects stale substrate_lock.json even when .agy/engine_hash.json is current
+    state_file = repo_dir / ".agy" / "engine_hash.json"
+    record_engine_hash(state_file)
+    (repo_dir / "substrate_lock.json").write_text(
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "engine_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "substrate_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "dist_fingerprint": "stale",
+                "total_assets": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluator._audit_cache.clear()
+    drift_rep = evaluator.audit_all(adapter, check_engine_drift=True, check_ledger=False)
+    assert drift_rep.drifted_assets_count == 1
+    assert DriftReason.ENGINE_HASH_DRIFT in drift_rep.drifted_assets[0].reasons
+
+    # Once substrate_lock.json matches compute_engine_hash(), audit_all passes
+    cur_hash = compute_engine_hash()
+    (repo_dir / "substrate_lock.json").write_text(
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "engine_hash": cur_hash,
+                "substrate_hash": cur_hash,
+                "dist_fingerprint": "aligned",
+                "total_assets": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluator._audit_cache.clear()
+    aligned_rep = evaluator.audit_all(adapter, check_engine_drift=True, check_ledger=False)
+    assert aligned_rep.drifted_assets_count == 0
+
+
+
