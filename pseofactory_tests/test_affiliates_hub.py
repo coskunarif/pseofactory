@@ -1536,5 +1536,158 @@ def test_contract_and_verifier_assertions_enforce_partner_roster_and_compliance(
     assert estate_audit["commercial_pages"] == 1
 
 
+def test_all_five_partnership_models_and_greenfield_vertical_compiler_routing():
+    """
+    Verifies:
+      1. All 5 canonical partnership structures (`RECURRING_SAAS_REVSHARE`, `CPA_BOUNTY`,
+         `QUALIFIED_LEAD_CPL`, `HYBRID_CPA_REVSHARE`, `USAGE_API_REFERRAL`) are supported
+         across `PROFITHELM_AFFILIATES`, `PREXVO_AFFILIATES`, `PARTNER_PARTNERSHIP_MODEL_SPECS`,
+         and `GREENFIELD_VERTICAL_CATALOG`.
+      2. Zero `"fica"` substring false positives on `"notification"`, `"certification"`, or
+         `"certificate"` slugs, plus exact vertical classification across all 23 vertical
+         families (including `b2b_cyber_compliance`, `commercial_solar_energy`,
+         `construction_contractor_finance`, `medical_practice_capex`,
+         `payment_processing_api_usage`, `commercial_working_capital_factoring`, and
+         `surety_bond_compliance`).
+      3. Greenfield pages compiled via `compile_high_effort_page` bind their vertical's
+         primary partner (never falling back to `turbotax` on non-tax topics) and stamp
+         `data-partnership-model` and `data-partner-models` in the rendered HTML.
+    """
+    from pseofactory.affiliates import (
+        CANONICAL_PARTNERSHIP_MODELS,
+        VERTICAL_DIVERSIFIED_PARTNER_ROSTERS,
+        audit_partnership_model_coverage,
+        bind_asset_partner_roster,
+        classify_asset_archetype_and_intent,
+    )
+    from pseofactory.compiler import compile_high_effort_page
+    from pseofactory.market_intel import GREENFIELD_VERTICAL_CATALOG
+
+    # 1. Verify all 5 canonical partnership models are supported in registry & audit
+    cov = audit_partnership_model_coverage()
+    assert cov["status"] == "PASS"
+    assert cov["all_5_models_supported"] is True
+    assert set(cov["canonical_partnership_models"]) == {
+        "RECURRING_SAAS_REVSHARE",
+        "CPA_BOUNTY",
+        "QUALIFIED_LEAD_CPL",
+        "HYBRID_CPA_REVSHARE",
+        "USAGE_API_REFERRAL",
+    }
+    for model_name in CANONICAL_PARTNERSHIP_MODELS:
+        assert len(cov["models_to_partners"][model_name]) >= 2, f"Missing partners for {model_name}"
+
+    # Verify GREENFIELD_VERTICAL_CATALOG represents all 5 partnership models
+    gf_models = {
+        offer.commission_type
+        for v in GREENFIELD_VERTICAL_CATALOG.values()
+        for offer in v["commission_offers"]
+    }
+    assert "QUALIFIED_LEAD" in gf_models
+    assert "CPA_BOUNTY" in gf_models
+    assert "HYBRID_CPA_REVSHARE" in gf_models
+    assert "RECURRING_SAAS_REVSHARE" in gf_models
+    assert "USAGE_API_REFERRAL" in gf_models
+
+    # 2. Verify zero "fica" substring false positives and exact classification across new verticals
+    hipaa_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "hipaa-breach-notification-civil-money-penalty-tier-calculator",
+        "hipaa breach notification civil money penalty tier calculator",
+    )
+    assert hipaa_cls["vertical_family"] == "b2b_cyber_compliance"
+
+    iso_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "iso-27001-certification-audit-cost-and-stage-2-calculator",
+        "iso 27001 certification audit cost stage 2 calculator",
+    )
+    assert iso_cls["vertical_family"] == "b2b_cyber_compliance"
+
+    srec_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "srec-solar-renewable-energy-certificate-revenue-calculator-by-state",
+        "srec solar renewable energy certificate calculator by state",
+    )
+    assert srec_cls["vertical_family"] == "commercial_solar_energy"
+
+    factoring_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "freight-factoring-invoice-advance-fee-calculator",
+        "freight factoring invoice advance fee calculator",
+    )
+    assert factoring_cls["vertical_family"] == "commercial_working_capital_factoring"
+
+    erisa_bond_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "erisa-fidelity-bond-coverage-amount-calculator",
+        "erisa fidelity bond coverage amount calculator",
+    )
+    assert erisa_bond_cls["vertical_family"] == "surety_bond_compliance"
+
+    lien_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "contractor-lien-release-statutory-matrix-by-state",
+        "contractor lien release statutory matrix by state",
+    )
+    assert lien_cls["vertical_family"] == "construction_contractor_finance"
+
+    wrvu_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "cms-physician-fee-schedule-wrvu-conversion-factor-calculator",
+        "cms physician fee schedule wrvu conversion factor calculator",
+    )
+    assert wrvu_cls["vertical_family"] == "medical_practice_capex"
+
+    api_cls = classify_asset_archetype_and_intent(
+        "profithelm",
+        "commercial-payment-processing-interchange-plus-fee-calculator",
+        "commercial payment processing interchange plus fee calculator",
+    )
+    assert api_cls["vertical_family"] == "payment_processing_api_usage"
+
+    assert len(VERTICAL_DIVERSIFIED_PARTNER_ROSTERS) >= 23
+
+    # 3. Verify greenfield compilation binds vertical-appropriate primary partner (not turbotax)
+    # and stamps data-partnership-model and data-partner-models in DOM
+    soc2_page = compile_high_effort_page(
+        {
+            "query": "soc 2 type 2 audit cost estimator calculator",
+            "slug": "soc-2-type-2-audit-cost-estimator-by-employee-headcount",
+            "tenant": "profithelm",
+            "statutory_authority": "32 CFR Part 170 & AICPA SSAE 18 Trust Services Criteria",
+            "economic_dataset": "BLS Occupational Employment Series",
+            "model_name": "SOC 2 Type II Audit Cost Estimator",
+            "formula": "base_cpa_fee + pentest_fee + platform_cost",
+            "inputs": {"base_cpa_fee": 22000, "pentest_fee": 9500, "platform_cost": 12000},
+            "published_output": 43500.0,
+            "sample_calculation": "22,000 CPA audit + 9,500 pentest + 12,000 automation platform = 43,500 total cost",
+            "canonical_base": "https://profithelm.com",
+        }
+    )
+    assert soc2_page["affiliate_route"]["partner_key"] == "rippling"
+    assert soc2_page["affiliate_route"]["partnership_model"] == "HYBRID_CPA_REVSHARE"
+    assert 'data-partner="rippling"' in soc2_page["html"]
+    assert 'data-partnership-model="HYBRID_CPA_REVSHARE"' in soc2_page["html"]
+    assert "data-partner-models=" in soc2_page["html"]
+
+    # Also verify all 5 partnership models can lead a roster across verticals
+    observed_primary_models = {
+        bind_asset_partner_roster("profithelm", "crypto-tax-calculator")["primary_partnership_model"],
+        bind_asset_partner_roster("profithelm", "saas-runway-calculator")["primary_partnership_model"],
+        bind_asset_partner_roster("profithelm", "section-1031-calculator")["primary_partnership_model"],
+        bind_asset_partner_roster("profithelm", "section-179-calculator")["primary_partnership_model"],
+        bind_asset_partner_roster("profithelm", "prediction-market-kalshi-fees")["primary_partnership_model"],
+    }
+    assert observed_primary_models == {
+        "RECURRING_SAAS_REVSHARE",
+        "CPA_BOUNTY",
+        "QUALIFIED_LEAD_CPL",
+        "HYBRID_CPA_REVSHARE",
+        "USAGE_API_REFERRAL",
+    }
+
+
+
 
 

@@ -583,11 +583,13 @@ def _render_compiler_monetization_and_guardrail_html(
             in_name = html_lib.escape(str(inline_offer.get("name") or pk_in))
             in_cta = html_lib.escape(str(inline_offer.get("cta_text") or "Explore Partner"))
             in_brand = html_lib.escape(str(inline_offer.get("company_brand") or pk_in))
+            in_model = html_lib.escape(str(inline_offer.get("partnership_model") or "CPA_BOUNTY"))
             in_href = html_lib.escape(str(inline_offer.get("attributed_href") or f"/r/{pk_in}"))
             in_sub = html_lib.escape(str(inline_offer.get("subid") or f"{slug_id}_inline"))
             inline_html = (
                 f'\n        <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{pk_in}" data-company-brand="{in_brand}" data-partner-tier="primary" '
+                f'data-partnership-model="{in_model}" '
                 f'data-cta-slot="calculator_result_inline" '
                 f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-top: 12px; background: var(--bg-elevated); border: 1px solid var(--border-strong); border-left: 4px solid var(--accent); border-radius: 8px;">\n'
                 f'          <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
@@ -596,6 +598,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'          </div>\n'
                 f'          <a href="{in_href}" rel="noopener sponsored nofollow" target="_blank" '
                 f'data-partner="{pk_in}" data-company-brand="{in_brand}" data-partner-tier="primary" '
+                f'data-partnership-model="{in_model}" '
                 f'data-tool="{html_lib.escape(slug_id)}" data-subid="{in_sub}" data-status="live" '
                 f'data-cta-slot="calculator_result_inline" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none; white-space: nowrap;">{in_cta}</a>\n'
@@ -607,16 +610,19 @@ def _render_compiler_monetization_and_guardrail_html(
             tb_cta = html_lib.escape(str(table_offer.get("cta_text") or "Compare Partner"))
             tb_brand = html_lib.escape(str(table_offer.get("company_brand") or pk_tb))
             tb_role = html_lib.escape(str(table_offer.get("tier_role") or "secondary"))
+            tb_model = html_lib.escape(str(table_offer.get("partnership_model") or "CPA_BOUNTY"))
             tb_href = html_lib.escape(str(table_offer.get("attributed_href") or f"/r/{pk_tb}"))
             tb_sub = html_lib.escape(str(table_offer.get("subid") or f"{slug_id}_table"))
             table_html = (
                 f'    <div class="comparison-table-cta-bar card pseo-card" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{pk_tb}" data-company-brand="{tb_brand}" data-partner-tier="{tb_role}" '
+                f'data-partnership-model="{tb_model}" '
                 f'data-cta-slot="comparison_table_cta" '
                 f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; margin-bottom: 24px;">\n'
                 f'      <span style="font-size: 14px; font-weight: 600; color: var(--text);">Scenario Execution Partner: <strong>{tb_name}</strong> ({tb_brand})</span>\n'
                 f'      <a href="{tb_href}" rel="noopener sponsored nofollow" target="_blank" '
                 f'data-partner="{pk_tb}" data-company-brand="{tb_brand}" data-partner-tier="{tb_role}" '
+                f'data-partnership-model="{tb_model}" '
                 f'data-tool="{html_lib.escape(slug_id)}" data-subid="{tb_sub}" data-status="live" '
                 f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{tb_cta}</a>\n'
@@ -637,12 +643,13 @@ def _render_compiler_monetization_and_guardrail_html(
             c_cta = html_lib.escape(str(card_offer.get("cta_text") or "Explore Partner"))
             c_brand = html_lib.escape(str(card_offer.get("company_brand") or c_pk))
             c_role = html_lib.escape(str(card_offer.get("tier_role") or ("primary" if idx == 1 else "secondary")))
+            c_model = html_lib.escape(str(card_offer.get("partnership_model") or "CPA_BOUNTY"))
             c_slot = html_lib.escape(str(card_offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card")))
             c_href = html_lib.escape(str(card_offer.get("attributed_href") or f"/r/{c_pk}"))
             c_sub = html_lib.escape(str(card_offer.get("subid") or f"{slug_id}_card_{idx}"))
             card_items.append(
                 f'        <div class="affiliate-card partner-card" data-partner="{c_pk}" '
-                f'data-company-brand="{c_brand}" data-partner-tier="{c_role}" '
+                f'data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}" '
                 f'style="padding: 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">\n'
                 f'          <div class="affiliate-info">\n'
                 f'            <span class="affiliate-badge" style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent);">{c_badge} ({c_role.title()})</span>\n'
@@ -653,6 +660,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'          <div>\n'
                 f'            <a href="{c_href}" rel="noopener sponsored nofollow" target="_blank" '
                 f'data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" '
+                f'data-partnership-model="{c_model}" '
                 f'data-tool="{html_lib.escape(slug_id)}" data-subid="{c_sub}" data-status="live" '
                 f'data-cta-slot="{c_slot}" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none; font-size: 14px;">{c_cta}</a>\n'
@@ -673,8 +681,19 @@ def _render_compiler_monetization_and_guardrail_html(
             route = get_affiliate_route("profithelm", "section-179-deduction-calculator", partner_key="crest_capital")
 
         primary_offer = roster_info.get("primary_offer") or {}
-        if gsc_metrics and slot_plan.get("gsc_repositioned") and primary_offer.get("partner_key"):
+        is_greenfield_vertical_mismatch = (
+            route.get("partner_key") == "turbotax"
+            and roster_info.get("vertical_family") not in ("federal_state_tax_brackets", "sales_tax_1099_nexus")
+        )
+        if primary_offer.get("partner_key") and (
+            (gsc_metrics and slot_plan.get("gsc_repositioned"))
+            or is_greenfield_vertical_mismatch
+        ):
             partner_key = str(primary_offer["partner_key"])
+            try:
+                route = get_affiliate_route("profithelm", slug, partner_key=partner_key)
+            except ValueError:
+                pass
             partner_name = str(primary_offer.get("name") or route.get("partner_name", "Xendoo"))
             cta_text = str(primary_offer.get("cta_text") or route.get("cta_text", "Explore Partner"))
             raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.xendoo.com/"))
@@ -694,19 +713,22 @@ def _render_compiler_monetization_and_guardrail_html(
         ftc_disc = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
         roster_keys_csv = html_lib.escape(",".join(roster_info.get("roster_keys") or []))
         companies_csv = html_lib.escape(",".join(roster_info.get("distinct_companies") or []))
+        models_csv = html_lib.escape(",".join(roster_info.get("partnership_models_represented") or []))
+        primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
 
         block_html = (
             f'    <section class="affiliate-cta-section affiliates-section card pseo-card" data-property="profithelm" '
-            f'data-partner="{partner_key}" data-partner-roster="{roster_keys_csv}" '
+            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" '
+            f'data-partner-models="{models_csv}" data-partner-roster="{roster_keys_csv}" '
             f'data-partner-companies="{companies_csv}" data-conversion-slot="{html_lib.escape(str(slot_plan.get("primary_slot") or "calculator_result_inline"))}" '
             f'data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Verified Commercial Execution Partner: {partner_name}</h2>\n'
             f'      <p>Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:</p>\n'
             f'      <p style="margin-top: 12px;">\n'
             f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
-            f'data-partner="{partner_key}" data-cta-slot="standalone_primary_cta" '
+            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" data-cta-slot="standalone_primary_cta" '
             f'class="affiliate-cta-link touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
@@ -772,12 +794,15 @@ def _render_compiler_monetization_and_guardrail_html(
         ftc_disc = PREXVO_DISCLOSURES.get("ftc_disclosure", "")
         roster_keys_csv = html_lib.escape(",".join(roster_info.get("roster_keys") or []))
         companies_csv = html_lib.escape(",".join(roster_info.get("distinct_companies") or []))
+        models_csv = html_lib.escape(",".join(roster_info.get("partnership_models_represented") or []))
+        primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "CPA_BOUNTY"))
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
 
         block_html = (
             f'    <section class="affiliate-cta-section refinance-partner-section ymyl-refinance-guardrail card pseo-card" data-property="prexvo" '
-            f'data-partner="{partner_key}" data-partner-roster="{roster_keys_csv}" '
+            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" '
+            f'data-partner-models="{models_csv}" data-partner-roster="{roster_keys_csv}" '
             f'data-partner-companies="{companies_csv}" data-commercial-offers="compliant-refinance" '
             f'data-restricted-public-service="false" data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Private Student Loan Refinance Comparison: {partner_name}</h2>\n'
@@ -786,7 +811,7 @@ def _render_compiler_monetization_and_guardrail_html(
             f'      </p>\n'
             f'      <p style="margin-top: 12px;">\n'
             f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
-            f'data-partner="{partner_key}" data-cta-slot="standalone_primary_cta" '
+            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" data-cta-slot="standalone_primary_cta" '
             f'class="affiliate-cta-link touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '

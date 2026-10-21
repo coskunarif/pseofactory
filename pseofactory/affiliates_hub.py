@@ -52,11 +52,16 @@ from pseofactory.affiliates import (
     audit_callout_destination_message_match,
     COMPANY_BRAND_BY_PARTNER_KEY,
     VERTICAL_DIVERSIFIED_PARTNER_ROSTERS,
+    CANONICAL_PARTNERSHIP_MODELS,
+    PARTNER_PARTNERSHIP_MODEL_SPECS,
+    resolve_partnership_model_spec,
+    score_partnership_model_intent_fit,
     classify_asset_archetype_and_intent,
     select_conversion_slot_plan,
     bind_asset_partner_roster,
     reposition_affiliate_placements_from_gsc_signals,
     run_gsc_affiliate_placement_feedback_pass,
+    audit_partnership_model_coverage,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -1426,6 +1431,17 @@ class MonetizationHub:
             vault_overrides=self.vault_data,
             min_companies=min_companies,
         )
+
+    def audit_partnership_models(
+        self,
+        property_id: Optional[str] = None,
+        dist_dir: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Audits partnership model coverage across all 5 canonical structures,
+        all verticals, and (optionally) compiled DOM output.
+        """
+        return audit_partnership_model_coverage(property_id=property_id, dist_dir=dist_dir)
 
 
 CentralizedAffiliatesHub = MonetizationHub

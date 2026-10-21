@@ -24,6 +24,664 @@ import urllib.parse
 from pseofactory.contracts import assert_no_forbidden_dashes
 
 
+CANONICAL_PARTNERSHIP_MODELS: Tuple[str, ...] = (
+    "RECURRING_SAAS_REVSHARE",
+    "CPA_BOUNTY",
+    "QUALIFIED_LEAD_CPL",
+    "HYBRID_CPA_REVSHARE",
+    "USAGE_API_REFERRAL",
+)
+
+PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
+    # 1. Recurring SaaS Rev-Share (RECURRING_SAAS_REVSHARE)
+    "coinledger": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 62.50,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 25.0,
+        "recurring_horizon_months": 24,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.048,
+        "ltv_bounty_equivalent_usd": 140.63,
+    },
+    "koinly": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 70.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 30.0,
+        "recurring_horizon_months": 24,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.046,
+        "ltv_bounty_equivalent_usd": 168.00,
+    },
+    "taxbit": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 70.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 25.0,
+        "recurring_horizon_months": 24,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 157.50,
+    },
+    "flexport": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 50.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 20.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 350.00,
+    },
+    "bench": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 225.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.042,
+        "ltv_bounty_equivalent_usd": 292.50,
+    },
+    "pilot": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 300.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.042,
+        "ltv_bounty_equivalent_usd": 390.00,
+    },
+    "jobber_field_service": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 160.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 20.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.048,
+        "ltv_bounty_equivalent_usd": 217.60,
+    },
+    "aurora_solar_saas": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 180.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 20.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 244.80,
+    },
+    "simplepractice_ehr": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 135.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 20.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.048,
+        "ltv_bounty_equivalent_usd": 183.60,
+    },
+    # 2. Hybrid Multi-Stage / CPA + Recurring Deals (HYBRID_CPA_REVSHARE)
+    "rippling": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 1000.00,
+        "cpl_lead_bounty_usd": 600.00,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "hybrid_stage_bounties_usd": {"sqo_demo_usd": 600.0, "closed_won_usd": 1000.0},
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 1100.00,
+    },
+    "deel": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 200.00,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "hybrid_stage_bounties_usd": {"qualified_demo_usd": 200.0, "closed_won_usd": 500.0},
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.042,
+        "ltv_bounty_equivalent_usd": 455.00,
+    },
+    "crest_capital": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 250.00,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "hybrid_stage_bounties_usd": {"firstpromoter_base_usd": 250.0, "impact_onboarded_usd": 500.0},
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 575.00,
+    },
+    "equipment_macrs": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 250.00,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "hybrid_stage_bounties_usd": {"firstpromoter_base_usd": 250.0, "impact_onboarded_usd": 500.0},
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 575.00,
+    },
+    "suretybonds_direct": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 175.00,
+        "cpl_lead_bounty_usd": 6.50,
+        "recurring_revshare_pct": 30.0,
+        "recurring_horizon_months": 12,
+        "hybrid_stage_bounties_usd": {"free_trial_lead_usd": 6.50, "paid_contract_revshare_pct": 30.0},
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.052,
+        "ltv_bounty_equivalent_usd": 230.25,
+    },
+    "lawdepot": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 45.00,
+        "cpl_lead_bounty_usd": 6.50,
+        "recurring_revshare_pct": 30.0,
+        "recurring_horizon_months": 12,
+        "hybrid_stage_bounties_usd": {"free_trial_lead_usd": 6.50, "paid_subscription_revshare_pct": 30.0},
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.055,
+        "ltv_bounty_equivalent_usd": 85.50,
+    },
+    "easyship_commerce": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 120.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 20.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.046,
+        "ltv_bounty_equivalent_usd": 163.20,
+    },
+    "sprinto_compliance": {
+        "partnership_model": "HYBRID_CPA_REVSHARE",
+        "cpa_bounty_usd": 225.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 285.75,
+    },
+    # 3. Flat CPA Bounties (CPA_BOUNTY)
+    "mercury": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.040,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "ramp": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.040,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "rho": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.040,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "brex": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 375.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.038,
+        "ltv_bounty_equivalent_usd": 375.00,
+    },
+    "gusto": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 100.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.052,
+        "ltv_bounty_equivalent_usd": 100.00,
+    },
+    "turbotax": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 45.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.055,
+        "ltv_bounty_equivalent_usd": 45.00,
+    },
+    "taxslayer": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 32.50,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.055,
+        "ltv_bounty_equivalent_usd": 32.50,
+    },
+    "freetaxusa": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 32.50,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.055,
+        "ltv_bounty_equivalent_usd": 32.50,
+    },
+    "splash_financial": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 300.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.035,
+        "ltv_bounty_equivalent_usd": 300.00,
+    },
+    "sofi": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 120.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.038,
+        "ltv_bounty_equivalent_usd": 120.00,
+    },
+    "sofi_refi": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 120.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.038,
+        "ltv_bounty_equivalent_usd": 120.00,
+    },
+    "earnest": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 200.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.036,
+        "ltv_bounty_equivalent_usd": 200.00,
+    },
+    "laurel_road": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.036,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "juno": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 137.50,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.042,
+        "ltv_bounty_equivalent_usd": 137.50,
+    },
+    "freightos_marketplace": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 185.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.045,
+        "ltv_bounty_equivalent_usd": 185.00,
+    },
+    # 4. Qualified Lead-Gen / CPL (QUALIFIED_LEAD_CPL)
+    "ipx1031": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 500.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.068,
+        "ltv_bounty_equivalent_usd": 500.00,
+    },
+    "exeter1031": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 250.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.072,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "simply_business": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 185.00,
+        "cpl_lead_bounty_usd": 185.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.080,
+        "ltv_bounty_equivalent_usd": 185.00,
+    },
+    "next_insurance_b2b": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 160.00,
+        "cpl_lead_bounty_usd": 160.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.082,
+        "ltv_bounty_equivalent_usd": 160.00,
+    },
+    "national_funding_med": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 200.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.070,
+        "ltv_bounty_equivalent_usd": 500.00,
+    },
+    "national_funding": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 200.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.070,
+        "ltv_bounty_equivalent_usd": 500.00,
+    },
+    "otr_solutions_factoring": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 250.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.074,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "credible": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 112.50,
+        "cpl_lead_bounty_usd": 112.50,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.075,
+        "ltv_bounty_equivalent_usd": 112.50,
+    },
+    "guideline": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 250.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.068,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    # 5. Usage / API / Transaction Volume Referrals (USAGE_API_REFERRAL)
+    "kalshi": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 25.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 15.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "CFTC event contract exchange trading volume & $25 funded trader activation",
+        "click_to_conversion_rate": 0.062,
+        "ltv_bounty_equivalent_usd": 85.00,
+    },
+    "stripe": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 500.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 10.0,
+        "recurring_horizon_months": 24,
+        "usage_referral_basis": "Commercial payment processing volume & API merchant settlement",
+        "click_to_conversion_rate": 0.052,
+        "ltv_bounty_equivalent_usd": 500.00,
+    },
+    "stripe_tax": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 200.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 10.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "Automated sales tax & 1099 API filing volume",
+        "click_to_conversion_rate": 0.055,
+        "ltv_bounty_equivalent_usd": 240.00,
+    },
+    "avalara": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 275.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 10.0,
+        "recurring_horizon_months": 18,
+        "usage_referral_basis": "Automated economic nexus & 1099 API transaction tier",
+        "click_to_conversion_rate": 0.050,
+        "ltv_bounty_equivalent_usd": 315.00,
+    },
+    "interactive_brokers": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 200.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "Institutional treasury & quantitative execution account activity",
+        "click_to_conversion_rate": 0.050,
+        "ltv_bounty_equivalent_usd": 200.00,
+    },
+    "public_com": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 100.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "Treasury bill & brokerage AUM allocation volume",
+        "click_to_conversion_rate": 0.052,
+        "ltv_bounty_equivalent_usd": 100.00,
+    },
+    "wealthfront": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 175.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "High-yield cash sweep & automated treasury AUM allocation",
+        "click_to_conversion_rate": 0.052,
+        "ltv_bounty_equivalent_usd": 175.00,
+    },
+    "first_american": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 100.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "Fractional real estate debt & 1031 capital deployment volume",
+        "click_to_conversion_rate": 0.050,
+        "ltv_bounty_equivalent_usd": 100.00,
+    },
+    "first_american_1031": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 100.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "Fractional real estate debt & 1031 capital deployment volume",
+        "click_to_conversion_rate": 0.050,
+        "ltv_bounty_equivalent_usd": 100.00,
+    },
+    "lendkey": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 200.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "Credit union & community bank network loan origination referral",
+        "click_to_conversion_rate": 0.048,
+        "ltv_bounty_equivalent_usd": 200.00,
+    },
+}
+
+
+def resolve_partnership_model_spec(partner_key: str, partner_obj: Optional[Any] = None) -> Dict[str, Any]:
+    """
+    Resolves the structured partnership model specification (RECURRING_SAAS_REVSHARE,
+    CPA_BOUNTY, QUALIFIED_LEAD_CPL, HYBRID_CPA_REVSHARE, or USAGE_API_REFERRAL) for any
+    partner key or AffiliatePartner instance.
+    Zero em-dashes. Zero en-dashes.
+    """
+    pk = str(partner_key or getattr(partner_obj, "key", "") or "").strip().lower()
+    if pk in PARTNER_PARTNERSHIP_MODEL_SPECS:
+        spec = dict(PARTNER_PARTNERSHIP_MODEL_SPECS[pk])
+        spec["partner_key"] = pk
+        return spec
+
+    comm_raw = str(getattr(partner_obj, "commission_est", "") or "").lower()
+    bounty_raw = str(getattr(partner_obj, "bounty_est", "") or "").lower()
+    combined = f"{pk} {comm_raw} {bounty_raw}"
+    if "sqo" in combined or ("+" in combined and ("recurring" in combined or "onboarded" in combined or "trial" in combined)):
+        model = "HYBRID_CPA_REVSHARE"
+        conv_rate = 0.045
+    elif "recurring" in combined or "revshare" in combined:
+        model = "RECURRING_SAAS_REVSHARE"
+        conv_rate = 0.046
+    elif any(k in combined for k in ("lead", "quote", "cpl", "demo", "contact")):
+        model = "QUALIFIED_LEAD_CPL"
+        conv_rate = 0.072
+    elif any(k in combined for k in ("api", "volume", "usage", "interchange", "event contract")):
+        model = "USAGE_API_REFERRAL"
+        conv_rate = 0.055
+    else:
+        model = "CPA_BOUNTY"
+        conv_rate = 0.038
+
+    return {
+        "partner_key": pk,
+        "partnership_model": model,
+        "cpa_bounty_usd": 120.0,
+        "cpl_lead_bounty_usd": 120.0 if model == "QUALIFIED_LEAD_CPL" else 0.0,
+        "recurring_revshare_pct": 20.0 if model in ("RECURRING_SAAS_REVSHARE", "HYBRID_CPA_REVSHARE") else 0.0,
+        "recurring_horizon_months": 12 if model in ("RECURRING_SAAS_REVSHARE", "HYBRID_CPA_REVSHARE") else 0,
+        "usage_referral_basis": "Metered API or transaction volume" if model == "USAGE_API_REFERRAL" else "",
+        "click_to_conversion_rate": conv_rate,
+        "ltv_bounty_equivalent_usd": 150.0,
+    }
+
+
+def score_partnership_model_intent_fit(
+    partnership_model: str,
+    commercial_intent: str,
+    vertical_family: str,
+    query: str = "",
+    page_archetype: str = "",
+) -> float:
+    """
+    Computes a deterministic intent-fit multiplier (1.00 to 1.45) scoring how well a
+    partnership model matches the page's audience intent and vertical family.
+    Zero em-dashes. Zero en-dashes.
+    """
+    model = (partnership_model or "CPA_BOUNTY").strip().upper()
+    intent = (commercial_intent or "").strip().lower()
+    vert = (vertical_family or "").strip().lower()
+    q_low = (query or "").strip().lower()
+
+    mult = 1.0
+    if model == "HYBRID_CPA_REVSHARE":
+        if vert in (
+            "section_179_equipment_capex",
+            "s_corp_payroll_reasonable_comp",
+            "workers_comp_labor_burden",
+            "rd_section_174_bookkeeping",
+            "b2b_cyber_compliance",
+            "surety_bond_compliance",
+            "construction_contractor_finance",
+            "tariff_customs_freight_trade",
+            "commercial_working_capital_factoring",
+        ):
+            mult = 1.32
+        else:
+            mult = 1.18
+    elif model == "QUALIFIED_LEAD_CPL":
+        if vert in (
+            "1031_like_kind_exchange",
+            "surety_bond_compliance",
+            "commercial_solar_energy",
+            "medical_practice_capex",
+            "commercial_working_capital_factoring",
+            "b2b_cyber_compliance",
+        ) or any(k in q_low for k in ("quote", "rates", "compare", "exchange", "bond", "demo", "install")):
+            mult = 1.35
+        elif intent == "comparative_evaluation_matrix":
+            mult = 1.25
+        else:
+            mult = 1.12
+    elif model == "RECURRING_SAAS_REVSHARE":
+        if vert in (
+            "crypto_digital_asset_tax",
+            "prediction_market_tax_1256",
+            "rd_section_174_bookkeeping",
+            "saas_unit_economics_spend",
+        ) or any(k in q_low for k in ("software", "automation", "import", "8949", "1099-da", "recurring")):
+            mult = 1.34
+        else:
+            mult = 1.15
+    elif model == "USAGE_API_REFERRAL":
+        if vert in (
+            "prediction_market_event_contracts",
+            "payment_processing_api_usage",
+            "sales_tax_1099_nexus",
+            "treasury_cash_runway",
+        ) or any(k in q_low for k in ("kalshi", "odds", "kelly", "arbitrage", "interchange", "api", "processing", "tbill", "yield")):
+            mult = 1.36
+        else:
+            mult = 1.10
+    elif model == "CPA_BOUNTY":
+        if vert in (
+            "student_loan_refinancing",
+            "treasury_cash_runway",
+            "saas_unit_economics_spend",
+            "federal_state_tax_brackets",
+        ):
+            mult = 1.26
+        else:
+            mult = 1.15
+    return round(mult, 4)
+
+
 @dataclass
 class AffiliatePartner:
     """
@@ -45,6 +703,13 @@ class AffiliatePartner:
     target_tools: List[str]
     supported_params: List[str]
     cta_text: str = ""
+    partnership_model: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.partnership_model or not str(self.partnership_model).strip():
+            self.partnership_model = str(
+                resolve_partnership_model_spec(self.key, self).get("partnership_model") or "CPA_BOUNTY"
+            )
 
     @property
     def url(self) -> str:
@@ -2589,6 +3254,7 @@ def get_affiliate_route(
         "target": "_blank",
         "badge": partner_obj.badge,
         "status": partner_obj.status,
+        "partnership_model": partner_obj.partnership_model,
         "bounty_est": partner_obj.bounty_est,
         "bounty_score": score_partner_yield(partner_obj, partner_obj.status),
         "is_fallback": False,
@@ -4399,12 +5065,13 @@ def normalize_html_callout_message_match(
                 card_href = _build_r_href(pk, f"card_{idx}", slot)
                 safe_s = html_lib.escape(page_slug)
                 safe_sub = html_lib.escape(f"{page_slug}_card_{idx}")
+                safe_p_model = html_lib.escape(p_obj.partnership_model)
                 cards_html.append(
-                    f'      <div class="partner-card" data-partner="{pk}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
+                    f'      <div class="partner-card" data-partner="{pk}" data-partnership-model="{safe_p_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
                     f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
                     f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
                     f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
-                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
+                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
                     f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                     f'        </a>\n'
                     f'      </div>'
@@ -4413,6 +5080,8 @@ def normalize_html_callout_message_match(
             return (
                 '<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" '
                 'data-partner="splash_financial" data-primary-partner="splash_financial" '
+                'data-partnership-model="CPA_BOUNTY" '
+                'data-partner-models="CPA_BOUNTY,QUALIFIED_LEAD_CPL,USAGE_API_REFERRAL" '
                 'data-partner-roster="splash_financial,sofi,credible,earnest,lendkey" '
                 'data-partner-companies="Splash Financial,SoFi,ELFI,Earnest,LendKey" '
                 'style="margin: 1.5rem 0;">\n'
@@ -4430,7 +5099,14 @@ def normalize_html_callout_message_match(
         )
         updated = re.sub(
             r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
-            r'<section class="partners-section"\g<1> data-partner="splash_financial" data-primary-partner="splash_financial" data-partner-roster="splash_financial,sofi,credible,earnest,lendkey" data-partner-companies="Splash Financial,SoFi,ELFI,Earnest,LendKey">',
+            r'<section class="partners-section"\g<1> data-partner="splash_financial" data-primary-partner="splash_financial" data-partnership-model="CPA_BOUNTY" data-partner-models="CPA_BOUNTY,QUALIFIED_LEAD_CPL,USAGE_API_REFERRAL" data-partner-roster="splash_financial,sofi,credible,earnest,lendkey" data-partner-companies="Splash Financial,SoFi,ELFI,Earnest,LendKey">',
+            updated,
+            count=1,
+            flags=re.I,
+        )
+        updated = re.sub(
+            r'(<section\s+class=["\']partners-section["\'][^>]*data-partner-roster=["\'][^"\']+["\'])(?![^>]*data-partnership-model=)([^>]*>)',
+            r'\g<1> data-partnership-model="CPA_BOUNTY" data-partner-models="CPA_BOUNTY,QUALIFIED_LEAD_CPL,USAGE_API_REFERRAL"\g<2>',
             updated,
             count=1,
             flags=re.I,
@@ -4454,8 +5130,9 @@ def normalize_html_callout_message_match(
             safe_sub = html_lib.escape(f"{page_slug}_card_{card_idx}")
             c_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(pk, pk))
             c_role = "primary" if card_idx == 1 else "secondary"
+            safe_p_model = html_lib.escape(p_obj.partnership_model)
             return (
-                f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}">\n'
+                f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{html_lib.escape(p_obj.badge)}</span>\n'
                 f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
@@ -4463,7 +5140,7 @@ def normalize_html_callout_message_match(
                 f'        <p class="affiliate-desc">{html_lib.escape(p_obj.description)}</p>\n'
                 f'      </div>\n'
                 f'      <div>\n'
-                f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-tool="{safe_s}" data-subid="{safe_sub}" data-cta-slot="{slot}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
+                f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-cta-slot="{slot}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
                 f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
                 f'        </a>\n'
                 f'      </div>\n'
@@ -4477,6 +5154,20 @@ def normalize_html_callout_message_match(
                 m_prim = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', sec_html, re.I)
                 if m_prim:
                     primary_inline_pk = m_prim.group(1).lower()
+                if 'data-partnership-model="' not in sec_html and primary_inline_pk:
+                    lead_mod = html_lib.escape(str(resolve_partnership_model_spec(primary_inline_pk)["partnership_model"]))
+                    rost_m = re.search(r'data-partner-roster=["\']([^"\']+)["\']', sec_html, re.I)
+                    rost_keys = [k.strip() for k in (rost_m.group(1).split(",") if rost_m else [primary_inline_pk]) if k.strip()]
+                    mods_csv = html_lib.escape(
+                        ",".join(dict.fromkeys(str(resolve_partnership_model_spec(rk)["partnership_model"]) for rk in rost_keys))
+                    )
+                    sec_html = re.sub(
+                        r'(<section\s+[^>]*data-partner-roster=["\'][^"\']+["\'])',
+                        rf'\g<1> data-partnership-model="{lead_mod}" data-partner-models="{mods_csv}"',
+                        sec_html,
+                        count=1,
+                        flags=re.I,
+                    )
                 return sec_html
             if "affiliate-card" in sec_html:
                 if is_general_tax_page:
@@ -4507,13 +5198,19 @@ def normalize_html_callout_message_match(
                     sorted_keys = ["rippling", "crest_capital", "mercury"]
                 primary_inline_pk = sorted_keys[0]
                 lead_pk = html_lib.escape(sorted_keys[0])
+                lead_mod = html_lib.escape(str(resolve_partnership_model_spec(sorted_keys[0])["partnership_model"]))
                 roster_csv = html_lib.escape(",".join(sorted_keys))
                 brands_list: List[str] = []
+                models_list: List[str] = []
                 for k_item in sorted_keys:
                     b_nm = COMPANY_BRAND_BY_PARTNER_KEY.get(k_item, k_item)
                     if b_nm not in brands_list:
                         brands_list.append(b_nm)
+                    m_nm = str(resolve_partnership_model_spec(k_item)["partnership_model"])
+                    if m_nm not in models_list:
+                        models_list.append(m_nm)
                 brands_csv = html_lib.escape(",".join(brands_list))
+                models_csv = html_lib.escape(",".join(models_list))
                 h2_m = re.search(r"<h2[^>]*>.*?</h2>", sec_html, re.S | re.I)
                 h2_html = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
                 cards_joined = "\n".join(
@@ -4523,6 +5220,7 @@ def normalize_html_callout_message_match(
                 return (
                     f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
                     f'data-partner="{lead_pk}" data-primary-partner="{lead_pk}" '
+                    f'data-partnership-model="{lead_mod}" data-partner-models="{models_csv}" '
                     f'data-partner-roster="{roster_csv}" data-partner-companies="{brands_csv}">\n'
                     f'        {h2_html}'
                     f'{cards_joined}\n'
@@ -4608,6 +5306,7 @@ def normalize_html_callout_message_match(
         safe_s = html_lib.escape(page_slug)
         safe_sub = html_lib.escape(f"{page_slug}_inline")
         safe_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(primary_inline_pk, primary_inline_pk))
+        safe_inline_model = html_lib.escape(p_inline.partnership_model)
         inline_href = _build_r_href(primary_inline_pk, "inline", "calculator_result_inline")
         gsc_extra_attrs = ""
         if gsc_inline_meta:
@@ -4616,13 +5315,13 @@ def normalize_html_callout_message_match(
             gsc_extra_attrs = f'data-gsc-repositioned="true" data-gsc-tier="{gsc_t}" data-yield-score="{gsc_y}" '
         inline_cta_html = (
             f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
-            f'data-company-brand="{safe_brand}" {gsc_extra_attrs}'
+            f'data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" {gsc_extra_attrs}'
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
             f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
             f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
             f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
             f'            </div>\n'
-            f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
+            f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
             f'              {safe_cta} &rarr;\n'
             f'            </a>\n'
             f'          </div>'
@@ -4708,6 +5407,16 @@ def normalize_html_callout_message_match(
             full_open = full_open[:-1] + f' data-subid="{safe_sub}">'
         if "data-cta-slot=" not in full_open:
             full_open = full_open[:-1] + f' data-cta-slot="{html_lib.escape(slot)}">'
+        p_mod = html_lib.escape(str(resolve_partnership_model_spec(pk)["partnership_model"]))
+        if "data-partnership-model=" not in full_open:
+            full_open = full_open[:-1] + f' data-partnership-model="{p_mod}">'
+        else:
+            full_open = re.sub(
+                r'data-partnership-model=["\'][^"\']*["\']',
+                f'data-partnership-model="{p_mod}"',
+                full_open,
+                flags=re.I,
+            )
         return full_open
 
     updated = re.sub(
@@ -4921,6 +5630,11 @@ VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
     "sales_tax_1099_nexus": ["crest_capital", "rippling", "gusto", "mercury"],
     "federal_state_tax_brackets": ["crest_capital", "rippling", "mercury", "gusto"],
     "saas_unit_economics_spend": ["mercury", "rippling", "gusto", "crest_capital"],
+    "b2b_cyber_compliance": ["rippling", "crest_capital", "mercury", "gusto"],
+    "commercial_solar_energy": ["crest_capital", "mercury", "rippling", "gusto"],
+    "construction_contractor_finance": ["suretybonds_direct", "crest_capital", "rippling", "mercury"],
+    "medical_practice_capex": ["crest_capital", "mercury", "rippling", "gusto"],
+    "payment_processing_api_usage": ["mercury", "crest_capital", "rippling", "kalshi"],
     "student_loan_refinancing": ["splash_financial", "sofi", "earnest", "credible", "lendkey"],
     "general_b2b_commercial_finance": ["crest_capital", "rippling", "gusto", "mercury"],
 }
@@ -4957,22 +5671,56 @@ def classify_asset_archetype_and_intent(
         vertical_family = "prediction_market_event_contracts"
     elif any(k in comb for k in ("crypto", "8949", "1099-da", "harvesting", "digital-asset", "staking", "defi-tax")):
         vertical_family = "crypto_digital_asset_tax"
-    elif any(k in comb for k in ("workers-comp", "payroll-burden", "labor-burden", "emr-mod", "ncci")):
+    elif any(k in comb for k in (
+        "soc-2", "soc 2", "soc2", "iso-27001", "iso 27001", "hipaa", "cmmc",
+        "sprs", "nist-800-171", "nist 800-171", "pentest", "penetration-test",
+        "pci-dss", "pci dss", "gdpr-fine", "cybersecurity-audit",
+    )):
+        vertical_family = "b2b_cyber_compliance"
+    elif any(k in comb for k in (
+        "nem-3", "nem 3.0", "net-metering", "net metering", "demand-charge", "demand charge",
+        "battery-storage", "battery storage", "peak-shaving", "srec", "trec",
+        "renewable-energy-certificate", "solar-payback", "ev-fleet", "commercial-solar", "solar-itc",
+    )):
+        vertical_family = "commercial_solar_energy"
+    elif any(k in comb for k in (
+        "wrvu", "rvu", "physician-fee-schedule", "physician fee schedule", "gpci",
+        "cpt-99490", "cpt 99490", "chronic-care-management", "cbct", "cone-beam",
+        "medical-equipment", "dental-equipment", "credentialing-delay", "practice-reimbursement",
+    )):
+        vertical_family = "medical_practice_capex"
+    elif any(k in comb for k in (
+        "contractor-lien", "mechanics-lien", "lien-release", "preliminary-notice",
+        "retainage", "progress-billing", "schedule-of-values", "davis-bacon",
+        "prevailing-wage", "contractor-markup", "markup-vs-margin", "contractor-overhead",
+        "prompt-payment",
+    )):
+        vertical_family = "construction_contractor_finance"
+    elif any(k in comb for k in (
+        "surety", "miller-act", "performance-bond", "payment-bond", "license-bond",
+        "contractor-bond", "customs-bond", "fidelity-bond", "erisa-fidelity",
+    )):
+        vertical_family = "surety_bond_compliance"
+    elif any(k in comb for k in ("workers-comp", "workers-compensation", "payroll-burden", "labor-burden", "emr-mod", "ncci", "class-code")):
         vertical_family = "workers_comp_labor_burden"
-    elif any(k in comb for k in ("s-corp", "s corp", "1120-s", "reasonable-salary", "reasonable-compensation", "fica", "payroll", "gusto", "w-2-vs-1099")):
+    elif any(k in comb for k in ("s-corp", "s corp", "1120-s", "reasonable-salary", "reasonable-compensation", "payroll", "gusto", "w-2-vs-1099")) or bool(re.search(r"\bfica\b", comb)):
         vertical_family = "s_corp_payroll_reasonable_comp"
     elif any(k in comb for k in ("174", "r-and-d", "r&d", "6765", "research-credit", "bookkeeping", "accounting")):
         vertical_family = "rd_section_174_bookkeeping"
     elif any(k in comb for k in ("179", "4562", "equipment", "depreciation", "macrs", "gvwr", "bonus-depreciation", "cost-segregation", "vehicle-deduction")):
         vertical_family = "section_179_equipment_capex"
-    elif any(k in comb for k in ("301", "tariff", "landed-cost", "customs", "htsus", "demurrage", "cbam", "freight", "duty")):
-        vertical_family = "tariff_customs_freight_trade"
-    elif any(k in comb for k in ("factoring", "invoice-discount", "line-of-credit", "working-capital", "receivable", "dso")):
+    elif any(k in comb for k in ("factoring", "invoice-advance", "invoice-discount", "line-of-credit", "working-capital", "receivable", "dso")):
         vertical_family = "commercial_working_capital_factoring"
-    elif any(k in comb for k in ("surety", "miller-act", "performance-bond", "contractor-bond", "customs-bond")):
-        vertical_family = "surety_bond_compliance"
+    elif any(k in comb for k in ("301", "tariff", "landed-cost", "customs", "htsus", "hts-code", "nmfc", "mpf", "hmf", "demurrage", "cbam", "freight", "duty")):
+        vertical_family = "tariff_customs_freight_trade"
     elif any(k in comb for k in ("401k", "401-k", "solo-401k", "sep-ira", "rollover", "retirement", "erisa")):
         vertical_family = "retirement_401k_rollover"
+    elif any(k in comb for k in (
+        "payment-processing", "interchange", "merchant-fee", "card-processing",
+        "stripe-fee", "payment-gateway", "api-usage", "api-pricing", "token-cost",
+        "metered-billing", "usage-billing",
+    )):
+        vertical_family = "payment_processing_api_usage"
     elif any(k in comb for k in ("sales-tax", "economic-nexus", "1099-nec", "1099-misc", "vat", "avalara")):
         vertical_family = "sales_tax_1099_nexus"
     elif any(k in comb for k in ("treasury", "hysa", "tbill", "money-market", "3124", "yield-arbitrage", "sweep")):
@@ -5340,6 +6088,8 @@ def bind_asset_partner_roster(
             "roster_keys": [],
             "distinct_companies": [],
             "distinct_companies_count": 0,
+            "primary_partnership_model": "",
+            "partnership_models_represented": [],
             "slot_plan": slot_plan,
         }
 
@@ -5365,16 +6115,7 @@ def bind_asset_partner_roster(
         )
     )
 
-    # Preserve legacy primary partner for exact slug matches (e.g., section-1031-calculator -> ipx1031)
-    try:
-        canonical_route = get_affiliate_route(prop, s_norm, vault_overrides=vault_overrides)
-        canonical_lead_pk = str(canonical_route.get("partner_key") or "").strip().lower()
-    except Exception:
-        canonical_lead_pk = ""
-
     candidate_keys_ordered: List[str] = []
-    if canonical_lead_pk and canonical_lead_pk in registry:
-        candidate_keys_ordered.append(canonical_lead_pk)
     for k in vertical_template_keys:
         if k in registry and k not in candidate_keys_ordered:
             candidate_keys_ordered.append(k)
@@ -5415,7 +6156,6 @@ def bind_asset_partner_roster(
 
     # 3. Build enriched offer dicts for each selected partner key
     slug_id = s_norm.replace("/", "-")
-    est_conv_rate = 0.035 if prop != "prexvo" else 0.025
     ftc_disc = (
         PREXVO_DISCLOSURES.get("ftc_disclosure", "")
         if prop == "prexvo"
@@ -5426,8 +6166,22 @@ def bind_asset_partner_roster(
     for idx, pk in enumerate(selected_keys):
         p_obj = registry[pk]
         r_meta = ranked_by_key.get(pk) or {}
-        bounty_mid = float(r_meta.get("bounty_midpoint_usd") or get_partner_bounty_midpoint(pk))
-        expected_epc = round(bounty_mid * est_conv_rate * intent_multiplier, 2)
+        model_spec = resolve_partnership_model_spec(pk, p_obj)
+        p_model = str(model_spec.get("partnership_model") or p_obj.partnership_model or "CPA_BOUNTY")
+        model_fit_mult = score_partnership_model_intent_fit(
+            partnership_model=p_model,
+            vertical_family=vertical_family,
+            commercial_intent=commercial_intent,
+            query=query,
+            page_archetype=resolved_archetype,
+        )
+        bounty_mid = float(
+            r_meta.get("bounty_midpoint_usd")
+            or model_spec.get("ltv_bounty_equivalent_usd")
+            or get_partner_bounty_midpoint(pk)
+        )
+        est_conv_rate = float(model_spec.get("click_to_conversion_rate") or (0.035 if prop != "prexvo" else 0.025))
+        expected_epc = round(bounty_mid * est_conv_rate * intent_multiplier * model_fit_mult, 2)
         base_yield = float(r_meta.get("yield_score") or round(bounty_mid * 0.5 + (5.0 if idx == 0 else 0.0), 2))
         company_brand = COMPANY_BRAND_BY_PARTNER_KEY.get(pk, p_obj.name.split()[0])
         tier_role = "primary" if idx == 0 else ("secondary" if idx < len(selected_keys) - 1 else "fallback")
@@ -5441,11 +6195,14 @@ def bind_asset_partner_roster(
             "company_brand": company_brand,
             "tier_role": tier_role,
             "status": "live",
+            "partnership_model": p_model,
+            "partnership_model_spec": model_spec,
+            "intent_fit_multiplier": model_fit_mult,
             "commission_est": p_obj.commission_est,
             "bounty_est": p_obj.bounty_est,
             "bounty_midpoint_usd": round(bounty_mid, 2),
             "expected_epc_usd": expected_epc,
-            "yield_score": round(base_yield * intent_multiplier, 2),
+            "yield_score": round(base_yield * intent_multiplier * model_fit_mult, 2),
             "empirical_erpm_usd": float(r_meta.get("empirical_erpm_usd", 0.0) or 0.0),
             "empirical_cta_ctr": float(r_meta.get("cta_ctr", 0.0) or 0.0),
             "outbound_clicks": int(r_meta.get("outbound_clicks", 0) or 0),
@@ -5476,6 +6233,8 @@ def bind_asset_partner_roster(
     secondary_offers = ordered_offers[1:-1] if len(ordered_offers) > 2 else (ordered_offers[1:] if len(ordered_offers) > 1 else [])
     fallback_offer = ordered_offers[-1] if len(ordered_offers) >= 2 else primary_offer
     distinct_companies = list(dict.fromkeys(str(o.get("company_brand") or "") for o in ordered_offers if o.get("company_brand")))
+    partnership_models_represented = list(dict.fromkeys(str(o.get("partnership_model") or "") for o in ordered_offers if o.get("partnership_model")))
+    primary_partnership_model = str(primary_offer.get("partnership_model") or "") if primary_offer else ""
 
     return {
         **cls_info,
@@ -5486,6 +6245,8 @@ def bind_asset_partner_roster(
         "roster_keys": [str(o.get("partner_key") or "") for o in ordered_offers],
         "distinct_companies": distinct_companies,
         "distinct_companies_count": len(distinct_companies),
+        "primary_partnership_model": primary_partnership_model,
+        "partnership_models_represented": partnership_models_represented,
         "slot_plan": slot_plan,
     }
 
@@ -5576,6 +6337,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         safe_name = html_lib.escape(str(inline_offer.get("name") or pk_in))
         safe_cta = html_lib.escape(str(inline_offer.get("cta_text") or "Explore Partner"))
         safe_brand = html_lib.escape(str(inline_offer.get("company_brand") or pk_in))
+        safe_in_model = html_lib.escape(str(inline_offer.get("partnership_model") or resolve_partnership_model_spec(pk_in)["partnership_model"]))
         safe_href = html_lib.escape(str(inline_offer.get("attributed_href") or f"/r/{pk_in}"))
         safe_sub = html_lib.escape(str(inline_offer.get("subid") or f"{slug_id}_inline"))
         safe_tool = html_lib.escape(slug_id)
@@ -5585,6 +6347,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         new_inline_div = (
             f'<div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
             f'data-partner="{pk_in}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
+            f'data-partnership-model="{safe_in_model}" '
             f'data-gsc-tier="{safe_gsc_tier}" data-gsc-repositioned="{"true" if slot_plan.get("gsc_repositioned") else "false"}" '
             f'data-yield-score="{yield_str}" '
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.75rem; margin-bottom: 0.75rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
@@ -5594,6 +6357,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'            </div>\n'
             f'            <a href="{safe_href}" target="_blank" rel="noopener sponsored nofollow" '
             f'data-partner="{pk_in}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
+            f'data-partnership-model="{safe_in_model}" '
             f'data-tool="{safe_tool}" data-subid="{safe_sub}" data-status="live" data-tier="starter" '
             f'data-cta-slot="calculator_result_inline" class="btn-cta touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; white-space: nowrap; text-decoration: none;">\n'
@@ -5635,6 +6399,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         safe_tbl_name = html_lib.escape(str(table_offer.get("name") or pk_tbl))
         safe_tbl_cta = html_lib.escape(str(table_offer.get("cta_text") or "Compare Offer"))
         safe_tbl_brand = html_lib.escape(str(table_offer.get("company_brand") or pk_tbl))
+        safe_tbl_model = html_lib.escape(str(table_offer.get("partnership_model") or resolve_partnership_model_spec(pk_tbl)["partnership_model"]))
         safe_tbl_href = html_lib.escape(str(table_offer.get("attributed_href") or f"/r/{pk_tbl}"))
         safe_tbl_sub = html_lib.escape(str(table_offer.get("subid") or f"{slug_id}_table"))
         safe_tool = html_lib.escape(slug_id)
@@ -5643,11 +6408,13 @@ def reposition_affiliate_placements_from_gsc_signals(
         table_cta_bar = (
             f'<div class="comparison-table-cta-bar" data-mechanic="compliant_intent_monetization" '
             f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
+            f'data-partnership-model="{safe_tbl_model}" '
             f'data-cta-slot="comparison_table_cta" data-gsc-tier="{html_lib.escape(gsc_tier)}" '
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">\n'
             f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text, #0f172a);">Scenario Execution Partner: <strong>{safe_tbl_name}</strong> ({safe_tbl_brand})</span>\n'
             f'        <a href="{safe_tbl_href}" target="_blank" rel="noopener sponsored nofollow" '
             f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
+            f'data-partnership-model="{safe_tbl_model}" '
             f'data-tool="{safe_tool}" data-subid="{safe_tbl_sub}" data-status="live" '
             f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{safe_tbl_cta} &rarr;</a>\n'
@@ -5687,12 +6454,13 @@ def reposition_affiliate_placements_from_gsc_signals(
             c_cta = html_lib.escape(str(card_offer.get("cta_text") or "Explore Partner"))
             c_brand = html_lib.escape(str(card_offer.get("company_brand") or c_pk))
             c_role = html_lib.escape(str(card_offer.get("tier_role") or ("primary" if idx == 1 else "secondary")))
+            c_model = html_lib.escape(str(card_offer.get("partnership_model") or resolve_partnership_model_spec(c_pk)["partnership_model"]))
             c_slot = html_lib.escape(str(card_offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card")))
             c_href = html_lib.escape(str(card_offer.get("attributed_href") or f"/r/{c_pk}"))
             c_sub = html_lib.escape(str(card_offer.get("subid") or f"{slug_id}_card_{idx}"))
             c_tool = html_lib.escape(slug_id)
             return (
-                f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}">\n'
+                f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{c_badge} ({c_role.title()} Offer)</span>\n'
                 f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / {c_brand}</span>\n'
@@ -5702,6 +6470,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 f'      <div>\n'
                 f'        <a href="{c_href}" target="_blank" rel="noopener sponsored nofollow" '
                 f'data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" '
+                f'data-partnership-model="{c_model}" '
                 f'data-status="live" data-tool="{c_tool}" data-subid="{c_sub}" data-cta-slot="{c_slot}" '
                 f'data-tier="starter" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; text-decoration: none;">\n'
@@ -5714,6 +6483,8 @@ def reposition_affiliate_placements_from_gsc_signals(
         cards_html = "\n".join(_render_roster_card(c, idx) for idx, c in enumerate(matrix_cards, start=1))
         roster_keys_csv = html_lib.escape(",".join(roster["roster_keys"]))
         companies_csv = html_lib.escape(",".join(roster["distinct_companies"]))
+        models_csv = html_lib.escape(",".join(roster.get("partnership_models_represented") or []))
+        lead_model_attr = html_lib.escape(str(roster.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
 
         if re.search(r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>', updated, flags=re.S | re.I):
             def _replace_aff_sec(m_sec: re.Match) -> str:
@@ -5724,6 +6495,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 return (
                     f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
                     f'data-partner="{lead_pk_attr}" data-primary-partner="{lead_pk_attr}" '
+                    f'data-partnership-model="{lead_model_attr}" data-partner-models="{models_csv}" '
                     f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
                     f'data-gsc-tier="{html_lib.escape(gsc_tier)}">\n'
                     f'        {h2_str}'
@@ -5740,12 +6512,15 @@ def reposition_affiliate_placements_from_gsc_signals(
     elif matrix_cards and prop == "prexvo":
         roster_keys_csv = html_lib.escape(",".join(roster["roster_keys"]))
         companies_csv = html_lib.escape(",".join(roster["distinct_companies"]))
+        models_csv = html_lib.escape(",".join(roster.get("partnership_models_represented") or []))
+        lead_model_attr = html_lib.escape(str(roster.get("primary_partnership_model") or "CPA_BOUNTY"))
         lead_pk_attr = html_lib.escape(str(slot_plan.get("promoted_partner_key") or "splash_financial"))
         updated = re.sub(
             r'<section\s+class=["\'][^"\']*refinance-partner-section[^"\']*["\'][^>]*>',
             (
                 f'<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{lead_pk_attr}" data-primary-partner="{lead_pk_attr}" '
+                f'data-partnership-model="{lead_model_attr}" data-partner-models="{models_csv}" '
                 f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
                 f'data-gsc-tier="{html_lib.escape(gsc_tier)}" style="margin: 1.5rem 0;">'
             ),
@@ -5982,6 +6757,107 @@ def run_gsc_affiliate_placement_feedback_pass(
         ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     return summary
+
+
+def audit_partnership_model_coverage(
+    property_id: Optional[str] = None,
+    dist_dir: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Audits partnership model coverage across:
+      1. Canonical partnership structures (`RECURRING_SAAS_REVSHARE`, `CPA_BOUNTY`,
+         `QUALIFIED_LEAD_CPL`, `HYBRID_CPA_REVSHARE`, `USAGE_API_REFERRAL`).
+      2. Registered partners in `PROFITHELM_AFFILIATES` and `PREXVO_AFFILIATES` plus
+         `PARTNER_PARTNERSHIP_MODEL_SPECS` and `GREENFIELD_VERTICAL_CATALOG`.
+      3. All 23 vertical families in `VERTICAL_DIVERSIFIED_PARTNER_ROSTERS`.
+      4. Optionally, compiled HTML pages in `dist_dir` (checking `data-partnership-model`
+         and `data-partner-models`).
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+
+    prop_filter = (property_id or "").strip().lower()
+    if prop_filter == "prexvo":
+        target_registries = [("prexvo", PREXVO_AFFILIATES)]
+    elif prop_filter in ("profithelm", "exchange1031"):
+        target_registries = [("profithelm", PROFITHELM_AFFILIATES)]
+    else:
+        target_registries = [("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)]
+
+    models_to_partners: Dict[str, List[str]] = {m: [] for m in CANONICAL_PARTNERSHIP_MODELS}
+    partner_model_map: Dict[str, str] = {}
+
+    for _prop, reg_dict in target_registries:
+        for pk, p_obj in reg_dict.items():
+            if pk != p_obj.key:
+                continue
+            mod = str(p_obj.partnership_model or resolve_partnership_model_spec(pk, p_obj)["partnership_model"])
+            partner_model_map[pk] = mod
+            if mod in models_to_partners and pk not in models_to_partners[mod]:
+                models_to_partners[mod].append(pk)
+
+    if not prop_filter:
+        for pk, spec in PARTNER_PARTNERSHIP_MODEL_SPECS.items():
+            mod = str(spec.get("partnership_model") or "")
+            if mod in models_to_partners and pk not in models_to_partners[mod]:
+                models_to_partners[mod].append(pk)
+
+    vertical_coverage: Dict[str, Dict[str, Any]] = {}
+    for v_fam in VERTICAL_DIVERSIFIED_PARTNER_ROSTERS:
+        v_prop = "prexvo" if v_fam == "student_loan_refinancing" else "profithelm"
+        if prop_filter and prop_filter != v_prop:
+            continue
+        roster = bind_asset_partner_roster(
+            property_id=v_prop,
+            slug=f"{v_fam.replace('_', '-')}-calculator",
+            query=v_fam.replace("_", " "),
+        )
+        vertical_coverage[v_fam] = {
+            "property_id": v_prop,
+            "primary_partner": roster["primary_offer"]["partner_key"] if roster.get("primary_offer") else "",
+            "primary_partnership_model": roster.get("primary_partnership_model", ""),
+            "partnership_models_represented": roster.get("partnership_models_represented", []),
+            "roster_keys": roster.get("roster_keys", []),
+            "distinct_companies_count": roster.get("distinct_companies_count", 0),
+        }
+
+    dom_pages_checked = 0
+    dom_commercial_pages_with_model_attr = 0
+    dom_models_observed: Set[str] = set()
+    if dist_dir is not None:
+        d_path = Path(dist_dir)
+        tools_dir = d_path / "tools" if (d_path / "tools").is_dir() else d_path
+        if tools_dir.is_dir():
+            for hf in sorted(tools_dir.rglob("index.html")):
+                try:
+                    html = hf.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                if 'data-restricted-public-service="true"' in html or "ymyl-public-service-guardrail" in html:
+                    continue
+                dom_pages_checked += 1
+                mods = re.findall(r'data-partnership-model=["\']([A-Z0-9_]+)["\']', html)
+                if mods:
+                    dom_commercial_pages_with_model_attr += 1
+                    dom_models_observed.update(mods)
+
+    missing_canonical_models = [
+        m for m in CANONICAL_PARTNERSHIP_MODELS if len(models_to_partners.get(m, [])) == 0
+    ]
+
+    return {
+        "status": "PASS" if (not prop_filter and len(missing_canonical_models) == 0) or (prop_filter and len(partner_model_map) > 0) else "FAIL",
+        "property_filter": prop_filter or "all",
+        "canonical_partnership_models": list(CANONICAL_PARTNERSHIP_MODELS),
+        "models_to_partners": models_to_partners,
+        "missing_canonical_models": missing_canonical_models,
+        "all_5_models_supported": len(missing_canonical_models) == 0,
+        "verticals_audited_count": len(vertical_coverage),
+        "vertical_coverage": vertical_coverage,
+        "dom_pages_checked": dom_pages_checked,
+        "dom_commercial_pages_with_model_attr": dom_commercial_pages_with_model_attr,
+        "dom_models_observed": sorted(dom_models_observed),
+    }
 
 
 
