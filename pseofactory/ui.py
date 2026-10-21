@@ -29,6 +29,55 @@ from pseofactory.partner_tracker import FleetMonetizationDashboardData, PartnerT
 from pseofactory.trends.models import AlgorithmicCeilingAnalysis
 
 
+UI_VISUAL_QUALITY_CONTRACT: Dict[str, Any] = {
+    "version": "ui-visual-contract-v3",
+    "typography": {
+        "h1_min_px": 24,
+        "h2_min_px": 18,
+        "h3_min_px": 16,
+        "tabular_nums_required": True,
+    },
+    "surface_geometry": {
+        "card_border_radius_px": 12,
+        "desktop_card_padding_min_px": 20,
+        "mobile_card_padding_min_px": 16,
+        "section_gap_min_px": 16,
+    },
+    "touch_ergonomics": {
+        "min_target_px": 44,
+        "table_scroll_wrapper_required": True,
+    },
+}
+
+
+def verify_ui_visual_quality_contract(html_doc: str, context: str = "ui") -> Dict[str, Any]:
+    """
+    Mechanically verifies that rendered UI HTML satisfies UI_VISUAL_QUALITY_CONTRACT:
+    monotonic typography hierarchy (h1 > h2 > h3), tabular-nums numeric alignment,
+    wrapped responsive tables (.table-wrap), card geometry, and >= 44x44px touch targets.
+    """
+    issues: List[str] = []
+    if "font-variant-numeric: tabular-nums" not in html_doc:
+        issues.append(f"[{context}] Missing tabular-nums numeric alignment rule.")
+    if "<table" in html_doc and 'class="table-wrap"' not in html_doc:
+        issues.append(f"[{context}] Table found without responsive .table-wrap container.")
+    if re.search(r"<h2[^>]*style=[\"'][^\"']*font-size:\s*1[0-7]px", html_doc, flags=re.IGNORECASE):
+        issues.append(f"[{context}] Inline h2 font-size below 18px violates typography hierarchy.")
+    h1_matches = [int(m) for m in re.findall(r"h1\s*\{[^}]*font-size:\s*(\d+)px", html_doc)]
+    h2_matches = [int(m) for m in re.findall(r"h2\s*\{[^}]*font-size:\s*(\d+)px", html_doc)]
+    if h1_matches and max(h1_matches) < UI_VISUAL_QUALITY_CONTRACT["typography"]["h1_min_px"]:
+        issues.append(f"[{context}] h1 font-size ({max(h1_matches)}px) is below minimum 24px.")
+    if h2_matches and max(h2_matches) < UI_VISUAL_QUALITY_CONTRACT["typography"]["h2_min_px"]:
+        issues.append(f"[{context}] h2 font-size ({max(h2_matches)}px) is below minimum 18px.")
+    if issues:
+        raise ValueError("; ".join(issues))
+    return {
+        "passed": True,
+        "contract_version": UI_VISUAL_QUALITY_CONTRACT["version"],
+        "issues": issues,
+    }
+
+
 def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     """
     Renders complete standalone HTML document for the minimal modern light interface.
@@ -488,7 +537,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             gap: 12px;
         }}
         .section-title-group h2 {{
-            font-size: 17px;
+            font-size: 20px;
             font-weight: 700;
             color: var(--text-main);
         }}
@@ -540,7 +589,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             border: 1px solid var(--danger-border);
         }}
         .action-title {{
-            font-size: 15px;
+            font-size: 16px;
             font-weight: 700;
             color: var(--text-main);
         }}
@@ -989,6 +1038,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     # Mechanical verification of contracts on rendered HTML
     assert_no_forbidden_dashes(markup, context="Rendered Light Interface HTML")
     assert_touch_targets(markup, is_css=False, context="Rendered Light Interface Touch Targets")
+    verify_ui_visual_quality_contract(markup, context="render_light_interface")
 
     return markup
 
@@ -1531,12 +1581,24 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
             gap: 16px;
         }}
         .title-group h1 {{
-            font-size: 22px;
+            font-size: 28px;
+            line-height: 1.2;
             font-weight: 700;
         }}
         .title-group p {{
             color: var(--text-sub);
             font-size: 13px;
+        }}
+        .section-title, h2 {{
+            font-size: 20px;
+            line-height: 1.3;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }}
+        @media (max-width: 640px) {{
+            .card {{ padding: 16px; }}
+            .title-group h1 {{ font-size: 24px; }}
+            .section-title, h2 {{ font-size: 18px; }}
         }}
         .metrics-grid {{
             display: grid;
@@ -1665,7 +1727,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
         </div>
 
         <div class="card">
-            <h2 style="font-size: 16px; margin-bottom: 16px;">Historical Impression Trajectory and Update Bands</h2>
+            <h2 class="section-title">Historical Impression Trajectory and Update Bands</h2>
             {svg_markup}
             <div style="display: flex; gap: 24px; margin-top: 12px; font-size: 12px; color: var(--text-sub);">
                 <span><strong style="color: #93c5fd;">&bull;</strong> Daily Impressions</span>
@@ -1676,7 +1738,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
         </div>
 
         <div class="card">
-            <h2 style="font-size: 16px; margin-bottom: 12px;">Correlated Google Algorithm Updates</h2>
+            <h2 class="section-title" style="margin-bottom: 12px;">Correlated Google Algorithm Updates</h2>
             <div class="table-wrap">
             <table>
                 <thead>
@@ -1701,6 +1763,7 @@ def render_gsc_ceiling_dashboard(analysis: AlgorithmicCeilingAnalysis) -> str:
 
     assert_no_forbidden_dashes(doc, "render_gsc_ceiling_dashboard")
     assert_touch_targets(doc, context="render_gsc_ceiling_dashboard")
+    verify_ui_visual_quality_contract(doc, context="render_gsc_ceiling_dashboard")
     return doc
 
 

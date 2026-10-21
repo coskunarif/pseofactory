@@ -10,9 +10,217 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-VISUAL_PRIMITIVES_VERSION = "pseo-primitives-v2"
+VISUAL_PRIMITIVES_VERSION = "pseo-primitives-v3"
+
+SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
+    "interactive_calculator": {
+        "archetype": "interactive_calculator",
+        "viewports": {
+            "mobile": {"width": 375, "height": 812, "max_horizontal_overflow_px": 0},
+            "desktop": {
+                "width": 1440,
+                "height": 900,
+                "max_horizontal_overflow_px": 0,
+                "max_container_width_px": 1140,
+                "max_sibling_left_drift_px": 4.0,
+            },
+        },
+        "typography": {
+            "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "mobile": {"h1_px": 24.0, "h2_px": 18.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "strict_monotonic_hierarchy": True,
+            "numeric_font_variant": "tabular-nums",
+        },
+        "surface_and_rhythm": {
+            "card_border_radius_px": 12.0,
+            "desktop_card_padding_px": 24.0,
+            "mobile_card_padding_px": 16.0,
+            "desktop_section_gap_px": 24.0,
+            "mobile_section_gap_px": 16.0,
+            "min_section_gap_px": 12.0,
+            "max_section_gap_px": 48.0,
+        },
+        "ergonomics": {
+            "min_touch_target_px": 44.0,
+            "min_input_font_size_px": 16.0,
+            "result_box_min_height_px": 110.0,
+            "table_wrapper_overflow_x": "auto",
+            "max_consecutive_cta_callouts": 2,
+            "require_runtime_sync": True,
+            "require_tabular_nums_outputs": True,
+        },
+    },
+    "statutory_guide": {
+        "archetype": "statutory_guide",
+        "viewports": {
+            "mobile": {"width": 375, "height": 812, "max_horizontal_overflow_px": 0},
+            "desktop": {
+                "width": 1440,
+                "height": 900,
+                "max_horizontal_overflow_px": 0,
+                "max_container_width_px": 1140,
+                "max_sibling_left_drift_px": 4.0,
+            },
+        },
+        "typography": {
+            "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "mobile": {"h1_px": 24.0, "h2_px": 18.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "strict_monotonic_hierarchy": True,
+            "numeric_font_variant": "tabular-nums",
+        },
+        "surface_and_rhythm": {
+            "card_border_radius_px": 12.0,
+            "desktop_card_padding_px": 24.0,
+            "mobile_card_padding_px": 16.0,
+            "desktop_section_gap_px": 24.0,
+            "mobile_section_gap_px": 16.0,
+            "min_section_gap_px": 12.0,
+            "max_section_gap_px": 48.0,
+        },
+        "ergonomics": {
+            "min_touch_target_px": 44.0,
+            "min_input_font_size_px": 16.0,
+            "result_box_min_height_px": 110.0,
+            "table_wrapper_overflow_x": "auto",
+            "max_consecutive_cta_callouts": 2,
+            "require_runtime_sync": False,
+            "require_tabular_nums_outputs": True,
+        },
+    },
+    "comparison_page": {
+        "archetype": "comparison_page",
+        "viewports": {
+            "mobile": {"width": 375, "height": 812, "max_horizontal_overflow_px": 0},
+            "desktop": {
+                "width": 1440,
+                "height": 900,
+                "max_horizontal_overflow_px": 0,
+                "max_container_width_px": 1140,
+                "max_sibling_left_drift_px": 4.0,
+            },
+        },
+        "typography": {
+            "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "mobile": {"h1_px": 24.0, "h2_px": 18.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "strict_monotonic_hierarchy": True,
+            "numeric_font_variant": "tabular-nums",
+        },
+        "surface_and_rhythm": {
+            "card_border_radius_px": 12.0,
+            "desktop_card_padding_px": 24.0,
+            "mobile_card_padding_px": 16.0,
+            "desktop_section_gap_px": 24.0,
+            "mobile_section_gap_px": 16.0,
+            "min_section_gap_px": 12.0,
+            "max_section_gap_px": 48.0,
+        },
+        "ergonomics": {
+            "min_touch_target_px": 44.0,
+            "min_input_font_size_px": 16.0,
+            "result_box_min_height_px": 110.0,
+            "table_wrapper_overflow_x": "auto",
+            "max_consecutive_cta_callouts": 2,
+            "require_runtime_sync": False,
+            "require_tabular_nums_outputs": True,
+            "require_wrapped_tables": True,
+        },
+    },
+    "index_hub": {
+        "archetype": "index_hub",
+        "viewports": {
+            "mobile": {"width": 375, "height": 812, "max_horizontal_overflow_px": 0},
+            "desktop": {
+                "width": 1440,
+                "height": 900,
+                "max_horizontal_overflow_px": 0,
+                "max_container_width_px": 1140,
+                "max_sibling_left_drift_px": 4.0,
+            },
+        },
+        "typography": {
+            "desktop": {"h1_px": 32.0, "h2_px": 20.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "mobile": {"h1_px": 24.0, "h2_px": 18.0, "h3_px": 16.0, "body_min_px": 14.0},
+            "strict_monotonic_hierarchy": True,
+            "numeric_font_variant": "tabular-nums",
+        },
+        "surface_and_rhythm": {
+            "card_border_radius_px": 12.0,
+            "desktop_card_padding_px": 24.0,
+            "mobile_card_padding_px": 16.0,
+            "desktop_section_gap_px": 24.0,
+            "mobile_section_gap_px": 16.0,
+            "min_section_gap_px": 12.0,
+            "max_section_gap_px": 48.0,
+        },
+        "ergonomics": {
+            "min_touch_target_px": 44.0,
+            "min_input_font_size_px": 16.0,
+            "result_box_min_height_px": 110.0,
+            "table_wrapper_overflow_x": "auto",
+            "max_consecutive_cta_callouts": 2,
+            "require_runtime_sync": False,
+            "require_tabular_nums_outputs": True,
+        },
+    },
+}
+
+
+def classify_screen_archetype(html_content: str, rel_path: str = "index.html") -> str:
+    """
+    Deterministically classifies an HTML screen into one of the 4 canonical archetypes:
+    interactive_calculator, comparison_page, statutory_guide, or index_hub.
+    """
+    norm_path = (rel_path or "index.html").strip().strip("/").lower()
+    html_lower = (html_content or "").lower()
+
+    has_calc = any(
+        marker in html_lower
+        for marker in (
+            'class="calculator-form"',
+            'class="calculation-container"',
+            'class="interactive-calculator-container"',
+            'id="calculation-manifest"',
+            'class="calculator-grid"',
+            'type="range"',
+            "type='range'",
+            "data-calc-input",
+        )
+    )
+    has_comparison = any(
+        marker in html_lower
+        for marker in (
+            'class="comparison-table',
+            'class="overlay-comparison-table',
+            'data-entity-type="scenario"',
+        )
+    )
+
+    if norm_path in ("", "index.html", "tools", "tools/index.html", "guides", "guides/index.html"):
+        if not has_calc or norm_path in ("tools", "tools/index.html", "guides", "guides/index.html"):
+            return "index_hub"
+        if "tools-grid" in html_lower or "directory-grid" in html_lower or "tool-card" in html_lower:
+            return "index_hub"
+
+    if "-vs-" in norm_path or "comparison" in norm_path:
+        return "comparison_page"
+    if has_calc:
+        return "interactive_calculator"
+    if has_comparison and "table" in html_lower:
+        return "comparison_page"
+    if any(k in html_lower for k in ("overlay-hub-list", "tools-grid", "directory-grid")) and not has_calc:
+        if norm_path.endswith("index.html") and norm_path.count("/") <= 1:
+            return "index_hub"
+    return "statutory_guide"
+
+
+def get_screen_archetype_contract(html_content: str = "", rel_path: str = "index.html") -> Dict[str, Any]:
+    """Returns the measurable visual/UX contract specification for the given screen or archetype name."""
+    if html_content in SCREEN_ARCHETYPE_CONTRACTS:
+        return dict(SCREEN_ARCHETYPE_CONTRACTS[html_content])
+    archetype = classify_screen_archetype(html_content, rel_path=rel_path)
+    return dict(SCREEN_ARCHETYPE_CONTRACTS[archetype])
 
 
 def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
@@ -20,7 +228,8 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
     Renders the deterministic visual primitive stylesheet (<style id="pseo-visual-primitives">).
     Defines complete design tokens and aliases so zero CSS variables are ever undefined,
     and enforces strict, deterministic geometry for typography, cards, tables, charts,
-    and >= 44x44px interactive controls across desktop (1280px) and mobile (375px/320px).
+    container horizontal alignment, vertical whitespace rhythm, and >= 44x44px interactive
+    controls across desktop (1440px/1280px) and mobile (375px/320px).
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     porcelain_tokens = """
@@ -148,41 +357,79 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       max-width: 100%;
       overflow-x: hidden;
     }}
+    /* Deterministic Page Container & Horizontal Bounding-Box Alignment (1440px Desktop & 375px Mobile) */
+    main, main.container {{
+      max-width: 1140px !important;
+      width: 100% !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+      padding-left: 24px !important;
+      padding-right: 24px !important;
+      box-sizing: border-box !important;
+    }}
+    main > .container {{
+      max-width: 100% !important;
+      width: 100% !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }}
+    .interactive-calculator-container {{
+      max-width: 100% !important;
+      width: 100% !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      margin-bottom: 24px !important;
+    }}
     /* Deterministic Typographic Hierarchy */
-    h1, main h1, .hero h1, .page-header h1, .header-title-group h1 {{
+    h1, main h1, .hero h1, .page-header h1, .header-title-group h1, .title-group h1 {{
       font-size: 32px !important;
       line-height: 1.2 !important;
       font-weight: 700 !important;
       letter-spacing: -0.02em !important;
       margin-top: 0;
     }}
-    h2, main h2, .card h2, .section-title, section h2, .section-header h2 {{
+    h2, main h2, .card h2, .section-title, section h2, .section-header h2, .card-title, .commentary-title {{
       font-size: 20px !important;
       line-height: 1.3 !important;
       font-weight: 600 !important;
       letter-spacing: -0.01em !important;
       margin-top: 0;
     }}
-    h3, main h3, .card h3, .section-subtitle, section h3 {{
+    h3, main h3, .card h3, .section-subtitle, section h3,
+    .calc-column-title, .calc-hub-subtitle, .partner-title, .variant-title, .affiliate-title {{
       font-size: 16px !important;
       line-height: 1.4 !important;
       font-weight: 600 !important;
       margin-top: 0;
     }}
-    h4, main h4, .card h4 {{
+    h4, main h4, .card h4, .calc-geo-answer-title {{
       font-size: 15px !important;
       line-height: 1.4 !important;
       font-weight: 600 !important;
       margin-top: 0;
     }}
-    /* Deterministic Card & Surface Geometry */
-    .card, .pseo-card, .overlay-section {{
+    /* Deterministic Card, Surface Geometry & Vertical Whitespace Rhythm */
+    .card, .pseo-card, .overlay-section,
+    .commentary-box, .statutory-provenance-box, .calculation-methodology-section,
+    .statutory-comparison-table-section, .comparison-table-section, .procedure-section,
+    .calculation-scenarios-section, .related-tools-section, .scenario-presets-section,
+    .sensitivity-matrix-section, .about-card, .receipt-card {{
       background-color: var(--card-bg) !important;
       border: 1px solid var(--border) !important;
       border-radius: 12px !important;
       padding: 24px !important;
-      margin-bottom: 24px;
+      margin-top: 0 !important;
+      margin-bottom: 24px !important;
       box-shadow: var(--shadow-card);
+    }}
+    .calculator-grid, .affiliates-section, [class*="partner-section"] {{
+      margin-top: 0 !important;
+      margin-bottom: 24px !important;
+    }}
+    .calculator-grid > .card {{
+      margin-bottom: 0 !important;
     }}
     .multi-dataset-join.card {{
       background-color: var(--bg-elevated) !important;
@@ -201,12 +448,21 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       padding: 16px;
       margin-top: 20px;
     }}
-    .output-value, .calc-metric-value, .metric-value, .calc-result-val {{
+    .output-value, .calc-metric-value, .metric-value, .calc-result-val,
+    .serp-metric-val, .breakdown-value, .font-mono, .kpi-block [id*="-res-"] {{
       font-variant-numeric: tabular-nums !important;
       font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }}
     /* Deterministic Touch Targets (>= 44x44px) & Interactive Pill Primitives */
     button, input:not([type="hidden"]), select, .touch-target, .btn, .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .runway-chip {{
+      min-height: 44px !important;
+      min-width: 44px !important;
+      box-sizing: border-box !important;
+    }}
+    .statutory-provenance-box a, .autonomous-citation-list a, .related-tools-section a,
+    .breadcrumbs a, .footer-links a, .pro-hook-link, .query-pill {{
+      display: inline-flex !important;
+      align-items: center !important;
       min-height: 44px !important;
       min-width: 44px !important;
       box-sizing: border-box !important;
@@ -277,7 +533,9 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       color: var(--accent) !important;
       justify-content: center !important;
     }}
-    input.touch-target, select.touch-target, .form-input, .form-select, .calc-number-input, .calc-select, .calc-input {{
+    input:not([type="hidden"]):not([type="range"]):not([type="checkbox"]),
+    select, input.touch-target, select.touch-target,
+    .form-input, .form-select, .calc-number-input, .calc-select, .calc-input {{
       min-height: 44px !important;
       min-width: 44px !important;
       font-size: 16px !important;
@@ -493,24 +751,36 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
         padding-left: 12px;
         padding-right: 12px;
       }}
-      .container {{
+      main, main.container, .container {{
         padding-left: 12px !important;
         padding-right: 12px !important;
       }}
-      .card, .pseo-card, .overlay-section {{
+      main > .container {{
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+      }}
+      .card, .pseo-card, .overlay-section,
+      .commentary-box, .statutory-provenance-box, .calculation-methodology-section,
+      .statutory-comparison-table-section, .comparison-table-section, .procedure-section,
+      .calculation-scenarios-section, .related-tools-section, .scenario-presets-section,
+      .sensitivity-matrix-section, .about-card, .receipt-card {{
         padding: 16px !important;
         margin-bottom: 16px !important;
         border-radius: 12px !important;
       }}
-      h1, main h1, .hero h1, .page-header h1, .header-title-group h1 {{
+      .interactive-calculator-container, .calculator-grid, .affiliates-section, [class*="partner-section"] {{
+        margin-bottom: 16px !important;
+      }}
+      h1, main h1, .hero h1, .page-header h1, .header-title-group h1, .title-group h1 {{
         font-size: 24px !important;
         line-height: 1.25 !important;
       }}
-      h2, main h2, .card h2, .section-title, section h2, .section-header h2 {{
+      h2, main h2, .card h2, .section-title, section h2, .section-header h2, .card-title, .commentary-title {{
         font-size: 18px !important;
         line-height: 1.3 !important;
       }}
-      h3, main h3, .card h3, .section-subtitle, section h3 {{
+      h3, main h3, .card h3, .section-subtitle, section h3,
+      .calc-column-title, .calc-hub-subtitle, .partner-title, .variant-title, .affiliate-title {{
         font-size: 16px !important;
         line-height: 1.4 !important;
       }}
@@ -1292,6 +1562,120 @@ def _parse_font_size_to_px(style_text: str) -> Optional[Tuple[float, bool]]:
 
 import functools as _functools
 
+_CTA_CALLOUT_BLOCK_MARKERS = (
+    "affiliate-cta-section",
+    "affiliates-section",
+    "partner-section",
+    "monetization-partner-section",
+    "commercial-handoff-card",
+    "inline-fold-cta-card",
+    "overlay-partner-offer",
+    "comparison-table-cta-bar",
+    "commercial-handoff-vetting",
+    "vetted-commercial-handoff",
+    "vetted_commercial_handoff_framing",
+    "statutory-edge-case-trap",
+    "statutory-trap-alert",
+    "instant_edge_case_trap_immediacy",
+    "ymyl-public-service-guardrail",
+)
+
+
+def _count_max_consecutive_cta_callouts(html_content: str) -> int:
+    """
+    Counts the maximum number of consecutive top-level callout or CTA blocks inside <main>
+    (or document body) that are not separated by a substantive analytical section.
+    """
+    if not html_content:
+        return 0
+    main_match = re.search(r"<main\b[^>]*>([\s\S]*?)</main>", html_content, re.IGNORECASE)
+    scope = main_match.group(1) if main_match else html_content
+    top_block_pattern = re.compile(
+        r"<(section|aside|nav)\b[^>]*>"
+        r"|<div\b[^>]*class=[\"'][^\"']*\b(?:comparison-table-cta-bar\s+card|multi-dataset-join|scenario-container|baseline-output-summary|calculator-grid|interactive-calculator-container|commentary-box)\b[^\"']*[\"'][^>]*>",
+        re.IGNORECASE,
+    )
+    max_consec = 0
+    cur_consec = 0
+    for bm in top_block_pattern.finditer(scope):
+        tag_str = bm.group(0).lower()
+        if any(marker in tag_str for marker in _CTA_CALLOUT_BLOCK_MARKERS):
+            cur_consec += 1
+            if cur_consec > max_consec:
+                max_consec = cur_consec
+        else:
+            cur_consec = 0
+    return max_consec
+
+
+def _heal_stacked_cta_callouts(doc: str) -> Tuple[str, bool]:
+    """
+    Interleaves analytical sections (#statutory-compliance-checklist or .methodology)
+    when callout/CTA blocks are stacked consecutively, and inserts a statutory context
+    separator if more than 2 CTA/callout blocks remain adjacent.
+    """
+    updated = doc
+    changed = False
+
+    # 1. Reorder #statutory-trap-alert + #vetted-commercial-handoff + #statutory-compliance-checklist
+    trap_handoff_compliance_re = re.compile(
+        r'(<aside\b[^>]*id=["\']statutory-trap-alert["\'][^>]*>[\s\S]*?</aside>)'
+        r'(\s*)'
+        r'(<section\b[^>]*id=["\']vetted-commercial-handoff["\'][^>]*>[\s\S]*?</section>(?:\s*<section\b[^>]*class=["\'][^"\']*partner-section[^"\']*["\'][^>]*>[\s\S]*?</section>)?)'
+        r'(\s*)'
+        r'(<section\b[^>]*id=["\']statutory-compliance-checklist["\'][^>]*>[\s\S]*?</section>)',
+        re.IGNORECASE,
+    )
+    if trap_handoff_compliance_re.search(updated):
+        updated = trap_handoff_compliance_re.sub(r"\1\2\5\4\3", updated, count=1)
+        changed = True
+
+    # 2. Reorder .comparison-table-cta-bar + .affiliate-cta-section + #vetted-commercial-handoff + #statutory-compliance-checklist
+    compiler_triple_cta_re = re.compile(
+        r'(<div\b[^>]*class=["\'][^"\']*comparison-table-cta-bar[^"\']*["\'][^>]*>[\s\S]*?</div>)'
+        r'(\s*)'
+        r'(<section\b[^>]*class=["\'][^"\']*affiliate-cta-section[^"\']*["\'][^>]*>[\s\S]*?</section>)'
+        r'(\s*)'
+        r'(<section\b[^>]*id=["\']vetted-commercial-handoff["\'][^>]*>[\s\S]*?</section>)'
+        r'(\s*)'
+        r'(<section\b[^>]*id=["\']statutory-compliance-checklist["\'][^>]*>[\s\S]*?</section>)',
+        re.IGNORECASE,
+    )
+    if compiler_triple_cta_re.search(updated):
+        updated = compiler_triple_cta_re.sub(r"\1\2\3\4\7\6\5", updated, count=1)
+        changed = True
+
+    # 3. Fallback for any remaining > 2 consecutive top-level CTA/callout blocks
+    if _count_max_consecutive_cta_callouts(updated) > 2:
+        top_block_pattern = re.compile(
+            r"<(section|aside|nav)\b[^>]*>"
+            r"|<div\b[^>]*class=[\"'][^\"']*\b(?:comparison-table-cta-bar\s+card|multi-dataset-join|scenario-container|baseline-output-summary|calculator-grid|interactive-calculator-container|commentary-box)\b[^\"']*[\"'][^>]*>",
+            re.IGNORECASE,
+        )
+        cur_consec = 0
+        insert_offsets: List[int] = []
+        for bm in top_block_pattern.finditer(updated):
+            tag_str = bm.group(0).lower()
+            if any(marker in tag_str for marker in _CTA_CALLOUT_BLOCK_MARKERS):
+                cur_consec += 1
+                if cur_consec == 3:
+                    insert_offsets.append(bm.start())
+                    cur_consec = 1
+            else:
+                cur_consec = 0
+        if insert_offsets:
+            sep_html = (
+                '<section class="statutory-context-separator card pseo-card">'
+                "<h2>Statutory Verification Context</h2>"
+                "<p>Reconcile primary statutory calculation outputs and governing authority citations before executing a commercial pathway.</p>"
+                "</section>\n    "
+            )
+            for offset in reversed(insert_offsets):
+                updated = updated[:offset] + sep_html + updated[offset:]
+            changed = True
+
+    return updated, changed
+
 
 def detect_visual_and_ux_contract_issues(
     html_content: str,
@@ -1299,12 +1683,13 @@ def detect_visual_and_ux_contract_issues(
     require_primitives: Optional[bool] = None,
 ) -> List[str]:
     """
-    Deterministically audits an HTML document for all 5 visual and UX flaw classes:
+    Deterministically audits an HTML document for all 6 visual and UX flaw classes:
     1. Missing or corrupted theme styles and undefined CSS custom properties (var(--...)).
     2. Unwrapped <table> elements or horizontal overflow sabotage (overflow-x: hidden, fixed wide px widths).
-    3. Cramped interactive tap targets (< 44px inline dimensions, < 44px CSS min-height/min-width, display: inline).
+    3. Cramped interactive tap targets (< 44px inline dimensions, < 44px CSS min-height/min-width, display: inline, < 16px input font-size).
     4. Broken visual and typographic hierarchy (inline heading font-size overrides, cramped card padding/radius).
     5. Broken interactive calculator controls, sliders, presets, and runtime synchronizer state.
+    6. Stacked callout/CTA density (> 2 consecutive callout or CTA blocks without analytical separation).
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     if not html_content or not isinstance(html_content, str):
@@ -1599,6 +1984,20 @@ def _detect_visual_and_ux_contract_issues_cached(
                         f"[{rel_path}] Calculator .output-value contains invalid initial text ({inner_txt!r})."
                     )
                     break
+
+    # 6. Stacked Callout / CTA Density Check
+    max_consec_ctas = _count_max_consecutive_cta_callouts(html_content)
+    trap_handoff_adj = bool(
+        re.search(
+            r'<aside\b[^>]*id=["\']statutory-trap-alert["\'][^>]*>[\s\S]*?</aside>\s*<section\b[^>]*id=["\']vetted-commercial-handoff["\']',
+            html_content,
+            re.IGNORECASE,
+        )
+    )
+    if max_consec_ctas > 2 or trap_handoff_adj:
+        issues.append(
+            f"[{rel_path}] Stacked callout/CTA density violation: {max_consec_ctas} consecutive callout/CTA blocks (> 2 max or adjacent trap+handoff) without analytical separation."
+        )
 
     return tuple(issues)
 
@@ -2155,6 +2554,11 @@ def normalize_html_visual_primitives(
                 if "interactive_control_sanitization" not in repaired:
                     repaired.append("interactive_control_sanitization")
 
+    # 5f. Heal stacked callout / CTA density (> 2 consecutive CTA/callout blocks or adjacent trap + handoff)
+    updated, healed_ctas = _heal_stacked_cta_callouts(updated)
+    if healed_ctas and "cta_density_normalization" not in repaired:
+        repaired.append("cta_density_normalization")
+
     # 6. Inject or repair <script id="pseo-runtime-sync">
     has_interactive_controls = any(
         tok in updated
@@ -2211,7 +2615,10 @@ def normalize_html_visual_primitives(
 
 __all__ = [
     "VISUAL_PRIMITIVES_VERSION",
+    "SCREEN_ARCHETYPE_CONTRACTS",
     "REQUIRED_PRIMITIVE_TOKENS",
+    "classify_screen_archetype",
+    "get_screen_archetype_contract",
     "render_visual_primitives_style",
     "render_runtime_synchronizer_script",
     "detect_visual_and_ux_contract_issues",

@@ -1700,11 +1700,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
 {scenario_table_html}
 
-{monetization_section_html}
-
-{vetted_handoff_html}
-
 {statutory_compliance_html}
+
+{monetization_section_html}
 
     <section class="methodology card">
       <h2>Statutory Analysis and Computational Methodology: {safe_model_h2}</h2>
@@ -1721,6 +1719,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         <li style="margin-bottom: 6px;"><strong>Empirical Benchmark Corroboration:</strong> Anchors macroeconomic and inflation assumptions to {economic_dataset} alongside the <a href="{canonical_base}/tools/{secondary_sibling_slug}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">{secondary_sibling_title}</a>.</li>
       </ul>
     </section>
+
+{vetted_handoff_html}
 
     <section class="faq-section card">
       <h2>Frequently Asked Questions: {safe_model_h2}</h2>
@@ -1863,8 +1863,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 </html>
 """
 
-    from pseofactory.visual_primitives import normalize_html_visual_primitives
+    from pseofactory.visual_primitives import (
+        assert_visual_and_ux_contracts,
+        normalize_html_visual_primitives,
+    )
     html_content, _ = normalize_html_visual_primitives(html_content, is_tenant_porcelain=False)
+    assert_visual_and_ux_contracts(html_content, context=f"compiled page '{slug}'", require_primitives=True)
 
     # 7. Strictly verify zero forbidden dashes
     assert_no_forbidden_dashes(html_content, context=f"compiled page '{slug}'")

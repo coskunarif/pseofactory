@@ -6461,14 +6461,14 @@ class RetroReflectionEngine:
                 updated = re.sub(r'\s*<aside[^>]+data-mechanic="instant_edge_case_trap_immediacy"[\s\S]*?</aside>', "", updated)
                 injected_parts.append(winning_blocks["edge_case_trap_html"])
                 repaired.append("instant_edge_case_trap_immediacy")
-            if "vetted_commercial_handoff_framing" in missing:
-                updated = re.sub(r'\s*<section[^>]+data-mechanic="vetted_commercial_handoff_framing"[\s\S]*?</section>', "", updated)
-                injected_parts.append(winning_blocks["vetted_handoff_html"])
-                repaired.append("vetted_commercial_handoff_framing")
             if "statutory_compliance_framing" in missing:
                 updated = re.sub(r'\s*<section[^>]+data-mechanic="statutory_compliance_framing"[\s\S]*?</section>', "", updated)
                 injected_parts.append(winning_blocks["statutory_compliance_html"])
                 repaired.append("statutory_compliance_framing")
+            if "vetted_commercial_handoff_framing" in missing:
+                updated = re.sub(r'\s*<section[^>]+data-mechanic="vetted_commercial_handoff_framing"[\s\S]*?</section>', "", updated)
+                injected_parts.append(winning_blocks["vetted_handoff_html"])
+                repaired.append("vetted_commercial_handoff_framing")
             if "three_tier_topic_cluster_nav" in missing:
                 updated = re.sub(r'\s*<nav[^>]+data-mechanic="on_this_page_jump_nav"[\s\S]*?</nav>', "", updated)
                 updated = re.sub(r'\s*<section[^>]+data-mechanic="three_tier_topic_cluster_nav"[\s\S]*?</section>', "", updated)

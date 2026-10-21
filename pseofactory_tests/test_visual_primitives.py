@@ -6,13 +6,18 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
 from pseofactory.visual_primitives import (
+    SCREEN_ARCHETYPE_CONTRACTS,
     VISUAL_PRIMITIVES_VERSION,
+    classify_screen_archetype,
+    detect_visual_and_ux_contract_issues,
+    get_screen_archetype_contract,
     render_visual_primitives_style,
     render_runtime_synchronizer_script,
     normalize_html_visual_primitives,
 )
 from pseofactory.maintenance import RetroReflectionEngine
-from pseofactory.audit import audit_code_slop_ratchet
+from pseofactory.audit import audit_code_slop_ratchet, audit_visual_ui_quality_contract
+from pseofactory.ui import UI_VISUAL_QUALITY_CONTRACT, verify_ui_visual_quality_contract
 
 
 def test_visual_primitives_style_tokens_and_geometry():
@@ -147,3 +152,73 @@ def test_slop_ratchet_passes_with_visual_primitives():
     """Verifies AST maintainability and duplication ratchet passes across all engine modules."""
     report = audit_code_slop_ratchet()
     assert report["passed"] is True, f"Slop ratchet failed: {report}"
+
+
+def test_screen_archetype_classification_and_contracts():
+    """Verifies all 4 screen archetypes are classified and bound to measurable visual quality contracts."""
+    assert set(SCREEN_ARCHETYPE_CONTRACTS.keys()) == {
+        "interactive_calculator",
+        "statutory_guide",
+        "comparison_page",
+        "index_hub",
+    }
+
+    hub_html = "<html><body><main><h1>Directory Hub</h1></main></body></html>"
+    assert classify_screen_archetype(hub_html, rel_path="index.html") == "index_hub"
+    assert classify_screen_archetype(hub_html, rel_path="tools/index.html") == "index_hub"
+
+    calc_html = '<html><body><main><h1>Calc</h1><form class="calculator-form"><input type="number" data-calc-input="x"></form></main></body></html>'
+    assert classify_screen_archetype(calc_html, rel_path="tools/saas-runway-calculator/index.html") == "interactive_calculator"
+
+    comp_html = '<html><body><main><h1>Comparison</h1><section class="comparison-table-section"><div class="table-wrap"><table></table></div></section></main></body></html>'
+    assert classify_screen_archetype(comp_html, rel_path="tools/kalshi-vs-polymarket-tax-calculator/index.html") == "comparison_page"
+
+    guide_html = "<html><body><main><h1>Statutory Decision Guide</h1><section class='card'><h2>Overview</h2></section></main></body></html>"
+    assert classify_screen_archetype(guide_html, rel_path="tools/crypto-tax-form-1099-da-mandatory-reporting/index.html") == "statutory_guide"
+
+    for arch_key in SCREEN_ARCHETYPE_CONTRACTS:
+        contract = get_screen_archetype_contract(guide_html, rel_path="tools/guide/index.html")
+        assert contract["viewports"]["desktop"]["width"] == 1440
+        assert contract["viewports"]["mobile"]["width"] == 375
+        assert contract["ergonomics"]["min_touch_target_px"] == 44.0
+        assert contract["ergonomics"]["max_consecutive_cta_callouts"] == 2
+        assert contract["typography"]["desktop"]["h1_px"] == 32.0
+        assert contract["typography"]["mobile"]["h1_px"] == 24.0
+
+
+def test_stacked_cta_callout_density_detection_and_self_healing():
+    """Verifies stacked callout/CTA density (> 2 consecutive or adjacent trap + handoff) is detected and self-healed."""
+    stacked_html = """<!DOCTYPE html>
+<html lang="en" data-theme="porcelain">
+<head><title>Stacked Callouts Test</title></head>
+<body>
+<main class="container">
+<h1>Stacked Callouts Test</h1>
+<aside id="statutory-trap-alert" class="pseo-card" data-mechanic="instant_edge_case_trap_immediacy"><h2>Trap Alert</h2></aside>
+<section id="vetted-commercial-handoff" class="pseo-card" data-mechanic="vetted_commercial_handoff_framing"><h2>Handoff</h2></section>
+<section class="monetization-partner-section pseo-card"><h2>Partner</h2></section>
+<section id="statutory-compliance-checklist" class="pseo-card" data-mechanic="statutory_compliance_framing"><h2>Compliance Checklist</h2></section>
+</main>
+</body>
+</html>"""
+    issues_before = detect_visual_and_ux_contract_issues(stacked_html, rel_path="tools/test/index.html", require_primitives=True)
+    assert any("stacked callout/cta density" in i.lower() for i in issues_before)
+
+    healed_html, actions = normalize_html_visual_primitives(stacked_html)
+    assert "cta_density_normalization" in actions
+    audit_after = audit_visual_ui_quality_contract(healed_html, rel_path="tools/test/index.html", require_primitives=True)
+    assert audit_after["passed"] is True, f"Expected healed HTML to pass visual contract: {audit_after}"
+    assert healed_html.find('id="statutory-compliance-checklist"') < healed_html.find('id="vetted-commercial-handoff"')
+
+
+def test_ui_visual_quality_contract_verification():
+    """Verifies UI_VISUAL_QUALITY_CONTRACT and verify_ui_visual_quality_contract enforce hierarchy and tabular-nums."""
+    assert UI_VISUAL_QUALITY_CONTRACT["typography"]["h1_min_px"] == 24
+    assert UI_VISUAL_QUALITY_CONTRACT["typography"]["h2_min_px"] == 18
+    valid_ui = """<!DOCTYPE html><html><head><style>
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; }
+    .metric { font-variant-numeric: tabular-nums; }
+    </style></head><body><h1>Dashboard</h1><div class="table-wrap"><table></table></div></body></html>"""
+    res = verify_ui_visual_quality_contract(valid_ui, context="test_ui")
+    assert res["passed"] is True

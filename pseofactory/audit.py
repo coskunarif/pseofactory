@@ -795,7 +795,12 @@ def _audit_schema_and_fact_gates(
             g10_ok = False
             violations.append("Gate 10 (Touch Target): #calculate-btn missing 44x44px touch target specification")
 
-    from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
+    from pseofactory.visual_primitives import (
+        VISUAL_PRIMITIVES_VERSION,
+        classify_screen_archetype,
+        detect_visual_and_ux_contract_issues,
+        get_screen_archetype_contract,
+    )
 
     visual_ux_issues = detect_visual_and_ux_contract_issues(
         html_content,
@@ -808,6 +813,7 @@ def _audit_schema_and_fact_gates(
             violations.append(f"Gate 10 (Visual/UX Contract): {vui}")
 
     gate_results["antislop_and_touch_target"] = g10_ok
+    gate_results["visual_ui_quality_contract"] = len(visual_ux_issues) == 0
 
     g11_ok = True
     try:
@@ -871,6 +877,40 @@ class ContentAccuracyAuditStage:
                 report=report,
             )
         return report
+
+
+def audit_visual_ui_quality_contract(
+    html_content: str,
+    rel_path: str = "index.html",
+    require_primitives: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """
+    Audits a rendered HTML page against its classified screen archetype contract
+    (interactive_calculator, statutory_guide, comparison_page, index_hub) and
+    returns structured pass/fail diagnostics.
+    """
+    from pseofactory.visual_primitives import (
+        VISUAL_PRIMITIVES_VERSION,
+        classify_screen_archetype,
+        detect_visual_and_ux_contract_issues,
+        get_screen_archetype_contract,
+    )
+
+    archetype = classify_screen_archetype(html_content, rel_path=rel_path)
+    contract = get_screen_archetype_contract(html_content, rel_path=rel_path)
+    issues = detect_visual_and_ux_contract_issues(
+        html_content,
+        rel_path=rel_path,
+        require_primitives=require_primitives,
+    )
+    return {
+        "passed": len(issues) == 0,
+        "archetype": archetype,
+        "contract_version": VISUAL_PRIMITIVES_VERSION,
+        "contract": contract,
+        "issues": issues,
+        "rel_path": rel_path,
+    }
 
 
 def audit_code_slop_ratchet(
