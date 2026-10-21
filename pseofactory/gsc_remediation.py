@@ -973,6 +973,19 @@ def _resolve_partner_offer_and_manual_gate(
         manual_requirement["affected_traffic_impressions"] = impact_est["affected_traffic_impressions"]
         manual_requirement["outbound_cta_intent_clicks"] = impact_est["outbound_cta_intent_clicks"]
 
+    from pseofactory.affiliates import bind_asset_partner_roster
+    roster_binding = bind_asset_partner_roster(
+        property_id=eff_tenant,
+        slug=s_norm,
+        query=query,
+        gsc_metrics=cand_dict,
+        engagement_metrics=eng_metrics if isinstance(eng_metrics, dict) else None,
+    )
+    slot_plan = roster_binding.get("slot_plan") or {}
+    if not cand_dict.get("preferred_cta_slot") and not (isinstance(eng_metrics, dict) and eng_metrics):
+        if slot_plan.get("gsc_repositioned") and slot_plan.get("primary_slot"):
+            preferred_cta_slot = str(slot_plan["primary_slot"])
+
     optimization_status = (
         "YIELD_OPTIMIZED_PROMOTED"
         if chosen_key != default_chosen_key
@@ -1001,6 +1014,8 @@ def _resolve_partner_offer_and_manual_gate(
         "optimization_status": optimization_status,
         "initial_default_partner_key": default_chosen_key,
         "ranked_partner_candidates": ranked_candidates,
+        "partner_roster": roster_binding,
+        "slot_plan": slot_plan,
     }
 
     return {
@@ -1008,6 +1023,8 @@ def _resolve_partner_offer_and_manual_gate(
         "commercial_offers_allowed": True,
         "monetization_mode": "LIVE_INTENT_PARTNER_OFFER",
         "partner_offer": partner_offer,
+        "partner_roster": roster_binding,
+        "slot_plan": slot_plan,
         "manual_requirement_detected": manual_requirement is not None,
         "manual_requirement": manual_requirement,
     }
@@ -3231,6 +3248,8 @@ def compile_remediation_overlay_spec(
         "restricted_public_service": mon_info["restricted_public_service"],
         "commercial_offers_allowed": mon_info["commercial_offers_allowed"],
         "partner_offer": mon_info["partner_offer"],
+        "partner_roster": mon_info.get("partner_roster"),
+        "slot_plan": mon_info.get("slot_plan"),
         "manual_requirement_detected": mon_info["manual_requirement_detected"],
         "manual_requirement": mon_info["manual_requirement"],
         "anomaly_type": anomaly_type,

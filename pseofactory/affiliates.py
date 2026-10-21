@@ -4803,6 +4803,1113 @@ def audit_callout_destination_message_match(
     }
 
 
+COMPANY_BRAND_BY_PARTNER_KEY: Dict[str, str] = {
+    "gusto": "Gusto",
+    "rippling": "Rippling",
+    "deel": "Rippling",
+    "crest_capital": "Xendoo",
+    "bench": "Xendoo",
+    "pilot": "Xendoo",
+    "mercury": "Mercury",
+    "ramp": "Mercury",
+    "brex": "Mercury",
+    "rho": "Mercury",
+    "taxslayer": "TaxSlayer",
+    "turbotax": "TaxSlayer",
+    "efile": "E-file.com",
+    "taxact": "TaxAct",
+    "eztaxreturn": "ezTaxReturn.com",
+    "lawdepot": "LawDepot",
+    "ipx1031": "IPX1031",
+    "exeter1031": "DLP Capital",
+    "first_american": "Groundfloor",
+    "coinledger": "CoinLedger",
+    "taxbit": "CoinLedger",
+    "koinly": "Koinly",
+    "kalshi": "Kalshi",
+    "moby": "Moby",
+    "zacks": "Zacks",
+    "interactive_brokers": "Zacks",
+    "wealthfront": "Valley Direct",
+    "guideline": "Capitalize",
+    "stripe_tax": "Tax1099",
+    "flexport": "Invoice Simple",
+    "otr_solutions_factoring": "Invoice Simple",
+    "freightos_marketplace": "Invoice Simple",
+    "national_funding": "Stax Payments",
+    "stripe": "Stax Payments",
+    "national_funding_med": "Stax Payments",
+    "suretybonds_direct": "SuretyBonds.com",
+    "splash_financial": "Splash Financial",
+    "sofi": "SoFi",
+    "sofi_refi": "SoFi",
+    "earnest": "Earnest",
+    "juno": "Earnest",
+    "credible": "ELFI",
+    "laurel_road": "Laurel Road",
+    "lendkey": "LendKey",
+}
+
+VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
+    "1031_like_kind_exchange": ["lawdepot", "ipx1031", "crest_capital", "mercury", "taxslayer"],
+    "section_179_equipment_capex": ["crest_capital", "mercury", "national_funding", "taxslayer", "rippling"],
+    "s_corp_payroll_reasonable_comp": ["gusto", "rippling", "crest_capital", "mercury", "taxslayer"],
+    "workers_comp_labor_burden": ["rippling", "gusto", "crest_capital", "mercury"],
+    "prediction_market_event_contracts": ["kalshi", "moby", "zacks", "coinledger", "koinly"],
+    "prediction_market_tax_1256": ["coinledger", "koinly", "kalshi", "taxslayer", "crest_capital"],
+    "crypto_digital_asset_tax": ["coinledger", "koinly", "taxslayer", "kalshi", "crest_capital"],
+    "rd_section_174_bookkeeping": ["pilot", "gusto", "rippling", "mercury", "taxslayer"],
+    "tariff_customs_freight_trade": ["flexport", "mercury", "crest_capital", "suretybonds_direct", "rippling"],
+    "commercial_working_capital_factoring": ["otr_solutions_factoring", "mercury", "crest_capital", "national_funding", "rippling"],
+    "surety_bond_compliance": ["suretybonds_direct", "lawdepot", "mercury", "crest_capital"],
+    "treasury_cash_runway": ["wealthfront", "mercury", "crest_capital", "zacks", "rippling"],
+    "retirement_401k_rollover": ["guideline", "gusto", "rippling", "wealthfront", "mercury"],
+    "sales_tax_1099_nexus": ["stripe_tax", "crest_capital", "taxslayer", "mercury", "rippling"],
+    "federal_state_tax_brackets": ["taxslayer", "efile", "eztaxreturn", "crest_capital", "wealthfront"],
+    "saas_unit_economics_spend": ["mercury", "rippling", "gusto", "crest_capital", "national_funding"],
+    "student_loan_refinancing": ["splash_financial", "sofi", "earnest", "credible", "laurel_road"],
+    "general_b2b_commercial_finance": ["crest_capital", "gusto", "mercury", "rippling", "taxslayer"],
+}
+
+
+def classify_asset_archetype_and_intent(
+    property_id: str,
+    slug: str,
+    query: str = "",
+    page_archetype: str = "",
+    html_content: str = "",
+) -> Dict[str, Any]:
+    """
+    Deterministically classifies an asset's vertical family, page archetype,
+    commercial intent, and Title IV YMYL restriction state.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "profithelm").strip().lower()
+    s_norm = (slug or "tool").strip().strip("/").lower()
+    q_norm = (query or "").strip().lower()
+    comb = f"{s_norm} {q_norm}"
+
+    restricted_ps = False
+    if prop == "prexvo":
+        restricted_ps = is_restricted_public_service_slug(s_norm, q_norm)
+        if not restricted_ps and not any(tok in comb for tok in ("refinance", "refinancing", "private-lender", "private lender")):
+            restricted_ps = True
+
+    if prop == "prexvo":
+        vertical_family = "public_service_title_iv_ymyl" if restricted_ps else "student_loan_refinancing"
+    elif any(k in comb for k in ("1031", "like-kind", "like kind", "8824", "boot", "qi-fee", "ftb-3840", "3840", "exchange-property")):
+        vertical_family = "1031_like_kind_exchange"
+    elif any(k in comb for k in ("prediction-market-tax", "section-1256", "section 1256", "6781", "event-contract-tax")):
+        vertical_family = "prediction_market_tax_1256"
+    elif any(k in comb for k in ("prediction-market", "kalshi", "polymarket", "event-contract", "kelly-criterion", "binary-contract", "implied-probability", "vigorish", "arbitrage-hedging")):
+        vertical_family = "prediction_market_event_contracts"
+    elif any(k in comb for k in ("crypto", "8949", "1099-da", "harvesting", "digital-asset", "staking", "defi-tax")):
+        vertical_family = "crypto_digital_asset_tax"
+    elif any(k in comb for k in ("workers-comp", "payroll-burden", "labor-burden", "emr-mod", "ncci")):
+        vertical_family = "workers_comp_labor_burden"
+    elif any(k in comb for k in ("s-corp", "s corp", "1120-s", "reasonable-salary", "reasonable-compensation", "fica", "payroll", "gusto", "w-2-vs-1099")):
+        vertical_family = "s_corp_payroll_reasonable_comp"
+    elif any(k in comb for k in ("174", "r-and-d", "r&d", "6765", "research-credit", "bookkeeping", "accounting")):
+        vertical_family = "rd_section_174_bookkeeping"
+    elif any(k in comb for k in ("179", "4562", "equipment", "depreciation", "macrs", "gvwr", "bonus-depreciation", "cost-segregation", "vehicle-deduction")):
+        vertical_family = "section_179_equipment_capex"
+    elif any(k in comb for k in ("301", "tariff", "landed-cost", "customs", "htsus", "demurrage", "cbam", "freight", "duty")):
+        vertical_family = "tariff_customs_freight_trade"
+    elif any(k in comb for k in ("factoring", "invoice-discount", "line-of-credit", "working-capital", "receivable", "dso")):
+        vertical_family = "commercial_working_capital_factoring"
+    elif any(k in comb for k in ("surety", "miller-act", "performance-bond", "contractor-bond", "customs-bond")):
+        vertical_family = "surety_bond_compliance"
+    elif any(k in comb for k in ("401k", "401-k", "solo-401k", "sep-ira", "rollover", "retirement", "erisa")):
+        vertical_family = "retirement_401k_rollover"
+    elif any(k in comb for k in ("sales-tax", "economic-nexus", "1099-nec", "1099-misc", "vat", "avalara")):
+        vertical_family = "sales_tax_1099_nexus"
+    elif any(k in comb for k in ("treasury", "hysa", "tbill", "money-market", "3124", "yield-arbitrage", "sweep")):
+        vertical_family = "treasury_cash_runway"
+    elif any(k in comb for k in ("saas", "burn", "runway", "cac", "ltv", "arr", "nrr", "magic-number", "rule-of-40", "churn")):
+        vertical_family = "saas_unit_economics_spend"
+    elif any(k in comb for k in ("tax-bracket", "irs-2027", "ca-tax", "standard-deduction", "marginal-tax", "tcja", "capital-gains", "199a", "qsbs", "1202", "amt", "niit")):
+        vertical_family = "federal_state_tax_brackets"
+    else:
+        vertical_family = "general_b2b_commercial_finance"
+
+    arch_raw = (page_archetype or "").strip().lower()
+    if arch_raw in ("interactive_calculator", "scenario_comparison_matrix", "statutory_spoke", "pillar_hub"):
+        resolved_archetype = arch_raw
+    elif "/" in s_norm or any(s_norm.startswith(pfx) for pfx in ("irs-2027-tax-brackets-", "section-1031-calculator-", "section-179-calculator-")):
+        resolved_archetype = "statutory_spoke"
+    elif any(k in comb for k in ("-vs-", " vs ", "comparison", "matrix", "brackets", "schedule")) and "calculator" not in s_norm:
+        resolved_archetype = "scenario_comparison_matrix"
+    elif any(k in s_norm for k in ("-hub", "directory", "index")) or s_norm in ("tools", "partners", "affiliates"):
+        resolved_archetype = "pillar_hub"
+    elif html_content and "<table" in html_content.lower() and "<form" not in html_content.lower() and 'class="calculator' not in html_content.lower():
+        resolved_archetype = "scenario_comparison_matrix"
+    else:
+        resolved_archetype = "interactive_calculator"
+
+    if restricted_ps:
+        commercial_intent = "public_service_ymyl_restricted"
+        intent_multiplier = 0.0
+    elif prop == "prexvo":
+        commercial_intent = "private_refinance_rate_shopping"
+        intent_multiplier = 1.35
+    elif resolved_archetype == "scenario_comparison_matrix" or any(k in comb for k in ("vs", "compare", "best", "alternative", "rates", "fees")):
+        commercial_intent = "comparative_evaluation_matrix"
+        intent_multiplier = 1.40
+    elif resolved_archetype == "interactive_calculator" or any(k in comb for k in ("calculator", "estimator", "simulator", "model")):
+        commercial_intent = "high_intent_transactional_calculator"
+        intent_multiplier = 1.30
+    else:
+        commercial_intent = "statutory_compliance_modeling"
+        intent_multiplier = 1.15
+
+    return {
+        "property_id": prop,
+        "slug": s_norm,
+        "vertical_family": vertical_family,
+        "page_archetype": resolved_archetype,
+        "commercial_intent": commercial_intent,
+        "intent_multiplier": intent_multiplier,
+        "restricted_public_service": restricted_ps,
+        "commercial_offers_allowed": not restricted_ps,
+    }
+
+
+def _match_gsc_query_specialized_partner(
+    property_id: str,
+    vertical_family: str,
+    query: str,
+    roster_offers: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Inspects a live GSC search query for high-intent sub-topic signals that should
+    dynamically promote a specific partner from the multi-company roster into the
+    primary conversion slot.
+    """
+    q_low = (query or "").strip().lower()
+    if not q_low or not roster_offers:
+        return None
+    available_keys = {str(o.get("partner_key") or "") for o in roster_offers}
+    prop = (property_id or "profithelm").strip().lower()
+
+    if prop == "prexvo":
+        if any(k in q_low for k in ("medical", "resident", "doctor", "healthcare", "dental", "nurse")) and "laurel_road" in available_keys:
+            return "laurel_road"
+        if any(k in q_low for k in ("precision", "custom term", "biweekly", "skip a payment", "earnest")) and "earnest" in available_keys:
+            return "earnest"
+        if any(k in q_low for k in ("sofi", "member", "unemployment protection")) and ("sofi" in available_keys or "sofi_refi" in available_keys):
+            return "sofi" if "sofi" in available_keys else "sofi_refi"
+        if any(k in q_low for k in ("parent", "elfi", "advisor")) and "credible" in available_keys:
+            return "credible"
+        return None
+
+    # ProfitHelm query-intent specialized promotion rules
+    if any(k in q_low for k in ("koinly", "defi", "wallet sync", "uk", "canada", "australia")) and "koinly" in available_keys:
+        return "koinly"
+    if any(k in q_low for k in ("coinledger", "8949", "1099-da", "turbo tax crypto")) and "coinledger" in available_keys:
+        return "coinledger"
+    if any(k in q_low for k in ("kalshi", "cftc", "event contract", "election odds", "fed rate odds")) and "kalshi" in available_keys:
+        return "kalshi"
+    if any(k in q_low for k in ("gusto", "s corp salary", "s-corp payroll", "reasonable salary payroll", "solo s corp", "w2 officer")) and "gusto" in available_keys:
+        return "gusto"
+    if any(k in q_low for k in ("rippling", "multi-state payroll", "global payroll", "eor", "hris", "workers comp audit")) and "rippling" in available_keys:
+        return "rippling"
+    if any(k in q_low for k in ("deed", "contract", "agreement", "operating agreement", "lease agreement", "promissory note", "lawdepot")) and "lawdepot" in available_keys:
+        return "lawdepot"
+    if any(k in q_low for k in ("qualified intermediary", "ipx1031", "45 day identification", "180 day exchange", "boot offset")) and "ipx1031" in available_keys:
+        return "ipx1031"
+    if any(k in q_low for k in ("xendoo", "cpa", "bookkeeping", "form 4562", "form 1120-s", "form 6765", "tax return")) and "crest_capital" in available_keys:
+        return "crest_capital"
+    if any(k in q_low for k in ("taxslayer", "self employed tax", "schedule c filing", "efile", "e-file")) and "taxslayer" in available_keys:
+        return "taxslayer"
+    if any(k in q_low for k in ("mercury", "treasury", "runway", "venture debt", "business checking", "sweep")) and "mercury" in available_keys:
+        return "mercury"
+    if any(k in q_low for k in ("valley direct", "high yield savings", "hysa", "fdic", "apy")) and "wealthfront" in available_keys:
+        return "wealthfront"
+    if any(k in q_low for k in ("401k rollover", "capitalize", "old 401k", "ira rollover")) and "guideline" in available_keys:
+        return "guideline"
+    return None
+
+
+def select_conversion_slot_plan(
+    property_id: str,
+    slug: str,
+    roster_offers: List[Dict[str, Any]],
+    page_archetype: str = "interactive_calculator",
+    commercial_intent: str = "high_intent_transactional_calculator",
+    vertical_family: str = "general_b2b_commercial_finance",
+    gsc_metrics: Optional[Dict[str, Any]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministically selects which partner link and conversion slot
+    (calculator_result_inline, comparison_table_cta, inline_callout_card, or partner_matrix_card)
+    to deploy and prioritize based on page archetype, commercial intent, expected yield,
+    and live GSC search performance signals.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "profithelm").strip().lower()
+    s_norm = (slug or "tool").strip().strip("/").lower()
+    slug_id = s_norm.replace("/", "-")
+
+    if not roster_offers:
+        return {
+            "primary_slot": "ymyl_public_service_guardrail",
+            "active_slots": ["ymyl_public_service_guardrail"],
+            "slot_bindings": {},
+            "gsc_opportunity_tier": "RESTRICTED_PUBLIC_SERVICE",
+            "gsc_repositioned": False,
+            "reposition_reason": "Commercial offers suppressed under Title IV public-service guardrail.",
+            "promoted_partner_key": "",
+            "initial_partner_key": "",
+        }
+
+    gsc = dict(gsc_metrics) if isinstance(gsc_metrics, dict) else {}
+    impressions = int(float(gsc.get("impressions", gsc.get("baseline_impressions", 0)) or 0))
+    clicks = int(float(gsc.get("clicks", gsc.get("baseline_clicks", 0)) or 0))
+    ctr = float(gsc.get("ctr", gsc.get("baseline_ctr", 0.0)) or 0.0)
+    if ctr <= 0.0 and impressions > 0 and clicks > 0:
+        ctr = clicks / float(impressions)
+    position = float(gsc.get("position", gsc.get("baseline_position", 0.0)) or 0.0)
+    gsc_query = str(gsc.get("query") or gsc.get("top_query") or "").strip()
+
+    ordered_offers = [dict(o) for o in roster_offers]
+    initial_primary_key = str(ordered_offers[0].get("partner_key") or "")
+
+    # Check if live GSC query or empirical yield triggers a partner promotion/swap
+    query_matched_pk = _match_gsc_query_specialized_partner(
+        property_id=prop,
+        vertical_family=vertical_family,
+        query=gsc_query,
+        roster_offers=ordered_offers,
+    )
+
+    highest_yield_offer = max(
+        ordered_offers,
+        key=lambda x: (
+            float(x.get("estimated_revenue_yield_usd", 0.0) or 0.0),
+            float(x.get("empirical_erpm_usd", 0.0) or 0.0),
+            float(x.get("yield_score", 0.0) or 0.0),
+            float(x.get("expected_epc_usd", 0.0) or 0.0),
+        ),
+    )
+    highest_yield_pk = str(highest_yield_offer.get("partner_key") or "")
+
+    gsc_repositioned = False
+    gsc_opportunity_tier = "BASELINE_MULTI_SLOT"
+    reposition_reason = "Deterministic archetype and expected-yield baseline slot selection."
+
+    # 1. Query-intent specialized partner swap when GSC query signals a sharper offer match
+    if query_matched_pk and query_matched_pk != initial_primary_key:
+        ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == query_matched_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "QUERY_INTENT_PARTNER_SWAP"
+        reposition_reason = (
+            f"Live GSC query '{gsc_query}' matched specialized offer '{query_matched_pk}', "
+            f"promoting it ahead of '{initial_primary_key}'."
+        )
+    # 2. High-impression CTR shortfall or striking-distance yield promotion
+    elif impressions >= 50 and ctr < 0.03:
+        if highest_yield_pk and highest_yield_pk != initial_primary_key:
+            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "HIGH_IMPRESSION_CTR_SHORTFALL"
+        reposition_reason = (
+            f"High search impressions ({impressions}) with low CTR ({ctr:.2%}) triggered above-the-fold "
+            f"calculator_result_inline and comparison_table_cta slot promotion for '{ordered_offers[0]['partner_key']}'."
+        )
+    elif 4.0 <= position <= 20.0 and impressions >= 10:
+        if highest_yield_pk and highest_yield_pk != initial_primary_key and float(highest_yield_offer.get("yield_score", 0.0)) > float(ordered_offers[0].get("yield_score", 0.0)):
+            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "STRIKING_DISTANCE_PROMOTION"
+        reposition_reason = (
+            f"Striking-distance GSC rank (position {position:.1f}, {impressions} impressions) activated "
+            f"multi-slot inline result hook plus comparison table partner row for '{ordered_offers[0]['partner_key']}'."
+        )
+    elif highest_yield_pk and highest_yield_pk != initial_primary_key and (
+        float(highest_yield_offer.get("estimated_revenue_yield_usd", 0.0) or 0.0) > 0.0
+        or float(highest_yield_offer.get("empirical_erpm_usd", 0.0) or 0.0) > 0.0
+    ):
+        ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "EMPIRICAL_YIELD_SWAP"
+        reposition_reason = (
+            f"Empirical outbound engagement promoted higher-yielding partner '{highest_yield_pk}' "
+            f"over static default '{initial_primary_key}'."
+        )
+
+    # Re-stamp tier_role after any GSC promotion/reordering
+    for idx, off in enumerate(ordered_offers):
+        if idx == 0:
+            off["tier_role"] = "primary"
+        elif idx < len(ordered_offers) - 1:
+            off["tier_role"] = "secondary"
+        else:
+            off["tier_role"] = "fallback"
+
+    lead_offer = ordered_offers[0]
+    secondary_offer = ordered_offers[1] if len(ordered_offers) > 1 else lead_offer
+
+    # Deterministic archetype -> conversion slot selection
+    if page_archetype == "scenario_comparison_matrix":
+        primary_slot = "comparison_table_cta"
+        active_slots = [
+            "comparison_table_cta",
+            "calculator_result_inline",
+            "partner_matrix_card",
+            "inline_callout_card",
+        ]
+    elif page_archetype == "statutory_spoke":
+        primary_slot = "calculator_result_inline"
+        active_slots = [
+            "calculator_result_inline",
+            "comparison_table_cta",
+            "partner_matrix_card",
+            "inline_callout_card",
+        ]
+    elif page_archetype == "pillar_hub":
+        primary_slot = "partner_matrix_card"
+        active_slots = [
+            "partner_matrix_card",
+            "comparison_table_cta",
+            "inline_callout_card",
+        ]
+    else:
+        # interactive_calculator
+        primary_slot = "calculator_result_inline"
+        active_slots = [
+            "calculator_result_inline",
+            "comparison_table_cta",
+            "partner_matrix_card",
+            "inline_callout_card",
+        ]
+
+    def _bind_offer_to_slot(offer_dict: Dict[str, Any], slot_name: str, sub_suffix: str) -> Dict[str, Any]:
+        pk = str(offer_dict.get("partner_key") or "")
+        sub_val = f"{slug_id}_{sub_suffix}"
+        attr_href = f"/r/{pk}?source_tool={slug_id}&subid={sub_val}&cta_slot={slot_name}"
+        return {
+            **offer_dict,
+            "cta_slot": slot_name,
+            "subid": sub_val,
+            "attributed_href": attr_href,
+        }
+
+    # Diversify slot assignments so comparison_table_cta can surface either lead_offer or top secondary_offer when appropriate
+    table_offer_source = (
+        lead_offer
+        if (primary_slot == "comparison_table_cta" or gsc_opportunity_tier in ("QUERY_INTENT_PARTNER_SWAP", "HIGH_IMPRESSION_CTR_SHORTFALL"))
+        else secondary_offer
+    )
+
+    slot_bindings: Dict[str, Any] = {
+        "calculator_result_inline": _bind_offer_to_slot(lead_offer, "calculator_result_inline", "inline"),
+        "comparison_table_cta": _bind_offer_to_slot(table_offer_source, "comparison_table_cta", "table"),
+        "inline_callout_card": _bind_offer_to_slot(lead_offer, "inline_callout_card", "callout"),
+        "partner_matrix_cards": [
+            _bind_offer_to_slot(
+                off,
+                "calculator_primary_cta" if idx == 1 else "partner_matrix_card",
+                f"card_{idx}",
+            )
+            for idx, off in enumerate(ordered_offers, start=1)
+        ],
+    }
+
+    return {
+        "primary_slot": primary_slot,
+        "active_slots": active_slots,
+        "slot_bindings": slot_bindings,
+        "ordered_offers": ordered_offers,
+        "gsc_opportunity_tier": gsc_opportunity_tier,
+        "gsc_repositioned": gsc_repositioned,
+        "reposition_reason": reposition_reason,
+        "promoted_partner_key": str(lead_offer.get("partner_key") or ""),
+        "initial_partner_key": initial_primary_key,
+        "gsc_impressions": impressions,
+        "gsc_clicks": clicks,
+        "gsc_ctr": round(ctr, 4),
+        "gsc_position": round(position, 2),
+        "gsc_query": gsc_query,
+    }
+
+
+def bind_asset_partner_roster(
+    property_id: str,
+    slug: str,
+    query: str = "",
+    page_archetype: str = "",
+    gsc_metrics: Optional[Dict[str, Any]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+    vault_overrides: Optional[Dict[str, Any]] = None,
+    min_companies: int = 3,
+    html_content: str = "",
+) -> Dict[str, Any]:
+    """
+    Automatically binds a diversified multi-company partner roster (Primary, Secondary, Fallback)
+    for any new or existing asset or vertical, and deterministically computes its conversion
+    slot placement plan using page archetype, commercial intent, expected yield, and live GSC signals.
+    Guarantees at least `min_companies` (>=3) distinct partner companies on every commercial page
+    and strict 0-commercial-link YMYL compliance on restricted public-service pages.
+    Zero em-dashes. Zero en-dashes.
+    """
+    cls_info = classify_asset_archetype_and_intent(
+        property_id=property_id,
+        slug=slug,
+        query=query,
+        page_archetype=page_archetype,
+        html_content=html_content,
+    )
+    prop = cls_info["property_id"]
+    s_norm = cls_info["slug"]
+    vertical_family = cls_info["vertical_family"]
+    resolved_archetype = cls_info["page_archetype"]
+    commercial_intent = cls_info["commercial_intent"]
+    intent_multiplier = cls_info["intent_multiplier"]
+    restricted_ps = cls_info["restricted_public_service"]
+
+    if restricted_ps:
+        slot_plan = select_conversion_slot_plan(
+            property_id=prop,
+            slug=s_norm,
+            roster_offers=[],
+            page_archetype=resolved_archetype,
+            commercial_intent=commercial_intent,
+            vertical_family=vertical_family,
+            gsc_metrics=gsc_metrics,
+            engagement_metrics=engagement_metrics,
+        )
+        return {
+            **cls_info,
+            "primary_offer": None,
+            "secondary_offers": [],
+            "fallback_offer": None,
+            "roster_offers": [],
+            "roster_keys": [],
+            "distinct_companies": [],
+            "distinct_companies_count": 0,
+            "slot_plan": slot_plan,
+        }
+
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+
+    # 1. Start with ranked tool affiliates from existing catalog + vertical diversified roster
+    ranked_initial = rank_partner_offers_by_revenue_yield(
+        property_id=prop,
+        slug=s_norm,
+        engagement_metrics=engagement_metrics,
+        vault_overrides=vault_overrides,
+    )
+    ranked_by_key: Dict[str, Dict[str, Any]] = {
+        str(r.get("partner_key") or ""): dict(r)
+        for r in ranked_initial
+        if isinstance(r, dict) and r.get("partner_key")
+    }
+
+    vertical_template_keys = list(
+        VERTICAL_DIVERSIFIED_PARTNER_ROSTERS.get(
+            vertical_family,
+            VERTICAL_DIVERSIFIED_PARTNER_ROSTERS["general_b2b_commercial_finance"],
+        )
+    )
+
+    # Preserve legacy primary partner for exact slug matches (e.g., section-1031-calculator -> ipx1031)
+    try:
+        canonical_route = get_affiliate_route(prop, s_norm, vault_overrides=vault_overrides)
+        canonical_lead_pk = str(canonical_route.get("partner_key") or "").strip().lower()
+    except Exception:
+        canonical_lead_pk = ""
+
+    candidate_keys_ordered: List[str] = []
+    if canonical_lead_pk and canonical_lead_pk in registry:
+        candidate_keys_ordered.append(canonical_lead_pk)
+    for k in vertical_template_keys:
+        if k in registry and k not in candidate_keys_ordered:
+            candidate_keys_ordered.append(k)
+    for r in ranked_initial:
+        rk = str(r.get("partner_key") or "")
+        if rk in registry and rk not in candidate_keys_ordered:
+            candidate_keys_ordered.append(rk)
+    # Fallback supplement pool so even greenfield verticals always reach >= min_companies distinct companies
+    supplement_pool = (
+        ["splash_financial", "sofi", "earnest", "credible", "laurel_road"]
+        if prop == "prexvo"
+        else ["crest_capital", "gusto", "rippling", "mercury", "taxslayer", "coinledger", "kalshi", "lawdepot"]
+    )
+    for sk in supplement_pool:
+        if sk in registry and sk not in candidate_keys_ordered:
+            candidate_keys_ordered.append(sk)
+
+    # 2. Select diversified multi-company roster prioritizing distinct underlying company brands first
+    selected_keys: List[str] = []
+    seen_brands: Set[str] = set()
+    target_roster_size = 5 if prop == "prexvo" else max(3, int(min_companies))
+
+    for ck in candidate_keys_ordered:
+        brand_name = COMPANY_BRAND_BY_PARTNER_KEY.get(ck, ck.replace("_", " ").title())
+        if brand_name not in seen_brands:
+            selected_keys.append(ck)
+            seen_brands.add(brand_name)
+        if len(selected_keys) >= target_roster_size:
+            break
+
+    # If still fewer than target_roster_size, append remaining distinct keys
+    if len(selected_keys) < target_roster_size:
+        for ck in candidate_keys_ordered:
+            if ck not in selected_keys:
+                selected_keys.append(ck)
+            if len(selected_keys) >= target_roster_size:
+                break
+
+    # 3. Build enriched offer dicts for each selected partner key
+    slug_id = s_norm.replace("/", "-")
+    est_conv_rate = 0.035 if prop != "prexvo" else 0.025
+    ftc_disc = (
+        PREXVO_DISCLOSURES.get("ftc_disclosure", "")
+        if prop == "prexvo"
+        else get_contextual_ftc_disclosure(prop, slug=s_norm)
+    )
+    roster_offers: List[Dict[str, Any]] = []
+
+    for idx, pk in enumerate(selected_keys):
+        p_obj = registry[pk]
+        r_meta = ranked_by_key.get(pk) or {}
+        bounty_mid = float(r_meta.get("bounty_midpoint_usd") or get_partner_bounty_midpoint(pk))
+        expected_epc = round(bounty_mid * est_conv_rate * intent_multiplier, 2)
+        base_yield = float(r_meta.get("yield_score") or round(bounty_mid * 0.5 + (5.0 if idx == 0 else 0.0), 2))
+        company_brand = COMPANY_BRAND_BY_PARTNER_KEY.get(pk, p_obj.name.split()[0])
+        tier_role = "primary" if idx == 0 else ("secondary" if idx < len(selected_keys) - 1 else "fallback")
+        slot_default = "calculator_primary_cta" if idx == 0 else "partner_matrix_card"
+        sub_default = f"{slug_id}_card_{idx + 1}"
+
+        roster_offers.append({
+            "partner_key": pk,
+            "name": p_obj.name,
+            "partner_name": p_obj.name,
+            "company_brand": company_brand,
+            "tier_role": tier_role,
+            "status": "live",
+            "commission_est": p_obj.commission_est,
+            "bounty_est": p_obj.bounty_est,
+            "bounty_midpoint_usd": round(bounty_mid, 2),
+            "expected_epc_usd": expected_epc,
+            "yield_score": round(base_yield * intent_multiplier, 2),
+            "empirical_erpm_usd": float(r_meta.get("empirical_erpm_usd", 0.0) or 0.0),
+            "empirical_cta_ctr": float(r_meta.get("cta_ctr", 0.0) or 0.0),
+            "outbound_clicks": int(r_meta.get("outbound_clicks", 0) or 0),
+            "estimated_revenue_yield_usd": float(r_meta.get("estimated_revenue_yield_usd", 0.0) or 0.0),
+            "badge": p_obj.badge,
+            "description": p_obj.description,
+            "cta_text": p_obj.cta_text,
+            "default_url": p_obj.default_url,
+            "redirect_path": f"/r/{pk}",
+            "attributed_href": f"/r/{pk}?source_tool={slug_id}&subid={sub_default}&cta_slot={slot_default}",
+            "rel_attributes": "noopener sponsored nofollow",
+            "disclosure": ftc_disc,
+        })
+
+    slot_plan = select_conversion_slot_plan(
+        property_id=prop,
+        slug=s_norm,
+        roster_offers=roster_offers,
+        page_archetype=resolved_archetype,
+        commercial_intent=commercial_intent,
+        vertical_family=vertical_family,
+        gsc_metrics=gsc_metrics,
+        engagement_metrics=engagement_metrics,
+    )
+
+    ordered_offers = slot_plan["ordered_offers"]
+    primary_offer = ordered_offers[0] if ordered_offers else None
+    secondary_offers = ordered_offers[1:-1] if len(ordered_offers) > 2 else (ordered_offers[1:] if len(ordered_offers) > 1 else [])
+    fallback_offer = ordered_offers[-1] if len(ordered_offers) >= 2 else primary_offer
+    distinct_companies = list(dict.fromkeys(str(o.get("company_brand") or "") for o in ordered_offers if o.get("company_brand")))
+
+    return {
+        **cls_info,
+        "primary_offer": primary_offer,
+        "secondary_offers": secondary_offers,
+        "fallback_offer": fallback_offer,
+        "roster_offers": ordered_offers,
+        "roster_keys": [str(o.get("partner_key") or "") for o in ordered_offers],
+        "distinct_companies": distinct_companies,
+        "distinct_companies_count": len(distinct_companies),
+        "slot_plan": slot_plan,
+    }
+
+
+def reposition_affiliate_placements_from_gsc_signals(
+    html_content: str,
+    property_id: str = "profithelm",
+    slug: str = "",
+    query: str = "",
+    gsc_metrics: Optional[Dict[str, Any]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Analyzes live GSC query, impression, CTR, and position signals alongside empirical
+    click yield to dynamically reposition or swap affiliate placements on compiled HTML pages:
+      1. Updates or injects the above-the-fold `calculator_result_inline` (.calc-inline-cta)
+         hook inside `.result-box` / `.result-card` with the GSC-promoted primary partner.
+      2. Injects or updates an actionable `comparison_table_cta` conversion slot inside or
+         immediately beneath the scenario/statutory comparison table on high-opportunity pages.
+      3. Expands or re-orders the multi-company partner roster cards (`primary`, `secondary`,
+         `fallback`) so the highest-converting offer leads.
+      4. Synchronizes `#gsc-striking-overlay` `.overlay-partner-offer` when present.
+    Returns `(updated_html, placement_delta_report)`.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+
+    if not html_content or not isinstance(html_content, str):
+        return html_content, {"repositioned": False, "status": "EMPTY_HTML"}
+
+    prop = (property_id or "profithelm").strip().lower()
+    page_slug = (slug or _extract_page_slug_from_html(html_content)).strip().strip("/").lower()
+    slug_id = page_slug.replace("/", "-")
+
+    # Capture before state
+    before_partners = re.findall(r'data-partner=["\']([a-z0-9_]+)["\']', html_content, flags=re.I)
+    before_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', html_content, flags=re.I)))
+    before_inline_m = re.search(
+        r'<div\s+class=["\'][^"\']*calc-inline-cta[^"\']*["\'][^>]*data-partner=["\']([a-z0-9_]+)["\']',
+        html_content,
+        flags=re.I,
+    )
+    before_primary = (
+        before_inline_m.group(1).lower()
+        if before_inline_m
+        else (before_partners[0].lower() if before_partners else "")
+    )
+
+    gsc_dict = dict(gsc_metrics) if isinstance(gsc_metrics, dict) else {}
+    eff_query = str(query or gsc_dict.get("query") or gsc_dict.get("top_query") or "").strip()
+
+    roster = bind_asset_partner_roster(
+        property_id=prop,
+        slug=page_slug,
+        query=eff_query,
+        gsc_metrics=gsc_dict,
+        engagement_metrics=engagement_metrics,
+        html_content=html_content,
+    )
+
+    if roster["restricted_public_service"]:
+        return html_content, {
+            "slug": page_slug,
+            "property_id": prop,
+            "restricted_public_service": True,
+            "repositioned": False,
+            "before_primary_partner": before_primary,
+            "after_primary_partner": "",
+            "before_slots": before_slots,
+            "after_slots": ["ymyl_public_service_guardrail"],
+            "gsc_opportunity_tier": "RESTRICTED_PUBLIC_SERVICE",
+            "roster_keys": [],
+            "distinct_companies": [],
+        }
+
+    slot_plan = roster["slot_plan"]
+    bindings = slot_plan["slot_bindings"]
+    inline_offer = bindings["calculator_result_inline"]
+    table_offer = bindings["comparison_table_cta"]
+    matrix_cards = bindings["partner_matrix_cards"]
+    gsc_tier = str(slot_plan.get("gsc_opportunity_tier") or "BASELINE_MULTI_SLOT")
+    updated = html_content
+
+    # 1. Reposition / inject calculator_result_inline (.calc-inline-cta)
+    if inline_offer:
+        pk_in = str(inline_offer["partner_key"])
+        safe_badge = html_lib.escape(str(inline_offer.get("badge") or "Featured Offer"))
+        safe_name = html_lib.escape(str(inline_offer.get("name") or pk_in))
+        safe_cta = html_lib.escape(str(inline_offer.get("cta_text") or "Explore Partner"))
+        safe_brand = html_lib.escape(str(inline_offer.get("company_brand") or pk_in))
+        safe_href = html_lib.escape(str(inline_offer.get("attributed_href") or f"/r/{pk_in}"))
+        safe_sub = html_lib.escape(str(inline_offer.get("subid") or f"{slug_id}_inline"))
+        safe_tool = html_lib.escape(slug_id)
+        safe_gsc_tier = html_lib.escape(gsc_tier)
+        yield_str = f"{float(inline_offer.get('yield_score', 0.0) or 0.0):.2f}"
+
+        new_inline_div = (
+            f'<div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
+            f'data-partner="{pk_in}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
+            f'data-gsc-tier="{safe_gsc_tier}" data-gsc-repositioned="{"true" if slot_plan.get("gsc_repositioned") else "false"}" '
+            f'data-yield-score="{yield_str}" '
+            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.75rem; margin-bottom: 0.75rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
+            f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
+            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
+            f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
+            f'            </div>\n'
+            f'            <a href="{safe_href}" target="_blank" rel="noopener sponsored nofollow" '
+            f'data-partner="{pk_in}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
+            f'data-tool="{safe_tool}" data-subid="{safe_sub}" data-status="live" data-tier="starter" '
+            f'data-cta-slot="calculator_result_inline" class="btn-cta touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; white-space: nowrap; text-decoration: none;">\n'
+            f'              {safe_cta} &rarr;\n'
+            f'            </a>\n'
+            f'          </div>'
+        )
+
+        if 'class="calc-inline-cta"' in updated:
+            updated = re.sub(
+                r'<div\s+class=["\']calc-inline-cta["\'][^>]*>.*?</div>\s*<a\s+[^>]*data-cta-slot=["\']calculator_result_inline["\'][^>]*>.*?</a>\s*</div>',
+                new_inline_div,
+                updated,
+                count=1,
+                flags=re.S | re.I,
+            )
+        else:
+            for r_pat in (
+                r'(<div\s+class=["\']result-box["\'][^>]*>.*?)(</div>)',
+                r'(<div\s+class=["\']card\s+result-card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
+                r'(<div\s+class=["\']calc-outputs-panel["\']>\s*<div\s+class=["\']calc-panel-header["\']>.*?</div>)',
+            ):
+                if re.search(r_pat, updated, flags=re.S | re.I):
+                    if "result-box" in r_pat:
+                        updated = re.sub(
+                            r_pat,
+                            rf"\g<1>\n          {new_inline_div}\n      \g<2>",
+                            updated,
+                            count=1,
+                            flags=re.S | re.I,
+                        )
+                    else:
+                        updated = re.sub(r_pat, rf"\g<1>\n          {new_inline_div}", updated, count=1, flags=re.S | re.I)
+                    break
+
+    # 2. Inject or update comparison_table_cta when active in slot_plan
+    if "comparison_table_cta" in slot_plan["active_slots"] and table_offer:
+        pk_tbl = str(table_offer["partner_key"])
+        safe_tbl_name = html_lib.escape(str(table_offer.get("name") or pk_tbl))
+        safe_tbl_cta = html_lib.escape(str(table_offer.get("cta_text") or "Compare Offer"))
+        safe_tbl_brand = html_lib.escape(str(table_offer.get("company_brand") or pk_tbl))
+        safe_tbl_href = html_lib.escape(str(table_offer.get("attributed_href") or f"/r/{pk_tbl}"))
+        safe_tbl_sub = html_lib.escape(str(table_offer.get("subid") or f"{slug_id}_table"))
+        safe_tool = html_lib.escape(slug_id)
+        safe_tier_role = html_lib.escape(str(table_offer.get("tier_role") or "primary"))
+
+        table_cta_bar = (
+            f'<div class="comparison-table-cta-bar" data-mechanic="compliant_intent_monetization" '
+            f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
+            f'data-cta-slot="comparison_table_cta" data-gsc-tier="{html_lib.escape(gsc_tier)}" '
+            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">\n'
+            f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text, #0f172a);">Scenario Execution Partner: <strong>{safe_tbl_name}</strong> ({safe_tbl_brand})</span>\n'
+            f'        <a href="{safe_tbl_href}" target="_blank" rel="noopener sponsored nofollow" '
+            f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
+            f'data-tool="{safe_tool}" data-subid="{safe_tbl_sub}" data-status="live" '
+            f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{safe_tbl_cta} &rarr;</a>\n'
+            f'      </div>'
+        )
+        if 'class="comparison-table-cta-bar"' in updated:
+            updated = re.sub(
+                r'<div\s+class=["\']comparison-table-cta-bar["\'][^>]*>.*?</div>',
+                table_cta_bar,
+                updated,
+                count=1,
+                flags=re.S | re.I,
+            )
+        else:
+            for tbl_pat in (
+                r'(<section\s+class=["\'][^"\']*scenario-comparison[^"\']*["\'][^>]*>.*?</table>\s*</div>)',
+                r'(<section\s+class=["\'][^"\']*overlay-comparison[^"\']*["\'][^>]*>.*?</table>\s*</div>)',
+                r'(<table\s+class=["\'][^"\']*(?:scenario-table|comparison-table|sensitivity-table)[^"\']*["\'][^>]*>.*?</table>\s*</div>)',
+            ):
+                if re.search(tbl_pat, updated, flags=re.S | re.I):
+                    updated = re.sub(
+                        tbl_pat,
+                        rf"\g<1>\n      {table_cta_bar}",
+                        updated,
+                        count=1,
+                        flags=re.S | re.I,
+                    )
+                    break
+
+    # 3. Rebuild or expand .affiliates-section / .affiliate-cta-section with the diversified multi-company roster
+    if matrix_cards and prop != "prexvo":
+        def _render_roster_card(card_offer: Dict[str, Any], idx: int) -> str:
+            c_pk = str(card_offer["partner_key"])
+            c_name = html_lib.escape(str(card_offer.get("name") or c_pk))
+            c_desc = html_lib.escape(str(card_offer.get("description") or ""))
+            c_badge = html_lib.escape(str(card_offer.get("badge") or "Verified Partner"))
+            c_cta = html_lib.escape(str(card_offer.get("cta_text") or "Explore Partner"))
+            c_brand = html_lib.escape(str(card_offer.get("company_brand") or c_pk))
+            c_role = html_lib.escape(str(card_offer.get("tier_role") or ("primary" if idx == 1 else "secondary")))
+            c_slot = html_lib.escape(str(card_offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card")))
+            c_href = html_lib.escape(str(card_offer.get("attributed_href") or f"/r/{c_pk}"))
+            c_sub = html_lib.escape(str(card_offer.get("subid") or f"{slug_id}_card_{idx}"))
+            c_tool = html_lib.escape(slug_id)
+            return (
+                f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}">\n'
+                f'      <div class="affiliate-info">\n'
+                f'        <span class="affiliate-badge">{c_badge} ({c_role.title()} Offer)</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / {c_brand}</span>\n'
+                f'        <h3 class="affiliate-title">{c_name}</h3>\n'
+                f'        <p class="affiliate-desc">{c_desc}</p>\n'
+                f'      </div>\n'
+                f'      <div>\n'
+                f'        <a href="{c_href}" target="_blank" rel="noopener sponsored nofollow" '
+                f'data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" '
+                f'data-status="live" data-tool="{c_tool}" data-subid="{c_sub}" data-cta-slot="{c_slot}" '
+                f'data-tier="starter" class="btn-cta partner-cta touch-target" '
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; text-decoration: none;">\n'
+                f'          {c_cta} &rarr;\n'
+                f'        </a>\n'
+                f'      </div>\n'
+                f'    </div>'
+            )
+
+        cards_html = "\n".join(_render_roster_card(c, idx) for idx, c in enumerate(matrix_cards, start=1))
+        roster_keys_csv = html_lib.escape(",".join(roster["roster_keys"]))
+        companies_csv = html_lib.escape(",".join(roster["distinct_companies"]))
+
+        if re.search(r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>', updated, flags=re.S | re.I):
+            def _replace_aff_sec(m_sec: re.Match) -> str:
+                raw_sec = m_sec.group(0)
+                h2_m = re.search(r"<h2[^>]*>.*?</h2>", raw_sec, flags=re.S | re.I)
+                h2_str = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
+                lead_pk_attr = html_lib.escape(str(slot_plan.get("promoted_partner_key") or ""))
+                return (
+                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
+                    f'data-partner="{lead_pk_attr}" data-primary-partner="{lead_pk_attr}" '
+                    f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
+                    f'data-gsc-tier="{html_lib.escape(gsc_tier)}">\n'
+                    f'        {h2_str}'
+                    f'{cards_html}\n'
+                    f'      </section>'
+                )
+            updated = re.sub(
+                r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>',
+                _replace_aff_sec,
+                updated,
+                count=1,
+                flags=re.S | re.I,
+            )
+
+    # 4. Update #gsc-striking-overlay .overlay-partner-offer if present
+    if inline_offer and 'class="overlay-section overlay-partner-offer' in updated:
+        pk_ov = str(inline_offer["partner_key"])
+        safe_ov_name = html_lib.escape(str(inline_offer.get("name") or pk_ov))
+        safe_ov_cta = html_lib.escape(str(inline_offer.get("cta_text") or "Explore Partner"))
+        safe_ov_disc = html_lib.escape(str(inline_offer.get("disclosure") or ""))
+        safe_ov_sub = html_lib.escape(f"{slug_id}_overlay")
+        safe_ov_href = html_lib.escape(
+            f"/r/{pk_ov}?source_tool={slug_id}&subid={safe_ov_href_sub if False else f'{slug_id}_overlay'}&cta_slot=overlay_primary_cta"
+        )
+        ov_markup = (
+            f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
+            f'data-property="{html_lib.escape(prop)}" data-partner="{pk_ov}" '
+            f'data-partner-url="/r/{pk_ov}" data-cta-slot="overlay_primary_cta" '
+            f'data-cta-id="cta-{html_lib.escape(prop)}-{html_lib.escape(slug_id)}-{pk_ov}" '
+            f'data-gsc-tier="{html_lib.escape(gsc_tier)}" data-mechanic="compliant_intent_monetization">\n'
+            f'  <h3 class="section-subtitle">Recommended Partner Solution: {safe_ov_name}</h3>\n'
+            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{safe_ov_disc}</p>\n'
+            f'  <a href="{safe_ov_href}" rel="noopener sponsored nofollow" target="_blank" '
+            f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{pk_ov}" '
+            f'data-tool="{html_lib.escape(slug_id)}" data-subid="{safe_ov_sub}" data-cta-slot="overlay_primary_cta" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{safe_ov_cta}</a>\n'
+            f'</section>'
+        )
+        updated = re.sub(
+            r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',
+            ov_markup,
+            updated,
+            count=1,
+            flags=re.S | re.I,
+        )
+
+    after_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', updated, flags=re.I)))
+    after_primary = str(slot_plan.get("promoted_partner_key") or "")
+
+    return updated, {
+        "slug": page_slug,
+        "property_id": prop,
+        "vertical_family": roster["vertical_family"],
+        "page_archetype": roster["page_archetype"],
+        "commercial_intent": roster["commercial_intent"],
+        "restricted_public_service": False,
+        "repositioned": bool(updated != html_content or slot_plan.get("gsc_repositioned")),
+        "gsc_repositioned": bool(slot_plan.get("gsc_repositioned")),
+        "gsc_opportunity_tier": gsc_tier,
+        "reposition_reason": slot_plan["reposition_reason"],
+        "before_primary_partner": before_primary,
+        "after_primary_partner": after_primary,
+        "before_slots": before_slots,
+        "after_slots": after_slots,
+        "roster_keys": roster["roster_keys"],
+        "distinct_companies": roster["distinct_companies"],
+        "distinct_companies_count": roster["distinct_companies_count"],
+        "gsc_impressions": slot_plan["gsc_impressions"],
+        "gsc_clicks": slot_plan["gsc_clicks"],
+        "gsc_ctr": slot_plan["gsc_ctr"],
+        "gsc_position": slot_plan["gsc_position"],
+        "gsc_query": slot_plan["gsc_query"],
+    }
+
+
+def run_gsc_affiliate_placement_feedback_pass(
+    property_id: str = "profithelm",
+    dist_dir: Optional[Any] = None,
+    repo_root: Optional[Any] = None,
+    gsc_rows: Optional[List[Dict[str, Any]]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """
+    Executes a closed-loop GSC search signal to affiliate placement optimization pass
+    across a tenant property's compiled tool pages.
+    Aggregates live GSC query, impression, CTR, and position signals per page,
+    binds diversified multi-company partner rosters, repositions conversion slots
+    on high-opportunity pages, and writes `.agy/gsc_affiliate_placement_ledger.json`
+    (unless `dry_run=True`).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    prop = (property_id or "profithelm").strip().lower()
+    if repo_root is not None:
+        r_root = Path(repo_root).resolve()
+    elif dist_dir is not None:
+        r_root = Path(dist_dir).resolve().parent
+    else:
+        r_root = Path(f"/home/ubuntuadmin/projects/{'prexvo' if prop == 'prexvo' else 'profithelm-platform'}")
+    d_dir = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
+
+    if gsc_rows is None:
+        try:
+            from pseofactory.seo_growth_loops import load_consolidated_gsc_query_rows
+            gsc_bundle = load_consolidated_gsc_query_rows(prop, repo_root=r_root, live_gsc=False)
+            raw_rows = list(
+                gsc_bundle.get("current_rows")
+                or gsc_bundle.get("snapshot_latest_rows")
+                or gsc_bundle.get("baseline_rows")
+                or gsc_bundle.get("query_rows")
+                or []
+            )
+            if not raw_rows:
+                gsc_bundle_default = load_consolidated_gsc_query_rows(prop, live_gsc=False)
+                raw_rows = list(
+                    gsc_bundle_default.get("current_rows")
+                    or gsc_bundle_default.get("snapshot_latest_rows")
+                    or gsc_bundle_default.get("baseline_rows")
+                    or gsc_bundle_default.get("query_rows")
+                    or []
+                )
+        except Exception:
+            raw_rows = []
+    else:
+        raw_rows = list(gsc_rows)
+
+    if engagement_metrics is None:
+        eng_file = r_root / ".agy" / "partner_engagement_metrics.json"
+        if eng_file.is_file():
+            try:
+                engagement_metrics = json.loads(eng_file.read_text(encoding="utf-8"))
+            except Exception:
+                engagement_metrics = {}
+        else:
+            engagement_metrics = {}
+
+    # Aggregate GSC metrics per tool slug (retaining top query by impressions/striking-distance)
+    gsc_by_slug: Dict[str, Dict[str, Any]] = {}
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        r_slug = str(row.get("slug") or "").strip().strip("/").lower()
+        if not r_slug:
+            r_url = str(row.get("target_url") or row.get("page") or row.get("url") or "").strip()
+            if "/tools/" in r_url:
+                r_slug = r_url.split("/tools/", 1)[1].split("?")[0].strip("/").lower()
+        if not r_slug:
+            continue
+        impr = int(float(row.get("impressions", 0) or 0))
+        clks = int(float(row.get("clicks", 0) or 0))
+        pos = float(row.get("position", 0.0) or 0.0)
+        q_str = str(row.get("query") or "").strip()
+
+        bucket = gsc_by_slug.setdefault(
+            r_slug,
+            {
+                "slug": r_slug,
+                "impressions": 0,
+                "clicks": 0,
+                "_weighted_pos": 0.0,
+                "_top_query_impr": -1,
+                "query": "",
+            },
+        )
+        bucket["impressions"] += impr
+        bucket["clicks"] += clks
+        if impr > 0 and pos > 0.0:
+            bucket["_weighted_pos"] += pos * impr
+        if q_str and impr > bucket["_top_query_impr"]:
+            bucket["_top_query_impr"] = impr
+            bucket["query"] = q_str
+
+    for b in gsc_by_slug.values():
+        tot_i = int(b["impressions"])
+        tot_c = int(b["clicks"])
+        b["ctr"] = round(tot_c / float(tot_i), 4) if tot_i > 0 else 0.0
+        b["position"] = round(float(b["_weighted_pos"]) / float(tot_i), 2) if tot_i > 0 and b["_weighted_pos"] > 0 else 0.0
+        b.pop("_weighted_pos", None)
+        b.pop("_top_query_impr", None)
+
+    tools_dir = d_dir / "tools"
+    page_reports: List[Dict[str, Any]] = []
+    repositioned_pages: List[Dict[str, Any]] = []
+    pages_scanned = 0
+    pages_updated = 0
+
+    if tools_dir.is_dir():
+        for html_file in sorted(tools_dir.rglob("index.html")):
+            rel_slug = html_file.parent.relative_to(tools_dir).as_posix().strip("/")
+            if not rel_slug:
+                continue
+            try:
+                raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            pages_scanned += 1
+            slug_gsc = gsc_by_slug.get(rel_slug) or gsc_by_slug.get(rel_slug.replace("/", "-")) or {}
+            updated_html, rep = reposition_affiliate_placements_from_gsc_signals(
+                raw_html,
+                property_id=prop,
+                slug=rel_slug,
+                query=str(slug_gsc.get("query") or ""),
+                gsc_metrics=slug_gsc,
+                engagement_metrics=engagement_metrics,
+            )
+            page_reports.append(rep)
+            if rep.get("repositioned") or updated_html != raw_html:
+                repositioned_pages.append(rep)
+                if not dry_run and updated_html != raw_html:
+                    html_file.write_text(updated_html, encoding="utf-8")
+                    pages_updated += 1
+
+    summary = {
+        "workflow": "gsc_affiliate_placement_feedback_pass",
+        "property_id": prop,
+        "dry_run": bool(dry_run),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "pages_scanned": pages_scanned,
+        "pages_updated": pages_updated,
+        "gsc_signal_slugs_count": len(gsc_by_slug),
+        "repositioned_pages_count": len(repositioned_pages),
+        "repositioned_pages": repositioned_pages[:50],
+        "page_reports": page_reports[:100],
+    }
+
+    if not dry_run and r_root.is_dir():
+        ledger_path = r_root / ".agy" / "gsc_affiliate_placement_ledger.json"
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return summary
+
+
+
 # Self-attestation on module import
 for _p_dict in (PROFITHELM_AFFILIATES, PREXVO_AFFILIATES):
     for _p_key, _p_val in _p_dict.items():

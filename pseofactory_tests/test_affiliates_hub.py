@@ -1263,3 +1263,278 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
     assert INTENT_ROUTING_TABLE["tariff-landed-cost"][0] == "rippling"
 
 
+def test_automatic_multi_company_partner_roster_binding_across_new_and_existing_verticals():
+    """Verifies that any new or existing asset automatically binds a diversified multi-company partner roster (Primary, Secondary, Fallback)."""
+    from pseofactory.affiliates import bind_asset_partner_roster
+
+    hub = MonetizationHub()
+
+    greenfield_assets = [
+        ("profithelm", "autonomous-warehouse-robotics-roi-calculator", "warehouse robotics capex equipment lease section 179 calculator", "section_179_equipment_capex", 3),
+        ("profithelm", "multi-state-remote-payroll-burden-estimator", "multi state remote employee payroll burden gusto rippling calculator", "workers_comp_labor_burden", 3),
+        ("profithelm", "commercial-triple-net-1031-boot-simulator", "triple net lease 1031 exchange boot tax deferral calculator", "1031_like_kind_exchange", 3),
+        ("profithelm", "defi-validator-yield-8949-tax-calculator", "crypto staking validator form 8949 tax reconciliation calculator", "crypto_digital_asset_tax", 3),
+        ("profithelm", "pass-through-qbi-199a-phaseout-estimator", "irs section 199a qbi deduction tax filing calculator", "federal_state_tax_brackets", 3),
+        ("profithelm", "municipal-bid-performance-bond-premium-calculator", "contractor performance surety bond cost calculator", "surety_bond_compliance", 3),
+        ("profithelm", "fomc-rate-cut-event-contract-kelly-calculator", "kalshi fomc rate cut event contract probability kelly calculator", "prediction_market_event_contracts", 3),
+        ("prexvo", "medical-residency-private-student-loan-refinance-calculator", "private student loan refinance interest rate comparison calculator", "student_loan_refinancing", 5),
+    ]
+
+    for prop_id, slug, query, expected_vertical, min_companies in greenfield_assets:
+        roster = hub.bind_partner_roster(property_id=prop_id, slug=slug, query=query)
+        assert roster["vertical_family"] == expected_vertical, f"Unexpected vertical for {slug}: {roster['vertical_family']}"
+        assert roster["restricted_public_service"] is False
+        assert roster["distinct_companies_count"] >= min_companies, (
+            f"Expected >= {min_companies} distinct companies for {slug}, got {roster['distinct_companies']}"
+        )
+        assert isinstance(roster["primary_offer"], dict) and roster["primary_offer"].get("partner_key")
+        assert isinstance(roster["secondary_offers"], list) and len(roster["secondary_offers"]) >= 1
+        assert isinstance(roster["fallback_offer"], dict) and roster["fallback_offer"].get("partner_key")
+
+        # Primary, first secondary, and fallback must represent distinct company brands
+        primary_brand = roster["primary_offer"]["company_brand"]
+        sec_brand = roster["secondary_offers"][0]["company_brand"]
+        fallback_brand = roster["fallback_offer"]["company_brand"]
+        assert len({primary_brand, sec_brand, fallback_brand}) == 3
+
+    # Verify YMYL statutory Prexvo asset suppresses all commercial partner offers
+    ymyl_roster = bind_asset_partner_roster(
+        property_id="prexvo",
+        slug="pslf-qualifying-payment-buyback-estimator",
+        query="pslf buyback qualifying payment statutory forgiveness calculator",
+    )
+    assert ymyl_roster["restricted_public_service"] is True
+    assert ymyl_roster["distinct_companies_count"] == 0
+    assert ymyl_roster["primary_offer"] is None
+    assert ymyl_roster["secondary_offers"] == []
+    assert ymyl_roster["fallback_offer"] is None
+    assert ymyl_roster["slot_plan"]["active_slots"] == ["ymyl_public_service_guardrail"]
+
+
+def test_deterministic_conversion_slot_selection_across_archetypes_and_intents():
+    """Verifies deterministic slot selection across page archetypes, commercial intents, and compiled HTML output."""
+    from pseofactory.affiliates import bind_asset_partner_roster
+    from pseofactory.compiler import compile_high_effort_page
+
+    calc_roster = bind_asset_partner_roster(
+        property_id="profithelm",
+        slug="saas-burn-multiple-runway-calculator",
+        query="saas burn multiple runway calculator",
+        page_archetype="interactive_calculator",
+    )
+    assert calc_roster["page_archetype"] == "interactive_calculator"
+    assert calc_roster["slot_plan"]["primary_slot"] == "calculator_result_inline"
+    assert calc_roster["slot_plan"]["active_slots"][0] == "calculator_result_inline"
+    assert "comparison_table_cta" in calc_roster["slot_plan"]["slot_bindings"]
+
+    matrix_roster = bind_asset_partner_roster(
+        property_id="profithelm",
+        slug="rippling-vs-gusto-payroll-cost-comparison-matrix",
+        query="rippling vs gusto payroll cost comparison matrix",
+        page_archetype="scenario_comparison_matrix",
+    )
+    assert matrix_roster["page_archetype"] == "scenario_comparison_matrix"
+    assert matrix_roster["slot_plan"]["primary_slot"] == "comparison_table_cta"
+
+    spoke_roster = bind_asset_partner_roster(
+        property_id="profithelm",
+        slug="irc-section-174-software-capitalization-statutory-guide",
+        query="irc section 174 software r&d capitalization statutory rules",
+        page_archetype="statutory_spoke",
+    )
+    assert spoke_roster["page_archetype"] == "statutory_spoke"
+    assert spoke_roster["slot_plan"]["primary_slot"] == "calculator_result_inline"
+
+    hub_roster = bind_asset_partner_roster(
+        property_id="profithelm",
+        slug="b2b-commercial-finance-calculators-hub",
+        query="b2b commercial finance directory hub",
+        page_archetype="pillar_hub",
+    )
+    assert hub_roster["page_archetype"] == "pillar_hub"
+    assert hub_roster["slot_plan"]["primary_slot"] == "partner_matrix_card"
+
+    # Compile a greenfield asset via compile_high_effort_page and verify all conversion slots render
+    compiled = compile_high_effort_page(
+        {
+            "query": "multi state remote payroll tax burden calculator",
+            "slug": "multi-state-remote-payroll-tax-burden-calculator",
+            "tenant": "profithelm",
+            "statutory_authority": "IRC Section 3111 & FUTA Section 3301",
+            "economic_dataset": "BLS ECEC Employer Costs for Employee Compensation",
+            "model_name": "Multi-State Employer Payroll Burden Model",
+            "formula": "gross_payroll * (1 + fica_rate + suta_rate)",
+            "inputs": {"gross_payroll": 500000, "fica_rate": 0.0765, "suta_rate": 0.027},
+            "published_output": 551750.0,
+            "sample_calculation": "500,000 gross payroll at 10.35% combined statutory tax rate yields 551,750 total employer cost",
+            "canonical_base": "https://profithelm.com",
+        }
+    )
+    html_out = compiled["html"]
+    assert 'data-cta-slot="calculator_result_inline"' in html_out
+    assert 'data-cta-slot="comparison_table_cta"' in html_out
+    assert 'data-cta-slot="calculator_primary_cta"' in html_out
+    assert 'data-cta-slot="partner_matrix_card"' in html_out
+    assert compiled["partner_roster"]["distinct_companies_count"] >= 3
+
+
+def test_gsc_driven_dynamic_placement_repositioning_and_swap_loop(tmp_path):
+    """Verifies GSC query, impression, CTR, and position signals dynamically reposition and swap affiliate placements."""
+    from pseofactory.affiliates import (
+        reposition_affiliate_placements_from_gsc_signals,
+        run_gsc_affiliate_placement_feedback_pass,
+    )
+    from pseofactory.compiler import compile_high_effort_page
+
+    compiled = compile_high_effort_page(
+        {
+            "query": "b2b payroll cost estimator",
+            "slug": "b2b-payroll-cost-estimator",
+            "tenant": "profithelm",
+            "statutory_authority": "IRC Section 3111",
+            "economic_dataset": "BLS ECEC Series",
+            "model_name": "B2B Payroll Cost Model",
+            "formula": "headcount * avg_salary * 1.12",
+            "inputs": {"headcount": 25, "avg_salary": 85000},
+            "published_output": 2380000.0,
+            "sample_calculation": "25 employees at 85,000 salary with 12% burden yields 2,380,000",
+            "canonical_base": "https://profithelm.com",
+        }
+    )
+
+    # 1. Striking-distance + query-specific partner intent ("rippling global eor payroll") on a B2B payroll tool
+    updated_html, rep_report = reposition_affiliate_placements_from_gsc_signals(
+        compiled["html"],
+        property_id="profithelm",
+        slug="b2b-payroll-cost-estimator",
+        query="rippling global eor multi state payroll calculator",
+        gsc_metrics={
+            "query": "rippling global eor multi state payroll calculator",
+            "impressions": 420,
+            "clicks": 3,
+            "ctr": 0.0071,
+            "position": 8.4,
+        },
+    )
+    assert rep_report["repositioned"] is True
+    assert rep_report["gsc_repositioned"] is True
+    assert rep_report["after_primary_partner"] == "rippling"
+    assert rep_report["distinct_companies_count"] >= 3
+    assert 'data-gsc-repositioned="true"' in updated_html
+
+    # 2. End-to-end HTML feedback pass on a compiled page directory
+    dist_dir = tmp_path / "dist"
+    tool_dir = dist_dir / "tools" / "b2b-payroll-cost-estimator"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    index_file = tool_dir / "index.html"
+    index_file.write_text(compiled["html"], encoding="utf-8")
+
+    gsc_rows = [
+        {
+            "slug": "b2b-payroll-cost-estimator",
+            "query": "rippling global eor multi state payroll calculator",
+            "impressions": 680,
+            "clicks": 4,
+            "ctr": 0.0058,
+            "position": 6.2,
+        }
+    ]
+    dry_report = run_gsc_affiliate_placement_feedback_pass(
+        property_id="profithelm",
+        dist_dir=dist_dir,
+        repo_root=tmp_path,
+        gsc_rows=gsc_rows,
+        dry_run=True,
+    )
+    assert dry_report["pages_scanned"] == 1
+    assert dry_report["repositioned_pages_count"] == 1
+    assert dry_report["repositioned_pages"][0]["after_primary_partner"] == "rippling"
+
+    live_report = run_gsc_affiliate_placement_feedback_pass(
+        property_id="profithelm",
+        dist_dir=dist_dir,
+        repo_root=tmp_path,
+        gsc_rows=gsc_rows,
+        dry_run=False,
+    )
+    assert live_report["pages_updated"] == 1
+    final_html = index_file.read_text(encoding="utf-8")
+    assert 'data-gsc-repositioned="true"' in final_html
+    assert 'data-primary-partner="rippling"' in final_html
+    assert '/r/rippling?source_tool=b2b-payroll-cost-estimator&amp;subid=b2b-payroll-cost-estimator_inline&amp;cta_slot=calculator_result_inline' in final_html
+
+
+def test_contract_and_verifier_assertions_enforce_partner_roster_and_compliance(tmp_path):
+    """Verifies contract and verifier gates enforce multi-company partner coverage, link integrity, and YMYL isolation."""
+    from pseofactory.compiler import compile_high_effort_page
+    from pseofactory.contracts import (
+        assert_asset_partner_roster_and_slot_integrity,
+        detect_asset_partner_roster_and_slot_issues,
+    )
+    from pseofactory.verifier import (
+        audit_estate_partner_roster_and_compliance,
+        verify_html_partner_roster_and_slot_contract,
+    )
+
+    ph_page = compile_high_effort_page(
+        {
+            "query": "section 179 equipment deduction calculator",
+            "slug": "section-179-equipment-deduction-calculator",
+            "tenant": "profithelm",
+            "statutory_authority": "IRC Section 179",
+            "economic_dataset": "FRED CPILFESL Series",
+            "model_name": "Section 179 Deduction Model",
+            "formula": "min(cost, cap)",
+            "inputs": {"cost": 350000, "cap": 1220000},
+            "published_output": 350000.0,
+            "sample_calculation": "350,000 equipment cost under 1,220,000 cap yields 350,000 deduction",
+            "canonical_base": "https://profithelm.com",
+        }
+    )
+    assert_asset_partner_roster_and_slot_integrity(
+        ph_page["html"],
+        property_id="profithelm",
+        slug="section-179-equipment-deduction-calculator",
+        require_multi_company=True,
+    )
+    v_res = verify_html_partner_roster_and_slot_contract(
+        ph_page["html"],
+        property_id="profithelm",
+        slug="section-179-equipment-deduction-calculator",
+        require_multi_company=True,
+    )
+    assert v_res["passed"] is True
+    assert len(v_res["partner_keys"]) >= 3
+
+    # Negative check: stripping sponsored attribute triggers contract violation
+    broken_html = ph_page["html"].replace('rel="noopener sponsored nofollow"', 'rel="noopener"')
+    issues = detect_asset_partner_roster_and_slot_issues(
+        broken_html,
+        property_id="profithelm",
+        slug="section-179-equipment-deduction-calculator",
+    )
+    assert any("sponsored" in issue.lower() for issue in issues)
+    with pytest.raises(ValueError):
+        assert_asset_partner_roster_and_slot_integrity(
+            broken_html,
+            property_id="profithelm",
+            slug="section-179-equipment-deduction-calculator",
+        )
+
+    # Estate-level audit check
+    dist_dir = tmp_path / "dist"
+    p_dir = dist_dir / "tools" / "section-179-equipment-deduction-calculator"
+    p_dir.mkdir(parents=True, exist_ok=True)
+    (p_dir / "index.html").write_text(ph_page["html"], encoding="utf-8")
+
+    estate_audit = audit_estate_partner_roster_and_compliance(
+        dist_dir=dist_dir,
+        property_id="profithelm",
+        require_multi_company=True,
+    )
+    assert estate_audit["passed"] is True
+    assert estate_audit["commercial_pages"] == 1
+
+
+
+

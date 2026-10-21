@@ -50,6 +50,13 @@ from pseofactory.affiliates import (
     SOVRN_VERIFIED_PAYING_MERCHANTS,
     audit_merchant_coverage_and_yield,
     audit_callout_destination_message_match,
+    COMPANY_BRAND_BY_PARTNER_KEY,
+    VERTICAL_DIVERSIFIED_PARTNER_ROSTERS,
+    classify_asset_archetype_and_intent,
+    select_conversion_slot_plan,
+    bind_asset_partner_roster,
+    reposition_affiliate_placements_from_gsc_signals,
+    run_gsc_affiliate_placement_feedback_pass,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -1394,5 +1401,35 @@ class MonetizationHub:
         registry and rendered HTML pages.
         """
         return audit_callout_destination_message_match(dist_dir=dist_dir, property_id=property_id)
+
+    def bind_partner_roster(
+        self,
+        property_id: str,
+        slug: str,
+        query: str = "",
+        page_archetype: str = "",
+        gsc_metrics: Optional[Dict[str, Any]] = None,
+        engagement_metrics: Optional[Dict[str, Any]] = None,
+        min_companies: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Binds a diversified multi-company partner roster (primary, secondary, fallback)
+        and deterministic conversion slot plan for any asset or vertical.
+        """
+        return bind_asset_partner_roster(
+            property_id=property_id,
+            slug=slug,
+            query=query,
+            page_archetype=page_archetype,
+            gsc_metrics=gsc_metrics,
+            engagement_metrics=engagement_metrics,
+            vault_overrides=self.vault_data,
+            min_companies=min_companies,
+        )
+
+
+CentralizedAffiliatesHub = MonetizationHub
+
+
 
 

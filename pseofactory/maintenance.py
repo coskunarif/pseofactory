@@ -6518,7 +6518,13 @@ class RetroReflectionEngine:
         from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, PROFITHELM_US_STATES
 
         ov_s_low = str(ov_s or "").lower().strip("/")
-        ov_body_dump = json.dumps({k: v for k, v in raw_ov.items() if k not in ("hub_links", "partner_offer")})
+        ov_body_dump = json.dumps(
+            {
+                k: v
+                for k, v in raw_ov.items()
+                if k not in ("hub_links", "partner_offer", "partner_roster", "slot_plan")
+            }
+        )
         qa_str = str(raw_ov.get("quick_answer") or "")
         q_str = str(raw_ov.get("query") or "").lower().strip()
         vehicle_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
@@ -6675,13 +6681,28 @@ class RetroReflectionEngine:
                                 ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
 
                             if isinstance(raw_ov.get("partner_offer"), dict) and not raw_ov.get("restricted_public_service"):
+                                from pseofactory.affiliates import bind_asset_partner_roster
                                 ov_low = ov_s.lower()
                                 po = dict(raw_ov["partner_offer"])
+                                ov_gsc = {
+                                    "impressions": raw_ov.get("baseline_impressions", 50),
+                                    "clicks": raw_ov.get("baseline_clicks", 0),
+                                    "ctr": raw_ov.get("baseline_ctr", 0.02),
+                                    "position": raw_ov.get("baseline_position", 12.0),
+                                    "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                                }
+                                roster_b = bind_asset_partner_roster(
+                                    property_id=property_id,
+                                    slug=ov_s,
+                                    query=str(ov_gsc["query"]),
+                                    gsc_metrics=ov_gsc,
+                                )
+                                primary_off = roster_b.get("primary_offer") or {}
                                 if property_id.lower() == "prexvo":
-                                    t_pk = "splash_financial"
-                                    t_name = "Splash Financial Student Loan Refinancing"
-                                    t_url = "https://www.splashfinancial.com/"
-                                    t_cta = "Compare Rates with Splash Financial"
+                                    t_pk = str(primary_off.get("partner_key") or "splash_financial")
+                                    t_name = str(primary_off.get("name") or "Splash Financial Student Loan Refinancing")
+                                    t_url = str(primary_off.get("default_url") or "https://www.splashfinancial.com/")
+                                    t_cta = str(primary_off.get("cta_text") or "Compare Rates with Splash Financial")
                                 else:
                                     if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
                                         t_pk = "kalshi"
@@ -6694,10 +6715,10 @@ class RetroReflectionEngine:
                                         t_url = "https://coinledger.io/?fpr=arif-554004"
                                         t_cta = "Generate IRS Form 8949 with CoinLedger"
                                     elif any(k in ov_low for k in ("s-corp", "reasonable-salary", "workers-comp", "payroll-burden")):
-                                        t_pk = "rippling"
-                                        t_name = "Rippling Workforce & Payroll Platform"
-                                        t_url = "https://try.rippling.com/mcfo1m09qiwt"
-                                        t_cta = "Schedule Rippling Demo"
+                                        t_pk = str(primary_off.get("partner_key") or "rippling")
+                                        t_name = str(primary_off.get("name") or "Rippling Workforce & Payroll Platform")
+                                        t_url = str(primary_off.get("default_url") or "https://try.rippling.com/mcfo1m09qiwt")
+                                        t_cta = str(primary_off.get("cta_text") or "Schedule Rippling Demo")
                                     elif "1031" in ov_low:
                                         t_pk = "ipx1031"
                                         t_name = "IPX1031 Qualified Intermediary"
@@ -6730,15 +6751,16 @@ class RetroReflectionEngine:
                                         t_url = "https://www.xendoo.com/?fp_ref=arif-4ac24e"
                                         t_cta = "Optimize Section 179 Accounting with Xendoo"
                                     else:
-                                        t_pk = "mercury"
-                                        t_name = "Mercury Business Banking"
-                                        t_url = "https://mercury.com/r/profithelm-llc"
-                                        t_cta = "Open a Mercury Account"
+                                        t_pk = str(primary_off.get("partner_key") or "mercury")
+                                        t_name = str(primary_off.get("name") or "Mercury Business Banking")
+                                        t_url = str(primary_off.get("default_url") or "https://mercury.com/r/profithelm-llc")
+                                        t_cta = str(primary_off.get("cta_text") or "Open a Mercury Account")
                                 if (
                                     po.get("partner_key") != t_pk
                                     or po.get("url") != t_url
                                     or po.get("redirect_path") != f"/r/{t_pk}"
                                     or po.get("partner_name") != t_name
+                                    or "partner_roster" not in raw_ov
                                 ):
                                     po["partner_key"] = t_pk
                                     po["partner_name"] = t_name
@@ -6746,7 +6768,11 @@ class RetroReflectionEngine:
                                     po["redirect_path"] = f"/r/{t_pk}"
                                     po["cta_text"] = t_cta
                                     po["cta_id"] = f"cta-{property_id.lower()}-{ov_s}-{t_pk}"
+                                    po["partner_roster"] = roster_b
+                                    po["slot_plan"] = roster_b.get("slot_plan")
                                     raw_ov["partner_offer"] = po
+                                    raw_ov["partner_roster"] = roster_b
+                                    raw_ov["slot_plan"] = roster_b.get("slot_plan")
                                     ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                         except Exception:
                             pass
@@ -7137,7 +7163,7 @@ class RetroReflectionEngine:
             if (
                 'data-status="pending"' in content
                 or 'data-partner="sofi_refi"' in content
-                or ("1031" in rel and 'data-partner="ipx1031"' not in content)
+                or ("1031" in rel and 'data-partner="ipx1031"' not in content and 'data-partner="lawdepot"' not in content)
                 or ('href="/r/' in content and "source_tool=" not in content)
             ):
                 if "callout_message_match" not in missing:
@@ -7430,6 +7456,21 @@ class RetroReflectionEngine:
                 retrofitted_paths.append(rel)
 
         if agy_dir.is_dir():
+            try:
+                from pseofactory.affiliates import run_gsc_affiliate_placement_feedback_pass
+                is_prod_repo = (
+                    str(d.parent).startswith("/home/ubuntuadmin/projects/")
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                )
+                if is_prod_repo:
+                    run_gsc_affiliate_placement_feedback_pass(
+                        property_id=property_id,
+                        dist_dir=d,
+                        repo_root=d.parent,
+                        dry_run=False,
+                    )
+            except Exception:
+                pass
             try:
                 from pseofactory.seo_growth_loops import evaluate_closed_loop_cohort_reflection
                 from pseofactory.verifier import verify_cohort_reflection_contract

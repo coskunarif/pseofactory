@@ -6319,7 +6319,7 @@ def verify_html_source_keyword_inflation_ratio(
     source_for_count = re.sub(r"https?://[^\s\"'<>]+", " ", raw, flags=re.IGNORECASE)
     source_for_count = re.sub(r"<meta\b[^>]*>", " ", source_for_count, flags=re.IGNORECASE)
     source_for_count = re.sub(
-        r'\b(?:href|src|item|url|contentUrl|data-tool|data-subid|data-cta-id|id|for|name)\s*=\s*["\'][^"\']*["\']',
+        r'\b(?:href|src|item|url|contentUrl|data-tool|data-subid|data-cta-id|data-partner|data-partner-roster|data-partner-companies|data-company-brand|data-partner-tier|data-cta-slot|data-gsc-tier|data-conversion-slot|id|for|name)\s*=\s*["\'][^"\']*["\']',
         " ",
         source_for_count,
         flags=re.IGNORECASE,
@@ -6511,3 +6511,119 @@ verify_operational_shield = _default_verifier.verify_operational_shield
 check_comparison_layout_gate = _default_verifier.check_comparison_layout_gate
 verify_comparison_layout_contracts = _default_verifier.verify_comparison_layout_contracts
 check_comparison_layout_contracts_gate = _default_verifier.check_comparison_layout_contracts_gate
+
+
+def verify_html_partner_roster_and_slot_contract(
+    html_content: str,
+    property_id: str = "profithelm",
+    slug: str = "",
+    rel_path: str = "index.html",
+    require_multi_company: bool = True,
+) -> Dict[str, Any]:
+    """
+    Mechanical single-page verification gate enforcing multi-company partner roster
+    binding (Primary, Secondary, Fallback), deterministic conversion slot coverage,
+    attributed /r/:partner link integrity, and FTC / Title IV compliance.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import (
+        detect_asset_partner_roster_and_slot_issues,
+        assert_asset_partner_roster_and_slot_integrity,
+    )
+
+    issues = detect_asset_partner_roster_and_slot_issues(
+        html_text=html_content,
+        property_id=property_id,
+        slug=slug,
+        rel_path=rel_path,
+        require_multi_company=require_multi_company,
+    )
+    try:
+        assert_asset_partner_roster_and_slot_integrity(
+            html_text=html_content,
+            property_id=property_id,
+            slug=slug,
+            context=rel_path,
+            require_multi_company=require_multi_company,
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if msg not in issues:
+            issues.append(msg)
+
+    partner_keys = list(
+        dict.fromkeys(re.findall(r'data-partner=["\']([a-z0-9_]+)["\']', str(html_content or ""), flags=re.I))
+    )
+    slots_found = list(
+        dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', str(html_content or ""), flags=re.I))
+    )
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": len(issues) == 0,
+        "gate": "check_partner_roster_and_slot_gate",
+        "property_id": property_id,
+        "slug": slug,
+        "partner_keys": partner_keys,
+        "slots_found": slots_found,
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
+def audit_estate_partner_roster_and_compliance(
+    dist_dir: Union[str, Path],
+    property_id: str = "profithelm",
+    require_multi_company: bool = True,
+) -> Dict[str, Any]:
+    """
+    Audits every compiled tool page under `dist_dir / 'tools'` against the
+    multi-company partner roster, conversion slot, link attribution, and
+    FTC / Title IV compliance contract.
+    Zero em-dashes. Zero en-dashes.
+    """
+    d_path = Path(dist_dir).resolve()
+    tools_dir = d_path / "tools"
+    prop = (property_id or "profithelm").strip().lower()
+    pages_audited = 0
+    commercial_pages = 0
+    restricted_pages = 0
+    violations: List[Dict[str, Any]] = []
+
+    if tools_dir.is_dir():
+        for html_file in sorted(tools_dir.rglob("index.html")):
+            rel_p = html_file.relative_to(d_path).as_posix()
+            rel_slug = html_file.parent.relative_to(tools_dir).as_posix().strip("/")
+            try:
+                raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            pages_audited += 1
+            res = verify_html_partner_roster_and_slot_contract(
+                raw_html,
+                property_id=prop,
+                slug=rel_slug,
+                rel_path=rel_p,
+                require_multi_company=require_multi_company,
+            )
+            if not res["partner_keys"]:
+                restricted_pages += 1
+            else:
+                commercial_pages += 1
+            if not res["passed"]:
+                violations.append({
+                    "rel_path": rel_p,
+                    "slug": rel_slug,
+                    "issues": res["issues"],
+                })
+
+    return {
+        "status": "PASS" if not violations else "FAIL",
+        "passed": len(violations) == 0,
+        "property_id": prop,
+        "pages_audited": pages_audited,
+        "commercial_pages": commercial_pages,
+        "restricted_public_service_pages": restricted_pages,
+        "violation_pages_count": len(violations),
+        "violations": violations,
+    }
+

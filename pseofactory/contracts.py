@@ -8710,6 +8710,195 @@ def assert_rate_limit_and_bot_shield(
     return True
 
 
+def detect_asset_partner_roster_and_slot_issues(
+    html_text: str,
+    property_id: str = "profithelm",
+    slug: str = "",
+    rel_path: str = "index.html",
+    require_multi_company: bool = True,
+) -> List[str]:
+    """
+    Enforces strict multi-company partner roster coverage, conversion slot placement,
+    link attribution integrity, domain isolation, and FTC / Title IV compliance across
+    compiled HTML assets.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import (
+        COMPANY_BRAND_BY_PARTNER_KEY,
+        PREXVO_AFFILIATES,
+        PROFITHELM_AFFILIATES,
+        classify_asset_archetype_and_intent,
+    )
+
+    issues: List[str] = []
+    if not isinstance(html_text, str) or not html_text.strip():
+        return [f"Page {rel_path}: HTML content must be a non-empty string"]
+
+    if "\u2014" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
+    if "\u2013" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
+
+    prop = (property_id or "profithelm").strip().lower()
+    eff_slug = (slug or "").strip().strip("/").lower()
+    if not eff_slug and "tools/" in rel_path:
+        eff_slug = rel_path.split("tools/", 1)[1].replace("/index.html", "").replace(".html", "").strip("/").lower()
+
+    cls_info = classify_asset_archetype_and_intent(
+        property_id=prop,
+        slug=eff_slug or "tool",
+        html_content=html_text,
+    )
+    restricted_ps = bool(
+        cls_info["restricted_public_service"]
+        or 'data-restricted-public-service="true"' in html_text
+        or 'data-commercial-offers="none"' in html_text
+        or 'data-commercial-offers="suppressed-default"' in html_text
+    )
+
+    r_links = list(re.finditer(r'<a\s+[^>]*href=["\'](/r/([a-z0-9_]+)[^"\']*)["\'][^>]*>', html_text, flags=re.I | re.S))
+
+    if restricted_ps:
+        if r_links:
+            bad_pks = sorted({m.group(2).lower() for m in r_links})
+            issues.append(
+                f"Page {rel_path}: Restricted public-service YMYL page contains forbidden commercial /r/ links: {bad_pks}"
+            )
+        if (
+            'data-restricted-public-service="true"' not in html_text
+            and 'data-commercial-offers="none"' not in html_text
+            and 'data-commercial-offers="suppressed-default"' not in html_text
+            and "ymyl-public-service-guardrail" not in html_text
+            and "Public Service" not in html_text
+            and "34 CFR" not in html_text
+        ):
+            issues.append(
+                f"Page {rel_path}: Restricted public-service YMYL page missing Title IV public-service guardrail disclosure"
+            )
+        return issues
+
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    foreign_registry = PROFITHELM_AFFILIATES if prop == "prexvo" else PREXVO_AFFILIATES
+
+    # Extract all bound partner keys across /r/ links and data-partner attributes
+    found_partner_keys: List[str] = []
+    for m in r_links:
+        tag_open = m.group(0)
+        href = m.group(1)
+        pk = m.group(2).lower()
+        if pk not in found_partner_keys:
+            found_partner_keys.append(pk)
+
+        if pk not in registry:
+            if pk in foreign_registry:
+                issues.append(
+                    f"Page {rel_path}: Cross-tenant partner bleed detected on /r/{pk} (foreign partner for {prop})"
+                )
+            else:
+                issues.append(
+                    f"Page {rel_path}: Unregistered partner key '/r/{pk}' not found in {prop} affiliate catalog"
+                )
+
+        rel_m = re.search(r'\brel=["\']([^"\']*)["\']', tag_open, flags=re.I)
+        rel_val = (rel_m.group(1).lower() if rel_m else "")
+        if "sponsored" not in rel_val or "nofollow" not in rel_val:
+            issues.append(
+                f"Page {rel_path}: Affiliate link '{href}' missing required rel='noopener sponsored nofollow' attributes"
+            )
+        if 'target="_blank"' not in tag_open.lower() and "target='_blank'" not in tag_open.lower():
+            issues.append(
+                f"Page {rel_path}: Affiliate link '{href}' missing required target='_blank'"
+            )
+        if 'data-status="pending"' in tag_open.lower():
+            issues.append(
+                f"Page {rel_path}: Affiliate link '{href}' has stale data-status='pending'"
+            )
+        if "source_tool=" not in href or "subid=" not in href or "cta_slot=" not in href:
+            issues.append(
+                f"Page {rel_path}: Affiliate link '{href}' missing required sub-attribution query params (source_tool, subid, cta_slot)"
+            )
+
+    for dp_m in re.finditer(r'data-partner=["\']([a-z0-9_]+)["\']', html_text, flags=re.I):
+        dp_k = dp_m.group(1).lower()
+        if dp_k not in found_partner_keys:
+            found_partner_keys.append(dp_k)
+
+    roster_attr_m = re.search(r'data-partner-roster=["\']([^"\']+)["\']', html_text, flags=re.I)
+    if roster_attr_m:
+        for rk in roster_attr_m.group(1).split(","):
+            rk_clean = rk.strip().lower()
+            if rk_clean and rk_clean not in found_partner_keys:
+                found_partner_keys.append(rk_clean)
+
+    if not found_partner_keys:
+        issues.append(f"Page {rel_path}: Commercial page binds 0 affiliate partners")
+        return issues
+
+    if require_multi_company:
+        distinct_brands = {
+            COMPANY_BRAND_BY_PARTNER_KEY.get(k, k)
+            for k in found_partner_keys
+            if k in registry
+        }
+        if len(found_partner_keys) < 3 or len(distinct_brands) < 3:
+            issues.append(
+                f"Page {rel_path}: Multi-company partner roster violation: found {len(found_partner_keys)} partner keys "
+                f"({found_partner_keys}) and {len(distinct_brands)} distinct companies ({sorted(distinct_brands)}), minimum 3 required"
+            )
+
+    # Check conversion slot coverage on interactive calculators
+    has_calc = (
+        'class="calculator' in html_text
+        or 'class="interactive-calculator' in html_text
+        or 'class="result-box"' in html_text
+        or 'class="card result-card"' in html_text
+    )
+    if has_calc and require_multi_company:
+        if 'data-cta-slot="calculator_result_inline"' not in html_text and 'class="calc-inline-cta"' not in html_text:
+            issues.append(
+                f"Page {rel_path}: Interactive calculator page missing above-the-fold 'calculator_result_inline' (.calc-inline-cta) conversion slot"
+            )
+
+    # Check FTC & YMYL disclosure compliance
+    low_html = html_text.lower()
+    if "ftc" not in low_html and "commission" not in low_html and "sponsored" not in low_html:
+        issues.append(f"Page {rel_path}: Commercial page missing required FTC affiliate disclosure")
+    if prop == "prexvo":
+        if not any(t in low_html for t in ("waives", "forfeit", "title iv", "pslf", "income-driven")):
+            issues.append(
+                f"Page {rel_path}: Prexvo commercial refinance page missing required Title IV federal protection forfeiture warning"
+            )
+
+    return issues
+
+
+def assert_asset_partner_roster_and_slot_integrity(
+    html_text: str,
+    property_id: str = "profithelm",
+    slug: str = "",
+    context: str = "",
+    require_multi_company: bool = True,
+) -> bool:
+    """
+    Contract assertion enforcing complete multi-company partner roster coverage,
+    conversion slot selection, link attribution integrity, and FTC / Title IV compliance.
+    Raises ValueError on any violation.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_asset_partner_roster_and_slot_issues(
+        html_text=html_text,
+        property_id=property_id,
+        slug=slug,
+        rel_path=context or slug or "index.html",
+        require_multi_company=require_multi_company,
+    )
+    if issues:
+        ctx = f" ({context})" if context else ""
+        raise ValueError(f"Partner roster and slot contract violation{ctx}: {issues[0]}")
+    return True
+
+
+
 from pseofactory.qualification import (
     qualify_search_intent,
     check_search_intent_cannibalization,
@@ -8947,6 +9136,8 @@ __all__ = [
     "assert_valid_verification_token",
     "detect_uninitialized_ssr_calculator_metrics",
     "assert_initialized_ssr_calculator_metrics",
+    "detect_asset_partner_roster_and_slot_issues",
+    "assert_asset_partner_roster_and_slot_integrity",
     "DatasetManifest",
     "compute_file_sha256",
 ]
