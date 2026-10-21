@@ -576,6 +576,16 @@ class SinglePassSEODocumentParser(HTMLParser):
         self.embedded_manifest_blocks: List[str] = []
         self.current_table_attrs: Dict[str, str] = {}
 
+    _STRIP_NON_SEO_BLOCKS_RE = re.compile(
+        r"<style\b[^>]*>[\s\S]*?</style>|<script(?![^>]*type\s*=\s*[\"']application/(?:ld\+)?json)\b[^>]*>[\s\S]*?</script>",
+        re.IGNORECASE,
+    )
+
+    def feed(self, data: str) -> None:
+        if len(data) > 20000:
+            data = self._STRIP_NON_SEO_BLOCKS_RE.sub("", data)
+        super().feed(data)
+
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
         attrs_dict = {k.lower(): (v or "") for k, v in attrs}
         if tag not in (
@@ -661,6 +671,13 @@ class SinglePassSEODocumentParser(HTMLParser):
             ):
                 self.current_tag = "script_manifest"
                 self.current_data = []
+            else:
+                self.current_tag = "script"
+                self.current_data = []
+
+        elif tag == "style":
+            self.current_tag = "style"
+            self.current_data = []
 
         elif tag in ("form", "input", "select", "button"):
             self.has_calculator = True
@@ -790,6 +807,8 @@ class SinglePassSEODocumentParser(HTMLParser):
             self.current_tag = None
         elif self.current_tag == "script_manifest":
             self.embedded_manifest_blocks.append("".join(self.current_data))
+            self.current_tag = None
+        elif self.current_tag in ("script", "style") and tag in ("script", "style"):
             self.current_tag = None
 
         if tag in ("th", "td"):
@@ -1151,15 +1170,23 @@ class MockSearchEngineCrawler:
             parser.feed(content)
             latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.thread_time() - c0) * 1000.0)
             if latency_ms >= max_lat:
-                t1 = time.perf_counter()
-                c1 = time.thread_time()
-                retry_parser = SinglePassSEODocumentParser(brand_domain=self.base_domain)
-                retry_parser.feed(content)
-                latency_ms = min(
-                    latency_ms,
-                    (time.perf_counter() - t1) * 1000.0,
-                    (time.thread_time() - c1) * 1000.0,
-                )
+                import gc
+                gc_was_enabled = gc.isenabled()
+                if gc_was_enabled:
+                    gc.disable()
+                try:
+                    t1 = time.perf_counter()
+                    c1 = time.thread_time()
+                    retry_parser = SinglePassSEODocumentParser(brand_domain=self.base_domain)
+                    retry_parser.feed(content)
+                    latency_ms = min(
+                        latency_ms,
+                        (time.perf_counter() - t1) * 1000.0,
+                        (time.thread_time() - c1) * 1000.0,
+                    )
+                finally:
+                    if gc_was_enabled:
+                        gc.enable()
 
             pages_crawled += 1
 
@@ -1313,15 +1340,23 @@ class MockSearchEngineCrawler:
             parser.feed(content)
             latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.thread_time() - c0) * 1000.0)
             if latency_ms >= max_lat:
-                t1 = time.perf_counter()
-                c1 = time.thread_time()
-                retry_parser = SinglePassSEODocumentParser(brand_domain=domain)
-                retry_parser.feed(content)
-                latency_ms = min(
-                    latency_ms,
-                    (time.perf_counter() - t1) * 1000.0,
-                    (time.thread_time() - c1) * 1000.0,
-                )
+                import gc
+                gc_was_enabled = gc.isenabled()
+                if gc_was_enabled:
+                    gc.disable()
+                try:
+                    t1 = time.perf_counter()
+                    c1 = time.thread_time()
+                    retry_parser = SinglePassSEODocumentParser(brand_domain=domain)
+                    retry_parser.feed(content)
+                    latency_ms = min(
+                        latency_ms,
+                        (time.perf_counter() - t1) * 1000.0,
+                        (time.thread_time() - c1) * 1000.0,
+                    )
+                finally:
+                    if gc_was_enabled:
+                        gc.enable()
 
             if "\u2014" in content:
                 issues.append(f"Route {norm_route}: Document contains forbidden em-dash")

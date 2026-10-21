@@ -160,13 +160,34 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     """
     props = [args.property] if getattr(args, "property", None) else None
     no_gitops = getattr(args, "no_gitops", False)
-    res = reflect_and_recompile_all_assets(
-        properties=props,
-        force=getattr(args, "force", False),
-        verbose=getattr(args, "verbose", False),
-        latch_state=True,
-        defer_live_indexing=True,
-    )
+    lock_fd = None
+    lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+    if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
+        try:
+            import fcntl
+            lock_fd = open(lock_file, "a+", encoding="utf-8")
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+        except OSError:
+            if lock_fd is not None:
+                lock_fd.close()
+                lock_fd = None
+    try:
+        res = reflect_and_recompile_all_assets(
+            properties=props,
+            force=getattr(args, "force", False),
+            verbose=getattr(args, "verbose", False),
+            latch_state=True,
+            defer_live_indexing=True,
+        )
+    finally:
+        if lock_fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
     if res.get("total_recompiled", 0) > 0 and not no_gitops:
         from pseofactory.gitops import GitOpsCoordinator
         from pseofactory.indexer import PushIndexer
@@ -426,12 +447,39 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     prop_ids = [property_id] if property_id else None
 
     if is_once:
-        res = supervisor.run_cycle(
-            force=force,
-            dry_run=dry_run,
-            property_ids=prop_ids,
-            skip_ci=skip_ci,
-        )
+        lock_fd = None
+        lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+        if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
+            try:
+                import fcntl
+                lock_fd = open(lock_file, "a+", encoding="utf-8")
+                if run_once:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                else:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            except OSError:
+                if lock_fd is not None:
+                    lock_fd.close()
+                if as_json:
+                    print(json.dumps({"status": "DEFERRED", "reason": "supervisor_lock_busy"}, indent=2))
+                else:
+                    print("[SUPERVISOR] Deferred: another supervisor or release pipeline holds the central lock.")
+                return 75
+        try:
+            res = supervisor.run_cycle(
+                force=force,
+                dry_run=dry_run,
+                property_ids=prop_ids,
+                skip_ci=skip_ci,
+            )
+        finally:
+            if lock_fd is not None:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                    lock_fd.close()
+                except Exception:
+                    pass
         if as_json:
             print(json.dumps(res, indent=2))
         else:

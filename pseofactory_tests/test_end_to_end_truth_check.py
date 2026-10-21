@@ -1573,4 +1573,30 @@ def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path)
     assert aligned_rep.drifted_assets_count == 0
 
 
+def test_single_pass_seo_document_parser_excludes_style_and_script_from_page_text():
+    """
+    Verifies SinglePassSEODocumentParser excludes inline <style> and non-JSON <script>
+    blocks from page_text while preserving JSON-LD and calculation-manifest script payloads.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.verifier import SinglePassSEODocumentParser
+
+    html = (
+        "<!DOCTYPE html><html lang='en'><head>"
+        "<title>2026 Section 179 Tax Calculator (Form 4562) | ProfitHelm</title>"
+        "<style>.secret-css-token { color: red; }</style>"
+        "<script type='application/ld+json'>{\"@context\":\"https://schema.org\",\"@type\":\"WebApplication\"}</script>"
+        "<script type='application/json' id='calculation-manifest'>{\"model\":\"sec179\"}</script>"
+        "<script>const secretJsToken = 999999;</script>"
+        "</head><body><h1>Section 179 Calculator</h1><p>Statutory limit $1,250,000.</p></body></html>"
+    )
+    parser = SinglePassSEODocumentParser(brand_domain="profithelm.com")
+    parser.feed(html)
+    assert "secret-css-token" not in parser.page_text
+    assert "secretJsToken" not in parser.page_text
+    assert len(parser.json_ld_blocks) == 1
+    assert len(parser.embedded_manifest_blocks) == 1
+
+
+
 

@@ -3173,10 +3173,32 @@ class RefactorCascadeEngine:
                             )
                             return True
                         raise RuntimeError(f"Estate rebuild failed for property '{adapter.property_id}'")
-                    if target_path.is_file() and target_path.suffix == ".html" and any(
-                        "Rolled-back " in str(d) for d in (record.details or [])
+                    if target_path.is_file() and target_path.suffix == ".html" and (
+                        any("Rolled-back " in str(d) for d in (record.details or []))
+                        or (
+                            isinstance(adapter, SubprocessPropertyAdapter)
+                            and not getattr(adapter, "_build_asset_command", None)
+                            and DriftReason.ENGINE_HASH_DRIFT not in (record.reasons or [])
+                        )
                     ):
                         self._reapply_active_overlay(slug, target_path, adapter)
+                        try:
+                            from pseofactory.visual_primitives import normalize_html_visual_primitives
+                            from pseofactory.affiliates import normalize_html_callout_message_match
+                            raw_h_fast = target_path.read_text(encoding="utf-8", errors="ignore")
+                            if RetroReflectionEngine.is_tool_or_calculator_page(target_path, adapter.dist_dir, raw_h_fast):
+                                raw_h_fast, _ = RetroReflectionEngine.retrofit_html(
+                                    raw_h_fast,
+                                    property_id=adapter.property_id,
+                                    slug=slug,
+                                    dist_dir=adapter.dist_dir,
+                                )
+                            raw_h_fast, _ = normalize_html_visual_primitives(raw_h_fast)
+                            raw_h_fast = normalize_html_callout_message_match(raw_h_fast, property_id=adapter.property_id)
+                            target_path.write_text(raw_h_fast, encoding="utf-8")
+                            self.evaluator._audit_cache.clear()
+                        except Exception:
+                            pass
                         if self.evaluator.audit_asset(target_path, adapter) is None:
                             build_ok = True
                         else:
