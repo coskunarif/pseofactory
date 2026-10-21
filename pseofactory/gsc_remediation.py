@@ -5146,6 +5146,35 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
         html,
         flags=re.DOTALL | re.IGNORECASE,
     )
+    try:
+        from pseofactory.maintenance import _normalize_page_structure_and_geo_parity
+        canon_m = re.search(
+            r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        ) or re.search(
+            r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+            html,
+            re.IGNORECASE,
+        )
+        canon_url = canon_m.group(1).strip() if canon_m else ""
+        slug_rb = str(overlay_data.get("slug") or "").strip("/")
+        if "/tools/" in canon_url:
+            slug_rb = canon_url.split("/tools/", 1)[1].split("?")[0].strip("/")
+        if "/" in slug_rb:
+            h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
+            topic_lbl = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else slug_rb.replace("-", " ").title()
+            html, _ = _normalize_page_structure_and_geo_parity(
+                html,
+                property_id=tenant_norm,
+                slug=slug_rb,
+                topic_label=topic_lbl,
+                canonical_url=canon_url,
+                stat_auth="IRC Section 1(j); IRC Section 179; IRC Section 1031",
+                econ_ds="IRS SOI Tax Statistics",
+            )
+    except Exception:
+        pass
     return _strip_forbidden_dashes(html)
 
 
@@ -5191,8 +5220,34 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             flags=re.IGNORECASE,
         )
 
-    # 2. Upgrade <meta name="description">
+    # 2. Upgrade <meta name="description"> (preserve spoke-specific og:description when it has concrete dollar/GVWR figures)
     meta_desc = _strip_forbidden_dashes(str(overlay_data.get("meta_description") or "")).strip()
+    canon_m_ov = re.search(
+        r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    ) or re.search(
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+        html,
+        re.IGNORECASE,
+    )
+    canon_url_ov = canon_m_ov.group(1).strip().lower() if canon_m_ov else ""
+    is_spoke_page_ov = bool(
+        re.search(
+            r"/tools/(?:irs-2027-tax-brackets|section-1031-calculator|section-179-calculator)/[a-z0-9-]+/?",
+            canon_url_ov,
+        )
+    )
+    if is_spoke_page_ov:
+        og_m_ov = re.search(
+            r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        )
+        if og_m_ov:
+            og_val_ov = og_m_ov.group(1).strip()
+            if ("$" in og_val_ov or "GVWR" in og_val_ov) and 70 <= len(og_val_ov) <= 160:
+                meta_desc = og_val_ov
     if meta_desc:
         escaped_desc = html_lib.escape(meta_desc)
         html = re.sub(
@@ -5210,6 +5265,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         quick_answer = quick_answer[: -len(" Verified")].strip()
     if quick_answer and not quick_answer.endswith((".", "!", "?")):
         quick_answer = quick_answer.rstrip(",;:-") + "."
+    if is_spoke_page_ov:
+        existing_qa_m = re.search(
+            r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
+            html,
+            re.IGNORECASE,
+        )
+        if existing_qa_m:
+            ex_qa_inner = existing_qa_m.group(1)
+            ex_qa_words = len(re.sub(r"<[^>]+>", " ", ex_qa_inner).split())
+            if "$" in ex_qa_inner and "$" not in quick_answer and 40 <= ex_qa_words <= 60:
+                quick_answer = ""
     if quick_answer:
         escaped_qa = html_lib.escape(quick_answer)
         qa_pattern = re.compile(

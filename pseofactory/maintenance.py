@@ -2586,6 +2586,11 @@ class AssetIntegrityEvaluator:
             and not engine_drifted
         )
         disk_eval_cache_path = Path("/tmp/pseofactory_asset_eval_cache_v1.json")
+        if engine_drifted and disk_eval_cache_path.is_file():
+            try:
+                disk_eval_cache_path.unlink(missing_ok=True)
+            except Exception:
+                pass
         eng_code_sig_str = ""
         disk_clean_entries: Dict[str, str] = {}
         if use_disk_eval_cache:
@@ -8556,6 +8561,10 @@ def reflect_and_recompile_all_assets(
         # Clear evaluator cache after rebuild/retrofit so verification reads fresh files
         evaluator._audit_cache.clear()
         evaluator._fingerprint_cache.clear()
+        try:
+            Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
+        except Exception:
+            pass
 
         will_run_downstream = bool(
             run_downstream
@@ -8596,11 +8605,19 @@ def reflect_and_recompile_all_assets(
                         retrofitted_count += 1
                 evaluator._audit_cache.clear()
                 evaluator._fingerprint_cache.clear()
+                try:
+                    Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
+                except Exception:
+                    pass
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
                 evaluator._audit_cache.clear()
                 evaluator._fingerprint_cache.clear()
+                try:
+                    Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
+                except Exception:
+                    pass
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
 
         is_unmerged_worktree = (
