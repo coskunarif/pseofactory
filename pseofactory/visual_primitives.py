@@ -347,7 +347,7 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
       font-weight: 600 !important;
     }}
     /* Deterministic Chart & SVG Frame Primitives */
-    .runway-chart-wrap, .pseo-chart-frame, .chart-container {{
+    .runway-chart-wrap, .pseo-chart-frame, .chart-container, .serp-svg-chart-wrap {{
       width: 100%;
       max-width: 100%;
       overflow: hidden;
@@ -356,6 +356,137 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
     }}
     svg {{
       max-width: 100%;
+    }}
+    /* SERP Incumbent Depth Workbench Primitives */
+    .serp-depth-workbench {{
+      border-top: 3px solid var(--accent) !important;
+      max-width: 100%;
+      overflow-x: hidden;
+    }}
+    .serp-workbench-intro {{
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--text-secondary, #475569);
+      margin-bottom: 14px;
+    }}
+    .serp-preset-bar {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+      max-width: 100%;
+    }}
+    .serp-archetype-btn {{
+      background-color: var(--bg-elevated) !important;
+      color: var(--accent) !important;
+      border: 1px solid var(--border-strong) !important;
+      font-size: 13px !important;
+      max-width: 100%;
+      white-space: normal !important;
+      text-align: left;
+    }}
+    .serp-archetype-btn:hover, .serp-archetype-btn.active {{
+      background-color: var(--accent) !important;
+      color: var(--cta-fg, #ffffff) !important;
+      border-color: var(--accent) !important;
+    }}
+    .serp-sub-inputs-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+      max-width: 100%;
+    }}
+    .serp-field-group {{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      max-width: 100%;
+    }}
+    .serp-field-label {{
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }}
+    .serp-sub-input, .serp-sub-select {{
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      background-color: var(--bg-inset);
+      color: var(--text);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      font-size: 16px;
+    }}
+    .serp-metrics-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+      max-width: 100%;
+    }}
+    .serp-metric-box {{
+      background-color: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      min-width: 0;
+      max-width: 100%;
+    }}
+    .serp-metric-label {{
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted, #64748b);
+      margin-bottom: 4px;
+    }}
+    .serp-metric-val {{
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }}
+    .serp-svg-chart-wrap {{
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      margin-bottom: 16px;
+    }}
+    .serp-visual-breakdown-svg {{
+      width: 100%;
+      height: auto;
+      display: block;
+    }}
+    .serp-intent-banner {{
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      background-color: var(--bg-elevated);
+      border-left: 4px solid var(--status-positive, #10b981);
+      margin-bottom: 16px;
+      max-width: 100%;
+    }}
+    .serp-intent-banner-text {{
+      flex: 1 1 220px;
+      min-width: 0;
+      max-width: 100%;
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--text);
+    }}
+    .serp-intent-banner-btn {{
+      background-color: var(--accent) !important;
+      color: var(--cta-fg, #ffffff) !important;
+      border: 1px solid var(--accent) !important;
+      max-width: 100%;
+      white-space: normal !important;
+      text-align: center;
     }}
     @media (max-width: 640px) {{
       body {{
@@ -517,6 +648,174 @@ def render_runtime_synchronizer_script() -> str:
       return null;
     }}
 
+    function fmtUsd(val) {{
+      if (isNaN(val) || !isFinite(val)) return "$0";
+      return "$" + new Intl.NumberFormat("en-US", {{ maximumFractionDigits: 0 }}).format(Math.round(val));
+    }}
+
+    function updateSerpSvgChart(retainedVal, taxVal, leftPrefix, rightPrefix) {{
+      var total = Math.max(1, retainedVal + taxVal);
+      var retPct = Math.max(4, Math.min(96, Math.round((retainedVal / total) * 1000) / 10));
+      var taxPct = Math.round((100-retPct) * 10) / 10;
+      var leftW = Math.round((retPct / 100) * 600);
+      var rightW = Math.max(12, 600-leftW);
+      var barRet = document.getElementById("serp-svg-bar-retained");
+      var barTax = document.getElementById("serp-svg-bar-tax");
+      var lblRet = document.getElementById("serp-svg-label-retained");
+      var lblTax = document.getElementById("serp-svg-label-tax");
+      if (barRet) barRet.setAttribute("width", String(leftW));
+      if (barTax) {{
+        barTax.setAttribute("x", String(leftW));
+        barTax.setAttribute("width", String(rightW));
+      }}
+      if (lblRet) lblRet.textContent = leftPrefix + ": " + fmtUsd(retainedVal) + " (" + retPct.toFixed(1) + "%)";
+      if (lblTax) lblTax.textContent = rightPrefix + ": " + fmtUsd(taxVal) + " (" + taxPct.toFixed(1) + "%)";
+    }}
+
+    function updateSerpWorkbenchSynchronously() {{
+      try {{
+        var wb = document.getElementById("serp-incumbent-depth-workbench");
+        if (!wb) return;
+        var mode = wb.getAttribute("data-workbench-mode") || "";
+        var out1 = document.getElementById("serp-out-primary");
+        var out2 = document.getElementById("serp-out-secondary");
+        var out3 = document.getElementById("serp-out-tertiary");
+        var out4 = document.getElementById("serp-out-quaternary");
+        var ban1 = document.getElementById("serp-banner-metric-primary");
+        var ban2 = document.getElementById("serp-banner-metric-secondary");
+
+        if (mode === "crypto") {{
+          var proc = parseFloat((document.getElementById("serp-crypto-proceeds") || {{}}).value || "85000") || 0;
+          var basis = parseFloat((document.getElementById("serp-crypto-basis") || {{}}).value || "32000") || 0;
+          var fees = parseFloat((document.getElementById("serp-crypto-fees") || {{}}).value || "1250") || 0;
+          var losses = parseFloat((document.getElementById("serp-crypto-losses") || {{}}).value || "4500") || 0;
+          var method = ((document.getElementById("serp-crypto-method") || {{}}).value || "hifo").toLowerCase();
+          var methodMult = method === "hifo" ? 1.0 : (method === "lifo" ? 1.08 : 1.18);
+          var rawGain = Math.max(0, proc-basis-fees-losses);
+          var adjGain = Math.round(rawGain * methodMult);
+          var estTax = Math.round(adjGain * 0.238);
+          var fifoTax = Math.round(rawGain * 1.18 * 0.238);
+          var lotAlpha = Math.max(0, fifoTax-estTax + Math.round((fees + losses) * 0.238));
+          var netRetained = Math.max(0, proc-fees-estTax);
+          if (out1) out1.textContent = fmtUsd(adjGain);
+          if (out2) out2.textContent = fmtUsd(estTax);
+          if (out3) out3.textContent = fmtUsd(lotAlpha);
+          if (out4) out4.textContent = fmtUsd(netRetained);
+          if (ban1) ban1.textContent = fmtUsd(adjGain);
+          if (ban2) ban2.textContent = fmtUsd(lotAlpha);
+          updateSerpSvgChart(netRetained, estTax, "Net Retained Proceeds", "Estimated Tax Exposure");
+        }} else if (mode === "tax_brackets") {{
+          var gross = parseFloat((document.getElementById("serp-tax-gross") || {{}}).value || "185000") || 0;
+          var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {{}}).value || "31000") || 0;
+          var ptet = parseFloat((document.getElementById("serp-tax-ptet") || {{}}).value || "15400") || 0;
+          var regime = ((document.getElementById("serp-tax-regime") || {{}}).value || "2026_active").toLowerCase();
+          var effRate = regime === "2027_sunset" ? 0.285 : (regime === "ptet_shield" ? 0.235 : 0.252);
+          var adjTaxable = Math.max(0, gross-pretax-ptet);
+          var combTax = Math.round(adjTaxable * effRate);
+          var shieldSaved = Math.round((pretax + ptet) * (effRate + 0.068));
+          var takeHome = Math.max(0, gross-combTax);
+          if (out1) out1.textContent = fmtUsd(adjTaxable);
+          if (out2) out2.textContent = fmtUsd(combTax);
+          if (out3) out3.textContent = fmtUsd(shieldSaved);
+          if (out4) out4.textContent = fmtUsd(takeHome);
+          if (ban1) ban1.textContent = fmtUsd(adjTaxable);
+          if (ban2) ban2.textContent = fmtUsd(shieldSaved);
+          updateSerpSvgChart(takeHome, combTax, "Net Take-Home Cash Flow", "Combined Tax Liability");
+        }} else if (mode === "sec179") {{
+          var cost = parseFloat((document.getElementById("serp-179-cost") || {{}}).value || "145000") || 0;
+          var incCap = parseFloat((document.getElementById("serp-179-income") || {{}}).value || "320000") || 0;
+          var apr = parseFloat((document.getElementById("serp-179-apr") || {{}}).value || "6.75") || 0;
+          var pClass = ((document.getElementById("serp-179-class") || {{}}).value || "machinery_100").toLowerCase();
+          var phaseOutRed = Math.max(0, cost-4090000);
+          var max179 = Math.max(0, 2560000-phaseOutRed);
+          var rawAllow = cost;
+          if (pClass === "passenger_auto") {{
+            rawAllow = Math.min(cost, 20400);
+          }} else if (pClass === "heavy_suv") {{
+            var suv179 = Math.min(cost, 31300);
+            var remBasis = Math.max(0, cost-suv179);
+            rawAllow = suv179 + Math.round(remBasis * 0.80);
+          }} else {{
+            var base179 = Math.min(cost, max179);
+            var rem179 = Math.max(0, cost-base179);
+            rawAllow = base179 + Math.round(rem179 * 0.80);
+          }}
+          var writeOff = Math.min(rawAllow, Math.max(20400, incCap));
+          var taxSaved = Math.round(writeOff * 0.35);
+          var mRate = (apr / 100) / 12;
+          var yr1Debt = mRate > 0 ? Math.round(((cost * mRate) / (1-Math.pow(1 + mRate, -60))) * 12) : Math.round(cost / 5);
+          var netSurplus = taxSaved-yr1Debt;
+          var netAfterTaxCost = Math.max(0, cost-taxSaved);
+          if (out1) out1.textContent = fmtUsd(writeOff);
+          if (out2) out2.textContent = fmtUsd(taxSaved);
+          if (out3) out3.textContent = fmtUsd(yr1Debt);
+          if (out4) out4.textContent = (netSurplus >= 0 ? "+" : "-") + fmtUsd(Math.abs(netSurplus));
+          if (ban1) ban1.textContent = fmtUsd(writeOff);
+          if (ban2) ban2.textContent = fmtUsd(taxSaved);
+          updateSerpSvgChart(netAfterTaxCost, taxSaved, "Net After-Tax Equipment Cost", "Year-1 Tax Shield Recovered");
+        }} else if (mode === "sec1031") {{
+          var relDebt = parseFloat((document.getElementById("serp-1031-rel-debt") || {{}}).value || "950000") || 0;
+          var repDebt = parseFloat((document.getElementById("serp-1031-rep-debt") || {{}}).value || "1150000") || 0;
+          var qiCosts = parseFloat((document.getElementById("serp-1031-costs") || {{}}).value || "42000") || 0;
+          var depr = parseFloat((document.getElementById("serp-1031-depr") || {{}}).value || "380000") || 0;
+          var elapsed = parseFloat((document.getElementById("serp-1031-close-days") || {{}}).value || "15") || 0;
+          var netBoot = Math.max(0, relDebt-repDebt-qiCosts);
+          var defTax = Math.round(depr * 0.25 + Math.max(0, (relDebt + 600000-qiCosts) * 0.238));
+          var carryBasis = Math.max(0, repDebt + 370000-qiCosts);
+          var remId = Math.max(0, Math.round(45-elapsed));
+          var remClose = Math.max(0, Math.round(180-elapsed));
+          if (out1) out1.textContent = fmtUsd(netBoot);
+          if (out2) out2.textContent = fmtUsd(defTax);
+          if (out3) out3.textContent = fmtUsd(carryBasis);
+          if (out4) out4.textContent = remId + "d ID / " + remClose + "d Close";
+          if (ban1) ban1.textContent = fmtUsd(netBoot);
+          if (ban2) ban2.textContent = fmtUsd(defTax);
+          updateSerpSvgChart(carryBasis, defTax, "Reinvested Exchange Equity", "Deferred Tax Preserved");
+        }} else if (mode === "repayment_loan") {{
+          var bAgi = parseFloat((document.getElementById("serp-loan-agi") || {{}}).value || "78000") || 0;
+          var sAgi = parseFloat((document.getElementById("serp-loan-spouse-agi") || {{}}).value || "64000") || 0;
+          var lBal = parseFloat((document.getElementById("serp-loan-balance") || {{}}).value || "68000") || 0;
+          var fMode = ((document.getElementById("serp-loan-filing") || {{}}).value || "mfs_new").toLowerCase();
+          var effAgi = fMode === "mfj_new" ? (bAgi + sAgi) : bAgi;
+          var rapPov = fMode === "mfj_new" ? 47565 : 35212;
+          var ibrPov = fMode === "mfj_new" ? 31710 : 23475;
+          var ibrRate = fMode === "mfs_old" ? 0.15 : 0.10;
+          var rapMo = Math.round(Math.max(0, (effAgi-rapPov) * 0.10) / 12);
+          var std10Mo = Math.round(lBal * 0.01135);
+          var ibrMo = Math.min(std10Mo, Math.round(Math.max(0, (effAgi-ibrPov) * ibrRate) / 12));
+          var mfsSaveYr = Math.round(sAgi * 0.10);
+          var refiMo = Math.round(lBal * 0.00859);
+          if (out1) out1.textContent = fmtUsd(rapMo);
+          if (out2) out2.textContent = fmtUsd(ibrMo);
+          if (out3) out3.textContent = fmtUsd(mfsSaveYr);
+          if (out4) out4.textContent = fmtUsd(std10Mo) + " / " + fmtUsd(refiMo);
+          if (ban1) ban1.textContent = fmtUsd(rapMo) + " monthly";
+          if (ban2) ban2.textContent = fmtUsd(mfsSaveYr) + " annual";
+          var annRap = rapMo * 12;
+          var annRet = Math.max(0, bAgi-annRap);
+          updateSerpSvgChart(annRet, annRap, "Annual Retained Income", "Annual RAP Obligation");
+        }} else if (mode === "b2b") {{
+          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {{}}).value || "450000") || 0;
+          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {{}}).value || "165000") || 0;
+          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {{}}).value || "24.5") || 0) / 100;
+          var bReg = ((document.getElementById("serp-b2b-regime") || {{}}).value || "optimal_election").toLowerCase();
+          var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
+          var effDed = bReg === "unoptimized_baseline" ? 0 : bDed;
+          var netExp = Math.round(Math.max(0, bGross-effDed) * adjRate);
+          var unoptExp = Math.round(bGross * adjRate);
+          var alphaSaved = Math.max(0, unoptExp-netExp);
+          var netCap = Math.max(0, bGross-netExp);
+          if (out1) out1.textContent = fmtUsd(netExp);
+          if (out2) out2.textContent = fmtUsd(unoptExp);
+          if (out3) out3.textContent = fmtUsd(alphaSaved);
+          if (out4) out4.textContent = fmtUsd(netCap);
+          if (ban1) ban1.textContent = fmtUsd(netExp);
+          if (ban2) ban2.textContent = fmtUsd(alphaSaved);
+          updateSerpSvgChart(netCap, netExp, "Net Retained Capital", "Net Statutory Exposure");
+        }}
+      }} catch (wbErr) {{}}
+    }}
+
     function updateOutputsSynchronously(triggerScale) {{
       try {{
         if (typeof window.updateTaxCalculator === "function" && document.getElementById("tax-income")) window.updateTaxCalculator("input");
@@ -529,6 +828,7 @@ def render_runtime_synchronizer_script() -> str:
         if (typeof window.updateSection1031Calculator === "function" && document.getElementById("sec1031-sale-price")) window.updateSection1031Calculator("sale-input");
         if (typeof window.updatePredictionMarketTaxCalculator === "function" && document.getElementById("pm-tax-gain")) window.updatePredictionMarketTaxCalculator("gain-input");
       }} catch (e) {{}}
+      updateSerpWorkbenchSynchronously();
 
       var outNodes = document.querySelectorAll(".output-value");
       if (!outNodes.length) return;
@@ -703,7 +1003,21 @@ def render_runtime_synchronizer_script() -> str:
           var baseN = parseFloat(target.getAttribute("data-pseo-base-val") || "");
           var scaleN = (!isNaN(baseN) && baseN > 0 && !isNaN(nVal)) ? (nVal / baseN) : undefined;
           updateOutputsSynchronously(scaleN);
+        }} else if (target.tagName === "SELECT") {{
+          updateOutputsSynchronously();
         }}
+      }} finally {{
+        _syncing = false;
+      }}
+    }}, true);
+
+    document.addEventListener("change", function(e) {{
+      if (_syncing) return;
+      var target = e.target;
+      if (!target || target.tagName !== "SELECT") return;
+      _syncing = true;
+      try {{
+        updateOutputsSynchronously();
       }} finally {{
         _syncing = false;
       }}
@@ -1469,6 +1783,7 @@ def normalize_html_visual_primitives(
         needs_style_repair = (
             f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
             or any(tok not in prim_body for tok in REQUIRED_PRIMITIVE_TOKENS)
+            or ".serp-depth-workbench" not in prim_body
         )
         if needs_style_repair:
             updated = re.sub(
@@ -1869,6 +2184,7 @@ def normalize_html_visual_primitives(
                 f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
                 or "__pseoRuntimeSyncInitialized" not in sync_body
                 or "updateOutputsSynchronously" not in sync_body
+                or "updateSerpWorkbenchSynchronously" not in sync_body
                 or "syncOutboundAffiliateLinks" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )

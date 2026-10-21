@@ -1793,6 +1793,11 @@ def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[
         ("irs-2027-tax-brackets/maine", "Maine 2027 Tax Brackets & Marginal Tax Rate Calculator"),
         ("irs-2027-tax-brackets/new-jersey", "New Jersey 2027 Tax Brackets & Marginal Tax Rate Calculator"),
         ("irs-2027-tax-brackets/new-york", "New York 2027 Tax Brackets & Marginal Tax Rate Calculator"),
+        ("section-1031-calculator/texas", "Texas Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
+        ("section-1031-calculator/arizona", "Arizona Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
+        ("section-1031-calculator/california", "California Section 1031 Like-Kind Exchange & FTB 3840 Calculator"),
+        ("section-1031-calculator/alabama", "Alabama Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
+        ("section-1031-calculator/maine", "Maine Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
         ("section-179-calculator/gmc-yukon-xl", "GMC Yukon XL Heavy SUV Section 179 & Bonus Depreciation Calculator"),
         ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
         ("section-179-vehicle-equipment-deduction", "Section 179 Commercial Vehicle & Equipment Deduction Calculator"),
@@ -2408,6 +2413,7 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
     raw = re.sub(r"\bCCorp([A-Z])", r"C-Corp \1", raw)
     raw = re.sub(r"SaaS([A-Z])", r"SaaS \1", raw)
     raw = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw)
+    raw = re.sub(r"([A-Za-z]{2,})(\d+)", r"\1 \2", raw)
     raw = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", raw)
     raw = re.sub(r"\bSaa\s+S\b", "SaaS", raw, flags=re.IGNORECASE)
 
@@ -2481,6 +2487,901 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
     return result or "Statutory Calculation Model"
 
 
+def _build_repayment_loan_depth_spec(
+    slug: str, topic_label: str, statutory_authority: str
+) -> Dict[str, Any]:
+    s_low = str(slug or "").strip().lower()
+    restricted_ps = is_restricted_public_service_slug(slug)
+    is_refi = any(tok in s_low for tok in ("refinance", "refinancing"))
+    private_col_lbl = "10-Yr Standard Cap / Private Refi" if is_refi else "10-Yr Standard Cap / 5.25% Fixed"
+    private_row_title = "Private Student Loan Refinance" if is_refi else "Fixed-Rate Credit Benchmark (TILA Reg Z)"
+    private_row_desc = (
+        "Lowers interest cost for high earners; permanently waives Title IV rights"
+        if is_refi
+        else "Fixed 5-to-20-year amortization benchmark; non-Title IV credit structure"
+    )
+    if restricted_ps:
+        banner_html = (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="pslf_guardrail">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Title IV Public Service Guardrail (34 CFR 685.219):</strong> At <span id="serp-banner-metric-primary">$356 monthly</span> under RAP, isolating spouse income saves <span id="serp-banner-metric-secondary">$6,400/yr</span> while preserving 100% tax-free 120-payment PSLF eligibility.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Official PSLF ECF &amp; NSLDS Verification Steps</a>\n'
+            '      </div>'
+        )
+    else:
+        banner_html = (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="repayment_commercial">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Repayment &amp; Rate Decision Signal:</strong> Your modeled RAP obligation is <span id="serp-banner-metric-primary">$356 monthly</span> (saving <span id="serp-banner-metric-secondary">$6,400/yr</span> via MFS filing isolation vs joint pooling). High-income borrowers not pursuing PSLF can compare soft-pull fixed APR offers against the $772 monthly 10-Year Standard cap.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Soft-Pull Rate &amp; Title IV Execution Checklist</a>\n'
+            '      </div>'
+        )
+    return {
+        "workbench_mode": "repayment_loan",
+        "workbench_h2": f"Interactive Filing Status, Spouse AGI &amp; Multi-Plan Matrix: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and 34 CFR 685.209, monthly income-driven obligations "
+            f"depend on whether you isolate individual Adjusted Gross Income via Married Filing Separately (MFS) "
+            f"or pool household income via Married Filing Jointly (MFJ). Select an archetype preset or adjust "
+            f"your household parameters below to compare Repayment Assistance Plan (RAP), New/Old IBR, and "
+            f"10-Year Standard caps side by side:"
+        ),
+        "presets": [
+            (
+                "Public Service Resident ($68k AGI / $145k Debt)",
+                '{"agi":68000,"loan_balance":145000,"family_size":2,"serp-loan-agi":68000,"serp-loan-spouse-agi":52000,"serp-loan-balance":145000,"serp-loan-filing":"pslf_track"}',
+            ),
+            (
+                "Dual-Income MFS Shield ($82k + $78k Spouse AGI)",
+                '{"agi":82000,"loan_balance":74000,"family_size":3,"serp-loan-agi":82000,"serp-loan-spouse-agi":78000,"serp-loan-balance":74000,"serp-loan-filing":"mfs_new"}',
+            ),
+            (
+                "Joint MFJ Household ($140k Combined / $55k Debt)",
+                '{"agi":140000,"loan_balance":55000,"family_size":4,"serp-loan-agi":85000,"serp-loan-spouse-agi":55000,"serp-loan-balance":55000,"serp-loan-filing":"mfj_new"}',
+            ),
+            (
+                "High-Earner Fixed Payoff ($195k AGI / $92k Debt)",
+                '{"agi":195000,"loan_balance":92000,"family_size":1,"serp-loan-agi":195000,"serp-loan-spouse-agi":0,"serp-loan-balance":92000,"serp-loan-filing":"mfs_old"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-loan-agi" class="serp-field-label">Borrower AGI ($)</label>\n'
+            '          <input type="number" id="serp-loan-agi" name="serp-loan-agi" class="touch-target serp-sub-input" min="0" max="2000000" step="1000" value="78000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-loan-spouse-agi" class="serp-field-label">Spouse AGI ($ for MFJ vs MFS)</label>\n'
+            '          <input type="number" id="serp-loan-spouse-agi" name="serp-loan-spouse-agi" class="touch-target serp-sub-input" min="0" max="2000000" step="1000" value="64000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-loan-balance" class="serp-field-label">Direct Loan Principal ($)</label>\n'
+            '          <input type="number" id="serp-loan-balance" name="serp-loan-balance" class="touch-target serp-sub-input" min="1000" max="1000000" step="1000" value="68000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-loan-filing" class="serp-field-label">Tax Filing Status &amp; Cohort (34 CFR 685.209)</label>\n'
+            '          <select id="serp-loan-filing" name="serp-loan-filing" class="touch-target serp-sub-select">\n'
+            '            <option value="mfs_new" selected="selected">Married Filing Separately (Isolates Borrower AGI: Post-2014 10%)</option>\n'
+            '            <option value="mfj_new">Married Filing Jointly (Pools Household AGI: Post-2014 10%)</option>\n'
+            '            <option value="mfs_old">Pre-2014 Legacy Borrower (MFS: 15% Old IBR vs 10% RAP)</option>\n'
+            '            <option value="pslf_track">PSLF 120-Payment Track (34 CFR 685.219 Tax-Free Discharge)</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Monthly RAP Payment (225% Poverty)", "$356"),
+            ("serp-out-secondary", "Monthly Statutory IBR (150% Poverty)", "$454"),
+            ("serp-out-tertiary", "MFS vs MFJ Annual Repayment Saved", "$6,400"),
+            ("serp-out-quaternary", private_col_lbl, "$772 / $584"),
+        ],
+        "svg_left_label": "Annual Retained Income: $73,728 (94.5%)",
+        "svg_right_label": "Annual RAP Obligation: $4,272 (5.5%)",
+        "svg_left_width": "567",
+        "svg_right_x": "567",
+        "svg_right_width": "33",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Title IV Multi-Plan Comparison Matrix",
+        "table_headers": [
+            "Repayment Plan / Option",
+            "Governing Statutory Authority",
+            "Poverty Exemption &amp; Rate Formula",
+            "Unpaid Interest &amp; Forgiveness Horizon",
+        ],
+        "table_rows": [
+            (
+                "Repayment Assistance Plan (RAP)",
+                "OBBBA Title VIII Subtitle B; 34 CFR Part 685",
+                "10% of AGI above 225% HHS Poverty ($35,212 Single)",
+                "100% unpaid undergraduate interest subsidy; 240-to-300-month cap",
+            ),
+            (
+                "New IBR (Post-July 1, 2014)",
+                "20 U.S.C. 1098e(e); 34 CFR 685.209",
+                "10% of AGI above 150% HHS Poverty ($23,475 Single)",
+                "Capped at 10-Year Standard payment; 20-year (240-month) discharge",
+            ),
+            (
+                "Old IBR (Pre-July 1, 2014)",
+                "20 U.S.C. 1098e(b); 34 CFR 685.221",
+                "15% of AGI above 150% HHS Poverty ($23,475 Single)",
+                "Capped at 10-Year Standard payment; 25-year (300-month) discharge",
+            ),
+            (
+                "Pay As You Earn (PAYE)",
+                "34 CFR 685.209(a) Statutory Transition Rules",
+                "10% of AGI above 150% HHS Poverty ($23,475 Single)",
+                "10-Year Standard payment ceiling; 20-year (240-month) forgiveness",
+            ),
+            (
+                "Income-Contingent Repayment (ICR)",
+                "34 CFR 685.209(b); HEA Section 455(d)",
+                "20% of AGI above 100% HHS Poverty ($15,650 Single)",
+                "Sole IDR plan eligible for consolidated Parent PLUS loans (25 years)",
+            ),
+            (
+                "PSLF 120-Payment Track &amp; Buyback",
+                "34 CFR 685.219 &amp; 26 U.S.C. 108(f)(1)",
+                "Qualifying RAP/IBR/PAYE/ICR payment x 120 months",
+                "100% federal tax-free principal and interest discharge at month 120",
+            ),
+            (
+                private_row_title,
+                "TILA Regulation Z (12 CFR Part 1026)",
+                "Credit-underwritten fixed APR (5 to 20 year term)",
+                private_row_desc,
+            ),
+        ],
+        "banner_html": banner_html,
+    }
+
+
+def _build_crypto_depth_spec(topic_label: str, statutory_authority: str) -> Dict[str, Any]:
+    return {
+        "workbench_mode": "crypto",
+        "workbench_h2": f"Interactive Cost-Basis Lot Sub-Ledger (FIFO vs HIFO vs LIFO) &amp; Form 8949 Reconciliation: {topic_label}",
+        "workbench_intro": (
+            f"Top SERP tax engines and <strong>{statutory_authority}</strong> require reconciling gross disposal proceeds "
+            f"from IRS Form 1099-DA against acquisition cost basis, deductible on-chain gas and exchange fees, "
+            f"capital loss harvesting offsets, and wallet-by-wallet Specific Identification (HIFO vs FIFO) under "
+            f"IRS Rev. Proc. 2024-28. Select an investor archetype or enter your transaction figures below:"
+        ),
+        "presets": [
+            (
+                "Active DeFi &amp; Spot Trader ($85k Proceeds / HIFO)",
+                '{"crypto-short-term":38000,"crypto-long-term":15000,"crypto-staking":4200,"crypto-income":145000,"serp-crypto-proceeds":85000,"serp-crypto-basis":32000,"serp-crypto-fees":1250,"serp-crypto-losses":4500,"serp-crypto-method":"hifo"}',
+            ),
+            (
+                "Long-Term HODLer Disposal ($240k Proceeds / $65k Basis)",
+                '{"crypto-short-term":0,"crypto-long-term":175000,"crypto-staking":0,"crypto-income":185000,"serp-crypto-proceeds":240000,"serp-crypto-basis":65000,"serp-crypto-fees":1800,"serp-crypto-losses":8200,"serp-crypto-method":"hifo"}',
+            ),
+            (
+                "Staking &amp; Validator Node ($45k Proceeds + Yield)",
+                '{"crypto-short-term":12000,"crypto-long-term":18000,"crypto-staking":28500,"crypto-income":160000,"serp-crypto-proceeds":45000,"serp-crypto-basis":15000,"serp-crypto-fees":650,"serp-crypto-losses":3000,"serp-crypto-method":"fifo"}',
+            ),
+            (
+                "High-Net-Worth NIIT Tier ($620k Proceeds / 23.8% Cap)",
+                '{"crypto-short-term":95000,"crypto-long-term":310000,"crypto-staking":18000,"crypto-income":480000,"serp-crypto-proceeds":620000,"serp-crypto-basis":215000,"serp-crypto-fees":4200,"serp-crypto-losses":22000,"serp-crypto-method":"hifo"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-crypto-proceeds" class="serp-field-label">Gross Disposal Proceeds ($ Form 1099-DA)</label>\n'
+            '          <input type="number" id="serp-crypto-proceeds" name="serp-crypto-proceeds" class="touch-target serp-sub-input" min="0" max="50000000" step="500" value="85000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-crypto-basis" class="serp-field-label">Acquisition Cost Basis ($ IRC 1012)</label>\n'
+            '          <input type="number" id="serp-crypto-basis" name="serp-crypto-basis" class="touch-target serp-sub-input" min="0" max="50000000" step="500" value="32000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-crypto-fees" class="serp-field-label">Deductible Gas &amp; Exchange Fees ($)</label>\n'
+            '          <input type="number" id="serp-crypto-fees" name="serp-crypto-fees" class="touch-target serp-sub-input" min="0" max="1000000" step="50" value="1250" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-crypto-losses" class="serp-field-label">Capital Loss Harvesting Offset ($)</label>\n'
+            '          <input type="number" id="serp-crypto-losses" name="serp-crypto-losses" class="touch-target serp-sub-input" min="0" max="5000000" step="250" value="4500" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-crypto-method" class="serp-field-label">Rev. Proc. 2024-28 Lot Accounting Method</label>\n'
+            '          <select id="serp-crypto-method" name="serp-crypto-method" class="touch-target serp-sub-select">\n'
+            '            <option value="hifo" selected="selected">HIFO (Specific ID Highest-In First-Out)</option>\n'
+            '            <option value="fifo">FIFO (Chronological First-In First-Out)</option>\n'
+            '            <option value="lifo">LIFO (Specific ID Last-In First-Out)</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Net Taxable Gain (Form 8949)", "$47,250"),
+            ("serp-out-secondary", "Estimated Capital Gains + NIIT Tax", "$11,246"),
+            ("serp-out-tertiary", "HIFO vs FIFO Lot Alpha Saved", "$3,402"),
+            ("serp-out-quaternary", "Net Post-Tax Proceeds Retained", "$73,754"),
+        ],
+        "svg_left_label": "Net Retained Proceeds: $73,754 (86.8%)",
+        "svg_right_label": "Estimated Tax Exposure: $11,246 (13.2%)",
+        "svg_left_width": "521",
+        "svg_right_x": "521",
+        "svg_right_width": "79",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} 2026 Digital Asset Tax &amp; Form 1099-DA Matrix",
+        "table_headers": [
+            "Digital Asset Tax Regime / Event",
+            "Governing IRS Statutory Authority",
+            "2026 Single / MFJ Thresholds &amp; Rates",
+            "Mandatory Reporting Form &amp; Basis Rule",
+        ],
+        "table_rows": [
+            (
+                "Long-Term Capital Gains (Held &gt; 365 Days)",
+                "IRC Section 1(h) &amp; Section 1222(3)",
+                "0% up to $48,350 ($96,700 MFJ); 15% up to $533,400 ($600,050 MFJ); 20% above",
+                "IRS Form 8949 Part II (Box D/E/F) &amp; Schedule D",
+            ),
+            (
+                "Short-Term Disposals &amp; Token Swaps (Held &lt;= 365 Days)",
+                "IRC Section 1(j) &amp; Section 1001",
+                "Taxed at ordinary brackets: 10%, 12%, 22%, 24%, 32%, 35%, 37%",
+                "IRS Form 8949 Part I (Box A/B/C); crypto-to-crypto swaps are taxable",
+            ),
+            (
+                "Net Investment Income Tax (NIIT Surtax)",
+                "IRC Section 1411(a)(1)",
+                "3.8% surtax on MAGI above $200,000 Single / $250,000 Married Jointly",
+                "IRS Form 8960; stacks on top of 15%/20% LTCG (23.8% max federal)",
+            ),
+            (
+                "Wallet-by-Wallet Cost-Basis Lot Allocation",
+                "IRS Rev. Proc. 2024-28 &amp; IRC Section 1012",
+                "HIFO / LIFO Specific Identification vs Chronological FIFO",
+                "Requires per-wallet lot records prior to disposal to avoid zero-basis audit",
+            ),
+            (
+                "Custodial Broker Digital Asset Reporting",
+                "IRC Section 6045 &amp; Treasury Final Broker Regs",
+                "Mandatory gross proceeds reporting effective 2025/2026 tax filings",
+                "IRS Form 1099-DA reconciled against non-custodial transfer logs",
+            ),
+            (
+                "Staking, Mining &amp; Airdrop Ordinary Income",
+                "IRS Rev. Rul. 2023-14 &amp; Notice 2014-21",
+                "10% to 37% ordinary income at exact timestamp of dominion and control",
+                "Schedule 1 (Form 1040); receipt FMV establishes subsequent Form 8949 basis",
+            ),
+            (
+                "Capital Loss Harvesting &amp; Carryforward",
+                "IRC Section 1211(b) &amp; Section 1212(b)",
+                "100% offset against capital gains plus $3,000 ($1,500 MFS) ordinary income",
+                "Unlimited lifetime carryforward of unused net capital losses on Schedule D",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="crypto">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Form 8949 &amp; 1099-DA Audit Signal:</strong> On <span id="serp-banner-metric-primary">$47,250</span> in net taxable gains, wallet-by-wallet HIFO lot selection saves <span id="serp-banner-metric-secondary">$3,402</span> vs chronological FIFO under IRS Rev. Proc. 2024-28. Automate multi-wallet API synchronization before importing broker Form 1099-DA files.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Compare Vetted Form 8949 &amp; 1099-DA Subledger Platforms</a>\n'
+            '      </div>'
+        ),
+    }
+
+
+def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict[str, Any]:
+    return {
+        "workbench_mode": "sec179",
+        "workbench_h2": f"Interactive GVWR Property Class, IRC 179(b)(3) Income Cap &amp; Financed Cash-Flow Arbitrage: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong>, first-year equipment and commercial vehicle expensing "
+            f"is governed by three statutory gates on IRS Form 4562: asset GVWR classification under IRC Section "
+            f"179(b)(5) and Section 280F, active trade or business taxable income under IRC Section 179(b)(3), and "
+            f"non-tax capital lease financing arbitrage where Year-1 tax savings exceed Year-1 debt service:"
+        ),
+        "presets": [
+            (
+                "Heavy Work Truck / Cargo Van &gt;6,000 lbs ($95k Uncapped)",
+                '{"sec179-cost":95000,"sec179-rate":35,"serp-179-cost":95000,"serp-179-income":280000,"serp-179-apr":6.5,"serp-179-class":"machinery_100"}',
+            ),
+            (
+                "Heavy SUV 6,000 to 14,000 lbs ($110k / $31,300 SUV Cap)",
+                '{"sec179-cost":110000,"sec179-rate":37,"serp-179-cost":110000,"serp-179-income":350000,"serp-179-apr":6.75,"serp-179-class":"heavy_suv"}',
+            ),
+            (
+                "Commercial Machinery &amp; Medical Fleet ($450k / 100% Write-Off)",
+                '{"sec179-cost":450000,"sec179-rate":35,"serp-179-cost":450000,"serp-179-income":820000,"serp-179-apr":6.25,"serp-179-class":"machinery_100"}',
+            ),
+            (
+                "Section 179 Phase-Out Stress ($4.35M Additions / $4.09M Cap)",
+                '{"sec179-cost":4350000,"sec179-rate":37,"serp-179-cost":4350000,"serp-179-income":5200000,"serp-179-apr":5.9,"serp-179-class":"machinery_100"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-179-cost" class="serp-field-label">Qualified Asset Cost ($ Placed in Service)</label>\n'
+            '          <input type="number" id="serp-179-cost" name="serp-179-cost" class="touch-target serp-sub-input" min="0" max="15000000" step="1000" value="145000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-179-income" class="serp-field-label">Active Business Taxable Income Cap ($ IRC 179(b)(3))</label>\n'
+            '          <input type="number" id="serp-179-income" name="serp-179-income" class="touch-target serp-sub-input" min="0" max="25000000" step="5000" value="320000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-179-apr" class="serp-field-label">60-Month Equipment Finance APR (%)</label>\n'
+            '          <input type="number" id="serp-179-apr" name="serp-179-apr" class="touch-target serp-sub-input" min="0" max="25" step="0.25" value="6.75" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-179-class" class="serp-field-label">Asset GVWR &amp; IRC 179 / 280F Property Class</label>\n'
+            '          <select id="serp-179-class" name="serp-179-class" class="touch-target serp-sub-select">\n'
+            '            <option value="machinery_100" selected="selected">Machinery / Software / Heavy Truck &gt;6,000 lbs (Uncapped 100%)</option>\n'
+            '            <option value="heavy_suv">Heavy SUV 6,000 to 14,000 lbs GVWR ($31,300 IRC 179(b)(5) Cap + Bonus)</option>\n'
+            '            <option value="passenger_auto">Luxury Passenger Auto &lt;6,000 lbs GVWR ($20,400 IRC 280F Year-1 Cap)</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Year-1 Total Statutory Write-Off", "$145,000"),
+            ("serp-out-secondary", "Year-1 Cash Tax Saved (at 35%)", "$50,750"),
+            ("serp-out-tertiary", "Year-1 Financed Debt Service (60m)", "$34,248"),
+            ("serp-out-quaternary", "Year-1 Net Cash-Flow Surplus", "+$16,502"),
+        ],
+        "svg_left_label": "Net After-Tax Equipment Cost: $94,250 (65.0%)",
+        "svg_right_label": "Year-1 Tax Shield Recovered: $50,750 (35.0%)",
+        "svg_left_width": "390",
+        "svg_right_x": "390",
+        "svg_right_width": "210",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Form 4562 &amp; GVWR Weight Class Matrix",
+        "table_headers": [
+            "Equipment / Vehicle Asset Category",
+            "Governing IRC Statutory Authority",
+            "2026 Section 179 Deduction Ceiling",
+            "Bonus Depreciation &amp; MACRS Treatment",
+        ],
+        "table_rows": [
+            (
+                "Commercial Machinery, Medical/Dental &amp; Off-The-Shelf Software",
+                "IRC Section 179(a) &amp; Section 179(d)(1)",
+                "Section 179 deduction limit of $2,560,000 (phaseout threshold of $4,090,000)",
+                "100% OBBBA Section 168(k) bonus + 5/7-year MACRS on any excess basis",
+            ),
+            (
+                "Heavy Pickup Truck (&gt;6,000 lbs GVWR &amp; &gt;=6-ft Cargo Bed) or Cargo Van",
+                "IRC Section 179(b)(5)(B) Work Vehicle Exception",
+                "Exempt from SUV cap; eligible for full $2,560,000 Section 179 limit",
+                "100% first-year deduction when &gt;50% qualified business use on Form 4562",
+            ),
+            (
+                "Heavy Passenger SUV (6,000 to 14,000 lbs GVWR, &lt;6-ft Bed)",
+                "IRC Section 179(b)(5)(A) Heavy SUV Cap",
+                "$31,300 statutory Section 179 cap ($30,500 prior-year inflation baseline)",
+                "Remaining basis eligible for Section 168(k) bonus + 5-year 200% DB MACRS",
+            ),
+            (
+                "Standard Passenger Automobile (&lt;6,000 lbs GVWR Sedan / Crossover)",
+                "IRC Section 280F(a)(1)(A) Luxury Auto Limits",
+                "$20,400 total Year-1 cap ($12,400 base + $8,000 bonus depreciation)",
+                "Year 2: $19,800; Year 3: $11,900; Year 4+: $7,160 per year until depreciated",
+            ),
+            (
+                "Qualified Improvement Property (QIP Non-Residential Interior)",
+                "IRC Section 168(e)(6) &amp; Section 179(e)",
+                "Eligible for $2,560,000 Section 179 cap (HVAC, roof, fire/security systems)",
+                "15-year straight-line MACRS recovery period; bonus depreciation eligible",
+            ),
+            (
+                "Active Business Income Limitation &amp; Carryforward",
+                "IRC Section 179(b)(3)(A) &amp; Form 4562 Line 11",
+                "Capped at aggregate net taxable income from active trades or businesses",
+                "Disallowed Section 179 carries forward indefinitely; 168(k) can create NOL",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="sec179">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Section 179 Financing Arbitrage Signal:</strong> Claiming a <span id="serp-banner-metric-primary">$145,000</span> Year-1 deduction generates <span id="serp-banner-metric-secondary">$50,750</span> in immediate tax savings versus $34,248 in Year-1 equipment finance payments (+$16,502 net Year-1 cash surplus when placed in service by December 31).\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Section 179 Financing &amp; CPA Accounting Partners</a>\n'
+            '      </div>'
+        ),
+    }
+
+
+def _build_sec1031_depth_spec(topic_label: str, statutory_authority: str) -> Dict[str, Any]:
+    return {
+        "workbench_mode": "sec1031",
+        "workbench_h2": f"Interactive Mortgage Boot, Section 1250 Recapture &amp; 45/180-Day Deadline Sub-Ledger: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and Treasury Reg. 1.1031(b)-1(c), full capital gains and "
+            f"25% Section 1250 depreciation recapture deferral on IRS Form 8824 requires trading equal or up in "
+            f"both net purchase price AND replacement mortgage debt (or offsetting any debt reduction with fresh "
+            f"cash equity) while meeting strict 45-day identification and 180-day closing windows:"
+        ),
+        "presets": [
+            (
+                "Zero-Boot Up-Trade ($2.5M Sale to $2.85M Replacement)",
+                '{"sec1031-sale-price":2500000,"sec1031-basis":950000,"sec1031-depreciation":380000,"sec1031-replacement":2850000,"serp-1031-rel-debt":950000,"serp-1031-rep-debt":1150000,"serp-1031-costs":42000,"serp-1031-depr":380000,"serp-1031-close-days":15}',
+            ),
+            (
+                "Partial Mortgage Boot Trap ($950k Old Debt to $700k New Debt)",
+                '{"sec1031-sale-price":2500000,"sec1031-basis":950000,"sec1031-depreciation":380000,"sec1031-replacement":2350000,"serp-1031-rel-debt":950000,"serp-1031-rep-debt":700000,"serp-1031-costs":38000,"serp-1031-depr":380000,"serp-1031-close-days":28}',
+            ),
+            (
+                "Multifamily Portfolio Exchange ($4.8M Sale / $850k Sec 1250)",
+                '{"sec1031-sale-price":4800000,"sec1031-basis":1900000,"sec1031-depreciation":850000,"sec1031-replacement":5400000,"serp-1031-rel-debt":2100000,"serp-1031-rep-debt":2500000,"serp-1031-costs":68000,"serp-1031-depr":850000,"serp-1031-close-days":5}',
+            ),
+            (
+                "Urgent Day-40 Identification Window ($1.4M NNN Retail)",
+                '{"sec1031-sale-price":1400000,"sec1031-basis":520000,"sec1031-depreciation":210000,"sec1031-replacement":1550000,"serp-1031-rel-debt":580000,"serp-1031-rep-debt":680000,"serp-1031-costs":26000,"serp-1031-depr":210000,"serp-1031-close-days":40}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-1031-rel-debt" class="serp-field-label">Relinquished Debt Payoff ($ Old Mortgage)</label>\n'
+            '          <input type="number" id="serp-1031-rel-debt" name="serp-1031-rel-debt" class="touch-target serp-sub-input" min="0" max="50000000" step="10000" value="950000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-1031-rep-debt" class="serp-field-label">Replacement Mortgage Debt ($ New Loan)</label>\n'
+            '          <input type="number" id="serp-1031-rep-debt" name="serp-1031-rep-debt" class="touch-target serp-sub-input" min="0" max="50000000" step="10000" value="1150000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-1031-costs" class="serp-field-label">Qualified Intermediary &amp; Closing Costs ($)</label>\n'
+            '          <input type="number" id="serp-1031-costs" name="serp-1031-costs" class="touch-target serp-sub-input" min="0" max="2000000" step="1000" value="42000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-1031-depr" class="serp-field-label">Cumulative Prior Depreciation ($ IRC 1250)</label>\n'
+            '          <input type="number" id="serp-1031-depr" name="serp-1031-depr" class="touch-target serp-sub-input" min="0" max="20000000" step="5000" value="380000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-1031-close-days" class="serp-field-label">Elapsed Days Since Sale Closing (0 to 180)</label>\n'
+            '          <input type="number" id="serp-1031-close-days" name="serp-1031-close-days" class="touch-target serp-sub-input" min="0" max="180" step="1" value="15" />\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Net Taxable Mortgage/Cash Boot", "$0"),
+            ("serp-out-secondary", "Total Tax Deferred (LTCG + §1250 + NIIT)", "$486,400"),
+            ("serp-out-tertiary", "Form 8824 Line 25 Carryover Basis", "$1,478,000"),
+            ("serp-out-quaternary", "Statutory Window (Day 45 ID / 180 Close)", "30d ID / 165d Close"),
+        ],
+        "svg_left_label": "Reinvested Exchange Equity: $1,508,000 (75.6%)",
+        "svg_right_label": "Deferred Tax Preserved: $486,400 (24.4%)",
+        "svg_left_width": "454",
+        "svg_right_x": "454",
+        "svg_right_width": "146",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Form 8824 Boot, Recapture &amp; Identification Rules",
+        "table_headers": [
+            "Section 1031 Statutory Component",
+            "Governing IRC / Treasury Authority",
+            "Tax Rate or Statutory Window",
+            "Form 8824 Reconciliation &amp; Safe Harbor",
+        ],
+        "table_rows": [
+            (
+                "45-Day Written Identification Period",
+                "IRC Section 1031(a)(3)(A); Treas. Reg. 1.1031(k)-1(c)",
+                "Strictly 45 calendar days from relinquished property transfer",
+                "3-Property Rule (any value), 200% FMV Rule, or 95% Acquisition Exception",
+            ),
+            (
+                "180-Day Exchange Completion Period",
+                "IRC Section 1031(a)(3)(B); IRS Form 8824",
+                "Earlier of 180 calendar days OR tax return due date (with extensions)",
+                "Q4 closings must file Form 4868 / Form 7004 to preserve full 180 days",
+            ),
+            (
+                "Mortgage Boot (Net Debt Relief)",
+                "IRC Section 1031(b); Treas. Reg. 1.1031(b)-1(c)",
+                "Taxed up to realized gain at 15%/20% LTCG + 25% §1250 + 3.8% NIIT",
+                "Offset debt reduction with new replacement debt or fresh cash in, never cash out",
+            ),
+            (
+                "Unrecaptured Section 1250 Depreciation",
+                "IRC Section 1(h)(1)(E) &amp; Section 1250",
+                "25% federal maximum rate on cumulative straight-line real property depreciation",
+                "100% deferred into replacement carryover basis on Form 8824 Line 25",
+            ),
+            (
+                "Qualified Intermediary (QI) Safe Harbor",
+                "Treas. Reg. 1.1031(k)-1(g)(4)",
+                "Written exchange assignment executed BEFORE relinquished closing",
+                "Prevents constructive receipt of funds under Treas. Reg. 1.1031(k)-1(f)",
+            ),
+            (
+                "State Clawback &amp; Out-of-State Tracking",
+                "CA R&amp;TC Section 18032.5 (FTB Form 3840) / OR-24",
+                "Up to 13.3% CA state tax deferred but tracked annually",
+                "Requires annual CA FTB Form 3840 informational filing even after moving out of state",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="sec1031">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Qualified Intermediary &amp; Boot Signal:</strong> Your exchange structure shows <span id="serp-banner-metric-primary">$0</span> in taxable boot while deferring <span id="serp-banner-metric-secondary">$486,400</span> in combined federal, 25% Section 1250 recapture, and state tax. Execute your written QI Exchange Assignment before escrow closes.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Bonded Qualified Intermediary (IPX1031) Vetting Checklist</a>\n'
+            '      </div>'
+        ),
+    }
+
+
+def _build_tax_brackets_depth_spec(
+    s_low: str, topic_label: str, statutory_authority: str
+) -> Dict[str, Any]:
+    is_ca = "california" in s_low or "ca-tax" in s_low
+    state_focus_lbl = (
+        "California FTB Form 540 (1.0% to 13.3% + 1.1% SDI)"
+        if is_ca
+        else "Federal IRC Section 1(j) &amp; State Marginal"
+    )
+    return {
+        "workbench_mode": "tax_brackets",
+        "workbench_h2": f"Interactive 401(k)/HSA Pre-Tax Shield, PTET Election &amp; {state_focus_lbl} Sub-Ledger: {topic_label}",
+        "workbench_intro": (
+            f"Competitor tax calculators rank by combining top-line bracket lookups with above-the-line "
+            f"retirement/health deductions (IRC Section 401(k) $23,500 limit and IRC Section 223 HSA), "
+            f"Pass-Through Entity Tax (PTET Notice 2020-75 / CA AB 150) SALT cap workarounds, and complete "
+            f"federal plus state marginal schedules under <strong>{statutory_authority}</strong>:"
+        ),
+        "presets": [
+            (
+                "Median Professional ($125k Gross / $23.5k 401k)",
+                '{"inp-income":125000,"tax-income":125000,"serp-tax-gross":125000,"serp-tax-pretax":23500,"serp-tax-ptet":0,"serp-tax-regime":"2026_active"}',
+            ),
+            (
+                "Dual-Earner Household ($285k Gross / Max 401k + HSA)",
+                '{"inp-income":285000,"tax-income":285000,"serp-tax-gross":285000,"serp-tax-pretax":55550,"serp-tax-ptet":12000,"serp-tax-regime":"2026_active"}',
+            ),
+            (
+                "S-Corp Owner PTET Shield ($450k Gross / 9.3% AB 150)",
+                '{"inp-income":450000,"tax-income":450000,"serp-tax-gross":450000,"serp-tax-pretax":69000,"serp-tax-ptet":35400,"serp-tax-regime":"ptet_shield"}',
+            ),
+            (
+                "2027 Sunset Reversion Stress ($650k Gross / 39.6% Top Rate)",
+                '{"inp-income":650000,"tax-income":650000,"serp-tax-gross":650000,"serp-tax-pretax":55550,"serp-tax-ptet":18000,"serp-tax-regime":"2027_sunset"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-tax-gross" class="serp-field-label">Gross Household / Pass-Through Income ($)</label>\n'
+            '          <input type="number" id="serp-tax-gross" name="serp-tax-gross" class="touch-target serp-sub-input" min="0" max="20000000" step="1000" value="185000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-tax-pretax" class="serp-field-label">Pre-Tax 401(k), Solo 401(k) &amp; HSA Deductions ($)</label>\n'
+            '          <input type="number" id="serp-tax-pretax" name="serp-tax-pretax" class="touch-target serp-sub-input" min="0" max="500000" step="500" value="31000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-tax-ptet" class="serp-field-label">PTET (AB 150) / Itemized SALT Deduction ($)</label>\n'
+            '          <input type="number" id="serp-tax-ptet" name="serp-tax-ptet" class="touch-target serp-sub-input" min="0" max="2000000" step="500" value="15400" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-tax-regime" class="serp-field-label">Statutory Tax Regime &amp; SALT Election</label>\n'
+            '          <select id="serp-tax-regime" name="serp-tax-regime" class="touch-target serp-sub-select">\n'
+            '            <option value="2026_active" selected="selected">2026 Current Law (10% to 37% Federal + State Schedule)</option>\n'
+            '            <option value="2027_sunset">2027 Post-Sunset Reversion (10% to 39.6% Federal + State)</option>\n'
+            '            <option value="ptet_shield">S-Corp / LLC PTET Election (Notice 2020-75 / CA AB 150 Shield)</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Adjusted Taxable Income Base", "$138,600"),
+            ("serp-out-secondary", "Combined Federal + State/SDI Tax", "$34,927"),
+            ("serp-out-tertiary", "401(k)/HSA &amp; PTET Tax Saved", "$14,848"),
+            ("serp-out-quaternary", "Net After-Tax Cash Retained", "$150,073"),
+        ],
+        "svg_left_label": "Net Take-Home Cash Flow: $150,073 (81.1%)",
+        "svg_right_label": "Combined Tax Liability: $34,927 (18.9%)",
+        "svg_left_width": "487",
+        "svg_right_x": "487",
+        "svg_right_width": "113",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Complete 10-Tier California FTB 540 &amp; Federal Rate Matrix",
+        "table_headers": [
+            "California State Bracket &amp; Federal Tier",
+            "Single Taxable Income Thresholds (FTB 540)",
+            "Married Filing Jointly Thresholds (FTB 540)",
+            "Head of Household &amp; Statutory Surcharges",
+        ],
+        "table_rows": [
+            (
+                "CA State Tier 1: 1.0% State Rate (10% Fed)",
+                "$0 to $10,756 Single",
+                "$0 to $21,512 Married Jointly",
+                "$0 to $21,527 Head of Household; Federal standard deduction of $15,000 Single / $30,000 MFJ",
+            ),
+            (
+                "CA State Tier 2: 2.0% State Rate (12% Fed)",
+                "$10,757 to $25,499 Single",
+                "$21,513 to $50,998 Married Jointly",
+                "$21,528 to $51,000 HOH; CA FTB 540 baseline exemption ($5,540 Single / $11,080 MFJ)",
+            ),
+            (
+                "CA State Tier 3: 4.0% State Rate (12%/22% Fed)",
+                "$25,500 to $40,245 Single",
+                "$50,999 to $80,490 Married Jointly",
+                "$51,001 to $65,744 HOH; CA Personal Exemption Credit ($149 Single / $298 MFJ)",
+            ),
+            (
+                "CA State Tier 4: 6.0% State Rate (22% Fed)",
+                "$40,246 to $55,866 Single",
+                "$80,491 to $111,732 Married Jointly",
+                "$65,745 to $81,364 HOH; CA SDI payroll withholding of 1.1% on all wages (no wage cap)",
+            ),
+            (
+                "CA State Tier 5: 8.0% State Rate (22%/24% Fed)",
+                "$55,867 to $70,606 Single",
+                "$111,733 to $141,212 Married Jointly",
+                "$81,365 to $96,107 HOH; Pre-tax 401(k) ($23,500 limit) reduces both Federal &amp; CA AGI",
+            ),
+            (
+                "CA State Tier 6: 9.3% Core Professional State Rate",
+                "$70,607 to $360,659 Single",
+                "$141,213 to $721,318 Married Jointly",
+                "$96,108 to $490,493 HOH; Pass-Through Entity Tax (AB 150) 9.3% elective SALT workaround",
+            ),
+            (
+                "CA State Tier 7 &amp; 8: 10.3% and 11.3% State Rates",
+                "$360,660 to $432,787 (10.3%); up to $721,314 (11.3%)",
+                "$721,319 to $865,574 (10.3%); up to $1,442,628 (11.3%)",
+                "$490,494 to $588,593 (10.3%); up to $980,987 (11.3%); 3.8% NIIT applies above $200k/$250k",
+            ),
+            (
+                "CA State Tier 9 &amp; 10: 12.3% + 1.0% Prop 63 (13.3% Top)",
+                "$721,315 to $1,000,000 (12.3%); Over $1,000,000 (13.3%)",
+                "$1,442,629+ (12.3% base; 13.3% above $1,000,000)",
+                "Includes 1.0% Mental Health Services Act surtax (R&amp;TC Section 17043) on taxable income &gt;$1M",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="tax_brackets">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Payroll &amp; Entity Tax Shield Signal:</strong> Deducting pre-tax 401(k)/HSA and PTET lowers your taxable base to <span id="serp-banner-metric-primary">$138,600</span> and saves <span id="serp-banner-metric-secondary">$14,848</span> in combined federal and state income tax. Automate S-Corp payroll and tax books to lock in full deduction compliance.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Compare Vetted Payroll, PTET &amp; Tax Accounting Platforms</a>\n'
+            '      </div>'
+        ),
+    }
+
+
+def _build_b2b_depth_spec(
+    topic_label: str, statutory_authority: str, economic_dataset: str
+) -> Dict[str, Any]:
+    return {
+        "workbench_mode": "b2b",
+        "workbench_h2": f"Interactive Statutory Safe-Harbor Sub-Ledger &amp; Capital Retention Matrix: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, institutional "
+            f"operators maximize net retained capital by pairing primary formula evaluation with statutory "
+            f"safe-harbor deductions, payroll/duty exemptions, and multi-regime sensitivity modeling:"
+        ),
+        "presets": [
+            (
+                "Growth Operator Baseline ($250k Gross / 22% Effective)",
+                '{"runway-cash":500000,"runway-burn":35000,"tey-principal":250000,"cg-amount":250000,"pm-tax-gain":50000,"serp-b2b-gross":250000,"serp-b2b-deduction":85000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "Mid-Market Safe-Harbor Election ($650k Gross / Maximized Shield)",
+                '{"runway-cash":1200000,"runway-burn":65000,"tey-principal":650000,"cg-amount":650000,"pm-tax-gain":120000,"serp-b2b-gross":650000,"serp-b2b-deduction":240000,"serp-b2b-rate":24.5,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "Unoptimized Statutory Exposure ($650k Gross / Full Drag)",
+                '{"runway-cash":800000,"runway-burn":85000,"tey-principal":650000,"cg-amount":650000,"pm-tax-gain":120000,"serp-b2b-gross":650000,"serp-b2b-deduction":0,"serp-b2b-rate":28.0,"serp-b2b-regime":"unoptimized_baseline"}',
+            ),
+            (
+                "Enterprise Scale Audit Stress ($2.4M Gross / High Bracket)",
+                '{"runway-cash":3500000,"runway-burn":140000,"tey-principal":2400000,"cg-amount":2400000,"pm-tax-gain":450000,"serp-b2b-gross":2400000,"serp-b2b-deduction":820000,"serp-b2b-rate":32.0,"serp-b2b-regime":"stress_case"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-gross" class="serp-field-label">Gross Revenue / Capital Exposure ($)</label>\n'
+            '          <input type="number" id="serp-b2b-gross" name="serp-b2b-gross" class="touch-target serp-sub-input" min="0" max="50000000" step="5000" value="450000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-deduction" class="serp-field-label">Statutory Offset / Exempt Allocation ($)</label>\n'
+            '          <input type="number" id="serp-b2b-deduction" name="serp-b2b-deduction" class="touch-target serp-sub-input" min="0" max="25000000" step="2500" value="165000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-rate" class="serp-field-label">Effective Statutory Tax / Capital Rate (%)</label>\n'
+            '          <input type="number" id="serp-b2b-rate" name="serp-b2b-rate" class="touch-target serp-sub-input" min="0" max="100" step="0.5" value="24.5" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-regime" class="serp-field-label">Statutory Election &amp; Compliance Mode</label>\n'
+            '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
+            '            <option value="optimal_election" selected="selected">Statutory Safe-Harbor Election (Maximized Deduction/Exemption)</option>\n'
+            '            <option value="unoptimized_baseline">Unoptimized Statutory Exposure (No Safe-Harbor Offset)</option>\n'
+            '            <option value="stress_case">Regulatory / Rate Stress Scenario (+20% Rate Sensitivity)</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Net Statutory Liability Exposure", "$69,825"),
+            ("serp-out-secondary", "Unoptimized Baseline Exposure", "$110,250"),
+            ("serp-out-tertiary", "Annual Safe-Harbor Alpha Saved", "$40,425"),
+            ("serp-out-quaternary", "Net Retained Operating Capital", "$380,175"),
+        ],
+        "svg_left_label": "Net Retained Capital: $380,175 (84.5%)",
+        "svg_right_label": "Net Statutory Exposure: $69,825 (15.5%)",
+        "svg_left_width": "507",
+        "svg_right_x": "507",
+        "svg_right_width": "93",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing Thresholds &amp; Safe-Harbor Matrix",
+        "table_headers": [
+            "Statutory Provision / Commercial Regime",
+            "Governing Legal &amp; Regulatory Citation",
+            "2026 Statutory Cap, Rate or Multiplier",
+            "Audit Substantiation &amp; Execution Standard",
+        ],
+        "table_rows": [
+            (
+                "S-Corp Reasonable Salary &amp; QBI Pass-Through",
+                "IRC Section 1366, Section 3111 &amp; Section 199A",
+                "15.3% FICA on W-2 up to $176,100 OASDI base; 20% QBI deduction ($197,300/$394,600 threshold)",
+                "IRS Form 1120-S, Schedule K-1, and W-2 reasonable compensation benchmark logs",
+            ),
+            (
+                "R&amp;D Tax Credit &amp; Section 174 Capitalization",
+                "IRC Section 41, Section 174 &amp; Section 280C(c)",
+                "Up to $500,000 Form 8974 payroll tax offset; 15-year foreign vs domestic R&amp;D rules",
+                "IRS Form 6765 Section G business-component technical uncertainty workpapers",
+            ),
+            (
+                "U.S. Treasury Bill State Tax Exemption",
+                "31 U.S.C. Section 3124(a) &amp; IRC Section 1411",
+                "100% exempt from state/local income tax (up to 13.3% CA / 10.9% NY state tax saved)",
+                "Form 1099-INT Box 3 state subtraction schedule; TEY = Yield / (1 minus State Rate)",
+            ),
+            (
+                "Section 301 Tariffs, MPF/HMF &amp; Surety Bonds",
+                "19 U.S.C. 2411, CBP Form 7501 &amp; 40 U.S.C. 3131",
+                "7.5% to 100% Section 301 duty + 0.3464% MPF + 0.125% HMF; $150,000 Miller Act bond threshold",
+                "10-digit HTSUS binding origin rulings and Treasury Circular 570 surety underwriting",
+            ),
+            (
+                "CFTC Event Contracts vs Non-DCM Venues",
+                "IRC Section 1256(g) &amp; CFTC 17 CFR Part 40",
+                "60% Long-Term / 40% Short-Term hybrid rate on regulated DCMs vs ordinary rates",
+                "IRS Form 6781 mark-to-market election and quadratic exchange fee reconciliation",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="b2b">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Treasury &amp; Tax Execution Signal:</strong> Applying statutory safe-harbor offsets reduces net exposure to <span id="serp-banner-metric-primary">$69,825</span> and preserves <span id="serp-banner-metric-secondary">$40,425</span> in annual operating capital. Verify automated compliance and treasury execution below.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Commercial Banking, Payroll &amp; Tax Partners</a>\n'
+            '      </div>'
+        ),
+    }
+
+
+def render_serp_incumbent_depth_upgrade_block(
+    slug: str,
+    title: str,
+    property_id: str,
+    canonical_base: str,
+    statutory_authority: str,
+    economic_dataset: str,
+) -> str:
+    """
+    Renders the SERP Incumbent Depth Upgrade Workbench (#serp-incumbent-depth-workbench)
+    engineered from live Google and Bing SERP competitor analysis to outrank #1 incumbents across:
+      1. One-Click Archetype Presets (data-calc-preset + data-cta-slot="calculator_preset_cta")
+      2. Multi-Variable Sub-Ledger Inputs (Cost Basis/FIFO-HIFO-LIFO, Pre-Tax 401k/HSA/PTET,
+         GVWR/Income Cap/Financing APR, Relinquished/Replacement Debt Boot & 45/180-Day Window,
+         and MFS vs MFJ Spouse AGI & 5-Plan Title IV Matrix)
+      3. Live Reactive Multi-Segment SVG Visual Breakdown Bar Chart
+      4. Authoritative Primary Data Reference Schedule Table (e.g. 10-tier CA FTB 540 schedule)
+      5. Dynamic Calculation-Bound Commercial Intent Callout (#dynamic-commercial-intent-banner)
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    s_low = str(slug or "").strip().lower()
+    is_prexvo = property_id.strip().lower() == "prexvo"
+    topic_label = _format_safe_heading_topic(title, slug)
+    veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
+
+    if is_prexvo:
+        spec = _build_repayment_loan_depth_spec(slug, topic_label, statutory_authority)
+    elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash")):
+        spec = _build_crypto_depth_spec(topic_label, statutory_authority)
+    elif (
+        s_low in veh_slugs
+        or any(
+            tok in s_low
+            for tok in (
+                "179",
+                "equipment",
+                "lease",
+                "macrs",
+                "depreciation",
+                "vehicle",
+                "gvwr",
+                "yukon",
+                "f250",
+                "sprinter",
+                "cybertruck",
+                "silverado",
+                "ram",
+                "transit",
+                "escalade",
+            )
+        )
+    ):
+        spec = _build_sec179_depth_spec(topic_label, statutory_authority)
+    elif any(tok in s_low for tok in ("1031", "like-kind", "exchange", "ftb-3840", "8824")):
+        spec = _build_sec1031_depth_spec(topic_label, statutory_authority)
+    elif any(
+        tok in s_low
+        for tok in (
+            "tax-bracket",
+            "irs-2027",
+            "ca-tax-brackets",
+            "capital-gains",
+            "tcja",
+            "marginal",
+        )
+    ):
+        spec = _build_tax_brackets_depth_spec(s_low, topic_label, statutory_authority)
+    else:
+        spec = _build_b2b_depth_spec(topic_label, statutory_authority, economic_dataset)
+
+    preset_buttons_html = "\n".join(
+        f'        <button type="button" class="touch-target btn-preset serp-archetype-btn" '
+        f'data-cta-slot="calculator_preset_cta" '
+        f"data-calc-preset='{p_json}'>{p_label}</button>"
+        for p_label, p_json in spec["presets"]
+    )
+    metrics_cards_html = "\n".join(
+        f'        <div class="serp-metric-box">\n'
+        f'          <div class="serp-metric-label">{m_label}</div>\n'
+        f'          <div id="{m_id}" class="serp-metric-val calc-metric-value">{m_val}</div>\n'
+        f'        </div>'
+        for m_id, m_label, m_val in spec["metrics_meta"]
+    )
+    th_html = "\n".join(f'              <th scope="col">{h}</th>' for h in spec["table_headers"])
+    tr_html = "\n".join(
+        f'            <tr>\n'
+        f'              <td><strong>{c1}</strong></td>\n'
+        f'              <td>{c2}</td>\n'
+        f'              <td>{c3}</td>\n'
+        f'              <td>{c4}</td>\n'
+        f'            </tr>'
+        for c1, c2, c3, c4 in spec["table_rows"]
+    )
+
+    return (
+        f'    <section id="serp-incumbent-depth-workbench" class="serp-depth-workbench card pseo-card" '
+        f'data-mechanic="serp_incumbent_depth_upgrade" data-workbench-mode="{spec["workbench_mode"]}">\n'
+        f'      <h2>{spec["workbench_h2"]}</h2>\n'
+        f'      <p class="serp-workbench-intro">{spec["workbench_intro"]}</p>\n'
+        f'      <div class="serp-preset-bar" role="group" aria-label="One-Click Statutory Scenario Archetypes">\n'
+        f'{preset_buttons_html}\n'
+        f'      </div>\n'
+        f'      <div class="serp-sub-inputs-grid">\n'
+        f'{spec["inputs_html"]}\n'
+        f'      </div>\n'
+        f'      <div class="serp-metrics-grid" aria-live="polite">\n'
+        f'{metrics_cards_html}\n'
+        f'      </div>\n'
+        f'      <div class="serp-svg-chart-wrap">\n'
+        f'        <svg class="serp-visual-breakdown-svg" viewBox="0 0 600 76" role="img" aria-label="Interactive Retained Capital versus Statutory Exposure Breakdown">\n'
+        f'          <title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>\n'
+        f'          <rect x="0" y="8" width="600" height="26" rx="6" fill="var(--bg-inset, #0b1329)" />\n'
+        f'          <rect id="serp-svg-bar-retained" x="0" y="8" width="{spec["svg_left_width"]}" height="26" rx="6" fill="var(--status-positive, #10b981)" />\n'
+        f'          <rect id="serp-svg-bar-tax" x="{spec["svg_right_x"]}" y="8" width="{spec["svg_right_width"]}" height="26" rx="6" fill="var(--accent, #38bdf8)" />\n'
+        f'          <text id="serp-svg-label-retained" x="8" y="58" fill="var(--text, #f8fafc)" font-size="13" font-weight="600">{spec["svg_left_label"]}</text>\n'
+        f'          <text id="serp-svg-label-tax" x="592" y="58" text-anchor="end" fill="var(--text-secondary, #cbd5e1)" font-size="13" font-weight="600">{spec["svg_right_label"]}</text>\n'
+        f'        </svg>\n'
+        f'      </div>\n'
+        f'{spec["banner_html"]}\n'
+        f'      <h3 id="serp-statutory-reference-schedule" style="margin-top: 22px; margin-bottom: 10px;">{spec["table_h3"]}</h3>\n'
+        f'      <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 12px;">The following primary statutory schedule reconciles official rate tiers, deduction caps, phaseout thresholds, and filing forms under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>:</p>\n'
+        f'      <div class="table-wrap pseo-table-wrap">\n'
+        f'        <table class="comparison-table serp-statutory-reference-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
+        f'          <thead>\n'
+        f'            <tr>\n'
+        f'{th_html}\n'
+        f'            </tr>\n'
+        f'          </thead>\n'
+        f'          <tbody>\n'
+        f'{tr_html}\n'
+        f'          </tbody>\n'
+        f'        </table>\n'
+        f'      </div>\n'
+        f'    </section>'
+    )
+
+
 def render_competitor_winning_pattern_blocks(
     slug: str,
     title: str,
@@ -2490,12 +3391,13 @@ def render_competitor_winning_pattern_blocks(
     economic_dataset: str,
 ) -> Dict[str, str]:
     """
-    Renders the 4 winning competitor patterns in HTML for compile_high_effort_page
+    Renders the 5 winning competitor patterns in HTML for compile_high_effort_page
     and RetroReflectionEngine:
       1. Calculator Immediacy: instant_edge_case_trap_immediacy
-      2. Authority Framing: statutory_compliance_framing (Beyond the Calculator + Pitfall Matrix)
-      3. Topic Clustering: on_this_page_jump_nav + three_tier_topic_cluster_nav
-      4. Commercial Handoffs: vetted_commercial_handoff_framing
+      2. Interactive Sub-Ledger & Primary Data Density: serp_incumbent_depth_upgrade
+      3. Authority Framing: statutory_compliance_framing (Beyond the Calculator + Pitfall Matrix)
+      4. Topic Clustering: on_this_page_jump_nav + three_tier_topic_cluster_nav
+      5. Commercial Handoffs: vetted_commercial_handoff_framing
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     ctx = _resolve_vertical_competitor_content(
@@ -2506,6 +3408,14 @@ def render_competitor_winning_pattern_blocks(
     )
     base_url = ctx["base_url"]
     topic_label = _format_safe_heading_topic(title, slug)
+    serp_depth_upgrade_html = render_serp_incumbent_depth_upgrade_block(
+        slug=slug,
+        title=title,
+        property_id=property_id,
+        canonical_base=canonical_base,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+    )
 
     # Extract 2 contextual peer tools for in-prose linking inside statutory compliance
     peer_links: List[Tuple[str, str]] = []
@@ -2528,10 +3438,11 @@ def render_competitor_winning_pattern_blocks(
         '      <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted, #475569); margin-bottom: 8px;">On This Page: Rapid Decision Navigation</div>\n'
         '      <div style="display: flex; flex-wrap: wrap; gap: 8px;">\n'
         '        <a href="#statutory-trap-alert" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">1. Statutory Deadline &amp; Edge-Case Trap</a>\n'
-        '        <a href="#vetted-commercial-handoff" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">2. Provider Vetting Checklist</a>\n'
-        '        <a href="#statutory-compliance-checklist" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">3. Beyond the Calculator Checklist</a>\n'
-        '        <a href="#statutory-pitfalls-matrix" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">4. Common Statutory Pitfalls</a>\n'
-        '        <a href="#topic-cluster-hub" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">5. 3-Tier Topic Cluster</a>\n'
+        '        <a href="#serp-incumbent-depth-workbench" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">2. Interactive Sub-Ledger &amp; Rate Schedule</a>\n'
+        '        <a href="#vetted-commercial-handoff" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">3. Provider Vetting Checklist</a>\n'
+        '        <a href="#statutory-compliance-checklist" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">4. Beyond the Calculator Checklist</a>\n'
+        '        <a href="#statutory-pitfalls-matrix" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">5. Common Statutory Pitfalls</a>\n'
+        '        <a href="#topic-cluster-hub" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">6. 3-Tier Topic Cluster</a>\n'
         '      </div>\n'
         '    </nav>'
     )
@@ -2633,6 +3544,7 @@ def render_competitor_winning_pattern_blocks(
     return {
         "on_this_page_nav_html": on_this_page_html,
         "edge_case_trap_html": edge_case_trap_html,
+        "serp_depth_upgrade_html": serp_depth_upgrade_html,
         "statutory_compliance_html": statutory_compliance_html,
         "three_tier_cluster_html": three_tier_cluster_html,
         "vetted_handoff_html": vetted_handoff_html,
@@ -2653,6 +3565,7 @@ __all__ = [
     "benchmark_all_properties",
     "run_blind_spot_pass",
     "_format_safe_heading_topic",
+    "render_serp_incumbent_depth_upgrade_block",
     "render_competitor_winning_pattern_blocks",
 ]
 

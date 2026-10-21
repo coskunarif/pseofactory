@@ -4678,7 +4678,7 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         return True
 
     if re.search(
-        r"<h[23][^>]*>[^<]*(?:[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*|\bIrs 2027\b[^<]*|\b(?:Quantitative|Arbitrage|Differential)\s+Model\s*)</h[23]>",
+        r"<h[23][^>]*>[^<]*(?:[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*|\b(?:Section|Form)\d+\b[^<]*|\bIrs 2027\b[^<]*|\b(?:Quantitative|Arbitrage|Differential)\s+Model\s*)</h[23]>",
         html_content,
     ):
         return True
@@ -4858,8 +4858,12 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         return True
 
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", html_content, re.IGNORECASE)
-    if t_m and detect_title_year_conflict_issues(re.sub(r"<[^>]+>", "", t_m.group(1)).strip()):
-        return True
+    if t_m:
+        raw_t_str = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
+        if detect_title_year_conflict_issues(raw_t_str) or bool(
+            re.search(r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b", raw_t_str, re.IGNORECASE)
+        ):
+            return True
 
     md_chk = re.search(
         r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
@@ -5061,7 +5065,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
     def _clean_heading_suffix(hm: re.Match) -> str:
         open_tag, inner_txt, close_tag = hm.group(1), hm.group(2), hm.group(3)
         if not re.search(
-            r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Quantitative|Arbitrage|Differential)(?:\s+Model)?\b|\bIrs 2027\b|\bSaa\s+S",
+            r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Section|Form)\d+\b|\b(?:Quantitative|Arbitrage|Differential)(?:\s+Model)?\b|\bIrs 2027\b|\bSaa\s+S",
             inner_txt,
         ):
             return hm.group(0)
@@ -5070,6 +5074,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
             f": {topic_label}",
             inner_txt,
         )
+        cleaned_inner = re.sub(r"\b(Section|Form)(\d+)\b", r"\1 \2", cleaned_inner)
         return f"{open_tag}{cleaned_inner}{close_tag}"
 
     cleaned_headings = re.sub(r"(<h[23]\b[^>]*>)([^<]*)(</h[23]>)", _clean_heading_suffix, updated)
@@ -5648,7 +5653,9 @@ def _normalize_page_structure_and_geo_parity(
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
     if t_m:
         old_t_raw = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
-        if detect_title_year_conflict_issues(old_t_raw):
+        if detect_title_year_conflict_issues(old_t_raw) or bool(
+            re.search(r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b", old_t_raw, re.IGNORECASE)
+        ):
             healed_t = _normalize_title_50_60(old_t_raw, brand_label, property_id)
             if healed_t and healed_t != old_t_raw:
                 updated = updated.replace(f"<title>{t_m.group(1)}</title>", f"<title>{healed_t}</title>", 1)
@@ -5730,6 +5737,7 @@ class RetroReflectionEngine:
         "statutory_compliance_framing",
         "three_tier_topic_cluster_nav",
         "vetted_commercial_handoff_framing",
+        "serp_incumbent_depth_upgrade",
         "deterministic_visual_primitives",
     )
 
@@ -5900,6 +5908,7 @@ class RetroReflectionEngine:
             not cluster_body
             or has_v_pollution
             or 'data-mechanic="on_this_page_jump_nav"' not in html_content
+            or 'href="#serp-incumbent-depth-workbench"' not in html_content
             or "<h2>3-Tier Statutory Topic Cluster" in html_content
             or "<h2>Connected Statutory Topic Cluster and Decision Architecture</h2>" in html_content
             or 'href="#calculator-workspace-anchor"' in html_content
@@ -5947,6 +5956,13 @@ class RetroReflectionEngine:
         ):
             missing.append("vetted_commercial_handoff_framing")
 
+        if (
+            'data-mechanic="serp_incumbent_depth_upgrade"' not in html_content
+            or 'id="serp-incumbent-depth-workbench"' not in html_content
+            or has_v_pollution
+        ):
+            missing.append("serp_incumbent_depth_upgrade")
+
         from pseofactory.visual_primitives import (
             VISUAL_PRIMITIVES_VERSION,
             detect_visual_and_ux_contract_issues,
@@ -5955,6 +5971,8 @@ class RetroReflectionEngine:
             'id="pseo-visual-primitives"' not in html_content
             or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
             or 'id="pseo-runtime-sync"' not in html_content
+            or ".serp-depth-workbench" not in html_content
+            or "updateSerpWorkbenchSynchronously" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)
@@ -6082,7 +6100,7 @@ class RetroReflectionEngine:
         statutory_authority = str(raw.get("statutory_authority") or default_stat).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
         economic_dataset = str(raw.get("economic_dataset") or default_econ).replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
         raw_model_name = str(raw.get("model_name") or f"{slug_title} Model").replace("\u2014", ": ").replace("\u2013", " to ").replace(" - ", ": ").strip()
-        if re.search(r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\bQuantitative\b|\bIrs 2027\b", raw_model_name):
+        if re.search(r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Section|Form)\d+\b|\bQuantitative\b|\bIrs 2027\b", raw_model_name):
             model_name = f"{_format_safe_heading_topic(raw_model_name, slug)} Model"
         else:
             model_name = raw_model_name
@@ -6379,6 +6397,7 @@ class RetroReflectionEngine:
                 "statutory_compliance_framing",
                 "three_tier_topic_cluster_nav",
                 "vetted_commercial_handoff_framing",
+                "serp_incumbent_depth_upgrade",
             )
         ):
             from pseofactory.competitor import render_competitor_winning_pattern_blocks
@@ -6393,6 +6412,10 @@ class RetroReflectionEngine:
                 statutory_authority=stat_auth,
                 economic_dataset=econ_ds,
             )
+            if "serp_incumbent_depth_upgrade" in missing:
+                updated = re.sub(r'\s*<section[^>]+data-mechanic="serp_incumbent_depth_upgrade"[\s\S]*?</section>', "", updated)
+                injected_parts.append(winning_blocks["serp_depth_upgrade_html"])
+                repaired.append("serp_incumbent_depth_upgrade")
             if "instant_edge_case_trap_immediacy" in missing:
                 updated = re.sub(r'\s*<aside[^>]+data-mechanic="instant_edge_case_trap_immediacy"[\s\S]*?</aside>', "", updated)
                 injected_parts.append(winning_blocks["edge_case_trap_html"])
@@ -6622,7 +6645,9 @@ class RetroReflectionEngine:
         )
         t_val = str(raw_ov.get("title_rewrite") or raw_ov.get("title") or "")
         m_val = str(raw_ov.get("meta_description") or "")
-        if detect_title_year_conflict_issues(t_val):
+        if detect_title_year_conflict_issues(t_val) or bool(
+            re.search(r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b", t_val, re.IGNORECASE)
+        ):
             return True
         if detect_sentence_truncation_issues(m_val) or detect_sentence_truncation_issues(qa_str):
             return True

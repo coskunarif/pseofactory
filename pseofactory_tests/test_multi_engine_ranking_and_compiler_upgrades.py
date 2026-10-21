@@ -295,3 +295,45 @@ def test_slop_ratchet_passes_after_compiler_and_competitor_upgrades():
     """Verifies AST slop ratchet passes with zero oversized functions or duplicate blocks."""
     ratchet = audit_code_slop_ratchet()
     assert ratchet["passed"] is True, f"Slop ratchet failed: {ratchet}"
+
+
+def test_serp_incumbent_depth_upgrade_workbench_and_title_modifiers():
+    """Verifies SERP incumbent depth upgrade workbenches across all 6 verticals and CTR title modifiers."""
+    from pseofactory.competitor import render_serp_incumbent_depth_upgrade_block
+    from pseofactory.gsc_remediation import _normalize_title_50_60
+
+    cases = [
+        ("crypto-tax-calculator", "2026 Crypto Tax Calculator", "profithelm", "https://profithelm.com", "IRC Section 1(h)", "IRS Rev. Proc. 2024-28", "crypto", "serp-crypto-proceeds", "Form 8949"),
+        ("irs-2027-tax-brackets/california", "California 2027 Tax Brackets", "profithelm", "https://profithelm.com", "IRC Section 1(j)", "IRS Rev. Proc. 2025-32", "tax_brackets", "serp-tax-pretax", "CA State Tier 6: 9.3%"),
+        ("section-179-calculator", "2026 Section 179 Calculator", "profithelm", "https://profithelm.com", "IRC Section 179", "IRS Pub. 946", "sec179", "serp-179-class", "$31,300"),
+        ("section-1031-calculator", "2026 Section 1031 Exchange Calculator", "profithelm", "https://profithelm.com", "IRC Section 1031", "IRS Form 8824", "sec1031", "serp-1031-rel-debt", "45-Day Written Identification"),
+        ("student-loan-repayment-calculator", "2026 Student Loan Repayment Calculator", "prexvo", "https://prexvo.com", "34 CFR Part 685", "FRED SLSTTOTAL", "repayment_loan", "serp-loan-spouse-agi", "Repayment Assistance Plan (RAP)"),
+        ("s-corp-tax-calculator", "2026 S-Corp Tax Calculator", "profithelm", "https://profithelm.com", "IRC Section 1366", "SSA OASDI", "b2b", "serp-b2b-deduction", "S-Corp Reasonable Salary"),
+    ]
+    for slug, title, prop, base, auth, ds, expected_mode, expected_input, expected_fact in cases:
+        block = render_serp_incumbent_depth_upgrade_block(
+            slug=slug,
+            title=title,
+            property_id=prop,
+            canonical_base=base,
+            statutory_authority=auth,
+            economic_dataset=ds,
+        )
+        assert 'id="serp-incumbent-depth-workbench"' in block
+        assert f'data-workbench-mode="{expected_mode}"' in block
+        assert expected_input in block
+        assert expected_fact in block
+        assert 'id="serp-svg-bar-retained"' in block
+        assert 'id="dynamic-commercial-intent-banner"' in block
+        assert 'class="comparison-table serp-statutory-reference-table"' in block
+
+    # Verify CTR title normalization strips (Rules), fixes Section179, and injects high-intent form modifiers
+    t_179 = _normalize_title_50_60("2026 Cadillac Escalade Section179 Calculator (Rules) | ProfitHelm", "profithelm", "ProfitHelm")
+    assert "Section179" not in t_179
+    assert "(Rules)" not in t_179
+    assert 50 <= len(t_179) <= 60
+
+    t_crypto = _normalize_title_50_60("2026 Crypto Tax Calculator | ProfitHelm", "profithelm", "ProfitHelm")
+    assert "Form 8949" in t_crypto
+    assert 50 <= len(t_crypto) <= 60
+

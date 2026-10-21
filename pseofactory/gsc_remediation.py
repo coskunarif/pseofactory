@@ -1605,6 +1605,7 @@ def _normalize_title_50_60(
     """
     clean = _strip_forbidden_dashes(raw_title).strip()
     clean = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"\b(Section|Form)(\d+)\b", r"\1 \2", clean, flags=re.IGNORECASE)
     clean = re.sub(r"\s+", " ", clean)
     clean = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", clean, flags=re.IGNORECASE)
     suffix = f" | {brand}"
@@ -1612,6 +1613,10 @@ def _normalize_title_50_60(
         base = clean[: -len(suffix)].strip(" |-:")
     else:
         base = clean.strip(" |-:")
+
+    # Strip robotic bare parenthetical tokens from prior normalizations
+    base = re.sub(r"\s*\((?:Rules|Tax|Guide|Model)\)(?:\s+Model)?", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\s+", " ", base).strip(" |-:")
 
     # Strip conflicting secondary year tokens when a primary tax/fiscal year (e.g. 2027) is already present
     if re.search(r"\b202[7-9]\b", base):
@@ -1659,11 +1664,29 @@ def _normalize_title_50_60(
     def _has_year(s: str) -> bool:
         return bool(re.search(r"\b(202[4-9]|203\d)\b", s))
 
+    base_low = base.lower()
+    if "crypto" in base_low:
+        vertical_paren_mod = "Form 8949"
+    elif "179" in base_low:
+        vertical_paren_mod = "Form 4562"
+    elif "1031" in base_low:
+        vertical_paren_mod = "Form 8824"
+    elif "california" in base_low or "ca " in base_low:
+        vertical_paren_mod = "FTB 540"
+    elif "bracket" in base_low:
+        vertical_paren_mod = "IRS Table"
+    elif tenant_id == "prexvo":
+        vertical_paren_mod = "IDR & RAP"
+    else:
+        vertical_paren_mod = "IRC Guide"
+
     # Attempt parenthetical secondary modifier injection if requested or beneficial
     mod_clean = _strip_forbidden_dashes(str(secondary_modifier or "")).strip(" ()|-:")
     if mod_clean and _has_year(base) and _has_year(mod_clean):
         mod_clean = re.sub(r"\b(202[4-9]|203\d)\b", "", mod_clean).strip(" ()|-:")
         mod_clean = re.sub(r"\s+", " ", mod_clean)
+    if mod_clean.lower() in {"rules", "tax", "guide", "model", "plan"}:
+        mod_clean = vertical_paren_mod if vertical_paren_mod != "IRC Guide" else "IRC Rules"
     if mod_clean and "(" not in base and ")" not in base:
         paren_token = f"({mod_clean})"
         if mod_clean.lower() not in base.lower():
@@ -1699,9 +1722,9 @@ def _normalize_title_50_60(
 
     # Pad with parenthetical modifier or whole words if shorter than 50 chars
     pad_tokens = (
-        ["(2026 Rules)", "(Title IV)", "2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
+        [f"({vertical_paren_mod})", "(2026 Rules)", "(Title IV)", "2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
         if tenant_id == "prexvo"
-        else ["(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
+        else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
     )
     for tok in pad_tokens:
         if len(cand) >= 50:

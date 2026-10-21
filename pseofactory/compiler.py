@@ -1068,6 +1068,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     statutory_compliance_html = winning_blocks["statutory_compliance_html"]
     three_tier_cluster_html = winning_blocks["three_tier_cluster_html"]
     vetted_handoff_html = winning_blocks["vetted_handoff_html"]
+    serp_depth_upgrade_html = winning_blocks["serp_depth_upgrade_html"]
 
     is_prexvo_js = "true" if is_prexvo else "false"
 
@@ -1655,6 +1656,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         </figcaption>
       </figure>
     </div>
+
+{serp_depth_upgrade_html}
 
 {on_this_page_nav_html}
 
