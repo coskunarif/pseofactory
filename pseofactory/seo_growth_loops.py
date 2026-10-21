@@ -598,41 +598,58 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                 except Exception:
                     pass
 
-    # 3. Load or enrich URL inspection records from .agy/indexing_health_report.json and TrendHistoryDB
+    # 3. Load or enrich URL inspection records from .agy/indexing_health_report.json, .agy/indexing_audit_log.json, and TrendHistoryDB
     idx_report_file = root / ".agy" / "indexing_health_report.json"
-    if not inspection_records and idx_report_file.is_file():
-        try:
-            idx_data = json.loads(idx_report_file.read_text(encoding="utf-8"))
-            for item in idx_data.get("inspected_urls", []) or idx_data.get("records", []) or []:
-                if not isinstance(item, dict):
-                    continue
-                p_url = _clean_dashes(str(item.get("page_url") or item.get("url") or "")).strip()
-                if not p_url:
-                    continue
-                inspection_records.append(
-                    GSCUrlInspectionRecord(
-                        property_id=prop,
-                        page_url=p_url,
-                        verdict=_clean_dashes(str(item.get("verdict") or "PASS")),
-                        coverage_state=_clean_dashes(str(item.get("coverage_state") or item.get("coverageState") or "Submitted and indexed")),
-                        indexing_state=_clean_dashes(str(item.get("indexing_state") or "INDEXING_ALLOWED")),
-                        page_fetch_state=_clean_dashes(str(item.get("page_fetch_state") or "SUCCESSFUL")),
-                        robots_txt_state=_clean_dashes(str(item.get("robots_txt_state") or "ALLOWED")),
-                        user_canonical=_clean_dashes(str(item.get("user_canonical") or p_url)),
-                        google_canonical=_clean_dashes(str(item.get("google_canonical") or p_url)),
-                        last_crawl_time=str(item.get("last_crawl_time") or ""),
-                        crawled_as=str(item.get("crawled_as") or "MOBILE"),
-                        rich_results_verdict=str(item.get("rich_results_verdict") or "VERDICT_UNSPECIFIED"),
-                        rich_results_types=list(item.get("rich_results_types", [])),
-                        mobile_usability_verdict=str(item.get("mobile_usability_verdict") or "VERDICT_UNSPECIFIED"),
-                        referring_urls=list(item.get("referring_urls", [])),
-                        sitemaps=list(item.get("sitemaps", [])),
-                        root_cause_classification=_clean_dashes(str(item.get("root_cause_classification") or "")),
-                        recorded_at=now_iso,
-                    )
+    idx_audit_file = root / ".agy" / "indexing_audit_log.json"
+    if not inspection_records:
+        raw_insp_items: List[Dict[str, Any]] = []
+        if idx_report_file.is_file():
+            try:
+                idx_data = json.loads(idx_report_file.read_text(encoding="utf-8"))
+                raw_insp_items.extend(idx_data.get("inspected_urls", []) or idx_data.get("records", []) or [])
+            except Exception:
+                pass
+        if idx_audit_file.is_file():
+            try:
+                aud_data = json.loads(idx_audit_file.read_text(encoding="utf-8"))
+                oracle_block = aud_data.get("gsc_inspection_oracle") if isinstance(aud_data, dict) else {}
+                if isinstance(oracle_block, dict):
+                    raw_insp_items.extend(oracle_block.get("inspections", []) or [])
+            except Exception:
+                pass
+        seen_insp_urls: Set[str] = set()
+        for item in raw_insp_items:
+            if not isinstance(item, dict):
+                continue
+            p_url = _clean_dashes(str(item.get("page_url") or item.get("url") or "")).strip()
+            if not p_url or p_url in seen_insp_urls:
+                continue
+            seen_insp_urls.add(p_url)
+            raw_out = ((item.get("raw_output") or {}).get("inspectionResult") or {}) if isinstance(item.get("raw_output"), dict) else {}
+            idx_res = raw_out.get("indexStatusResult") if isinstance(raw_out.get("indexStatusResult"), dict) else {}
+            mob_res = raw_out.get("mobileUsabilityResult") if isinstance(raw_out.get("mobileUsabilityResult"), dict) else {}
+            inspection_records.append(
+                GSCUrlInspectionRecord(
+                    property_id=prop,
+                    page_url=p_url,
+                    verdict=_clean_dashes(str(item.get("verdict") or idx_res.get("verdict") or "PASS")),
+                    coverage_state=_clean_dashes(str(item.get("coverage_state") or item.get("coverageState") or idx_res.get("coverageState") or "Submitted and indexed")),
+                    indexing_state=_clean_dashes(str(item.get("indexing_state") or idx_res.get("indexingState") or "INDEXING_ALLOWED")),
+                    page_fetch_state=_clean_dashes(str(item.get("page_fetch_state") or idx_res.get("pageFetchState") or "SUCCESSFUL")),
+                    robots_txt_state=_clean_dashes(str(item.get("robots_txt_state") or idx_res.get("robotsTxtState") or "ALLOWED")),
+                    user_canonical=_clean_dashes(str(item.get("user_canonical") or idx_res.get("userCanonical") or p_url)),
+                    google_canonical=_clean_dashes(str(item.get("google_canonical") or idx_res.get("googleCanonical") or p_url)),
+                    last_crawl_time=str(item.get("last_crawl_time") or idx_res.get("lastCrawlTime") or ""),
+                    crawled_as=str(item.get("crawled_as") or idx_res.get("crawledAs") or "MOBILE"),
+                    rich_results_verdict=str(item.get("rich_results_verdict") or "VERDICT_UNSPECIFIED"),
+                    rich_results_types=list(item.get("rich_results_types") or item.get("rich_results_detected") or []),
+                    mobile_usability_verdict=str(item.get("mobile_usability_verdict") or mob_res.get("verdict") or "VERDICT_UNSPECIFIED"),
+                    referring_urls=list(item.get("referring_urls") or idx_res.get("referringUrls") or []),
+                    sitemaps=list(item.get("sitemaps") or idx_res.get("sitemap") or []),
+                    root_cause_classification=_clean_dashes(str(item.get("root_cause_classification") or "")),
+                    recorded_at=now_iso,
                 )
-        except Exception:
-            pass
+            )
 
     # Persist to or hydrate from TrendHistoryDB
     try:

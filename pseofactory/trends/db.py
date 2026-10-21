@@ -1451,14 +1451,17 @@ class TrendHistoryDB:
     def get_gsc_device_metrics(
         self,
         property_id: str,
-        window_key: str = "recent_28d",
+        window_key: Optional[str] = None,
         page: Optional[str] = None,
         query: Optional[str] = None,
     ) -> List[GSCDeviceMetricRecord]:
         """Retrieves persisted device-level Search Console telemetry for a property."""
         conn = self.get_connection()
-        clauses = ["property_id = ?", "window_key = ?"]
-        params: List[Any] = [str(property_id), str(window_key)]
+        clauses = ["property_id = ?"]
+        params: List[Any] = [str(property_id)]
+        if window_key is not None:
+            clauses.append("window_key = ?")
+            params.append(str(window_key))
         if page is not None:
             clauses.append("page = ?")
             params.append(str(page))

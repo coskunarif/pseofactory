@@ -7588,11 +7588,7 @@ class RetroReflectionEngine:
             )
             if overlay_injected and "gsc_striking_overlay" not in repaired:
                 repaired.append("gsc_striking_overlay")
-            if (
-                gsc_lifecycle_data
-                and 'id="calculator-workspace-anchor"' in updated_html
-                and "data-gsc-device-focus=" not in updated_html.split('id="calculator-workspace-anchor"', 1)[1].split(">", 1)[0]
-            ):
+            if gsc_lifecycle_data:
                 p_lookup = f"/tools/{slug}".lower().rstrip("/")
                 p_dev = (gsc_lifecycle_data.get("page_device_diagnostics") or {}).get(p_lookup) or {}
                 p_vel = ((gsc_lifecycle_data.get("time_window_velocity") or {}).get("page_window_velocity") or {}).get(p_lookup) or {}
@@ -7602,13 +7598,34 @@ class RetroReflectionEngine:
                 sa_attr = ",".join(sa_keys) if sa_keys else "STANDARD_SNIPPET"
                 traj_attr = str(p_vel.get("trajectory_state") or "STABLE")
                 cov_attr = str(p_insp.get("coverage_state") or "Submitted and indexed")
-                stamped_anchor = (
-                    f'id="calculator-workspace-anchor" data-gsc-device-focus="{dev_focus_attr}" '
-                    f'data-gsc-search-appearance="{sa_attr}" data-gsc-trajectory="{traj_attr}" '
+                gsc_attr_str = (
+                    f'data-gsc-device-focus="{dev_focus_attr}" '
+                    f'data-gsc-search-appearance="{sa_attr}" '
+                    f'data-gsc-trajectory="{traj_attr}" '
                     f'data-gsc-coverage-state="{cov_attr}"'
                 )
-                updated_html = updated_html.replace('id="calculator-workspace-anchor"', stamped_anchor, 1)
-                if "gsc_lifecycle_telemetry_stamp" not in repaired:
+                stamped_any = False
+                if (
+                    'id="calculator-workspace-anchor"' in updated_html
+                    and "data-gsc-device-focus=" not in updated_html.split('id="calculator-workspace-anchor"', 1)[1].split(">", 1)[0]
+                ):
+                    updated_html = updated_html.replace(
+                        'id="calculator-workspace-anchor"',
+                        f'id="calculator-workspace-anchor" {gsc_attr_str}',
+                        1,
+                    )
+                    stamped_any = True
+                if (
+                    'class="quick-answer-body"' in updated_html
+                    and "data-gsc-device-focus=" not in updated_html.split('class="quick-answer-body"', 1)[1].split(">", 1)[0]
+                ):
+                    updated_html = updated_html.replace(
+                        'class="quick-answer-body"',
+                        f'class="quick-answer-body" {gsc_attr_str}',
+                        1,
+                    )
+                    stamped_any = True
+                if stamped_any and "gsc_lifecycle_telemetry_stamp" not in repaired:
                     repaired.append("gsc_lifecycle_telemetry_stamp")
             if "/r/" in updated_html or "overlay-partner-offer" in updated_html:
                 try:
@@ -8751,8 +8768,8 @@ def reflect_and_recompile_all_assets(
                 except Exception:
                     pass
 
-            # Always execute single-pass retro-reflection across existing dist inventory when full build or mutation is needed
-            if should_run_full_build or estate_needed_mutation:
+            # Always execute single-pass retro-reflection across existing dist inventory when full build, mutation, or forced reflection is requested
+            if should_run_full_build or estate_needed_mutation or force:
                 try:
                     retro_res = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
