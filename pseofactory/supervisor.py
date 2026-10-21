@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import random
+import subprocess
 import tempfile
 import time
 from typing import Any, Callable, Dict, Generator, List, Optional, Type, Union
@@ -904,9 +905,18 @@ class AutonomousLifecycleSupervisor:
                 if rep.drifted_assets_count > 0:
                     any_drift = True
                     break
-                if not dry_run and enable_gitops and getattr(a, "repo_path", None):
+                if (
+                    not dry_run
+                    and enable_gitops
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                    and getattr(a, "repo_path", None)
+                ):
                     t_repo = Path(a.repo_path)
-                    if (t_repo / ".git").exists():
+                    if (
+                        str(t_repo.resolve()).startswith("/home/ubuntuadmin/projects/")
+                        and t_repo.name in ("profithelm-platform", "prexvo")
+                        and (t_repo / ".git").exists()
+                    ):
                         st_chk = subprocess.run(
                             ["git", "-C", str(t_repo), "status", "--porcelain"],
                             capture_output=True,
