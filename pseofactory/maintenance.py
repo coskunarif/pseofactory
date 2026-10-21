@@ -3293,10 +3293,19 @@ class RefactorCascadeEngine:
         if not repo_root:
             return
         overlay_path: Optional[Path] = None
-        flat_slug = slug.replace("/", "-")
+        cand_slugs = [slug, slug.replace("/", "-")]
+        try:
+            rel_parts = target_path.relative_to(adapter.dist_dir).as_posix().split("/")
+            if len(rel_parts) >= 3 and rel_parts[0] == "tools":
+                spoke_slug = "/".join(rel_parts[1:-1]) if rel_parts[-1] == "index.html" else "/".join(rel_parts[1:]).removesuffix(".html")
+                if spoke_slug and spoke_slug not in cand_slugs:
+                    cand_slugs.insert(0, spoke_slug)
+                    cand_slugs.insert(1, spoke_slug.replace("/", "-"))
+        except Exception:
+            pass
         for ov_dir in (Path(repo_root) / "content" / "overlays", Path(repo_root) / ".agy" / "overlays"):
-            for cand_name in (f"{slug}.json", f"{flat_slug}.json"):
-                cand_p = ov_dir / cand_name
+            for cand_s in cand_slugs:
+                cand_p = ov_dir / f"{cand_s}.json"
                 if cand_p.is_file():
                     overlay_path = cand_p
                     break
@@ -3397,7 +3406,7 @@ class RefactorCascadeEngine:
                     self._reapply_active_overlay(rec.slug, Path(rec.asset_path).resolve(), adapter)
 
             post_audit_map = {
-                rec.slug: self.evaluator.audit_asset(Path(rec.asset_path).resolve(), adapter)
+                str(Path(rec.asset_path).resolve()): self.evaluator.audit_asset(Path(rec.asset_path).resolve(), adapter)
                 for rec in actionable_records
                 if rec.slug is not None and Path(rec.asset_path).resolve().is_file()
             }
@@ -3408,7 +3417,7 @@ class RefactorCascadeEngine:
                     verify_dict = {"status": "PASS"}
                 else:
                     audit_record = (
-                        post_audit_map.get(rec.slug)
+                        post_audit_map.get(str(target_path))
                         if rec.slug is not None
                         else self.evaluator.audit_asset(target_path, adapter)
                     )

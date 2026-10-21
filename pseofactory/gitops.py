@@ -1558,10 +1558,19 @@ class CICDWatcher:
                                                     "conclusion": "local_audit_error",
                                                     "error": f"Local audit gate error for '{proj_name}': {aud_err}",
                                                 }
-                                            if shutil.which("npx"):
+                                            w_env = os.environ.copy()
+                                            nvm_bins = sorted(
+                                                Path("/home/ubuntuadmin/.nvm/versions/node").glob("v*/bin"),
+                                                reverse=True,
+                                            )
+                                            if nvm_bins:
+                                                w_env["PATH"] = f"{nvm_bins[0]}:{w_env.get('PATH', '')}"
+                                            npx_bin = shutil.which("npx", path=w_env.get("PATH"))
+                                            if npx_bin:
                                                 w_res = subprocess.run(
-                                                    ["npx", "wrangler", "pages", "deploy", "dist", "--project-name", proj_name, "--branch", "main", "--commit-dirty=true"],
+                                                    [npx_bin, "wrangler", "pages", "deploy", "dist", "--project-name", proj_name, "--branch", "main", "--commit-dirty=true"],
                                                     cwd=str(rp),
+                                                    env=w_env,
                                                     capture_output=True,
                                                     text=True,
                                                     check=False,
