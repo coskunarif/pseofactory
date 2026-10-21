@@ -757,6 +757,11 @@ def evaluate_query_impression_split(
             pos_val = float(item.get("position", 50.0) or 50.0)
             clicks_val = int(float(item.get("clicks", 0) or 0))
             is_301 = bool(item.get("is_redirected_301", False))
+            dev_splits = item.get("device_splits") if isinstance(item.get("device_splits"), dict) else {}
+            mob_imp = float(item.get("mobile_impressions", (dev_splits.get("MOBILE") or {}).get("impressions", 0.0)) or 0.0)
+            desk_imp = float(item.get("desktop_impressions", (dev_splits.get("DESKTOP") or {}).get("impressions", 0.0)) or 0.0)
+            mob_pos = float(item.get("mobile_position", (dev_splits.get("MOBILE") or {}).get("position", pos_val)) or pos_val)
+            desk_pos = float(item.get("desktop_position", (dev_splits.get("DESKTOP") or {}).get("position", pos_val)) or pos_val)
         else:
             url_str = str(item or "").strip()
             impr_val = 0.0
@@ -764,6 +769,10 @@ def evaluate_query_impression_split(
             pos_val = 50.0
             clicks_val = 0
             is_301 = False
+            mob_imp = 0.0
+            desk_imp = 0.0
+            mob_pos = 50.0
+            desk_pos = 50.0
 
         if not url_str:
             continue
@@ -782,6 +791,10 @@ def evaluate_query_impression_split(
             "explicit_share": float(explicit_share) if explicit_share is not None else None,
             "position": pos_val,
             "clicks": clicks_val,
+            "mobile_impressions": mob_imp,
+            "desktop_impressions": desk_imp,
+            "mobile_position": mob_pos,
+            "desktop_position": desk_pos,
             "is_redirected_301": is_301,
         })
 
@@ -842,15 +855,44 @@ def evaluate_query_impression_split(
     qualifying_split = [e for e in active_sorted if float(e["share"]) >= min_split_share]
     incidental_noise = [e for e in active_sorted[1:] if float(e["share"]) < min_split_share]
 
-    is_true_split = bool(len(qualifying_split) >= 2 and dominant_share <= dominance_threshold)
-    classification = (
-        "TRUE_CANNIBALIZATION_SPLIT"
-        if is_true_split
-        else ("DOMINANT_WINNER_INCIDENTAL_NOISE" if dominant_share > dominance_threshold else "SUB_THRESHOLD_SECONDARY_SHARE")
+    # Detect cross-device cannibalization split (URL A dominates MOBILE while URL B dominates DESKTOP)
+    mob_candidates = [e for e in active_entries if float(e.get("mobile_impressions", 0.0)) >= 1.0]
+    desk_candidates = [e for e in active_entries if float(e.get("desktop_impressions", 0.0)) >= 1.0]
+    mob_leader = (
+        sorted(mob_candidates, key=lambda x: (-float(x["mobile_impressions"]), float(x["mobile_position"]), int(x["index"])))[0]
+        if mob_candidates
+        else None
     )
+    desk_leader = (
+        sorted(desk_candidates, key=lambda x: (-float(x["desktop_impressions"]), float(x["desktop_position"]), int(x["index"])))[0]
+        if desk_candidates
+        else None
+    )
+    cross_device_split = bool(
+        mob_leader
+        and desk_leader
+        and mob_leader["url"] != desk_leader["url"]
+        and (float(mob_leader["mobile_impressions"]) + float(desk_leader["desktop_impressions"])) >= 3.0
+    )
+
+    is_true_split = bool((len(qualifying_split) >= 2 and dominant_share <= dominance_threshold) or cross_device_split)
+    if len(qualifying_split) >= 2 and dominant_share <= dominance_threshold:
+        classification = "TRUE_CANNIBALIZATION_SPLIT"
+    elif cross_device_split:
+        classification = "CROSS_DEVICE_CANNIBALIZATION_SPLIT"
+        for leader_entry in (mob_leader, desk_leader):
+            if leader_entry and leader_entry not in qualifying_split:
+                qualifying_split.append(leader_entry)
+    elif dominant_share > dominance_threshold:
+        classification = "DOMINANT_WINNER_INCIDENTAL_NOISE"
+    else:
+        classification = "SUB_THRESHOLD_SECONDARY_SHARE"
 
     return {
         "is_true_cannibalization_split": is_true_split,
+        "cross_device_split_detected": cross_device_split,
+        "mobile_leader_url": mob_leader["url"] if mob_leader else "",
+        "desktop_leader_url": desk_leader["url"] if desk_leader else "",
         "classification": classification,
         "has_impression_telemetry": True,
         "total_impressions": int(total_impr),
@@ -859,7 +901,7 @@ def evaluate_query_impression_split(
         "dominant_url": dominant["url"],
         "dominant_share": dominant_share,
         "qualifying_split_urls": [e["url"] for e in qualifying_split],
-        "incidental_noise_urls": [e["url"] for e in incidental_noise] + [e["url"] for e in redirected_entries],
+        "incidental_noise_urls": [e["url"] for e in incidental_noise if e not in qualifying_split] + [e["url"] for e in redirected_entries],
         "url_shares": [
             {
                 "url": e["url"],
@@ -867,6 +909,8 @@ def evaluate_query_impression_split(
                 "share": float(e.get("share", 0.0)),
                 "position": round(float(e["position"]), 2),
                 "clicks": int(e["clicks"]),
+                "mobile_impressions": int(e.get("mobile_impressions", 0)),
+                "desktop_impressions": int(e.get("desktop_impressions", 0)),
                 "is_redirected_301": e["is_redirected_301"],
             }
             for e in active_sorted + redirected_entries
@@ -1033,6 +1077,12 @@ def qualify_search_intent(
                         "answer": f"Deterministic statutory calculation and threshold analysis for {q_text}.",
                     }
                 ],
+                "device_focus": str(query_data.get("device_focus") or ("MOBILE_CTR_DEFICIT" if float(query_data.get("mobile_ctr_gap", 0.0) or 0.0) >= 0.01 else "BALANCED")),
+                "mobile_ctr": float(query_data.get("mobile_ctr", 0.0) or 0.0),
+                "desktop_ctr": float(query_data.get("desktop_ctr", 0.0) or 0.0),
+                "mobile_ctr_gap": float(query_data.get("mobile_ctr_gap", 0.0) or 0.0),
+                "search_appearances": list(query_data.get("search_appearances") or []),
+                "time_window_trajectory": str((query_data.get("time_window_delta") or {}).get("trajectory_state") or query_data.get("time_window_trajectory") or "STABLE"),
             }
 
             return SearchIntentVerdict({
@@ -1138,6 +1188,14 @@ def qualify_search_intent(
         "expected_output",
         "slug",
         "title",
+        "device_focus",
+        "mobile_ctr",
+        "desktop_ctr",
+        "mobile_ctr_gap",
+        "search_appearances",
+        "time_window_trajectory",
+        "gsc_telemetry",
+        "inspection_state",
     ):
         if field in query_data:
             candidate_spec[field] = query_data[field]

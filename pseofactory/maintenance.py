@@ -7421,6 +7421,29 @@ class RetroReflectionEngine:
         retrofitted_paths: List[str] = []
         agy_dir = d.parent / ".agy"
 
+        gsc_lifecycle_data: Dict[str, Any] = {}
+        is_prod_repo = (
+            str(d.parent).startswith("/home/ubuntuadmin/projects/")
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        )
+        if agy_dir.is_dir():
+            gsc_tel_path = agy_dir / "gsc_lifecycle_telemetry.json"
+            if is_prod_repo:
+                try:
+                    from pseofactory.seo_growth_loops import harvest_and_sync_gsc_multidimensional_telemetry
+                    gsc_lifecycle_data = harvest_and_sync_gsc_multidimensional_telemetry(
+                        property_id=property_id,
+                        repo_root=d.parent,
+                        persist=True,
+                    )
+                except Exception:
+                    gsc_lifecycle_data = {}
+            if not gsc_lifecycle_data and gsc_tel_path.is_file():
+                try:
+                    gsc_lifecycle_data = json.loads(gsc_tel_path.read_text(encoding="utf-8"))
+                except Exception:
+                    gsc_lifecycle_data = {}
+
         # Scrub any DEGRADED_ROLLED_BACK overlays from dist HTML before active overlay resolution
         for overlays_dir in (d.parent / "content" / "overlays", agy_dir / "overlays"):
             if not overlays_dir.is_dir():
@@ -7550,6 +7573,28 @@ class RetroReflectionEngine:
             )
             if overlay_injected and "gsc_striking_overlay" not in repaired:
                 repaired.append("gsc_striking_overlay")
+            if (
+                gsc_lifecycle_data
+                and 'id="calculator-workspace-anchor"' in updated_html
+                and "data-gsc-device-focus=" not in updated_html.split('id="calculator-workspace-anchor"', 1)[1].split(">", 1)[0]
+            ):
+                p_lookup = f"/tools/{slug}".lower().rstrip("/")
+                p_dev = (gsc_lifecycle_data.get("page_device_diagnostics") or {}).get(p_lookup) or {}
+                p_vel = ((gsc_lifecycle_data.get("time_window_velocity") or {}).get("page_window_velocity") or {}).get(p_lookup) or {}
+                p_insp = ((gsc_lifecycle_data.get("url_inspection_summary") or {}).get("inspection_by_path") or {}).get(p_lookup) or {}
+                sa_keys = list((gsc_lifecycle_data.get("search_appearances") or {}).keys())
+                dev_focus_attr = str(p_dev.get("device_focus") or "BALANCED")
+                sa_attr = ",".join(sa_keys) if sa_keys else "STANDARD_SNIPPET"
+                traj_attr = str(p_vel.get("trajectory_state") or "STABLE")
+                cov_attr = str(p_insp.get("coverage_state") or "Submitted and indexed")
+                stamped_anchor = (
+                    f'id="calculator-workspace-anchor" data-gsc-device-focus="{dev_focus_attr}" '
+                    f'data-gsc-search-appearance="{sa_attr}" data-gsc-trajectory="{traj_attr}" '
+                    f'data-gsc-coverage-state="{cov_attr}"'
+                )
+                updated_html = updated_html.replace('id="calculator-workspace-anchor"', stamped_anchor, 1)
+                if "gsc_lifecycle_telemetry_stamp" not in repaired:
+                    repaired.append("gsc_lifecycle_telemetry_stamp")
             if "/r/" in updated_html or "overlay-partner-offer" in updated_html:
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
@@ -8051,6 +8096,7 @@ def _execute_autonomous_downstream_chain(
         from pseofactory.gsc_remediation import evaluate_expired_overlays
         from pseofactory.seo_growth_loops import (
             harvest_and_sync_gsc_daily_timeline,
+            harvest_and_sync_gsc_multidimensional_telemetry,
             load_consolidated_gsc_query_rows,
             run_all_seo_growth_workflows,
             sync_real_gsc_baselines_to_recovery_ledger,
@@ -8059,6 +8105,7 @@ def _execute_autonomous_downstream_chain(
         in_pytest = "PYTEST_CURRENT_TEST" in os.environ
         daily_gsc_records = None
         consolidated_live_queries = None
+        multidim_telemetry = None
         if not in_pytest:
             try:
                 daily_gsc_records = harvest_and_sync_gsc_daily_timeline(
@@ -8068,6 +8115,14 @@ def _execute_autonomous_downstream_chain(
                 )
             except Exception:
                 daily_gsc_records = None
+            try:
+                multidim_telemetry = harvest_and_sync_gsc_multidimensional_telemetry(
+                    property_id=adapter.property_id,
+                    repo_root=repo_root,
+                    persist=not dry_run,
+                )
+            except Exception:
+                multidim_telemetry = None
             try:
                 cons_res = load_consolidated_gsc_query_rows(
                     property_id=adapter.property_id,
@@ -8288,6 +8343,20 @@ def _execute_autonomous_downstream_chain(
         summary["conversion_gaps_remediated_count"] = conv_closed
         summary["distribution_gaps_remediated_count"] = dist_closed
         summary["manual_alerts_routed_count"] = len(routed_manual_ids)
+        if not dry_run and not in_pytest:
+            try:
+                from pseofactory.affiliates import run_gsc_affiliate_placement_feedback_pass
+                aff_fb = run_gsc_affiliate_placement_feedback_pass(
+                    property_id=adapter.property_id,
+                    dist_dir=adapter.dist_dir,
+                    repo_root=repo_root,
+                    gsc_rows=consolidated_live_queries,
+                    engagement_metrics=prop_agg,
+                    dry_run=dry_run,
+                )
+                summary["affiliate_gsc_feedback_repositioned_count"] = aff_fb.get("repositioned_pages_count", 0)
+            except Exception:
+                pass
     except Exception as mon_err:
         summary["monetization_status"] = "EXCEPTION_ROUTED"
         act = bus.route_stage_exception(

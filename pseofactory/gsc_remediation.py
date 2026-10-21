@@ -1512,6 +1512,48 @@ def calculate_candidate_roi(
         gap_boost += 0.20
     gap_boost += ai_citation_boost + deterministic_math_boost
 
+    dev_splits = data.get("device_splits") if isinstance(data.get("device_splits"), dict) else {}
+    mob_dict = dev_splits.get("MOBILE") if isinstance(dev_splits.get("MOBILE"), dict) else {}
+    desk_dict = dev_splits.get("DESKTOP") if isinstance(dev_splits.get("DESKTOP"), dict) else {}
+    mobile_impressions = int(float(data.get("mobile_impressions", mob_dict.get("impressions", 0)) or 0))
+    desktop_impressions = int(float(data.get("desktop_impressions", desk_dict.get("impressions", 0)) or 0))
+    mobile_ctr = float(data.get("mobile_ctr", mob_dict.get("ctr", 0.0)) or 0.0)
+    desktop_ctr = float(data.get("desktop_ctr", desk_dict.get("ctr", 0.0)) or 0.0)
+    mobile_ctr_gap = round(float(data.get("mobile_ctr_gap", desktop_ctr - mobile_ctr) or 0.0), 4)
+    device_focus = str(
+        data.get("device_focus")
+        or ("MOBILE_CTR_DEFICIT" if (mobile_impressions >= 5 and mobile_ctr_gap >= 0.01) else "BALANCED")
+    )
+    search_appearances = [str(sa).upper() for sa in (data.get("search_appearances") or []) if sa]
+    time_window_trajectory = str(
+        (data.get("time_window_delta") or {}).get("trajectory_state")
+        or data.get("time_window_trajectory")
+        or "STABLE"
+    ).upper()
+    coverage_state = str(
+        (data.get("inspection_state") or {}).get("coverage_state")
+        or data.get("coverage_state")
+        or ""
+    )
+
+    if any(
+        k in data
+        for k in (
+            "mobile_impressions",
+            "mobile_ctr_gap",
+            "device_splits",
+            "search_appearances",
+            "time_window_delta",
+            "time_window_trajectory",
+        )
+    ):
+        if mobile_impressions >= 5 and mobile_ctr_gap >= 0.01:
+            gap_boost += 0.12
+        if any(sa in ("REVIEW_SNIPPET", "PRODUCT_SNIPPETS") for sa in search_appearances):
+            gap_boost += 0.08
+        if time_window_trajectory == "DECAYING":
+            gap_boost += 0.10
+
     commercial_weight = round((1.0 + (cpc / 20.0) + (erpm_usd / 200.0)) * intent_multiplier * gap_boost, 4)
     roi_score = round(expected_click_lift * commercial_weight, 4)
 
@@ -1528,6 +1570,15 @@ def calculate_candidate_roi(
         "ai_citation_vacant": ai_citation_vacant,
         "ai_cited_domains": ai_cited_domains,
         "weaker_cited_domains": weaker_cited_domains,
+        "mobile_impressions": mobile_impressions,
+        "desktop_impressions": desktop_impressions,
+        "mobile_ctr": round(mobile_ctr, 4),
+        "desktop_ctr": round(desktop_ctr, 4),
+        "mobile_ctr_gap": mobile_ctr_gap,
+        "device_focus": device_focus,
+        "search_appearances": search_appearances,
+        "time_window_trajectory": time_window_trajectory,
+        "coverage_state": coverage_state,
         "losing_to_weaker_domains": losing_to_weaker_domains,
         "missing_ai_overview": missing_ai_overview,
         "citation_gap_status": citation_gap_status,
@@ -3314,9 +3365,24 @@ def compile_remediation_overlay_spec(
         "missing_ai_overview",
         "citation_gap_status",
         "needs_deterministic_math",
+        "mobile_impressions",
+        "desktop_impressions",
+        "mobile_ctr",
+        "desktop_ctr",
+        "mobile_ctr_gap",
+        "device_focus",
+        "search_appearances",
+        "time_window_trajectory",
+        "coverage_state",
     ):
         if ai_key in candidate:
             spec_out[ai_key] = candidate[ai_key]
+    spec_out.setdefault("device_focus", str(candidate.get("device_focus") or "BALANCED"))
+    spec_out.setdefault("search_appearances", list(candidate.get("search_appearances") or []))
+    spec_out.setdefault(
+        "time_window_trajectory",
+        str((candidate.get("time_window_delta") or {}).get("trajectory_state") or candidate.get("time_window_trajectory") or "STABLE"),
+    )
     return spec_out
 
 

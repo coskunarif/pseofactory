@@ -225,6 +225,131 @@ class GoogleTrendsRSSCollector(BaseSuggestCollector):
         return []
 
 
+class GSCSearchConsoleCollector(BaseSuggestCollector):
+    """
+    Harvester for persisted and live Google Search Console multi-dimensional telemetry.
+    Surfaces breakout queries (recent_28d vs prior_28d_baseline), striking-distance queries (pos 4-20),
+    and mobile CTR deficit queries directly into the upstream discovery pipeline.
+    """
+
+    def __init__(
+        self,
+        db_path: Optional[Any] = None,
+        properties: Optional[List[str]] = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        retries: int = MAX_RETRIES,
+    ):
+        super().__init__("gsc_search_console", timeout=timeout, retries=retries)
+        self.db_path = db_path
+        self.properties = properties or ["profithelm", "prexvo"]
+
+    def fetch_suggestions(self, query: str = "") -> List[str]:
+        spikes = self.harvest_gsc_spikes(seed_filter=query)
+        return [s.query for s in spikes]
+
+    def harvest_gsc_spikes(self, seed_filter: str = "") -> List[FeedSpike]:
+        from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+        target_db = self.db_path or DEFAULT_DB_PATH
+        try:
+            tdb = TrendHistoryDB(target_db)
+        except Exception:
+            return []
+
+        now = datetime.now(timezone.utc).isoformat()
+        results: List[FeedSpike] = []
+        seen: set[str] = set()
+        seed_low = str(seed_filter or "").strip().lower()
+
+        for prop in self.properties:
+            try:
+                recent_rows = tdb.get_gsc_query_page_windows(prop, window_key="recent_28d")
+                prior_rows = tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")
+                dev_rows = tdb.get_gsc_device_metrics(prop, window_key="recent_90d") or tdb.get_gsc_device_metrics(prop, window_key="recent_28d")
+                sa_rows = tdb.get_gsc_search_appearance_metrics(prop, window_key="recent_90d")
+            except Exception:
+                continue
+
+            prior_map = {(r.page, r.query.lower()): r for r in prior_rows}
+            dev_by_qp: Dict[tuple[str, str], Dict[str, Any]] = {}
+            for dr in dev_rows:
+                if dr.query and dr.page:
+                    dev_by_qp.setdefault((dr.page, dr.query.lower()), {})[dr.device] = {
+                        "clicks": dr.clicks,
+                        "impressions": dr.impressions,
+                        "ctr": dr.ctr,
+                        "position": dr.position,
+                    }
+            sa_names = [s.search_appearance for s in sa_rows]
+
+            for r in recent_rows:
+                q_clean = r.query.strip()
+                q_low = q_clean.lower()
+                if not q_clean or q_low in seen:
+                    continue
+                if seed_low and seed_low not in q_low and q_low not in seed_low:
+                    continue
+                prior = prior_map.get((r.page, q_low))
+                prior_imp = prior.impressions if prior else 0
+                imp_delta = r.impressions - prior_imp
+                pos_delta = (prior.position - r.position) if (prior and prior.position > 0 and r.position > 0) else 0.0
+
+                dev_info = dev_by_qp.get((r.page, q_low), {})
+                mob_ctr = float((dev_info.get("MOBILE") or {}).get("ctr", 0.0) or 0.0)
+                desk_ctr = float((dev_info.get("DESKTOP") or {}).get("ctr", 0.0) or 0.0)
+                mob_ctr_gap = round(desk_ctr - mob_ctr, 4)
+
+                # Qualify if breakout impressions, striking distance (4..20), or mobile CTR deficit
+                if r.impressions < 2 and imp_delta <= 0:
+                    continue
+                seen.add(q_low)
+                velocity = round(max(25.0, float(r.impressions) * 4.0 + max(0.0, imp_delta * 3.0)), 2)
+                accel = round(max(2.0, float(imp_delta) * 1.5 + max(0.0, pos_delta * 2.0)), 2)
+                z_val = round(min(6.0, 2.0 + (r.impressions / 20.0) + (0.5 if 4.0 <= r.position <= 20.0 else 0.0)), 2)
+                spike_id = generate_spike_id(self.source_name, q_clean, now)
+                results.append(
+                    FeedSpike(
+                        id=spike_id,
+                        query=q_clean,
+                        source=self.source_name,
+                        detected_at=now,
+                        sample_count=max(100, r.impressions * 25),
+                        velocity=velocity,
+                        acceleration=accel,
+                        z_score=z_val,
+                        baseline_mean=float(max(1, prior_imp)),
+                        baseline_std=2.5,
+                        raw_payload={
+                            "property_id": prop,
+                            "page": r.page,
+                            "impressions": r.impressions,
+                            "clicks": r.clicks,
+                            "ctr": r.ctr,
+                            "current_position": r.position,
+                            "prior_28d_impressions": prior_imp,
+                            "mobile_ctr": mob_ctr,
+                            "desktop_ctr": desk_ctr,
+                            "mobile_ctr_gap": mob_ctr_gap,
+                            "search_appearances": sa_names,
+                            "gsc_telemetry": {
+                                "property_id": prop,
+                                "page": r.page,
+                                "impressions": r.impressions,
+                                "clicks": r.clicks,
+                                "ctr": r.ctr,
+                                "position": r.position,
+                                "prior_28d_impressions": prior_imp,
+                                "mobile_ctr": mob_ctr,
+                                "desktop_ctr": desk_ctr,
+                                "mobile_ctr_gap": mob_ctr_gap,
+                                "search_appearances": sa_names,
+                            },
+                        },
+                    )
+                )
+        return results
+
+
 class MultiSourceCollector:
     """Coordinates multi-source streaming suggest ingestion across diverse providers."""
 
@@ -253,6 +378,17 @@ class MultiSourceCollector:
         seen_queries = set()
 
         for collector in self.collectors:
+            if isinstance(collector, GSCSearchConsoleCollector):
+                try:
+                    for s in collector.harvest_gsc_spikes():
+                        q_key = s.query.lower().strip()
+                        if q_key and q_key not in seen_queries:
+                            seen_queries.add(q_key)
+                            all_spikes.append(s)
+                except Exception:
+                    pass
+                continue
+
             if isinstance(collector, GoogleTrendsRSSCollector):
                 try:
                     trends = collector.fetch_suggestions("")

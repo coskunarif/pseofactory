@@ -5905,6 +5905,24 @@ def select_conversion_slot_plan(
     position = float(gsc.get("position", gsc.get("baseline_position", 0.0)) or 0.0)
     gsc_query = str(gsc.get("query") or gsc.get("top_query") or "").strip()
 
+    dev_splits = gsc.get("device_splits") if isinstance(gsc.get("device_splits"), dict) else {}
+    mob_dict = dev_splits.get("MOBILE") if isinstance(dev_splits.get("MOBILE"), dict) else {}
+    desk_dict = dev_splits.get("DESKTOP") if isinstance(dev_splits.get("DESKTOP"), dict) else {}
+    mobile_impressions = int(float(gsc.get("mobile_impressions", mob_dict.get("impressions", 0)) or 0))
+    desktop_impressions = int(float(gsc.get("desktop_impressions", desk_dict.get("impressions", 0)) or 0))
+    mobile_ctr = float(gsc.get("mobile_ctr", mob_dict.get("ctr", 0.0)) or 0.0)
+    desktop_ctr = float(gsc.get("desktop_ctr", desk_dict.get("ctr", 0.0)) or 0.0)
+    mobile_ctr_gap = round(float(gsc.get("mobile_ctr_gap", desktop_ctr - mobile_ctr) or 0.0), 4)
+    device_focus = str(
+        gsc.get("device_focus")
+        or (
+            "MOBILE_CTR_DEFICIT"
+            if (mobile_impressions >= 5 and mobile_ctr_gap >= 0.01)
+            else ("MOBILE_DOMINANT" if mobile_impressions > desktop_impressions and mobile_impressions >= 5 else "BALANCED")
+        )
+    )
+    search_appearances = [str(sa).upper() for sa in (gsc.get("search_appearances") or []) if sa]
+
     ordered_offers = [dict(o) for o in roster_offers]
     initial_primary_key = str(ordered_offers[0].get("partner_key") or "")
 
@@ -5958,6 +5976,22 @@ def select_conversion_slot_plan(
         reposition_reason = (
             f"Striking-distance GSC rank (position {position:.1f}, {impressions} impressions) activated "
             f"multi-slot inline result hook plus comparison table partner row for '{ordered_offers[0]['partner_key']}'."
+        )
+    elif mobile_impressions >= 5 and (mobile_ctr_gap >= 0.01 or device_focus in ("MOBILE_CTR_DEFICIT", "MOBILE_DOMINANT")):
+        if highest_yield_pk and highest_yield_pk != initial_primary_key and float(highest_yield_offer.get("yield_score", 0.0)) > float(ordered_offers[0].get("yield_score", 0.0)):
+            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "MOBILE_CTR_DEFICIT_PROMOTION"
+        reposition_reason = (
+            f"Mobile GSC split ({mobile_impressions} mobile impr, mobile CTR {mobile_ctr:.2%} vs desktop {desktop_ctr:.2%}) "
+            f"promoted above-the-fold touch calculator_result_inline CTA for '{ordered_offers[0]['partner_key']}'."
+        )
+    elif any(sa in ("REVIEW_SNIPPET", "PRODUCT_SNIPPETS") for sa in search_appearances) and impressions >= 3:
+        gsc_repositioned = True
+        gsc_opportunity_tier = "RICH_APPEARANCE_MATRIX_PROMOTION"
+        reposition_reason = (
+            f"Rich-result searchAppearance ({','.join(search_appearances)}) promoted structured "
+            f"comparison_table_cta and inline conversion slots for '{ordered_offers[0]['partner_key']}'."
         )
     elif highest_yield_pk and highest_yield_pk != initial_primary_key and (
         float(highest_yield_offer.get("estimated_revenue_yield_usd", 0.0) or 0.0) > 0.0
@@ -6031,7 +6065,16 @@ def select_conversion_slot_plan(
     # Diversify slot assignments so comparison_table_cta can surface either lead_offer or top secondary_offer when appropriate
     table_offer_source = (
         lead_offer
-        if (primary_slot == "comparison_table_cta" or gsc_opportunity_tier in ("QUERY_INTENT_PARTNER_SWAP", "HIGH_IMPRESSION_CTR_SHORTFALL"))
+        if (
+            primary_slot == "comparison_table_cta"
+            or gsc_opportunity_tier
+            in (
+                "QUERY_INTENT_PARTNER_SWAP",
+                "HIGH_IMPRESSION_CTR_SHORTFALL",
+                "MOBILE_CTR_DEFICIT_PROMOTION",
+                "RICH_APPEARANCE_MATRIX_PROMOTION",
+            )
+        )
         else secondary_offer
     )
 
@@ -6064,6 +6107,13 @@ def select_conversion_slot_plan(
         "gsc_ctr": round(ctr, 4),
         "gsc_position": round(position, 2),
         "gsc_query": gsc_query,
+        "gsc_mobile_impressions": mobile_impressions,
+        "gsc_desktop_impressions": desktop_impressions,
+        "gsc_mobile_ctr": round(mobile_ctr, 4),
+        "gsc_desktop_ctr": round(desktop_ctr, 4),
+        "gsc_mobile_ctr_gap": mobile_ctr_gap,
+        "gsc_device_focus": device_focus,
+        "gsc_search_appearances": search_appearances,
     }
 
 
@@ -6620,6 +6670,13 @@ def reposition_affiliate_placements_from_gsc_signals(
         "gsc_ctr": slot_plan["gsc_ctr"],
         "gsc_position": slot_plan["gsc_position"],
         "gsc_query": slot_plan["gsc_query"],
+        "gsc_mobile_impressions": slot_plan.get("gsc_mobile_impressions", 0),
+        "gsc_desktop_impressions": slot_plan.get("gsc_desktop_impressions", 0),
+        "gsc_mobile_ctr": slot_plan.get("gsc_mobile_ctr", 0.0),
+        "gsc_desktop_ctr": slot_plan.get("gsc_desktop_ctr", 0.0),
+        "gsc_mobile_ctr_gap": slot_plan.get("gsc_mobile_ctr_gap", 0.0),
+        "gsc_device_focus": slot_plan.get("gsc_device_focus", "BALANCED"),
+        "gsc_search_appearances": slot_plan.get("gsc_search_appearances", []),
     }
 
 
@@ -6704,6 +6761,11 @@ def run_gsc_affiliate_placement_feedback_pass(
         clks = int(float(row.get("clicks", 0) or 0))
         pos = float(row.get("position", 0.0) or 0.0)
         q_str = str(row.get("query") or "").strip()
+        mob_impr = int(float(row.get("mobile_impressions", 0) or 0))
+        desk_impr = int(float(row.get("desktop_impressions", 0) or 0))
+        mob_ctr = float(row.get("mobile_ctr", 0.0) or 0.0)
+        desk_ctr = float(row.get("desktop_ctr", 0.0) or 0.0)
+        sa_list = list(row.get("search_appearances") or [])
 
         bucket = gsc_by_slug.setdefault(
             r_slug,
@@ -6711,13 +6773,27 @@ def run_gsc_affiliate_placement_feedback_pass(
                 "slug": r_slug,
                 "impressions": 0,
                 "clicks": 0,
+                "mobile_impressions": 0,
+                "desktop_impressions": 0,
+                "_mob_weighted_ctr": 0.0,
+                "_desk_weighted_ctr": 0.0,
                 "_weighted_pos": 0.0,
                 "_top_query_impr": -1,
                 "query": "",
+                "search_appearances": [],
             },
         )
         bucket["impressions"] += impr
         bucket["clicks"] += clks
+        bucket["mobile_impressions"] += mob_impr
+        bucket["desktop_impressions"] += desk_impr
+        if mob_impr > 0:
+            bucket["_mob_weighted_ctr"] += mob_ctr * mob_impr
+        if desk_impr > 0:
+            bucket["_desk_weighted_ctr"] += desk_ctr * desk_impr
+        for sa in sa_list:
+            if sa and sa not in bucket["search_appearances"]:
+                bucket["search_appearances"].append(sa)
         if impr > 0 and pos > 0.0:
             bucket["_weighted_pos"] += pos * impr
         if q_str and impr > bucket["_top_query_impr"]:
@@ -6727,10 +6803,22 @@ def run_gsc_affiliate_placement_feedback_pass(
     for b in gsc_by_slug.values():
         tot_i = int(b["impressions"])
         tot_c = int(b["clicks"])
+        m_i = int(b["mobile_impressions"])
+        d_i = int(b["desktop_impressions"])
         b["ctr"] = round(tot_c / float(tot_i), 4) if tot_i > 0 else 0.0
         b["position"] = round(float(b["_weighted_pos"]) / float(tot_i), 2) if tot_i > 0 and b["_weighted_pos"] > 0 else 0.0
+        b["mobile_ctr"] = round(float(b["_mob_weighted_ctr"]) / float(m_i), 4) if m_i > 0 else 0.0
+        b["desktop_ctr"] = round(float(b["_desk_weighted_ctr"]) / float(d_i), 4) if d_i > 0 else 0.0
+        b["mobile_ctr_gap"] = round(b["desktop_ctr"] - b["mobile_ctr"], 4)
+        b["device_focus"] = (
+            "MOBILE_CTR_DEFICIT"
+            if (m_i >= 5 and b["mobile_ctr_gap"] >= 0.01)
+            else ("MOBILE_DOMINANT" if (m_i > d_i and m_i >= 5) else "BALANCED")
+        )
         b.pop("_weighted_pos", None)
         b.pop("_top_query_impr", None)
+        b.pop("_mob_weighted_ctr", None)
+        b.pop("_desk_weighted_ctr", None)
 
     tools_dir = d_dir / "tools"
     page_reports: List[Dict[str, Any]] = []
@@ -6791,9 +6879,8 @@ def run_gsc_affiliate_placement_feedback_pass(
 
     if not dry_run and r_root.is_dir():
         ledger_path = r_root / ".agy" / "gsc_affiliate_placement_ledger.json"
-        if pages_updated > 0 or not ledger_path.is_file():
-            ledger_path.parent.mkdir(parents=True, exist_ok=True)
-            ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     return summary
 

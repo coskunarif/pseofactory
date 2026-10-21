@@ -556,7 +556,29 @@ def _render_compiler_monetization_and_guardrail_html(
     from pseofactory.affiliates import bind_asset_partner_roster
 
     prop_id = "prexvo" if is_prexvo else "profithelm"
-    gsc_metrics = candidate_spec.get("gsc_metrics") if isinstance(candidate_spec.get("gsc_metrics"), dict) else None
+    gsc_metrics_raw: Dict[str, Any] = {}
+    if isinstance(candidate_spec.get("gsc_telemetry"), dict):
+        gsc_metrics_raw.update(candidate_spec["gsc_telemetry"])
+    if isinstance(candidate_spec.get("gsc_metrics"), dict):
+        gsc_metrics_raw.update(candidate_spec["gsc_metrics"])
+    for gk in (
+        "impressions",
+        "clicks",
+        "ctr",
+        "position",
+        "query",
+        "mobile_impressions",
+        "desktop_impressions",
+        "mobile_ctr",
+        "desktop_ctr",
+        "mobile_ctr_gap",
+        "device_focus",
+        "search_appearances",
+        "device_splits",
+    ):
+        if gk in candidate_spec and gk not in gsc_metrics_raw:
+            gsc_metrics_raw[gk] = candidate_spec[gk]
+    gsc_metrics = gsc_metrics_raw if gsc_metrics_raw else None
     engagement_metrics = candidate_spec.get("engagement_metrics") if isinstance(candidate_spec.get("engagement_metrics"), dict) else None
     page_archetype = str(candidate_spec.get("page_archetype") or "")
 
@@ -856,6 +878,149 @@ def _render_compiler_monetization_and_guardrail_html(
     }
 
 
+def _resolve_gsc_lifecycle_compile_signals(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolves normalized GSC lifecycle telemetry signals for compiler manifest and DOM attributes."""
+    gsc_tel = candidate_spec.get("gsc_telemetry") if isinstance(candidate_spec.get("gsc_telemetry"), dict) else {}
+    gsc_met = candidate_spec.get("gsc_metrics") if isinstance(candidate_spec.get("gsc_metrics"), dict) else {}
+    device_focus = str(
+        candidate_spec.get("device_focus")
+        or gsc_tel.get("device_focus")
+        or gsc_met.get("device_focus")
+        or "BALANCED"
+    ).strip()
+    search_appearances = [
+        str(sa).upper()
+        for sa in (
+            candidate_spec.get("search_appearances")
+            or gsc_tel.get("search_appearances")
+            or gsc_met.get("search_appearances")
+            or []
+        )
+        if sa
+    ]
+    trajectory = str(
+        candidate_spec.get("time_window_trajectory")
+        or gsc_tel.get("time_window_trajectory")
+        or gsc_met.get("time_window_trajectory")
+        or "STABLE"
+    ).strip()
+    coverage_state = str(
+        (candidate_spec.get("inspection_state") or {}).get("coverage_state")
+        if isinstance(candidate_spec.get("inspection_state"), dict)
+        else (candidate_spec.get("coverage_state") or gsc_tel.get("coverage_state") or "Submitted and indexed")
+    ).strip()
+    return {
+        "device_focus": device_focus,
+        "search_appearances": search_appearances,
+        "time_window_trajectory": trajectory,
+        "coverage_state": coverage_state,
+        "appearance_attr": ",".join(search_appearances) if search_appearances else "STANDARD_SNIPPET",
+    }
+
+
+def _build_compiler_faq_entities(
+    title: str,
+    formula: str,
+    statutory_authority: str,
+    economic_dataset: str,
+    is_prediction_tool: bool,
+    is_prexvo: bool,
+) -> List[Dict[str, Any]]:
+    """Builds conversational FAQPage entities tailored to tenant and tool cluster."""
+    faq_entities: List[Dict[str, Any]] = [
+        {
+            "@type": "Question",
+            "name": f"How is {title} determined under statutory authority guidelines?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": f"The deterministic calculation model evaluates {formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}.",
+            },
+        },
+        {
+            "@type": "Question",
+            "name": "What empirical benchmarks validate this firsthand calculation model?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": f"The proprietary model cross-references empirical economic series from {economic_dataset} with statutory authority {statutory_authority}.",
+            },
+        },
+    ]
+    if is_prediction_tool:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": "How does fee drag impact prediction market profitability on Kalshi and Polymarket?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Kalshi charges quadratic transaction fees peaking at 1.75 cents per contract at fifty-fifty odds, requiring traders to account for fee drag alongside expected value and implied probability spreads.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "Why is the Kelly criterion fraction critical for prediction market risk management?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The Kelly criterion formula determines the mathematically optimal bankroll fraction to wager, protecting capital against volatility while maximizing long-term compound growth.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "How are prediction market gains taxed under IRC Section 1256 rules?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Regulated exchange contracts on CFTC-approved venues like Kalshi qualify for Section 1256 sixty-forty tax treatment, splitting gains into sixty percent long-term and forty percent short-term capital rates.",
+                },
+            },
+        ])
+    elif is_prexvo:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": "Who is eligible for the Repayment Assistance Plan (RAP) under Title IV rules?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Under 34 CFR Part 685, borrowers with eligible federal Direct Loans qualify for RAP based on adjusted gross income and family size relative to federal poverty guidelines.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "How does RAP compare to income-driven repayment options like IBR and SAVE?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "RAP establishes affordable monthly payment caps based on discretionary income while preventing runaway balance growth through federal interest subsidies on qualifying Title IV loans.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "What requirements determine qualifying monthly payments for PSLF loan forgiveness?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Public Service Loan Forgiveness requires 120 verified on-time monthly payments under an accepted income-driven plan while employed full-time by a qualifying public service employer.",
+                },
+            },
+        ])
+    else:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": f"What documentation is required to substantiate deductions under {statutory_authority}?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Taxpayers must retain contemporaneous equipment purchase invoices, financing agreements, and tax return statements verifying placing property in service during the eligible tax year.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "How do economic phaseout thresholds adjust over time across benchmark series?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"Statutory deduction limits and phaseout brackets adjust annually for inflation based on index metrics published in official series like {economic_dataset}.",
+                },
+            },
+        ])
+    return faq_entities
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -979,6 +1144,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         published_output = calculated_output
 
     # 5. Canonical Factor 7 calculation manifest assembly
+    gsc_sig = _resolve_gsc_lifecycle_compile_signals(candidate_spec)
+    gsc_device_focus = gsc_sig["device_focus"]
+    gsc_search_appearances = gsc_sig["search_appearances"]
+    gsc_trajectory = gsc_sig["time_window_trajectory"]
+    gsc_coverage_state = gsc_sig["coverage_state"]
+    gsc_appearance_attr = gsc_sig["appearance_attr"]
+
     manifest: Dict[str, Any] = {
         "manifest_id": f"{slug}-manifest",
         "model_name": model_name,
@@ -988,6 +1160,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         "sample_calculation": sample_calc,
         "statutory_authority": statutory_authority,
         "economic_dataset": economic_dataset,
+        "gsc_lifecycle_signals": {
+            "device_focus": gsc_device_focus,
+            "search_appearances": gsc_search_appearances,
+            "time_window_trajectory": gsc_trajectory,
+            "coverage_state": gsc_coverage_state,
+        },
     }
 
     # 6. Render Obsidian dark-theme HTML asset
@@ -1145,98 +1323,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     cluster_links_html = "\n".join(cluster_items_html)
 
     # High-intent conversational FAQPage entities
-    faq_entities = [
-        {
-            "@type": "Question",
-            "name": f"How is {title} determined under statutory authority guidelines?",
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": f"The deterministic calculation model evaluates {formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}."
-            }
-        },
-        {
-            "@type": "Question",
-            "name": "What empirical benchmarks validate this firsthand calculation model?",
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": f"The proprietary model cross-references empirical economic series from {economic_dataset} with statutory authority {statutory_authority}."
-            }
-        }
-    ]
-
-    if is_prediction_tool:
-        faq_entities.extend([
-            {
-                "@type": "Question",
-                "name": "How does fee drag impact prediction market profitability on Kalshi and Polymarket?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "Kalshi charges quadratic transaction fees peaking at 1.75 cents per contract at fifty-fifty odds, requiring traders to account for fee drag alongside expected value and implied probability spreads."
-                }
-            },
-            {
-                "@type": "Question",
-                "name": "Why is the Kelly criterion fraction critical for prediction market risk management?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "The Kelly criterion formula determines the mathematically optimal bankroll fraction to wager, protecting capital against volatility while maximizing long-term compound growth."
-                }
-            },
-            {
-                "@type": "Question",
-                "name": "How are prediction market gains taxed under IRC Section 1256 rules?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "Regulated exchange contracts on CFTC-approved venues like Kalshi qualify for Section 1256 sixty-forty tax treatment, splitting gains into sixty percent long-term and forty percent short-term capital rates."
-                }
-            }
-        ])
-    elif is_prexvo:
-        faq_entities.extend([
-            {
-                "@type": "Question",
-                "name": "Who is eligible for the Repayment Assistance Plan (RAP) under Title IV rules?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "Under 34 CFR Part 685, borrowers with eligible federal Direct Loans qualify for RAP based on adjusted gross income and family size relative to federal poverty guidelines."
-                }
-            },
-            {
-                "@type": "Question",
-                "name": "How does RAP compare to income-driven repayment options like IBR and SAVE?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "RAP establishes affordable monthly payment caps based on discretionary income while preventing runaway balance growth through federal interest subsidies on qualifying Title IV loans."
-                }
-            },
-            {
-                "@type": "Question",
-                "name": "What requirements determine qualifying monthly payments for PSLF loan forgiveness?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": "Public Service Loan Forgiveness requires 120 verified on-time monthly payments under an accepted income-driven plan while employed full-time by a qualifying public service employer."
-                }
-            }
-        ])
-    else:
-        faq_entities.extend([
-            {
-                "@type": "Question",
-                "name": f"What documentation is required to substantiate deductions under {statutory_authority}?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": f"Taxpayers must retain contemporaneous equipment purchase invoices, financing agreements, and tax return statements verifying placing property in service during the eligible tax year."
-                }
-            },
-            {
-                "@type": "Question",
-                "name": "How do economic phaseout thresholds adjust over time across benchmark series?",
-                "acceptedAnswer": {
-                    "@type": "Answer",
-                    "text": f"Statutory deduction limits and phaseout brackets adjust annually for inflation based on index metrics published in official series like {economic_dataset}."
-                }
-            }
-        ])
+    faq_entities = _build_compiler_faq_entities(
+        title=title,
+        formula=formula,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+        is_prediction_tool=is_prediction_tool,
+        is_prexvo=is_prexvo,
+    )
 
     faq_json_str = json.dumps(faq_entities, ensure_ascii=False, indent=6)
 
@@ -1581,6 +1675,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     "applicationCategory": "{application_category}",
     "operatingSystem": "All",
     "url": "{canonical_base}/tools/{slug}/",
+    "featureList": [
+      "Deterministic Statutory Formula Evaluation ({statutory_authority})",
+      "Empirical Benchmark Corroboration ({economic_dataset})",
+      "Interactive 5-Point Scenario Comparison Matrix"
+    ],
     "offers": {{
       "@type": "Offer",
       "price": "0.00",
@@ -1631,7 +1730,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <div class="container">
     <header class="card">
       <h1>{title}</h1>
-      <div class="takeaway quick-answer">
+      <div class="takeaway quick-answer" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}">
         <p class="takeaway">
           The {model_name} produces a baseline output of <strong>{display_output}</strong>.
           Executive operators evaluate deterministic calculations derived from formula <code>{formula}</code>
@@ -1641,7 +1740,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </div>
     </header>
 
-    <div id="calculator-workspace-anchor" class="calculation-container card">
+    <div id="calculator-workspace-anchor" class="calculation-container card" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}" data-gsc-trajectory="{gsc_trajectory}" data-gsc-coverage-state="{gsc_coverage_state}">
       <h2>Interactive Quantitative Model: {safe_model_h2}</h2>
       <p>
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values

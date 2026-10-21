@@ -27,7 +27,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.supervisor import AtomicStateLedger
-from pseofactory.trends.models import GSCDailyMetricRecord
+from pseofactory.trends.models import (
+    GSCDailyMetricRecord,
+    GSCDeviceMetricRecord,
+    GSCQueryPageWindowRecord,
+    GSCSearchAppearanceRecord,
+    GSCUrlInspectionRecord,
+)
 
 
 def _clean_dashes(text: str) -> str:
@@ -220,6 +226,733 @@ def harvest_and_sync_gsc_daily_timeline(
                 pass
 
     return sorted(records, key=lambda r: r.date)
+
+
+def _normalize_gsc_path_key(url_or_path: str) -> str:
+    raw = str(url_or_path or "").strip()
+    if not raw:
+        return "/"
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urllib.parse.urlparse(raw)
+        path = parsed.path or "/"
+    else:
+        path = raw.split("?", 1)[0].split("#", 1)[0]
+    if not path.startswith("/"):
+        path = "/" + path
+    return (path.rstrip("/") or "/").lower()
+
+
+def _parse_gsccli_json_rows(stdout_text: str) -> List[Dict[str, Any]]:
+    if not stdout_text:
+        return []
+    s_i, e_i = stdout_text.find("{"), stdout_text.rfind("}")
+    if s_i == -1 or e_i <= s_i:
+        return []
+    try:
+        payload = json.loads(stdout_text[s_i : e_i + 1])
+        rows = payload.get("data", [])
+        return [r for r in rows if isinstance(r, dict)]
+    except Exception:
+        return []
+
+
+def harvest_and_sync_gsc_multidimensional_telemetry(
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    db_path: Optional[Union[str, Path]] = None,
+    fixture_payload: Optional[Dict[str, Any]] = None,
+    live_gsc: Optional[bool] = None,
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """
+    Harvests and synchronizes multi-dimensional Google Search Console telemetry:
+      1. Device-level CTR splits (property-wide device, page+device, query+page+device)
+      2. Rich-result searchAppearance metrics (e.g. REVIEW_SNIPPET, PRODUCT_SNIPPETS)
+      3. Time-windowed query+page snapshots (recent_28d vs prior_28d_baseline vs recent_90d)
+      4. Granular URL Inspection coverage states (Submitted and indexed, Crawled - currently not indexed,
+         Discovered - currently not indexed, Duplicate without user-selected canonical, etc.)
+    Persists records into TrendHistoryDB (gsc_device_metrics, gsc_search_appearance_metrics,
+    gsc_query_page_windows, gsc_url_inspection_states) and <repo_root>/.agy/gsc_lifecycle_telemetry.json.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.indexing.feedback_loop import GSCRootCauseClassifier
+    from pseofactory.qualification import (
+        load_property_redirect_map,
+        resolve_redirected_gsc_target,
+        rollup_redirected_gsc_rows,
+    )
+    from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+    prop = _resolve_property_id(property_id, repo_root)
+    root = _resolve_tenant_repo_root(prop, repo_root)
+    site_uri = f"sc-domain:{prop}.com"
+    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if live_gsc is None:
+        live_gsc = "PYTEST_CURRENT_TEST" not in os.environ
+
+    local_tdb = root / "pseofactory" / "trends" / "data" / "trend_history.db"
+    target_db_path = Path(db_path) if db_path else (local_tdb if local_tdb.parent.is_dir() else DEFAULT_DB_PATH)
+    if not target_db_path.is_file() and "PYTEST_CURRENT_TEST" not in os.environ:
+        main_repo_db = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
+        if main_repo_db.is_file():
+            target_db_path = main_repo_db
+
+    device_records: List[GSCDeviceMetricRecord] = []
+    appearance_records: List[GSCSearchAppearanceRecord] = []
+    window_records: List[GSCQueryPageWindowRecord] = []
+    inspection_records: List[GSCUrlInspectionRecord] = []
+
+    # 1. Load from explicit fixture_payload if provided
+    if isinstance(fixture_payload, dict):
+        for dr in fixture_payload.get("device_metrics", []) or []:
+            if isinstance(dr, GSCDeviceMetricRecord):
+                device_records.append(dr)
+            elif isinstance(dr, dict):
+                device_records.append(
+                    GSCDeviceMetricRecord(
+                        property_id=prop,
+                        device=str(dr.get("device", "DESKTOP")),
+                        page=_clean_dashes(str(dr.get("page", ""))),
+                        query=_clean_dashes(str(dr.get("query", ""))),
+                        window_key=str(dr.get("window_key", "recent_28d")),
+                        clicks=max(0, int(float(dr.get("clicks", 0) or 0))),
+                        impressions=max(0, int(float(dr.get("impressions", 0) or 0))),
+                        ctr=max(0.0, min(1.0, float(dr.get("ctr", 0.0) or 0.0))),
+                        position=max(0.0, float(dr.get("position", 0.0) or 0.0)),
+                        recorded_at=str(dr.get("recorded_at") or now_iso),
+                    )
+                )
+        for ar in fixture_payload.get("search_appearances", []) or []:
+            if isinstance(ar, GSCSearchAppearanceRecord):
+                appearance_records.append(ar)
+            elif isinstance(ar, dict):
+                sa_name = _clean_dashes(str(ar.get("search_appearance") or ar.get("searchAppearance") or "")).strip().upper()
+                if sa_name:
+                    appearance_records.append(
+                        GSCSearchAppearanceRecord(
+                            property_id=prop,
+                            search_appearance=sa_name,
+                            window_key=str(ar.get("window_key", "recent_90d")),
+                            clicks=max(0, int(float(ar.get("clicks", 0) or 0))),
+                            impressions=max(0, int(float(ar.get("impressions", 0) or 0))),
+                            ctr=max(0.0, min(1.0, float(ar.get("ctr", 0.0) or 0.0))),
+                            position=max(0.0, float(ar.get("position", 0.0) or 0.0)),
+                            recorded_at=str(ar.get("recorded_at") or now_iso),
+                        )
+                    )
+        for wr in fixture_payload.get("query_page_windows", []) or []:
+            if isinstance(wr, GSCQueryPageWindowRecord):
+                window_records.append(wr)
+            elif isinstance(wr, dict):
+                window_records.append(
+                    GSCQueryPageWindowRecord(
+                        property_id=prop,
+                        window_key=str(wr.get("window_key", "recent_28d")),
+                        query=_clean_dashes(str(wr.get("query", ""))),
+                        page=_clean_dashes(str(wr.get("page", ""))),
+                        clicks=max(0, int(float(wr.get("clicks", 0) or 0))),
+                        impressions=max(0, int(float(wr.get("impressions", 0) or 0))),
+                        ctr=max(0.0, min(1.0, float(wr.get("ctr", 0.0) or 0.0))),
+                        position=max(0.0, float(wr.get("position", 0.0) or 0.0)),
+                        window_start_date=str(wr.get("window_start_date", "")),
+                        window_end_date=str(wr.get("window_end_date", "")),
+                        recorded_at=str(wr.get("recorded_at") or now_iso),
+                    )
+                )
+        for ir in fixture_payload.get("url_inspections", []) or []:
+            if isinstance(ir, GSCUrlInspectionRecord):
+                inspection_records.append(ir)
+            elif isinstance(ir, dict):
+                inspection_records.append(
+                    GSCUrlInspectionRecord(
+                        property_id=prop,
+                        page_url=_clean_dashes(str(ir.get("page_url") or ir.get("url") or "")),
+                        verdict=_clean_dashes(str(ir.get("verdict", "NEUTRAL"))),
+                        coverage_state=_clean_dashes(str(ir.get("coverage_state") or ir.get("coverageState") or "Unknown")),
+                        indexing_state=_clean_dashes(str(ir.get("indexing_state") or ir.get("indexingState") or "INDEXING_STATE_UNSPECIFIED")),
+                        page_fetch_state=_clean_dashes(str(ir.get("page_fetch_state") or ir.get("pageFetchState") or "PAGE_FETCH_STATE_UNSPECIFIED")),
+                        robots_txt_state=_clean_dashes(str(ir.get("robots_txt_state") or ir.get("robotsTxtState") or "ROBOTS_TXT_STATE_UNSPECIFIED")),
+                        user_canonical=_clean_dashes(str(ir.get("user_canonical") or ir.get("userCanonical") or "")),
+                        google_canonical=_clean_dashes(str(ir.get("google_canonical") or ir.get("googleCanonical") or "")),
+                        last_crawl_time=str(ir.get("last_crawl_time") or ir.get("lastCrawlTime") or ""),
+                        crawled_as=str(ir.get("crawled_as") or ir.get("crawledAs") or "MOBILE"),
+                        rich_results_verdict=str(ir.get("rich_results_verdict") or "VERDICT_UNSPECIFIED"),
+                        rich_results_types=list(ir.get("rich_results_types", [])),
+                        mobile_usability_verdict=str(ir.get("mobile_usability_verdict") or "VERDICT_UNSPECIFIED"),
+                        referring_urls=list(ir.get("referring_urls", [])),
+                        sitemaps=list(ir.get("sitemaps", [])),
+                        root_cause_classification=_clean_dashes(str(ir.get("root_cause_classification") or "")),
+                        recorded_at=str(ir.get("recorded_at") or now_iso),
+                    )
+                )
+
+    # 2. Query live gsccli when outside pytest and fixture_payload was not provided
+    if not fixture_payload and live_gsc:
+        gsccli_bin = shutil.which("gsccli") or "/home/ubuntuadmin/.npm-global/bin/gsccli"
+        if Path(gsccli_bin).is_file():
+            # 2a. Property-level device splits (90d)
+            try:
+                proc_dev = subprocess.run(
+                    [gsccli_bin, "query", "run", "-s", site_uri, "-d", "device", "--start-date", "90daysAgo", "--data-state", "all", "-f", "json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                for r in _parse_gsccli_json_rows(proc_dev.stdout if proc_dev.returncode == 0 else ""):
+                    dev_str = str(r.get("device") or (r["keys"][0] if isinstance(r.get("keys"), list) and r["keys"] else "DESKTOP")).strip().upper()
+                    device_records.append(
+                        GSCDeviceMetricRecord(
+                            property_id=prop,
+                            device=dev_str,
+                            page="",
+                            query="",
+                            window_key="recent_90d",
+                            clicks=max(0, int(float(r.get("clicks", 0) or 0))),
+                            impressions=max(0, int(float(r.get("impressions", 0) or 0))),
+                            ctr=max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0))),
+                            position=max(0.0, float(r.get("position", 0.0) or 0.0)),
+                            recorded_at=now_iso,
+                        )
+                    )
+            except Exception:
+                pass
+
+            # 2b. Query + Page + Device splits (90d) + Page + Device rollups
+            try:
+                proc_qpd = subprocess.run(
+                    [
+                        gsccli_bin,
+                        "query",
+                        "run",
+                        "-s",
+                        site_uri,
+                        "-d",
+                        "query",
+                        "-d",
+                        "page",
+                        "-d",
+                        "device",
+                        "--start-date",
+                        "90daysAgo",
+                        "--data-state",
+                        "all",
+                        "-f",
+                        "json",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=25,
+                )
+                qpd_rows = _parse_gsccli_json_rows(proc_qpd.stdout if proc_qpd.returncode == 0 else "")
+                page_dev_agg: Dict[Tuple[str, str], Dict[str, float]] = {}
+                for r in qpd_rows:
+                    q_txt = _clean_dashes(str(r.get("query") or "")).strip()
+                    p_txt = _clean_dashes(str(r.get("page") or "")).strip()
+                    dev_str = str(r.get("device") or "DESKTOP").strip().upper()
+                    clk = max(0, int(float(r.get("clicks", 0) or 0)))
+                    imp = max(0, int(float(r.get("impressions", 0) or 0)))
+                    ctr_v = max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0)))
+                    pos_v = max(0.0, float(r.get("position", 0.0) or 0.0))
+                    if q_txt or p_txt:
+                        device_records.append(
+                            GSCDeviceMetricRecord(
+                                property_id=prop,
+                                device=dev_str,
+                                page=p_txt,
+                                query=q_txt,
+                                window_key="recent_90d",
+                                clicks=clk,
+                                impressions=imp,
+                                ctr=ctr_v,
+                                position=pos_v,
+                                recorded_at=now_iso,
+                            )
+                        )
+                    if p_txt:
+                        pd_bucket = page_dev_agg.setdefault(
+                            (p_txt, dev_str),
+                            {"clicks": 0.0, "impressions": 0.0, "w_pos": 0.0},
+                        )
+                        pd_bucket["clicks"] += clk
+                        pd_bucket["impressions"] += imp
+                        pd_bucket["w_pos"] += pos_v * max(1, imp)
+                for (p_txt, dev_str), agg in page_dev_agg.items():
+                    tot_i = int(agg["impressions"])
+                    tot_c = int(agg["clicks"])
+                    avg_p = round(agg["w_pos"] / float(max(1, tot_i)), 2)
+                    device_records.append(
+                        GSCDeviceMetricRecord(
+                            property_id=prop,
+                            device=dev_str,
+                            page=p_txt,
+                            query="",
+                            window_key="recent_90d",
+                            clicks=tot_c,
+                            impressions=tot_i,
+                            ctr=round(tot_c / float(tot_i), 4) if tot_i > 0 else 0.0,
+                            position=avg_p,
+                            recorded_at=now_iso,
+                        )
+                    )
+            except Exception:
+                pass
+
+            # 2c. Rich-result searchAppearance metrics (90d)
+            try:
+                proc_sa = subprocess.run(
+                    [
+                        gsccli_bin,
+                        "query",
+                        "run",
+                        "-s",
+                        site_uri,
+                        "-d",
+                        "searchAppearance",
+                        "--start-date",
+                        "90daysAgo",
+                        "--data-state",
+                        "all",
+                        "-f",
+                        "json",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                for r in _parse_gsccli_json_rows(proc_sa.stdout if proc_sa.returncode == 0 else ""):
+                    sa_str = _clean_dashes(
+                        str(r.get("searchAppearance") or (r["keys"][0] if isinstance(r.get("keys"), list) and r["keys"] else ""))
+                    ).strip().upper()
+                    if sa_str:
+                        appearance_records.append(
+                            GSCSearchAppearanceRecord(
+                                property_id=prop,
+                                search_appearance=sa_str,
+                                window_key="recent_90d",
+                                clicks=max(0, int(float(r.get("clicks", 0) or 0))),
+                                impressions=max(0, int(float(r.get("impressions", 0) or 0))),
+                                ctr=max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0))),
+                                position=max(0.0, float(r.get("position", 0.0) or 0.0)),
+                                recorded_at=now_iso,
+                            )
+                        )
+            except Exception:
+                pass
+
+            # 2d. Time-windowed query+page snapshots: recent_28d vs prior_28d_baseline
+            for win_key, s_date, e_date in (
+                ("recent_28d", "28daysAgo", "today"),
+                ("prior_28d_baseline", "56daysAgo", "29daysAgo"),
+            ):
+                try:
+                    proc_w = subprocess.run(
+                        [
+                            gsccli_bin,
+                            "query",
+                            "run",
+                            "-s",
+                            site_uri,
+                            "-d",
+                            "query",
+                            "-d",
+                            "page",
+                            "--start-date",
+                            s_date,
+                            "--end-date",
+                            e_date,
+                            "--data-state",
+                            "all",
+                            "-f",
+                            "json",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=25,
+                    )
+                    for r in _parse_gsccli_json_rows(proc_w.stdout if proc_w.returncode == 0 else ""):
+                        q_txt = _clean_dashes(str(r.get("query") or "")).strip()
+                        p_txt = _clean_dashes(str(r.get("page") or "")).strip()
+                        if q_txt or p_txt:
+                            window_records.append(
+                                GSCQueryPageWindowRecord(
+                                    property_id=prop,
+                                    window_key=win_key,
+                                    query=q_txt,
+                                    page=p_txt,
+                                    clicks=max(0, int(float(r.get("clicks", 0) or 0))),
+                                    impressions=max(0, int(float(r.get("impressions", 0) or 0))),
+                                    ctr=max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0))),
+                                    position=max(0.0, float(r.get("position", 0.0) or 0.0)),
+                                    window_start_date=s_date,
+                                    window_end_date=e_date,
+                                    recorded_at=now_iso,
+                                )
+                            )
+                except Exception:
+                    pass
+
+    # 3. Load or enrich URL inspection records from .agy/indexing_health_report.json and TrendHistoryDB
+    idx_report_file = root / ".agy" / "indexing_health_report.json"
+    if not inspection_records and idx_report_file.is_file():
+        try:
+            idx_data = json.loads(idx_report_file.read_text(encoding="utf-8"))
+            for item in idx_data.get("inspected_urls", []) or idx_data.get("records", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                p_url = _clean_dashes(str(item.get("page_url") or item.get("url") or "")).strip()
+                if not p_url:
+                    continue
+                inspection_records.append(
+                    GSCUrlInspectionRecord(
+                        property_id=prop,
+                        page_url=p_url,
+                        verdict=_clean_dashes(str(item.get("verdict") or "PASS")),
+                        coverage_state=_clean_dashes(str(item.get("coverage_state") or item.get("coverageState") or "Submitted and indexed")),
+                        indexing_state=_clean_dashes(str(item.get("indexing_state") or "INDEXING_ALLOWED")),
+                        page_fetch_state=_clean_dashes(str(item.get("page_fetch_state") or "SUCCESSFUL")),
+                        robots_txt_state=_clean_dashes(str(item.get("robots_txt_state") or "ALLOWED")),
+                        user_canonical=_clean_dashes(str(item.get("user_canonical") or p_url)),
+                        google_canonical=_clean_dashes(str(item.get("google_canonical") or p_url)),
+                        last_crawl_time=str(item.get("last_crawl_time") or ""),
+                        crawled_as=str(item.get("crawled_as") or "MOBILE"),
+                        rich_results_verdict=str(item.get("rich_results_verdict") or "VERDICT_UNSPECIFIED"),
+                        rich_results_types=list(item.get("rich_results_types", [])),
+                        mobile_usability_verdict=str(item.get("mobile_usability_verdict") or "VERDICT_UNSPECIFIED"),
+                        referring_urls=list(item.get("referring_urls", [])),
+                        sitemaps=list(item.get("sitemaps", [])),
+                        root_cause_classification=_clean_dashes(str(item.get("root_cause_classification") or "")),
+                        recorded_at=now_iso,
+                    )
+                )
+        except Exception:
+            pass
+
+    # Persist to or hydrate from TrendHistoryDB
+    try:
+        if target_db_path.parent.is_dir() or db_path is not None:
+            with TrendHistoryDB(target_db_path) as tdb:
+                if persist and (device_records or appearance_records or window_records or inspection_records):
+                    if device_records:
+                        tdb.upsert_gsc_device_metrics(device_records)
+                    if appearance_records:
+                        tdb.upsert_gsc_search_appearance_metrics(appearance_records)
+                    if window_records:
+                        tdb.upsert_gsc_query_page_windows(window_records)
+                    if inspection_records:
+                        tdb.upsert_gsc_url_inspection_states(inspection_records)
+                if not device_records:
+                    device_records = tdb.get_gsc_device_metrics(prop, window_key="recent_90d") or tdb.get_gsc_device_metrics(prop, window_key="recent_28d")
+                if not appearance_records:
+                    appearance_records = tdb.get_gsc_search_appearance_metrics(prop, window_key="recent_90d")
+                if not window_records:
+                    window_records = (
+                        tdb.get_gsc_query_page_windows(prop, window_key="recent_28d")
+                        + tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")
+                    )
+                if not inspection_records:
+                    inspection_records = tdb.get_gsc_url_inspection_states(prop)
+    except Exception:
+        pass
+
+    # Also fallback to existing <repo_root>/.agy/gsc_lifecycle_telemetry.json if DB had no records in isolated test tmp_path
+    telemetry_file = root / ".agy" / "gsc_lifecycle_telemetry.json"
+    if not (device_records or appearance_records or window_records or inspection_records) and telemetry_file.is_file():
+        try:
+            saved = json.loads(telemetry_file.read_text(encoding="utf-8"))
+            return saved
+        except Exception:
+            pass
+
+    redirect_map = load_property_redirect_map(repo_root=root, property_id=prop)
+
+    def _canonical_path_for(url_or_path: str) -> str:
+        raw_p = _normalize_gsc_path_key(url_or_path)
+        res = resolve_redirected_gsc_target(target_url=raw_p, property_id=prop, repo_root=root)
+        c_p = str(res.get("canonical_path") or raw_p).strip()
+        return _normalize_gsc_path_key(c_p)
+
+    # Classify any unclassified URL inspection records via GSCRootCauseClassifier
+    classifier = GSCRootCauseClassifier()
+    coverage_counts: Dict[str, int] = {}
+    canonical_mismatches: List[Dict[str, Any]] = []
+    inspection_by_path: Dict[str, Dict[str, Any]] = {}
+
+    for rec in inspection_records:
+        cov = rec.coverage_state or "Unknown"
+        coverage_counts[cov] = coverage_counts.get(cov, 0) + 1
+        u_can = _normalize_gsc_path_key(rec.user_canonical) if rec.user_canonical else ""
+        g_can = _normalize_gsc_path_key(rec.google_canonical) if rec.google_canonical else ""
+        has_mismatch = bool(u_can and g_can and u_can != g_can)
+        if not rec.root_cause_classification:
+            diag = classifier.classify(
+                slug=_normalize_gsc_path_key(rec.page_url).strip("/") or "root",
+                url=rec.page_url,
+                coverage_state=rec.coverage_state,
+                verdict=rec.verdict,
+                page_fetch_state=rec.page_fetch_state,
+                user_canonical=rec.user_canonical,
+                google_canonical=rec.google_canonical,
+                rich_results_verdict=rec.rich_results_verdict,
+                mobile_usability_verdict=rec.mobile_usability_verdict,
+            )
+            rec.root_cause_classification = diag.classification.value
+        p_key = _canonical_path_for(rec.page_url)
+        rec_dict = rec.to_dict()
+        rec_dict["canonical_mismatch"] = has_mismatch
+        inspection_by_path[p_key] = rec_dict
+        if has_mismatch:
+            canonical_mismatches.append(rec_dict)
+
+    # Compute property-level and page-level device split summaries
+    property_device_summary: Dict[str, Dict[str, Any]] = {}
+    page_device_splits: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    query_page_device_splits: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    explicit_page_device_keys: Set[Tuple[str, str]] = set()
+    qpd_rollup_buckets: Dict[Tuple[str, str], Dict[str, float]] = {}
+
+    for d_rec in device_records:
+        dev = d_rec.device
+        if not d_rec.page and not d_rec.query:
+            property_device_summary[dev] = {
+                "clicks": d_rec.clicks,
+                "impressions": d_rec.impressions,
+                "ctr": round(d_rec.ctr, 4),
+                "position": round(d_rec.position, 2),
+            }
+        elif d_rec.page and not d_rec.query:
+            p_key = _canonical_path_for(d_rec.page)
+            explicit_page_device_keys.add((p_key, dev))
+            existing_b = page_device_splits.setdefault(p_key, {}).get(dev)
+            if existing_b:
+                tot_i = int(existing_b["impressions"]) + d_rec.impressions
+                tot_c = int(existing_b["clicks"]) + d_rec.clicks
+                w_p = (float(existing_b["position"]) * max(1, int(existing_b["impressions"]))) + (d_rec.position * max(1, d_rec.impressions))
+                page_device_splits[p_key][dev] = {
+                    "clicks": tot_c,
+                    "impressions": tot_i,
+                    "ctr": round(tot_c / float(max(1, tot_i)), 4) if tot_i > 0 else 0.0,
+                    "position": round(w_p / float(max(1, tot_i)), 2),
+                }
+            else:
+                page_device_splits.setdefault(p_key, {})[dev] = {
+                    "clicks": d_rec.clicks,
+                    "impressions": d_rec.impressions,
+                    "ctr": round(d_rec.ctr, 4),
+                    "position": round(d_rec.position, 2),
+                }
+        elif d_rec.page and d_rec.query:
+            p_key = _canonical_path_for(d_rec.page)
+            q_key = d_rec.query.strip().lower()
+            qp_id = f"{p_key}::{q_key}"
+            existing_qp = query_page_device_splits.setdefault(qp_id, {}).get(dev)
+            if existing_qp:
+                tot_i = int(existing_qp["impressions"]) + d_rec.impressions
+                tot_c = int(existing_qp["clicks"]) + d_rec.clicks
+                w_p = (float(existing_qp["position"]) * max(1, int(existing_qp["impressions"]))) + (d_rec.position * max(1, d_rec.impressions))
+                query_page_device_splits[qp_id][dev] = {
+                    "clicks": tot_c,
+                    "impressions": tot_i,
+                    "ctr": round(tot_c / float(max(1, tot_i)), 4) if tot_i > 0 else 0.0,
+                    "position": round(w_p / float(max(1, tot_i)), 2),
+                }
+            else:
+                query_page_device_splits.setdefault(qp_id, {})[dev] = {
+                    "clicks": d_rec.clicks,
+                    "impressions": d_rec.impressions,
+                    "ctr": round(d_rec.ctr, 4),
+                    "position": round(d_rec.position, 2),
+                }
+            rb = qpd_rollup_buckets.setdefault(
+                (p_key, dev),
+                {"clicks": 0.0, "impressions": 0.0, "w_pos": 0.0},
+            )
+            rb["clicks"] += d_rec.clicks
+            rb["impressions"] += d_rec.impressions
+            rb["w_pos"] += d_rec.position * max(1, d_rec.impressions)
+
+    for (p_key, dev), rb in qpd_rollup_buckets.items():
+        if (p_key, dev) not in explicit_page_device_keys:
+            tot_i = int(rb["impressions"])
+            tot_c = int(rb["clicks"])
+            page_device_splits.setdefault(p_key, {})[dev] = {
+                "clicks": tot_c,
+                "impressions": tot_i,
+                "ctr": round(tot_c / float(max(1, tot_i)), 4) if tot_i > 0 else 0.0,
+                "position": round(rb["w_pos"] / float(max(1, tot_i)), 2),
+            }
+
+    # Roll up page_device_splits across 301 redirects so canonical paths receive legacy device signals
+    page_device_diagnostics: Dict[str, Dict[str, Any]] = {}
+    for p_key, dev_map in page_device_splits.items():
+        mob = dev_map.get("MOBILE", {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": 0.0})
+        desk = dev_map.get("DESKTOP", {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": 0.0})
+        tab = dev_map.get("TABLET", {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": 0.0})
+        tot_imp = int(mob["impressions"]) + int(desk["impressions"]) + int(tab["impressions"])
+        mob_share = round(int(mob["impressions"]) / float(max(1, tot_imp)), 4) if tot_imp > 0 else 0.0
+        desk_share = round(int(desk["impressions"]) / float(max(1, tot_imp)), 4) if tot_imp > 0 else 0.0
+        mob_ctr_gap = round(float(desk["ctr"]) - float(mob["ctr"]), 4)
+        mob_pos_delta = round(float(mob["position"]) - float(desk["position"]), 2) if (mob["position"] and desk["position"]) else 0.0
+
+        if mob_share >= 0.55:
+            device_focus = "MOBILE_DOMINANT"
+        elif int(mob["impressions"]) >= 5 and mob_ctr_gap >= 0.01:
+            device_focus = "MOBILE_CTR_DEFICIT"
+        elif desk_share >= 0.65:
+            device_focus = "DESKTOP_DOMINANT"
+        else:
+            device_focus = "BALANCED"
+
+        page_device_diagnostics[p_key] = {
+            "total_device_impressions": tot_imp,
+            "mobile_impressions": int(mob["impressions"]),
+            "desktop_impressions": int(desk["impressions"]),
+            "tablet_impressions": int(tab["impressions"]),
+            "mobile_clicks": int(mob["clicks"]),
+            "desktop_clicks": int(desk["clicks"]),
+            "mobile_ctr": round(float(mob["ctr"]), 4),
+            "desktop_ctr": round(float(desk["ctr"]), 4),
+            "mobile_position": round(float(mob["position"]), 2),
+            "desktop_position": round(float(desk["position"]), 2),
+            "mobile_impression_share": mob_share,
+            "desktop_impression_share": desk_share,
+            "mobile_ctr_gap": mob_ctr_gap,
+            "mobile_position_delta": mob_pos_delta,
+            "device_focus": device_focus,
+            "devices": dev_map,
+        }
+
+    # Summarize search appearances
+    search_appearance_summary: Dict[str, Dict[str, Any]] = {}
+    for sa_rec in appearance_records:
+        search_appearance_summary[sa_rec.search_appearance] = {
+            "clicks": sa_rec.clicks,
+            "impressions": sa_rec.impressions,
+            "ctr": round(sa_rec.ctr, 4),
+            "position": round(sa_rec.position, 2),
+            "window_key": sa_rec.window_key,
+        }
+
+    # Summarize time-windowed query+page velocity (recent_28d vs prior_28d_baseline)
+    recent_28d_raw = [w.to_dict() for w in window_records if w.window_key == "recent_28d"]
+    prior_28d_raw = [w.to_dict() for w in window_records if w.window_key == "prior_28d_baseline"]
+    recent_28d_rollup = rollup_redirected_gsc_rows(recent_28d_raw, property_id=prop, repo_root=root) if recent_28d_raw else {"rows": []}
+    prior_28d_rollup = rollup_redirected_gsc_rows(prior_28d_raw, property_id=prop, repo_root=root) if prior_28d_raw else {"rows": []}
+
+    prior_by_qp: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for pr in prior_28d_rollup.get("rows", []):
+        p_k = _normalize_gsc_path_key(str(pr.get("canonical_path") or pr.get("page") or ""))
+        q_k = str(pr.get("query") or "").strip().lower()
+        if p_k and q_k:
+            prior_by_qp[(p_k, q_k)] = pr
+
+    window_deltas_by_qp: Dict[str, Dict[str, Any]] = {}
+    page_window_velocity: Dict[str, Dict[str, Any]] = {}
+    for rr in recent_28d_rollup.get("rows", []):
+        p_k = _normalize_gsc_path_key(str(rr.get("canonical_path") or rr.get("page") or ""))
+        q_k = str(rr.get("query") or "").strip().lower()
+        if not p_k or not q_k:
+            continue
+        pr = prior_by_qp.get((p_k, q_k))
+        r_imp = int(rr.get("impressions", 0) or 0)
+        p_imp = int(pr.get("impressions", 0) or 0) if pr else 0
+        r_pos = float(rr.get("position", 100.0) or 100.0)
+        p_pos = float(pr.get("position", r_pos) or r_pos) if pr else r_pos
+        r_ctr = float(rr.get("ctr", 0.0) or 0.0)
+        p_ctr = float(pr.get("ctr", r_ctr) or r_ctr) if pr else r_ctr
+        pos_delta = round(r_pos - p_pos, 2)
+        imp_delta = r_imp - p_imp
+        ctr_delta = round(r_ctr - p_ctr, 4)
+
+        traj_state = "STABLE"
+        if pr and pos_delta >= 1.5 and max(r_imp, p_imp) >= 3:
+            traj_state = "DECAYING"
+        elif pr and pos_delta <= -1.5 and r_imp >= p_imp:
+            traj_state = "ACCELERATING"
+        elif not pr and r_imp >= 5:
+            traj_state = "BREAKOUT_NEW"
+
+        qp_id = f"{p_k}::{q_k}"
+        window_deltas_by_qp[qp_id] = {
+            "canonical_path": p_k,
+            "query": q_k,
+            "recent_28d_impressions": r_imp,
+            "prior_28d_impressions": p_imp,
+            "impression_delta_28d": imp_delta,
+            "recent_28d_position": round(r_pos, 2),
+            "prior_28d_position": round(p_pos, 2),
+            "position_delta_28d": pos_delta,
+            "recent_28d_ctr": round(r_ctr, 4),
+            "prior_28d_ctr": round(p_ctr, 4),
+            "ctr_delta_28d": ctr_delta,
+            "trajectory_state": traj_state,
+        }
+        p_vel = page_window_velocity.setdefault(
+            p_k,
+            {
+                "recent_28d_impressions": 0,
+                "prior_28d_impressions": 0,
+                "decaying_queries_count": 0,
+                "accelerating_queries_count": 0,
+                "breakout_queries_count": 0,
+                "trajectory_state": "STABLE",
+            },
+        )
+        p_vel["recent_28d_impressions"] += r_imp
+        p_vel["prior_28d_impressions"] += p_imp
+        if traj_state == "DECAYING":
+            p_vel["decaying_queries_count"] += 1
+            p_vel["trajectory_state"] = "DECAYING"
+        elif traj_state == "ACCELERATING":
+            p_vel["accelerating_queries_count"] += 1
+            if p_vel["trajectory_state"] == "STABLE":
+                p_vel["trajectory_state"] = "ACCELERATING"
+        elif traj_state == "BREAKOUT_NEW":
+            p_vel["breakout_queries_count"] += 1
+            if p_vel["trajectory_state"] == "STABLE":
+                p_vel["trajectory_state"] = "BREAKOUT_NEW"
+
+    payload = {
+        "status": "PASS",
+        "property_id": prop,
+        "domain": domain,
+        "site_uri": site_uri,
+        "timestamp": now_iso,
+        "dimensions_synced": {
+            "device_records_count": len(device_records),
+            "search_appearance_records_count": len(appearance_records),
+            "query_page_window_records_count": len(window_records),
+            "url_inspection_records_count": len(inspection_records),
+        },
+        "property_device_summary": property_device_summary,
+        "page_device_diagnostics": page_device_diagnostics,
+        "query_page_device_splits": query_page_device_splits,
+        "search_appearances": search_appearance_summary,
+        "has_review_snippet_signal": "REVIEW_SNIPPET" in search_appearance_summary,
+        "has_product_snippets_signal": "PRODUCT_SNIPPETS" in search_appearance_summary,
+        "time_window_velocity": {
+            "recent_28d_rows_count": len(recent_28d_rollup.get("rows", [])),
+            "prior_28d_baseline_rows_count": len(prior_28d_rollup.get("rows", [])),
+            "page_window_velocity": page_window_velocity,
+            "query_page_deltas": window_deltas_by_qp,
+        },
+        "url_inspection_summary": {
+            "total_inspected_urls": len(inspection_records),
+            "coverage_state_counts": coverage_counts,
+            "canonical_mismatches_count": len(canonical_mismatches),
+            "canonical_mismatches": canonical_mismatches,
+            "inspection_by_path": inspection_by_path,
+        },
+    }
+
+    if persist:
+        out_path = root / ".agy" / "gsc_lifecycle_telemetry.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        AtomicStateLedger.save_json(out_path, payload)
+
+    return payload
+
 
 
 def load_consolidated_gsc_query_rows(
@@ -459,6 +1192,35 @@ def load_consolidated_gsc_query_rows(
                 pass
 
     current_rollup = rollup_redirected_gsc_rows(raw_current_rows, property_id=prop, repo_root=root)
+
+    multidim_bundle = harvest_and_sync_gsc_multidimensional_telemetry(
+        prop, repo_root=root, live_gsc=live_gsc, persist=False
+    )
+
+    if not raw_baseline_rows:
+        try:
+            from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+            local_tdb = root / "pseofactory" / "trends" / "data" / "trend_history.db"
+            t_path = local_tdb if local_tdb.parent.is_dir() else DEFAULT_DB_PATH
+            if t_path.is_file():
+                with TrendHistoryDB(t_path) as tdb:
+                    prior_win_rows = tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")
+                    for pw in prior_win_rows:
+                        raw_baseline_rows.append(
+                            {
+                                "query": pw.query,
+                                "page": pw.page,
+                                "impressions": pw.impressions,
+                                "clicks": pw.clicks,
+                                "ctr": pw.ctr,
+                                "position": pw.position,
+                                "recorded_at": pw.recorded_at,
+                            }
+                        )
+        except Exception:
+            pass
+
     baseline_rollup = (
         rollup_redirected_gsc_rows(raw_baseline_rows, property_id=prop, repo_root=root)
         if raw_baseline_rows
@@ -470,11 +1232,57 @@ def load_consolidated_gsc_query_rows(
         else current_rollup
     )
 
+    # Enrich rolled-up current_rows with multi-dimensional GSC signals (device splits, search appearance, time-window velocity, URL inspection)
+    page_dev_diag = multidim_bundle.get("page_device_diagnostics") or {}
+    qp_dev_splits = multidim_bundle.get("query_page_device_splits") or {}
+    search_apps = multidim_bundle.get("search_appearances") or {}
+    qp_win_deltas = (multidim_bundle.get("time_window_velocity") or {}).get("query_page_deltas") or {}
+    page_win_vel = (multidim_bundle.get("time_window_velocity") or {}).get("page_window_velocity") or {}
+    insp_by_path = (multidim_bundle.get("url_inspection_summary") or {}).get("inspection_by_path") or {}
+
+    def _enrich_rows_with_multidim(raw_rows_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out_list: List[Dict[str, Any]] = []
+        for r in raw_rows_list:
+            if not isinstance(r, dict):
+                continue
+            row_copy = dict(r)
+            p_k = _normalize_gsc_path_key(str(row_copy.get("canonical_path") or row_copy.get("page") or ""))
+            q_k = str(row_copy.get("query") or "").strip().lower()
+            qp_id = f"{p_k}::{q_k}"
+
+            p_diag = page_dev_diag.get(p_k) or {}
+            qp_dev = qp_dev_splits.get(qp_id) or p_diag.get("devices") or {}
+            mob_d = qp_dev.get("MOBILE") or {}
+            desk_d = qp_dev.get("DESKTOP") or {}
+
+            row_copy["device_splits"] = qp_dev
+            row_copy["mobile_impressions"] = int(mob_d.get("impressions", p_diag.get("mobile_impressions", 0)) or 0)
+            row_copy["desktop_impressions"] = int(desk_d.get("impressions", p_diag.get("desktop_impressions", 0)) or 0)
+            row_copy["mobile_ctr"] = float(mob_d.get("ctr", p_diag.get("mobile_ctr", 0.0)) or 0.0)
+            row_copy["desktop_ctr"] = float(desk_d.get("ctr", p_diag.get("desktop_ctr", 0.0)) or 0.0)
+            row_copy["mobile_position"] = float(mob_d.get("position", p_diag.get("mobile_position", 0.0)) or 0.0)
+            row_copy["desktop_position"] = float(desk_d.get("position", p_diag.get("desktop_position", 0.0)) or 0.0)
+            row_copy["mobile_impression_share"] = float(p_diag.get("mobile_impression_share", 0.0) or 0.0)
+            row_copy["mobile_ctr_gap"] = round(row_copy["desktop_ctr"] - row_copy["mobile_ctr"], 4)
+            row_copy["device_focus"] = str(p_diag.get("device_focus") or "BALANCED")
+            row_copy["search_appearances"] = list(search_apps.keys())
+            row_copy["time_window_delta"] = qp_win_deltas.get(qp_id) or page_win_vel.get(p_k) or {}
+            row_copy["inspection_state"] = insp_by_path.get(p_k) or {}
+            out_list.append(row_copy)
+        return out_list
+
+    enriched_current_rows = _enrich_rows_with_multidim(current_rollup.get("rows", []))
+    enriched_snapshot_latest_rows = (
+        _enrich_rows_with_multidim(snapshot_latest_rollup.get("rows", []))
+        if snapshot_latest_rows
+        else enriched_current_rows
+    )
+
     return {
         "property_id": prop,
-        "current_rows": current_rollup.get("rows", []),
+        "current_rows": enriched_current_rows,
         "baseline_rows": baseline_rollup.get("rows", []),
-        "snapshot_latest_rows": snapshot_latest_rollup.get("rows", []),
+        "snapshot_latest_rows": enriched_snapshot_latest_rows,
         "impressions_by_path": current_rollup.get("impressions_by_path", {}),
         "clicks_by_path": current_rollup.get("clicks_by_path", {}),
         "redirect_rollup_summary": {
@@ -484,6 +1292,7 @@ def load_consolidated_gsc_query_rows(
             "ignored_off_topic_rows_count": current_rollup.get("ignored_off_topic_rows_count", 0),
             "canonical_targets_summary": current_rollup.get("canonical_targets_summary", {}),
         },
+        "multidimensional_telemetry": multidim_bundle,
         "earliest_snapshot_id": earliest_snapshot_id,
         "latest_snapshot_id": latest_snapshot_id,
         "earliest_recorded_at": earliest_recorded_at,
@@ -564,13 +1373,27 @@ def identify_content_decay(
         curr_pos = float(row.get("position", 100.0) or 100.0)
 
         base_row = base_by_qp.get(qp_key)
-        base_pos = float(base_row.get("position", curr_pos) or curr_pos) if base_row else curr_pos
-        base_impr = int(float(base_row.get("impressions", curr_impr) or curr_impr)) if base_row else curr_impr
-        base_clicks = int(float(base_row.get("clicks", curr_clicks) or curr_clicks)) if base_row else curr_clicks
-        base_ctr = float(base_row.get("ctr", curr_ctr) or curr_ctr) if base_row else curr_ctr
+        win_delta = row.get("time_window_delta") if isinstance(row.get("time_window_delta"), dict) else {}
+        if not base_row and win_delta.get("prior_28d_impressions"):
+            base_pos = float(win_delta.get("prior_28d_position", curr_pos) or curr_pos)
+            base_impr = int(float(win_delta.get("prior_28d_impressions", curr_impr) or curr_impr))
+            base_clicks = curr_clicks
+            base_ctr = float(win_delta.get("prior_28d_ctr", curr_ctr) or curr_ctr)
+        else:
+            base_pos = float(base_row.get("position", curr_pos) or curr_pos) if base_row else curr_pos
+            base_impr = int(float(base_row.get("impressions", curr_impr) or curr_impr)) if base_row else curr_impr
+            base_clicks = int(float(base_row.get("clicks", curr_clicks) or curr_clicks)) if base_row else curr_clicks
+            base_ctr = float(base_row.get("ctr", curr_ctr) or curr_ctr) if base_row else curr_ctr
 
         pos_delta = round(curr_pos - base_pos, 2)
         ctr_delta = round(curr_ctr - base_ctr, 4)
+
+        mob_impr = int(float(row.get("mobile_impressions", 0) or 0))
+        desk_impr = int(float(row.get("desktop_impressions", 0) or 0))
+        mob_ctr = float(row.get("mobile_ctr", 0.0) or 0.0)
+        desk_ctr = float(row.get("desktop_ctr", 0.0) or 0.0)
+        mob_ctr_gap = round(desk_ctr - mob_ctr, 4)
+        dev_focus = str(row.get("device_focus") or "BALANCED")
 
         rank_bucket = max(1, min(10, int(round(curr_pos))))
         expected_ctr = EXPECTED_CTR_CURVE.get(rank_bucket, 0.015) if curr_pos <= 15.0 else 0.01
@@ -587,6 +1410,9 @@ def identify_content_decay(
         elif curr_pos <= 12.0 and curr_impr >= 8 and curr_ctr < (expected_ctr * 0.5):
             decay_type = "CTR_DECAY"
             severity = "HIGH" if curr_impr >= 15 else "MEDIUM"
+        elif curr_pos <= 15.0 and mob_impr >= 6 and mob_ctr_gap >= 0.015 and mob_ctr < (expected_ctr * 0.6):
+            decay_type = "CTR_DECAY"
+            severity = "HIGH" if mob_impr >= 12 else "MEDIUM"
 
         if decay_type:
             leaf_slug = _slug_from_url_or_query(target_url=c_url, query=q)
@@ -618,6 +1444,13 @@ def identify_content_decay(
                     "current_ctr": round(curr_ctr, 4),
                     "ctr_delta": ctr_delta,
                     "expected_ctr": round(expected_ctr, 4),
+                    "mobile_impressions": mob_impr,
+                    "desktop_impressions": desk_impr,
+                    "mobile_ctr": round(mob_ctr, 4),
+                    "desktop_ctr": round(desk_ctr, 4),
+                    "mobile_ctr_gap": mob_ctr_gap,
+                    "device_focus": dev_focus,
+                    "time_window_trajectory": str(win_delta.get("trajectory_state") or "DECAYING"),
                     "urgency_score": urgency_score,
                     "recommended_action": (
                         "REFRESH_OVERLAY_AND_HEADINGS"
@@ -2479,22 +3312,45 @@ def audit_gsc_cannibalization_splits(
         by_query.setdefault(q, []).append(r)
 
     true_splits: List[Dict[str, Any]] = []
+    cross_device_splits: List[Dict[str, Any]] = []
     dominant_winner_suppressed: List[Dict[str, Any]] = []
     multi_url_queries_count = 0
 
     for q_text, q_rows in sorted(by_query.items()):
-        # Aggregate impressions by canonical URL for this query
+        # Aggregate impressions by canonical URL for this query, preserving device splits
         by_url: Dict[str, Dict[str, Any]] = {}
         for qr in q_rows:
             u_str = str(qr.get("canonical_url") or qr.get("page") or qr.get("canonical_path") or "").strip()
             imp = int(float(qr.get("impressions", 0) or 0))
             clk = int(float(qr.get("clicks", 0) or 0))
             pos = float(qr.get("position", 50.0) or 50.0)
-            entry = by_url.setdefault(u_str, {"url": u_str, "impressions": 0, "clicks": 0, "position": pos})
+            mob_imp = int(float(qr.get("mobile_impressions", 0) or 0))
+            desk_imp = int(float(qr.get("desktop_impressions", 0) or 0))
+            mob_pos = float(qr.get("mobile_position", pos) or pos)
+            desk_pos = float(qr.get("desktop_position", pos) or pos)
+            entry = by_url.setdefault(
+                u_str,
+                {
+                    "url": u_str,
+                    "impressions": 0,
+                    "clicks": 0,
+                    "position": pos,
+                    "mobile_impressions": 0,
+                    "desktop_impressions": 0,
+                    "mobile_position": mob_pos,
+                    "desktop_position": desk_pos,
+                },
+            )
             entry["impressions"] += imp
             entry["clicks"] += clk
+            entry["mobile_impressions"] += mob_imp
+            entry["desktop_impressions"] += desk_imp
             if pos < entry["position"]:
                 entry["position"] = pos
+            if mob_pos > 0 and (entry["mobile_position"] <= 0 or mob_pos < entry["mobile_position"]):
+                entry["mobile_position"] = mob_pos
+            if desk_pos > 0 and (entry["desktop_position"] <= 0 or desk_pos < entry["desktop_position"]):
+                entry["desktop_position"] = desk_pos
 
         if len(by_url) <= 1:
             continue
@@ -2514,13 +3370,19 @@ def audit_gsc_cannibalization_splits(
             "qualifying_split_urls": split_res.get("qualifying_split_urls", []),
             "incidental_noise_urls": split_res.get("incidental_noise_urls", []),
             "url_shares": split_res.get("url_shares", []),
+            "cross_device_split_detected": bool(split_res.get("cross_device_split_detected", False)),
+            "mobile_leader_url": str(split_res.get("mobile_leader_url") or ""),
+            "desktop_leader_url": str(split_res.get("desktop_leader_url") or ""),
         }
+        if split_res.get("cross_device_split_detected"):
+            cross_device_splits.append(record)
         if split_res.get("is_true_cannibalization_split"):
             true_splits.append(record)
         else:
             dominant_winner_suppressed.append(record)
 
     true_splits.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
+    cross_device_splits.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
     dominant_winner_suppressed.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
 
     return {
@@ -2528,8 +3390,10 @@ def audit_gsc_cannibalization_splits(
         "property_id": prop,
         "multi_url_queries_evaluated": multi_url_queries_count,
         "true_cannibalization_splits_count": len(true_splits),
+        "cross_device_splits_count": len(cross_device_splits),
         "dominant_winner_noise_suppressed_count": len(dominant_winner_suppressed),
         "true_cannibalization_splits": true_splits[:25],
+        "cross_device_splits": cross_device_splits[:25],
         "dominant_winner_suppressed": dominant_winner_suppressed[:25],
     }
 
@@ -4588,6 +5452,9 @@ def run_all_seo_growth_workflows(
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
 
     daily_records = harvest_and_sync_gsc_daily_timeline(prop, repo_root=root, live_gsc=live_gsc, persist=persist)
+    multidim_telemetry = harvest_and_sync_gsc_multidimensional_telemetry(
+        prop, repo_root=root, live_gsc=live_gsc, persist=persist
+    )
     consolidated_gsc = load_consolidated_gsc_query_rows(
         prop, repo_root=root, live_queries=live_queries, live_gsc=live_gsc
     )
@@ -4677,6 +5544,13 @@ def run_all_seo_growth_workflows(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "daily_gsc_records_synced": len(daily_records),
         "consolidated_gsc_rows_count": len(consolidated_gsc.get("current_rows") or []),
+        "gsc_lifecycle_telemetry": {
+            "status": multidim_telemetry.get("status", "PASS"),
+            "artifact": str(root / ".agy" / "gsc_lifecycle_telemetry.json"),
+            "dimensions_synced": multidim_telemetry.get("dimensions_synced", {}),
+            "property_device_summary": multidim_telemetry.get("property_device_summary", {}),
+            "search_appearances": multidim_telemetry.get("search_appearances", {}),
+        },
         "north_star_scorecard": {
             "status": north_star["status"],
             "artifact": str(root / ".agy" / "north_star_scorecard.json"),

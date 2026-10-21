@@ -645,3 +645,112 @@ class AlgorithmicCeilingAnalysis:
             metadata=data.get("metadata"),
         )
 
+
+@dataclass
+class GSCDeviceMetricRecord:
+    """Device-level Search Console telemetry record across property, page, and query dimensions."""
+    property_id: str
+    device: str
+    page: str = ""
+    query: str = ""
+    window_key: str = "recent_28d"
+    clicks: int = 0
+    impressions: int = 0
+    ctr: float = 0.0
+    position: float = 0.0
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCDeviceMetricRecord.property_id")
+        assert_no_forbidden_dashes(self.device, "GSCDeviceMetricRecord.device")
+        assert_no_forbidden_dashes(self.page, "GSCDeviceMetricRecord.page")
+        assert_no_forbidden_dashes(self.query, "GSCDeviceMetricRecord.query")
+        assert_no_forbidden_dashes(self.window_key, "GSCDeviceMetricRecord.window_key")
+        self.device = str(self.device or "DESKTOP").strip().upper()
+        if self.device not in ("DESKTOP", "MOBILE", "TABLET", "ALL"):
+            self.device = "DESKTOP"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GSCSearchAppearanceRecord:
+    """Rich-result Search Appearance telemetry record from Search Console (e.g., REVIEW_SNIPPET, PRODUCT_SNIPPETS)."""
+    property_id: str
+    search_appearance: str
+    window_key: str = "recent_90d"
+    clicks: int = 0
+    impressions: int = 0
+    ctr: float = 0.0
+    position: float = 0.0
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCSearchAppearanceRecord.property_id")
+        assert_no_forbidden_dashes(self.search_appearance, "GSCSearchAppearanceRecord.search_appearance")
+        assert_no_forbidden_dashes(self.window_key, "GSCSearchAppearanceRecord.window_key")
+        self.search_appearance = str(self.search_appearance or "").strip().upper()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GSCQueryPageWindowRecord:
+    """Time-windowed query + page Search Console telemetry snapshot for longitudinal velocity and decay analysis."""
+    property_id: str
+    window_key: str
+    query: str
+    page: str
+    clicks: int = 0
+    impressions: int = 0
+    ctr: float = 0.0
+    position: float = 0.0
+    window_start_date: str = ""
+    window_end_date: str = ""
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCQueryPageWindowRecord.property_id")
+        assert_no_forbidden_dashes(self.window_key, "GSCQueryPageWindowRecord.window_key")
+        assert_no_forbidden_dashes(self.query, "GSCQueryPageWindowRecord.query")
+        assert_no_forbidden_dashes(self.page, "GSCQueryPageWindowRecord.page")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GSCUrlInspectionRecord:
+    """Granular URL Inspection coverage and rich-result/mobile-usability state from Search Console."""
+    property_id: str
+    page_url: str
+    verdict: str = "NEUTRAL"
+    coverage_state: str = "Unknown"
+    indexing_state: str = "INDEXING_STATE_UNSPECIFIED"
+    page_fetch_state: str = "PAGE_FETCH_STATE_UNSPECIFIED"
+    robots_txt_state: str = "ROBOTS_TXT_STATE_UNSPECIFIED"
+    user_canonical: str = ""
+    google_canonical: str = ""
+    last_crawl_time: str = ""
+    crawled_as: str = "MOBILE"
+    rich_results_verdict: str = "VERDICT_UNSPECIFIED"
+    rich_results_types: List[str] = field(default_factory=list)
+    mobile_usability_verdict: str = "VERDICT_UNSPECIFIED"
+    referring_urls: List[str] = field(default_factory=list)
+    sitemaps: List[str] = field(default_factory=list)
+    root_cause_classification: str = ""
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCUrlInspectionRecord.property_id")
+        assert_no_forbidden_dashes(self.page_url, "GSCUrlInspectionRecord.page_url")
+        assert_no_forbidden_dashes(self.coverage_state, "GSCUrlInspectionRecord.coverage_state")
+        assert_no_forbidden_dashes(self.user_canonical, "GSCUrlInspectionRecord.user_canonical")
+        assert_no_forbidden_dashes(self.google_canonical, "GSCUrlInspectionRecord.google_canonical")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+

@@ -33,6 +33,10 @@ from pseofactory.trends.models import (
     GoogleUpdateEvent,
     AlgorithmicCeilingAnalysis,
     CeilingThresholdSpec,
+    GSCDeviceMetricRecord,
+    GSCSearchAppearanceRecord,
+    GSCQueryPageWindowRecord,
+    GSCUrlInspectionRecord,
 )
 from pseofactory.trends.filters import calculate_second_derivative_acceleration
 
@@ -414,6 +418,107 @@ class TrendHistoryDB:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_market_intel_candidates_score ON market_intel_candidates(fast_money_score DESC, rank ASC);"
+            )
+
+            # 12. gsc_device_metrics
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_device_metrics (
+                    property_id TEXT NOT NULL,
+                    window_key TEXT NOT NULL DEFAULT 'recent_28d',
+                    page TEXT NOT NULL DEFAULT '',
+                    query TEXT NOT NULL DEFAULT '',
+                    device TEXT NOT NULL CHECK(device IN ('DESKTOP', 'MOBILE', 'TABLET', 'ALL')),
+                    clicks INTEGER NOT NULL DEFAULT 0 CHECK(clicks >= 0),
+                    impressions INTEGER NOT NULL DEFAULT 0 CHECK(impressions >= 0),
+                    ctr REAL NOT NULL DEFAULT 0.0 CHECK(ctr >= 0.0 AND ctr <= 1.0),
+                    position REAL NOT NULL DEFAULT 0.0 CHECK(position >= 0.0),
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, window_key, page, query, device)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_device_prop_page ON gsc_device_metrics(property_id, page, device);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_device_prop_query ON gsc_device_metrics(property_id, query, device);"
+            )
+
+            # 13. gsc_search_appearance_metrics
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_search_appearance_metrics (
+                    property_id TEXT NOT NULL,
+                    window_key TEXT NOT NULL DEFAULT 'recent_90d',
+                    search_appearance TEXT NOT NULL,
+                    clicks INTEGER NOT NULL DEFAULT 0 CHECK(clicks >= 0),
+                    impressions INTEGER NOT NULL DEFAULT 0 CHECK(impressions >= 0),
+                    ctr REAL NOT NULL DEFAULT 0.0 CHECK(ctr >= 0.0 AND ctr <= 1.0),
+                    position REAL NOT NULL DEFAULT 0.0 CHECK(position >= 0.0),
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, window_key, search_appearance)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_appearance_prop ON gsc_search_appearance_metrics(property_id, impressions DESC);"
+            )
+
+            # 14. gsc_query_page_windows
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_query_page_windows (
+                    property_id TEXT NOT NULL,
+                    window_key TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    page TEXT NOT NULL,
+                    clicks INTEGER NOT NULL DEFAULT 0 CHECK(clicks >= 0),
+                    impressions INTEGER NOT NULL DEFAULT 0 CHECK(impressions >= 0),
+                    ctr REAL NOT NULL DEFAULT 0.0 CHECK(ctr >= 0.0 AND ctr <= 1.0),
+                    position REAL NOT NULL DEFAULT 0.0 CHECK(position >= 0.0),
+                    window_start_date TEXT NOT NULL DEFAULT '',
+                    window_end_date TEXT NOT NULL DEFAULT '',
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, window_key, query, page)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_qp_windows_prop_page ON gsc_query_page_windows(property_id, window_key, page);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_qp_windows_prop_query ON gsc_query_page_windows(property_id, window_key, query);"
+            )
+
+            # 15. gsc_url_inspection_states
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_url_inspection_states (
+                    property_id TEXT NOT NULL,
+                    page_url TEXT NOT NULL,
+                    verdict TEXT NOT NULL DEFAULT 'NEUTRAL',
+                    coverage_state TEXT NOT NULL DEFAULT 'Unknown',
+                    indexing_state TEXT NOT NULL DEFAULT 'INDEXING_STATE_UNSPECIFIED',
+                    page_fetch_state TEXT NOT NULL DEFAULT 'PAGE_FETCH_STATE_UNSPECIFIED',
+                    robots_txt_state TEXT NOT NULL DEFAULT 'ROBOTS_TXT_STATE_UNSPECIFIED',
+                    user_canonical TEXT NOT NULL DEFAULT '',
+                    google_canonical TEXT NOT NULL DEFAULT '',
+                    last_crawl_time TEXT NOT NULL DEFAULT '',
+                    crawled_as TEXT NOT NULL DEFAULT 'MOBILE',
+                    rich_results_verdict TEXT NOT NULL DEFAULT 'VERDICT_UNSPECIFIED',
+                    rich_results_types TEXT NOT NULL DEFAULT '[]',
+                    mobile_usability_verdict TEXT NOT NULL DEFAULT 'VERDICT_UNSPECIFIED',
+                    referring_urls TEXT NOT NULL DEFAULT '[]',
+                    sitemaps TEXT NOT NULL DEFAULT '[]',
+                    root_cause_classification TEXT NOT NULL DEFAULT '',
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, page_url)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_inspection_prop_verdict ON gsc_url_inspection_states(property_id, verdict, coverage_state);"
             )
 
     # -------------------------------------------------------------------------
@@ -1247,4 +1352,474 @@ class TrendHistoryDB:
             item["evaluated_at"] = r["evaluated_at"]
             results.append(item)
         return results
+
+    # -------------------------------------------------------------------------
+    # Multi-Dimensional GSC Lifecycle Telemetry Operations
+    # -------------------------------------------------------------------------
+
+    def get_latest_gsc_ceiling_snapshot(
+        self,
+        property_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieves the most recent algorithmic ceiling snapshot for a property."""
+        conn = self.get_connection()
+        row = conn.execute(
+            """
+            SELECT snapshot_id, property_id, computed_at, analysis_window_days,
+                   peak_impressions_rma28, current_impressions_rma28, ceiling_detected,
+                   ceiling_dampening_score, correlated_update_id, recommendation, metadata
+            FROM gsc_ceiling_snapshots
+            WHERE property_id = ?
+            ORDER BY computed_at DESC
+            LIMIT 1;
+            """,
+            (str(property_id),),
+        ).fetchone()
+        if not row:
+            return None
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        return {
+            "snapshot_id": row["snapshot_id"],
+            "property_id": row["property_id"],
+            "computed_at": row["computed_at"],
+            "analysis_window_days": int(row["analysis_window_days"]),
+            "peak_impressions_rma28": float(row["peak_impressions_rma28"]),
+            "current_impressions_rma28": float(row["current_impressions_rma28"]),
+            "ceiling_detected": bool(row["ceiling_detected"]),
+            "ceiling_dampening_score": float(row["ceiling_dampening_score"]),
+            "correlated_update_id": row["correlated_update_id"],
+            "recommendation": row["recommendation"],
+            "metadata": meta,
+        }
+
+    def upsert_gsc_device_metrics(
+        self,
+        records: List[Union[GSCDeviceMetricRecord, Dict[str, Any]]],
+    ) -> int:
+        """Idempotently upserts device-level Search Console telemetry records."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        count = 0
+        with self.transaction() as cur:
+            for item in records:
+                rec = (
+                    item
+                    if isinstance(item, GSCDeviceMetricRecord)
+                    else GSCDeviceMetricRecord(
+                        property_id=str(item.get("property_id", "")),
+                        device=str(item.get("device", "DESKTOP")),
+                        page=str(item.get("page", "")),
+                        query=str(item.get("query", "")),
+                        window_key=str(item.get("window_key", "recent_28d")),
+                        clicks=max(0, int(item.get("clicks", 0) or 0)),
+                        impressions=max(0, int(item.get("impressions", 0) or 0)),
+                        ctr=max(0.0, min(1.0, float(item.get("ctr", 0.0) or 0.0))),
+                        position=max(0.0, float(item.get("position", 0.0) or 0.0)),
+                        recorded_at=str(item.get("recorded_at") or now_iso),
+                    )
+                )
+                cur.execute(
+                    """
+                    INSERT INTO gsc_device_metrics (
+                        property_id, window_key, page, query, device,
+                        clicks, impressions, ctr, position, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(property_id, window_key, page, query, device) DO UPDATE SET
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        position = excluded.position,
+                        recorded_at = excluded.recorded_at;
+                    """,
+                    (
+                        rec.property_id,
+                        rec.window_key,
+                        rec.page,
+                        rec.query,
+                        rec.device,
+                        rec.clicks,
+                        rec.impressions,
+                        rec.ctr,
+                        rec.position,
+                        rec.recorded_at,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_gsc_device_metrics(
+        self,
+        property_id: str,
+        window_key: str = "recent_28d",
+        page: Optional[str] = None,
+        query: Optional[str] = None,
+    ) -> List[GSCDeviceMetricRecord]:
+        """Retrieves persisted device-level Search Console telemetry for a property."""
+        conn = self.get_connection()
+        clauses = ["property_id = ?", "window_key = ?"]
+        params: List[Any] = [str(property_id), str(window_key)]
+        if page is not None:
+            clauses.append("page = ?")
+            params.append(str(page))
+        if query is not None:
+            clauses.append("query = ?")
+            params.append(str(query))
+        sql = f"""
+            SELECT property_id, window_key, page, query, device,
+                   clicks, impressions, ctr, position, recorded_at
+            FROM gsc_device_metrics
+            WHERE {' AND '.join(clauses)}
+            ORDER BY impressions DESC, clicks DESC;
+        """
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        return [
+            GSCDeviceMetricRecord(
+                property_id=r["property_id"],
+                window_key=r["window_key"],
+                page=r["page"],
+                query=r["query"],
+                device=r["device"],
+                clicks=int(r["clicks"]),
+                impressions=int(r["impressions"]),
+                ctr=float(r["ctr"]),
+                position=float(r["position"]),
+                recorded_at=r["recorded_at"],
+            )
+            for r in rows
+        ]
+
+    def upsert_gsc_search_appearance_metrics(
+        self,
+        records: List[Union[GSCSearchAppearanceRecord, Dict[str, Any]]],
+    ) -> int:
+        """Idempotently upserts rich-result Search Appearance telemetry records."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        count = 0
+        with self.transaction() as cur:
+            for item in records:
+                rec = (
+                    item
+                    if isinstance(item, GSCSearchAppearanceRecord)
+                    else GSCSearchAppearanceRecord(
+                        property_id=str(item.get("property_id", "")),
+                        search_appearance=str(item.get("search_appearance", "")),
+                        window_key=str(item.get("window_key", "recent_90d")),
+                        clicks=max(0, int(item.get("clicks", 0) or 0)),
+                        impressions=max(0, int(item.get("impressions", 0) or 0)),
+                        ctr=max(0.0, min(1.0, float(item.get("ctr", 0.0) or 0.0))),
+                        position=max(0.0, float(item.get("position", 0.0) or 0.0)),
+                        recorded_at=str(item.get("recorded_at") or now_iso),
+                    )
+                )
+                if not rec.search_appearance:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO gsc_search_appearance_metrics (
+                        property_id, window_key, search_appearance,
+                        clicks, impressions, ctr, position, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(property_id, window_key, search_appearance) DO UPDATE SET
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        position = excluded.position,
+                        recorded_at = excluded.recorded_at;
+                    """,
+                    (
+                        rec.property_id,
+                        rec.window_key,
+                        rec.search_appearance,
+                        rec.clicks,
+                        rec.impressions,
+                        rec.ctr,
+                        rec.position,
+                        rec.recorded_at,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_gsc_search_appearance_metrics(
+        self,
+        property_id: str,
+        window_key: str = "recent_90d",
+    ) -> List[GSCSearchAppearanceRecord]:
+        """Retrieves persisted Search Appearance telemetry records for a property."""
+        conn = self.get_connection()
+        rows = conn.execute(
+            """
+            SELECT property_id, window_key, search_appearance,
+                   clicks, impressions, ctr, position, recorded_at
+            FROM gsc_search_appearance_metrics
+            WHERE property_id = ? AND window_key = ?
+            ORDER BY impressions DESC, clicks DESC;
+            """,
+            (str(property_id), str(window_key)),
+        ).fetchall()
+        return [
+            GSCSearchAppearanceRecord(
+                property_id=r["property_id"],
+                window_key=r["window_key"],
+                search_appearance=r["search_appearance"],
+                clicks=int(r["clicks"]),
+                impressions=int(r["impressions"]),
+                ctr=float(r["ctr"]),
+                position=float(r["position"]),
+                recorded_at=r["recorded_at"],
+            )
+            for r in rows
+        ]
+
+    def upsert_gsc_query_page_windows(
+        self,
+        records: List[Union[GSCQueryPageWindowRecord, Dict[str, Any]]],
+    ) -> int:
+        """Idempotently upserts time-windowed query + page telemetry snapshots."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        count = 0
+        with self.transaction() as cur:
+            for item in records:
+                rec = (
+                    item
+                    if isinstance(item, GSCQueryPageWindowRecord)
+                    else GSCQueryPageWindowRecord(
+                        property_id=str(item.get("property_id", "")),
+                        window_key=str(item.get("window_key", "recent_28d")),
+                        query=str(item.get("query", "")),
+                        page=str(item.get("page", "")),
+                        clicks=max(0, int(item.get("clicks", 0) or 0)),
+                        impressions=max(0, int(item.get("impressions", 0) or 0)),
+                        ctr=max(0.0, min(1.0, float(item.get("ctr", 0.0) or 0.0))),
+                        position=max(0.0, float(item.get("position", 0.0) or 0.0)),
+                        window_start_date=str(item.get("window_start_date", "")),
+                        window_end_date=str(item.get("window_end_date", "")),
+                        recorded_at=str(item.get("recorded_at") or now_iso),
+                    )
+                )
+                if not rec.query and not rec.page:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO gsc_query_page_windows (
+                        property_id, window_key, query, page,
+                        clicks, impressions, ctr, position,
+                        window_start_date, window_end_date, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(property_id, window_key, query, page) DO UPDATE SET
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        position = excluded.position,
+                        window_start_date = excluded.window_start_date,
+                        window_end_date = excluded.window_end_date,
+                        recorded_at = excluded.recorded_at;
+                    """,
+                    (
+                        rec.property_id,
+                        rec.window_key,
+                        rec.query,
+                        rec.page,
+                        rec.clicks,
+                        rec.impressions,
+                        rec.ctr,
+                        rec.position,
+                        rec.window_start_date,
+                        rec.window_end_date,
+                        rec.recorded_at,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_gsc_query_page_windows(
+        self,
+        property_id: str,
+        window_key: str = "recent_28d",
+        page: Optional[str] = None,
+    ) -> List[GSCQueryPageWindowRecord]:
+        """Retrieves persisted time-windowed query + page telemetry snapshots."""
+        conn = self.get_connection()
+        if page is not None:
+            rows = conn.execute(
+                """
+                SELECT property_id, window_key, query, page,
+                       clicks, impressions, ctr, position,
+                       window_start_date, window_end_date, recorded_at
+                FROM gsc_query_page_windows
+                WHERE property_id = ? AND window_key = ? AND page = ?
+                ORDER BY impressions DESC, clicks DESC;
+                """,
+                (str(property_id), str(window_key), str(page)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT property_id, window_key, query, page,
+                       clicks, impressions, ctr, position,
+                       window_start_date, window_end_date, recorded_at
+                FROM gsc_query_page_windows
+                WHERE property_id = ? AND window_key = ?
+                ORDER BY impressions DESC, clicks DESC;
+                """,
+                (str(property_id), str(window_key)),
+            ).fetchall()
+        return [
+            GSCQueryPageWindowRecord(
+                property_id=r["property_id"],
+                window_key=r["window_key"],
+                query=r["query"],
+                page=r["page"],
+                clicks=int(r["clicks"]),
+                impressions=int(r["impressions"]),
+                ctr=float(r["ctr"]),
+                position=float(r["position"]),
+                window_start_date=r["window_start_date"],
+                window_end_date=r["window_end_date"],
+                recorded_at=r["recorded_at"],
+            )
+            for r in rows
+        ]
+
+    def upsert_gsc_url_inspection_states(
+        self,
+        records: List[Union[GSCUrlInspectionRecord, Dict[str, Any]]],
+    ) -> int:
+        """Idempotently upserts granular URL Inspection coverage and rich-result/mobile usability states."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        count = 0
+        with self.transaction() as cur:
+            for item in records:
+                rec = (
+                    item
+                    if isinstance(item, GSCUrlInspectionRecord)
+                    else GSCUrlInspectionRecord(
+                        property_id=str(item.get("property_id", "")),
+                        page_url=str(item.get("page_url", "") or item.get("url", "")),
+                        verdict=str(item.get("verdict", "NEUTRAL")),
+                        coverage_state=str(item.get("coverage_state", "Unknown")),
+                        indexing_state=str(item.get("indexing_state", "INDEXING_STATE_UNSPECIFIED")),
+                        page_fetch_state=str(item.get("page_fetch_state", "PAGE_FETCH_STATE_UNSPECIFIED")),
+                        robots_txt_state=str(item.get("robots_txt_state", "ROBOTS_TXT_STATE_UNSPECIFIED")),
+                        user_canonical=str(item.get("user_canonical", "")),
+                        google_canonical=str(item.get("google_canonical", "")),
+                        last_crawl_time=str(item.get("last_crawl_time", "")),
+                        crawled_as=str(item.get("crawled_as", "MOBILE")),
+                        rich_results_verdict=str(item.get("rich_results_verdict", "VERDICT_UNSPECIFIED")),
+                        rich_results_types=list(item.get("rich_results_types", [])),
+                        mobile_usability_verdict=str(item.get("mobile_usability_verdict", "VERDICT_UNSPECIFIED")),
+                        referring_urls=list(item.get("referring_urls", [])),
+                        sitemaps=list(item.get("sitemaps", [])),
+                        root_cause_classification=str(item.get("root_cause_classification", "")),
+                        recorded_at=str(item.get("recorded_at") or now_iso),
+                    )
+                )
+                if not rec.page_url:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO gsc_url_inspection_states (
+                        property_id, page_url, verdict, coverage_state, indexing_state,
+                        page_fetch_state, robots_txt_state, user_canonical, google_canonical,
+                        last_crawl_time, crawled_as, rich_results_verdict, rich_results_types,
+                        mobile_usability_verdict, referring_urls, sitemaps,
+                        root_cause_classification, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(property_id, page_url) DO UPDATE SET
+                        verdict = excluded.verdict,
+                        coverage_state = excluded.coverage_state,
+                        indexing_state = excluded.indexing_state,
+                        page_fetch_state = excluded.page_fetch_state,
+                        robots_txt_state = excluded.robots_txt_state,
+                        user_canonical = excluded.user_canonical,
+                        google_canonical = excluded.google_canonical,
+                        last_crawl_time = excluded.last_crawl_time,
+                        crawled_as = excluded.crawled_as,
+                        rich_results_verdict = excluded.rich_results_verdict,
+                        rich_results_types = excluded.rich_results_types,
+                        mobile_usability_verdict = excluded.mobile_usability_verdict,
+                        referring_urls = excluded.referring_urls,
+                        sitemaps = excluded.sitemaps,
+                        root_cause_classification = excluded.root_cause_classification,
+                        recorded_at = excluded.recorded_at;
+                    """,
+                    (
+                        rec.property_id,
+                        rec.page_url,
+                        rec.verdict,
+                        rec.coverage_state,
+                        rec.indexing_state,
+                        rec.page_fetch_state,
+                        rec.robots_txt_state,
+                        rec.user_canonical,
+                        rec.google_canonical,
+                        rec.last_crawl_time,
+                        rec.crawled_as,
+                        rec.rich_results_verdict,
+                        json.dumps(rec.rich_results_types),
+                        rec.mobile_usability_verdict,
+                        json.dumps(rec.referring_urls),
+                        json.dumps(rec.sitemaps),
+                        rec.root_cause_classification,
+                        rec.recorded_at,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_gsc_url_inspection_states(
+        self,
+        property_id: str,
+        page_url: Optional[str] = None,
+    ) -> List[GSCUrlInspectionRecord]:
+        """Retrieves persisted URL Inspection states for a property."""
+        conn = self.get_connection()
+        if page_url is not None:
+            rows = conn.execute(
+                """
+                SELECT * FROM gsc_url_inspection_states
+                WHERE property_id = ? AND page_url = ?;
+                """,
+                (str(property_id), str(page_url)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT * FROM gsc_url_inspection_states
+                WHERE property_id = ?
+                ORDER BY recorded_at DESC;
+                """,
+                (str(property_id),),
+            ).fetchall()
+        return [
+            GSCUrlInspectionRecord(
+                property_id=r["property_id"],
+                page_url=r["page_url"],
+                verdict=r["verdict"],
+                coverage_state=r["coverage_state"],
+                indexing_state=r["indexing_state"],
+                page_fetch_state=r["page_fetch_state"],
+                robots_txt_state=r["robots_txt_state"],
+                user_canonical=r["user_canonical"],
+                google_canonical=r["google_canonical"],
+                last_crawl_time=r["last_crawl_time"],
+                crawled_as=r["crawled_as"],
+                rich_results_verdict=r["rich_results_verdict"],
+                rich_results_types=json.loads(r["rich_results_types"] or "[]"),
+                mobile_usability_verdict=r["mobile_usability_verdict"],
+                referring_urls=json.loads(r["referring_urls"] or "[]"),
+                sitemaps=json.loads(r["sitemaps"] or "[]"),
+                root_cause_classification=r["root_cause_classification"],
+                recorded_at=r["recorded_at"],
+            )
+            for r in rows
+        ]
+
 

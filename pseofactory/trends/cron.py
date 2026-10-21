@@ -36,7 +36,11 @@ from pseofactory.trends.models import (
     JevEvaluationRecord,
     NicheClusterProposal,
 )
-from pseofactory.trends.collectors import MultiSourceCollector, generate_spike_id
+from pseofactory.trends.collectors import (
+    GSCSearchConsoleCollector,
+    MultiSourceCollector,
+    generate_spike_id,
+)
 from pseofactory.trends.filters import NoiseFilter
 from pseofactory.trends.treg_checker import TregChecker
 from pseofactory.trends.jev_engine import (
@@ -325,7 +329,14 @@ class TrendCronRunner:
         # Acquire atomic advisory lock on <db_path>.lock with bounded wait for concurrent fleet/timer execution
         with db.acquire_lock(non_blocking=True, timeout=lock_timeout):
             # 1. Start cycle in DB
-            sources_crawled = ["google_suggest", "youtube_suggest", "reddit_autocomplete", "hn_search", "google_trends_rss"]
+            sources_crawled = [
+                "google_suggest",
+                "youtube_suggest",
+                "reddit_autocomplete",
+                "hn_search",
+                "google_trends_rss",
+                "gsc_search_console",
+            ]
             if fixture_path:
                 sources_crawled = ["fixture"]
 
@@ -337,20 +348,77 @@ class TrendCronRunner:
                 spikes = self.load_fixture(fixture_path)
             else:
                 collector = MultiSourceCollector()
+                collector.collectors.append(GSCSearchConsoleCollector(db_path=self.db_path))
                 spikes = collector.harvest(seed_list)
 
-            # 3. Preload existing tools for cannibalization checks
+            # 3. Preload existing tools and persisted GSC telemetry for cannibalization & ceiling checks
             existing_tools_map: Dict[str, List[Dict[str, Any]]] = {}
+            site_impressions_by_prop: Dict[str, int] = {
+                "prexvo": total_site_impressions,
+                "profithelm": total_site_impressions,
+                "unassigned": total_site_impressions,
+            }
+            ceiling_by_prop: Dict[str, Optional[Dict[str, Any]]] = {
+                "prexvo": None,
+                "profithelm": None,
+                "unassigned": None,
+            }
+            gsc_qp_by_prop_slug: Dict[str, Dict[str, Dict[str, Any]]] = {"prexvo": {}, "profithelm": {}}
             try:
                 reg = TenantRegistry.default()
                 for p_id in ("prexvo", "profithelm"):
                     try:
                         adapter = reg.get_adapter(p_id)
-                        existing_tools_map[p_id] = getattr(adapter, "tools", []) or []
+                        existing_tools_map[p_id] = [dict(t) for t in (getattr(adapter, "tools", []) or [])]
                     except Exception:
                         existing_tools_map[p_id] = []
             except Exception:
                 existing_tools_map = {"prexvo": [], "profithelm": []}
+
+            try:
+                for p_id in ("prexvo", "profithelm"):
+                    if total_site_impressions == 500:
+                        daily_m = db.get_gsc_daily_metrics(p_id, days=28)
+                        if daily_m:
+                            site_impressions_by_prop[p_id] = max(1, sum(int(m.impressions) for m in daily_m))
+                    ceiling_by_prop[p_id] = db.get_latest_gsc_ceiling_snapshot(p_id)
+                    win_rows = db.get_gsc_query_page_windows(p_id, window_key="recent_28d")
+                    dev_rows = db.get_gsc_device_metrics(p_id, window_key="recent_90d") or db.get_gsc_device_metrics(p_id, window_key="recent_28d")
+                    dev_by_page: Dict[str, Dict[str, Any]] = {}
+                    for dr in dev_rows:
+                        if dr.page and not dr.query:
+                            dev_by_page.setdefault(dr.page, {})[dr.device] = {
+                                "clicks": dr.clicks,
+                                "impressions": dr.impressions,
+                                "ctr": dr.ctr,
+                                "position": dr.position,
+                            }
+                    for wr in win_rows:
+                        p_parts = [pt for pt in wr.page.split("/") if pt and pt not in ("https:", "http:", "profithelm.com", "prexvo.com", "tools")]
+                        s_key = p_parts[0].lower() if p_parts else sanitize_url_slug(wr.query)
+                        b_entry = gsc_qp_by_prop_slug[p_id].setdefault(
+                            s_key,
+                            {
+                                "impressions": 0,
+                                "clicks": 0,
+                                "best_position": 100.0,
+                                "devices": dev_by_page.get(wr.page, {}),
+                            },
+                        )
+                        b_entry["impressions"] += wr.impressions
+                        b_entry["clicks"] += wr.clicks
+                        if 0.0 < wr.position < b_entry["best_position"]:
+                            b_entry["best_position"] = wr.position
+                    for tool in existing_tools_map.get(p_id, []):
+                        t_slug = str(tool.get("slug", "")).strip().lower()
+                        if t_slug and t_slug in gsc_qp_by_prop_slug[p_id]:
+                            g_info = gsc_qp_by_prop_slug[p_id][t_slug]
+                            if "position" not in tool and g_info["best_position"] < 100.0:
+                                tool["position"] = g_info["best_position"]
+                            tool["gsc_impressions_28d"] = g_info["impressions"]
+                            tool["gsc_devices"] = g_info["devices"]
+            except Exception:
+                pass
 
             obs_records: List[RawObservationRecord] = []
             eval_records: List[JevEvaluationRecord] = []
@@ -647,6 +715,11 @@ class TrendCronRunner:
                 if cand.metadata is None:
                     cand.metadata = {}
                 cand.metadata.setdefault("property_id", assigned_property)
+                if "gsc_telemetry" in raw_meta:
+                    cand.metadata["gsc_telemetry"] = raw_meta["gsc_telemetry"]
+                if ceiling_by_prop.get(assigned_property):
+                    cand.metadata["ceiling_status"] = ceiling_by_prop[assigned_property]
+                eff_site_impr = site_impressions_by_prop.get(assigned_property, total_site_impressions)
                 mock_jev = raw_meta.get("jev_mock")
                 decision = self.jev_engine.evaluate(
                     candidate=cand,
@@ -654,7 +727,7 @@ class TrendCronRunner:
                     cannibalization_context=cann_ctx,
                     jev_mock=mock_jev,
                     position=pos,
-                    total_site_impressions=total_site_impressions,
+                    total_site_impressions=eff_site_impr,
                 )
                 monetization_qual = qualify_monetization_opportunity(
                     query=clean_q,

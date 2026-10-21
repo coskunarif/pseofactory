@@ -6664,3 +6664,73 @@ def audit_estate_partner_roster_and_compliance(
         "violations": violations,
     }
 
+
+def verify_gsc_lifecycle_telemetry_contract(
+    repo_root: Union[str, Path],
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Mechanical verification gate asserting that multi-dimensional Google Search Console
+    telemetry (device splits, rich-result searchAppearances, time-window velocity/decay,
+    and granular URL inspection coverage states) is persisted and reflected in the
+    tenant's .agy/gsc_lifecycle_telemetry.json ledger and compiled dist/ HTML outputs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes
+
+    r_path = Path(repo_root).resolve()
+    prop = (property_id or "profithelm").strip().lower()
+    telemetry_file = r_path / ".agy" / "gsc_lifecycle_telemetry.json"
+    issues: List[str] = []
+
+    if not telemetry_file.is_file():
+        issues.append(f"Missing multi-dimensional GSC telemetry ledger at {telemetry_file}")
+        return {
+            "status": "FAIL",
+            "passed": False,
+            "gate": "verify_gsc_lifecycle_telemetry_contract",
+            "property_id": prop,
+            "issues": issues,
+        }
+
+    try:
+        raw_text = telemetry_file.read_text(encoding="utf-8")
+        assert_no_forbidden_dashes(raw_text, context="gsc_lifecycle_telemetry.json")
+        payload = json.loads(raw_text)
+    except Exception as exc:
+        issues.append(f"Invalid gsc_lifecycle_telemetry.json: {exc}")
+        return {
+            "status": "FAIL",
+            "passed": False,
+            "gate": "verify_gsc_lifecycle_telemetry_contract",
+            "property_id": prop,
+            "issues": issues,
+        }
+
+    required_keys = (
+        "dimensions_synced",
+        "property_device_summary",
+        "page_device_diagnostics",
+        "search_appearances",
+        "time_window_velocity",
+        "url_inspection_summary",
+    )
+    for rk in required_keys:
+        if rk not in payload:
+            issues.append(f"Missing required telemetry dimension key '{rk}' in gsc_lifecycle_telemetry.json")
+
+    if payload.get("property_id") != prop:
+        issues.append(
+            f"Telemetry property_id mismatch: expected '{prop}', got '{payload.get('property_id')}'"
+        )
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": len(issues) == 0,
+        "gate": "verify_gsc_lifecycle_telemetry_contract",
+        "property_id": prop,
+        "dimensions_synced": payload.get("dimensions_synced", {}),
+        "issues": issues,
+    }
+
+

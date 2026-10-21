@@ -82,6 +82,9 @@ class RootCauseClassification(str, Enum):
     CANONICAL_TEMPLATE_DEFECT = "CANONICAL_TEMPLATE_DEFECT"
     CONTENT_DEPTH_DEFICIT = "CONTENT_DEPTH_DEFICIT"
     ALGORITHMIC_EXPANSION_FREEZE = "ALGORITHMIC_EXPANSION_FREEZE"
+    INDEXED_HEALTHY = "INDEXED_HEALTHY"
+    ROBOTS_OR_NOINDEX_EXCLUSION = "ROBOTS_OR_NOINDEX_EXCLUSION"
+    RICH_RESULT_OR_MOBILE_USABILITY_DEFECT = "RICH_RESULT_OR_MOBILE_USABILITY_DEFECT"
     UNKNOWN_OR_UNCLASSIFIED = "UNKNOWN_OR_UNCLASSIFIED"
 
     def __str__(self) -> str:
@@ -146,7 +149,7 @@ class GSCRootCauseClassifier:
     @classmethod
     def classify(
         cls,
-        item: Union[Dict[str, Any], str],
+        item: Optional[Union[Dict[str, Any], str]] = None,
         coverage_state: Optional[str] = None,
         verdict: Optional[str] = None,
         error: Optional[str] = None,
@@ -154,6 +157,7 @@ class GSCRootCauseClassifier:
         word_count: Optional[int] = None,
         canonical_base: Optional[str] = None,
         section_rules: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> DiagnosisResult:
         """
         Classifies an unindexed URL or inspection anomaly into a structured DiagnosisResult
@@ -164,13 +168,16 @@ class GSCRootCauseClassifier:
 
         if isinstance(item, str):
             url = item
-            data: Dict[str, Any] = {}
+            data: Dict[str, Any] = dict(kwargs)
         elif isinstance(item, dict):
-            data = item
-            url = str(data.get("url") or data.get("target_url") or "")
+            data = {**kwargs, **item}
+            url = str(data.get("url") or data.get("page_url") or data.get("target_url") or "")
+        elif item is None:
+            data = dict(kwargs)
+            url = str(data.get("url") or data.get("page_url") or data.get("target_url") or data.get("slug") or "")
         else:
             url = getattr(item, "url", str(item))
-            data = getattr(item, "__dict__", {})
+            data = {**kwargs, **getattr(item, "__dict__", {})}
 
         sec_info = classify_url_template_section(
             url,
@@ -228,7 +235,7 @@ class GSCRootCauseClassifier:
         if is_thin:
             return DiagnosisResult(
                 url=url,
-                classification=RootCauseClassification.CONTENT_DEPTH_DEFICIT.value,
+                classification=RootCauseClassification.CONTENT_DEPTH_DEFICIT,
                 reason=f"Body content depth ({eff_words if eff_words is not None else '<150'} words) below 150-word preflight threshold",
                 remediation_action="Expand programmatic content body using structured data tables and FAQ accordions",
                 reflection_path=f"adapter.build_asset(slug) -> Preflight Stage 5 check -> Refresh {child_sitemap}",
@@ -248,7 +255,7 @@ class GSCRootCauseClassifier:
         ):
             return DiagnosisResult(
                 url=url,
-                classification=RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value,
+                classification=RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY,
                 reason="Page crawled by search crawler but omitted from index due to quality or answer deficiency",
                 remediation_action="Enrich entity context, inject Princeton GEO direct answer block, verify H1 uniqueness",
                 reflection_path=f"reflect_and_recompile_all_assets(properties=[tenant]) -> Preflight Stage 5 -> Resubmit {child_sitemap} and Tier-1 Hubs",
@@ -268,7 +275,7 @@ class GSCRootCauseClassifier:
         ):
             return DiagnosisResult(
                 url=url,
-                classification=RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value,
+                classification=RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG,
                 reason="Page discovered but crawl queue delayed due to crawl budget or external signal lag",
                 remediation_action="Verify depth <= 2. Boost crawling signals across AI and traditional aggregators without burning GSC daily API quota",
                 reflection_path=f"Dispatch fast-index (IndexNow + WebSub hub ping + Ping-O-Matic). Keep in {child_sitemap}",
@@ -280,7 +287,8 @@ class GSCRootCauseClassifier:
                 submitted_pages_only_scope=submitted_scope,
             )
 
-        # 3. HTTP 404 / 410 / Dead Route
+        # 3. HTTP 404 / 410 / Soft 404 / Dead Route
+        page_fetch = str(data.get("page_fetch_state") or data.get("pageFetchState") or "").lower()
         is_404 = (
             eff_status in (404, 410, "404", "410")
             or "404" in err_lower
@@ -289,17 +297,19 @@ class GSCRootCauseClassifier:
             or "404" in cov_lower
             or "410" in cov_lower
             or "not found" in cov_lower
+            or "soft_404" in page_fetch
+            or "not_found" in page_fetch
             or "dead_route" in err_lower
             or "quarantine_http_error" in err_lower
         )
         if is_404:
             return DiagnosisResult(
                 url=url,
-                classification=RootCauseClassification.DEAD_ROUTE_IN_SITEMAP.value,
+                classification=RootCauseClassification.DEAD_ROUTE_IN_SITEMAP,
                 reason="Target URL returns HTTP 404/410 or missing from compiled dist directory",
                 remediation_action=f"Airlock quarantine in indexing_quarantine_ledger.json. Remove URL from dist/sitemap.xml and dist/{child_sitemap}",
                 reflection_path="gsccli index publish --action URL_DELETED if previously pushed to Google Indexing API",
-                metadata={**base_meta, "status_code": eff_status, "error": eff_err},
+                metadata={**base_meta, "status_code": eff_status, "error": eff_err, "page_fetch_state": page_fetch},
                 section=section,
                 child_sitemap=child_sitemap,
                 child_sitemap_url=child_sitemap_url,
@@ -307,13 +317,15 @@ class GSCRootCauseClassifier:
                 submitted_pages_only_scope=submitted_scope,
             )
 
-        # 4. Canonical Mismatch
-        user_canon = str(data.get("user_canonical") or "").strip().rstrip("/")
-        google_canon = str(data.get("google_canonical") or "").strip().rstrip("/")
+        # 4. Canonical Mismatch or Redirect / Duplicate Consolidation
+        user_canon = str(data.get("user_canonical") or data.get("userCanonical") or "").strip().rstrip("/")
+        google_canon = str(data.get("google_canonical") or data.get("googleCanonical") or "").strip().rstrip("/")
         is_canonical = (
             "canonical" in err_lower
             or "canonical_mismatch" in err_lower
             or "canonical" in cov_lower
+            or "duplicate" in cov_lower
+            or "page with redirect" in cov_lower
             or data.get("canonical_match") is False
             or (bool(user_canon) and bool(google_canon) and user_canon != google_canon)
             or "quarantine_unindexable_meta" in err_lower
@@ -321,11 +333,42 @@ class GSCRootCauseClassifier:
         if is_canonical:
             return DiagnosisResult(
                 url=url,
-                classification=RootCauseClassification.CANONICAL_TEMPLATE_DEFECT.value,
+                classification=RootCauseClassification.CANONICAL_TEMPLATE_DEFECT,
                 reason="HTML link rel canonical tag mismatches expected canonical base URL",
                 remediation_action="Repair property adapter canonical domain template (canonical_base vs HTML <link rel='canonical'>)",
                 reflection_path=f"Recompile child property HTML -> Verify Preflight Stage 3 (Canonical equality) -> Update {child_sitemap}",
-                metadata={**base_meta, "error": eff_err},
+                metadata={
+                    **base_meta,
+                    "error": eff_err,
+                    "coverage_state": eff_cov,
+                    "user_canonical": user_canon,
+                    "google_canonical": google_canon,
+                },
+                section=section,
+                child_sitemap=child_sitemap,
+                child_sitemap_url=child_sitemap_url,
+                date_bucket=date_bucket,
+                submitted_pages_only_scope=submitted_scope,
+            )
+
+        # 5. Robots.txt or Noindex Exclusion
+        robots_state = str(data.get("robots_txt_state") or data.get("robotsTxtState") or "").lower()
+        indexing_state = str(data.get("indexing_state") or data.get("indexingState") or "").lower()
+        is_robots_or_noindex = (
+            "noindex" in cov_lower
+            or "blocked by robots" in cov_lower
+            or "disallowed" in robots_state
+            or "blocked_by_meta_tag" in indexing_state
+            or "blocked_by_http_header" in indexing_state
+        )
+        if is_robots_or_noindex:
+            return DiagnosisResult(
+                url=url,
+                classification=RootCauseClassification.ROBOTS_OR_NOINDEX_EXCLUSION,
+                reason=f"URL excluded from indexing by robots.txt or meta noindex directive ({eff_cov})",
+                remediation_action="Audit robots.txt and meta robots tag; remove unintended noindex or prune from sitemap",
+                reflection_path=f"Verify intended indexability -> Recompile HTML or remove from {child_sitemap}",
+                metadata={**base_meta, "coverage_state": eff_cov, "robots_txt_state": robots_state, "indexing_state": indexing_state},
                 section=section,
                 child_sitemap=child_sitemap,
                 child_sitemap_url=child_sitemap_url,
@@ -343,7 +386,7 @@ class GSCRootCauseClassifier:
         if is_ceiling:
             return DiagnosisResult(
                 url=url,
-                classification=RootCauseClassification.ALGORITHMIC_EXPANSION_FREEZE.value,
+                classification=RootCauseClassification.ALGORITHMIC_EXPANSION_FREEZE,
                 reason="Algorithmic ceiling threshold detected; impressions dampened by Core/Spam update correlation",
                 remediation_action="Freezes programmatic asset expansion for property per gsc_ceiling.py recommendation",
                 reflection_path="Suppress fresh URL generation; focus exclusively on quality upgrades for existing indexed routes",
@@ -355,10 +398,42 @@ class GSCRootCauseClassifier:
                 submitted_pages_only_scope=submitted_scope,
             )
 
+        # 7. Submitted and indexed (with Rich Results / Mobile Usability check)
+        rich_verdict = str(data.get("rich_results_verdict") or "").upper()
+        mob_verdict = str(data.get("mobile_usability_verdict") or "").upper()
+        if "submitted and indexed" in cov_lower or ("indexed" in cov_lower and "not indexed" not in cov_lower):
+            if rich_verdict == "FAIL" or mob_verdict == "FAIL":
+                return DiagnosisResult(
+                    url=url,
+                    classification=RootCauseClassification.RICH_RESULT_OR_MOBILE_USABILITY_DEFECT,
+                    reason=f"Page indexed but rich results ({rich_verdict}) or mobile usability ({mob_verdict}) reported inspection failure",
+                    remediation_action="Repair JSON-LD structured data and 44x44px touch target mobile viewport primitives",
+                    reflection_path="Recompile HTML with verified FAQPage/WebApplication schema and visual primitives",
+                    metadata={**base_meta, "coverage_state": eff_cov, "rich_results_verdict": rich_verdict, "mobile_usability_verdict": mob_verdict},
+                    section=section,
+                    child_sitemap=child_sitemap,
+                    child_sitemap_url=child_sitemap_url,
+                    date_bucket=date_bucket,
+                    submitted_pages_only_scope=submitted_scope,
+                )
+            return DiagnosisResult(
+                url=url,
+                classification=RootCauseClassification.INDEXED_HEALTHY,
+                reason="URL submitted in sitemap and confirmed indexed in Google Search Console",
+                remediation_action="Monitor search impressions, device CTR splits, and rich result appearances",
+                reflection_path=f"Retain in {child_sitemap} and monitor longitudinal velocity",
+                metadata={**base_meta, "coverage_state": eff_cov, "verdict": eff_verdict},
+                section=section,
+                child_sitemap=child_sitemap,
+                child_sitemap_url=child_sitemap_url,
+                date_bucket=date_bucket,
+                submitted_pages_only_scope=submitted_scope,
+            )
+
         # Fallback
         return DiagnosisResult(
             url=url,
-            classification=RootCauseClassification.UNKNOWN_OR_UNCLASSIFIED.value,
+            classification=RootCauseClassification.UNKNOWN_OR_UNCLASSIFIED,
             reason=f"Unclassified inspection anomaly: cov='{eff_cov}', err='{eff_err}'",
             remediation_action="Conduct manual inspection via gsccli inspect url and verify page HTML",
             reflection_path="Run inspect_dist and review preflight quarantine report",

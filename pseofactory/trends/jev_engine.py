@@ -237,6 +237,22 @@ class JevEngine:
 
         y_asset = base_y_asset * tier_multiplier
 
+        gsc_meta = (candidate.metadata or {}).get("gsc_telemetry")
+        if isinstance(gsc_meta, dict) and gsc_meta:
+            gsc_mult = 1.0
+            mob_gap = float(gsc_meta.get("mobile_ctr_gap", 0.0) or 0.0)
+            if mob_gap >= 0.01:
+                gsc_mult += min(0.04, mob_gap * 1.5)
+            sa_list = gsc_meta.get("search_appearances") or []
+            if any(sa in ("REVIEW_SNIPPET", "PRODUCT_SNIPPETS") for sa in sa_list):
+                gsc_mult += 0.03
+            traj = str(gsc_meta.get("time_window_trajectory") or "").upper()
+            if traj in ("ACCELERATING", "BREAKOUT_NEW"):
+                gsc_mult += 0.03
+            elif traj == "DECAYING":
+                gsc_mult += 0.02
+            y_asset = y_asset * min(1.10, gsc_mult)
+
         momentum_core = 0.35 * v_norm + 0.65 * s_norm
         momentum_factor = math.pow(momentum_core, 0.85) if momentum_core > 0.0 else 0.0
 
@@ -353,6 +369,7 @@ class JevEngine:
             )
 
         # Step 3: Cannibalization Triage Gate
+        gsc_meta = (candidate.metadata or {}).get("gsc_telemetry") if candidate.metadata else None
         if c_cannibal >= 0.50:
             tool_slug = matching_tool or "existing-tool"
             if 4.0 <= pos <= 20.0:
@@ -366,6 +383,10 @@ class JevEngine:
                     "intent_tier": monetization.get("intent_tier", ""),
                     "recommended_partners": monetization.get("recommended_partners", []),
                 }
+                if isinstance(gsc_meta, dict) and gsc_meta:
+                    overlay_spec["gsc_telemetry"] = dict(gsc_meta)
+                    overlay_spec["device_focus"] = str(gsc_meta.get("device_focus") or ("MOBILE_CTR_DEFICIT" if float(gsc_meta.get("mobile_ctr_gap", 0.0) or 0.0) >= 0.01 else "BALANCED"))
+                    overlay_spec["search_appearances"] = list(gsc_meta.get("search_appearances") or [])
                 if getattr(treg_result, "ai_citation_checked", False):
                     overlay_spec["ai_citation_vacant"] = bool(treg_result.ai_citation_vacant)
                     overlay_spec["ai_cited_domains"] = list(treg_result.ai_cited_domains or [])
@@ -401,6 +422,24 @@ class JevEngine:
                     evaluated_at=now_iso,
                     matching_tool=tool_slug,
                 )
+
+        # Step 3.5: Algorithmic Ceiling Suppression Guard
+        ceiling_status = (candidate.metadata or {}).get("ceiling_status") if candidate.metadata else None
+        if isinstance(ceiling_status, dict) and ceiling_status.get("ceiling_detected") and ceiling_status.get("recommendation") == "FREEZE_EXPANSION":
+            c_score = float(ceiling_status.get("ceiling_dampening_score", 0.0) or 0.0)
+            return JevDecisionResult(
+                query=clean_q,
+                slug=slug,
+                action="MONITOR",
+                jev_score=jev_score,
+                durable_prob=durable_prob,
+                composite_profit_yield=composite_yield,
+                cannibalization_risk=c_cannibal,
+                target_asset_type="none",
+                decision_reason=f"Algorithmic ceiling active (dampening score {c_score:.2f}); freeze void expansion until authority recovery",
+                passed_thresholds=False,
+                evaluated_at=now_iso,
+            )
 
         # Step 4: Build Page Qualification Gate (with Monetization Qualification & AI Citation Void)
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
@@ -446,6 +485,10 @@ class JevEngine:
                 "mandatory_disclosures": monetization.get("disclosures_required", {}),
                 "monetization_qualification": monetization,
             }
+            if isinstance(gsc_meta, dict) and gsc_meta:
+                candidate_spec["gsc_telemetry"] = dict(gsc_meta)
+                candidate_spec["device_focus"] = str(gsc_meta.get("device_focus") or "BALANCED")
+                candidate_spec["search_appearances"] = list(gsc_meta.get("search_appearances") or [])
             return JevDecisionResult(
                 query=clean_q,
                 slug=slug,
