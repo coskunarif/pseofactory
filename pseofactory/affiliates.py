@@ -5361,9 +5361,13 @@ def normalize_html_callout_message_match(
             r'(<div\s+class=["\']calculator-grid["\']>.*?<div\s+class=["\']card["\']>.*?<div\s+class=["\']card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
             r'(<div\s+class=["\']calc-outputs-panel["\']>\s*<div\s+class=["\']calc-panel-header["\']>.*?</div>)',
             r'(<div\s+class=["\']calc-results-column["\']>\s*<h3\s+class=["\']calc-column-title["\']>.*?</h3>)',
+            r'(<div\s+class=["\']result-box["\'][^>]*>.*?)(</div>)',
         ):
             if re.search(pat, updated, re.S | re.I):
-                updated = re.sub(pat, rf"\g<1>{inline_cta_html}", updated, count=1, flags=re.S | re.I)
+                if "result-box" in pat:
+                    updated = re.sub(pat, rf"\g<1>{inline_cta_html}\n      \g<2>", updated, count=1, flags=re.S | re.I)
+                else:
+                    updated = re.sub(pat, rf"\g<1>{inline_cta_html}", updated, count=1, flags=re.S | re.I)
                 injected_inline = True
                 break
         if injected_inline and "</head>" in updated:

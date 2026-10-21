@@ -5751,11 +5751,27 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 r'<script\s+type=["\']application/ld\+json["\']\s*>(.*?)</script>',
                 re.DOTALL | re.IGNORECASE,
             )
-            match = script_pattern.search(html)
-            if match:
+            matches = list(script_pattern.finditer(html))
+            target_match = None
+            target_data = None
+            for m_cand in matches:
                 try:
-                    existing_data = json.loads(match.group(1).strip())
-                    if isinstance(existing_data, dict) and "@graph" in existing_data and isinstance(existing_data["@graph"], list):
+                    cand_data = json.loads(m_cand.group(1).strip())
+                except Exception:
+                    continue
+                if isinstance(cand_data, dict) and (
+                    ("@graph" in cand_data and isinstance(cand_data["@graph"], list))
+                    or cand_data.get("@type") == "FAQPage"
+                ):
+                    target_match = m_cand
+                    target_data = cand_data
+                    break
+
+            if target_match is not None and isinstance(target_data, dict):
+                try:
+                    existing_data = target_data
+                    match = target_match
+                    if "@graph" in existing_data and isinstance(existing_data["@graph"], list):
                         faq_node = next((n for n in existing_data["@graph"] if n.get("@type") == "FAQPage"), None)
                         faq_modified = False
                         if faq_node:
@@ -5783,7 +5799,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         if faq_modified:
                             new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
                             html = html[: match.start()] + new_script + html[match.end() :]
-                    elif isinstance(existing_data, dict) and existing_data.get("@type") == "FAQPage":
+                    elif existing_data.get("@type") == "FAQPage":
                         faq_modified = False
                         existing_qs = {
                             html_lib.unescape(str(q.get("name") or "")).strip()
@@ -5799,12 +5815,6 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         if faq_modified:
                             new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
                             html = html[: match.start()] + new_script + html[match.end() :]
-                    elif '"@type": "FAQPage"' not in html and '"@type":"FAQPage"' not in html:
-                        json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
-                        if "</head>" in html:
-                            html = html.replace("</head>", f"{json_ld_script}\n</head>", 1)
-                        else:
-                            injected_sections.append(json_ld_script)
                 except Exception:
                     json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
                     if "</head>" in html:
