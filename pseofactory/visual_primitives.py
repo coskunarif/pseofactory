@@ -2129,11 +2129,7 @@ def _render_runtime_sync_events_js() -> str:
               if (statusNode) {
                 statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal...";
               }
-              if (drawer) {
-                drawer.setAttribute("data-redirect-url", data.redirect_url);
-                if (data.checkout_url) drawer.setAttribute("data-checkout-url", data.checkout_url);
-                if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
-              }
+              if (drawer) drawer.setAttribute("data-redirect-url", data.redirect_url);
             }
           }).catch(function() {});
         }
