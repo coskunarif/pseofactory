@@ -2212,6 +2212,7 @@ class LiveTruthAuditEngine:
                 html_content,
                 tenant=property_id,
                 rel_path=ctx_label,
+                include_fact_store=False,
             )
             for rv in recon_violations:
                 if rv not in violations:
@@ -3246,6 +3247,7 @@ class RefactorCascadeEngine:
 
                 # 2c. Self-heal visual/UX primitives & page structure GEO normalization after overlay injection
                 if target_path.is_file() and target_path.suffix == ".html":
+                    from pseofactory.tenant_facts import TruthReconciliationEngine
                     from pseofactory.visual_primitives import (
                         detect_visual_and_ux_contract_issues,
                         normalize_html_visual_primitives,
@@ -3273,6 +3275,15 @@ class RefactorCascadeEngine:
                         if norm_html != raw_html:
                             target_path.write_text(norm_html, encoding="utf-8")
                             raw_html = norm_html
+                    reconciled_html, recon_changes = TruthReconciliationEngine.reconcile_html_truth(
+                        raw_html,
+                        tenant=adapter.property_id,
+                        rel_path=target_path.name,
+                        slug=slug,
+                    )
+                    if recon_changes and reconciled_html != raw_html:
+                        target_path.write_text(reconciled_html, encoding="utf-8")
+                        raw_html = reconciled_html
                     try:
                         from pseofactory.affiliates import normalize_html_callout_message_match
                         callout_html = normalize_html_callout_message_match(raw_html, property_id=adapter.property_id)
@@ -5026,7 +5037,9 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
     inferred_tenant = "prexvo" if "prexvo.com" in html_content.lower() or "34 cfr" in html_content.lower() else "profithelm"
-    if TruthReconciliationEngine.audit_html_truth_reconciliation(html_content, tenant=inferred_tenant):
+    if TruthReconciliationEngine.audit_html_truth_reconciliation(
+        html_content, tenant=inferred_tenant, include_fact_store=False
+    ):
         return True
 
     return False

@@ -623,11 +623,16 @@ class TenantFactStore:
 
         # 5. Statutory threshold limit boundaries & ground-truth benchmark figures
         if tenant_norm == "profithelm":
+            prose_scan_text = (
+                re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+                if "<style" in text_lower
+                else text
+            )
             # Section 179 SUV / heavy vehicle cap ($30,500 for 2024/2026 / $31,300 for 2025)
             if "suv" in text_lower or "heavy vehicle" in text_lower:
                 suv_clause_matches = re.finditer(
                     r'(?:(?:suv|heavy\s*vehicle)[^\.\n]{0,140}?(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?(?:suv|heavy\s*vehicle))',
-                    text,
+                    prose_scan_text,
                     re.IGNORECASE,
                 )
                 for m_obj in suv_clause_matches:
@@ -635,8 +640,8 @@ class TenantFactStore:
                     clause_low = m_obj.group(0).lower()
                     # Check a tight window around the match for explicit 2025 qualification
                     win_start = max(0, m_obj.start() - 60)
-                    win_end = min(len(text), m_obj.end() + 80)
-                    window_low = text[win_start:win_end].lower()
+                    win_end = min(len(prose_scan_text), m_obj.end() + 80)
+                    window_low = prose_scan_text[win_start:win_end].lower()
                     try:
                         val = float(raw_val.replace(",", ""))
                         has_2025_qual = "2025" in window_low and "in 2026" not in clause_low
@@ -654,6 +659,7 @@ class TenantFactStore:
                 "$31,300 suv cap",
                 "$31,300 irc 179(b)(5) cap",
                 "irc §179(b)(5) $31,300 cap",
+                "irc \\u00a7179(b)(5) $31,300 cap",
                 "$31,300 (irc §179(b)(5))",
                 "$31,300 statutory section 179 cap ($30,500 prior-year",
                 "capped at a $31,300 section 179 deduction in 2026",
@@ -669,7 +675,7 @@ class TenantFactStore:
             if "section 179" in text_lower or "section179" in text_lower:
                 s179_matches = re.findall(
                     r'(?:section\s*179[^\.\n]{0,140}?(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?section\s*179)',
-                    text,
+                    prose_scan_text,
                     re.IGNORECASE,
                 )
                 for m in s179_matches:
@@ -837,9 +843,11 @@ class TruthReconciliationEngine:
         ("Heavy SUV 6,000 to 14,000 lbs ($110k / $31,300 SUV Cap)", "Heavy SUV 6,000 to 14,000 lbs ($110k / $30,500 SUV Cap)"),
         ("Heavy SUV 6,000 to 14,000 lbs GVWR ($31,300 IRC 179(b)(5) Cap + Bonus)", "Heavy SUV 6,000 to 14,000 lbs GVWR ($30,500 IRC 179(b)(5) Cap + Bonus)"),
         ("Heavy SUVs (6,000-14,000 lbs, $31,300 Cap + Bonus)", "Heavy SUVs (6,000-14,000 lbs, $30,500 Cap + Bonus)"),
+        ("Heavy SUV Tax Savings ($31,300 Cap + Bonus)", "Heavy SUV Tax Savings ($30,500 Cap + Bonus)"),
         ("<td>$31,300 + Bonus Depr.</td>", "<td>$30,500 + Bonus Depr.</td>"),
         ("<td>$31,300 (IRC §179(b)(5))</td>", "<td>$30,500 (IRC §179(b)(5))</td>"),
         ("IRC §179(b)(5) $31,300 cap", "IRC §179(b)(5) $30,500 cap"),
+        ("IRC \\u00a7179(b)(5) $31,300 cap", "IRC \\u00a7179(b)(5) $30,500 cap"),
         ("60% on balance (2024-2026 phase-down)", "20% on balance (2026 statutory rate)"),
         ("<td>60% on balance</td>", "<td>20% on balance</td>"),
         ("<td>$53,320 on $85,000 basis</td>", "<td>$38,000 on $85,000 basis</td>"),
@@ -847,6 +855,10 @@ class TruthReconciliationEngine:
         (
             "qualifies for an immediate first-year Section 179 expense allowance of up to $31,300 plus 60% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $53,320, reducing net income tax liability by $19,728 at the 37% marginal rate.",
             "qualifies for an immediate first-year Section 179 expense allowance of up to $30,500 plus 20% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $38,000, reducing net income tax liability by $14,060 at the 37% marginal rate.",
+        ),
+        (
+            "qualifies for the IRC Section 280F heavy SUV allowance of up to $31,300 plus 60% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $53,320, reducing net income tax liability by $19,728 at a 37% marginal tax bracket.",
+            "qualifies for the IRC Section 280F heavy SUV allowance of up to $30,500 plus 20% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $38,000, reducing net income tax liability by $14,060 at a 37% marginal tax bracket.",
         ),
         (
             'id="val-first_year_deduction">$53,320<',
@@ -1105,6 +1117,7 @@ class TruthReconciliationEngine:
         tenant: str,
         rel_path: str = "",
         slug: str = "",
+        include_fact_store: bool = True,
     ) -> List[str]:
         """
         Deterministically audits an HTML document for any remaining factual drift,
@@ -1112,10 +1125,11 @@ class TruthReconciliationEngine:
         Returns a list of violation descriptions (empty list == PASS).
         """
         violations: List[str] = []
-        store = TenantFactStore.get_instance()
-        ok, store_violations = store.verify_claim(tenant=tenant, text=html_content, context=rel_path or slug)
-        if not ok:
-            violations.extend(store_violations)
+        if include_fact_store:
+            store = TenantFactStore.get_instance()
+            ok, store_violations = store.verify_claim(tenant=tenant, text=html_content, context=rel_path or slug)
+            if not ok:
+                violations.extend(store_violations)
 
         for filler_old, _ in cls.SPECULATIVE_FILLER_REPLACEMENTS:
             if filler_old in html_content:
@@ -1123,10 +1137,28 @@ class TruthReconciliationEngine:
 
         tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
         if tenant_norm == "profithelm":
+            for old_str, _ in cls.PROFITHELM_HTML_REPLACEMENTS:
+                if old_str in html_content:
+                    msg = f"Unreconciled ProfitHelm statutory figure or JS cap: '{old_str[:60]}'"
+                    if msg not in violations:
+                        violations.append(msg)
             if "Math.min(cost, 31300)" in html_content or "Math.min(basis, 31300)" in html_content or "const suvCap = 31300" in html_content:
                 violations.append("Inline calculator JS uses stale 31300 Heavy SUV cap instead of 2026 statutory 30500 cap")
             if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
                 violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
+        else:
+            combined_slug = f"{rel_path.lower()} {slug.lower()}"
+            is_ibr_or_paye = (
+                any(k in combined_slug for k in ("ibr-hardship", "paye-sunset"))
+                or "IBR Hardship Cap Calculator" in html_content
+                or "PAYE Sunset Eligibility" in html_content
+            ) and "rap-vs-ibr" not in combined_slug
+            if is_ibr_or_paye:
+                for old_str, _ in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
+                    if old_str in html_content:
+                        msg = f"Unreconciled Prexvo IBR/PAYE threshold figure: '{old_str[:60]}'"
+                        if msg not in violations:
+                            violations.append(msg)
 
         return violations
 
