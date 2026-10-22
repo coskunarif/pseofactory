@@ -3894,9 +3894,43 @@ class MaintenanceLifecycle:
                     except TypeError:
                         adapter.build_asset(b_slug)
 
+            def _resolve_existing_refactor_target(cand_slug: str) -> Optional[Path]:
+                if not cand_slug:
+                    return None
+                for direct_p in (
+                    adapter.dist_dir / f"{cand_slug}.html",
+                    adapter.dist_dir / cand_slug / "index.html",
+                    adapter.dist_dir / "tools" / cand_slug / "index.html",
+                ):
+                    if direct_p.exists():
+                        return direct_p
+                for p_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if cand_slug.startswith(f"{p_hub}-"):
+                        leaf_s = cand_slug[len(p_hub) + 1:]
+                        cand_html = adapter.dist_dir / "tools" / p_hub / leaf_s / "index.html"
+                        if cand_html.exists():
+                            return cand_html
+                if adapter.property_id == "profithelm":
+                    cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / cand_slug / "index.html"
+                    if cand_veh.exists():
+                        return cand_veh
+                return None
+
             overlay_drifted = []
+            seen_overlay_targets = set()
             for item in refactor_pages:
                 r_slug = item.get("slug") if isinstance(item, dict) else str(item)
+                resolved_target = _resolve_existing_refactor_target(r_slug)
+                if resolved_target is None and isinstance(item, dict):
+                    cand_tool = (
+                        item.get("matching_tool")
+                        or (item.get("overlay_spec") or {}).get("slug")
+                        or ""
+                    ).strip()
+                    cand_resolved = _resolve_existing_refactor_target(cand_tool)
+                    if cand_resolved is not None:
+                        r_slug = cand_tool
+                        resolved_target = cand_resolved
                 if not dry_run:
                     try:
                         from pseofactory.gsc_remediation import (
@@ -3905,7 +3939,7 @@ class MaintenanceLifecycle:
                         )
                         base_dir = getattr(adapter, "base_dir", None) or adapter.dist_dir.parent
                         cand_dict = dict(item) if isinstance(item, dict) else {"slug": r_slug}
-                        cand_dict.setdefault("slug", r_slug)
+                        cand_dict["slug"] = r_slug
                         cand_dict.setdefault("property_id", adapter.property_id)
                         overlay_payload = compile_remediation_overlay_spec(
                             cand_dict,
@@ -3926,11 +3960,16 @@ class MaintenanceLifecycle:
                         print(f"Warning: Failed to persist overlay for slug '{r_slug}': {o_err}")
 
                 # Locate or synthesize asset path
-                target_html = adapter.dist_dir / f"{r_slug}.html"
-                if not target_html.exists() and (adapter.dist_dir / r_slug / "index.html").exists():
-                    target_html = adapter.dist_dir / r_slug / "index.html"
-                elif not target_html.exists() and (adapter.dist_dir / "tools" / r_slug / "index.html").exists():
-                    target_html = adapter.dist_dir / "tools" / r_slug / "index.html"
+                target_html = resolved_target if resolved_target is not None else (adapter.dist_dir / f"{r_slug}.html")
+                if (
+                    isinstance(adapter, SubprocessPropertyAdapter)
+                    and not getattr(adapter, "_build_asset_command", None)
+                    and not target_html.exists()
+                ):
+                    continue
+                if str(target_html) in seen_overlay_targets:
+                    continue
+                seen_overlay_targets.add(str(target_html))
                 r_rec = AssetDriftRecord(
                     asset_path=str(target_html),
                     slug=r_slug,

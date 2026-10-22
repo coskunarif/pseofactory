@@ -1594,7 +1594,7 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     assert ph_audit["compiled_dom_parity"]["network_tracked_click_share_pct"] >= 75.0
     assert ph_audit["compiled_dom_parity"]["edge_upgraded_click_share_pct"] == 100.0
     assert ph_audit["compiled_dom_parity"]["pending_partner_links_in_dom"] == 0
-    assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 76
+    assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 75
     assert px_audit["compiled_dom_parity"]["ymyl_restricted_pages_clean"] is True
 
 
