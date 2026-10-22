@@ -3037,7 +3037,7 @@ def _extract_calculation_variant_nodes_cached(html_or_text: str) -> Tuple[Dict[s
             and any(k in s.get("heading", "").lower() for k in ("variant", "tier", "regime"))
             and not any(
                 excl in s.get("heading", "").lower()
-                for excl in ("pillar hubs", "arbitrage matrices", "asset spokes", "borrower spokes", "transition matrices")
+                for excl in ("pillar hubs", "arbitrage matrices", "asset spokes", "borrower spokes", "transition matrices", "quote intake")
             )
         ]
         for idx, vs in enumerate(variant_sections):

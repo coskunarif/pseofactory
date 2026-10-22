@@ -3523,7 +3523,7 @@ def render_partner_quote_intake_html(
 
     if prop_clean == "prexvo":
         is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
-        heading_text = f"Qualified Borrower Rate-Match Intake ({threshold_fmt}+ Balance Tier)"
+        heading_text = f"Qualified Borrower Rate-Match Intake ({threshold_fmt}+ Balance Threshold)"
         sub_text = (
             f"Calculations at or above {threshold_fmt} qualify for direct institutional rate-table matching "
             f"with pre-filled loan parameters. Calculations below {threshold_fmt} remain 100% frictionless with zero registration."
@@ -3548,28 +3548,28 @@ def render_partner_quote_intake_html(
             btn_text = "Unlock Matched Rate-Table Quote & Continue"
     else:
         if vertical == "1031_exchange":
-            heading_text = f"Qualified Intermediary & Tax Advisory Quote Intake ({threshold_fmt}+ Exchange Tier)"
+            heading_text = f"Qualified Intermediary & Tax Advisory Quote Intake ({threshold_fmt}+ Exchange Threshold)"
             sub_text = (
                 f"Exchange deferrals at or above {threshold_fmt} qualify for priority Qualified Intermediary escrow "
                 f"fee quotes and multi-state CPA boot reconciliation. Sub-threshold calculations stay 100% frictionless."
             )
             band_label = "Relinquished Property / Exchange Capital Band"
         elif vertical == "invoice_factoring":
-            heading_text = f"Commercial Factoring & Working Capital Quote Intake ({threshold_fmt}+ Volume Tier)"
+            heading_text = f"Commercial Factoring & Working Capital Quote Intake ({threshold_fmt}+ Volume Threshold)"
             sub_text = (
                 f"Monthly receivable volume at or above {threshold_fmt} qualifies for direct non-recourse factoring "
                 f"advance rates and same-day funding quotes. Sub-threshold calculations stay 100% frictionless."
             )
             band_label = "Monthly Invoice / Working Capital Band"
         elif vertical == "capex_section_179":
-            heading_text = f"Commercial Equipment & Section 179 Tax Quote Intake ({threshold_fmt}+ CapEx Tier)"
+            heading_text = f"Commercial Equipment & Section 179 Tax Quote Intake ({threshold_fmt}+ CapEx Threshold)"
             sub_text = (
                 f"Capital equipment acquisitions at or above {threshold_fmt} qualify for direct equipment financing "
                 f"rate sheets and CPA depreciation audit schedules. Sub-threshold calculations stay 100% frictionless."
             )
             band_label = "Equipment CapEx / Deduction Capital Band"
         else:
-            heading_text = f"Commercial CPA & Advisory Quote Intake ({threshold_fmt}+ Exposure Tier)"
+            heading_text = f"Commercial CPA & Advisory Quote Intake ({threshold_fmt}+ Exposure Threshold)"
             sub_text = (
                 f"Commercial calculations at or above {threshold_fmt} qualify for direct CPA tax preparation "
                 f"and entity structuring fee quotes. Sub-threshold calculations stay 100% frictionless."

@@ -6966,6 +6966,13 @@ class RetroReflectionEngine:
                         1,
                     )
                     repaired.append("partner_quote_intake")
+            elif quote_intake_html and 'id="partner-quote-intake-step"' in updated and "Tier)</h3>" in updated:
+                updated = re.sub(
+                    r'(<div class="partner-quote-header">[\s\S]{0,300}?)\s+Tier\)</h3>',
+                    r"\1 Threshold)</h3>",
+                    updated,
+                )
+                repaired.append("partner_quote_intake")
             elif not quote_intake_html and 'id="partner-quote-intake-step"' in updated:
                 updated = re.sub(
                     r'\s*<div id="partner-quote-intake-step"[\s\S]*?</form>\s*</div>',
