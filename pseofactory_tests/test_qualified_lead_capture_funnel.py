@@ -303,11 +303,15 @@ def test_edge_lead_capture_function_generation_and_tenant_sync(tmp_path):
     assert "otr_solutions_factoring" in ph_js
     assert "ipx1031" in ph_js
     assert "splash_financial" not in ph_js
+    assert "ok: true, success: true" in ph_js
+    assert "ok: false, success: false" in ph_js
 
     assert "PREXVO_LEADS" in px_js
     assert "splash_financial" in px_js
     assert "RESTRICTED_PUBLIC_SERVICE_SLUGS" in px_js
     assert "otr_solutions_factoring" not in px_js
+    assert "ok: true, success: true" in px_js
+    assert "ok: false, success: false" in px_js
 
     for prop_id in ("profithelm", "prexvo"):
         repo_dir = tmp_path / prop_id
@@ -316,3 +320,53 @@ def test_edge_lead_capture_function_generation_and_tenant_sync(tmp_path):
         res = sync_tenant_edge_redirect_function(repo_dir, property_id=prop_id)
         assert res["status"] == "UPDATED"
         assert (repo_dir / "functions" / "api" / "lead-capture.js").is_file()
+
+
+def test_tenant_ci_workflow_and_script_isolation_sync(tmp_path):
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+    from pseofactory.trends.cron import TrendCronRunner
+
+    for repo_name in ("profithelm-platform", "prexvo"):
+        t_repo = tmp_path / repo_name
+        pkg_name = "profithelm" if "profithelm" in repo_name else "prexvo"
+        (t_repo / pkg_name).mkdir(parents=True)
+        (t_repo / "scripts").mkdir(parents=True)
+        (t_repo / ".github" / "workflows").mkdir(parents=True)
+        (t_repo / "scripts" / "run_factory.sh").write_text(
+            '#!/usr/bin/env bash\nSCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nREPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"\n',
+            encoding="utf-8",
+        )
+        (t_repo / ".github" / "workflows" / "ci.yml").write_text(
+            "name: Legacy CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
+            encoding="utf-8",
+        )
+        if repo_name == "profithelm-platform":
+            (t_repo / ".github" / "workflows" / "deploy-google.yml").write_text(
+                "name: Legacy Deploy\non:\n  push:\n    branches: [main]\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n",
+                encoding="utf-8",
+            )
+
+        res = sync_tenant_test_isolation_guards(t_repo)
+        assert res["status"] == "PASS"
+        assert res["updated_files"] >= 2
+
+        rf_text = (t_repo / "scripts" / "run_factory.sh").read_text(encoding="utf-8")
+        assert 'readlink -f "${BASH_SOURCE[0]}"' in rf_text
+
+        ci_text = (t_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        assert "runs-on: self-hosted" in ci_text
+        assert "cancel-in-progress: true" in ci_text
+        assert "unset CLOUDFLARE_API_TOKEN" in ci_text
+        assert "if [ ! -f dist/index.html ]; then" in ci_text
+
+        if repo_name == "profithelm-platform":
+            dg_text = (t_repo / ".github" / "workflows" / "deploy-google.yml").read_text(encoding="utf-8")
+            assert "runs-on: self-hosted" in dg_text
+            assert "workflow_dispatch:" in dg_text
+            assert "branches: [main]" not in dg_text
+
+    import inspect
+    cron_src = inspect.getsource(TrendCronRunner.run_cycle)
+    assert '".agy" / "void_candidates.jsonl"' in cron_src
+
+

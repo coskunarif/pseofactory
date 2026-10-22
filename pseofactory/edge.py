@@ -2287,7 +2287,7 @@ export async function onRequestGet(context) {
   }
 
   return new Response(
-    JSON.stringify({ ok: true, property_id: "prexvo", count: leads.length, leads }),
+    JSON.stringify({ ok: true, success: true, property_id: "prexvo", count: leads.length, leads }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
 }
@@ -2314,6 +2314,7 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: false,
+          success: false,
           error: "Restricted public-service asset cannot capture commercial student loan refinance leads.",
         }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -2324,6 +2325,7 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: true,
+          success: true,
           status: "frictionless_sub_threshold",
           persisted: false,
           frictionless_mode: true,
@@ -2342,14 +2344,14 @@ export async function onRequestPost(context) {
 
     if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
-        JSON.stringify({ ok: false, error: "Please enter a valid email address." }),
+        JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
 
     if (state.length !== 2) {
       return new Response(
-        JSON.stringify({ ok: false, error: "Please select a valid 2-letter US state." }),
+        JSON.stringify({ ok: false, success: false, error: "Please select a valid 2-letter US state." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
@@ -2358,6 +2360,7 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: false,
+          success: false,
           error: "Explicit TCPA partner_sharing_consent is required to match your refinance quote.",
         }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -2412,13 +2415,13 @@ export async function onRequestPost(context) {
       await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
     }
 
-    return new Response(JSON.stringify({ ok: true, status: "captured", persisted: true, ...record }), {
+    return new Response(JSON.stringify({ ok: true, success: true, status: "captured", persisted: true, ...record }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (err) {
     return new Response(
-      JSON.stringify({ ok: false, error: "Unable to process refinance quote request." }),
+      JSON.stringify({ ok: false, success: false, error: "Unable to process refinance quote request." }),
       { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
     );
   }
@@ -2569,7 +2572,7 @@ export async function onRequestGet(context) {
   }
 
   return new Response(
-    JSON.stringify({ ok: true, property_id: "profithelm", count: leads.length, leads }),
+    JSON.stringify({ ok: true, success: true, property_id: "profithelm", count: leads.length, leads }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
 }
@@ -2595,7 +2598,7 @@ export async function onRequestPost(context) {
     if (!hasQuoteFields) {
       if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
-          JSON.stringify({ ok: false, error: "Please enter a valid business email address." }),
+          JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
         );
       }
@@ -2609,6 +2612,7 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: true,
+          success: true,
           status: "playbook_subscribed",
           message: "Your custom calculation worksheet and compliance checklist have been queued.",
           redirect_url: `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}`,
@@ -2624,6 +2628,7 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: true,
+          success: true,
           status: "frictionless_sub_threshold",
           persisted: false,
           frictionless_mode: true,
@@ -2642,7 +2647,7 @@ export async function onRequestPost(context) {
 
     if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
-        JSON.stringify({ ok: false, error: "Please enter a valid business email address." }),
+        JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
@@ -2650,7 +2655,7 @@ export async function onRequestPost(context) {
     const state = String(body.state || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
     if (state.length !== 2) {
       return new Response(
-        JSON.stringify({ ok: false, error: "Please select a valid 2-letter US state." }),
+        JSON.stringify({ ok: false, success: false, error: "Please select a valid 2-letter US state." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
@@ -2659,6 +2664,7 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({
           ok: false,
+          success: false,
           error: "Explicit TCPA partner_sharing_consent is required to dispatch your commercial quote.",
         }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -2712,13 +2718,13 @@ export async function onRequestPost(context) {
       await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
     }
 
-    return new Response(JSON.stringify({ ok: true, status: "captured", persisted: true, ...record }), {
+    return new Response(JSON.stringify({ ok: true, success: true, status: "captured", persisted: true, ...record }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (err) {
     return new Response(
-      JSON.stringify({ ok: false, error: "Unable to process commercial quote request." }),
+      JSON.stringify({ ok: false, success: false, error: "Unable to process commercial quote request." }),
       { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
     );
   }

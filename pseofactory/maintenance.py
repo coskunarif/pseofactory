@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import re
+import fcntl
 import json
 import time
 import uuid
@@ -3660,6 +3661,37 @@ class MaintenanceLifecycle:
         )
 
         with adapter.scoped_environment():
+            if (
+                not dry_run
+                and getattr(adapter, "repo_path", None)
+                and adapter.property_id in ("profithelm", "prexvo")
+                and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
+                and "PYTEST_CURRENT_TEST" not in os.environ
+            ):
+                factory_lock_path = Path(f"/tmp/{adapter.property_id}_factory.lock")
+                lock_probe_fd = None
+                try:
+                    lock_probe_fd = open(factory_lock_path, "a+", encoding="utf-8")
+                    fcntl.flock(lock_probe_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(lock_probe_fd.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="DEFERRED",
+                        assets_audited=0,
+                        assets_drifted=0,
+                        assets_refactored=0,
+                        assets_failed=0,
+                        engine_hash=None,
+                        duration_seconds=time.time() - start_time,
+                    )
+                finally:
+                    if lock_probe_fd is not None:
+                        try:
+                            lock_probe_fd.close()
+                        except OSError:
+                            pass
+
             if (
                 not dry_run
                 and getattr(adapter, "repo_path", None)

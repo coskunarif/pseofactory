@@ -905,6 +905,27 @@ class AutonomousLifecycleSupervisor:
             cascade_engine = RefactorCascadeEngine(evaluator=evaluator)
             any_drift = False
             for pid, a in adapters.items():
+                if (
+                    not dry_run
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                    and getattr(a, "repo_path", None)
+                    and pid in ("profithelm", "prexvo")
+                    and str(Path(a.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
+                ):
+                    fl_path = Path(f"/tmp/{pid}_factory.lock")
+                    fl_fd = None
+                    try:
+                        fl_fd = open(fl_path, "a+", encoding="utf-8")
+                        fcntl.flock(fl_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        fcntl.flock(fl_fd.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        continue
+                    finally:
+                        if fl_fd is not None:
+                            try:
+                                fl_fd.close()
+                            except OSError:
+                                pass
                 rep = evaluator.audit_all(a, check_engine_drift=False, check_ledger=False)
                 if rep.drifted_assets_count > 0:
                     any_drift = True

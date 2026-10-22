@@ -19,3 +19,21 @@ sys.path_importer_cache.clear()
 
 if str(worktree_root) not in sys.path:
     sys.path.insert(0, str(worktree_root))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    import os
+    import shutil
+
+    pid = os.getpid()
+    tmp_root = Path("/tmp")
+    for pattern in (f"pseofactory_pytest_*_{pid}*", f"pseofactory_test_syndication_*_{pid}*"):
+        for item in list(tmp_root.glob(pattern)):
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink(missing_ok=True)
+            except OSError:
+                pass
+

@@ -1163,9 +1163,10 @@ class TrendCronRunner:
                     deduplicated_sink_count = sink_records_to_jsonl(sink_candidates, sink_path)
                     try:
                         sink_resolved = Path(sink_path).resolve()
-                        repo_sink = Path(__file__).resolve().parents[2] / "void_candidates.jsonl"
-                        if str(sink_resolved).endswith("/vault/void_candidates.jsonl") and repo_sink.parent.is_dir():
-                            sink_records_to_jsonl(sink_candidates, repo_sink)
+                        repo_agy_sink = Path(__file__).resolve().parents[2] / ".agy" / "void_candidates.jsonl"
+                        if str(sink_resolved).endswith("/vault/void_candidates.jsonl") and repo_agy_sink.parent.parent.is_dir():
+                            repo_agy_sink.parent.mkdir(parents=True, exist_ok=True)
+                            sink_records_to_jsonl(sink_candidates, repo_agy_sink)
                     except Exception:
                         pass
 

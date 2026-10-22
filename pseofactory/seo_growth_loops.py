@@ -3170,11 +3170,15 @@ def compile_ai_citation_digital_pr_queue(
 
     # 2. Ingest actual candidate queue (void_candidates.jsonl)
     candidate_queue_evaluated = 0
-    void_paths = [root / "void_candidates.jsonl"]
+    void_paths = [root / "void_candidates.jsonl", root / ".agy" / "void_candidates.jsonl"]
     if str(root).startswith("/home/ubuntuadmin/projects/"):
-        central_void = Path("/home/ubuntuadmin/projects/pseofactory/void_candidates.jsonl")
-        if central_void not in void_paths:
-            void_paths.append(central_void)
+        for central_void in (
+            Path("/home/ubuntuadmin/projects/pseofactory/void_candidates.jsonl"),
+            Path("/home/ubuntuadmin/projects/pseofactory/.agy/void_candidates.jsonl"),
+            Path("/home/ubuntuadmin/.local/share/vault/void_candidates.jsonl"),
+        ):
+            if central_void not in void_paths:
+                void_paths.append(central_void)
 
     for vp in void_paths:
         if not vp.is_file():

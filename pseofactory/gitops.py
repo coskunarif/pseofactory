@@ -2666,9 +2666,179 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             if old_prexvo_err in rf_new and 'reset -q HEAD -- dist/' not in rf_new:
                 rf_new = rf_new.replace(old_prexvo_err, new_prexvo_err, 1)
 
+            old_script_dir_block = (
+                'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+                'REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"'
+            )
+            new_script_dir_block = (
+                'RESOLVED_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"\n'
+                'SCRIPT_DIR="$(cd "$(dirname "$RESOLVED_SOURCE")" && pwd)"\n'
+                'if [ "$(basename "$SCRIPT_DIR")" = "scripts" ]; then\n'
+                '    REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"\n'
+                'else\n'
+                '    REPO_DIR="$SCRIPT_DIR"\n'
+                'fi'
+            )
+            if old_script_dir_block in rf_new and "RESOLVED_SOURCE=" not in rf_new:
+                rf_new = rf_new.replace(old_script_dir_block, new_script_dir_block, 1)
+
             if rf_new != rf_src:
                 run_factory_sh.write_text(rf_new, encoding="utf-8")
                 updated_files.append(str(run_factory_sh))
+        except Exception:
+            pass
+
+    # 5. Synchronize tenant GitHub Actions workflows (.github/workflows/ci.yml and deploy-google.yml)
+    # Enforces self-hosted runner execution, concurrency cancellation, and compiled-output verification
+    # without redundant full-site rebuilds or overlapping push races.
+    workflows_dir = repo / ".github" / "workflows"
+    ci_yml_path = workflows_dir / "ci.yml"
+    if ci_yml_path.is_file():
+        try:
+            if (repo / "profithelm").is_dir():
+                desired_ph_ci = (
+                    "name: ProfitHelm CI Quality Gate\n\n"
+                    "on:\n"
+                    "  push:\n"
+                    "    branches: [ master, main ]\n"
+                    "  pull_request:\n"
+                    "    branches: [ master, main ]\n"
+                    "  workflow_dispatch:\n\n"
+                    "concurrency:\n"
+                    "  group: ${{ github.workflow }}-${{ github.ref }}\n"
+                    "  cancel-in-progress: true\n\n"
+                    "jobs:\n"
+                    "  test_and_audit:\n"
+                    "    name: Build, Test & Craftsmanship Audit\n"
+                    "    runs-on: self-hosted\n\n"
+                    "    steps:\n"
+                    "      - name: Checkout Repository\n"
+                    "        uses: actions/checkout@v4\n\n"
+                    "      - name: Verify Dependencies & CLI Wrappers\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/home/ubuntuadmin/.local/bin:/home/ubuntuadmin/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          python3 -m pip install -e /home/ubuntuadmin/projects/pseofactory --no-build-isolation --no-deps || python3 -m pip install git+https://github.com/coskunarif/pseofactory.git\n"
+                    "          python3 -m pip install -e . --no-build-isolation --no-deps\n"
+                    "          mkdir -p /home/ubuntuadmin/.local/bin\n"
+                    "          if [ -f bin/profithelm-dataset ]; then\n"
+                    "            cp -f bin/profithelm-dataset /home/ubuntuadmin/.local/bin/profithelm-dataset\n"
+                    "            chmod +x /home/ubuntuadmin/.local/bin/profithelm-dataset\n"
+                    "          fi\n\n"
+                    "      - name: Verify Compiled Static Distribution & Craftsmanship Audit\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                    "          if [ ! -f dist/index.html ]; then\n"
+                    "            python3 -m profithelm.cli build\n"
+                    "          fi\n"
+                    "          python3 -m profithelm.cli audit\n\n"
+                    "      - name: Execute Full Test Suite\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                    "          pytest tests/ -q\n\n"
+                    "      - name: Deploy to Cloudflare Pages Edge\n"
+                    "        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')\n"
+                    "        env:\n"
+                    "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          if [ -f /home/ubuntuadmin/.config/.wrangler/config/default.toml ]; then\n"
+                    "            unset CLOUDFLARE_API_TOKEN\n"
+                    "          fi\n"
+                    "          npx wrangler pages deploy dist --project-name profithelm --branch main --commit-dirty=true\n"
+                )
+                if ci_yml_path.read_text(encoding="utf-8") != desired_ph_ci:
+                    ci_yml_path.write_text(desired_ph_ci, encoding="utf-8")
+                    updated_files.append(str(ci_yml_path))
+
+                deploy_google_path = workflows_dir / "deploy-google.yml"
+                if deploy_google_path.is_file():
+                    desired_dg = (
+                        "name: Deploy to Google Cloud Serverless (Pay-As-You-Go)\n\n"
+                        "on:\n"
+                        "  workflow_dispatch:\n\n"
+                        "concurrency:\n"
+                        "  group: ${{ github.workflow }}-${{ github.ref }}\n"
+                        "  cancel-in-progress: true\n\n"
+                        "jobs:\n"
+                        "  deploy_google_hosting:\n"
+                        "    name: Deploy to Google Firebase Hosting Edge\n"
+                        "    runs-on: self-hosted\n"
+                        "    if: github.event_name == 'workflow_dispatch' && env.GCP_SA_KEY != ''\n"
+                        "    env:\n"
+                        "      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}\n\n"
+                        "    steps:\n"
+                        "      - name: Checkout Repository\n"
+                        "        uses: actions/checkout@v4\n\n"
+                        "      - name: Verify Compiled Static Distribution\n"
+                        "        run: |\n"
+                        "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                        "          python3 -m profithelm.cli audit\n\n"
+                        "      - name: Authenticate to Google Cloud\n"
+                        "        uses: google-github-actions/auth@v2\n"
+                        "        if: env.GCP_SA_KEY != ''\n"
+                        "        with:\n"
+                        "          credentials_json: ${{ secrets.GCP_SA_KEY }}\n\n"
+                        "      - name: Deploy to Firebase Hosting Edge\n"
+                        "        uses: FirebaseExtended/action-hosting-deploy@v0\n"
+                        "        if: env.GCP_SA_KEY != ''\n"
+                        "        with:\n"
+                        "          repoToken: ${{ secrets.GITHUB_TOKEN }}\n"
+                        "          firebaseServiceAccount: ${{ secrets.GCP_SA_KEY }}\n"
+                        "          channelId: live\n"
+                        "          projectId: profithelm-477200\n"
+                    )
+                    if deploy_google_path.read_text(encoding="utf-8") != desired_dg:
+                        deploy_google_path.write_text(desired_dg, encoding="utf-8")
+                        updated_files.append(str(deploy_google_path))
+            elif (repo / "prexvo").is_dir():
+                desired_px_ci = (
+                    "name: Prexvo CI Quality Gate\n\n"
+                    "on:\n"
+                    "  push:\n"
+                    "    branches: [ master, main ]\n"
+                    "  pull_request:\n"
+                    "    branches: [ master, main ]\n"
+                    "  workflow_dispatch:\n\n"
+                    "concurrency:\n"
+                    "  group: ${{ github.workflow }}-${{ github.ref }}\n"
+                    "  cancel-in-progress: true\n\n"
+                    "jobs:\n"
+                    "  test_and_audit:\n"
+                    "    name: Build, Test & Craftsmanship Audit\n"
+                    "    runs-on: self-hosted\n\n"
+                    "    steps:\n"
+                    "      - name: Checkout Repository\n"
+                    "        uses: actions/checkout@v4\n\n"
+                    "      - name: Verify Dependencies\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/home/ubuntuadmin/.local/bin:/home/ubuntuadmin/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          python3 -m pip install -e /home/ubuntuadmin/projects/pseofactory --no-build-isolation --no-deps || python3 -m pip install git+https://github.com/coskunarif/pseofactory.git\n"
+                    "          python3 -m pip install -e . --no-build-isolation --no-deps\n\n"
+                    "      - name: Verify Compiled Static Distribution & Statutory Audit\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                    "          if [ ! -f dist/index.html ]; then\n"
+                    "            python3 -m prexvo.cli build\n"
+                    "          fi\n"
+                    "          python3 -m prexvo.cli audit\n\n"
+                    "      - name: Execute Full Test Suite\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                    "          pytest tests/ -q\n\n"
+                    "      - name: Deploy to Cloudflare Pages Edge\n"
+                    "        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')\n"
+                    "        env:\n"
+                    "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          if [ -f /home/ubuntuadmin/.config/.wrangler/config/default.toml ]; then\n"
+                    "            unset CLOUDFLARE_API_TOKEN\n"
+                    "          fi\n"
+                    "          npx wrangler pages deploy dist --project-name prexvo --branch main --commit-dirty=true\n"
+                )
+                if ci_yml_path.read_text(encoding="utf-8") != desired_px_ci:
+                    ci_yml_path.write_text(desired_px_ci, encoding="utf-8")
+                    updated_files.append(str(ci_yml_path))
         except Exception:
             pass
 
@@ -3014,11 +3184,64 @@ def reconcile_workspace_tracking_state(
             for rn in ("pseofactory", "profithelm-platform", "prexvo")
         ]
 
+    if not in_test and not is_explicit:
+        for stray_dir_name in ("dist", "machine_endpoints"):
+            stray_dir = Path("/home/ubuntuadmin/projects") / stray_dir_name
+            if stray_dir.is_dir():
+                try:
+                    if not any(stray_dir.iterdir()):
+                        stray_dir.rmdir()
+                except OSError:
+                    pass
+        try:
+            for tmp_item in list(Path("/tmp").glob("pseofactory_pytest_*")) + list(
+                Path("/tmp").glob("pseofactory_test_syndication_*")
+            ):
+                m_pid = re.search(r"_(\d+)(?:\.json)?$", tmp_item.name)
+                if m_pid:
+                    pid_val = int(m_pid.group(1))
+                    if pid_val != os.getpid() and not _is_pid_alive(pid_val):
+                        try:
+                            if tmp_item.is_dir():
+                                shutil.rmtree(tmp_item, ignore_errors=True)
+                            else:
+                                tmp_item.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+        except Exception:
+            pass
+
     for rp in target_repo_paths:
         if not (rp / ".git").exists():
             continue
         repo_name = rp.name
         try:
+            if repo_name == "pseofactory":
+                vc_st = subprocess.run(
+                    ["git", "-C", str(rp), "status", "--porcelain", "--", "void_candidates.jsonl"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if vc_st.returncode == 0 and vc_st.stdout.strip():
+                    src_vc = rp / "void_candidates.jsonl"
+                    dst_vc = rp / ".agy" / "void_candidates.jsonl"
+                    if src_vc.is_file():
+                        try:
+                            dst_vc.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(src_vc, dst_vc)
+                        except OSError:
+                            pass
+                    subprocess.run(
+                        ["git", "-C", str(rp), "checkout", "HEAD", "--", "void_candidates.jsonl"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    healed_tenant_trees += 1
+
             if repo_name in ("profithelm-platform", "prexvo") or tenant_repos is not None:
                 lock_name = "profithelm_factory.lock" if "profithelm" in repo_name else "prexvo_factory.lock"
                 lock_path = (
