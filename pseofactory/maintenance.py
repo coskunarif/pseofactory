@@ -5020,7 +5020,13 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         if (
             not any(k in canon_url for k in ("pslf", "save-plan", "ibr-hardship", "teacher-loan", "joint-consolidation", "student-loan-refinance-break-even-calculator"))
             and 'id="topic-cluster-hub"' in html_content
-            and "/tools/student-loan-refinance-break-even-calculator/" not in html_content
+            and (
+                "/tools/student-loan-refinance-break-even-calculator/" not in html_content
+                or (
+                    "Student Loan Refinance Break-Even vs Title IV Protection Calculator</a></li>" in html_content
+                    and "waives federal protections" not in html_content.lower()
+                )
+            )
         ):
             return True
 
@@ -6068,7 +6074,8 @@ def _normalize_page_structure_and_geo_parity(
                 '          <li><a href="https://prexvo.com/tools/student-loan-refinance-break-even-calculator/" '
                 'class="touch-target cluster-link" style="display: inline-flex; align-items: center; min-height: 44px; '
                 'padding: 8px 12px; text-decoration: none; font-weight: 600;">'
-                'Student Loan Refinance Break-Even vs Title IV Protection Calculator</a></li>\n'
+                'Student Loan Refinance Break-Even vs Title IV Protection Calculator</a> '
+                '<span style="font-size: 13px; color: var(--text-muted, #475569);">(Refinancing federal student loans permanently waives federal protections.)</span></li>\n'
             )
             cluster_updated = re.sub(
                 r'(id=["\']topic-cluster-hub["\'][\s\S]*?<ul[^>]*>\s*)',
@@ -6080,6 +6087,16 @@ def _normalize_page_structure_and_geo_parity(
             if cluster_updated != updated:
                 updated = cluster_updated
                 changed = True
+        elif (
+            "Student Loan Refinance Break-Even vs Title IV Protection Calculator</a></li>" in updated
+            and "waives federal protections" not in updated.lower()
+        ):
+            updated = updated.replace(
+                "Student Loan Refinance Break-Even vs Title IV Protection Calculator</a></li>",
+                'Student Loan Refinance Break-Even vs Title IV Protection Calculator</a> '
+                '<span style="font-size: 13px; color: var(--text-muted, #475569);">(Refinancing federal student loans permanently waives federal protections.)</span></li>',
+            )
+            changed = True
 
     qa_m_norm = re.search(
         r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>\s*<p[^>]*>)([\s\S]*?)(</p>\s*</aside>)',
