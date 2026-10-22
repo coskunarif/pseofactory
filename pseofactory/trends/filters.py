@@ -94,6 +94,9 @@ def is_transient_noise_text(text: str, custom_stoplist: Optional[List[str]] = No
     if "launch scrubbed" in t_clean or ("scrubbed" in t_clean and "today" in t_clean):
         return True
 
+    if any(op in t_clean for op in ("site:", "filetype:", "inurl:", "intitle:", "site-irs-gov")):
+        return True
+
     return False
 
 

@@ -486,6 +486,178 @@ def test_compiler_embeds_statutory_matrix_and_interactive_workbench_assets(tmp_p
     assert 'id="saveable-decision-blueprint"' in html_out
     assert "updateInteractiveCliffAndComparator" in html_out
     assert "collectWorkbenchBlueprintState" in html_out
+    assert "emitWorkbenchEngagementBeacon" in html_out
+
+
+def test_closed_loop_workbench_and_gsc_feedback_in_jev_and_slot_plan():
+    """Verifies closed-loop workbench engagement and GSC cluster feedback drive JevEngine prioritization and select_conversion_slot_plan weighting."""
+    from pseofactory.affiliates import (
+        aggregate_outbound_partner_engagement,
+        bind_asset_partner_roster,
+        select_conversion_slot_plan,
+    )
+    from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+    from pseofactory.trends.cron import TrendCronRunner
+    from pseofactory.trends.filters import NoiseFilter
+    from pseofactory.trends.jev_engine import JevEngine
+    from pseofactory.trends.models import TrendCandidate, TregDurabilityResult
+
+    # 1. Statutory collector emits <= 7 token queries that pass NoiseFilter
+    stat_spikes = StatutoryEconomicDatasetCollector().harvest_statutory_spikes()
+    nf = NoiseFilter()
+    for sp in stat_spikes:
+        passed, reason, _ = nf.evaluate_spike(sp, search_volume=1200)
+        assert passed is True, f"Statutory spike '{sp.query}' failed NoiseFilter: {reason}"
+
+    # 2. Prexvo property assignment routes IBR tax bomb and forgiveness tax bomb to prexvo
+    runner = TrendCronRunner()
+    asgn_ibr = runner.determine_property_assignment("ibr tax bomb calculator")
+    assert asgn_ibr["property_id"] == "prexvo"
+    assert asgn_ibr["contamination_scan_passed"] == 1
+
+    # 3. Telemetry aggregation separates verified clicks from synthetic probes and counts workbench interactions
+    raw_events = [
+        {
+            "property_id": "profithelm",
+            "event": "workbench_interaction",
+            "event_type": "calculator_interaction",
+            "interaction_type": "scenario_pin_a",
+            "tool_slug": "section-179-calculator",
+            "cta_slot": "comparison_table_cta",
+            "subid": "section-179-calculator_wb_scenario_pin_a",
+        },
+        {
+            "property_id": "profithelm",
+            "event": "workbench_interaction",
+            "event_type": "calculator_interaction",
+            "interaction_type": "scenario_pin_b",
+            "tool_slug": "section-179-calculator",
+            "cta_slot": "comparison_table_cta",
+            "subid": "section-179-calculator_wb_scenario_pin_b",
+        },
+        {
+            "property_id": "profithelm",
+            "event": "workbench_interaction",
+            "event_type": "calculator_interaction",
+            "interaction_type": "blueprint_save",
+            "tool_slug": "section-179-calculator",
+            "cta_slot": "calculator_result_inline",
+            "subid": "section-179-calculator_wb_blueprint_save",
+        },
+        {
+            "property_id": "profithelm",
+            "event": "affiliate_click",
+            "tool_slug": "section-179-calculator",
+            "partner_key": "crest_capital",
+            "cta_slot": "comparison_table_cta",
+            "subid": "section-179-calculator_table",
+            "value_tier": "premium",
+        },
+        {
+            "property_id": "profithelm",
+            "event": "affiliate_click",
+            "tool_slug": "section-179-calculator",
+            "partner_key": "crest_capital",
+            "cta_slot": "partner_matrix_card",
+            "subid": "section-179-calculator_test_probe_oct19",
+            "value_tier": "starter",
+        },
+    ]
+    agg = aggregate_outbound_partner_engagement(raw_events, property_id="profithelm")
+    assert agg["total_workbench_interactions"] == 3
+    assert agg["total_scenario_pins"] == 2
+    assert agg["total_blueprint_saves"] == 1
+    assert agg["verified_non_probe_outbound_clicks"] == 1
+    assert agg["synthetic_probe_clicks_filtered"] == 1
+
+    # 4. select_conversion_slot_plan uses engagement_metrics to weight and promote comparison_table_cta
+    roster = bind_asset_partner_roster("profithelm", "section-179-calculator")["roster_offers"]
+    slot_plan = select_conversion_slot_plan(
+        property_id="profithelm",
+        slug="section-179-calculator",
+        roster_offers=roster,
+        page_archetype="interactive_calculator",
+        engagement_metrics=agg,
+    )
+    assert slot_plan["primary_slot"] == "comparison_table_cta"
+    assert slot_plan["gsc_opportunity_tier"] == "WORKBENCH_ENGAGEMENT_SLOT_PROMOTION"
+    assert slot_plan["slot_weights"]["comparison_table_cta"] > slot_plan["slot_weights"]["calculator_result_inline"]
+    assert slot_plan["workbench_engagement"]["scenario_pins"] == 2
+    assert slot_plan["workbench_engagement"]["blueprint_saves"] == 1
+
+    # 5. JevEngine closed-loop feedback promotes stabilized candidates & blocks search-operator noise
+    jev = JevEngine()
+    treg_cap = TregDurabilityResult(
+        query="ohio capital gains tax calculator",
+        search_volume=1200,
+        cpc_usd=4.10,
+        competition_index=0.45,
+        keyword_difficulty=22.0,
+        position_zero_vacant=True,
+        historical_stability=0.88,
+        checked_at="2026-10-22T00:00:00Z",
+    )
+    cand_base = TrendCandidate(
+        id="cand-ohio-base",
+        query="ohio capital gains tax calculator",
+        slug="ohio-capital-gains-tax-calculator",
+        source="google_suggest",
+        intent_cluster="calculator",
+        velocity=48.0,
+        acceleration=6.0,
+        z_score=2.4,
+        is_transient_noise=False,
+        discovered_at="2026-10-22T00:00:00Z",
+        metadata={"property_id": "profithelm"},
+    )
+    res_base = jev.evaluate(cand_base, treg_cap)
+    cand_cl = TrendCandidate(
+        id="cand-ohio-cl",
+        query="ohio capital gains tax calculator",
+        slug="ohio-capital-gains-tax-calculator",
+        source="google_suggest",
+        intent_cluster="calculator",
+        velocity=48.0,
+        acceleration=6.0,
+        z_score=2.4,
+        is_transient_noise=False,
+        discovered_at="2026-10-22T00:00:00Z",
+        metadata={
+            "property_id": "profithelm",
+            "closed_loop_feedback": {
+                "gsc_cluster_impressions": 2740,
+                "gsc_cluster_clicks": 96,
+                "workbench_interactions": 5,
+                "scenario_pins": 2,
+                "blueprint_saves": 2,
+                "verified_outbound_clicks": 12,
+                "consecutive_cycles": 5,
+            },
+        },
+    )
+    res_cl = jev.evaluate(cand_cl, treg_cap)
+    assert res_cl.composite_profit_yield > res_base.composite_profit_yield
+    assert res_cl.action == "BUILD_PAGE"
+    assert res_cl.candidate_spec["sponsor_coverage_verified"] is True
+    assert res_cl.candidate_spec["closed_loop_feedback"]["gsc_cluster_impressions"] == 2740
+
+    # Search operator query is rejected from BUILD_PAGE
+    cand_op = TrendCandidate(
+        id="cand-op-noise",
+        query="site:irs.gov 2026 section 179 2560000",
+        slug="site-irs-gov-2026-section-179-2-560-000",
+        source="google_suggest",
+        intent_cluster="statutory_compliance",
+        velocity=90.0,
+        acceleration=20.0,
+        z_score=4.2,
+        is_transient_noise=False,
+        discovered_at="2026-10-22T00:00:00Z",
+        metadata={"property_id": "profithelm"},
+    )
+    res_op = jev.evaluate(cand_op, treg_cap)
+    assert res_op.action == "REJECT"
+
 
 
 

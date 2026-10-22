@@ -2477,8 +2477,13 @@ def aggregate_outbound_partner_engagement(
                 "property_id": prop_val,
                 "page_views": 0,
                 "calculator_interactions": 0,
+                "workbench_interactions": 0,
+                "scenario_pins": 0,
+                "blueprint_saves": 0,
                 "preset_clicks": 0,
                 "outbound_clicks": 0,
+                "verified_non_probe_outbound_clicks": 0,
+                "synthetic_probe_clicks_filtered": 0,
                 "cta_ctr": 0.0,
                 "intent_to_click_rate": 0.0,
                 "realized_revenue_usd": 0.0,
@@ -2637,11 +2642,26 @@ def aggregate_outbound_partner_engagement(
             {"cta_slot": cta_slot, "views": 0, "intent_interactions": 0, "outbound_clicks": 0, "estimated_revenue_yield_usd": 0.0},
         )
 
+        interaction_type = str(ev.get("interaction_type") or props.get("interaction_type") or "").strip().lower()
         is_view = etype in ("page_view", "impression", "offer_impression")
         is_calc_intent = (
-            etype in ("client_calculation", "calculation", "scenario_copy", "slider_drag", "input_change", "calculator_interaction")
+            etype
+            in (
+                "client_calculation",
+                "calculation",
+                "scenario_copy",
+                "slider_drag",
+                "input_change",
+                "calculator_interaction",
+                "workbench_interaction",
+                "scenario_pin",
+                "blueprint_save",
+                "blueprint_share",
+                "blueprint_export",
+            )
             or etype.startswith("select_preset")
             or etype == "preset_click"
+            or interaction_type.startswith(("scenario_pin", "blueprint_", "preset_hydration"))
         )
         is_outbound_click = etype in ("affiliate_click", "click_conversion_cta", "outbound_redirect", "partner_cta_click")
 
@@ -2671,7 +2691,17 @@ def aggregate_outbound_partner_engagement(
 
         if is_calc_intent:
             s_rec["calculator_interactions"] += 1
-            if "preset" in etype:
+            if (
+                "workbench" in etype
+                or etype in ("scenario_pin", "blueprint_save", "blueprint_share", "blueprint_export")
+                or interaction_type.startswith(("scenario_pin", "blueprint_", "preset_hydration"))
+            ):
+                s_rec["workbench_interactions"] = s_rec.get("workbench_interactions", 0) + 1
+            if "scenario_pin" in etype or interaction_type.startswith("scenario_pin"):
+                s_rec["scenario_pins"] = s_rec.get("scenario_pins", 0) + 1
+            if "blueprint" in etype or interaction_type.startswith("blueprint_"):
+                s_rec["blueprint_saves"] = s_rec.get("blueprint_saves", 0) + 1
+            if "preset" in etype or interaction_type == "preset_hydration":
                 s_rec["preset_clicks"] += 1
             s_slot["intent_interactions"] += 1
             slot_rec["intent_interactions"] += 1
@@ -2697,6 +2727,15 @@ def aggregate_outbound_partner_engagement(
 
         if is_outbound_click:
             s_rec["outbound_clicks"] += 1
+            sub_low = subid_val.lower()
+            is_synthetic_probe = any(
+                tok in sub_low
+                for tok in ("_oct19", "_test_", "_live_kv_", "_edge", "qa_", "probe_", "synthetic_")
+            )
+            if is_synthetic_probe:
+                s_rec["synthetic_probe_clicks_filtered"] = s_rec.get("synthetic_probe_clicks_filtered", 0) + 1
+            else:
+                s_rec["verified_non_probe_outbound_clicks"] = s_rec.get("verified_non_probe_outbound_clicks", 0) + 1
             s_Slot_clicks = s_slot["outbound_clicks"] + 1
             s_slot["outbound_clicks"] = s_Slot_clicks
             slot_rec["outbound_clicks"] += 1
@@ -2788,7 +2827,7 @@ def aggregate_outbound_partner_engagement(
         if s_rec["cta_slots"]:
             best_slot = max(
                 s_rec["cta_slots"].values(),
-                key=lambda x: (x.get("estimated_revenue_yield_usd", 0.0), x.get("outbound_clicks", 0)),
+                key=lambda x: (x.get("estimated_revenue_yield_usd", 0.0), x.get("outbound_clicks", 0), x.get("intent_interactions", 0)),
             )
             s_rec["top_converting_cta_slot"] = best_slot["cta_slot"]
 
@@ -2822,7 +2861,12 @@ def aggregate_outbound_partner_engagement(
         "property_id": prop_filter or "all",
         "total_events_processed": len(raw_events),
         "total_outbound_clicks": sum(s["outbound_clicks"] for s in by_slug.values()),
+        "verified_non_probe_outbound_clicks": sum(s.get("verified_non_probe_outbound_clicks", 0) for s in by_slug.values()),
+        "synthetic_probe_clicks_filtered": sum(s.get("synthetic_probe_clicks_filtered", 0) for s in by_slug.values()),
         "total_calculator_interactions": sum(s["calculator_interactions"] for s in by_slug.values()),
+        "total_workbench_interactions": sum(s.get("workbench_interactions", 0) for s in by_slug.values()),
+        "total_scenario_pins": sum(s.get("scenario_pins", 0) for s in by_slug.values()),
+        "total_blueprint_saves": sum(s.get("blueprint_saves", 0) for s in by_slug.values()),
         "total_estimated_revenue_yield_usd": round(sum(s["estimated_revenue_yield_usd"] for s in by_slug.values()), 2),
         "by_slug": by_slug,
         "by_page": by_slug,
@@ -5889,6 +5933,13 @@ def select_conversion_slot_plan(
             "primary_slot": "ymyl_public_service_guardrail",
             "active_slots": ["ymyl_public_service_guardrail"],
             "slot_bindings": {},
+            "slot_weights": {},
+            "workbench_engagement": {
+                "calculator_interactions": 0,
+                "workbench_interactions": 0,
+                "scenario_pins": 0,
+                "blueprint_saves": 0,
+            },
             "gsc_opportunity_tier": "RESTRICTED_PUBLIC_SERVICE",
             "gsc_repositioned": False,
             "reposition_reason": "Commercial offers suppressed under Title IV public-service guardrail.",
@@ -5922,6 +5973,40 @@ def select_conversion_slot_plan(
         )
     )
     search_appearances = [str(sa).upper() for sa in (gsc.get("search_appearances") or []) if sa]
+
+    eng = dict(engagement_metrics) if isinstance(engagement_metrics, dict) else {}
+    by_slug_eng = (
+        eng.get("by_slug")
+        if isinstance(eng.get("by_slug"), dict)
+        else (eng.get("by_page") if isinstance(eng.get("by_page"), dict) else {})
+    )
+    slug_eng = (
+        by_slug_eng.get(slug_id)
+        or by_slug_eng.get(s_norm)
+        or (
+            eng
+            if any(
+                k in eng
+                for k in (
+                    "calculator_interactions",
+                    "workbench_interactions",
+                    "scenario_pins",
+                    "blueprint_saves",
+                    "cta_slots",
+                )
+            )
+            else {}
+        )
+    )
+    if not isinstance(slug_eng, dict):
+        slug_eng = {}
+    calc_interactions = int(slug_eng.get("calculator_interactions", 0) or 0)
+    wb_interactions = int(slug_eng.get("workbench_interactions", 0) or 0)
+    scenario_pins = int(slug_eng.get("scenario_pins", 0) or 0)
+    blueprint_saves = int(slug_eng.get("blueprint_saves", 0) or 0)
+    slug_cta_slots = slug_eng.get("cta_slots") if isinstance(slug_eng.get("cta_slots"), dict) else {}
+    global_cta_slots = eng.get("by_cta_slot") if isinstance(eng.get("by_cta_slot"), dict) else {}
+    top_conv_pk = str(slug_eng.get("top_converting_partner") or "").strip().lower()
 
     ordered_offers = [dict(o) for o in roster_offers]
     initial_primary_key = str(ordered_offers[0].get("partner_key") or "")
@@ -6004,6 +6089,14 @@ def select_conversion_slot_plan(
             f"Empirical outbound engagement promoted higher-yielding partner '{highest_yield_pk}' "
             f"over static default '{initial_primary_key}'."
         )
+    elif top_conv_pk and top_conv_pk != initial_primary_key and any(o.get("partner_key") == top_conv_pk for o in ordered_offers):
+        ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == top_conv_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "EMPIRICAL_YIELD_SWAP"
+        reposition_reason = (
+            f"Closed-loop slug engagement promoted top-converting partner '{top_conv_pk}' "
+            f"ahead of '{initial_primary_key}'."
+        )
 
     # Re-stamp tier_role after any GSC promotion/reordering
     for idx, off in enumerate(ordered_offers):
@@ -6051,6 +6144,56 @@ def select_conversion_slot_plan(
             "inline_callout_card",
         ]
 
+    # Closed-loop workbench and slot engagement weighting
+    slot_weights: Dict[str, float] = {
+        "calculator_result_inline": 1.0,
+        "comparison_table_cta": 0.9,
+        "partner_matrix_card": 0.8,
+        "inline_callout_card": 0.7,
+    }
+    if page_archetype == "scenario_comparison_matrix":
+        slot_weights["comparison_table_cta"] += 0.25
+    elif page_archetype == "pillar_hub":
+        slot_weights["partner_matrix_card"] += 0.35
+
+    if scenario_pins > 0:
+        slot_weights["comparison_table_cta"] += min(0.65, scenario_pins * 0.22)
+    if blueprint_saves > 0 or calc_interactions > 0:
+        slot_weights["calculator_result_inline"] += min(0.60, blueprint_saves * 0.20 + calc_interactions * 0.08)
+
+    for slot_k in list(slot_weights.keys()):
+        s_slot_data = slug_cta_slots.get(slot_k) if isinstance(slug_cta_slots.get(slot_k), dict) else {}
+        g_slot_data = global_cta_slots.get(slot_k) if isinstance(global_cta_slots.get(slot_k), dict) else {}
+        s_clicks = int(s_slot_data.get("outbound_clicks", 0) or 0)
+        s_intents = int(s_slot_data.get("intent_interactions", 0) or 0)
+        g_clicks = int(g_slot_data.get("outbound_clicks", 0) or 0)
+        slot_weights[slot_k] = round(
+            slot_weights[slot_k] + min(0.50, s_clicks * 0.14 + s_intents * 0.06 + min(0.12, g_clicks * 0.01)),
+            4,
+        )
+
+    if page_archetype != "pillar_hub":
+        comp_clicks = int((slug_cta_slots.get("comparison_table_cta") or {}).get("outbound_clicks", 0) or 0)
+        inline_clicks = int((slug_cta_slots.get("calculator_result_inline") or {}).get("outbound_clicks", 0) or 0)
+        if (scenario_pins >= 1 or comp_clicks > inline_clicks) and slot_weights["comparison_table_cta"] > slot_weights[primary_slot]:
+            primary_slot = "comparison_table_cta"
+            active_slots = sorted(active_slots, key=lambda s_name: -slot_weights.get(s_name, 0.0))
+            if not gsc_repositioned:
+                gsc_repositioned = True
+                gsc_opportunity_tier = "WORKBENCH_ENGAGEMENT_SLOT_PROMOTION"
+                reposition_reason = (
+                    f"Closed-loop workbench scenario comparator engagement (pins={scenario_pins}, "
+                    f"table_clicks={comp_clicks}) promoted 'comparison_table_cta' (weight {slot_weights['comparison_table_cta']:.2f}) "
+                    f"for '{lead_offer.get('partner_key')}'."
+                )
+        elif (blueprint_saves >= 1 or wb_interactions >= 1) and not gsc_repositioned:
+            gsc_repositioned = True
+            gsc_opportunity_tier = "WORKBENCH_ENGAGEMENT_SLOT_PROMOTION"
+            reposition_reason = (
+                f"Closed-loop workbench engagement (workbench={wb_interactions}, blueprint_saves={blueprint_saves}) "
+                f"reinforced '{primary_slot}' (weight {slot_weights.get(primary_slot, 1.0):.2f}) for '{lead_offer.get('partner_key')}'."
+            )
+
     def _bind_offer_to_slot(offer_dict: Dict[str, Any], slot_name: str, sub_suffix: str) -> Dict[str, Any]:
         pk = str(offer_dict.get("partner_key") or "")
         sub_val = f"{slug_id}_{sub_suffix}"
@@ -6059,6 +6202,7 @@ def select_conversion_slot_plan(
             **offer_dict,
             "cta_slot": slot_name,
             "subid": sub_val,
+            "slot_weight": slot_weights.get(slot_name, 0.8),
             "attributed_href": attr_href,
         }
 
@@ -6073,6 +6217,7 @@ def select_conversion_slot_plan(
                 "HIGH_IMPRESSION_CTR_SHORTFALL",
                 "MOBILE_CTR_DEFICIT_PROMOTION",
                 "RICH_APPEARANCE_MATRIX_PROMOTION",
+                "WORKBENCH_ENGAGEMENT_SLOT_PROMOTION",
             )
         )
         else secondary_offer
@@ -6096,6 +6241,13 @@ def select_conversion_slot_plan(
         "primary_slot": primary_slot,
         "active_slots": active_slots,
         "slot_bindings": slot_bindings,
+        "slot_weights": slot_weights,
+        "workbench_engagement": {
+            "calculator_interactions": calc_interactions,
+            "workbench_interactions": wb_interactions,
+            "scenario_pins": scenario_pins,
+            "blueprint_saves": blueprint_saves,
+        },
         "ordered_offers": ordered_offers,
         "gsc_opportunity_tier": gsc_opportunity_tier,
         "gsc_repositioned": gsc_repositioned,

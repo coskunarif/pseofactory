@@ -262,6 +262,28 @@ class JevEngine:
                 corrob_mult = min(1.16, corrob_mult + 0.04)
             y_asset = y_asset * corrob_mult
 
+        closed_loop = meta_dict.get("closed_loop_feedback")
+        if isinstance(closed_loop, dict) and closed_loop:
+            cl_mult = 1.0
+            c_impr = int(closed_loop.get("gsc_cluster_impressions", 0) or 0)
+            c_clicks = int(closed_loop.get("gsc_cluster_clicks", 0) or 0)
+            wb_inter = int(closed_loop.get("workbench_interactions", 0) or 0)
+            sc_pins = int(closed_loop.get("scenario_pins", 0) or 0)
+            bp_saves = int(closed_loop.get("blueprint_saves", 0) or 0)
+            ver_clicks = int(closed_loop.get("verified_outbound_clicks", 0) or 0)
+            consec_cycles = int(closed_loop.get("consecutive_cycles", 1) or 1)
+            if c_impr >= 10:
+                cl_mult += min(0.11, math.log10(max(1, c_impr)) * 0.032)
+            if c_clicks >= 1:
+                cl_mult += min(0.08, c_clicks * 0.015)
+            if wb_inter >= 1 or sc_pins >= 1 or bp_saves >= 1:
+                cl_mult += min(0.12, wb_inter * 0.03 + sc_pins * 0.04 + bp_saves * 0.04)
+            if ver_clicks >= 1:
+                cl_mult += min(0.08, ver_clicks * 0.015)
+            if consec_cycles >= 3:
+                cl_mult += min(0.09, (consec_cycles - 2) * 0.035)
+            y_asset = y_asset * min(1.34, cl_mult)
+
         momentum_core = 0.35 * v_norm + 0.65 * s_norm
         momentum_factor = math.pow(momentum_core, 0.85) if momentum_core > 0.0 else 0.0
 
@@ -344,8 +366,22 @@ class JevEngine:
             )
 
         # Step 1: Noise and Deceleration Gate
-        if candidate.is_transient_noise or (candidate.acceleration <= 0.0 and treg_result.search_volume < 1000) or candidate.z_score < 1.5:
-            reason = "Transient chatter or decelerating spike without established baseline volume"
+        q_low_clean = clean_q.lower()
+        is_search_operator_noise = any(
+            op in q_low_clean or op in slug
+            for op in ("site:", "filetype:", "inurl:", "intitle:", "site-irs-gov")
+        )
+        if (
+            candidate.is_transient_noise
+            or is_search_operator_noise
+            or (candidate.acceleration <= 0.0 and treg_result.search_volume < 1000)
+            or candidate.z_score < 1.5
+        ):
+            reason = (
+                "Search operator syntax rejected from autonomous build pipeline"
+                if is_search_operator_noise
+                else "Transient chatter or decelerating spike without established baseline volume"
+            )
             return JevDecisionResult(
                 query=clean_q,
                 slug=slug,
@@ -382,6 +418,7 @@ class JevEngine:
         gsc_meta = cand_meta.get("gsc_telemetry")
         stat_matrix = cand_meta.get("statutory_economic_matrix")
         corrob_sources = list(cand_meta.get("corroborating_sources") or [])
+        closed_loop_fb = cand_meta.get("closed_loop_feedback")
         if c_cannibal >= 0.50:
             tool_slug = matching_tool or "existing-tool"
             if 4.0 <= pos <= 20.0:
@@ -403,6 +440,8 @@ class JevEngine:
                     overlay_spec["statutory_economic_matrix"] = stat_matrix
                 if corrob_sources:
                     overlay_spec["corroborating_sources"] = corrob_sources
+                if isinstance(closed_loop_fb, dict) and closed_loop_fb:
+                    overlay_spec["closed_loop_feedback"] = dict(closed_loop_fb)
                 if getattr(treg_result, "ai_citation_checked", False):
                     overlay_spec["ai_citation_vacant"] = bool(treg_result.ai_citation_vacant)
                     overlay_spec["ai_cited_domains"] = list(treg_result.ai_cited_domains or [])
@@ -457,7 +496,7 @@ class JevEngine:
                 evaluated_at=now_iso,
             )
 
-        # Step 4: Build Page Qualification Gate (with Monetization Qualification & AI Citation Void)
+        # Step 4: Build Page Qualification Gate (with Sponsor-Verified Monetization & AI Citation Void)
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
         r_composite = 0.6 * c_cannibal + 0.4 * kd_norm
         ai_vacant = bool(getattr(treg_result, "ai_citation_vacant", False))
@@ -466,6 +505,22 @@ class JevEngine:
             or treg_result.keyword_difficulty < 25.0
             or (ai_vacant and treg_result.keyword_difficulty <= 38.0)
         )
+        rec_partners = list(monetization.get("recommended_partners") or [])
+        is_restricted_ps = bool(monetization.get("restricted_public_service", False))
+        prop_id_resolved = str(monetization.get("property_id") or "")
+        bounty_est_val = float(monetization.get("expected_bounty_usd", 0.0) or 0.0)
+        sponsor_coverage_verified = bool(
+            monetization.get("partner_alignment_verified", True)
+            and (
+                (len(rec_partners) >= 1 and bounty_est_val >= 25.0)
+                or is_restricted_ps
+                or prop_id_resolved not in ("profithelm", "prexvo")
+            )
+        )
+        is_non_tool_question = (
+            target_asset == "void_documentation"
+            and q_low_clean.startswith(("can you ", "how do i ", "what is a ", "why does "))
+        )
 
         if (
             composite_yield >= self.min_build_yield
@@ -473,6 +528,8 @@ class JevEngine:
             and c_cannibal < 0.50
             and p0_or_low_kd
             and monetization.get("monetization_qualified", False)
+            and sponsor_coverage_verified
+            and not is_non_tool_question
         ):
             reason = f"High-yield durable void (yield {composite_yield:.1f} >= {self.min_build_yield:.1f}) with vacant Position 0 and zero cannibalization"
             candidate_spec = {
@@ -489,11 +546,12 @@ class JevEngine:
                 "ai_cited_domains": list(getattr(treg_result, "ai_cited_domains", None) or []),
                 "status": "APPROVED_BUILD",
                 "discovered_at": candidate.discovered_at,
-                "property_id": monetization.get("property_id", ""),
+                "property_id": prop_id_resolved,
                 "intent_tier": monetization.get("intent_tier", ""),
                 "monetization_qualified": monetization.get("monetization_qualified", False),
+                "sponsor_coverage_verified": sponsor_coverage_verified,
                 "primary_partner": monetization.get("primary_partner", ""),
-                "recommended_partners": monetization.get("recommended_partners", []),
+                "recommended_partners": rec_partners,
                 "expected_bounty_usd": monetization.get("expected_bounty_usd", 0.0),
                 "effective_partner_yield": monetization.get("effective_partner_yield", 0.0),
                 "estimated_monthly_revenue_usd": monetization.get("estimated_monthly_revenue_usd", 0.0),
@@ -509,6 +567,8 @@ class JevEngine:
                 candidate_spec["statutory_economic_matrix"] = stat_matrix
             if corrob_sources:
                 candidate_spec["corroborating_sources"] = corrob_sources
+            if isinstance(closed_loop_fb, dict) and closed_loop_fb:
+                candidate_spec["closed_loop_feedback"] = dict(closed_loop_fb)
             return JevDecisionResult(
                 query=clean_q,
                 slug=slug,

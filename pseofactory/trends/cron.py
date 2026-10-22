@@ -65,6 +65,13 @@ PREXVO_STATUTORY_TOKENS: List[str] = [
     "save plan",
     "idr waiver",
     "student loan forgiveness",
+    "forgiveness tax bomb",
+    "ibr tax bomb",
+    "ibr payment",
+    "ibr repayment",
+    "ibr calculator",
+    "vs ibr",
+    "ibr vs",
     "parent plus",
     "section 108f",
 ]
@@ -386,16 +393,35 @@ class TrendCronRunner:
                 "unassigned": None,
             }
             gsc_qp_by_prop_slug: Dict[str, Dict[str, Dict[str, Any]]] = {"prexvo": {}, "profithelm": {}}
+            outbound_engagement_by_prop: Dict[str, Dict[str, Any]] = {"prexvo": {}, "profithelm": {}}
             try:
+                from pseofactory.affiliates import (
+                    GSC_EMPIRICAL_CLUSTER_TRAFFIC,
+                    aggregate_outbound_partner_engagement,
+                )
+
                 reg = TenantRegistry.default()
                 for p_id in ("prexvo", "profithelm"):
                     try:
                         adapter = reg.get_adapter(p_id)
                         existing_tools_map[p_id] = [dict(t) for t in (getattr(adapter, "tools", []) or [])]
+                        if not fixture_path and getattr(adapter, "repo_path", None):
+                            t_repo = Path(adapter.repo_path)
+                            events_f = t_repo / ".agy" / "telemetry_events.jsonl"
+                            agg_f = t_repo / ".agy" / "outbound_partner_engagement.json"
+                            if events_f.is_file():
+                                outbound_engagement_by_prop[p_id] = aggregate_outbound_partner_engagement(
+                                    events_f, property_id=p_id
+                                )
+                            elif agg_f.is_file():
+                                outbound_engagement_by_prop[p_id] = aggregate_outbound_partner_engagement(
+                                    agg_f, property_id=p_id
+                                )
                     except Exception:
                         existing_tools_map[p_id] = []
             except Exception:
                 existing_tools_map = {"prexvo": [], "profithelm": []}
+                GSC_EMPIRICAL_CLUSTER_TRAFFIC = {}
 
             try:
                 for p_id in ("prexvo", "profithelm"):
@@ -758,44 +784,7 @@ class TrendCronRunner:
                     "current_position": pos,
                 }
 
-                # Step 4F: Evaluate Jev decision
-                if cand.metadata is None:
-                    cand.metadata = {}
-                cand.metadata.setdefault("property_id", assigned_property)
-                if "gsc_telemetry" in raw_meta:
-                    cand.metadata["gsc_telemetry"] = raw_meta["gsc_telemetry"]
-                if not fixture_path:
-                    if "corroborating_sources" in raw_meta:
-                        cand.metadata["corroborating_sources"] = list(raw_meta["corroborating_sources"])
-                    if "source_count" in raw_meta:
-                        cand.metadata["source_count"] = int(raw_meta["source_count"])
-                if assigned_property in ("prexvo", "profithelm"):
-                    cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
-                        assigned_property, clean_q
-                    )
-                if ceiling_by_prop.get(assigned_property):
-                    cand.metadata["ceiling_status"] = ceiling_by_prop[assigned_property]
-                eff_site_impr = site_impressions_by_prop.get(assigned_property, total_site_impressions)
-                mock_jev = raw_meta.get("jev_mock")
-                decision = self.jev_engine.evaluate(
-                    candidate=cand,
-                    treg_result=treg_res,
-                    cannibalization_context=cann_ctx,
-                    jev_mock=mock_jev,
-                    position=pos,
-                    total_site_impressions=eff_site_impr,
-                )
-                monetization_qual = qualify_monetization_opportunity(
-                    query=clean_q,
-                    slug=slug,
-                    property_id=assigned_property,
-                    search_volume=treg_res.search_volume,
-                    cpc_usd=treg_res.cpc_usd,
-                    jev_score=decision.jev_score,
-                    durable_prob=decision.durable_prob,
-                )
-
-                # Update keyword history rollup to obtain consecutive streak
+                # Update keyword history rollup first so consecutive_streak feeds closed-loop evaluation
                 consecutive_streak = 1
                 if not dry_run:
                     rollup = db.upsert_keyword_history(
@@ -812,6 +801,96 @@ class TrendCronRunner:
                     consecutive_streak = rollup.consecutive_cycles_count
                 else:
                     consecutive_streak = 1
+
+                # Step 4F: Evaluate Jev decision with closed-loop search and workbench telemetry
+                if cand.metadata is None:
+                    cand.metadata = {}
+                cand.metadata.setdefault("property_id", assigned_property)
+                if "gsc_telemetry" in raw_meta:
+                    cand.metadata["gsc_telemetry"] = raw_meta["gsc_telemetry"]
+                if "closed_loop_feedback" in raw_meta:
+                    cand.metadata["closed_loop_feedback"] = dict(raw_meta["closed_loop_feedback"])
+                if not fixture_path:
+                    if "corroborating_sources" in raw_meta:
+                        cand.metadata["corroborating_sources"] = list(raw_meta["corroborating_sources"])
+                    if "source_count" in raw_meta:
+                        cand.metadata["source_count"] = int(raw_meta["source_count"])
+                    if assigned_property in ("prexvo", "profithelm") and "closed_loop_feedback" not in cand.metadata:
+                        prop_gsc_map = gsc_qp_by_prop_slug.get(assigned_property, {})
+                        prop_eng = outbound_engagement_by_prop.get(assigned_property, {})
+                        cluster_tokens = [
+                            t
+                            for t in (
+                                "capital-gains",
+                                "tax-bracket",
+                                "179",
+                                "1031",
+                                "crypto-tax",
+                                "prediction-market",
+                                "runway",
+                                "treasury",
+                                "qsbs",
+                                "1202",
+                                "174",
+                                "199a",
+                                "s-corp",
+                                "student-loan",
+                                "rap",
+                                "ibr",
+                                "pslf",
+                                "parent-plus",
+                                "paye",
+                                "icr",
+                            )
+                            if t in slug or t.replace("-", " ") in norm_q
+                        ]
+                        c_impr = 0
+                        c_clicks = 0
+                        for g_slug, g_info in prop_gsc_map.items():
+                            if g_slug == slug or g_slug == matching_tool or any(ct in g_slug for ct in cluster_tokens):
+                                c_impr += int(g_info.get("impressions", 0) or 0)
+                                c_clicks += int(g_info.get("clicks", 0) or 0)
+                        if c_impr == 0:
+                            for e_slug, (e_imp, e_clk) in GSC_EMPIRICAL_CLUSTER_TRAFFIC.items():
+                                if e_slug == slug or e_slug == matching_tool or any(ct in e_slug for ct in cluster_tokens):
+                                    c_impr += int(e_imp)
+                                    c_clicks += int(e_clk)
+                        cand.metadata["closed_loop_feedback"] = {
+                            "gsc_cluster_impressions": c_impr,
+                            "gsc_cluster_clicks": c_clicks,
+                            "workbench_interactions": int(prop_eng.get("total_workbench_interactions", 0) or 0)
+                            + int(prop_eng.get("total_calculator_interactions", 0) or 0),
+                            "scenario_pins": int(prop_eng.get("total_scenario_pins", 0) or 0),
+                            "blueprint_saves": int(prop_eng.get("total_blueprint_saves", 0) or 0),
+                            "verified_outbound_clicks": int(prop_eng.get("verified_non_probe_outbound_clicks", 0) or 0),
+                            "synthetic_probe_clicks_filtered": int(prop_eng.get("synthetic_probe_clicks_filtered", 0) or 0),
+                            "consecutive_cycles": consecutive_streak,
+                        }
+                if assigned_property in ("prexvo", "profithelm"):
+                    cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
+                        assigned_property, clean_q
+                    )
+                if ceiling_by_prop.get(assigned_property):
+                    cand.metadata["ceiling_status"] = ceiling_by_prop[assigned_property]
+                eff_site_impr = site_impressions_by_prop.get(assigned_property, total_site_impressions)
+                mock_jev = raw_meta.get("jev_mock")
+                decision = self.jev_engine.evaluate(
+                    candidate=cand,
+                    treg_result=treg_res,
+                    cannibalization_context=cann_ctx,
+                    jev_mock=mock_jev,
+                    position=pos,
+                    total_site_impressions=eff_site_impressions if "eff_site_impressions" in locals() else eff_site_impr,
+                )
+                monetization_qual = qualify_monetization_opportunity(
+                    query=clean_q,
+                    slug=slug,
+                    property_id=assigned_property,
+                    search_volume=treg_res.search_volume,
+                    cpc_usd=treg_res.cpc_usd,
+                    jev_score=decision.jev_score,
+                    durable_prob=decision.durable_prob,
+                )
 
                 # Step 4F: Multi-Cycle Durability Gating & Tenant Action Triage
                 action_to_record = decision.action

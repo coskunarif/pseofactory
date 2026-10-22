@@ -1510,7 +1510,12 @@ def _render_runtime_sync_events_js() -> str:
         var trafficSource = resolveTrafficSourceAttribution();
         var numEl = document.querySelector('input[type="number"], input[type="range"]');
         var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
-        var tier = (!isNaN(numVal) && numVal >= 100000) ? "premium" : "starter";
+        var compRoot = document.getElementById("stateful-scenario-comparator");
+        var bpRoot = document.getElementById("saveable-decision-blueprint");
+        var hasPinned = Boolean(compRoot && (compRoot.getAttribute("data-pinned-a") === "1" || compRoot.getAttribute("data-pinned-b") === "1"));
+        var hasBlueprint = Boolean(bpRoot && bpRoot.getAttribute("data-blueprint-saved") === "1");
+        var wbState = hasBlueprint ? "blueprint_saved" : (hasPinned ? "pinned_ab" : "");
+        var tier = ((!isNaN(numVal) && numVal >= 100000) || hasPinned || hasBlueprint) ? "premium" : "starter";
         var rLinks = document.querySelectorAll('a[href^="/r/"]');
         for (var i = 0; i < rLinks.length; i++) {
           var lnk = rLinks[i];
@@ -1526,6 +1531,10 @@ def _render_runtime_sync_events_js() -> str:
           if (!qs.get("cta_slot")) qs.set("cta_slot", slot);
           if (!qs.get("traffic_source")) qs.set("traffic_source", trafficSource);
           qs.set("ph_tier", tier);
+          if (wbState) {
+            qs.set("wb_state", wbState);
+            lnk.setAttribute("data-wb-state", wbState);
+          }
           lnk.setAttribute("href", basePath + "?" + qs.toString());
           if (!lnk.getAttribute("data-partner")) lnk.setAttribute("data-partner", pk);
           if (!lnk.getAttribute("data-tool")) lnk.setAttribute("data-tool", slug);
@@ -1533,6 +1542,74 @@ def _render_runtime_sync_events_js() -> str:
           if (!lnk.getAttribute("data-cta-slot")) lnk.setAttribute("data-cta-slot", slot);
           lnk.setAttribute("data-traffic-source", trafficSource);
           lnk.setAttribute("data-tier", tier);
+        }
+      } catch (err) {}
+    }
+
+    function emitWorkbenchEngagementBeacon(interactionType, ctaSlot, extraProps) {
+      try {
+        var slug = resolveCurrentToolSlug();
+        var trafficSource = resolveTrafficSourceAttribution();
+        var numEl = document.querySelector('input[type="number"], input[type="range"]');
+        var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
+        var tier = (!isNaN(numVal) && numVal >= 100000) ? "premium" : "starter";
+        var slot = ctaSlot || "calculator_result_inline";
+        var subid = slug + "_wb_" + String(interactionType || "interact");
+        var evPayload = {
+          tool: slug,
+          source_tool: slug,
+          interaction_type: String(interactionType || "workbench_interaction"),
+          cta_slot: slot,
+          subid: subid,
+          tier: tier,
+          value_tier: tier,
+          traffic_source: trafficSource
+        };
+        if (extraProps && typeof extraProps === "object") {
+          for (var ek in extraProps) {
+            if (Object.prototype.hasOwnProperty.call(extraProps, ek)) {
+              evPayload[ek] = extraProps[ek];
+            }
+          }
+        }
+        if (typeof window.gtag === "function") {
+          window.gtag("event", "workbench_interaction", evPayload);
+        }
+        var analyticsApi = window["Profit" + "HelmAnalytics"];
+        if (analyticsApi && typeof analyticsApi.track === "function") {
+          analyticsApi.track("workbench_interaction", evPayload);
+        } else {
+          var beaconBody = JSON.stringify({
+            event: "workbench_interaction",
+            event_type: "calculator_interaction",
+            interaction_type: String(interactionType || "workbench_interaction"),
+            tool_slug: slug,
+            source_tool: slug,
+            cta_slot: slot,
+            subid: subid,
+            value_tier: tier,
+            ph_tier: tier,
+            path: window.location ? window.location.pathname : "/",
+            traffic_source: trafficSource,
+            properties: evPayload
+          });
+          var sentBeacon = false;
+          if (navigator.sendBeacon) {
+            try {
+              var blob = typeof Blob === "function" ? new Blob([beaconBody], { type: "application/json" }) : beaconBody;
+              sentBeacon = navigator.sendBeacon("/api/telemetry", blob);
+            } catch (bErr) {}
+          }
+          if (!sentBeacon && typeof window.fetch === "function") {
+            try {
+              window.fetch("/api/telemetry", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: beaconBody,
+                keepalive: true
+              }).catch(function() {});
+            } catch (fErr) {}
+          }
         }
       } catch (err) {}
     }
@@ -1570,6 +1647,8 @@ def _render_runtime_sync_events_js() -> str:
           }
         }
         if (restoredCount > 0) {
+          var bpRoot = document.getElementById("saveable-decision-blueprint");
+          if (bpRoot) bpRoot.setAttribute("data-blueprint-saved", "1");
           var statusEl = document.getElementById("serp-blueprint-status");
           if (statusEl) {
             statusEl.textContent = "Blueprint Status: Restored saved state (" + String(restoredCount) + " inputs hydrated from local storage).";
@@ -1681,6 +1760,8 @@ def _render_runtime_sync_events_js() -> str:
               compRoot.removeAttribute("data-pinned-b");
             }
             updateInteractiveCliffAndComparator(liveP, liveS);
+            syncOutboundAffiliateLinks();
+            emitWorkbenchEngagementBeacon("scenario_pin_" + pinMode.toLowerCase(), "comparison_table_cta", { pin_mode: pinMode, primary_val: liveP, secondary_val: liveS });
           }
         } catch (err) {}
         return;
@@ -1692,6 +1773,8 @@ def _render_runtime_sync_events_js() -> str:
         try {
           var act = (bpBtn.getAttribute("data-blueprint-action") || "").toLowerCase();
           var bpState = collectWorkbenchBlueprintState();
+          var bpRoot = document.getElementById("saveable-decision-blueprint");
+          if (bpRoot) bpRoot.setAttribute("data-blueprint-saved", "1");
           var statusEl = document.getElementById("serp-blueprint-status");
           if (act === "save") {
             if (window.localStorage) {
@@ -1732,6 +1815,8 @@ def _render_runtime_sync_events_js() -> str:
               statusEl.textContent = "Blueprint Status: Exported audit-ready JSON decision blueprint (" + bpState.slug + "-decision-blueprint.json).";
             }
           }
+          syncOutboundAffiliateLinks();
+          emitWorkbenchEngagementBeacon("blueprint_" + act, "calculator_result_inline", { blueprint_action: act, param_count: Object.keys(bpState.inputs).length });
         } catch (err) {}
         return;
       }
@@ -1885,6 +1970,7 @@ def _render_runtime_sync_events_js() -> str:
             readout.textContent = "Active Preset Loaded (" + summaryPairs.join(" | ") + ")";
           }
           updateOutputsSynchronously();
+          emitWorkbenchEngagementBeacon("preset_hydration", "calculator_result_inline", { preset_keys: Object.keys(parsed).length });
         } catch (err) {}
         return;
       }
@@ -3240,6 +3326,7 @@ def normalize_html_visual_primitives(
                 or "updateOutputsSynchronously" not in sync_body
                 or "updateSerpWorkbenchSynchronously" not in sync_body
                 or "updateInteractiveCliffAndComparator" not in sync_body
+                or "emitWorkbenchEngagementBeacon" not in sync_body
                 or "syncOutboundAffiliateLinks" not in sync_body
                 or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
                 or "kalshi_price" in sync_body

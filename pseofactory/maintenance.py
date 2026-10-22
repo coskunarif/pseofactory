@@ -6033,6 +6033,7 @@ class RetroReflectionEngine:
             or ".serp-depth-workbench" not in html_content
             or "updateSerpWorkbenchSynchronously" not in html_content
             or "updateInteractiveCliffAndComparator" not in html_content
+            or "emitWorkbenchEngagementBeacon" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)
