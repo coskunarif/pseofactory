@@ -2610,6 +2610,22 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             if old_main_exit in f_new and '"reset", "-q", "HEAD", "--", "dist"' not in f_new:
                 f_new = f_new.replace(old_main_exit, new_main_exit, 1)
 
+            old_prexvo_desc = '                        "description": selected_opp.get("description", f"Calculate statutory options for {target_q}."),'
+            new_prexvo_desc = (
+                '                        "description": (\n'
+                '                            selected_opp.get("description")\n'
+                '                            if len(str(selected_opp.get("description") or "").strip()) >= 75\n'
+                '                            else f"Calculate statutory Title IV options for {target_q} under 34 CFR 685.209 with verified repayment and forgiveness math."\n'
+                '                        ),'
+            )
+            if old_prexvo_desc in f_new:
+                f_new = f_new.replace(old_prexvo_desc, new_prexvo_desc, 1)
+
+            old_is_stat = "                is_statutory = isinstance(ex, StatutoryAccuracyError)"
+            new_is_stat = '                is_statutory = isinstance(ex, StatutoryAccuracyError) or "SEO checklist verification failed" in str(ex)'
+            if old_is_stat in f_new and "SEO checklist verification failed" not in f_new:
+                f_new = f_new.replace(old_is_stat, new_is_stat, 1)
+
             if f_new != f_src:
                 factory_py.write_text(f_new, encoding="utf-8")
                 updated_files.append(str(factory_py))
@@ -2681,6 +2697,22 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             )
             if old_script_dir_block in rf_new and "RESOLVED_SOURCE=" not in rf_new:
                 rf_new = rf_new.replace(old_script_dir_block, new_script_dir_block, 1)
+
+            old_pid_echo = 'echo "$$" > "$PID_FILE"'
+            new_pid_echo = (
+                'echo "$$" > "$PID_FILE"\n'
+                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then\n'
+                '    exec 201>"/tmp/pseofactory_supervisor.lock"\n'
+                '    if ! flock -w "${LOCK_WAIT_TIMEOUT:-60}" 201; then\n'
+                '        echo "Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL)." >&2\n'
+                '        exit 75\n'
+                '    fi\n'
+                '    flock -u 201 2>/dev/null || true\n'
+                '    exec 201>&-\n'
+                'fi'
+            )
+            if old_pid_echo in rf_new and "PSEUFACTORY_HOLDS_SUPERVISOR_LOCK" not in rf_new:
+                rf_new = rf_new.replace(old_pid_echo, new_pid_echo, 1)
 
             if rf_new != rf_src:
                 run_factory_sh.write_text(rf_new, encoding="utf-8")

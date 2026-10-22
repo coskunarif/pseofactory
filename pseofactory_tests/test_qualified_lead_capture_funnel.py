@@ -333,9 +333,15 @@ def test_tenant_ci_workflow_and_script_isolation_sync(tmp_path):
         (t_repo / "scripts").mkdir(parents=True)
         (t_repo / ".github" / "workflows").mkdir(parents=True)
         (t_repo / "scripts" / "run_factory.sh").write_text(
-            '#!/usr/bin/env bash\nSCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nREPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"\n',
+            '#!/usr/bin/env bash\nSCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nREPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"\necho "$$" > "$PID_FILE"\n',
             encoding="utf-8",
         )
+        if repo_name == "prexvo":
+            (t_repo / "prexvo" / "factory.py").write_text(
+                '                        "description": selected_opp.get("description", f"Calculate statutory options for {target_q}."),\n'
+                '                is_statutory = isinstance(ex, StatutoryAccuracyError)\n',
+                encoding="utf-8",
+            )
         (t_repo / ".github" / "workflows" / "ci.yml").write_text(
             "name: Legacy CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
             encoding="utf-8",
@@ -352,6 +358,12 @@ def test_tenant_ci_workflow_and_script_isolation_sync(tmp_path):
 
         rf_text = (t_repo / "scripts" / "run_factory.sh").read_text(encoding="utf-8")
         assert 'readlink -f "${BASH_SOURCE[0]}"' in rf_text
+        assert "PSEUFACTORY_HOLDS_SUPERVISOR_LOCK" in rf_text
+
+        if repo_name == "prexvo":
+            f_text = (t_repo / "prexvo" / "factory.py").read_text(encoding="utf-8")
+            assert "under 34 CFR 685.209 with verified repayment and forgiveness math." in f_text
+            assert "SEO checklist verification failed" in f_text
 
         ci_text = (t_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         assert "runs-on: self-hosted" in ci_text
@@ -369,4 +381,23 @@ def test_tenant_ci_workflow_and_script_isolation_sync(tmp_path):
     cron_src = inspect.getsource(TrendCronRunner.run_cycle)
     assert '".agy" / "void_candidates.jsonl"' in cron_src
 
-
+    from pseofactory.maintenance import (
+        _needs_page_structure_geo_normalization,
+        _normalize_page_structure_and_geo_parity,
+    )
+    short_meta_html = (
+        '<html><head><meta name="description" content="Calculate statutory options for student loan forgiveness update."></head>'
+        '<body><h1>Student Loan Forgiveness Update</h1></body></html>'
+    )
+    assert _needs_page_structure_geo_normalization(short_meta_html) is True
+    norm_html, changed = _normalize_page_structure_and_geo_parity(
+        short_meta_html,
+        property_id="prexvo",
+        slug="student-loan-forgiveness-update",
+        topic_label="Student Loan Forgiveness Update",
+        canonical_url="https://prexvo.com/tools/student-loan-forgiveness-update/",
+        stat_auth="Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
+        econ_ds="Federal Reserve G.19 Consumer Credit Series",
+    )
+    assert changed is True
+    assert _needs_page_structure_geo_normalization(norm_html) is False
