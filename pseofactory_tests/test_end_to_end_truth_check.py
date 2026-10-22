@@ -1598,5 +1598,89 @@ def test_single_pass_seo_document_parser_excludes_style_and_script_from_page_tex
     assert len(parser.embedded_manifest_blocks) == 1
 
 
+def test_truth_reconciliation_engine_auto_remediation_and_audit():
+    """
+    Verifies TruthReconciliationEngine deterministically detects and repairs stale 2026
+    statutory figures, inline calculator JS caps, FAQ JSON-LD to DOM drift, missing signal
+    WebPage JSON-LD, Prexvo IBR/PAYE vs RAP plan thresholds, and speculative filler.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.tenant_facts import TruthReconciliationEngine
 
+    stale_ph_html = """<!DOCTYPE html><html lang="en"><head>
+    <title>2026 Section 179 Tax Calculator (Form 4562) | ProfitHelm</title>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is the 2026 Section 179 SUV cap?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Stale schema answer"
+          }
+        }
+      ]
+    }
+    </script>
+    </head><body>
+    <p>In today's rapidly evolving tax landscape, In 2026, Commercial Asset allows immediate first-year expensing of up to $1,250,000 in qualifying commercial equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $3,130,000 in total asset purchases.</p>
+    <p>Heavy SUVs are capped at a $31,300 Section 179 deduction in 2026. IRC 179 ($1.29M Cap) / 168(k) 20% Bonus.</p>
+    <table><tr><td>$1,220,000 (Full Basis 100%)</td><td>60% on balance</td><td>$31,300 + Bonus Depr.</td></tr></table>
+    <details class="faq-item"><summary>What is the 2026 Section 179 SUV cap?</summary><p>Under IRC Section 179(b)(5), the 2026 Heavy SUV cap is $30,500 ($31,300 for 2025 inflation-adjusted schedules).</p></details>
+    <script>var suv179 = Math.min(cost, 31300);</script>
+    </body></html>"""
 
+    pre_violations = TruthReconciliationEngine.audit_html_truth_reconciliation(
+        stale_ph_html,
+        tenant="profithelm",
+        rel_path="tools/section-179-calculator/index.html",
+        slug="section-179-calculator",
+    )
+    assert len(pre_violations) >= 4
+
+    reconciled_ph, repairs = TruthReconciliationEngine.reconcile_html_truth(
+        stale_ph_html,
+        tenant="profithelm",
+        rel_path="tools/section-179-calculator/index.html",
+        slug="section-179-calculator",
+    )
+    assert "speculative_filler_stripped" in repairs
+    assert "profithelm_statutory_truth_reconciled" in repairs
+    assert "faq_schema_dom_synced" in repairs
+    assert "$2,560,000 (Full Basis 100%)" in reconciled_ph
+    assert "up to $2,560,000 in qualifying commercial equipment" in reconciled_ph
+    assert "above $4,090,000 in total asset purchases" in reconciled_ph
+    assert "IRC 179 ($2.56M Cap) / 168(k) 20% Bonus" in reconciled_ph
+    assert "var suv179 = Math.min(cost, 30500);" in reconciled_ph
+    assert "<td>20% on balance</td>" in reconciled_ph
+    assert "Stale schema answer" not in reconciled_ph
+
+    post_violations = TruthReconciliationEngine.audit_html_truth_reconciliation(
+        reconciled_ph,
+        tenant="profithelm",
+        rel_path="tools/section-179-calculator/index.html",
+        slug="section-179-calculator",
+    )
+    assert post_violations == []
+
+    # Verify Prexvo IBR Hardship Cap plan-threshold reconciliation
+    stale_px_html = """<!DOCTYPE html><html lang="en"><head><title>2026 IBR Hardship Cap Calculator | Prexvo</title></head><body>
+    <p>Under Title IV regulation 34 CFR Part 685, IBR Hardship Cap Calculator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.</p>
+    </body></html>"""
+    assert TruthReconciliationEngine.audit_html_truth_reconciliation(
+        stale_px_html, tenant="prexvo", slug="ibr-hardship-cap-calculator"
+    )
+    reconciled_px, px_repairs = TruthReconciliationEngine.reconcile_html_truth(
+        stale_px_html, tenant="prexvo", slug="ibr-hardship-cap-calculator"
+    )
+    assert "prexvo_plan_threshold_reconciled" in px_repairs
+    assert "150 percent HHS Poverty Guideline exemption ($23,475 protected single-filer income)" in reconciled_px
+    assert (
+        TruthReconciliationEngine.audit_html_truth_reconciliation(
+            reconciled_px, tenant="prexvo", slug="ibr-hardship-cap-calculator"
+        )
+        == []
+    )

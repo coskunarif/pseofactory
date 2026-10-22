@@ -1276,7 +1276,7 @@ def _render_runtime_sync_workbench_js() -> str:
           if (pClass === "passenger_auto") {
             rawAllow = Math.min(cost, 20400);
           } else if (pClass === "heavy_suv") {
-            var suv179 = Math.min(cost, 31300);
+            var suv179 = Math.min(cost, 30500);
             var remBasis = Math.max(0, cost-suv179);
             rawAllow = suv179 + Math.round(remBasis * 0.80);
           } else {

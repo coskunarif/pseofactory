@@ -1955,6 +1955,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "statutory New and Old IBR monthly caps under Title IV 34 CFR Part 685.",
                     " Verified under OBBBA Title VIII and HEA Section 493C.",
                 )
+            if any(k in q_low for k in ("ibr", "hardship", "paye", "pay as you earn")) and "rap" not in q_low:
+                return (
+                    f"Calculate {lbl} under Title IV 34 CFR 685.209 using 150% HHS Poverty "
+                    f"Guidelines ($23,475 single exemption), hardship caps, and forgiveness rules.",
+                    " Verified under Title IV 34 CFR Part 685 statutory rules.",
+                )
             return (
                 f"Calculate {lbl} obligations under Title IV 34 CFR Part 685 using 225% HHS Poverty "
                 f"Guidelines, discretionary income caps, and forgiveness rules.",
@@ -2094,6 +2100,13 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
                 f"{short_q} compares private student loan interest rate reductions against the net present "
                 f"value of forfeited federal benefits including 100 percent RAP unpaid interest waivers and "
                 f"tax-free Public Service Loan Forgiveness under 26 U.S.C. 108(f)(1)."
+            ).split()
+        elif any(k in combined_low for k in ("ibr-hardship", "paye-sunset", "paye sunset", "ibr hardship")) and "rap-vs" not in combined_low:
+            base_words = (
+                f"Under Title IV regulation 34 CFR 685.209 and 20 U.S.C. 1098e, {short_q} determines monthly "
+                f"obligations using the 150 percent HHS Poverty Guideline exemption ($23,475 protected "
+                f"single-filer income) and a 10 to 15 percent discretionary rate capped at the 10-year "
+                f"Standard Repayment ceiling, with principal forgiveness after 240 to 300 qualifying payments."
             ).split()
         else:
             base_words = (
@@ -3052,12 +3065,12 @@ def _build_vertical_profithelm_overlay_blocks(
             },
             {
                 "id": "preset-enterprise",
-                "label": f"{heading_label} High-Cap Scenario ($1.25M Statutory Limit)",
+                "label": f"{heading_label} High-Cap Scenario ($2.56M Statutory Limit)",
                 "query": query_clean,
                 "target_position": pos,
                 "baseline_ctr": ctr,
                 "impressions": impr,
-                "params": {"cost": 1250000, "bracket": 37, "revenue": 4500000, "cogs": 1600000},
+                "params": {"cost": 2560000, "bracket": 37, "revenue": 4500000, "cogs": 1600000},
                 "description": "Top-bracket pass-through or C-Corp modeling phase-out thresholds and bonus depreciation.",
             },
         ],
@@ -3515,6 +3528,35 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Compare IDR Subsidy vs Standard 10-Year Schedule",
                 },
             ]
+        elif any(k in low for k in ("ibr", "hardship", "paye", "pay as you earn")) and "rap" not in low:
+            assertions = [
+                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the federal poverty guideline ($23,475 single baseline) under 34 CFR 685.209.",
+                "Under 34 CFR 685.209 and 20 U.S.C. 1098e, monthly IBR and PAYE obligations never exceed the 10-year Standard Repayment ceiling calculated at repayment entry once partial financial hardship is established.",
+                "Starting January 1, 2026, standard 20-year and 25-year IDR balance forgiveness is includible in federal gross income under IRC Section 108(f)(5) unless the borrower qualifies for the IRC Section 108(a)(1)(B) insolvency exclusion.",
+            ]
+            matrix = [
+                {
+                    "profile": "Early-Career Borrower ($45k AGI, $55k Direct Loans)",
+                    "statutory_threshold": "150% Federal Poverty Exemption ($23,475 Single IBR/PAYE Baseline)",
+                    "optimal_path": "2026 IBR / PAYE Hardship Cap vs RAP Transition Evaluation",
+                    "net_dollar_impact": "$179.38/mo Post-2014 IBR/PAYE Payment Capped Below 10-Year Standard (34 CFR 685.209)",
+                    "next_action": "Lock 2026 IDR Recertification Baseline",
+                },
+                {
+                    "profile": "Mid-Career Dual-Earner Household ($135k Combined AGI)",
+                    "statutory_threshold": "IRC Section 6013 Separate vs Joint AGI Isolation",
+                    "optimal_path": "Married Filing Separately to Exclude Spouse Income",
+                    "net_dollar_impact": "$4,920 Annual Payment Reduction Under Separate Filing",
+                    "next_action": "Compare MFS Tax Delta vs IDR Payment Savings",
+                },
+                {
+                    "profile": "High-Earners Above Statutory Hardship Cap ($195k+ AGI, >6.8% APR)",
+                    "statutory_threshold": "10-Year Standard Payment Ceiling (34 CFR 685.209)",
+                    "optimal_path": "Fixed 10-Year Standard Ceiling Protection Within IBR/PAYE",
+                    "net_dollar_impact": "$9,640 Interest Reduction over 7-Year Amortization",
+                    "next_action": "Compare 10-Year Standard Cap vs Accelerated Payoff",
+                },
+            ]
         else:
             assertions = [
                 f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% to 225% of the federal poverty guideline ($15,650 single baseline) under 34 CFR 685.209.",
@@ -3612,14 +3654,14 @@ def _build_autonomous_citation_assertions_and_matrix(
             )
             clean_179_label = re.sub(r"\s+", " ", clean_179_label).strip()
             assertions = [
-                f"In 2026, {clean_179_label} allows immediate first-year expensing of up to $1,250,000 in qualifying commercial equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $3,130,000 in total asset purchases.",
+                f"In 2026, {clean_179_label} allows immediate first-year expensing of up to $2,560,000 in qualifying commercial equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $4,090,000 in total asset purchases.",
                 "Under IRC Section 179(b)(3), first-year Section 179 expensing cannot exceed aggregate taxable income from active trades or businesses, whereas IRC Section 168(k) bonus depreciation can create a carryforward Net Operating Loss (NOL) under IRC Section 172.",
                 "Under IRC Section 280F(d)(7) and IRS Form 4562 Part V, heavy SUVs rated between 6,000 and 14,000 lbs GVWR are capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules) before applying remaining bonus and MACRS depreciation.",
             ]
             matrix = [
                 {
                     "profile": "Profitable Operating Company ($250k Equipment Purchase, $400k Income)",
-                    "statutory_threshold": "$1,250,000 Section 179 Cap (IRC Section 179(b)(1))",
+                    "statutory_threshold": "$2,560,000 Section 179 Cap (IRC Section 179(b)(1))",
                     "optimal_path": "100% Section 179 Election on IRS Form 4562 Part I",
                     "net_dollar_impact": "$80,000 Immediate Cash Tax Shield (at 32% Marginal Rate)",
                     "next_action": "Verify Placed-in-Service Date Before December 31, 2026",
@@ -3632,10 +3674,10 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Compare Section 179 Equipment Financing APRs",
                 },
                 {
-                    "profile": "CapEx Intensive Expansion ($3.6M Total Equipment Placed in Service)",
-                    "statutory_threshold": "$3,130,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))",
-                    "optimal_path": "Combine Remaining $780k Section 179 Allowance + IRC 168(k) Bonus",
-                    "net_dollar_impact": "$412,000 First-Year Combined Depreciation Tax Shield",
+                    "profile": "CapEx Intensive Expansion ($4.35M Total Equipment Placed in Service)",
+                    "statutory_threshold": "$4,090,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))",
+                    "optimal_path": "Combine Remaining $2.30M Section 179 Allowance + IRC 168(k) Bonus",
+                    "net_dollar_impact": "$1,522,500 First-Year Combined Depreciation Tax Shield",
                     "next_action": "Run Form 4562 Section 179 Phase-Out & MACRS Schedule",
                 },
             ]
@@ -3877,6 +3919,68 @@ def _build_vertical_prexvo_overlay_blocks(
                         "Filing Married Filing Separately disallows the $2,500 IRC Section 221 student loan interest deduction, "
                         "the Earned Income Tax Credit, the American Opportunity and Lifetime Learning education credits, and "
                         "compresses the IRC Section 1411 NIIT threshold to $125,000."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("ibr", "hardship", "paye", "pay as you earn")) and "rap" not in comb:
+        return {
+            "h2_headings": [
+                f"{heading_label}: 2026 Title IV Statutory Rules & Formula",
+                f"Comparing {heading_label} Under 34 CFR 685.209 Benchmarks",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-baseline",
+                    "label": f"{heading_label} Baseline ($60k Balance, $65k AGI)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 60000, "agi": 65000, "family_size": 1, "interest_rate": 6.5},
+                    "description": "Single borrower at $65,000 AGI with 150% HHS poverty exemption ($23,475 protected baseline).",
+                },
+                {
+                    "id": "preset-accelerated",
+                    "label": f"{heading_label} High-Balance ($95k Balance, $85k AGI)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 95000, "agi": 85000, "family_size": 2, "interest_rate": 6.8},
+                    "description": "Dual-household borrower comparing IBR/PAYE partial financial hardship cap vs 10-year Standard ceiling.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "Single Filer ($60,000 Loan, $65,000 AGI)",
+                    "baseline": "$681.29 / mo (10-Year Standard Ceiling)",
+                    "optimized": "$346.04 / mo (10% Post-2014 IBR / PAYE at 150% Poverty)",
+                    "delta": "-$335.25 / mo (-49.2% Obligation)",
+                    "authority": "34 CFR 685.209 & 20 U.S.C. 1098e",
+                },
+                {
+                    "scenario": "Public Service Track (120 Qualifying Payments)",
+                    "baseline": "$68,100 Cumulative Standard Outflow",
+                    "optimized": "$41,525 Outflow + Tax-Free Discharge",
+                    "delta": "$26,575 Statutory Principal Relief",
+                    "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How is {query_clean} calculated under 2026 Title IV regulations?",
+                    "answer": (
+                        f"Under 34 CFR 685.209 and 20 U.S.C. 1098e, {query_clean} subtracts 150 percent of the applicable HHS Poverty "
+                        f"Guideline ($23,475 single baseline) from Adjusted Gross Income and assesses 10 percent (post-2014 new borrowers "
+                        f"or PAYE) or 15 percent (pre-2014 IBR borrowers) of discretionary income divided by 12, capped at the 10-year Standard Repayment amount."
+                    ),
+                },
+                {
+                    "question": f"Does {query_clean} qualify for statutory loan forgiveness?",
+                    "answer": (
+                        "Yes. Qualifying monthly payments count toward 120-payment Public Service Loan Forgiveness "
+                        "under 34 CFR 685.219 or 240-to-300-payment income-driven discharge schedules."
                     ),
                 },
             ],
@@ -5570,6 +5674,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     "Commercial Asset",
                     a_str,
                     flags=re.IGNORECASE,
+                )
+            if "In 2026" in a_str and "$1,250,000" in a_str:
+                a_str = a_str.replace("$1,250,000", "$2,560,000").replace("$3,130,000", "$4,090,000")
+            if "capped at a $31,300 Section 179 deduction in 2026" in a_str:
+                a_str = a_str.replace(
+                    "capped at a $31,300 Section 179 deduction in 2026",
+                    "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
                 )
             sanitized_assertions.append(a_str)
         li_items = [

@@ -2207,6 +2207,15 @@ class LiveTruthAuditEngine:
                                     )
                             except ValueError:
                                 pass
+            from pseofactory.tenant_facts import TruthReconciliationEngine
+            recon_violations = TruthReconciliationEngine.audit_html_truth_reconciliation(
+                html_content,
+                tenant=property_id,
+                rel_path=ctx_label,
+            )
+            for rv in recon_violations:
+                if rv not in violations:
+                    violations.append(rv)
         except Exception:
             pass
 
@@ -4976,6 +4985,11 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         if detect_sentence_truncation_issues(qa_plain):
             return True
 
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+    inferred_tenant = "prexvo" if "prexvo.com" in html_content.lower() or "34 cfr" in html_content.lower() else "profithelm"
+    if TruthReconciliationEngine.audit_html_truth_reconciliation(html_content, tenant=inferred_tenant):
+        return True
+
     return False
 
 
@@ -6040,6 +6054,17 @@ def _normalize_page_structure_and_geo_parity(
                 )
                 changed = True
 
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+    recon_html, recon_repairs = TruthReconciliationEngine.reconcile_html_truth(
+        updated,
+        tenant=property_id,
+        rel_path=canonical_url,
+        slug=slug,
+    )
+    if recon_repairs and recon_html != updated:
+        updated = recon_html
+        changed = True
+
     return updated, changed
 
 
@@ -6077,21 +6102,21 @@ class RetroReflectionEngine:
     PREXVO_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "rap-payment-calculator": {
             "model_name": "Repayment Assistance Plan (RAP) Monthly Payment Model",
-            "formula": "max(0.0, (agi - 22590) * 0.10 / 12)",
+            "formula": "round(max(0.0, (agi - 35212.50) * 0.10 / 12), 2)",
             "inputs": {"agi": 65000, "loan_balance": 42000},
-            "published_output": 353.42,
+            "published_output": 248.23,
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (OBBBA) Title VIII Subtitle B",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
-            "sample_calculation": "For $65,000 AGI with a $22,590 statutory exemption, monthly RAP payment is $353.42.",
+            "sample_calculation": "For $65,000 AGI with a $35,212.50 statutory exemption (225% of $15,650 HHS poverty baseline), monthly RAP payment is $248.23.",
         },
         "pslf-buyback-calculator": {
             "model_name": "PSLF Buyback Lump-Sum Settlement Model",
-            "formula": "max(0.0, (agi - 22590) * 0.10 / 12) * buyback_months",
+            "formula": "round(max(0.0, (agi - 35212.50) * 0.10 / 12) * buyback_months, 2)",
             "inputs": {"agi": 65000, "buyback_months": 12},
-            "published_output": 4241.0,
+            "published_output": 2978.75,
             "statutory_authority": "34 CFR 685.219(g) Public Service Loan Forgiveness Hold Harmless Buyback Rules; Title IV HEA",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and U.S. Department of Education FSA Data Center",
-            "sample_calculation": "Buying back 12 qualifying deferment or forbearance months at $353.42/mo yields $4,241.00.",
+            "sample_calculation": "Buying back 12 qualifying deferment or forbearance months at $248.23/mo yields $2,978.75.",
         },
         "student-loan-refinance-break-even-calculator": {
             "model_name": "Student Loan Refinance Interest Savings Model",
@@ -6985,6 +7010,20 @@ class RetroReflectionEngine:
             return True
         if "default to" in ov_body_dump.lower():
             return True
+        if any(
+            st_claim in ov_body_dump
+            for st_claim in (
+                "$1,250,000",
+                "$3,130,000",
+                "$1.25M Statutory Limit",
+                "capped at a $31,300 Section 179 deduction in 2026",
+            )
+        ):
+            return True
+        if any(k in ov_s_low for k in ("ibr-hardship", "paye-sunset")) and "rap-vs" not in ov_s_low and (
+            "225%" in ov_body_dump or "225 percent" in ov_body_dump or "$35,212.50" in ov_body_dump
+        ):
+            return True
         from pseofactory.contracts import (
             detect_sentence_truncation_issues,
             detect_title_year_conflict_issues,
@@ -7039,6 +7078,7 @@ class RetroReflectionEngine:
             try:
                 from pseofactory.gsc_remediation import compile_remediation_overlay_spec
                 from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+                from pseofactory.tenant_facts import TruthReconciliationEngine
                 veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
                 for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
                     if not ov_dir.is_dir():
@@ -7049,6 +7089,13 @@ class RetroReflectionEngine:
                             if not isinstance(raw_ov, dict):
                                 continue
                             ov_s = str(raw_ov.get("slug") or ov_path.stem)
+                            raw_ov, ov_reconciled = TruthReconciliationEngine.reconcile_overlay_spec_truth(
+                                raw_ov,
+                                tenant=property_id,
+                                slug=ov_s,
+                            )
+                            if ov_reconciled:
+                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                             if cls._overlay_spec_needs_heal(ov_s, raw_ov):
                                 healed_ov = compile_remediation_overlay_spec(
                                     {
@@ -7076,8 +7123,6 @@ class RetroReflectionEngine:
                                     "post_eval_metrics",
                                     "grouped_queries",
                                     "secondary_title_modifier",
-                                    "autonomous_citation_assertions",
-                                    "ai_mode_decision_matrix",
                                     "conversion_slot_weights",
                                     "early_regression_flagged",
                                     "early_regression_at",
@@ -7089,7 +7134,11 @@ class RetroReflectionEngine:
                                 ):
                                     if preserve_key in raw_ov:
                                         healed_ov[preserve_key] = raw_ov[preserve_key]
-                                raw_ov = healed_ov
+                                raw_ov, _ = TruthReconciliationEngine.reconcile_overlay_spec_truth(
+                                    healed_ov,
+                                    tenant=property_id,
+                                    slug=ov_s,
+                                )
                                 ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
 
                             if isinstance(raw_ov.get("partner_offer"), dict) and not raw_ov.get("restricted_public_service"):
@@ -7861,6 +7910,33 @@ class RetroReflectionEngine:
                     canonical_base
                     or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
                 ).rstrip("/") + "/" + ("" if rel == "index.html" else rel.replace("index.html", ""))
+                from pseofactory.tenant_facts import TruthReconciliationEngine
+                nt_recon_html, nt_recon_rep = TruthReconciliationEngine.reconcile_html_truth(
+                    content,
+                    tenant=property_id,
+                    rel_path=rel,
+                    slug=html_file.parent.name if html_file.name == "index.html" else html_file.stem,
+                )
+                if nt_recon_rep and nt_recon_html != content:
+                    html_file.write_text(nt_recon_html, encoding="utf-8")
+                    content = nt_recon_html
+                    if rel not in retrofitted_paths:
+                        retrofitted_paths.append(rel)
+                if rel == "signal/index.html":
+                    static_sig = d.parent / "static" / "signal" / "index.html"
+                    if static_sig.is_file():
+                        try:
+                            raw_ss = static_sig.read_text(encoding="utf-8", errors="ignore")
+                            rec_ss, rep_ss = TruthReconciliationEngine.reconcile_html_truth(
+                                raw_ss,
+                                tenant=property_id,
+                                rel_path="static/signal/index.html",
+                                slug="signal",
+                            )
+                            if rep_ss and rec_ss != raw_ss:
+                                static_sig.write_text(rec_ss, encoding="utf-8")
+                        except Exception:
+                            pass
                 nt_geo_html, nt_geo_changed = _normalize_page_structure_and_geo_parity(
                     content,
                     property_id=property_id,

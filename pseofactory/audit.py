@@ -818,7 +818,7 @@ def _audit_schema_and_fact_gates(
     g11_ok = True
     try:
         from pseofactory.contracts import detect_uncorroborated_statutory_claims
-        from pseofactory.tenant_facts import TenantFactStore
+        from pseofactory.tenant_facts import TenantFactStore, TruthReconciliationEngine
         fact_store = TenantFactStore.get_instance()
         if fact_store.get_profile(tenant) is not None:
             spec_disclosures = candidate_spec.get("mandatory_disclosures") or []
@@ -832,6 +832,18 @@ def _audit_schema_and_fact_gates(
                 g11_ok = False
                 for fv in fact_violations:
                     violations.append(f"Gate 11 (Tenant Fact Parity): {fv}")
+            recon_issues = TruthReconciliationEngine.audit_html_truth_reconciliation(
+                html_content,
+                tenant=tenant,
+                rel_path=slug or "index.html",
+                slug=slug or "",
+            )
+            if recon_issues:
+                g11_ok = False
+                for ri in recon_issues:
+                    msg = f"Gate 11 (Truth Reconciliation): {ri}"
+                    if msg not in violations:
+                        violations.append(msg)
         stat_issues = detect_uncorroborated_statutory_claims(html_content, rel_path=slug or "index.html")
         if stat_issues:
             g11_ok = False

@@ -2805,7 +2805,7 @@ def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict
                 '{"sec179-cost":95000,"sec179-rate":35,"serp-179-cost":95000,"serp-179-income":280000,"serp-179-apr":6.5,"serp-179-class":"machinery_100"}',
             ),
             (
-                "Heavy SUV 6,000 to 14,000 lbs ($110k / $31,300 SUV Cap)",
+                "Heavy SUV 6,000 to 14,000 lbs ($110k / $30,500 SUV Cap)",
                 '{"sec179-cost":110000,"sec179-rate":37,"serp-179-cost":110000,"serp-179-income":350000,"serp-179-apr":6.75,"serp-179-class":"heavy_suv"}',
             ),
             (
@@ -2834,7 +2834,7 @@ def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict
             '          <label for="serp-179-class" class="serp-field-label">Asset GVWR &amp; IRC 179 / 280F Property Class</label>\n'
             '          <select id="serp-179-class" name="serp-179-class" class="touch-target serp-sub-select">\n'
             '            <option value="machinery_100" selected="selected">Machinery / Software / Heavy Truck &gt;6,000 lbs (Uncapped 100%)</option>\n'
-            '            <option value="heavy_suv">Heavy SUV 6,000 to 14,000 lbs GVWR ($31,300 IRC 179(b)(5) Cap + Bonus)</option>\n'
+            '            <option value="heavy_suv">Heavy SUV 6,000 to 14,000 lbs GVWR ($30,500 IRC 179(b)(5) Cap + Bonus)</option>\n'
             '            <option value="passenger_auto">Luxury Passenger Auto &lt;6,000 lbs GVWR ($20,400 IRC 280F Year-1 Cap)</option>\n'
             '          </select>\n'
             '        </div>'
@@ -2873,7 +2873,7 @@ def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict
             (
                 "Heavy Passenger SUV (6,000 to 14,000 lbs GVWR, &lt;6-ft Bed)",
                 "IRC Section 179(b)(5)(A) Heavy SUV Cap",
-                "$31,300 statutory Section 179 cap ($30,500 prior-year inflation baseline)",
+                "$30,500 statutory Section 179 cap ($31,300 for 2025 inflation-adjusted schedule)",
                 "Remaining basis eligible for Section 168(k) bonus + 5-year 200% DB MACRS",
             ),
             (
@@ -3295,7 +3295,7 @@ def _render_multi_year_cliff_visualizer_html(
         rows = [
             ("2024 Enacted Baseline", "IRC 179 ($1.22M Cap) / 168(k) 60% Bonus", "20% Section 199A QBI / 3.4% Core CPI", "cliff-exposure-2024", "$42,800"),
             ("2025 Pre-Cliff Window", "IRC 179 ($1.25M Cap) / 168(k) 40% Bonus", "25% Section 301 Tariff / 4.48% 10Y Treasury", "cliff-exposure-2025", "$54,600"),
-            ("2026 Statutory Cliff Year", "IRC 179 ($1.29M Cap) / 168(k) 20% Bonus", "TCJA Sunset &amp; Section 199A Expiration Cliff", "cliff-exposure-2026", "$69,825"),
+            ("2026 Statutory Cliff Year", "IRC 179 ($2.56M Cap) / 168(k) 20% Bonus", "TCJA Sunset &amp; Section 199A Expiration Cliff", "cliff-exposure-2026", "$69,825"),
             ("2027 Post-Sunset Regime", "IRC 179 ($1.33M Cap) / 168(k) 0% Bonus", "MACRS 5-Yr / 7-Yr Straight Schedule Only", "cliff-exposure-2027", "$84,200"),
             ("2028-2030 Forward Projection", "IRC 179 ($1.37M to $1.45M Indexed Cap)", "Section 174 5-Yr R&amp;D Amortization Mandate", "cliff-exposure-2028", "$88,950"),
         ]

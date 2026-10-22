@@ -1993,8 +1993,25 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         assert_visual_and_ux_contracts,
         normalize_html_visual_primitives,
     )
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+
+    resolved_tenant = "prexvo" if is_prexvo else "profithelm"
+    html_content, _ = TruthReconciliationEngine.reconcile_html_truth(
+        html_content,
+        tenant=resolved_tenant,
+        rel_path=f"tools/{slug}/index.html",
+        slug=slug,
+    )
     html_content, _ = normalize_html_visual_primitives(html_content, is_tenant_porcelain=False)
     assert_visual_and_ux_contracts(html_content, context=f"compiled page '{slug}'", require_primitives=True)
+    reconciliation_violations = TruthReconciliationEngine.audit_html_truth_reconciliation(
+        html_content,
+        tenant=resolved_tenant,
+        rel_path=f"tools/{slug}/index.html",
+        slug=slug,
+    )
+    if reconciliation_violations:
+        raise ValueError(f"TruthReconciliationEngine audit failed on '{slug}': {reconciliation_violations[0]}")
 
     # 7. Strictly verify zero forbidden dashes
     assert_no_forbidden_dashes(html_content, context=f"compiled page '{slug}'")

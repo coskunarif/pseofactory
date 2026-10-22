@@ -625,22 +625,45 @@ class TenantFactStore:
         if tenant_norm == "profithelm":
             # Section 179 SUV / heavy vehicle cap ($30,500 for 2024/2026 / $31,300 for 2025)
             if "suv" in text_lower or "heavy vehicle" in text_lower:
-                suv_matches = re.findall(
+                suv_clause_matches = re.finditer(
                     r'(?:(?:suv|heavy\s*vehicle)[^\.\n]{0,140}?(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?(?:suv|heavy\s*vehicle))',
                     text,
                     re.IGNORECASE,
                 )
-                for m in suv_matches:
-                    raw_val = m[0] or m[1]
+                for m_obj in suv_clause_matches:
+                    raw_val = m_obj.group(1) or m_obj.group(2)
+                    clause_low = m_obj.group(0).lower()
+                    # Check a tight window around the match for explicit 2025 qualification
+                    win_start = max(0, m_obj.start() - 60)
+                    win_end = min(len(text), m_obj.end() + 80)
+                    window_low = text[win_start:win_end].lower()
                     try:
                         val = float(raw_val.replace(",", ""))
-                        suv_cap = 31300.0 if "2025" in text_lower else 30500.0
+                        has_2025_qual = "2025" in window_low and "in 2026" not in clause_low
+                        suv_cap = 31300.0 if has_2025_qual else 30500.0
                         if val > suv_cap:
                             violations.append(
-                                f"Section 179 heavy vehicle/SUV limit contradiction: claimed ${val:,.0f} exceeds statutory cap of $30,500 for 2024 ($31,300 for 2025)"
+                                f"Section 179 heavy vehicle/SUV limit contradiction: claimed ${val:,.0f} exceeds statutory cap of $30,500 for 2024/2026 ($31,300 for 2025)"
                             )
                     except ValueError:
                         pass
+
+            stale_suv_tokens = (
+                "$31,300 cap + bonus",
+                "$31,300 + bonus depr.",
+                "$31,300 suv cap",
+                "$31,300 irc 179(b)(5) cap",
+                "irc §179(b)(5) $31,300 cap",
+                "$31,300 (irc §179(b)(5))",
+                "$31,300 statutory section 179 cap ($30,500 prior-year",
+                "capped at a $31,300 section 179 deduction in 2026",
+                "allowance of up to $31,300 plus 60% bonus depreciation",
+            )
+            for st_suv in stale_suv_tokens:
+                if st_suv in text_lower:
+                    violations.append(
+                        f"Stale 2026 Heavy SUV Section 179 cap '{st_suv}' detected: 2026 statutory SUV cap is $30,500 ($31,300 for 2025 inflation-adjusted schedules)"
+                    )
 
             # Section 179 overall expense limit ($1,220,000 for 2024 / $1,250,000 for 2025 / $2,560,000 for 2026 OBBBA)
             if "section 179" in text_lower or "section179" in text_lower:
@@ -666,9 +689,23 @@ class TenantFactStore:
                     except ValueError:
                         pass
 
-            if "full cap ($1.29m)" in text_lower:
+            stale_2026_179_patterns = (
+                "full cap ($1.29m)",
+                "irc 179 ($1.29m cap)",
+                "$1,220,000 (full basis 100%)",
+                "$1,250,000 section 179 cap",
+                "$3,130,000 section 179 phase-out threshold",
+                "high-cap scenario ($1.25m statutory limit)",
+                "above $3,130,000 in total asset purchases",
+            )
+            for st_179 in stale_2026_179_patterns:
+                if st_179 in text_lower:
+                    violations.append(
+                        f"Section 179 2026 statutory limit contradiction: '{st_179}' contradicts 2026 OBBBA statutory deduction cap of $2,560,000 ($2.56M) and $4,090,000 phase-out threshold"
+                    )
+            if re.search(r"in\s+2026[^\.\n]{0,140}?up\s+to\s+\$1,250,000\s+in\s+qualifying", text, re.IGNORECASE):
                 violations.append(
-                    "Section 179 table header contradiction: 'Full Cap ($1.29M)' contradicts 2026 OBBBA statutory deduction cap of $2,560,000 ($2.56M)"
+                    "Section 179 2026 statutory limit contradiction: claiming 'In 2026 ... up to $1,250,000' contradicts 2026 OBBBA statutory deduction cap of $2,560,000"
                 )
 
             stale_tcja_tokens = ("$18,340", "$22,238", "$3,898", "$29,238")
@@ -728,6 +765,15 @@ class TenantFactStore:
                     "Incomplete IBR statutory rate '15% Discretionary' in comparison table cell: must specify '10% to 15% Discretionary' covering post-2014 new borrowers (10%) and pre-2014 borrowers (15%) under 34 CFR 685.209"
                 )
 
+            # Plan-specific contradiction: attributing 225% ($35,212.50) to IBR Hardship Cap or PAYE Sunset calculation
+            if re.search(
+                r"(?:ibr\s+hardship(?:\s+cap)?\s+calculator|paye\s+sunset(?:\s+eligibility)?(?:\s+calculator)?)\s+(?:determines\s+monthly\s+obligations\s+using\s+the\s+225\s+percent|subtracts\s+225\s+percent)",
+                text_lower,
+            ):
+                violations.append(
+                    "Prexvo plan-threshold contradiction: IBR and PAYE use 150% HHS Poverty Guideline ($23,475 single exemption), whereas 225% ($35,212.50) applies to RAP"
+                )
+
         is_valid = len(violations) == 0
         return is_valid, violations
 
@@ -744,11 +790,354 @@ class TenantFactStore:
             )
 
 
+class TruthReconciliationEngine:
+    """
+    Deterministic Truth-Reconciliation and Auto-Remediation Engine.
+    Binds prose, comparison tables, autonomous citation assertions, AI-mode decision matrices,
+    JSON-LD structured schema, and interactive calculator JS logic to the versioned
+    TenantFactStore ground-truth registry while stripping speculative filler.
+    Zero LLM calls, 100% deterministic, idempotent, zero em-dashes, zero en-dashes.
+    """
+
+    VERSION: str = "2026.10.21-v1"
+
+    SPECULATIVE_FILLER_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        ("In today's rapidly evolving tax landscape, ", ""),
+        ("In today's complex regulatory environment, ", ""),
+        ("It is important to note that ", ""),
+        ("It is worth noting that ", ""),
+        ("Needless to say, ", ""),
+        ("As a general rule of thumb, ", ""),
+    )
+
+    PROFITHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        # Stale 2024/2025 Section 179 caps and phaseout thresholds presented as 2026 rules
+        ("$1,220,000 (Full Basis 100%)", "$2,560,000 (Full Basis 100%)"),
+        ("up to $1,250,000 in qualifying commercial equipment", "up to $2,560,000 in qualifying commercial equipment"),
+        ("above $3,130,000 in total asset purchases", "above $4,090,000 in total asset purchases"),
+        ("$1,250,000 Section 179 Cap (IRC Section 179(b)(1))", "$2,560,000 Section 179 Cap (IRC Section 179(b)(1))"),
+        ("$3,130,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))", "$4,090,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))"),
+        ("CapEx Intensive Expansion ($3.6M Total Equipment Placed in Service)", "CapEx Intensive Expansion ($4.35M Total Equipment Placed in Service)"),
+        ("Combine Remaining $780k Section 179 Allowance + IRC 168(k) Bonus", "Combine Remaining $2.30M Section 179 Allowance + IRC 168(k) Bonus"),
+        ("$412,000 First-Year Combined Depreciation Tax Shield", "$1,522,500 First-Year Combined Depreciation Tax Shield"),
+        ("High-Cap Scenario ($1.25M Statutory Limit)", "High-Cap Scenario ($2.56M Statutory Limit)"),
+        ("&quot;cost&quot;: 1250000,", "&quot;cost&quot;: 2560000,"),
+        ('"cost": 1250000,', '"cost": 2560000,'),
+        ("IRC 179 ($1.29M Cap) / 168(k) 20% Bonus", "IRC 179 ($2.56M Cap) / 168(k) 20% Bonus"),
+        ("Full Cap ($1.29M)", "Full Cap ($2.56M)"),
+        # Stale 2026 Heavy SUV cap ($31,300 -> $30,500) and 2024 60% bonus depreciation in 2026 SUV calculators/tables
+        (
+            "capped at a $31,300 Section 179 deduction in 2026",
+            "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
+        ),
+        (
+            "$31,300 statutory Section 179 cap ($30,500 prior-year inflation baseline)",
+            "$30,500 statutory Section 179 cap ($31,300 for 2025 inflation-adjusted schedule)",
+        ),
+        ("Heavy SUV 6,000 to 14,000 lbs ($110k / $31,300 SUV Cap)", "Heavy SUV 6,000 to 14,000 lbs ($110k / $30,500 SUV Cap)"),
+        ("Heavy SUV 6,000 to 14,000 lbs GVWR ($31,300 IRC 179(b)(5) Cap + Bonus)", "Heavy SUV 6,000 to 14,000 lbs GVWR ($30,500 IRC 179(b)(5) Cap + Bonus)"),
+        ("Heavy SUVs (6,000-14,000 lbs, $31,300 Cap + Bonus)", "Heavy SUVs (6,000-14,000 lbs, $30,500 Cap + Bonus)"),
+        ("<td>$31,300 + Bonus Depr.</td>", "<td>$30,500 + Bonus Depr.</td>"),
+        ("<td>$31,300 (IRC §179(b)(5))</td>", "<td>$30,500 (IRC §179(b)(5))</td>"),
+        ("IRC §179(b)(5) $31,300 cap", "IRC §179(b)(5) $30,500 cap"),
+        ("60% on balance (2024-2026 phase-down)", "20% on balance (2026 statutory rate)"),
+        ("<td>60% on balance</td>", "<td>20% on balance</td>"),
+        ("<td>$53,320 on $85,000 basis</td>", "<td>$38,000 on $85,000 basis</td>"),
+        ("and 60% bonus depreciation under Section 168(k)", "and 20% bonus depreciation under Section 168(k)"),
+        (
+            "qualifies for an immediate first-year Section 179 expense allowance of up to $31,300 plus 60% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $53,320, reducing net income tax liability by $19,728 at the 37% marginal rate.",
+            "qualifies for an immediate first-year Section 179 expense allowance of up to $30,500 plus 20% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $38,000, reducing net income tax liability by $14,060 at the 37% marginal rate.",
+        ),
+        (
+            'id="val-first_year_deduction">$53,320<',
+            'id="val-first_year_deduction">$38,000<',
+        ),
+        (
+            'id="val-tax_savings">$19,728<',
+            'id="val-tax_savings">$14,060<',
+        ),
+        (
+            'id="val-effective_cost">$65,272<',
+            'id="val-effective_cost">$70,940<',
+        ),
+        (
+            'id="val-heavy_suv_capped_savings">$21,895<',
+            'id="val-heavy_suv_capped_savings">$14,525<',
+        ),
+        (
+            "<td>$62,556</td><td>$21,895</td>",
+            "<td>$41,500</td><td>$14,525</td>",
+        ),
+        # Inline calculator JS parity
+        ("var suv179 = Math.min(cost, 31300);", "var suv179 = Math.min(cost, 30500);"),
+        (
+            "const suvCap = 31300 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 0.60;",
+            "const suvCap = 30500 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 0.20;",
+        ),
+        (
+            "Math.min(basis, 31300) + Math.max(0, basis - 31300) * 0.60",
+            "Math.min(basis, 30500) + Math.max(0, basis - 30500) * 0.20",
+        ),
+    )
+
+    PREXVO_IBR_PAYE_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        (
+            "Under Title IV regulation 34 CFR Part 685, IBR Hardship Cap Calculator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Title IV regulation 34 CFR 685.209 and 20 U.S.C. 1098e, IBR Hardship Cap Calculator determines monthly obligations using the 150 percent HHS Poverty Guideline exemption ($23,475 protected single-filer income) and a 10 to 15 percent discretionary rate capped at the 10-year Standard Repayment ceiling, with principal forgiveness after 240 to 300 qualifying payments.",
+        ),
+        (
+            "Under Title IV regulation 34 CFR Part 685, PAYE Sunset Eligibility determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Title IV regulation 34 CFR 685.209 and 20 U.S.C. 1098e, PAYE Sunset Eligibility determines monthly obligations using the 150 percent HHS Poverty Guideline exemption ($23,475 protected single-filer income) and a 10 to 15 percent discretionary rate capped at the 10-year Standard Repayment ceiling, with principal forgiveness after 240 to 300 qualifying payments.",
+        ),
+        (
+            "Calculate IBR Hardship Cap under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+            "Calculate IBR Hardship Cap under Title IV 34 CFR 685.209 using 150% HHS Poverty Guidelines ($23,475 single exemption), hardship caps, and forgiveness rules.",
+        ),
+        (
+            "Calculate PAYE Sunset Eligibility under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+            "Calculate PAYE Sunset Eligibility under Title IV 34 CFR 685.209 using 150% HHS Poverty Guidelines ($23,475 single exemption), hardship caps, and forgiveness rules.",
+        ),
+        (
+            "Under 34 CFR Part 685, ibr hardship cap calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under 34 CFR 685.209 and 20 U.S.C. 1098e, ibr hardship cap calculator subtracts 150 percent of the applicable HHS Poverty Guideline ($23,475 single baseline) from Adjusted Gross Income and assesses 10 percent (post-2014 new borrowers) or 15 percent (pre-2014 borrowers) of discretionary income divided by 12, capped at the 10-year Standard Repayment amount.",
+        ),
+        (
+            "Under 34 CFR Part 685, paye sunset eligibility calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under 34 CFR 685.209 and 20 U.S.C. 1098e, paye sunset eligibility calculator subtracts 150 percent of the applicable HHS Poverty Guideline ($23,475 single baseline) from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, capped at the 10-year Standard Repayment amount.",
+        ),
+        (
+            "<td>225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)</td>\n          <td>2026 RAP / IBR with 100% Unpaid Interest Waiver</td>\n          <td><strong>$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)</strong></td>",
+            "<td>150% Federal Poverty Exemption ($23,475 Single IBR/PAYE Baseline)</td>\n          <td>2026 IBR / PAYE Hardship Cap vs RAP Transition Evaluation</td>\n          <td><strong>$179.38/mo Post-2014 IBR/PAYE Payment Capped Below 10-Year Standard (34 CFR 685.209)</strong></td>",
+        ),
+        (
+            "Single borrower at $65,000 AGI with 225% HHS poverty exemption ($248.23/mo RAP payment).",
+            "Single borrower at $65,000 AGI with 150% HHS poverty exemption ($23,475 protected baseline).",
+        ),
+    )
+
+    @classmethod
+    def reconcile_html_truth(
+        cls,
+        html_content: str,
+        tenant: str,
+        rel_path: str = "",
+        slug: str = "",
+    ) -> Tuple[str, List[str]]:
+        """
+        Deterministically reconciles prose, comparison tables, autonomous assertions,
+        decision matrices, structured JSON-LD schema, and inline calculator JS against
+        TenantFactStore ground truth while stripping speculative filler.
+        Returns (updated_html, list_of_repaired_categories).
+        """
+        import html as _html_lib
+        import json as _json_lib
+
+        updated = html_content
+        repairs: List[str] = []
+        tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
+        combined_slug = f"{rel_path.lower()} {slug.lower()}"
+
+        # 1. Strip speculative filler phrases across prose
+        for filler_old, filler_new in cls.SPECULATIVE_FILLER_REPLACEMENTS:
+            if filler_old in updated:
+                updated = updated.replace(filler_old, filler_new)
+                if "speculative_filler_stripped" not in repairs:
+                    repairs.append("speculative_filler_stripped")
+
+        # 2. Tenant-specific deterministic statutory truth replacements
+        if tenant_norm == "profithelm":
+            for old_str, new_str in cls.PROFITHELM_HTML_REPLACEMENTS:
+                if old_str in updated:
+                    updated = updated.replace(old_str, new_str)
+                    if "profithelm_statutory_truth_reconciled" not in repairs:
+                        repairs.append("profithelm_statutory_truth_reconciled")
+        else:
+            is_ibr_or_paye = (
+                any(k in combined_slug for k in ("ibr-hardship", "paye-sunset"))
+                or "IBR Hardship Cap Calculator" in updated
+                or "PAYE Sunset Eligibility" in updated
+            ) and "rap-vs-ibr" not in combined_slug
+            if is_ibr_or_paye:
+                for old_str, new_str in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
+                    if old_str in updated:
+                        updated = updated.replace(old_str, new_str)
+                        if "prexvo_plan_threshold_reconciled" not in repairs:
+                            repairs.append("prexvo_plan_threshold_reconciled")
+
+        # 3. Ensure signal/index.html has a valid WebPage JSON-LD schema block if missing
+        if (
+            ("signal/index.html" in rel_path.lower() or slug.lower() == "signal")
+            and 'type="application/ld+json"' not in updated
+            and "</head>" in updated
+        ):
+            canon_m = re.search(
+                r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+                updated,
+                re.IGNORECASE,
+            )
+            sig_url = canon_m.group(1) if canon_m else "https://profithelm.com/signal/"
+            t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
+            sig_title = _html_lib.unescape(re.sub(r"<[^>]+>", "", t_m.group(1)).strip()) if t_m else "ProfitHelm Statutory Signal"
+            ld_payload = {
+                "@context": "https://schema.org",
+                "@type": "WebPage",
+                "@id": f"{sig_url.rstrip('/')}/#webpage",
+                "name": sig_title,
+                "url": sig_url,
+                "description": "Deterministic federal and state statutory tax and capital allocation telemetry signal.",
+            }
+            ld_script = f'  <script type="application/ld+json">\n{_json_lib.dumps(ld_payload, indent=2)}\n  </script>\n</head>'
+            updated = updated.replace("</head>", ld_script, 1)
+            repairs.append("signal_webpage_jsonld_injected")
+
+        # 4. Enforce 1:1 FAQPage JSON-LD <-> visible <details> FAQ answer parity if FAQs exist
+        if '"FAQPage"' in updated and "<details" in updated:
+            dom_faqs: List[Tuple[str, str]] = []
+            for dm in re.finditer(r"<details\b[^>]*>([\s\S]*?)</details>", updated, re.IGNORECASE):
+                d_inner = dm.group(1)
+                sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", d_inner, re.IGNORECASE)
+                if not sm:
+                    continue
+                q_txt = _html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", sm.group(1)))).strip()
+                after_s = d_inner[sm.end():]
+                a_txt = _html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", after_s))).strip()
+                if q_txt and a_txt:
+                    dom_faqs.append((q_txt, a_txt))
+
+            if dom_faqs:
+                faq_entities = [
+                    {
+                        "@type": "Question",
+                        "name": q_t,
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": a_t,
+                        },
+                    }
+                    for q_t, a_t in dom_faqs
+                ]
+
+                def _sync_ld_faq_answers(m_ld: re.Match) -> str:
+                    o_tag, raw_json, c_tag = m_ld.group(1), m_ld.group(2), m_ld.group(3)
+                    try:
+                        parsed = _json_lib.loads(raw_json.strip())
+                        if isinstance(parsed, dict):
+                            if "@graph" in parsed and isinstance(parsed["@graph"], list):
+                                for node in parsed["@graph"]:
+                                    if isinstance(node, dict) and node.get("@type") == "FAQPage":
+                                        if node.get("mainEntity") != faq_entities:
+                                            node["mainEntity"] = faq_entities
+                                            return f"{o_tag}\n{_json_lib.dumps(parsed, indent=2)}\n  {c_tag}"
+                            elif parsed.get("@type") == "FAQPage":
+                                if parsed.get("mainEntity") != faq_entities:
+                                    parsed["mainEntity"] = faq_entities
+                                    return f"{o_tag}\n{_json_lib.dumps(parsed, indent=2)}\n  {c_tag}"
+                    except Exception:
+                        pass
+                    return m_ld.group(0)
+
+                synced_html = re.sub(
+                    r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+                    _sync_ld_faq_answers,
+                    updated,
+                    flags=re.IGNORECASE,
+                )
+                if synced_html != updated:
+                    updated = synced_html
+                    if "faq_schema_dom_synced" not in repairs:
+                        repairs.append("faq_schema_dom_synced")
+
+        return updated, repairs
+
+    @classmethod
+    def reconcile_overlay_spec_truth(
+        cls,
+        raw_ov: Dict[str, Any],
+        tenant: str,
+        slug: str = "",
+    ) -> Tuple[Dict[str, Any], bool]:
+        """
+        Deterministically reconciles a persisted GSC overlay JSON dictionary against
+        TenantFactStore ground truth so stale 2026 Section 179 caps ($1,250,000 / $3,130,000 / $31,300)
+        or Prexvo IBR/PAYE thresholds (225% / $35,212.50) are healed in place.
+        """
+        import json as _json_lib
+
+        if not isinstance(raw_ov, dict):
+            return raw_ov, False
+        ov_slug = str(raw_ov.get("slug") or slug or "").lower()
+        tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
+        serialized = _json_lib.dumps(raw_ov, ensure_ascii=False)
+        updated_str = serialized
+
+        if tenant_norm == "profithelm":
+            for old_s, new_s in (
+                ("up to $1,250,000 in qualifying commercial equipment", "up to $2,560,000 in qualifying commercial equipment"),
+                ("above $3,130,000 in total asset purchases", "above $4,090,000 in total asset purchases"),
+                ("$1,250,000 Section 179 Cap (IRC Section 179(b)(1))", "$2,560,000 Section 179 Cap (IRC Section 179(b)(1))"),
+                ("$3,130,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))", "$4,090,000 Section 179 Phase-Out Threshold (IRC 179(b)(2))"),
+                ("CapEx Intensive Expansion ($3.6M Total Equipment Placed in Service)", "CapEx Intensive Expansion ($4.35M Total Equipment Placed in Service)"),
+                ("Combine Remaining $780k Section 179 Allowance + IRC 168(k) Bonus", "Combine Remaining $2.30M Section 179 Allowance + IRC 168(k) Bonus"),
+                ("$412,000 First-Year Combined Depreciation Tax Shield", "$1,522,500 First-Year Combined Depreciation Tax Shield"),
+                ("High-Cap Scenario ($1.25M Statutory Limit)", "High-Cap Scenario ($2.56M Statutory Limit)"),
+                ('"cost": 1250000', '"cost": 2560000'),
+                (
+                    "capped at a $31,300 Section 179 deduction in 2026",
+                    "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
+                ),
+            ):
+                if old_s in updated_str:
+                    updated_str = updated_str.replace(old_s, new_s)
+        else:
+            if any(k in ov_slug for k in ("ibr-hardship", "paye-sunset")) and "rap-vs" not in ov_slug:
+                for old_s, new_s in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
+                    if old_s in updated_str:
+                        updated_str = updated_str.replace(old_s, new_s)
+
+        if updated_str != serialized:
+            return _json_lib.loads(updated_str), True
+        return raw_ov, False
+
+    @classmethod
+    def audit_html_truth_reconciliation(
+        cls,
+        html_content: str,
+        tenant: str,
+        rel_path: str = "",
+        slug: str = "",
+    ) -> List[str]:
+        """
+        Deterministically audits an HTML document for any remaining factual drift,
+        intra-page statutory contradictions, inline JS cap mismatches, or speculative filler.
+        Returns a list of violation descriptions (empty list == PASS).
+        """
+        violations: List[str] = []
+        store = TenantFactStore.get_instance()
+        ok, store_violations = store.verify_claim(tenant=tenant, text=html_content, context=rel_path or slug)
+        if not ok:
+            violations.extend(store_violations)
+
+        for filler_old, _ in cls.SPECULATIVE_FILLER_REPLACEMENTS:
+            if filler_old in html_content:
+                violations.append(f"Speculative filler phrase detected: '{filler_old.strip()}'")
+
+        tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
+        if tenant_norm == "profithelm":
+            if "Math.min(cost, 31300)" in html_content or "Math.min(basis, 31300)" in html_content or "const suvCap = 31300" in html_content:
+                violations.append("Inline calculator JS uses stale 31300 Heavy SUV cap instead of 2026 statutory 30500 cap")
+            if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
+                violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
+
+        return violations
+
+
 __all__ = [
     "PricingTier",
     "FeatureContract",
     "TenantStatutoryTruth",
     "TenantTruthProfile",
     "TenantFactStore",
+    "TruthReconciliationEngine",
     "PropertyContaminationError",
 ]
+
