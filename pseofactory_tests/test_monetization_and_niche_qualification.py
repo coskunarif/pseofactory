@@ -379,6 +379,11 @@ def test_pre_treg_noise_and_cannibalization_filtering_across_substrate_and_tenan
             for k in keywords
         ]
 
+    monkeypatch.setattr(
+        ph_scanner,
+        "FINANCIAL_KEYWORDS",
+        [*ph_scanner.FINANCIAL_KEYWORDS, "section 174", "amortization", "capitalization"],
+    )
     monkeypatch.setattr(ph_scanner, "fetch_google_trends_breakouts", lambda geo="US": [
         {"query": "celebrity oscars red carpet dress meme", "approx_traffic": "100K+", "velocity": "Breakout", "geo": "US"},
         {"query": "pslf student loan forgiveness 2026 calculator", "approx_traffic": "40K+", "velocity": "Breakout", "geo": "US"},
