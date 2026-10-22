@@ -754,3 +754,48 @@ class GSCUrlInspectionRecord:
         return asdict(self)
 
 
+@dataclass
+class StatutoryEconomicTimeseriesRecord:
+    """Longitudinal statutory and macroeconomic time-series data point archived per cycle for compile-time matrices."""
+    series_id: str
+    property_id: str
+    jurisdiction: str
+    statutory_citation: str
+    metric_key: str
+    metric_label: str
+    effective_year: int
+    metric_value: float
+    unit: str = "USD"
+    source_agency: str = "IRS"
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    metadata: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.series_id, "StatutoryEconomicTimeseriesRecord.series_id")
+        assert_no_forbidden_dashes(self.property_id, "StatutoryEconomicTimeseriesRecord.property_id")
+        assert_no_forbidden_dashes(self.jurisdiction, "StatutoryEconomicTimeseriesRecord.jurisdiction")
+        assert_no_forbidden_dashes(self.statutory_citation, "StatutoryEconomicTimeseriesRecord.statutory_citation")
+        assert_no_forbidden_dashes(self.metric_key, "StatutoryEconomicTimeseriesRecord.metric_key")
+        assert_no_forbidden_dashes(self.metric_label, "StatutoryEconomicTimeseriesRecord.metric_label")
+        assert_no_forbidden_dashes(self.unit, "StatutoryEconomicTimeseriesRecord.unit")
+        assert_no_forbidden_dashes(self.source_agency, "StatutoryEconomicTimeseriesRecord.source_agency")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StatutoryEconomicTimeseriesRecord":
+        return cls(
+            series_id=str(data.get("series_id", "")),
+            property_id=str(data.get("property_id", "unassigned")),
+            jurisdiction=str(data.get("jurisdiction", "US-FED")),
+            statutory_citation=str(data.get("statutory_citation", "")),
+            metric_key=str(data.get("metric_key", "")),
+            metric_label=str(data.get("metric_label", "")),
+            effective_year=int(data.get("effective_year", 2026)),
+            metric_value=float(data.get("metric_value", 0.0)),
+            unit=str(data.get("unit", "USD")),
+            source_agency=str(data.get("source_agency", "IRS")),
+            recorded_at=str(data.get("recorded_at", datetime.now(timezone.utc).isoformat())),
+            metadata=data.get("metadata"),
+        )

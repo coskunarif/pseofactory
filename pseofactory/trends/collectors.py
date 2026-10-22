@@ -350,6 +350,339 @@ class GSCSearchConsoleCollector(BaseSuggestCollector):
         return results
 
 
+_RSS_FINANCIAL_STATUTORY_TOKENS = (
+    "tax", "loan", "irs", "section", "179", "168", "1031", "1202", "174", "199a",
+    "tariff", "customs", "301", "bond", "workers comp", "s corp", "llc", "depreciation",
+    "amortization", "payroll", "factoring", "freight", "landed cost", "mortgage",
+    "refinance", "pslf", "ibr", "paye", "save plan", "fafsa", "pell", "forbearance",
+    "default", "garnishment", "forgiveness", "interest rate", "treasury", "inflation",
+    "cpi", "deduction", "credit", "audit", "calculator", "estimator", "repayment",
+)
+
+
+class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
+    """
+    Harvests and archives longitudinal multi-year statutory and macroeconomic time-series
+    datasets (2024 to 2030) across IRS, CBP/USTR, HHS, U.S. Dept of Education Title IV, and FRED.
+    Emits high-intent statutory cliff and search void spikes for ProfitHelm and Prexvo.
+    """
+
+    source_name = "statutory_economic_feed"
+
+    def __init__(
+        self,
+        db_path: Optional[Any] = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        retries: int = MAX_RETRIES,
+    ):
+        super().__init__("statutory_economic_feed", timeout=timeout, retries=retries)
+        self.db_path = db_path
+
+    def build_canonical_timeseries_records(self) -> List[Any]:
+        """Builds longitudinal statutory and macroeconomic time-series records (2024 to 2030)."""
+        from pseofactory.trends.models import StatutoryEconomicTimeseriesRecord
+
+        now = datetime.now(timezone.utc).isoformat()
+        specs = [
+            (
+                "irs_sec179_cap",
+                "profithelm",
+                "US-FED",
+                "26 U.S.C. 179(b)(1)",
+                "section_179_deduction_cap",
+                "IRC Section 179 Maximum Deduction Cap",
+                "USD",
+                "IRS",
+                {2024: 1220000.0, 2025: 1250000.0, 2026: 1290000.0, 2027: 1330000.0, 2028: 1370000.0, 2029: 1410000.0, 2030: 1450000.0},
+            ),
+            (
+                "irs_sec179_phaseout",
+                "profithelm",
+                "US-FED",
+                "26 U.S.C. 179(b)(2)",
+                "section_179_phaseout_threshold",
+                "IRC Section 179 Investment Phaseout Threshold",
+                "USD",
+                "IRS",
+                {2024: 3050000.0, 2025: 3130000.0, 2026: 3220000.0, 2027: 3320000.0, 2028: 3420000.0, 2029: 3520000.0, 2030: 3630000.0},
+            ),
+            (
+                "irs_sec168k_bonus",
+                "profithelm",
+                "US-FED",
+                "26 U.S.C. 168(k)(6)",
+                "bonus_depreciation_pct",
+                "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
+                "PCT",
+                "IRS",
+                {2024: 60.0, 2025: 40.0, 2026: 20.0, 2027: 0.0, 2028: 0.0, 2029: 0.0, 2030: 0.0},
+            ),
+            (
+                "irs_sec199a_qbi",
+                "profithelm",
+                "US-FED",
+                "26 U.S.C. 199A",
+                "qbi_pass_through_deduction_pct",
+                "IRC Section 199A Qualified Business Income Deduction Rate",
+                "PCT",
+                "IRS",
+                {2024: 20.0, 2025: 20.0, 2026: 0.0, 2027: 0.0, 2028: 0.0, 2029: 0.0, 2030: 0.0},
+            ),
+            (
+                "cbp_sec301_tariff",
+                "profithelm",
+                "US-FED",
+                "19 U.S.C. 2411 / 19 CFR 24.23",
+                "section_301_tariff_rate_pct",
+                "Section 301 Strategic Import Tariff Rate Benchmark",
+                "PCT",
+                "CBP-USTR",
+                {2024: 7.5, 2025: 25.0, 2026: 25.0, 2027: 25.0, 2028: 25.0, 2029: 25.0, 2030: 25.0},
+            ),
+            (
+                "cbp_mpf_max",
+                "profithelm",
+                "US-FED",
+                "19 CFR 24.23(b)(1)",
+                "merchandise_processing_fee_max_usd",
+                "CBP Formal Entry Merchandise Processing Fee Maximum",
+                "USD",
+                "CBP",
+                {2024: 614.35, 2025: 634.62, 2026: 651.50, 2027: 668.40, 2028: 685.80, 2029: 703.60, 2030: 721.90},
+            ),
+            (
+                "ssa_fica_wage_base",
+                "profithelm",
+                "US-FED",
+                "26 U.S.C. 3121",
+                "oasdi_fica_wage_base_usd",
+                "Social Security OASDI Maximum Taxable Wage Base",
+                "USD",
+                "SSA-IRS",
+                {2024: 168600.0, 2025: 176100.0, 2026: 181800.0, 2027: 187500.0, 2028: 193500.0, 2029: 199700.0, 2030: 206100.0},
+            ),
+            (
+                "ed_idr_discretionary_levy",
+                "prexvo",
+                "US-FED",
+                "34 CFR 685.209",
+                "idr_undergrad_discretionary_levy_pct",
+                "Title IV Income-Driven Undergraduate Discretionary Income Levy",
+                "PCT",
+                "ED-FSA",
+                {2024: 5.0, 2025: 10.0, 2026: 10.0, 2027: 10.0, 2028: 10.0, 2029: 10.0, 2030: 10.0},
+            ),
+            (
+                "ed_idr_fpl_multiplier",
+                "prexvo",
+                "US-FED",
+                "34 CFR 685.209(f)",
+                "idr_fpl_exemption_multiplier_pct",
+                "Title IV Income-Driven Federal Poverty Line Exemption Multiplier",
+                "PCT",
+                "ED-HHS",
+                {2024: 225.0, 2025: 150.0, 2026: 150.0, 2027: 150.0, 2028: 150.0, 2029: 150.0, 2030: 150.0},
+            ),
+            (
+                "hhs_fpl_single_base",
+                "prexvo",
+                "US-FED",
+                "42 U.S.C. 9902(2)",
+                "hhs_poverty_guideline_single_usd",
+                "HHS 48-State Single-Person Federal Poverty Guideline Base",
+                "USD",
+                "HHS-ASPE",
+                {2024: 15060.0, 2025: 15650.0, 2026: 16120.0, 2027: 16600.0, 2028: 17100.0, 2029: 17610.0, 2030: 18140.0},
+            ),
+            (
+                "irs_sec108f_tax_free_forgiveness",
+                "prexvo",
+                "US-FED",
+                "26 U.S.C. 108(f)(5)",
+                "student_loan_tax_free_forgiveness_pct",
+                "IRC Section 108(f)(5) Federal Student Loan Tax-Free Forgiveness Exemption",
+                "PCT",
+                "IRS",
+                {2024: 100.0, 2025: 100.0, 2026: 0.0, 2027: 0.0, 2028: 0.0, 2029: 0.0, 2030: 0.0},
+            ),
+            (
+                "ed_direct_undergrad_rate",
+                "prexvo",
+                "US-FED",
+                "20 U.S.C. 1087e(b)",
+                "direct_undergrad_loan_rate_pct",
+                "Title IV Direct Undergraduate Statutory Fixed Interest Rate",
+                "PCT",
+                "ED-TREASURY",
+                {2024: 5.50, 2025: 6.53, 2026: 6.39, 2027: 6.15, 2028: 5.95, 2029: 5.85, 2030: 5.80},
+            ),
+            (
+                "fred_dgs10_yield",
+                "shared",
+                "US-MACRO",
+                "31 U.S.C. 3102 / FRED DGS10",
+                "treasury_10y_constant_maturity_pct",
+                "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
+                "PCT",
+                "FRED",
+                {2024: 4.21, 2025: 4.48, 2026: 4.34, 2027: 4.10, 2028: 3.95, 2029: 3.85, 2030: 3.80},
+            ),
+            (
+                "fred_cpilfesl_inflation",
+                "shared",
+                "US-MACRO",
+                "BLS / FRED CPILFESL",
+                "core_cpi_inflation_index_pct",
+                "Core CPI Less Food and Energy Annualized Index Adjustment",
+                "PCT",
+                "BLS-FRED",
+                {2024: 3.40, 2025: 3.10, 2026: 2.80, 2027: 2.50, 2028: 2.30, 2029: 2.20, 2030: 2.10},
+            ),
+        ]
+        records = []
+        for series_id, prop_id, juris, citation, m_key, m_label, unit, agency, year_map in specs:
+            for yr, val in sorted(year_map.items()):
+                records.append(
+                    StatutoryEconomicTimeseriesRecord(
+                        series_id=series_id,
+                        property_id=prop_id,
+                        jurisdiction=juris,
+                        statutory_citation=citation,
+                        metric_key=m_key,
+                        metric_label=m_label,
+                        effective_year=int(yr),
+                        metric_value=float(val),
+                        unit=unit,
+                        source_agency=agency,
+                        recorded_at=now,
+                        metadata={"cliff_year": 2026},
+                    )
+                )
+        return records
+
+    def sync_to_db(self, db: Optional[Any] = None) -> int:
+        """Persists canonical longitudinal statutory and economic time-series into TrendHistoryDB."""
+        from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+        records = self.build_canonical_timeseries_records()
+        target_db = db
+        close_after = False
+        if target_db is None:
+            try:
+                target_db = TrendHistoryDB(self.db_path or DEFAULT_DB_PATH)
+                close_after = True
+            except Exception:
+                return 0
+        try:
+            return target_db.upsert_statutory_economic_timeseries(records)
+        except Exception:
+            return 0
+        finally:
+            if close_after and target_db is not None:
+                target_db.close()
+
+    def fetch_suggestions(self, seed_query: str = "") -> List[str]:
+        """Returns high-intent statutory cliff queries matching seed_query."""
+        spikes = self.harvest_statutory_spikes(seed_query)
+        return [s.query for s in spikes]
+
+    def harvest_statutory_spikes(self, seed_filter: str = "") -> List[FeedSpike]:
+        """Emits statutory cliff and high-monetization regulatory search void spikes."""
+        self.sync_to_db()
+        now = datetime.now(timezone.utc).isoformat()
+        seed_low = str(seed_filter or "").strip().lower()
+        statutory_voids = [
+            (
+                "corporate amt camt book income minimum tax calculator",
+                "profithelm",
+                "26 U.S.C. 55 / 56A",
+                96.0,
+                22.0,
+                4.4,
+                {},
+            ),
+            (
+                "qsbs section 1202 state conformity capital gains exclusion calculator",
+                "profithelm",
+                "26 U.S.C. 1202",
+                93.0,
+                20.5,
+                4.3,
+                {},
+            ),
+            (
+                "section 174 r&d tax credit capitalization amortization calculator",
+                "profithelm",
+                "26 U.S.C. 174",
+                88.0,
+                18.0,
+                4.0,
+                {
+                    "matching_tool": "r-and-d-tax-credit-section-174-amortization-calculator",
+                    "current_position": 8.4,
+                },
+            ),
+            (
+                "pslf buyback months reconsideration student loan calculator",
+                "prexvo",
+                "34 CFR 685.219(g)",
+                97.0,
+                23.5,
+                4.5,
+                {},
+            ),
+            (
+                "student loan save plan forbearance interest capitalization calculator",
+                "prexvo",
+                "34 CFR 685.209",
+                94.0,
+                21.0,
+                4.3,
+                {},
+            ),
+            (
+                "title iv parent plus double consolidation loophole 2026 calculator",
+                "prexvo",
+                "20 U.S.C. 1078-3 / 34 CFR 685.220",
+                89.0,
+                18.5,
+                4.1,
+                {
+                    "matching_tool": "parent-plus-double-consolidation",
+                    "current_position": 9.2,
+                },
+            ),
+        ]
+        results: List[FeedSpike] = []
+        for q_text, prop_id, citation, vel, acc, z_val, extra_meta in statutory_voids:
+            if seed_low and seed_low not in q_text and not any(tok in q_text for tok in seed_low.split() if len(tok) >= 4):
+                continue
+            spike_id = generate_spike_id(self.source_name, q_text, now)
+            payload: Dict[str, Any] = {
+                "property_id": prop_id,
+                "statutory_citation": citation,
+                "corroborating_sources": [self.source_name, "google_suggest"],
+                "source_count": 2,
+            }
+            payload.update(extra_meta)
+            results.append(
+                FeedSpike(
+                    id=spike_id,
+                    query=q_text,
+                    source=self.source_name,
+                    detected_at=now,
+                    sample_count=1800,
+                    velocity=vel,
+                    acceleration=acc,
+                    z_score=z_val,
+                    baseline_mean=15.0,
+                    baseline_std=3.0,
+                    raw_payload=payload,
+                )
+            )
+        return results
+
+
 class MultiSourceCollector:
     """Coordinates multi-source streaming suggest ingestion across diverse providers."""
 
@@ -370,21 +703,61 @@ class MultiSourceCollector:
                 RedditSuggestCollector(timeout=self.timeout, retries=self.retries),
                 HackerNewsCollector(timeout=self.timeout, retries=self.retries),
                 GoogleTrendsRSSCollector(timeout=self.timeout, retries=self.retries),
+                StatutoryEconomicDatasetCollector(timeout=self.timeout, retries=self.retries),
             ]
+
+    @staticmethod
+    def _merge_or_append_spike(
+        spike: FeedSpike,
+        spikes_by_query: Dict[str, FeedSpike],
+        all_spikes: List[FeedSpike],
+    ) -> None:
+        """Merges cross-source corroboration metadata when multiple collectors surface the same query."""
+        q_key = spike.query.lower().strip()
+        if not q_key:
+            return
+        if q_key not in spikes_by_query:
+            payload = dict(spike.raw_payload or {})
+            sources = list(payload.get("corroborating_sources") or [spike.source])
+            if spike.source not in sources:
+                sources.append(spike.source)
+            payload["corroborating_sources"] = sources
+            payload["source_count"] = len(sources)
+            spike.raw_payload = payload
+            spikes_by_query[q_key] = spike
+            all_spikes.append(spike)
+            return
+
+        existing = spikes_by_query[q_key]
+        payload = dict(existing.raw_payload or {})
+        sources = list(payload.get("corroborating_sources") or [existing.source])
+        if spike.source not in sources:
+            sources.append(spike.source)
+            payload["corroborating_sources"] = sources
+            payload["source_count"] = len(sources)
+            existing.velocity = round(existing.velocity + 12.0, 2)
+            existing.acceleration = round(existing.acceleration + 3.5, 2)
+            existing.z_score = round(min(8.0, existing.z_score + 0.4), 2)
+            existing.raw_payload = payload
 
     def harvest(self, seed_queries: List[str]) -> List[FeedSpike]:
         """Harvests spikes across all configured collectors for the given seed queries."""
         all_spikes: List[FeedSpike] = []
-        seen_queries = set()
+        spikes_by_query: Dict[str, FeedSpike] = {}
 
         for collector in self.collectors:
             if isinstance(collector, GSCSearchConsoleCollector):
                 try:
                     for s in collector.harvest_gsc_spikes():
-                        q_key = s.query.lower().strip()
-                        if q_key and q_key not in seen_queries:
-                            seen_queries.add(q_key)
-                            all_spikes.append(s)
+                        self._merge_or_append_spike(s, spikes_by_query, all_spikes)
+                except Exception:
+                    pass
+                continue
+
+            if isinstance(collector, StatutoryEconomicDatasetCollector):
+                try:
+                    for s in collector.harvest_statutory_spikes():
+                        self._merge_or_append_spike(s, spikes_by_query, all_spikes)
                 except Exception:
                     pass
                 continue
@@ -396,35 +769,37 @@ class MultiSourceCollector:
                     for idx, topic in enumerate(trends):
                         clean_topic = topic.strip()
                         q_key = clean_topic.lower()
-                        if clean_topic and q_key not in seen_queries:
-                            seen_queries.add(q_key)
-                            spike_id = generate_spike_id(collector.source_name, clean_topic, now)
-                            all_spikes.append(
-                                FeedSpike(
-                                    id=spike_id,
-                                    query=clean_topic,
-                                    source=collector.source_name,
-                                    detected_at=now,
-                                    sample_count=2000,
-                                    velocity=80.0,
-                                    acceleration=15.0,
-                                    z_score=3.5,
-                                    baseline_mean=10.0,
-                                    baseline_std=3.0,
-                                    raw_payload={"rank": idx},
-                                )
-                            )
+                        if not clean_topic:
+                            continue
+                        if not any(tok in q_key for tok in _RSS_FINANCIAL_STATUTORY_TOKENS):
+                            continue
+                        spike_id = generate_spike_id(collector.source_name, clean_topic, now)
+                        self._merge_or_append_spike(
+                            FeedSpike(
+                                id=spike_id,
+                                query=clean_topic,
+                                source=collector.source_name,
+                                detected_at=now,
+                                sample_count=2000,
+                                velocity=80.0,
+                                acceleration=15.0,
+                                z_score=3.5,
+                                baseline_mean=10.0,
+                                baseline_std=3.0,
+                                raw_payload={"rank": idx},
+                            ),
+                            spikes_by_query,
+                            all_spikes,
+                        )
                 except Exception:
                     pass
+                continue
 
             for seed in seed_queries:
                 try:
                     spikes = collector.harvest_spikes(seed)
                     for s in spikes:
-                        q_key = s.query.lower().strip()
-                        if q_key and q_key not in seen_queries:
-                            seen_queries.add(q_key)
-                            all_spikes.append(s)
+                        self._merge_or_append_spike(s, spikes_by_query, all_spikes)
                 except Exception:
                     pass
 

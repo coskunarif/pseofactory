@@ -449,5 +449,44 @@ def test_reflect_zero_drift_fastpath_does_not_raise_unbound_local(tmp_path, monk
     assert res["total_recompiled"] == 0
 
 
+def test_compiler_embeds_statutory_matrix_and_interactive_workbench_assets(tmp_path):
+    """Verifies compile_high_effort_page embeds longitudinal statutory_economic_matrix and renders sticky interactive workbench widgets."""
+    from pseofactory.compiler import compile_high_effort_page
+    from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+    from pseofactory.trends.db import TrendHistoryDB
+
+    db_file = tmp_path / "matrix_compile.db"
+    with TrendHistoryDB(db_file) as db:
+        StatutoryEconomicDatasetCollector().sync_to_db(db)
+        matrix = db.compile_statutory_economic_matrix("profithelm", "section 179 deduction limit calculator")
+
+    compiled = compile_high_effort_page(
+        {
+            "slug": "section-179-phaseout-cliff-calculator",
+            "query": "section 179 phaseout cliff calculator",
+            "property_id": "profithelm",
+            "model_name": "Section 179 Phaseout Cliff Model",
+            "formula": "min(purchase_price, 1290000)",
+            "inputs": {"purchase_price": 450000},
+            "published_output": 450000,
+            "sample_calculation": "min(450000, 1290000) = 450000",
+            "statutory_authority": matrix["statutory_authority"],
+            "economic_dataset": matrix["economic_dataset"],
+            "statutory_economic_matrix": matrix,
+            "corroborating_sources": ["statutory_economic_dataset", "google_suggest"],
+        }
+    )
+    html_out = compiled["html"]
+    manifest = compiled["manifest"]
+    assert "statutory_economic_matrix" in manifest
+    assert manifest["statutory_economic_matrix"]["series_count"] >= 1
+    assert manifest["corroborating_sources"] == ["statutory_economic_dataset", "google_suggest"]
+    assert 'id="multi-year-cliff-visualizer"' in html_out
+    assert 'id="stateful-scenario-comparator"' in html_out
+    assert 'id="saveable-decision-blueprint"' in html_out
+    assert "updateInteractiveCliffAndComparator" in html_out
+    assert "collectWorkbenchBlueprintState" in html_out
+
+
 
 

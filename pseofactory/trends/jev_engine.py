@@ -253,6 +253,15 @@ class JevEngine:
                 gsc_mult += 0.02
             y_asset = y_asset * min(1.10, gsc_mult)
 
+        meta_dict = candidate.metadata or {}
+        source_cnt = int(meta_dict.get("source_count", 1) or 1)
+        if source_cnt >= 2:
+            corrob_mult = min(1.12, 1.0 + 0.04 * (source_cnt - 1))
+            eff_partner_yield = float(monetization.get("effective_partner_yield", 0.0) or 0.0)
+            if eff_partner_yield >= 25.0:
+                corrob_mult = min(1.16, corrob_mult + 0.04)
+            y_asset = y_asset * corrob_mult
+
         momentum_core = 0.35 * v_norm + 0.65 * s_norm
         momentum_factor = math.pow(momentum_core, 0.85) if momentum_core > 0.0 else 0.0
 
@@ -369,7 +378,10 @@ class JevEngine:
             )
 
         # Step 3: Cannibalization Triage Gate
-        gsc_meta = (candidate.metadata or {}).get("gsc_telemetry") if candidate.metadata else None
+        cand_meta = candidate.metadata or {}
+        gsc_meta = cand_meta.get("gsc_telemetry")
+        stat_matrix = cand_meta.get("statutory_economic_matrix")
+        corrob_sources = list(cand_meta.get("corroborating_sources") or [])
         if c_cannibal >= 0.50:
             tool_slug = matching_tool or "existing-tool"
             if 4.0 <= pos <= 20.0:
@@ -387,6 +399,10 @@ class JevEngine:
                     overlay_spec["gsc_telemetry"] = dict(gsc_meta)
                     overlay_spec["device_focus"] = str(gsc_meta.get("device_focus") or ("MOBILE_CTR_DEFICIT" if float(gsc_meta.get("mobile_ctr_gap", 0.0) or 0.0) >= 0.01 else "BALANCED"))
                     overlay_spec["search_appearances"] = list(gsc_meta.get("search_appearances") or [])
+                if isinstance(stat_matrix, dict) and stat_matrix:
+                    overlay_spec["statutory_economic_matrix"] = stat_matrix
+                if corrob_sources:
+                    overlay_spec["corroborating_sources"] = corrob_sources
                 if getattr(treg_result, "ai_citation_checked", False):
                     overlay_spec["ai_citation_vacant"] = bool(treg_result.ai_citation_vacant)
                     overlay_spec["ai_cited_domains"] = list(treg_result.ai_cited_domains or [])
@@ -424,7 +440,7 @@ class JevEngine:
                 )
 
         # Step 3.5: Algorithmic Ceiling Suppression Guard
-        ceiling_status = (candidate.metadata or {}).get("ceiling_status") if candidate.metadata else None
+        ceiling_status = cand_meta.get("ceiling_status")
         if isinstance(ceiling_status, dict) and ceiling_status.get("ceiling_detected") and ceiling_status.get("recommendation") == "FREEZE_EXPANSION":
             c_score = float(ceiling_status.get("ceiling_dampening_score", 0.0) or 0.0)
             return JevDecisionResult(
@@ -489,6 +505,10 @@ class JevEngine:
                 candidate_spec["gsc_telemetry"] = dict(gsc_meta)
                 candidate_spec["device_focus"] = str(gsc_meta.get("device_focus") or "BALANCED")
                 candidate_spec["search_appearances"] = list(gsc_meta.get("search_appearances") or [])
+            if isinstance(stat_matrix, dict) and stat_matrix:
+                candidate_spec["statutory_economic_matrix"] = stat_matrix
+            if corrob_sources:
+                candidate_spec["corroborating_sources"] = corrob_sources
             return JevDecisionResult(
                 query=clean_q,
                 slug=slug,

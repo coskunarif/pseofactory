@@ -347,3 +347,61 @@ def test_niche_cluster_proposal_persistence(tmp_path: Path):
         assert proposals[0].cluster_slug == "contractor-lien-statutory-matrix"
         assert proposals[0].consecutive_cycles_sustained == 3
         assert proposals[0].mean_composite_yield == 78.5
+
+
+def test_statutory_economic_timeseries_and_matrix_compilation(tmp_path: Path):
+    """Verifies longitudinal 2024-2030 statutory/economic dataset persistence and matrix compilation."""
+    from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+
+    db_file = tmp_path / "test_statutory_matrix.db"
+    with TrendHistoryDB(db_file) as db:
+        collector = StatutoryEconomicDatasetCollector()
+        synced = collector.sync_to_db(db)
+        assert synced >= 90
+
+        ph_matrix = db.compile_statutory_economic_matrix("profithelm", "section 179 deduction limit calculator")
+        assert ph_matrix["property_id"] == "profithelm"
+        assert ph_matrix["series_count"] >= 1
+        assert "IRC Section 179" in ph_matrix["statutory_authority"]
+        assert len(ph_matrix["series"][0]["timeline"]) == 7
+
+        px_matrix = db.compile_statutory_economic_matrix("prexvo", "repayment assistance plan rap calculator")
+        assert px_matrix["property_id"] == "prexvo"
+        assert px_matrix["series_count"] >= 1
+        assert "Title IV" in px_matrix["statutory_authority"]
+
+
+def test_orphaned_cycle_healing_preserves_consecutive_streaks(tmp_path: Path):
+    """Verifies heal_orphaned_running_cycles marks orphaned RUNNING cycles FAILED and preserves streak continuity."""
+    db_file = tmp_path / "test_orphan_heal.db"
+    with TrendHistoryDB(db_file) as db:
+        db.start_cycle("cycle-good-1", ["calc"], ["statutory_economic_dataset"])
+        r1 = db.upsert_keyword_history(
+            query_slug="section-179-phaseout-cliff-calculator",
+            query="section 179 phaseout cliff calculator",
+            cycle_id="cycle-good-1",
+            observed_velocity=80.0,
+            property_id="profithelm",
+            observed_at="2026-10-19T00:00:00Z",
+        )
+        assert r1.consecutive_cycles_count == 1
+        db.complete_cycle("cycle-good-1", 1, 1)
+
+        # Simulate a timeout-aborted RUNNING cycle
+        db.start_cycle("cycle-aborted-2", ["calc"], ["statutory_economic_dataset"])
+        healed = db.heal_orphaned_running_cycles(exclude_cycle_id="cycle-good-3")
+        assert healed == 1
+
+        # Next cycle should look back to cycle-good-1 and increment streak to 2
+        db.start_cycle("cycle-good-3", ["calc"], ["statutory_economic_dataset"])
+        r3 = db.upsert_keyword_history(
+            query_slug="section-179-phaseout-cliff-calculator",
+            query="section 179 phaseout cliff calculator",
+            cycle_id="cycle-good-3",
+            observed_velocity=85.0,
+            property_id="profithelm",
+            observed_at="2026-10-21T00:00:00Z",
+        )
+        assert r3.consecutive_cycles_count == 2
+        db.complete_cycle("cycle-good-3", 1, 1)
+

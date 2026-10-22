@@ -1149,6 +1149,53 @@ def _render_runtime_sync_workbench_js() -> str:
       } catch (e) {}
     }
 
+    function updateInteractiveCliffAndComparator(retainedVal, taxVal) {
+      try {
+        var total = Math.max(1, retainedVal + taxVal);
+        var cliffMults = [0.74, 0.80, 0.88, 0.96, 1.04, 1.12];
+        for (var cIdx = 0; cIdx < cliffMults.length; cIdx++) {
+          var barEl = document.getElementById("serp-cliff-bar-" + String(cIdx));
+          var valEl = document.getElementById("serp-cliff-val-" + String(cIdx));
+          var yrVal = Math.max(100, Math.round(taxVal * cliffMults[cIdx]));
+          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, taxVal * 1.18)) * 70)));
+          var barY = 90-barH;
+          if (barEl) {
+            barEl.setAttribute("y", String(barY));
+            barEl.setAttribute("height", String(barH));
+          }
+          if (valEl) {
+            valEl.setAttribute("y", String(barY-5));
+            valEl.textContent = yrVal >= 1000 ? ("$" + (Math.round((yrVal / 100)) / 10).toFixed(1) + "k") : fmtUsd(yrVal);
+          }
+        }
+        var compRoot = document.getElementById("stateful-scenario-comparator");
+        if (compRoot) {
+          compRoot.setAttribute("data-live-primary", String(retainedVal));
+          compRoot.setAttribute("data-live-secondary", String(taxVal));
+          var pinnedA = compRoot.getAttribute("data-pinned-a") === "1";
+          var pinnedB = compRoot.getAttribute("data-pinned-b") === "1";
+          var a1 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-primary") || "0") || retainedVal) : retainedVal;
+          var a2 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-secondary") || "0") || taxVal) : taxVal;
+          var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || Math.round(retainedVal * 1.12)) : Math.round(retainedVal * 1.12);
+          var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || Math.round(taxVal * 0.82)) : Math.round(taxVal * 0.82);
+          var elA1 = document.getElementById("serp-scn-a-primary");
+          var elA2 = document.getElementById("serp-scn-a-secondary");
+          var elB1 = document.getElementById("serp-scn-b-primary");
+          var elB2 = document.getElementById("serp-scn-b-secondary");
+          var elD1 = document.getElementById("serp-scn-delta-primary");
+          var elD2 = document.getElementById("serp-scn-delta-secondary");
+          if (elA1) elA1.textContent = fmtUsd(a1);
+          if (elA2) elA2.textContent = fmtUsd(a2);
+          if (elB1) elB1.textContent = fmtUsd(b1);
+          if (elB2) elB2.textContent = fmtUsd(b2);
+          var d1 = b1-a1;
+          var d2 = a2-b2;
+          if (elD1) elD1.textContent = (d1 >= 0 ? "+" : "") + fmtUsd(d1);
+          if (elD2) elD2.textContent = (d2 >= 0 ? "+" : "") + fmtUsd(d2) + " Saved";
+        }
+      } catch (err) {}
+    }
+
     function updateSerpSvgChart(retainedVal, taxVal, leftPrefix, rightPrefix) {
       var total = Math.max(1, retainedVal + taxVal);
       var retPct = Math.max(4, Math.min(96, Math.round((retainedVal / total) * 1000) / 10));
@@ -1166,6 +1213,7 @@ def _render_runtime_sync_workbench_js() -> str:
       }
       if (lblRet) lblRet.textContent = leftPrefix + ": " + fmtUsd(retainedVal) + " (" + retPct.toFixed(1) + "%)";
       if (lblTax) lblTax.textContent = rightPrefix + ": " + fmtUsd(taxVal) + " (" + taxPct.toFixed(1) + "%)";
+      updateInteractiveCliffAndComparator(retainedVal, taxVal);
     }
 
     function updateSerpWorkbenchSynchronously() {
@@ -1489,6 +1537,48 @@ def _render_runtime_sync_events_js() -> str:
       } catch (err) {}
     }
 
+    function collectWorkbenchBlueprintState() {
+      var state = { slug: resolveCurrentToolSlug(), ts: new Date().toISOString(), inputs: {}, outputs: {} };
+      var inps = document.querySelectorAll('input[type="number"], input[type="range"], select');
+      for (var i = 0; i < inps.length; i++) {
+        var el = inps[i];
+        var key = el.id || el.name || "";
+        if (key && !/^retro-range-/.test(key)) {
+          state.inputs[key] = el.value;
+        }
+      }
+      var p1 = document.getElementById("serp-out-primary");
+      var p2 = document.getElementById("serp-out-secondary");
+      if (p1) state.outputs.primary = (p1.textContent || "").trim();
+      if (p2) state.outputs.secondary = (p2.textContent || "").trim();
+      return state;
+    }
+
+    function restoreSavedBlueprintIfPresent() {
+      try {
+        var slug = resolveCurrentToolSlug();
+        var raw = window.localStorage ? window.localStorage.getItem("pseo_blueprint_" + slug) : null;
+        if (!raw) return;
+        var saved = JSON.parse(raw);
+        if (!saved || !saved.inputs) return;
+        var restoredCount = 0;
+        for (var k in saved.inputs) {
+          var el = document.getElementById(k) || document.querySelector('[name="' + k + '"]');
+          if (el && saved.inputs[k] !== undefined) {
+            el.value = String(saved.inputs[k]);
+            restoredCount++;
+          }
+        }
+        if (restoredCount > 0) {
+          var statusEl = document.getElementById("serp-blueprint-status");
+          if (statusEl) {
+            statusEl.textContent = "Blueprint Status: Restored saved state (" + String(restoredCount) + " inputs hydrated from local storage).";
+          }
+          updateOutputsSynchronously();
+        }
+      } catch (err) {}
+    }
+
     function initBaseValues() {
       var inputs = document.querySelectorAll('input[type="number"], input[type="range"]');
       for (var i = 0; i < inputs.length; i++) {
@@ -1500,6 +1590,7 @@ def _render_runtime_sync_events_js() -> str:
           }
         }
       }
+      restoreSavedBlueprintIfPresent();
       syncOutboundAffiliateLinks();
     }
 
@@ -1568,6 +1659,83 @@ def _render_runtime_sync_events_js() -> str:
     }, true);
 
     document.addEventListener("click", function(e) {
+      var pinBtn = e.target && e.target.closest ? e.target.closest("[data-scenario-pin]") : null;
+      if (pinBtn) {
+        e.preventDefault();
+        try {
+          var compRoot = document.getElementById("stateful-scenario-comparator");
+          if (compRoot) {
+            var pinMode = (pinBtn.getAttribute("data-scenario-pin") || "").toUpperCase();
+            var liveP = parseFloat(compRoot.getAttribute("data-live-primary") || "0") || 0;
+            var liveS = parseFloat(compRoot.getAttribute("data-live-secondary") || "0") || 0;
+            if (pinMode === "A") {
+              compRoot.setAttribute("data-pinned-a", "1");
+              compRoot.setAttribute("data-scn-a-primary", String(liveP));
+              compRoot.setAttribute("data-scn-a-secondary", String(liveS));
+            } else if (pinMode === "B") {
+              compRoot.setAttribute("data-pinned-b", "1");
+              compRoot.setAttribute("data-scn-b-primary", String(liveP));
+              compRoot.setAttribute("data-scn-b-secondary", String(liveS));
+            } else {
+              compRoot.removeAttribute("data-pinned-a");
+              compRoot.removeAttribute("data-pinned-b");
+            }
+            updateInteractiveCliffAndComparator(liveP, liveS);
+          }
+        } catch (err) {}
+        return;
+      }
+
+      var bpBtn = e.target && e.target.closest ? e.target.closest("[data-blueprint-action]") : null;
+      if (bpBtn) {
+        e.preventDefault();
+        try {
+          var act = (bpBtn.getAttribute("data-blueprint-action") || "").toLowerCase();
+          var bpState = collectWorkbenchBlueprintState();
+          var statusEl = document.getElementById("serp-blueprint-status");
+          if (act === "save") {
+            if (window.localStorage) {
+              window.localStorage.setItem("pseo_blueprint_" + bpState.slug, JSON.stringify(bpState));
+            }
+            if (statusEl) {
+              statusEl.textContent = "Blueprint Status: Saved locally (" + Object.keys(bpState.inputs).length + " parameters persisted for instant reload).";
+            }
+          } else if (act === "share") {
+            var qs = new URLSearchParams();
+            for (var ik in bpState.inputs) {
+              if (bpState.inputs[ik] !== undefined && bpState.inputs[ik] !== "") {
+                qs.set(ik, String(bpState.inputs[ik]));
+              }
+            }
+            var shareUrl = (window.location ? window.location.origin + window.location.pathname : "/") + "?" + qs.toString();
+            if (window.history && window.history.replaceState) {
+              window.history.replaceState({}, "", window.location.pathname + "?" + qs.toString());
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(shareUrl).catch(function() {});
+            }
+            if (statusEl) {
+              statusEl.textContent = "Blueprint Status: Shareable URL state synchronized to address bar (" + shareUrl.slice(0, 72) + ").";
+            }
+          } else if (act === "export") {
+            var jsonStr = JSON.stringify(bpState, null, 2);
+            if (typeof Blob === "function" && typeof URL !== "undefined" && URL.createObjectURL) {
+              var b = new Blob([jsonStr], { type: "application/json" });
+              var dl = document.createElement("a");
+              dl.href = URL.createObjectURL(b);
+              dl.download = bpState.slug + "-decision-blueprint.json";
+              document.body.appendChild(dl);
+              dl.click();
+              document.body.removeChild(dl);
+            }
+            if (statusEl) {
+              statusEl.textContent = "Blueprint Status: Exported audit-ready JSON decision blueprint (" + bpState.slug + "-decision-blueprint.json).";
+            }
+          }
+        } catch (err) {}
+        return;
+      }
+
       var affLink = e.target && e.target.closest ? e.target.closest('a[href^="/r/"]') : null;
       if (affLink) {
         try {
@@ -3071,6 +3239,7 @@ def normalize_html_visual_primitives(
                 or "__pseoRuntimeSyncInitialized" not in sync_body
                 or "updateOutputsSynchronously" not in sync_body
                 or "updateSerpWorkbenchSynchronously" not in sync_body
+                or "updateInteractiveCliffAndComparator" not in sync_body
                 or "syncOutboundAffiliateLinks" not in sync_body
                 or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
                 or "kalshi_price" in sync_body

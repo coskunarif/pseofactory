@@ -37,6 +37,7 @@ from pseofactory.trends.models import (
     GSCSearchAppearanceRecord,
     GSCQueryPageWindowRecord,
     GSCUrlInspectionRecord,
+    StatutoryEconomicTimeseriesRecord,
 )
 from pseofactory.trends.filters import calculate_second_derivative_acceleration
 
@@ -521,6 +522,33 @@ class TrendHistoryDB:
                 "CREATE INDEX IF NOT EXISTS idx_gsc_inspection_prop_verdict ON gsc_url_inspection_states(property_id, verdict, coverage_state);"
             )
 
+            # 16. statutory_economic_timeseries
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS statutory_economic_timeseries (
+                    series_id TEXT NOT NULL,
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'shared', 'unassigned')),
+                    jurisdiction TEXT NOT NULL DEFAULT 'US-FED',
+                    statutory_citation TEXT NOT NULL,
+                    metric_key TEXT NOT NULL,
+                    metric_label TEXT NOT NULL,
+                    effective_year INTEGER NOT NULL,
+                    metric_value REAL NOT NULL,
+                    unit TEXT NOT NULL DEFAULT 'USD',
+                    source_agency TEXT NOT NULL DEFAULT 'IRS',
+                    recorded_at TEXT NOT NULL,
+                    metadata TEXT,
+                    PRIMARY KEY (series_id, effective_year)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stat_econ_prop_year ON statutory_economic_timeseries(property_id, effective_year ASC);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stat_econ_metric_key ON statutory_economic_timeseries(metric_key, effective_year ASC);"
+            )
+
     # -------------------------------------------------------------------------
     # Crawl Cycle Operations
     # -------------------------------------------------------------------------
@@ -622,18 +650,40 @@ class TrendHistoryDB:
         )
 
     def get_previous_cycle_id(self, current_cycle_id: str) -> Optional[str]:
-        """Returns cycle_id of the immediately preceding cycle."""
+        """Returns cycle_id of the immediately preceding non-failed cycle."""
         conn = self.get_connection()
         row = conn.execute(
             """
             SELECT cycle_id FROM crawl_cycles
-            WHERE cycle_id != ?
+            WHERE cycle_id != ? AND status != 'FAILED'
             ORDER BY executed_at DESC, rowid DESC
             LIMIT 1;
             """,
             (current_cycle_id,),
         ).fetchone()
         return row["cycle_id"] if row else None
+
+    def heal_orphaned_running_cycles(self, exclude_cycle_id: Optional[str] = None) -> int:
+        """Marks orphaned RUNNING crawl cycles with 0 observations as FAILED so they do not break consecutive streaks."""
+        conn = self.get_connection()
+        if exclude_cycle_id:
+            cur = conn.execute(
+                """
+                UPDATE crawl_cycles
+                SET status = 'FAILED'
+                WHERE status = 'RUNNING' AND total_raw_observations = 0 AND cycle_id != ?;
+                """,
+                (exclude_cycle_id,),
+            )
+        else:
+            cur = conn.execute(
+                """
+                UPDATE crawl_cycles
+                SET status = 'FAILED'
+                WHERE status = 'RUNNING' AND total_raw_observations = 0;
+                """
+            )
+        return int(cur.rowcount or 0)
 
     # -------------------------------------------------------------------------
     # Observation Records
@@ -980,23 +1030,36 @@ class TrendHistoryDB:
         self,
         query_slug: str,
         max_age_days: Optional[int] = 30,
+        ignore_poisoned_zero: bool = True,
     ) -> Optional[TregSnapshotRecord]:
         """
         Retrieves most recent TregSnapshotRecord for given query_slug from treg_metric_snapshots table.
-        Optionally validates snapshot freshness against max_age_days.
+        Optionally validates snapshot freshness against max_age_days and rejects poisoned 0-volume defaults.
         Zero em-dashes. Zero en-dashes.
         """
         assert_url_safe_slug(query_slug)
         conn = self.get_connection()
-        row = conn.execute(
-            """
-            SELECT * FROM treg_metric_snapshots
-            WHERE query_slug = ?
-            ORDER BY checked_at DESC
-            LIMIT 1;
-            """,
-            (query_slug,),
-        ).fetchone()
+        if ignore_poisoned_zero:
+            row = conn.execute(
+                """
+                SELECT * FROM treg_metric_snapshots
+                WHERE query_slug = ?
+                  AND NOT (search_volume = 0 AND cpc_usd = 0.0 AND keyword_difficulty = 50.0)
+                ORDER BY checked_at DESC
+                LIMIT 1;
+                """,
+                (query_slug,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM treg_metric_snapshots
+                WHERE query_slug = ?
+                ORDER BY checked_at DESC
+                LIMIT 1;
+                """,
+                (query_slug,),
+            ).fetchone()
 
         if not row:
             return None
@@ -1027,6 +1090,17 @@ class TrendHistoryDB:
             volatility_score=row["volatility_score"],
             checked_at=row["checked_at"],
         )
+
+    def purge_poisoned_treg_snapshots(self) -> int:
+        """Removes poisoned treg_metric_snapshots rows where search_volume=0, cpc_usd=0.0, and keyword_difficulty=50.0."""
+        conn = self.get_connection()
+        cur = conn.execute(
+            """
+            DELETE FROM treg_metric_snapshots
+            WHERE search_volume = 0 AND cpc_usd = 0.0 AND keyword_difficulty = 50.0;
+            """
+        )
+        return int(cur.rowcount or 0)
 
     def record_jev_evaluation(self, evaluation: JevEvaluationRecord) -> None:
         """Records strategic Jev evaluation record."""
@@ -1825,4 +1899,165 @@ class TrendHistoryDB:
             for r in rows
         ]
 
+    # -------------------------------------------------------------------------
+    # Longitudinal Statutory & Macroeconomic Time-Series Operations
+    # -------------------------------------------------------------------------
 
+    def upsert_statutory_economic_timeseries(
+        self,
+        records: List[Union[StatutoryEconomicTimeseriesRecord, Dict[str, Any]]],
+    ) -> int:
+        """Idempotently upserts longitudinal statutory and macroeconomic time-series points."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        count = 0
+        with self.transaction() as cur:
+            for item in records:
+                rec = (
+                    item
+                    if isinstance(item, StatutoryEconomicTimeseriesRecord)
+                    else StatutoryEconomicTimeseriesRecord.from_dict(item)
+                )
+                meta_json = json.dumps(rec.metadata) if rec.metadata else None
+                cur.execute(
+                    """
+                    INSERT INTO statutory_economic_timeseries (
+                        series_id, property_id, jurisdiction, statutory_citation,
+                        metric_key, metric_label, effective_year, metric_value,
+                        unit, source_agency, recorded_at, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(series_id, effective_year) DO UPDATE SET
+                        property_id = excluded.property_id,
+                        jurisdiction = excluded.jurisdiction,
+                        statutory_citation = excluded.statutory_citation,
+                        metric_key = excluded.metric_key,
+                        metric_label = excluded.metric_label,
+                        metric_value = excluded.metric_value,
+                        unit = excluded.unit,
+                        source_agency = excluded.source_agency,
+                        recorded_at = excluded.recorded_at,
+                        metadata = COALESCE(excluded.metadata, statutory_economic_timeseries.metadata);
+                    """,
+                    (
+                        rec.series_id,
+                        rec.property_id,
+                        rec.jurisdiction,
+                        rec.statutory_citation,
+                        rec.metric_key,
+                        rec.metric_label,
+                        int(rec.effective_year),
+                        float(rec.metric_value),
+                        rec.unit,
+                        rec.source_agency,
+                        rec.recorded_at or now_iso,
+                        meta_json,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_statutory_economic_timeseries(
+        self,
+        property_id: Optional[str] = None,
+        metric_key: Optional[str] = None,
+    ) -> List[StatutoryEconomicTimeseriesRecord]:
+        """Retrieves longitudinal statutory and macroeconomic time-series records."""
+        conn = self.get_connection()
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if property_id:
+            clauses.append("property_id IN (?, 'shared')")
+            params.append(str(property_id))
+        if metric_key:
+            clauses.append("metric_key = ?")
+            params.append(str(metric_key))
+        sql = f"""
+            SELECT series_id, property_id, jurisdiction, statutory_citation,
+                   metric_key, metric_label, effective_year, metric_value,
+                   unit, source_agency, recorded_at, metadata
+            FROM statutory_economic_timeseries
+            WHERE {' AND '.join(clauses)}
+            ORDER BY series_id ASC, effective_year ASC;
+        """
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        return [
+            StatutoryEconomicTimeseriesRecord(
+                series_id=r["series_id"],
+                property_id=r["property_id"],
+                jurisdiction=r["jurisdiction"],
+                statutory_citation=r["statutory_citation"],
+                metric_key=r["metric_key"],
+                metric_label=r["metric_label"],
+                effective_year=int(r["effective_year"]),
+                metric_value=float(r["metric_value"]),
+                unit=r["unit"],
+                source_agency=r["source_agency"],
+                recorded_at=r["recorded_at"],
+                metadata=json.loads(r["metadata"]) if r["metadata"] else None,
+            )
+            for r in rows
+        ]
+
+    def compile_statutory_economic_matrix(
+        self,
+        property_id: str,
+        query: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Compiles a longitudinal multi-year statutory and economic matrix (2024 to 2030)
+        from archived statutory_economic_timeseries rows for compile-time workbench injection.
+        """
+        prop = str(property_id or "profithelm").strip().lower()
+        if prop not in ("profithelm", "prexvo"):
+            prop = "profithelm"
+        records = self.get_statutory_economic_timeseries(property_id=prop)
+        series_map: Dict[str, Dict[str, Any]] = {}
+        for rec in records:
+            entry = series_map.setdefault(
+                rec.series_id,
+                {
+                    "series_id": rec.series_id,
+                    "property_id": rec.property_id,
+                    "jurisdiction": rec.jurisdiction,
+                    "statutory_citation": rec.statutory_citation,
+                    "metric_key": rec.metric_key,
+                    "metric_label": rec.metric_label,
+                    "unit": rec.unit,
+                    "source_agency": rec.source_agency,
+                    "points": {},
+                    "timeline": [],
+                },
+            )
+            entry["points"][str(rec.effective_year)] = rec.metric_value
+            entry["timeline"].append({"year": rec.effective_year, "value": rec.metric_value})
+
+        q_lower = str(query or "").lower()
+        ordered_series = sorted(
+            series_map.values(),
+            key=lambda s: (
+                0 if any(tok in q_lower for tok in str(s["metric_key"]).split("_") if len(tok) >= 3) else 1,
+                0 if s["property_id"] == prop else 1,
+                str(s["series_id"]),
+            ),
+        )
+        default_auth = (
+            "Title IV Higher Education Act 34 CFR Part 685.209"
+            if prop == "prexvo"
+            else "IRC Section 179 and 26 U.S.C. 168(k) Statutory Depreciation Schedule"
+        )
+        default_econ = "FRED Series DGS10 and CPILFESL Longitudinal Macro Dataset"
+        top_citation = str(ordered_series[0]["statutory_citation"]) if ordered_series else default_auth
+        if prop == "profithelm" and "irc section" not in top_citation.lower():
+            top_citation = f"{top_citation} ({default_auth})"
+        elif prop == "prexvo" and "title iv" not in top_citation.lower():
+            top_citation = f"{top_citation} ({default_auth})"
+        return {
+            "property_id": prop,
+            "query": str(query or ""),
+            "years": [2024, 2025, 2026, 2027, 2028, 2029, 2030],
+            "statutory_authority": top_citation,
+            "economic_dataset": default_econ,
+            "series_count": len(ordered_series),
+            "series": ordered_series,
+        }

@@ -6014,6 +6014,9 @@ class RetroReflectionEngine:
         if (
             'data-mechanic="serp_incumbent_depth_upgrade"' not in html_content
             or 'id="serp-incumbent-depth-workbench"' not in html_content
+            or 'id="multi-year-cliff-visualizer"' not in html_content
+            or 'id="stateful-scenario-comparator"' not in html_content
+            or 'id="saveable-decision-blueprint"' not in html_content
             or "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in html_content
             or has_v_pollution
         ):
@@ -6029,6 +6032,7 @@ class RetroReflectionEngine:
             or 'id="pseo-runtime-sync"' not in html_content
             or ".serp-depth-workbench" not in html_content
             or "updateSerpWorkbenchSynchronously" not in html_content
+            or "updateInteractiveCliffAndComparator" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)

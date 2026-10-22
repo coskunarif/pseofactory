@@ -3245,6 +3245,171 @@ def _build_b2b_depth_spec(
     }
 
 
+def _render_multi_year_cliff_visualizer_html(
+    topic_label: str,
+    is_prexvo: bool,
+    statutory_authority: str,
+    economic_dataset: str,
+) -> str:
+    """Renders the longitudinal 2024 to 2030 statutory and repayment cliff visualizer and SVG trajectory."""
+    if is_prexvo:
+        h3_title = f"Multi-Year Repayment &amp; Forgiveness Tax Cliff Visualizer (2024 to 2030): {topic_label}"
+        summary_default = "2026 Cliff Alert: IRC Section 108(f)(5) tax-free forgiveness expires Jan 1, 2026 (+22% to 37% federal tax exposure on discharged balances) alongside 34 CFR 685.209 IDR discretionary levy shifts."
+        rows = [
+            ("2024 Enacted Baseline", "34 CFR 685.209 (5% Undergrad / 225% FPL)", "IRC 108(f)(5) 100% Tax-Free Forgiveness", "cliff-exposure-2024", "$1,680 / yr"),
+            ("2025 Pre-Cliff Window", "SAVE Injunction / IBR 10% Discretionary Levy", "IRC 108(f)(5) Final Tax-Free Window", "cliff-exposure-2025", "$2,540 / yr"),
+            ("2026 Statutory Cliff Year", "34 CFR 685.209 RAP / Old-New IBR Transition", "Federal Tax Bomb Resumes on Forgiven Debt", "cliff-exposure-2026", "$3,420 / yr"),
+            ("2027 Post-Sunset Regime", "150% HHS FPL Exemption / 10% to 15% Levy", "Ordinary Income Inclusion + Insolvency Form 982", "cliff-exposure-2027", "$3,690 / yr"),
+            ("2028-2030 Forward Projection", "CPI-Indexed HHS Poverty Guideline Escalation", "PSLF 26 U.S.C. 108(f)(1) Remains Tax-Exempt", "cliff-exposure-2028", "$3,980 / yr"),
+        ]
+    else:
+        h3_title = f"Multi-Year Statutory Phaseout &amp; TCJA Sunset Cliff Visualizer (2024 to 2030): {topic_label}"
+        summary_default = "2026 Cliff Alert: IRC Section 168(k) first-year bonus depreciation steps down from 60% (2024) and 40% (2025) to 20% in 2026 and 0% in 2027 alongside Section 179 inflation-indexed caps."
+        rows = [
+            ("2024 Enacted Baseline", "IRC 179 ($1.22M Cap) / 168(k) 60% Bonus", "20% Section 199A QBI / 3.4% Core CPI", "cliff-exposure-2024", "$42,800"),
+            ("2025 Pre-Cliff Window", "IRC 179 ($1.25M Cap) / 168(k) 40% Bonus", "25% Section 301 Tariff / 4.48% 10Y Treasury", "cliff-exposure-2025", "$54,600"),
+            ("2026 Statutory Cliff Year", "IRC 179 ($1.29M Cap) / 168(k) 20% Bonus", "TCJA Sunset &amp; Section 199A Expiration Cliff", "cliff-exposure-2026", "$69,825"),
+            ("2027 Post-Sunset Regime", "IRC 179 ($1.33M Cap) / 168(k) 0% Bonus", "MACRS 5-Yr / 7-Yr Straight Schedule Only", "cliff-exposure-2027", "$84,200"),
+            ("2028-2030 Forward Projection", "IRC 179 ($1.37M to $1.45M Indexed Cap)", "Section 174 5-Yr R&amp;D Amortization Mandate", "cliff-exposure-2028", "$88,950"),
+        ]
+    tr_cliff = "\n".join(
+        f'            <tr>\n'
+        f'              <td><strong>{yr_label}</strong></td>\n'
+        f'              <td>{reg_rule}</td>\n'
+        f'              <td>{macro_rule}</td>\n'
+        f'              <td id="{cell_id}" class="calc-metric-value"><strong>{default_val}</strong></td>\n'
+        f'            </tr>'
+        for yr_label, reg_rule, macro_rule, cell_id, default_val in rows
+    )
+    return (
+        f'      <div id="multi-year-cliff-visualizer" class="serp-cliff-visualizer" data-mechanic="multi_year_cliff_visualizer">\n'
+        f'        <h3 style="margin-top: 22px; margin-bottom: 8px;">{h3_title}</h3>\n'
+        f'        <p id="serp-cliff-svg-summary" style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 12px;">{summary_default}</p>\n'
+        f'        <div class="serp-svg-chart-wrap">\n'
+        f'          <svg id="serp-cliff-trajectory-svg" class="serp-visual-breakdown-svg" viewBox="0 0 600 92" role="img" aria-label="Multi-Year Statutory and Repayment Cliff Trajectory">\n'
+        f'            <desc>Multi-Year Statutory and Repayment Cliff Trajectory</desc>\n'
+        f'            <rect x="0" y="6" width="600" height="80" rx="6" fill="var(--bg-inset, #0b1329)" />\n'
+        f'            <rect id="cliff-bar-2024" x="28" y="42" width="76" height="26" rx="4" fill="var(--status-positive, #10b981)" />\n'
+        f'            <rect id="cliff-bar-2025" x="142" y="34" width="76" height="34" rx="4" fill="var(--accent, #38bdf8)" />\n'
+        f'            <rect id="cliff-bar-2026" x="256" y="20" width="88" height="48" rx="4" fill="#f59e0b" />\n'
+        f'            <rect id="cliff-bar-2027" x="380" y="14" width="76" height="54" rx="4" fill="#ef4444" />\n'
+        f'            <rect id="cliff-bar-2028" x="494" y="12" width="76" height="56" rx="4" fill="#ec4899" />\n'
+        f'            <text x="66" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2024</text>\n'
+        f'            <text x="180" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2025</text>\n'
+        f'            <text x="300" y="81" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">2026 Cliff</text>\n'
+        f'            <text x="418" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2027</text>\n'
+        f'            <text x="532" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2028-2030</text>\n'
+        f'          </svg>\n'
+        f'        </div>\n'
+        f'        <div class="table-wrap pseo-table-wrap">\n'
+        f'          <table class="comparison-table serp-cliff-matrix-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
+        f'            <thead>\n'
+        f'              <tr>\n'
+        f'                <th scope="col">Effective Tax / Academic Year</th>\n'
+        f'                <th scope="col">Governing Statutory Phaseout Rule</th>\n'
+        f'                <th scope="col">Macroeconomic &amp; Sunset Driver</th>\n'
+        f'                <th scope="col">Projected Annual Exposure</th>\n'
+        f'              </tr>\n'
+        f'            </thead>\n'
+        f'            <tbody>\n'
+        f'{tr_cliff}\n'
+        f'            </tbody>\n'
+        f'          </table>\n'
+        f'        </div>\n'
+        f'      </div>'
+    )
+
+
+def _render_stateful_scenario_comparator_html(
+    topic_label: str,
+    is_prexvo: bool,
+    statutory_authority: str,
+    economic_dataset: str,
+) -> str:
+    """Renders the stateful side-by-side Scenario A vs Scenario B vs Live Workbench comparator."""
+    base_a = "$85,000" if is_prexvo else "$240,000"
+    base_b = "$145,000" if is_prexvo else "$520,000"
+    base_live = "$95,000" if is_prexvo else "$285,000"
+    ret_a = "$61,510" if is_prexvo else "$184,200"
+    ret_b = "$92,800" if is_prexvo else "$368,400"
+    ret_live = "$70,510" if is_prexvo else "$215,175"
+    tax_a = "$2,349" if is_prexvo else "$55,800"
+    tax_b = "$5,220" if is_prexvo else "$151,600"
+    tax_live = "$2,949" if is_prexvo else "$69,825"
+    delta_b = "+$2,871" if is_prexvo else "+$95,800"
+    delta_live = "+$600" if is_prexvo else "+$14,025"
+    return (
+        f'      <div id="stateful-scenario-comparator" class="serp-scenario-comparator" data-mechanic="stateful_scenario_comparator">\n'
+        f'        <h3 style="margin-top: 22px; margin-bottom: 8px;">Stateful Side-by-Side Scenario Comparator: {topic_label}</h3>\n'
+        f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Pin any active input state to Scenario A or Scenario B to evaluate multi-variable counterfactual deltas in real time:</p>\n'
+        f'        <div class="serp-preset-bar" role="group" aria-label="Stateful Scenario Pin Controls">\n'
+        f'          <button type="button" id="btn-pin-scenario-a" class="touch-target btn-preset serp-comparator-btn" data-cta-slot="pin_scenario_a_cta" data-scenario-pin="A">Pin Current State to Scenario A</button>\n'
+        f'          <button type="button" id="btn-pin-scenario-b" class="touch-target btn-preset serp-comparator-btn" data-cta-slot="pin_scenario_b_cta" data-scenario-pin="B">Pin Current State to Scenario B</button>\n'
+        f'          <button type="button" id="btn-reset-scenarios" class="touch-target btn-preset serp-comparator-btn" data-cta-slot="reset_scenarios_cta" data-scenario-pin="RESET">Reset Pinned Scenarios</button>\n'
+        f'        </div>\n'
+        f'        <div class="table-wrap pseo-table-wrap">\n'
+        f'          <table class="comparison-table serp-scenario-comparator-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
+        f'            <thead>\n'
+        f'              <tr>\n'
+        f'                <th scope="col">Comparison Dimension</th>\n'
+        f'                <th scope="col">Scenario A (Pinned Baseline)</th>\n'
+        f'                <th scope="col">Scenario B (Pinned Counterfactual)</th>\n'
+        f'                <th scope="col">Live Active Workbench</th>\n'
+        f'              </tr>\n'
+        f'            </thead>\n'
+        f'            <tbody>\n'
+        f'              <tr>\n'
+        f'                <td><strong>Primary Gross Input Base</strong></td>\n'
+        f'                <td id="comp-a-input" class="calc-metric-value">{base_a}</td>\n'
+        f'                <td id="comp-b-input" class="calc-metric-value">{base_b}</td>\n'
+        f'                <td id="comp-live-input" class="calc-metric-value"><strong>{base_live}</strong></td>\n'
+        f'              </tr>\n'
+        f'              <tr>\n'
+        f'                <td><strong>Protected Capital / Statutory Offset</strong></td>\n'
+        f'                <td id="comp-a-retained" class="calc-metric-value">{ret_a}</td>\n'
+        f'                <td id="comp-b-retained" class="calc-metric-value">{ret_b}</td>\n'
+        f'                <td id="comp-live-retained" class="calc-metric-value"><strong>{ret_live}</strong></td>\n'
+        f'              </tr>\n'
+        f'              <tr>\n'
+        f'                <td><strong>Net Statutory Exposure / Annual Levy</strong></td>\n'
+        f'                <td id="comp-a-tax" class="calc-metric-value">{tax_a}</td>\n'
+        f'                <td id="comp-b-tax" class="calc-metric-value">{tax_b}</td>\n'
+        f'                <td id="comp-live-tax" class="calc-metric-value"><strong>{tax_live}</strong></td>\n'
+        f'              </tr>\n'
+        f'              <tr>\n'
+        f'                <td><strong>Net Exposure Delta vs Scenario A</strong></td>\n'
+        f'                <td id="comp-a-delta" class="calc-metric-value">$0 (Baseline)</td>\n'
+        f'                <td id="comp-b-delta" class="calc-metric-value">{delta_b}</td>\n'
+        f'                <td id="comp-live-delta" class="calc-metric-value"><strong>{delta_live}</strong></td>\n'
+        f'              </tr>\n'
+        f'            </tbody>\n'
+        f'          </table>\n'
+        f'        </div>\n'
+        f'      </div>'
+    )
+
+
+def _render_saveable_decision_blueprint_html(
+    slug: str,
+    topic_label: str,
+    statutory_authority: str,
+    economic_dataset: str,
+) -> str:
+    """Renders the saveable decision blueprint bar with localStorage persistence, deep-link URL sync, and JSON export."""
+    return (
+        f'      <div id="saveable-decision-blueprint" class="serp-decision-blueprint" data-mechanic="saveable_decision_blueprint" data-blueprint-slug="{slug}">\n'
+        f'        <h3 style="margin-top: 20px; margin-bottom: 8px;">Saveable Decision Blueprint &amp; Audit-Ready State Export</h3>\n'
+        f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Persist your active parameters locally, copy a parameterized deep-link URL for CPA or advisor review, or export a structured JSON decision blueprint cited to <strong>{statutory_authority}</strong>:</p>\n'
+        f'        <div class="serp-preset-bar" role="group" aria-label="Decision Blueprint Persistence Controls">\n'
+        f'          <button type="button" id="btn-save-blueprint" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="save_blueprint_cta" data-blueprint-action="save">Save Decision Blueprint</button>\n'
+        f'          <button type="button" id="btn-copy-blueprint-link" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="share_blueprint_cta" data-blueprint-action="share">Copy Shareable Blueprint Link</button>\n'
+        f'          <button type="button" id="btn-export-blueprint-json" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="export_blueprint_cta" data-blueprint-action="export">Export JSON Decision Blueprint</button>\n'
+        f'        </div>\n'
+        f'        <div id="blueprint-status-readout" class="serp-blueprint-status" aria-live="polite" style="font-size: 13px; color: var(--text-secondary, #64748b); margin-top: 8px;">Blueprint state ready: deterministic server-rendered baseline loaded ({topic_label}).</div>\n'
+        f'      </div>'
+    )
+
+
 def render_serp_incumbent_depth_upgrade_block(
     slug: str,
     title: str,
@@ -3263,6 +3428,9 @@ def render_serp_incumbent_depth_upgrade_block(
       3. Live Reactive Multi-Segment SVG Visual Breakdown Bar Chart
       4. Authoritative Primary Data Reference Schedule Table (e.g. 10-tier CA FTB 540 schedule)
       5. Dynamic Calculation-Bound Commercial Intent Callout (#dynamic-commercial-intent-banner)
+      6. Multi-Year Statutory & Repayment Cliff Visualizer (#multi-year-cliff-visualizer)
+      7. Stateful Side-by-Side Scenario Comparator (#stateful-scenario-comparator)
+      8. Saveable Decision Blueprint (#saveable-decision-blueprint)
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     s_low = str(slug or "").strip().lower()
@@ -3338,6 +3506,24 @@ def render_serp_incumbent_depth_upgrade_block(
         f'            </tr>'
         for c1, c2, c3, c4 in spec["table_rows"]
     )
+    cliff_html = _render_multi_year_cliff_visualizer_html(
+        topic_label=topic_label,
+        is_prexvo=is_prexvo,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+    )
+    comparator_html = _render_stateful_scenario_comparator_html(
+        topic_label=topic_label,
+        is_prexvo=is_prexvo,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+    )
+    blueprint_html = _render_saveable_decision_blueprint_html(
+        slug=s_low,
+        topic_label=topic_label,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+    )
 
     return (
         f'    <section id="serp-incumbent-depth-workbench" class="serp-depth-workbench card pseo-card" '
@@ -3364,6 +3550,9 @@ def render_serp_incumbent_depth_upgrade_block(
         f'        </svg>\n'
         f'      </div>\n'
         f'{spec["banner_html"]}\n'
+        f'{cliff_html}\n'
+        f'{comparator_html}\n'
+        f'{blueprint_html}\n'
         f'      <h3 id="serp-statutory-reference-schedule" style="margin-top: 22px; margin-bottom: 10px;">{spec["table_h3"]}</h3>\n'
         f'      <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 12px;">The following primary statutory schedule reconciles official rate tiers, deduction caps, phaseout thresholds, and filing forms under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>:</p>\n'
         f'      <div class="table-wrap pseo-table-wrap">\n'

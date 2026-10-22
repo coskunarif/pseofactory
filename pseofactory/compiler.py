@@ -1151,6 +1151,25 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     gsc_coverage_state = gsc_sig["coverage_state"]
     gsc_appearance_attr = gsc_sig["appearance_attr"]
 
+    statutory_matrix = (
+        candidate_spec.get("statutory_economic_matrix")
+        if isinstance(candidate_spec.get("statutory_economic_matrix"), dict)
+        else (
+            manifest_source.get("statutory_economic_matrix")
+            if isinstance(manifest_source.get("statutory_economic_matrix"), dict)
+            else None
+        )
+    )
+    corroborating_sources = (
+        candidate_spec.get("corroborating_sources")
+        if isinstance(candidate_spec.get("corroborating_sources"), list)
+        else (
+            manifest_source.get("corroborating_sources")
+            if isinstance(manifest_source.get("corroborating_sources"), list)
+            else []
+        )
+    )
+
     manifest: Dict[str, Any] = {
         "manifest_id": f"{slug}-manifest",
         "model_name": model_name,
@@ -1167,6 +1186,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             "coverage_state": gsc_coverage_state,
         },
     }
+    if statutory_matrix:
+        manifest["statutory_economic_matrix"] = statutory_matrix
+    if corroborating_sources:
+        manifest["corroborating_sources"] = corroborating_sources
 
     # 6. Render Obsidian dark-theme HTML asset
     form_inputs_html = []

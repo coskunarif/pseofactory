@@ -715,13 +715,27 @@ class TregChecker:
                 )
                 if proc.returncode == 0 and proc.stdout.strip():
                     payload = json.loads(proc.stdout.strip())
-                    res_body = payload.get("result", payload)
-                    volume = int(res_body.get("search_volume", 0))
-                    cpc = float(res_body.get("cpc_usd", 0.0))
-                    comp = float(res_body.get("competition_index", 0.0))
-                    kd = float(res_body.get("keyword_difficulty", 50.0))
-                    p0_vacant = bool(res_body.get("position_zero_vacant", kd < 25.0))
-                    stability = float(res_body.get("historical_stability", 0.85))
+                    res_body = payload.get("result") or payload.get("output") or payload
+                    if not isinstance(res_body, dict):
+                        res_body = {}
+                    raw_ideas = res_body.get("keywords")
+                    if "search_volume" in res_body or "cpc_usd" in res_body:
+                        volume = int(res_body.get("search_volume", 0))
+                        cpc = float(res_body.get("cpc_usd", 0.0))
+                        comp = float(res_body.get("competition_index", 0.0))
+                        kd = float(res_body.get("keyword_difficulty", 50.0))
+                        p0_vacant = bool(res_body.get("position_zero_vacant", kd < 25.0))
+                        stability = float(res_body.get("historical_stability", 0.85))
+                    else:
+                        heur = self._offline_heuristic(clean_q, reason="treg_ideas_calibrated")
+                        idea_count = len(raw_ideas) if isinstance(raw_ideas, list) else int(res_body.get("count", 0) or 0)
+                        scale = min(1.35, max(0.85, 0.85 + 0.05 * idea_count)) if idea_count > 0 else 1.0
+                        volume = int(round(heur.search_volume * scale))
+                        cpc = round(heur.cpc_usd * scale, 2)
+                        comp = heur.competition_index
+                        kd = heur.keyword_difficulty
+                        p0_vacant = heur.position_zero_vacant
+                        stability = heur.historical_stability
 
                     ai_vacant = bool(res_body.get("ai_citation_vacant", False))
                     ai_domains = [
@@ -750,7 +764,7 @@ class TregChecker:
                         position_zero_vacant=p0_vacant,
                         historical_stability=stability,
                         checked_at=datetime.now(timezone.utc).isoformat(),
-                        raw_ideas=res_body.get("keywords"),
+                        raw_ideas=raw_ideas,
                         ai_citation_vacant=ai_vacant,
                         ai_cited_domains=ai_domains,
                         ai_citation_checked=ai_checked,

@@ -39,6 +39,7 @@ from pseofactory.trends.models import (
 from pseofactory.trends.collectors import (
     GSCSearchConsoleCollector,
     MultiSourceCollector,
+    StatutoryEconomicDatasetCollector,
     generate_spike_id,
 )
 from pseofactory.trends.filters import NoiseFilter
@@ -64,6 +65,8 @@ PREXVO_STATUTORY_TOKENS: List[str] = [
     "save plan",
     "idr waiver",
     "student loan forgiveness",
+    "parent plus",
+    "section 108f",
 ]
 
 PROFITHELM_STATUTORY_TOKENS: List[str] = [
@@ -74,6 +77,8 @@ PROFITHELM_STATUTORY_TOKENS: List[str] = [
     "like kind exchange",
     "section 179",
     "bonus depreciation",
+    "section 168",
+    "macrs",
     "tcja",
     "commercial clean energy 179d",
     "commercial clean energy",
@@ -89,6 +94,15 @@ PROFITHELM_STATUTORY_TOKENS: List[str] = [
     "prediction market tax",
     "section 1256",
     "1256 contract",
+    "section 1202",
+    "qsbs",
+    "section 174",
+    "r&d tax",
+    "corporate amt",
+    "camt",
+    "section 199a",
+    "199a",
+    "s-corp payroll",
     "niit",
     "crypto tax",
     "treasury yield",
@@ -324,6 +338,9 @@ class TrendCronRunner:
         else:
             seed_list = list(seeds)
 
+        import time as _time
+
+        cycle_deadline = _time.monotonic() + 180.0
         db = TrendHistoryDB(self.db_path)
 
         # Acquire atomic advisory lock on <db_path>.lock with bounded wait for concurrent fleet/timer execution
@@ -335,12 +352,17 @@ class TrendCronRunner:
                 "reddit_autocomplete",
                 "hn_search",
                 "google_trends_rss",
+                "statutory_economic_feed",
                 "gsc_search_console",
             ]
             if fixture_path:
                 sources_crawled = ["fixture"]
 
             if not dry_run:
+                if not fixture_path:
+                    db.heal_orphaned_running_cycles(exclude_cycle_id=cycle_id)
+                    db.purge_poisoned_treg_snapshots()
+                StatutoryEconomicDatasetCollector(db_path=self.db_path).sync_to_db(db)
                 db.start_cycle(cycle_id=cycle_id, seeds=seed_list, sources=sources_crawled)
 
             # 2. Ingest raw spikes
@@ -461,6 +483,26 @@ class TrendCronRunner:
                     raw_payload=spike.raw_payload,
                 )
                 obs_records.append(raw_obs)
+
+                if not fixture_path:
+                    for extra_src in list(raw_meta.get("corroborating_sources") or []):
+                        if extra_src and extra_src != spike.source:
+                            extra_obs_id = hashlib.sha256(f"{cycle_id}:{extra_src}:{norm_q}".encode()).hexdigest()[:16]
+                            obs_records.append(
+                                RawObservationRecord(
+                                    observation_id=extra_obs_id,
+                                    cycle_id=cycle_id,
+                                    source=str(extra_src),
+                                    query=clean_q,
+                                    normalized_query=norm_q,
+                                    rank_position=rank_idx,
+                                    observed_velocity=spike.velocity,
+                                    observed_acceleration=spike.acceleration,
+                                    observed_z_score=spike.z_score,
+                                    observed_at=spike.detected_at,
+                                    raw_payload=spike.raw_payload,
+                                )
+                            )
 
                 if norm_q in seen_cycle_queries:
                     continue
@@ -689,7 +731,12 @@ class TrendCronRunner:
 
                 # Step 4E: Treg demand cross-check (ONLY for non-cannibalized or striking distance)
                 mock_treg = raw_meta.get("treg_mock")
-                treg_res = self.treg_checker.check_query(clean_q, mock_override=mock_treg)
+                rem_budget = max(0.0, cycle_deadline - _time.monotonic()) if not fixture_path else None
+                treg_res = self.treg_checker.check_query(
+                    clean_q,
+                    mock_override=mock_treg,
+                    remaining_budget=rem_budget,
+                )
 
                 snap_rec = TregSnapshotRecord(
                     snapshot_id=f"treg_{slug}_{cycle_id}",
@@ -717,6 +764,15 @@ class TrendCronRunner:
                 cand.metadata.setdefault("property_id", assigned_property)
                 if "gsc_telemetry" in raw_meta:
                     cand.metadata["gsc_telemetry"] = raw_meta["gsc_telemetry"]
+                if not fixture_path:
+                    if "corroborating_sources" in raw_meta:
+                        cand.metadata["corroborating_sources"] = list(raw_meta["corroborating_sources"])
+                    if "source_count" in raw_meta:
+                        cand.metadata["source_count"] = int(raw_meta["source_count"])
+                if assigned_property in ("prexvo", "profithelm"):
+                    cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
+                        assigned_property, clean_q
+                    )
                 if ceiling_by_prop.get(assigned_property):
                     cand.metadata["ceiling_status"] = ceiling_by_prop[assigned_property]
                 eff_site_impr = site_impressions_by_prop.get(assigned_property, total_site_impressions)
@@ -1026,6 +1082,13 @@ class TrendCronRunner:
                             "candidate_spec": spec_dict if ev.action == "BUILD_PAGE" else None,
                         })
                     deduplicated_sink_count = sink_records_to_jsonl(sink_candidates, sink_path)
+                    try:
+                        sink_resolved = Path(sink_path).resolve()
+                        repo_sink = Path(__file__).resolve().parents[2] / "void_candidates.jsonl"
+                        if str(sink_resolved).endswith("/vault/void_candidates.jsonl") and repo_sink.parent.is_dir():
+                            sink_records_to_jsonl(sink_candidates, repo_sink)
+                    except Exception:
+                        pass
 
             return {
                 "cycle_id": cycle_id,
