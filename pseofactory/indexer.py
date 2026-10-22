@@ -2526,9 +2526,19 @@ class PushIndexer:
                 if cr_path.is_file():
                     cr_data = json.loads(cr_path.read_text(encoding="utf-8"))
                     if isinstance(cr_data, dict):
-                        effective_boosts = list(
+                        effective_boosts.extend(
                             cr_data.get("next_maintenance_directives", {}).get("priority_indexing_urls", []) or []
                         )
+                rf_path = repo_root / ".agy" / "quantitative_revenue_forecast.json"
+                if rf_path.is_file():
+                    rf_data = json.loads(rf_path.read_text(encoding="utf-8"))
+                    if isinstance(rf_data, dict):
+                        effective_boosts.extend(rf_data.get("priority_indexing_urls", []) or [])
+                        for r_item in (rf_data.get("ranked_assets") or [])[:15]:
+                            if isinstance(r_item, dict) and "/" not in str(r_item.get("slug") or ""):
+                                u_cand = r_item.get("url") or r_item.get("target_url")
+                                if u_cand:
+                                    effective_boosts.append(str(u_cand))
             except Exception:
                 pass
         boost_set = {str(b).strip().rstrip("/") for b in effective_boosts if b}
@@ -2543,7 +2553,7 @@ class PushIndexer:
             if boost_set and (raw.rstrip("/") in boost_set or path in boost_set):
                 return 1
             if path.startswith("/tools/"):
-                return 2
+                return 2 if len(path.strip("/").split("/")) <= 2 else 3
             if path.startswith("/comparisons/") or "-vs-" in path:
                 return 3
             if path.startswith("/guides/"):
@@ -2686,7 +2696,7 @@ class PushIndexer:
 
         if urls:
             airlock_res = self.preflight_airlock(urls)
-            urls = list(airlock_res[0])
+            urls = self.prioritize_urls_for_indexing_allocation(list(airlock_res[0]))
 
         target_batch = urls[:max_urls]
         inspections = []
@@ -2714,6 +2724,45 @@ class PushIndexer:
                     "last_crawl_time": datetime.now().isoformat(),
                 }
                 inspections.append(insp)
+
+        if live and inspections:
+            try:
+                from pseofactory.trends.db import DEFAULT_DB_PATH, GSCUrlInspectionRecord, TrendHistoryDB
+                prop_id = "prexvo" if "prexvo" in (self.domain or "").lower() else "profithelm"
+                db_records = []
+                for item in inspections:
+                    if not isinstance(item, dict) or item.get("status") != "INSPECTED":
+                        continue
+                    raw_out = ((item.get("raw_output") or {}).get("inspectionResult") or {}) if isinstance(item.get("raw_output"), dict) else {}
+                    idx_res = raw_out.get("indexStatusResult") if isinstance(raw_out.get("indexStatusResult"), dict) else {}
+                    mob_res = raw_out.get("mobileUsabilityResult") if isinstance(raw_out.get("mobileUsabilityResult"), dict) else {}
+                    p_url = str(item.get("url") or "").strip()
+                    if p_url:
+                        db_records.append(
+                            GSCUrlInspectionRecord(
+                                property_id=prop_id,
+                                page_url=p_url,
+                                verdict=str(item.get("verdict") or idx_res.get("verdict") or "PASS"),
+                                coverage_state=str(item.get("coverage_state") or idx_res.get("coverageState") or "Submitted and indexed"),
+                                indexing_state=str(idx_res.get("indexingState") or "INDEXING_ALLOWED"),
+                                page_fetch_state=str(idx_res.get("pageFetchState") or "SUCCESSFUL"),
+                                robots_txt_state=str(idx_res.get("robotsTxtState") or "ALLOWED"),
+                                user_canonical=str(idx_res.get("userCanonical") or p_url),
+                                google_canonical=str(idx_res.get("googleCanonical") or p_url),
+                                last_crawl_time=str(item.get("last_crawl_time") or idx_res.get("lastCrawlTime") or ""),
+                                crawled_as=str(idx_res.get("crawledAs") or "MOBILE"),
+                                rich_results_verdict=str(item.get("rich_results_verdict") or "VERDICT_UNSPECIFIED"),
+                                rich_results_types=list(item.get("rich_results_detected") or []),
+                                mobile_usability_verdict=str(mob_res.get("verdict") or "VERDICT_UNSPECIFIED"),
+                                referring_urls=list(idx_res.get("referringUrls") or []),
+                                sitemaps=list(idx_res.get("sitemap") or []),
+                            )
+                        )
+                if db_records and DEFAULT_DB_PATH.parent.is_dir():
+                    with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
+                        tdb.upsert_gsc_url_inspection_states(db_records)
+            except Exception:
+                pass
 
         indexed_count = sum(1 for item in inspections if item.get("is_indexed", False))
         total = len(inspections)
@@ -4045,7 +4094,7 @@ class PushIndexer:
             }
             websub_res = self.ping_websub_hub(dry_run=not live)
             pingomatic_res = self.ping_pingomatic(dry_run=not live)
-            oracle_sample = safe_all_urls[:5]
+            oracle_sample = self.prioritize_urls_for_indexing_allocation(safe_all_urls)[:5]
             gsc_res = {
                 "site": self.gsc_site,
                 "urls_targeted": len(safe_all_urls),

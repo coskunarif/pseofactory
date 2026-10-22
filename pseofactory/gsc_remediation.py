@@ -1665,9 +1665,39 @@ def _normalize_title_50_60(
     else:
         base = clean.strip(" |-:")
 
-    # Strip robotic bare parenthetical tokens from prior normalizations
+    # Strip robotic bare parenthetical tokens and filler pads from prior normalizations
     base = re.sub(r"\s*\((?:Rules|Tax|Guide|Model)\)(?:\s+Model)?", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\b(?:Model\s+Tool(?:\s+Guide)?|Tool\s+Guide)\b", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\b1099\s+Da\b", "1099-DA", base, flags=re.IGNORECASE)
+    base = re.sub(r"\bRap\s+Vs\s+Ibr\b", "RAP vs IBR", base, flags=re.IGNORECASE)
     base = re.sub(r"\s+", " ", base).strip(" |-:")
+
+    # Expand short Prexvo abbreviations naturally instead of padding with robotic filler words
+    if tenant_id == "prexvo":
+        if re.search(r"\brap\s+vs\s+ibr\b", base, re.IGNORECASE) and "student loan" not in base.lower():
+            base = re.sub(
+                r"\brap\s+vs\s+ibr\b",
+                "RAP vs IBR Student Loan",
+                base,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        elif re.search(r"^rap\b", base, re.IGNORECASE) and "repayment assistance" not in base.lower():
+            base = re.sub(
+                r"^rap\b",
+                "Repayment Assistance Plan (RAP)",
+                base,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        elif "ibr hardship cap" in base.lower() and "student loan" not in base.lower():
+            base = re.sub(
+                r"\bibr\s+hardship\s+cap\b",
+                "IBR Hardship Cap Student Loan",
+                base,
+                count=1,
+                flags=re.IGNORECASE,
+            )
 
     # Strip conflicting secondary year tokens when a primary tax/fiscal year (e.g. 2027) is already present
     if re.search(r"\b202[7-9]\b", base):
@@ -1727,7 +1757,7 @@ def _normalize_title_50_60(
     elif "bracket" in base_low:
         vertical_paren_mod = "IRS Table"
     elif tenant_id == "prexvo":
-        vertical_paren_mod = "IDR & RAP"
+        vertical_paren_mod = "Title IV" if "rap" in base_low else "IDR & RAP"
     else:
         vertical_paren_mod = "IRC Guide"
 
@@ -1746,7 +1776,7 @@ def _normalize_title_50_60(
             else:
                 # Try compact short parenthetical modifiers that fit within max_base
                 short_mods = (
-                    [mod_clean, "2026 RAP", "PSLF", "Title IV", "2026", "IDR Plan"]
+                    [mod_clean, "Title IV", "IDR Plan", "2026 RAP", "2026"]
                     if tenant_id == "prexvo"
                     else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
                 )
@@ -1771,11 +1801,11 @@ def _normalize_title_50_60(
     if 50 <= len(cand) <= 60:
         return _strip_forbidden_dashes(cand)
 
-    # Pad with parenthetical modifier or whole words if shorter than 50 chars
+    # Pad with parenthetical modifier or whole domain words if shorter than 50 chars
     pad_tokens = (
-        [f"({vertical_paren_mod})", "(2026 Rules)", "(Title IV)", "2026", "Model", "Tool", "Guide", "Rules", "Engine", "Plan"]
+        [f"({vertical_paren_mod})", "(Title IV)", "(2026 Rules)", "2026", "Payment", "Federal", "Schedule", "Plan", "Estimator", "Rules"]
         if tenant_id == "prexvo"
-        else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Model", "Tool", "Guide", "Engine", "Rules"]
+        else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
     )
     for tok in pad_tokens:
         if len(cand) >= 50:
@@ -1793,9 +1823,9 @@ def _normalize_title_50_60(
 
     if len(cand) < 50:
         extra_pads = (
-            ["& Title IV Simulator", "& Statutory Model", "Simulator", "Engine", "Guide"]
+            ["& Title IV Simulator", "& Payment Schedule", "Simulator", "Schedule", "Estimator"]
             if tenant_id == "prexvo"
-            else ["& Statutory Model", "& Planning Engine", "Simulator", "Engine", "Guide"]
+            else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
         )
         for ep in extra_pads:
             trial_base = f"{base} {ep}".strip()
@@ -1807,14 +1837,14 @@ def _normalize_title_50_60(
     while len(cand) < 50:
         if not _has_year(base):
             add_tok = "2026"
-        elif "model" not in base.lower():
-            add_tok = "Model"
-        elif "tool" not in base.lower():
-            add_tok = "Tool"
-        elif "guide" not in base.lower():
-            add_tok = "Guide"
-        else:
+        elif "schedule" not in base.lower():
+            add_tok = "Schedule"
+        elif "estimator" not in base.lower():
+            add_tok = "Estimator"
+        elif "rules" not in base.lower():
             add_tok = "Rules"
+        else:
+            add_tok = "Plan" if tenant_id == "prexvo" else "Tax"
         if len(base) + 1 + len(add_tok) <= max_base and add_tok.lower() not in base.lower():
             base = f"{base} {add_tok}"
         else:
@@ -1827,7 +1857,7 @@ def _normalize_title_50_60(
             b_words.pop()
         trimmed = " ".join(b_words).rstrip(" |-&:")
         if len(trimmed) < min_base:
-            for short_tok in ("2026", "Tool", "Guide", "Model", "Tax", "Plan", "Rules"):
+            for short_tok in ("2026", "Tax", "Plan", "Rules", "Rate", "Cap"):
                 if _has_year(trimmed) and _has_year(short_tok):
                     continue
                 if short_tok.lower() not in trimmed.lower() and min_base <= len(f"{trimmed} {short_tok}") <= max_base:
@@ -1844,6 +1874,8 @@ def _normalize_title_50_60(
 _TRAILING_LABEL_STOPWORDS = (
     "of", "for", "to", "in", "on", "with", "by", "from", "and", "or",
     "vs", "versus", "the", "a", "an", "under", "into", "between",
+    "calculator", "tool", "simulator", "model", "engine", "guide",
+    "break", "married", "section", "double", "mandatory",
 )
 
 
@@ -1853,68 +1885,122 @@ def _clean_short_label(words_list: List[str], max_chars: int = 32) -> str:
         w_copy.pop()
     while len(w_copy) > 1 and w_copy[-1].lower().rstrip(".,;:-") in _TRAILING_LABEL_STOPWORDS:
         w_copy.pop()
-    return " ".join(w_copy).strip(" ,;:-")
+    res = " ".join(w_copy).strip(" ,;:-")
+    res = re.sub(r"\b1099\s+Da\b", "1099-DA", res, flags=re.IGNORECASE)
+    res = re.sub(r"\bVs\b", "vs", res)
+    return res
 
 
 def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> str:
     """
     Deterministically normalizes meta description length into [120, 155] characters
     with domain-isolated statutory terminology, complete whole-word sentences,
-    and zero forbidden dashes.
+    zero 'Calculate X Calculator' redundancy, and zero forbidden dashes.
     """
     from pseofactory.contracts import detect_sentence_truncation_issues
 
     clean = _strip_forbidden_dashes(raw_meta).strip()
     clean = re.sub(r"\s+", " ", clean)
-    if (
-        120 <= len(clean) <= 155
-        and not clean.endswith("and audit-ready.")
-        and not detect_sentence_truncation_issues(clean)
-    ):
-        return clean
-
     q_words = [w for w in _strip_forbidden_dashes(query_label).split() if w.strip()]
     short_label = _clean_short_label(q_words, max_chars=28)
     if not short_label:
         short_label = "Title IV student loan repayment" if tenant_id == "prexvo" else "statutory tax liability"
     q_low = f"{query_label.lower()} {short_label.lower()}"
 
+    has_meta_defect = bool(
+        re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", clean, re.IGNORECASE)
+        or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b", clean, re.IGNORECASE)
+        or (
+            any(k in q_low for k in ("refinance", "icr", "income contingent", "ibr hardship", "hardship cap"))
+            and "225% hhs poverty" in clean.lower()
+        )
+    )
+    if (
+        120 <= len(clean) <= 155
+        and not clean.endswith("and audit-ready.")
+        and not has_meta_defect
+        and not detect_sentence_truncation_issues(clean)
+    ):
+        return clean
+
     def _build_default_meta(lbl: str) -> Tuple[str, str]:
         if tenant_id == "prexvo":
+            if "refinance" in q_low or "break-even" in q_low or "break even" in q_low:
+                return (
+                    "Calculate student loan refinance APR savings, monthly payment reductions, "
+                    "and exact break-even horizons versus federal Title IV protections.",
+                    " Verified under TILA Regulation Z and Title IV 34 CFR Part 685.",
+                )
+            if "icr" in q_low or "income contingent" in q_low or "income-contingent" in q_low:
+                return (
+                    "Calculate Income-Contingent Repayment (ICR) monthly payments under 34 CFR "
+                    "685.209(b) using 20% discretionary income or 12-year fixed IPF rules.",
+                    " Verified under Title IV 34 CFR 685.209(b) statutory rules.",
+                )
+            if "hardship" in q_low or ("ibr" in q_low and "rap" not in q_low):
+                return (
+                    "Calculate Income-Based Repayment (IBR) Partial Financial Hardship thresholds "
+                    "and the 10-year Standard payment ceiling under HEA Section 493C.",
+                    " Verified under 20 U.S.C. 1098e and 34 CFR 685.221 rules.",
+                )
+            if "pslf" in q_low or "public service" in q_low or "buyback" in q_low:
+                return (
+                    "Calculate PSLF 120 qualifying monthly payments, tax-free discharge timelines, "
+                    "and Hold Harmless Buyback eligibility under 34 CFR 685.219.",
+                    " Verified under Title IV 34 CFR 685.219 public service rules.",
+                )
+            if "rap vs ibr" in q_low or ("rap" in q_low and "ibr" in q_low):
+                return (
+                    "Compare OBBBA Repayment Assistance Plan (RAP) tiered AGI payments against "
+                    "statutory New and Old IBR monthly caps under Title IV 34 CFR Part 685.",
+                    " Verified under OBBBA Title VIII and HEA Section 493C.",
+                )
             return (
-                f"Calculate {lbl} under Title IV 34 CFR Part 685 using 225% HHS Poverty "
+                f"Calculate {lbl} obligations under Title IV 34 CFR Part 685 using 225% HHS Poverty "
                 f"Guidelines, discretionary income caps, and forgiveness rules.",
                 " Verified under Title IV 34 CFR Part 685 statutory rules.",
             )
         if "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
             return (
-                f"Calculate {lbl} under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
+                f"Calculate {lbl} deferral under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
                 f"Section 1250 recapture, boot, and state clawback rules.",
                 " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824.",
             )
-        if "crypto" in q_low or "8949" in q_low or "1099-da" in q_low:
+        if "crypto" in q_low or "8949" in q_low or "1099-da" in q_low or "1099 da" in q_low:
             return (
-                f"Calculate {lbl} under IRC Section 1012 and Form 1099-DA, modeling capital "
+                f"Calculate {lbl} liability under IRC Section 1012 and Form 1099-DA, modeling capital "
                 f"gains, staking yield, and 3.8% NIIT compliance rules.",
                 " Grounded in IRS Form 8949 and Schedule D compliance rules.",
             )
         if "saas" in q_low or "runway" in q_low or "burn" in q_low:
             return (
-                f"Calculate {lbl} under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
+                f"Calculate {lbl} metrics under GAAP ASC 205-40 benchmarks, projecting net monthly burn, "
                 f"MRR growth, and exact Zero Cash Date horizons.",
                 " Grounded in institutional corporate treasury benchmarks.",
             )
         if "treasury" in q_low or "tbill" in q_low or "hysa" in q_low or "3124" in q_low:
             return (
-                f"Calculate {lbl} under 31 U.S.C. Section 3124 state tax exemption rules, "
+                f"Calculate {lbl} spreads under 31 U.S.C. Section 3124 state tax exemption rules, "
                 f"comparing US Treasury Bill Tax-Equivalent Yield vs HYSA APY.",
                 " Grounded in federal statutory yield exemption formulas.",
             )
         if "s-corp" in q_low or "reasonable salary" in q_low or "199a" in q_low:
             return (
-                f"Calculate {lbl} under IRC Section 1366 and Section 199A, modeling W-2 FICA "
+                f"Calculate {lbl} savings under IRC Section 1366 and Section 199A, modeling W-2 FICA "
                 f"payroll splits, K-1 distributions, and QBI deduction limits.",
                 " Grounded in IRS reasonable compensation audit benchmarks.",
+            )
+        if "179" in q_low or "gvwr" in q_low or "heavy vehicle" in q_low or "equipment" in q_low:
+            return (
+                f"Calculate {lbl} deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) "
+                f"and Section 168(k) bonus depreciation on IRS Form 4562.",
+                " Grounded in IRC Section 179 and IRS Form 4562 schedules.",
+            )
+        if "2027" in q_low or "bracket" in q_low or "tcja" in q_low:
+            return (
+                f"Calculate {lbl} liability under IRC Section 1(j), comparing marginal rates (10% to 37%), "
+                f"standard deductions, and post-TCJA sunset brackets.",
+                " Grounded in IRC Section 1(j) federal statutory schedules.",
             )
         return (
             f"Calculate {lbl} using deterministic IRC statutory formulas, federal "
@@ -1933,6 +2019,7 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
     use_clean = (
         len(clean) >= 60
         and not clean.endswith("and audit-ready.")
+        and not has_meta_defect
         and not detect_sentence_truncation_issues(clean)
     )
     cand = clean if use_clean else default_meta
@@ -5343,8 +5430,16 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         return rollback_degraded_overlay_from_html(html, overlay_data)
 
     # 1. Upgrade <title>
+    ov_tenant = (
+        "prexvo"
+        if "prexvo" in str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or "").lower()
+        else "profithelm"
+    )
+    ov_brand = "Prexvo" if ov_tenant == "prexvo" else "ProfitHelm"
     title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
+    if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
+        title_rewrite = _normalize_title_50_60(title_rewrite, ov_brand, ov_tenant)
     if title_rewrite:
         escaped_title = html_lib.escape(title_rewrite)
         html = re.sub(
@@ -5385,6 +5480,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             canon_url_ov,
         )
     )
+    used_spoke_og = False
     if is_spoke_page_ov:
         og_m_ov = re.search(
             r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']',
@@ -5395,6 +5491,19 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             og_val_ov = og_m_ov.group(1).strip()
             if ("$" in og_val_ov or "GVWR" in og_val_ov) and 70 <= len(og_val_ov) <= 160:
                 meta_desc = og_val_ov
+                used_spoke_og = True
+    if meta_desc and not used_spoke_og:
+        ov_slug_q = f"{overlay_data.get('slug') or ''} {overlay_data.get('query') or ''} {canon_url_ov}".strip()
+        if (
+            re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", meta_desc, re.IGNORECASE)
+            or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", meta_desc, re.IGNORECASE)
+            or (
+                any(k in ov_slug_q.lower() for k in ("refinance", "icr", "income-contingent", "ibr-hardship", "hardship-cap"))
+                and "225% hhs poverty" in meta_desc.lower()
+            )
+        ):
+            q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
+            meta_desc = _normalize_meta_120_155("", ov_tenant, q_lbl)
     if meta_desc:
         escaped_desc = html_lib.escape(meta_desc)
         html = re.sub(

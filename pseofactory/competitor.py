@@ -2518,16 +2518,43 @@ def _build_repayment_loan_depth_spec(
             '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Soft-Pull Rate &amp; Title IV Execution Checklist</a>\n'
             '      </div>'
         )
-    return {
-        "workbench_mode": "repayment_loan",
-        "workbench_h2": f"Interactive Filing Status, Spouse AGI &amp; Multi-Plan Matrix: {topic_label}",
-        "workbench_intro": (
+    if is_refi:
+        wb_h2 = f"Interactive Private Refinance APR Spread vs. Title IV Break-Even Matrix: {topic_label}"
+        wb_intro = (
+            f"Under <strong>{statutory_authority}</strong> and Truth in Lending Act (TILA) Regulation Z (12 CFR Part 1026), "
+            f"refinancing federal Direct Loans into a private fixed-rate note only reduces lifetime cash outflow when your "
+            f"household AGI exceeds Title IV subsidy thresholds and you do not qualify for 120-payment PSLF discharge. "
+            f"Select a borrower archetype or adjust your income and balance below to compare federal RAP/IBR payments "
+            f"against the 10-Year Standard cap and private refinance break-even benchmarks:"
+        )
+    elif "icr" in s_low or "income-contingent" in s_low:
+        wb_h2 = f"Interactive ICR 20% Discretionary vs. 12-Year Fixed Payment Matrix: {topic_label}"
+        wb_intro = (
+            f"Under <strong>{statutory_authority}</strong> and 34 CFR 685.209(b), Income-Contingent Repayment (ICR) "
+            f"calculates monthly obligations as the lesser of 20% of discretionary income above 100% HHS Poverty Guidelines "
+            f"or a 12-year fixed amortization adjusted by the statutory Income Percentage Factor (IPF), and serves as the "
+            f"sole legacy IDR pathway for consolidated Parent PLUS loans. Select a preset or adjust parameters below:"
+        )
+    elif "ibr-hardship" in s_low or "hardship-cap" in s_low:
+        wb_h2 = f"Interactive IBR Partial Financial Hardship &amp; 10-Year Standard Cap Matrix: {topic_label}"
+        wb_intro = (
+            f"Under <strong>{statutory_authority}</strong> and HEA Section 493C (20 U.S.C. 1098e), Income-Based Repayment "
+            f"(IBR) caps required monthly payments at the 10-Year Standard Repayment ceiling determined at plan entry, "
+            f"while isolating spouse AGI when filing Married Filing Separately (MFS). Select an archetype preset below:"
+        )
+    else:
+        wb_h2 = f"Interactive Filing Status, Spouse AGI &amp; Multi-Plan Matrix: {topic_label}"
+        wb_intro = (
             f"Under <strong>{statutory_authority}</strong> and 34 CFR 685.209, monthly income-driven obligations "
             f"depend on whether you isolate individual Adjusted Gross Income via Married Filing Separately (MFS) "
             f"or pool household income via Married Filing Jointly (MFJ). Select an archetype preset or adjust "
             f"your household parameters below to compare Repayment Assistance Plan (RAP), New/Old IBR, and "
             f"10-Year Standard caps side by side:"
-        ),
+        )
+    return {
+        "workbench_mode": "repayment_loan",
+        "workbench_h2": wb_h2,
+        "workbench_intro": wb_intro,
         "presets": [
             (
                 "Public Service Resident ($68k AGI / $145k Debt)",
@@ -3740,6 +3767,446 @@ def render_competitor_winning_pattern_blocks(
     }
 
 
+COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
+    "section-1031-calculator": {
+        "property_id": "profithelm",
+        "slug": "section-1031-calculator",
+        "target_queries": [
+            "1031 exchange calculator",
+            "partial 1031 exchange calculator",
+            "1031 exchange boot calculator",
+            "california 1031 exchange clawback calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.ipx1031.com/capital-gain-estimator/",
+            "https://www.deferred.com/1031-exchange-calculator",
+            "https://www.exeter1031.com/1031_exchange_calculators.aspx",
+            "https://www.start1031.com/1031-exchange-calculator/",
+        ],
+        "calculator_interactivity": (
+            "Incumbents pair relinquished sale price, adjusted basis, and accumulated depreciation inputs "
+            "with immediate debt-boot vs cash-boot decomposition, 25% IRC Section 1250 unrecaptured depreciation "
+            "recapture, 3.8% NIIT surtax, and 45-day identification / 180-day closing calendar trackers."
+        ),
+        "visual_hierarchy": (
+            "Above-the-fold two-column input-to-waterfall layout highlighting Total Taxes Deferred vs Total "
+            "Taxable Boot Recognized in high-contrast metric cards before explanatory prose."
+        ),
+        "content_effort": (
+            "Worked partial-downsize mortgage boot scenarios, Three-Property vs 200% identification rule "
+            "decision matrices, and state clawback reporting tables (California FTB Form 3840, Oregon Form OR-24)."
+        ),
+        "trust_signals": (
+            "Explicit citations to IRC Section 1031(a)(3), Treasury Regulation 1.1031(k)-1(g)(4) Qualified "
+            "Intermediary safe-harbor rules, IRS Form 8824 line mappings, and segregated escrow disclosures."
+        ),
+        "seo_structure": (
+            "Dedicated hub calculator connected to 50 state-level 1031 exchange spoke schedules with clean "
+            "50-60 char titles, 120-155 char whole-sentence meta descriptions, Dataset + HowTo + FAQPage JSON-LD, "
+            "and nofollow parameterized preset links to prevent duplicate query-string crawl bloat."
+        ),
+        "counter_strategy_executed": (
+            "Eliminated mid-word meta description truncation ('state clawb.'), added rel='nofollow' on "
+            "parameterized scenario preset links, and combined live Form 8824 boot/recapture/45-180 day "
+            "countdown workbench with direct Qualified Intermediary / DST replacement handoff."
+        ),
+    },
+    "crypto-tax-calculator": {
+        "property_id": "profithelm",
+        "slug": "crypto-tax-calculator",
+        "target_queries": [
+            "crypto tax calculator",
+            "cryptocurrency capital gains tax calculator",
+            "form 1099-da crypto tax calculator",
+            "bitcoin tax calculator",
+        ],
+        "incumbent_urls": [
+            "https://coinledger.io/crypto-tax-calculator",
+            "https://koinly.io/crypto-tax-calculator/",
+            "https://tokentax.co/crypto-tax-calculator",
+            "https://www.nerdwallet.com/calculator/crypto-tax-calculator",
+        ],
+        "calculator_interactivity": (
+            "CoinLedger and Koinly provide instant disposal proceeds, cost basis, transaction fee offset, "
+            "holding period toggle (<=12 months ordinary brackets vs >12 months 0%/15%/20% LTCG), filing "
+            "status, and 3.8% IRC Section 1411 NIIT surtax calculation."
+        ),
+        "visual_hierarchy": (
+            "Immediate disposal gain/loss summary card paired with a low-friction portfolio import CTA "
+            "('Import Exchange CSV / API to Generate IRS Form 8949 in Minutes - Free Preview')."
+        ),
+        "content_effort": (
+            "Side-by-side FIFO vs Specific Identification (Rev. Proc. 2024-28 wallet-by-wallet) comparison, "
+            "IRS Form 1099-DA broker gross proceeds reconciliation, and wash-sale / tax-loss harvesting rules."
+        ),
+        "trust_signals": (
+            "Citations to IRC Section 1012, IRS Notice 2014-21, Rev. Rul. 2023-14 (staking income), Form 8949 "
+            "Box A/B/D/E mappings, and verified CoinLedger partner integration."
+        ),
+        "seo_structure": (
+            "SoftwareApplication + Dataset + HowTo + FAQPage schema graph, disambiguated title/meta snippet "
+            "without redundant 'Calculate Crypto Tax Calculator' phrasing, and direct spoke linkage to "
+            "/tools/crypto-tax-form-1099-da-mandatory-reporting/."
+        ),
+        "counter_strategy_executed": (
+            "Repaired redundant meta description phrasing, injected Dataset + HowTo schema onto companion "
+            "Form 1099-DA spoke, and paired Form 8949 lot-accounting workbench with verified CoinLedger "
+            "automated tax-lot reconciliation CTA."
+        ),
+    },
+    "section-179-calculator": {
+        "property_id": "profithelm",
+        "slug": "section-179-calculator",
+        "target_queries": [
+            "section 179 calculator",
+            "section 179 deduction calculator 2026",
+            "section 179 vehicle deduction calculator",
+            "equipment lease vs buy section 179 calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.crestcapital.com/tax_deduction_calculator",
+            "https://www.nav.com/resource/section-179-calculator/",
+            "https://turbotax.intuit.com/tax-tools/calculators/section-179/",
+        ],
+        "calculator_interactivity": (
+            "Crest Capital pairs equipment purchase cost and marginal tax bracket inputs with instant "
+            "Section 179 deduction ($2,560,000 cap, $4,090,000 phase-out), Section 168(k) bonus depreciation, "
+            "cash tax savings, net out-of-pocket equipment cost, and a soft-pull equipment financing eligibility check."
+        ),
+        "visual_hierarchy": (
+            "Three-step input panel on the left paired with bold First-Year Write-Off, Cash Tax Savings, "
+            "and Net Equipment Cost After Tax cards on the right, followed by a 4-step financing workflow."
+        ),
+        "content_effort": (
+            "Explicit GVWR vehicle classification tiers (Passenger Auto <=6,000 lbs vs Heavy SUV 6,000-14,000 lbs "
+            "$30,500 cap vs Cargo/Work Truck >6ft bed 100% cap), placed-in-service deadline rules, and Section "
+            "179(d)(10) recapture warnings when business use drops to 50% or below."
+        ),
+        "trust_signals": (
+            "Exact statutory citations to 26 U.S.C. Section 179, IRC Section 168(k), IRC Section 280F luxury "
+            "auto limits, IRS Form 4562 Part I, and TILA Reg-Z soft-pull commercial financing disclosures."
+        ),
+        "seo_structure": (
+            "Hub calculator linked to 27 commercial vehicle GVWR spokes and companion equipment lease/ROI "
+            "calculators with Dataset + HowTo rich result schemas and commercial-intent query filtering that "
+            "excludes off-intent auto-shopping ('for sale', 'deals near me') vanity impressions."
+        ),
+        "counter_strategy_executed": (
+            "Upgraded meta description to cite exact $2,560,000 cap and $4,090,000 phase-out under Form 4562, "
+            "injected Dataset + HowTo JSON-LD across all Section 179 vehicle/equipment companion calculators, "
+            "and discounted off-intent vehicle dealership queries in the quantitative revenue forecaster."
+        ),
+    },
+    "irs-2027-tax-brackets": {
+        "property_id": "profithelm",
+        "slug": "irs-2027-tax-brackets",
+        "target_queries": [
+            "2027 tax brackets",
+            "california tax brackets 2026 2027",
+            "2027 tax brackets married filing jointly",
+            "tcja sunset tax calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.nerdwallet.com/article/taxes/california-state-tax",
+            "https://www.nerdwallet.com/article/taxes/federal-income-tax-brackets",
+            "https://taxfoundation.org/data/all/federal/tax-calculator-tcja-expiration/",
+            "https://smartasset.com/taxes/california-tax-calculator",
+        ],
+        "calculator_interactivity": (
+            "NerdWallet and Tax Foundation pair filing status, gross income, and state residency inputs with "
+            "marginal vs effective tax rate breakdowns, standard deduction offsets, and current IRC Section 1(j) "
+            "rates (10% to 37%) vs post-sunset pre-TCJA tier comparisons."
+        ),
+        "visual_hierarchy": (
+            "Quick-answer box with exact dollar tax liability and take-home pay at the top, interactive marginal "
+            "bracket waterfall chart in the middle, and complete Single / Married Filing Jointly / Head of "
+            "Household statutory rate tables below."
+        ),
+        "content_effort": (
+            "State-specific statutory bracket tables (e.g., California 9 brackets from 1% to 12.3% plus 1% "
+            "Mental Health Services Act surtax above $1M = 13.3% top rate, CA standard deduction, FTB Form 540 "
+            "residency rules) alongside federal safe-harbor estimated tax rules (IRC Section 6654)."
+        ),
+        "trust_signals": (
+            "Citations to IRC Section 1(j), IRS Revenue Procedure inflation adjustments, California FTB Form 540 "
+            "and Publication 1031 residency standards, and verified CPA/EA review methodology."
+        ),
+        "seo_structure": (
+            "National hub plus 51 state/DC spoke calculators with Dataset + HowTo + FAQPage JSON-LD, "
+            "state-specific quick-answer dollar figures, and zero duplicate year tokens in H1/title."
+        ),
+        "counter_strategy_executed": (
+            "Eliminated duplicate '2027' year token in hub H1 ('IRS 2027 Tax Brackets & TCJA Sunset Calculator'), "
+            "repaired truncated 'Married using' meta description, and preserved state-specific dollar quick-answers "
+            "across all 51 jurisdiction spokes."
+        ),
+    },
+    "s-corp-reasonable-salary-tax-calculator": {
+        "property_id": "profithelm",
+        "slug": "s-corp-reasonable-salary-tax-calculator",
+        "target_queries": [
+            "s corp reasonable salary calculator",
+            "s corp tax calculator",
+            "llc vs s corp tax calculator 2026",
+            "s corp fica tax savings calculator",
+        ],
+        "incumbent_urls": [
+            "https://gusto.com/resources/calculators/s-corp-tax-calculator",
+            "https://www.collective.com/s-corp-tax-savings-calculator",
+            "https://bench.co/blog/tax-tips/s-corp-tax-calculator/",
+        ],
+        "calculator_interactivity": (
+            "Gusto and Collective compute W-2 officer salary vs K-1 shareholder distribution splits, 15.3% FICA "
+            "self-employment tax savings up to the $176,100 OASDI cap, 0.9% Additional Medicare Tax, and the "
+            "20% IRC Section 199A QBI deduction trade-off."
+        ),
+        "visual_hierarchy": (
+            "Side-by-side Sole Proprietorship / Single-Member LLC vs S-Corporation annual tax comparison card "
+            "with net FICA savings highlighted above an automated W-2 officer payroll onboarding CTA."
+        ),
+        "content_effort": (
+            "IRS multi-factor reasonable compensation audit standards (training, duties, time devoted, comparable "
+            "BLS OEWS wages), state-level S-Corp franchise/entity fees (e.g., CA 1.5% / $800 minimum), and "
+            "Form 1120-S / Form 941 payroll compliance costs."
+        ),
+        "trust_signals": (
+            "Citations to IRC Section 1366, IRC Section 199A, IRC Section 3121, IRS Fact Sheet FS-2008-25, "
+            "and direct verified Gusto ($100 CPA) and Rippling ($1,600 SQO+Won) partner integrations."
+        ),
+        "seo_structure": (
+            "Full Organization + WebApplication + TechArticle + Dataset + HowTo + FAQPage + BreadcrumbList "
+            "JSON-LD graph to capture Google Dataset and FAQ rich results alongside Breadcrumbs."
+        ),
+        "counter_strategy_executed": (
+            "Injected missing Dataset and HowTo JSON-LD schemas into /tools/s-corp-reasonable-salary-tax-calculator/ "
+            "(fixing the GSC inspection gap where only Breadcrumbs were detected) and prioritized it in the "
+            "quantitative revenue forecast."
+        ),
+    },
+    "rap-payment-calculator": {
+        "property_id": "prexvo",
+        "slug": "rap-payment-calculator",
+        "target_queries": [
+            "rap calculator",
+            "repayment assistance plan calculator",
+            "rap vs ibr calculator",
+            "obbba student loan repayment calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.studentloanplanner.com/repayment-assistance-plan-rap-calculator/",
+            "https://www.nerdwallet.com/article/loans/student-loans/repayment-assistance-plan-rap",
+            "https://studentaid.gov/loan-simulator/",
+        ],
+        "calculator_interactivity": (
+            "Student Loan Planner models OBBBA Repayment Assistance Plan (RAP) tiered AGI brackets (1% to 10% "
+            "of AGI), $50 per-dependent monthly reduction, $10 minimum monthly payment, 100% unpaid interest "
+            "subsidy, and direct side-by-side comparison against New IBR (10%), Old IBR (15%), and private "
+            "refinance monthly payments."
+        ),
+        "visual_hierarchy": (
+            "Instant Monthly RAP Payment vs Monthly IBR Payment vs 10-Year Standard Cap comparison cards at "
+            "the top, followed by MFS vs MFJ spouse AGI isolation toggle and July 1, 2026 statutory transition timeline."
+        ),
+        "content_effort": (
+            "Detailed breakdown of Public Law 119-21 (OBBBA) Title VIII Subtitle B provisions, July 1, 2026 "
+            "RAP launch date, July 1, 2028 SAVE/ICR/PAYE sunset deadline, 30-year (360-month) RAP forgiveness "
+            "horizon vs 20/25-year IBR, and high-income private refinance decision thresholds."
+        ),
+        "trust_signals": (
+            "Citations to OBBBA Title VIII Subtitle B, HEA Section 493C (20 U.S.C. 1098e), 34 CFR 685.209, "
+            "2026 HHS Federal Poverty Guidelines ($15,650 base + $5,500 per person), and mandatory Title IV "
+            "forfeiture warnings before private refinancing."
+        ),
+        "seo_structure": (
+            "Clean 50-60 char titles without robotic 'Model Tool Guide' padding, plan-specific 120-155 char "
+            "meta descriptions, Dataset + HowTo + FAQPage JSON-LD, and contextual internal links to companion "
+            "IBR, ICR, MFS, and Refinance Break-Even calculators."
+        ),
+        "counter_strategy_executed": (
+            "Purged robotic 'Model Tool Guide' title padding and redundant 'Calculate RAP Calculator' meta "
+            "descriptions on /tools/rap-payment-calculator/ and /tools/rap-vs-ibr-calculator/, and connected "
+            "all commercial IDR hubs to /tools/student-loan-refinance-break-even-calculator/."
+        ),
+    },
+    "student-loan-refinance-break-even-calculator": {
+        "property_id": "prexvo",
+        "slug": "student-loan-refinance-break-even-calculator",
+        "target_queries": [
+            "student loan refinance break even calculator",
+            "student loan refinance calculator",
+            "should i refinance federal student loans or stay on idr",
+            "income based student loan repayment calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.bankrate.com/loans/student-loans/student-loan-calculator/",
+            "https://www.sofi.com/student-loan-refinancing-calculator/",
+            "https://www.earnest.com/student-loan-refinance-calculator",
+        ],
+        "calculator_interactivity": (
+            "Bankrate, SoFi, and Earnest compare current weighted-average federal loan APR (6.80% to 8.05% "
+            "Direct Unsubsidized/PLUS) against private refinance fixed APRs (4.99% to 5.50%), showing monthly "
+            "payment delta, lifetime interest saved, and break-even month horizon."
+        ),
+        "visual_hierarchy": (
+            "Side-by-side Federal Title IV Retention vs Private Refinance Conversion comparison cards with "
+            "an explicit PSLF / IDR forfeiture warning banner and soft-pull rate check checklist."
+        ),
+        "content_effort": (
+            "Quantitative break-even analysis accounting for lost RAP unpaid interest subsidies, 10-year "
+            "Standard Repayment cap ceilings, Debt-to-Income (DTI) underwriting thresholds, and TILA Reg-Z "
+            "soft-pull pre-qualification rights."
+        ),
+        "trust_signals": (
+            "Explicit 34 CFR Part 685 Title IV forfeiture disclosures, TILA Regulation Z (12 CFR Part 1026) "
+            "APR rules, and strict zero-commercial isolation on PSLF/SAVE/IBR-hardship public-service pages."
+        ),
+        "seo_structure": (
+            "Dedicated refinance break-even meta description (replacing generic 225% HHS Poverty Guideline copy), "
+            "bespoke APR Spread vs Title IV Break-Even workbench heading/intro, and contextual inbound links "
+            "from all 9 commercial Prexvo calculators."
+        ),
+        "counter_strategy_executed": (
+            "Replaced wrong 'Calculate Student Loan Refinance Break under Title IV 34 CFR Part 685 using 225% "
+            "HHS Poverty Guidelines' meta description with refinance APR spread & break-even copy, upgraded the "
+            "bespoke SERP workbench to 'Interactive Private Refinance APR Spread vs. Title IV Break-Even Matrix', "
+            "and increased contextual inbound links from 1 to >=9 across Prexvo hubs."
+        ),
+    },
+}
+
+
+REJECTED_COSMETIC_CHANGES: List[Dict[str, str]] = [
+    {
+        "proposal": "Decorative hero illustrations, animated gradient backgrounds, and custom webfont swaps",
+        "rejection_reason": (
+            "Zero impact on Search Intent Match (+2.60), Query-Answer Match (+2.15), or partner EPC conversion; "
+            "adds CLS/LCP latency and dilutes above-the-fold calculator immediacy."
+        ),
+    },
+    {
+        "proposal": "Cosmetic button color/border-radius restyling and card drop-shadow tweaks across calculators",
+        "rejection_reason": (
+            "Does not resolve SERP CTR shortfalls, schema eligibility, crawl budget bloat, or borrower/taxpayer "
+            "math anxiety."
+        ),
+    },
+    {
+        "proposal": "Expanding long-form generic overview prose above the interactive calculator",
+        "rejection_reason": (
+            "Pushes interactive inputs and the 40-60 word statutory quick-answer below the fold, hurting "
+            "Main Answer Near Beginning of Page (+1.59) and Satisfaction/Task Completion (+2.14)."
+        ),
+    },
+]
+
+
+BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION: List[Dict[str, Any]] = [
+    {
+        "upgrade_id": "sys_nofollow_preset_crawl_budget_guard",
+        "scope": "SYSTEMIC_TEMPLATE_ENHANCEMENT",
+        "target_assets": "All ProfitHelm (148) and Prexvo (13) calculator pages (.scenario-preset-link anchors)",
+        "engineering_cost": "LOW",
+        "ranking_impact_score": 9.4,
+        "conversion_impact_score": 8.2,
+        "composite_roi_score": 9.1,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Live GSC URL inspection revealed Googlebot wasting crawl budget on 462+ parameterized preset URLs "
+            "(?sale_price=2500000&replacement_state=TX, ?gross_amount=80000&effective_rate=0.19). Adding "
+            "rel='nofollow' to .scenario-preset-link anchors in compiler.py and maintenance.py preserves 100% "
+            "interactive JS/deep-link preset functionality while consolidating Googlebot crawl equity onto canonical URLs."
+        ),
+    },
+    {
+        "upgrade_id": "sys_gsc_oracle_revenue_prioritization",
+        "scope": "SYSTEMIC_TEMPLATE_ENHANCEMENT",
+        "target_assets": "PushIndexer.run_incremental_indexing, prioritize_urls_for_indexing_allocation, and compile_gsc_lifecycle_telemetry",
+        "engineering_cost": "LOW",
+        "ranking_impact_score": 9.2,
+        "conversion_impact_score": 8.5,
+        "composite_roi_score": 9.0,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Fixes the alphabetical safe_all_urls[:5] blind spot in indexer.py that inspected static trust pages "
+            "(/about/, /contact/, /privacy/) instead of top revenue calculators, and wires quantitative_revenue_forecast.json "
+            "directly into Tier-1 indexing/inspection quota allocation."
+        ),
+    },
+    {
+        "upgrade_id": "sys_snippet_and_schema_completeness",
+        "scope": "SYSTEMIC_TEMPLATE_ENHANCEMENT",
+        "target_assets": "12 ProfitHelm calculators missing Dataset/HowTo JSON-LD + all truncated/robotic Titles & Meta Descriptions",
+        "engineering_cost": "MEDIUM",
+        "ranking_impact_score": 9.6,
+        "conversion_impact_score": 8.9,
+        "composite_roi_score": 9.4,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Live GSC inspection showed /tools/s-corp-reasonable-salary-tax-calculator/ lacked Dataset rich results "
+            "because 12 ProfitHelm calculators were missing Dataset + HowTo JSON-LD nodes. Simultaneously healing "
+            "'state clawb.' truncation, 'Model Tool Guide' title filler, 'Calculate X Calculator' redundancy, and "
+            "plan-specific Prexvo meta descriptions directly lifts SERP CTR and resolves ICR/IBR query cannibalization."
+        ),
+    },
+    {
+        "upgrade_id": "bespoke_prexvo_refinance_and_idr_workbench",
+        "scope": "BESPOKE_TOOL_MECHANIC",
+        "target_assets": "/tools/student-loan-refinance-break-even-calculator/, /tools/icr-repayment-calculator/, /tools/ibr-hardship-cap-calculator/",
+        "engineering_cost": "LOW",
+        "ranking_impact_score": 9.3,
+        "conversion_impact_score": 9.5,
+        "composite_roi_score": 9.4,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Disambiguates Prexvo's highest-EPC refinance calculator ($64+ effective EPC) and cannibalized ICR/IBR "
+            "calculators with bespoke SERP workbench headings, TILA Reg-Z APR spread vs Title IV forfeiture framing, "
+            "and 9 new contextual inbound links from commercial IDR hubs."
+        ),
+    },
+]
+
+
+def get_competitive_incumbent_profile(slug_or_query: str) -> Dict[str, Any]:
+    """
+    Returns the durable competitive incumbent profile for a calculator slug or target money query.
+    Zero em-dashes. Zero en-dashes.
+    """
+    key = str(slug_or_query or "").strip().lower().strip("/")
+    if key.startswith("tools/"):
+        key = key[len("tools/") :]
+    if key in COMPETITIVE_INCUMBENT_PROFILES:
+        return dict(COMPETITIVE_INCUMBENT_PROFILES[key])
+    base_slug = key.split("/")[0]
+    if base_slug in COMPETITIVE_INCUMBENT_PROFILES:
+        return dict(COMPETITIVE_INCUMBENT_PROFILES[base_slug])
+    for prof in COMPETITIVE_INCUMBENT_PROFILES.values():
+        if any(key in q.lower() or q.lower() in key for q in prof.get("target_queries", [])):
+            return dict(prof)
+    return dict(COMPETITIVE_INCUMBENT_PROFILES["section-1031-calculator"])
+
+
+def evaluate_bespoke_vs_systemic_upgrades(property_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Returns the structured evaluation of bespoke interactive tool mechanics vs systemic
+    template enhancements across ProfitHelm and Prexvo, including durable incumbent profiles
+    and rejected cosmetic changes.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop_norm = str(property_id or "").strip().lower()
+    profiles = [
+        dict(v)
+        for v in COMPETITIVE_INCUMBENT_PROFILES.values()
+        if not prop_norm or v.get("property_id") == prop_norm
+    ]
+    return {
+        "property_id": prop_norm or "all",
+        "incumbent_profiles_count": len(profiles),
+        "incumbent_profiles": profiles,
+        "upgrade_tradeoff_matrix": [dict(u) for u in BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION],
+        "rejected_cosmetic_changes": [dict(c) for c in REJECTED_COSMETIC_CHANGES],
+    }
+
+
 __all__ = [
     "INTERACTIVE_PATTERNS",
     "CLICK_MAGNET_PATTERNS",
@@ -3747,6 +4214,9 @@ __all__ = [
     "SUPPORTED_SEARCH_ENGINES",
     "WINNING_COMPETITOR_MECHANICS",
     "TARGET_QUERY_BENCHMARKS",
+    "COMPETITIVE_INCUMBENT_PROFILES",
+    "REJECTED_COSMETIC_CHANGES",
+    "BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION",
     "GapCandidateSpec",
     "MultiEngineQueryBenchmark",
     "CompetitorGapEngine",
@@ -3756,7 +4226,10 @@ __all__ = [
     "_format_safe_heading_topic",
     "render_serp_incumbent_depth_upgrade_block",
     "render_competitor_winning_pattern_blocks",
+    "get_competitive_incumbent_profile",
+    "evaluate_bespoke_vs_systemic_upgrades",
 ]
+
 
 
 

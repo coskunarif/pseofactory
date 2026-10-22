@@ -1496,6 +1496,187 @@ def test_evaluate_expired_overlays_rolled_back_recovery_heals_spec_and_injects_h
     assert 'id="gsc-striking-overlay"' in tx_html_after
 
 
+def test_quantitative_revenue_forecast_and_competitive_incumbent_upgrades(tmp_path: Path) -> None:
+    """
+    Verifies:
+      1. Quantitative revenue forecast separates qualified commercial queries from vanity
+         retail queries ('cadillac escalade for sale', 'taxi driver'), joins URL inspection
+         states and partner EPC readiness, and enforces $0.00 commercial revenue on Prexvo
+         restricted public-service YMYL calculators.
+      2. Live SERP competitive incumbent profiles and bespoke vs systemic upgrade trade-offs
+         expose all 5 required dissection dimensions and rejected cosmetic changes.
+      3. RetroReflectionEngine heals robotic titles ('Model Tool Guide'), duplicate H1 years,
+         defective meta descriptions ('Calculate X Calculator', 'Break under', 'clawb.'),
+         injects Dataset + HowTo JSON-LD into @graph blocks missing them, adds rel=nofollow
+         to .scenario-preset-link anchors, and expands Prexvo refinance internal links.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.competitor import (
+        COMPETITIVE_INCUMBENT_PROFILES,
+        REJECTED_COSMETIC_CHANGES,
+        evaluate_bespoke_vs_systemic_upgrades,
+        get_competitive_incumbent_profile,
+    )
+    from pseofactory.indexer import PushIndexer
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.seo_growth_loops import (
+        compile_quantitative_revenue_forecast,
+        is_vanity_or_off_intent_query,
+    )
+
+    assert is_vanity_or_off_intent_query("cadillac escalade for sale", slug="section-179-calculator/cadillac-escalade") is True
+    assert is_vanity_or_off_intent_query("chevy tahoe deals near me", slug="section-179-calculator/chevy-tahoe") is True
+    assert is_vanity_or_off_intent_query("taxi driver", slug="irs-2027-tax-brackets/california") is True
+    assert is_vanity_or_off_intent_query("section 1031 exchange calculator", slug="section-1031-calculator") is False
+    assert is_vanity_or_off_intent_query("ford f250 section 179 deduction", slug="section-179-calculator/ford-super-duty-f250") is False
+
+    # Verify competitive incumbent profiles and trade-off evaluation
+    assert len(COMPETITIVE_INCUMBENT_PROFILES) >= 7
+    assert len(REJECTED_COSMETIC_CHANGES) >= 3
+    prof_1031 = get_competitive_incumbent_profile("section-1031-calculator")
+    assert any("ipx1031.com" in u for u in prof_1031["incumbent_urls"])
+    for dim in ("calculator_interactivity", "visual_hierarchy", "content_effort", "trust_signals", "seo_structure"):
+        assert dim in prof_1031
+
+    eval_ph = evaluate_bespoke_vs_systemic_upgrades(property_id="profithelm")
+    assert eval_ph["incumbent_profiles_count"] >= 4
+    assert len(eval_ph["upgrade_tradeoff_matrix"]) >= 4
+
+    # Build ProfitHelm revenue forecast fixture with commercial vs vanity queries
+    ph_root = _seed_tenant_fixture(tmp_path / "ph_forecast_tenant")
+    escalade_dir = ph_root / "dist" / "tools" / "section-179-calculator" / "cadillac-escalade"
+    escalade_dir.mkdir(parents=True, exist_ok=True)
+    (escalade_dir / "index.html").write_text(
+        "<html><head><title>Cadillac Escalade Section 179 Calculator | ProfitHelm</title></head>"
+        "<body><main><h1>Cadillac Escalade Section 179 Calculator</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    scorp_dir = ph_root / "dist" / "tools" / "s-corp-reasonable-salary-tax-calculator"
+    scorp_dir.mkdir(parents=True, exist_ok=True)
+    (scorp_dir / "index.html").write_text(
+        '<!DOCTYPE html><html><head>'
+        '<title>S-Corp Reasonable Salary Tax Calculator Model Tool Guide | ProfitHelm</title>'
+        '<meta name="description" content="Calculate S-Corp Reasonable Salary Tax Calculator">'
+        '<link rel="canonical" href="https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/">'
+        '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebPage","name":"S-Corp"},{"@type":"SoftwareApplication","name":"S-Corp","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}]}</script>'
+        '</head><body><main>'
+        '<h1>IRS 2027 S-Corp Reasonable Salary Tax Calculator 2027</h1>'
+        '<a href="?gross_amount=80000&amp;effective_rate=0.19" data-preset="baseline" class="touch-target scenario-preset-link">Baseline</a>'
+        '</main></body></html>',
+        encoding="utf-8",
+    )
+
+    # Verify RetroReflectionEngine heals title, H1, meta description, Dataset/HowTo schema, and nofollow preset links
+    healed_html, repaired = RetroReflectionEngine.retrofit_html(
+        (scorp_dir / "index.html").read_text(encoding="utf-8"),
+        property_id="profithelm",
+        slug="s-corp-reasonable-salary-tax-calculator",
+        dist_dir=ph_root / "dist",
+    )
+    (scorp_dir / "index.html").write_text(healed_html, encoding="utf-8")
+    assert "Model Tool" not in healed_html
+    assert "Tool Guide" not in healed_html
+    assert "Calculate S-Corp Reasonable Salary Tax Calculator" not in healed_html
+    assert 'rel="nofollow" class="touch-target scenario-preset-link"' in healed_html
+    assert '"@type": "Dataset"' in healed_html
+    assert '"@type": "HowTo"' in healed_html
+
+    ph_forecast = compile_quantitative_revenue_forecast(
+        property_id="profithelm",
+        repo_root=ph_root,
+        dist_dir=ph_root / "dist",
+        consolidated_gsc={
+            "current_rows": [
+                {
+                    "query": "cadillac escalade for sale",
+                    "page": "https://profithelm.com/tools/section-179-calculator/cadillac-escalade/",
+                    "impressions": 450,
+                    "clicks": 0,
+                    "position": 54.0,
+                },
+                {
+                    "query": "section 1031 exchange calculator",
+                    "page": "https://profithelm.com/tools/section-1031-calculator/",
+                    "impressions": 110,
+                    "clicks": 2,
+                    "position": 9.2,
+                },
+                {
+                    "query": "s corp reasonable salary calculator",
+                    "page": "https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/",
+                    "impressions": 65,
+                    "clicks": 1,
+                    "position": 11.4,
+                },
+            ]
+        },
+        persist=True,
+    )
+    assert (ph_root / ".agy" / "quantitative_revenue_forecast.json").is_file()
+    assert (ph_root / ".agy" / "competitive_incumbent_profiles.json").is_file()
+    by_slug = {a["slug"]: a for a in ph_forecast["ranked_assets"]}
+    assert by_slug["section-179-calculator/cadillac-escalade"]["vanity_impressions"] == 450
+    assert by_slug["section-179-calculator/cadillac-escalade"]["qualified_commercial_impressions"] == 0
+    assert (
+        by_slug["s-corp-reasonable-salary-tax-calculator"]["monetization_rank"]
+        < by_slug["section-179-calculator/cadillac-escalade"]["monetization_rank"]
+    )
+
+    # Verify PushIndexer prioritizes top revenue-forecasted URLs ahead of alphabetical spokes
+    indexer = PushIndexer(domain="profithelm.com", dist_dir=ph_root / "dist")
+    candidate_urls = [
+        "https://profithelm.com/tools/irs-2027-tax-brackets/alabama/",
+        "https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/",
+        "https://profithelm.com/tools/section-1031-calculator/",
+    ]
+    prioritized = indexer.prioritize_urls_for_indexing_allocation(candidate_urls)
+    assert prioritized[-1] == "https://profithelm.com/tools/irs-2027-tax-brackets/alabama/"
+
+    # Verify Prexvo YMYL zero-commercial enforcement and refinance break-even ranking
+    px_root = tmp_path / "px_forecast_tenant"
+    for px_slug in ("pslf-qualifying-payment-simulator", "student-loan-refinance-break-even-calculator"):
+        d_p = px_root / "dist" / "tools" / px_slug
+        d_p.mkdir(parents=True, exist_ok=True)
+        (d_p / "index.html").write_text(
+            f"<html><head><title>{px_slug} | Prexvo</title></head><body><main><h1>{px_slug}</h1></main></body></html>",
+            encoding="utf-8",
+        )
+    px_forecast = compile_quantitative_revenue_forecast(
+        property_id="prexvo",
+        repo_root=px_root,
+        dist_dir=px_root / "dist",
+        consolidated_gsc={
+            "current_rows": [
+                {
+                    "query": "pslf qualifying payment calculator",
+                    "page": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+                    "impressions": 220,
+                    "clicks": 3,
+                    "position": 8.5,
+                },
+                {
+                    "query": "student loan refinance break even calculator",
+                    "page": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
+                    "impressions": 40,
+                    "clicks": 1,
+                    "position": 12.0,
+                },
+            ]
+        },
+        persist=True,
+    )
+    px_by_slug = {a["slug"]: a for a in px_forecast["ranked_assets"]}
+    assert px_by_slug["pslf-qualifying-payment-simulator"]["partner_epc_readiness"]["restricted_public_service"] is True
+    assert px_by_slug["pslf-qualifying-payment-simulator"]["partner_epc_readiness"]["effective_epc_usd"] == 0.0
+    assert px_by_slug["pslf-qualifying-payment-simulator"]["forecasted_90d_revenue_usd"] == 0.0
+    assert px_by_slug["student-loan-refinance-break-even-calculator"]["forecasted_90d_revenue_usd"] > 0.0
+    assert (
+        px_by_slug["student-loan-refinance-break-even-calculator"]["monetization_rank"]
+        < px_by_slug["pslf-qualifying-payment-simulator"]["monetization_rank"]
+    )
+
+
+
 
 
 

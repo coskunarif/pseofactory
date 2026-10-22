@@ -4893,9 +4893,26 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", html_content, re.IGNORECASE)
     if t_m:
         raw_t_str = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
-        if detect_title_year_conflict_issues(raw_t_str) or bool(
-            re.search(r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b", raw_t_str, re.IGNORECASE)
+        if (
+            detect_title_year_conflict_issues(raw_t_str)
+            or bool(
+                re.search(
+                    r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b|\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b",
+                    raw_t_str,
+                    re.IGNORECASE,
+                )
+            )
+            or ("(pslf)" in raw_t_str.lower() and not any(k in canon_url for k in ("pslf", "public-service")))
         ):
+            return True
+
+    if 'href="https://profithelm.com/signal/"' in html_content:
+        return True
+
+    h1_m_chk = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", html_content, re.IGNORECASE)
+    if h1_m_chk:
+        h1_txt_chk = re.sub(r"<[^>]+>", "", h1_m_chk.group(1)).strip()
+        if len(re.findall(r"\b202[6-9]\b", re.sub(r"\b202\d\s*[-/]\s*202\d\b", "", h1_txt_chk))) >= 2:
             return True
 
     md_chk = re.search(
@@ -4907,8 +4924,47 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         html_content,
         re.IGNORECASE,
     )
-    if md_chk and detect_sentence_truncation_issues(md_chk.group(1).strip()):
+    if md_chk:
+        md_val_chk = md_chk.group(1).strip()
+        if (
+            detect_sentence_truncation_issues(md_val_chk)
+            or len(md_val_chk) > 155
+            or bool(re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", md_val_chk, re.IGNORECASE))
+            or bool(re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", md_val_chk, re.IGNORECASE))
+            or (
+                any(k in canon_url for k in ("refinance", "icr-repayment", "ibr-hardship"))
+                and "225% hhs poverty" in md_val_chk.lower()
+            )
+        ):
+            return True
+
+    if 'class="touch-target scenario-preset-link"' in html_content and bool(
+        re.search(r'<a\b(?![^>]*\brel=["\']nofollow["\'])[^>]*\bscenario-preset-link\b', html_content, re.IGNORECASE)
+    ):
         return True
+
+    if (
+        "/tools/" in canon_url
+        and not canon_url.rstrip("/").endswith("/tools")
+        and '"@graph"' in html_content
+        and ('"@type": "Dataset"' not in html_content or '"@type": "HowTo"' not in html_content)
+    ):
+        return True
+
+    if "prexvo.com/tools/" in canon_url:
+        if "student-loan-refinance-break-even-calculator" in canon_url and "Interactive Private Refinance APR Spread" not in html_content:
+            return True
+        if "icr-repayment-calculator" in canon_url and "Interactive ICR 20% Discretionary" not in html_content:
+            return True
+        if "ibr-hardship-cap-calculator" in canon_url and "Interactive IBR Partial Financial Hardship" not in html_content:
+            return True
+        if (
+            not any(k in canon_url for k in ("pslf", "save-plan", "ibr-hardship", "teacher-loan", "joint-consolidation", "student-loan-refinance-break-even-calculator"))
+            and 'id="topic-cluster-hub"' in html_content
+            and "waives federal protections" in html_content.lower()
+            and "/tools/student-loan-refinance-break-even-calculator/" not in html_content
+        ):
+            return True
 
     qa_chk = re.search(
         r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
@@ -5698,17 +5754,55 @@ def _normalize_page_structure_and_geo_parity(
         )
         changed = True
 
+    if 'href="https://profithelm.com/signal/"' in updated and "/static/signal" in (canonical_url or ""):
+        updated = updated.replace('https://profithelm.com/signal/', 'https://profithelm.com/static/signal/')
+        changed = True
+
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
     if t_m:
         old_t_raw = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
-        if detect_title_year_conflict_issues(old_t_raw) or bool(
-            re.search(r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b", old_t_raw, re.IGNORECASE)
+        misplaced_pslf = "(pslf)" in old_t_raw.lower() and not any(k in slug.lower() for k in ("pslf", "public-service"))
+        if (
+            detect_title_year_conflict_issues(old_t_raw)
+            or misplaced_pslf
+            or bool(
+                re.search(
+                    r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b|\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b",
+                    old_t_raw,
+                    re.IGNORECASE,
+                )
+            )
         ):
-            healed_t = _normalize_title_50_60(old_t_raw, brand_label, property_id)
+            clean_t_seed = re.sub(r"\s*\(PSLF\)", "", old_t_raw, flags=re.IGNORECASE) if misplaced_pslf else old_t_raw
+            healed_t = _normalize_title_50_60(clean_t_seed, brand_label, property_id)
             if healed_t and healed_t != old_t_raw:
                 updated = updated.replace(f"<title>{t_m.group(1)}</title>", f"<title>{healed_t}</title>", 1)
                 updated = updated.replace(f'content="{old_t_raw}"', f'content="{healed_t}"')
                 updated = updated.replace(f'"{old_t_raw}"', f'"{healed_t}"')
+                changed = True
+
+    h1_m_norm = re.search(r"(<h1[^>]*>)([\s\S]*?)(</h1>)", updated, re.IGNORECASE)
+    if h1_m_norm:
+        h1_inner = h1_m_norm.group(2).strip()
+        h1_plain = re.sub(r"<[^>]+>", "", h1_inner).strip()
+        if len(re.findall(r"\b202[6-9]\b", re.sub(r"\b202\d\s*[-/]\s*202\d\b", "", h1_plain))) >= 2 and "<" not in h1_inner:
+            seen_h1_yr = False
+            dedup_h1_words: List[str] = []
+            for hw in h1_inner.split():
+                if re.fullmatch(r"202[6-9]", hw.strip("().,:")):
+                    if seen_h1_yr:
+                        continue
+                    seen_h1_yr = True
+                dedup_h1_words.append(hw)
+            new_h1_inner = " ".join(dedup_h1_words)
+            if new_h1_inner and new_h1_inner != h1_inner:
+                updated = (
+                    updated[: h1_m_norm.start()]
+                    + h1_m_norm.group(1)
+                    + new_h1_inner
+                    + h1_m_norm.group(3)
+                    + updated[h1_m_norm.end() :]
+                )
                 changed = True
 
     md_m_norm = re.search(
@@ -5722,14 +5816,205 @@ def _normalize_page_structure_and_geo_parity(
     )
     if md_m_norm:
         old_md_raw = md_m_norm.group(1).strip()
-        if detect_sentence_truncation_issues(old_md_raw):
+        is_spoke_slug = "/" in slug and any(
+            slug.startswith(p) for p in ("irs-2027-tax-brackets/", "section-1031-calculator/", "section-179-calculator/")
+        )
+        if not is_spoke_slug and (
+            detect_sentence_truncation_issues(old_md_raw)
+            or len(old_md_raw) > 155
+            or bool(re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", old_md_raw, re.IGNORECASE))
+            or bool(re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", old_md_raw, re.IGNORECASE))
+            or (
+                any(k in slug.lower() for k in ("refinance", "icr", "ibr-hardship", "hardship-cap"))
+                and "225% hhs poverty" in old_md_raw.lower()
+            )
+        ):
             healed_md = _normalize_meta_120_155(
                 "",
                 property_id,
-                topic_label or slug.replace("-", " "),
+                slug.replace("-", " "),
             )
             if healed_md and healed_md != old_md_raw:
                 updated = updated.replace(f'content="{old_md_raw}"', f'content="{healed_md}"')
+                updated = updated.replace(f'"{old_md_raw}"', f'"{healed_md}"')
+                changed = True
+
+    if 'class="touch-target scenario-preset-link"' in updated:
+        nof_updated = re.sub(
+            r'(<a\b(?![^>]*\brel=["\']nofollow["\'])[^>]*\bdata-preset=["\'][^"\']+["\'])\s+(class=["\']touch-target\s+scenario-preset-link["\'])',
+            r'\1 rel="nofollow" \2',
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if nof_updated != updated:
+            updated = nof_updated
+            changed = True
+
+    if (
+        slug
+        and slug not in ("index", "tools-directory", "tools")
+        and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo"))
+        and '"@graph"' in updated
+        and ('"@type": "Dataset"' not in updated or '"@type": "HowTo"' not in updated)
+    ):
+        def _inject_dataset_howto_graph(m_ld: re.Match) -> str:
+            o_tag, raw_j, c_tag = m_ld.group(1), m_ld.group(2), m_ld.group(3)
+            try:
+                parsed_j = json.loads(raw_j.strip())
+                if not isinstance(parsed_j, dict) or not isinstance(parsed_j.get("@graph"), list):
+                    return m_ld.group(0)
+                g_nodes = parsed_j["@graph"]
+                existing_types = {
+                    str(t)
+                    for n in g_nodes
+                    if isinstance(n, dict)
+                    for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
+                    if t
+                }
+                page_u = canonical_url.split("#")[0].rstrip("/") + "/"
+                base_u = page_u.split("/tools/")[0] if "/tools/" in page_u else ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+                clean_lbl = topic_label or slug.replace("-", " ").title()
+                modified_g = False
+                if "Dataset" not in existing_types:
+                    g_nodes.append(
+                        {
+                            "@type": "Dataset",
+                            "@id": f"{page_u}#dataset",
+                            "name": f"{clean_lbl} Empirical Statutory Calculation Dataset",
+                            "description": f"Deterministic statutory calculation schedule and sensitivity matrix for {clean_lbl} under {stat_auth}.",
+                            "url": page_u,
+                            "creator": {
+                                "@type": "Organization",
+                                "@id": f"{base_u}/#organization",
+                                "name": brand_label,
+                                "url": base_u,
+                            },
+                            "publisher": {
+                                "@type": "Organization",
+                                "name": brand_label,
+                                "url": base_u,
+                            },
+                            "temporalCoverage": "2026/2027",
+                            "isAccessibleForFree": True,
+                            "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+                            "distribution": [
+                                {
+                                    "@type": "DataDownload",
+                                    "encodingFormat": "text/html",
+                                    "contentUrl": page_u,
+                                }
+                            ],
+                            "spatialCoverage": "United States",
+                            "mainEntityOfPage": {"@id": f"{page_u}#webpage"},
+                            "includedInDataCatalog": {
+                                "@type": "DataCatalog",
+                                "@id": f"{base_u}/#datacatalog",
+                                "name": f"{brand_label} Statutory Data Catalog",
+                                "url": base_u,
+                            },
+                        }
+                    )
+                    modified_g = True
+                if "HowTo" not in existing_types:
+                    howto_lbl = re.sub(r"\s+Calculator\b", "", clean_lbl, flags=re.IGNORECASE).strip() or clean_lbl
+                    g_nodes.append(
+                        {
+                            "@type": "HowTo",
+                            "@id": f"{page_u}#howto",
+                            "name": f"How to Calculate {howto_lbl}",
+                            "description": f"Step-by-step statutory procedure for computing {howto_lbl} under {stat_auth}.",
+                            "url": page_u,
+                            "totalTime": "PT1M",
+                            "step": [
+                                {
+                                    "@type": "HowToStep",
+                                    "position": 1,
+                                    "name": "Enter Financial Baseline Parameters",
+                                    "text": f"Input baseline dollar figures and rate assumptions into the {clean_lbl} form.",
+                                    "url": f"{page_u}#step-1",
+                                },
+                                {
+                                    "@type": "HowToStep",
+                                    "position": 2,
+                                    "name": "Select Statutory Tier or Jurisdiction",
+                                    "text": f"Choose the applicable statutory classification or filing tier under {stat_auth}.",
+                                    "url": f"{page_u}#step-2",
+                                },
+                                {
+                                    "@type": "HowToStep",
+                                    "position": 3,
+                                    "name": "Review Deterministic Output & Sensitivity Matrix",
+                                    "text": "Inspect the computed dollar output, 5-point sensitivity schedule, and compliance checklist.",
+                                    "url": f"{page_u}#step-3",
+                                },
+                            ],
+                            "isPartOf": {"@id": f"{page_u}#webpage"},
+                        }
+                    )
+                    modified_g = True
+                if modified_g:
+                    return f"{o_tag}\n{json.dumps(parsed_j, indent=2)}\n  {c_tag}"
+            except Exception:
+                pass
+            return m_ld.group(0)
+
+        ld_updated = re.sub(
+            r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+            _inject_dataset_howto_graph,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if ld_updated != updated:
+            updated = ld_updated
+            changed = True
+
+    if property_id.lower() == "prexvo":
+        from pseofactory.competitor import is_restricted_public_service_slug, render_serp_incumbent_depth_upgrade_block
+        if any(k in slug.lower() for k in ("student-loan-refinance-break-even-calculator", "icr-repayment-calculator", "ibr-hardship-cap-calculator")):
+            if (
+                ("refinance" in slug.lower() and "Interactive Private Refinance APR Spread" not in updated)
+                or ("icr-repayment" in slug.lower() and "Interactive ICR 20% Discretionary" not in updated)
+                or ("ibr-hardship" in slug.lower() and "Interactive IBR Partial Financial Hardship" not in updated)
+            ):
+                fresh_wb = render_serp_incumbent_depth_upgrade_block(
+                    slug=slug,
+                    topic_label=topic_label,
+                    property_id=property_id,
+                    statutory_authority=stat_auth,
+                )
+                wb_replaced = re.sub(
+                    r'<section[^>]+id=["\']serp-depth-workbench["\'][\s\S]*?</section>',
+                    fresh_wb.strip(),
+                    updated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                if wb_replaced != updated:
+                    updated = wb_replaced
+                    changed = True
+        if (
+            not is_restricted_public_service_slug(slug)
+            and slug != "student-loan-refinance-break-even-calculator"
+            and 'id="topic-cluster-hub"' in updated
+            and "waives federal protections" in updated.lower()
+            and "/tools/student-loan-refinance-break-even-calculator/" not in updated
+        ):
+            refi_li = (
+                '          <li><a href="https://prexvo.com/tools/student-loan-refinance-break-even-calculator/" '
+                'class="touch-target cluster-link" style="display: inline-flex; align-items: center; min-height: 44px; '
+                'padding: 8px 12px; text-decoration: none; font-weight: 600;">'
+                'Student Loan Refinance Break-Even vs Title IV Protection Calculator</a></li>\n'
+            )
+            cluster_updated = re.sub(
+                r'(id=["\']topic-cluster-hub["\'][\s\S]*?<ul[^>]*>\s*)',
+                rf"\g<1>{refi_li}",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if cluster_updated != updated:
+                updated = cluster_updated
                 changed = True
 
     qa_m_norm = re.search(
@@ -6395,7 +6680,7 @@ class RetroReflectionEngine:
                 qs = "&amp;".join(params)
                 href = f"{base_href}?{qs}" if qs else base_href
                 p_links.append(
-                    f'        <a href="{href}" data-preset="{p_key}" '
+                    f'        <a href="{href}" data-preset="{p_key}" rel="nofollow" '
                     f'class="touch-target scenario-preset-link" '
                     f'style="display: inline-flex; align-items: center; justify-content: center; '
                     f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
@@ -6706,11 +6991,28 @@ class RetroReflectionEngine:
         )
         t_val = str(raw_ov.get("title_rewrite") or raw_ov.get("title") or "")
         m_val = str(raw_ov.get("meta_description") or "")
-        if detect_title_year_conflict_issues(t_val) or bool(
-            re.search(r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b", t_val, re.IGNORECASE)
+        if (
+            detect_title_year_conflict_issues(t_val)
+            or bool(
+                re.search(
+                    r"\((?:Rules|Tax|Guide|Model)\)|\b(?:Section|Form)\d+\b|\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b",
+                    t_val,
+                    re.IGNORECASE,
+                )
+            )
+            or ("(pslf)" in t_val.lower() and not any(k in ov_s_low for k in ("pslf", "public-service")))
         ):
             return True
-        if detect_sentence_truncation_issues(m_val) or detect_sentence_truncation_issues(qa_str):
+        if (
+            detect_sentence_truncation_issues(m_val)
+            or detect_sentence_truncation_issues(qa_str)
+            or bool(re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", m_val, re.IGNORECASE))
+            or bool(re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", m_val, re.IGNORECASE))
+            or (
+                any(k in ov_s_low for k in ("refinance", "icr", "ibr-hardship", "hardship-cap"))
+                and "225% hhs poverty" in m_val.lower()
+            )
+        ):
             return True
         return False
 
@@ -7386,8 +7688,17 @@ class RetroReflectionEngine:
                 try:
                     il_data = json.loads(il_file.read_text(encoding="utf-8"))
                     orphans = il_data.get("orphaned_pages") if isinstance(il_data, dict) else []
-                    if isinstance(orphans, list) and any(
-                        "404" in str(o).lower() or str(o).strip("/") == "signal" for o in orphans
+                    in_deg_map = (il_data.get("contextual_in_degree_by_path") or {}) if isinstance(il_data, dict) else {}
+                    if (
+                        (
+                            isinstance(orphans, list)
+                            and any("404" in str(o).lower() or str(o).strip("/") in ("signal", "static/signal") for o in orphans)
+                        )
+                        or "/static/signal" in in_deg_map
+                        or (
+                            property_id.lower() == "prexvo"
+                            and int(in_deg_map.get("/tools/student-loan-refinance-break-even-calculator", 99) or 0) <= 1
+                        )
                     ):
                         stale_pages[".agy/internal_linking_opportunities.json"] = ["internal_linking_ledger_integrity"]
                 except Exception:
@@ -7400,6 +7711,12 @@ class RetroReflectionEngine:
                         stale_pages[".agy/cohort_reflection_ledger.json"] = ["cohort_reflection_ledger_integrity"]
                 except Exception:
                     pass
+            if (
+                str(d.parent).startswith("/home/ubuntuadmin/projects/")
+                and "PYTEST_CURRENT_TEST" not in os.environ
+                and not (agy_dir / "quantitative_revenue_forecast.json").is_file()
+            ):
+                stale_pages[".agy/quantitative_revenue_forecast.json"] = ["quantitative_revenue_forecast_missing"]
 
         return {
             "status": "PASS" if not stale_pages else "STALE",
@@ -7790,8 +8107,17 @@ class RetroReflectionEngine:
                 if il_file.is_file():
                     il_raw = json.loads(il_file.read_text(encoding="utf-8"))
                     orphans = il_raw.get("orphaned_pages") if isinstance(il_raw, dict) else []
-                    if isinstance(orphans, list) and any(
-                        "404" in str(o).lower() or str(o).strip("/") == "signal" for o in orphans
+                    in_deg_map = (il_raw.get("contextual_in_degree_by_path") or {}) if isinstance(il_raw, dict) else {}
+                    if (
+                        (
+                            isinstance(orphans, list)
+                            and any("404" in str(o).lower() or str(o).strip("/") in ("signal", "static/signal") for o in orphans)
+                        )
+                        or "/static/signal" in in_deg_map
+                        or (
+                            property_id.lower() == "prexvo"
+                            and int(in_deg_map.get("/tools/student-loan-refinance-break-even-calculator", 99) or 0) <= 1
+                        )
                     ):
                         discover_internal_linking_opportunities(
                             property_id=property_id,
@@ -7801,6 +8127,45 @@ class RetroReflectionEngine:
                         )
                         if ".agy/internal_linking_opportunities.json" not in retrofitted_paths:
                             retrofitted_paths.append(".agy/internal_linking_opportunities.json")
+            except Exception:
+                pass
+            try:
+                q_file = agy_dir / "indexing_quarantine_ledger.json"
+                if q_file.is_file() and "PYTEST_CURRENT_TEST" not in os.environ:
+                    from pseofactory.indexing.preflight import IndexingPreflightEngine
+                    dom_q = "prexvo.com" if property_id.lower() == "prexvo" else "profithelm.com"
+                    pf_eng = IndexingPreflightEngine(property_id=property_id, domain=dom_q, dist_dir=d)
+                    pf_rep = pf_eng.inspect_dist(d)
+                    eligible_set = {u.rstrip("/") + "/" for u in pf_rep.push_eligible_urls}
+                    raw_q = json.loads(q_file.read_text(encoding="utf-8"))
+                    if isinstance(raw_q, list) and raw_q:
+                        kept_q = [
+                            item
+                            for item in raw_q
+                            if isinstance(item, dict)
+                            and (str(item.get("url") or "").rstrip("/") + "/") not in eligible_set
+                            and "/static/" not in str(item.get("url") or "")
+                        ]
+                        if len(kept_q) != len(raw_q):
+                            q_file.write_text(json.dumps(kept_q, indent=2) + "\n", encoding="utf-8")
+                            if ".agy/indexing_quarantine_ledger.json" not in retrofitted_paths:
+                                retrofitted_paths.append(".agy/indexing_quarantine_ledger.json")
+            except Exception:
+                pass
+            try:
+                if str(d.parent).startswith("/home/ubuntuadmin/projects/") and "PYTEST_CURRENT_TEST" not in os.environ:
+                    from pseofactory.seo_growth_loops import compile_quantitative_revenue_forecast
+                    qrf_file = agy_dir / "quantitative_revenue_forecast.json"
+                    had_qrf = qrf_file.is_file()
+                    compile_quantitative_revenue_forecast(
+                        property_id=property_id,
+                        repo_root=d.parent,
+                        dist_dir=d,
+                        multidim_telemetry=gsc_lifecycle_data or None,
+                        persist=True,
+                    )
+                    if not had_qrf and qrf_file.is_file() and ".agy/quantitative_revenue_forecast.json" not in retrofitted_paths:
+                        retrofitted_paths.append(".agy/quantitative_revenue_forecast.json")
             except Exception:
                 pass
 

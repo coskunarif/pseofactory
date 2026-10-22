@@ -7588,7 +7588,7 @@ _SENTENCE_TRUNCATION_DANGLING_END_WORDS: Set[str] = {
     "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
     "benchmar", "benc", "ben", "yie", "forgiven", "calculat", "amortiz",
     "deduct", "withhold", "repay", "schedul", "compoun", "est", "approx",
-    "qb",
+    "qb", "clawb",
 }
 
 _SENTENCE_TRUNCATION_PATTERNS: List[Tuple[re.Pattern, str]] = [

@@ -774,7 +774,7 @@ class DailyIndexingInspector:
                 rel = hf.relative_to(d_dir)
                 site_p = ("/" + "/".join(rel.parent.parts) if rel.parent.parts else "/") if rel.name == "index.html" else ("/" + str(rel).replace(".html", ""))
                 site_p = site_p.rstrip("/") or "/"
-                if site_p in ("/404", "/signal") or site_p.startswith("/signal/"):
+                if site_p in ("/404", "/signal", "/static/signal") or site_p.startswith(("/signal/", "/static/")):
                     continue
                 try:
                     raw_h = hf.read_text(encoding="utf-8", errors="ignore")

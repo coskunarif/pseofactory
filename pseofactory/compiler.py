@@ -523,7 +523,7 @@ def _render_scenario_presets_bar_html(
         qs = "&amp;".join(params)
         href = f"{canonical_base}/tools/{slug}/?{qs}" if qs else f"{canonical_base}/tools/{slug}/"
         links_html.append(
-            f'          <a href="{href}" data-preset="{preset_key}" '
+            f'          <a href="{href}" data-preset="{preset_key}" rel="nofollow" '
             f'class="touch-target scenario-preset-link" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
