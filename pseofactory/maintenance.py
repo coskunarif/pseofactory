@@ -4965,7 +4965,7 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         ):
             return True
 
-    if 'href="https://profithelm.com/signal/"' in html_content:
+    if 'href="https://profithelm.com/signal/"' in html_content and "/static/signal" in canon_url:
         return True
 
     h1_m_chk = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", html_content, re.IGNORECASE)
@@ -5020,7 +5020,6 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         if (
             not any(k in canon_url for k in ("pslf", "save-plan", "ibr-hardship", "teacher-loan", "joint-consolidation", "student-loan-refinance-break-even-calculator"))
             and 'id="topic-cluster-hub"' in html_content
-            and "waives federal protections" in html_content.lower()
             and "/tools/student-loan-refinance-break-even-calculator/" not in html_content
         ):
             return True
@@ -6063,7 +6062,6 @@ def _normalize_page_structure_and_geo_parity(
             not is_restricted_public_service_slug(slug)
             and slug != "student-loan-refinance-break-even-calculator"
             and 'id="topic-cluster-hub"' in updated
-            and "waives federal protections" in updated.lower()
             and "/tools/student-loan-refinance-break-even-calculator/" not in updated
         ):
             refi_li = (
