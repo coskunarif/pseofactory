@@ -401,3 +401,182 @@ def test_tenant_ci_workflow_and_script_isolation_sync(tmp_path):
     )
     assert changed is True
     assert _needs_page_structure_geo_normalization(norm_html) is False
+
+
+def test_playbook_subscription_stripe_checkout_and_transactional_responder(tmp_path):
+    from pseofactory.partner_tracker import (
+        ingest_playbook_subscription,
+        resolve_lead_monetization_offer,
+        create_stripe_checkout_session,
+        render_transactional_playbook_email,
+        dispatch_transactional_playbook,
+        get_lead_monitoring_summary,
+    )
+
+    scanner = CrossPropertyContaminationScanner()
+    leads_path = tmp_path / "captured_leads.jsonl"
+
+    # 1. ProfitHelm 1031 Playbook Subscription attaches $79 workpaper offer and persists to ledger
+    ph_sub = ingest_playbook_subscription(
+        property_id="profithelm",
+        tool_slug="section-1031-calculator",
+        email="controller@cre-holdings.com",
+        calculated_amount=220000,
+        leads_ledger_path=leads_path,
+        auto_dispatch_email=False,
+    )
+    assert ph_sub["status"] == "playbook_subscribed"
+    assert ph_sub["persisted"] is True
+    assert ph_sub["lead_type"] == "playbook_subscription"
+    assert ph_sub["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+    assert ph_sub["offer_price_usd"] == 79.0
+    assert "/api/lead-capture?checkout=1" in ph_sub["checkout_url"]
+
+    # 2. Prexvo Refi Playbook Subscription attaches $39 decision audit offer and persists to ledger
+    px_sub = ingest_playbook_subscription(
+        property_id="prexvo",
+        tool_slug="student-loan-refinance-break-even-calculator",
+        email="fellow@medschool-cohort.org",
+        calculated_amount=95000,
+        leads_ledger_path=leads_path,
+        auto_dispatch_email=False,
+    )
+    assert px_sub["status"] == "playbook_subscribed"
+    assert px_sub["persisted"] is True
+    assert px_sub["offer_sku"] == "px_refi_amortization_decision_audit"
+    assert px_sub["offer_price_usd"] == 39.0
+    assert "/api/lead-capture?checkout=1" in px_sub["checkout_url"]
+
+    # 3. Restricted YMYL public-service pages on Prexvo remain strictly blocked from playbook/checkout capture
+    with pytest.raises(ValueError, match="Restricted public-service asset"):
+        ingest_playbook_subscription(
+            property_id="prexvo",
+            tool_slug="pslf-qualifying-payment-simulator",
+            email="borrower@publicservice.org",
+            leads_ledger_path=leads_path,
+        )
+    with pytest.raises(ValueError, match="Restricted public-service asset"):
+        resolve_lead_monetization_offer("prexvo", "ibr-hardship-cap-calculator")
+
+    # 4. Transactional Playbook Email rendering enforces zero forbidden dashes and strict tenant isolation
+    ph_email = render_transactional_playbook_email(ph_sub)
+    px_email = render_transactional_playbook_email(px_sub)
+    assert_no_forbidden_dashes(ph_email["html_body"], context="ph_playbook_email")
+    assert_no_forbidden_dashes(px_email["html_body"], context="px_playbook_email")
+    assert scanner.scan_text(ph_email["html_body"], "profithelm") == []
+    assert scanner.scan_text(px_email["html_body"], "prexvo") == []
+    assert "https://profithelm.com/api/lead-capture?checkout=1" in ph_email["html_body"]
+    assert "https://prexvo.com/api/lead-capture?checkout=1" in px_email["html_body"]
+
+    # 5. Dry-run responder and programmable Stripe Checkout session payload verification
+    dry_disp = dispatch_transactional_playbook(ph_sub, execute_live=False)
+    assert dry_disp["status"] == "dry_run_ready"
+    assert dry_disp["dispatched"] is False
+
+    stripe_sess = create_stripe_checkout_session(
+        property_id="profithelm",
+        tool_slug="invoice-factoring-cost-apr-calculator",
+        customer_email="cfo@freightlogistics.com",
+        lead_id="lead_profithelm_test123",
+        execute_live=False,
+    )
+    assert stripe_sess["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+    assert stripe_sess["offer_price_cents"] == 4900
+    assert stripe_sess["request_payload"]["metadata[lead_id]"] == "lead_profithelm_test123"
+    assert stripe_sess["request_payload"]["line_items[0][price_data][unit_amount]"] == "4900"
+
+    # 6. Lead monitoring summary aggregates across both properties
+    mon = get_lead_monitoring_summary(leads_ledger_path=leads_path)
+    assert mon["total_leads"] == 2
+    assert mon["by_property"]["profithelm"] == 1
+    assert mon["by_property"]["prexvo"] == 1
+    assert mon["by_lead_type"]["playbook_subscription"] == 2
+    assert mon["total_checkout_offer_pipeline_usd"] == 118.0
+
+
+def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
+    import subprocess
+    import json
+
+    for prop_id in ("profithelm", "prexvo"):
+        fn_dir = tmp_path / prop_id / "functions" / "api"
+        fn_dir.mkdir(parents=True)
+        fn_file = fn_dir / "lead-capture.js"
+        fn_file.write_text(generate_edge_lead_capture_function(prop_id), encoding="utf-8")
+
+        slug = (
+            "section-1031-calculator"
+            if prop_id == "profithelm"
+            else "student-loan-refinance-break-even-calculator"
+        )
+        node_script = f"""
+        import("./functions/api/lead-capture.js").then(async mod => {{
+          const kvStore = new Map();
+          const mockEnv = {{
+            PROFITHELM_LEADS: {{
+              put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+              list: async ({{ prefix }}) => ({{
+                keys: Array.from(kvStore.keys()).filter(k => k.startsWith(prefix)).map(name => ({{ name }}))
+              }}),
+              get: async (k) => kvStore.get(k) || null
+            }},
+            PREXVO_LEADS: {{
+              put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+              list: async ({{ prefix }}) => ({{
+                keys: Array.from(kvStore.keys()).filter(k => k.startsWith(prefix)).map(name => ({{ name }}))
+              }}),
+              get: async (k) => kvStore.get(k) || null
+            }}
+          }};
+
+          const playbookReq = {{
+            url: "https://{prop_id}.com/api/lead-capture",
+            headers: new Headers({{ "content-type": "application/json" }}),
+            json: async () => ({{ email: "playbook@{prop_id}.com", source: "/tools/{slug}/" }})
+          }};
+          const pbRes = await mod.onRequestPost({{ request: playbookReq, env: mockEnv }});
+          const pbData = await pbRes.json();
+
+          const getReq = {{
+            url: "https://{prop_id}.com/api/lead-capture?limit=50",
+            headers: new Headers()
+          }};
+          const getRes = await mod.onRequestGet({{ request: getReq, env: mockEnv }});
+          const getData = await getRes.json();
+
+          const checkoutReq = {{
+            url: "https://{prop_id}.com" + pbData.checkout_url,
+            headers: new Headers()
+          }};
+          const coRes = await mod.onRequestGet({{ request: checkoutReq, env: mockEnv }});
+          const coData = await coRes.json();
+
+          console.log(JSON.stringify({{
+            pbStatus: pbRes.status,
+            pbData,
+            getCount: getData.count,
+            getSummary: getData.summary,
+            coStatus: coRes.status,
+            coData
+          }}));
+        }});
+        """
+        proc = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=tmp_path / prop_id,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout.strip())
+        assert out["pbStatus"] == 200
+        assert out["pbData"]["status"] == "playbook_subscribed"
+        assert out["pbData"]["persisted"] is True
+        assert out["pbData"]["lead_id"].startswith(f"lead_{prop_id}_")
+        assert "/api/lead-capture?checkout=1" in out["pbData"]["checkout_url"]
+        assert out["getCount"] == 1
+        assert out["getSummary"]["playbook_subscriptions_count"] == 1
+        assert out["coStatus"] == 200
+        assert out["coData"]["status"] == "checkout_session_ready"
+        assert out["coData"]["offer_sku"] == out["pbData"]["offer_sku"]
+

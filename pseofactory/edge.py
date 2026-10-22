@@ -2194,9 +2194,11 @@ def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
     if prop_clean == "prexvo":
         lead_js = """/**
  * Cloudflare Pages Function: Prexvo Student Loan Refinance Partner Quote Intake (/api/lead-capture)
- * Captures TCPA-consented borrower quote requests ($50,000+ student loan refinance threshold),
- * keeps sub-threshold calculations frictionless, blocks restricted YMYL public-service pages,
- * persists CPL records in PREXVO_LEADS KV, and flags $100,000+ leads for Splash Financial rep dispatch.
+ * Captures TCPA-consented borrower quote requests ($50,000+ student loan refinance threshold)
+ * and playbook worksheet subscriptions, keeps sub-threshold calculations frictionless,
+ * blocks restricted YMYL public-service pages, dispatches ZeptoMail transactional playbooks,
+ * attaches programmable Stripe Checkout offers, persists CPL records in PREXVO_LEADS KV,
+ * and flags $100,000+ leads for Splash Financial rep dispatch.
  * Zero AI slop. Zero em-dashes. Zero en-dashes.
  */
 
@@ -2224,6 +2226,15 @@ const PARTNER_ROUTES = {
   edvestin: "https://edvestinu.com/refinance-student-loans/",
 };
 
+const PREXVO_TOOLKIT_OFFER = {
+  sku: "px_refi_amortization_decision_audit",
+  title: "Prexvo Private Refinance vs Federal Protections Decision Audit Kit",
+  price_usd: 39,
+  price_cents: 3900,
+  currency: "usd",
+  billing_mode: "payment",
+};
+
 function getLeadsKv(env) {
   if (!env) return null;
   return env.PREXVO_LEADS || env.PREXVO_TELEMETRY_KV || env.TELEMETRY_KV || null;
@@ -2244,6 +2255,125 @@ function deriveCapitalBand(amount) {
   return "under_50k";
 }
 
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
+  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
+  const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  if (!stripeKey || typeof fetch !== "function") {
+    return {
+      offer_sku: PREXVO_TOOLKIT_OFFER.sku,
+      offer_title: PREXVO_TOOLKIT_OFFER.title,
+      offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+      checkout_url: fallbackUrl,
+      checkout_session_id: `cs_edge_${leadId}`,
+      checkout_mode: "edge_checkout_rail",
+    };
+  }
+  try {
+    const params = new URLSearchParams({
+      mode: "payment",
+      "payment_method_types[0]": "card",
+      customer_email: email,
+      client_reference_id: leadId,
+      success_url: `https://prexvo.com/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}`,
+      cancel_url: `https://prexvo.com/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}`,
+      "line_items[0][price_data][currency]": PREXVO_TOOLKIT_OFFER.currency,
+      "line_items[0][price_data][unit_amount]": String(PREXVO_TOOLKIT_OFFER.price_cents),
+      "line_items[0][price_data][product_data][name]": PREXVO_TOOLKIT_OFFER.title,
+      "line_items[0][quantity]": "1",
+      "metadata[lead_id]": leadId,
+      "metadata[property_id]": "prexvo",
+      "metadata[tool_slug]": toolSlug,
+      "metadata[offer_sku]": PREXVO_TOOLKIT_OFFER.sku,
+    });
+    const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${stripeKey}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+    const data = await resp.json();
+    if (resp.ok && data && data.url) {
+      return {
+        offer_sku: PREXVO_TOOLKIT_OFFER.sku,
+        offer_title: PREXVO_TOOLKIT_OFFER.title,
+        offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+        checkout_url: data.url,
+        checkout_session_id: data.id || `cs_live_${leadId}`,
+        checkout_mode: "stripe_live_session",
+      };
+    }
+  } catch (_) {}
+  return {
+    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
+    offer_title: PREXVO_TOOLKIT_OFFER.title,
+    offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+    checkout_url: fallbackUrl,
+    checkout_session_id: `cs_edge_${leadId}`,
+    checkout_mode: "edge_checkout_rail",
+  };
+}
+
+async function dispatchEdgeZeptoMailPlaybook(env, record) {
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+    : "";
+  if (!zeptoToken || typeof fetch !== "function") {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: null,
+    };
+  }
+  const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
+  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@prexvo.com";
+  const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
+  const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+  const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+    `<h2>Your Prexvo Student Loan Refinance Worksheet &amp; Decision Checklist</h2>` +
+    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
+    `<p>Model Balance: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
+    `<p><a href="https://prexvo.com${record.redirect_url}">Compare Matched Lender Rates (${record.partner_rep_desk || "Splash Financial Partner Desk"})</a></p>` +
+    `<p><a href="https://prexvo.com${record.checkout_url}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `</div>`;
+  try {
+    const resp = await fetch(`${apiBase}/email`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({
+        from: { address: fromEmail, name: fromName },
+        to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+        subject: `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`,
+        htmlbody: htmlBody,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      return {
+        zeptomail_dispatched: true,
+        zeptomail_status: "sent_edge_zeptomail",
+        zeptomail_request_id: data.request_id || (data.data && data.data[0] && data.data[0]. additional_info) || "ok",
+      };
+    }
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: (data && data.error && data.error.request_id) || null,
+    };
+  } catch (_) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: null,
+    };
+  }
+}
+
 export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -2251,6 +2381,23 @@ export async function onRequestOptions() {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL(request.url);
+  if (reqUrl.searchParams.get("checkout") === "1") {
+    const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
+    const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
+    const toolSlug = reqUrl.searchParams.get("tool_slug") || "student-loan-refinance-break-even-calculator";
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        status: "checkout_session_ready",
+        property_id: "prexvo",
+        lead_id: leadId,
+        ...offer,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
   const kv = getLeadsKv(env);
@@ -2286,8 +2433,16 @@ export async function onRequestGet(context) {
     }
   }
 
+  const summary = {
+    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
+    playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
+    zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
+    checkout_offers_count: leads.filter((l) => Boolean(l.checkout_url)).length,
+    action_bus_dispatched_count: leads.filter((l) => Boolean(l.action_bus_dispatched)).length,
+  };
+
   return new Response(
-    JSON.stringify({ ok: true, success: true, property_id: "prexvo", count: leads.length, leads }),
+    JSON.stringify({ ok: true, success: true, property_id: "prexvo", count: leads.length, summary, leads }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
 }
@@ -2298,13 +2453,12 @@ export async function onRequestPost(context) {
     const body = await request.json();
     const email = (body.email || "").trim().toLowerCase();
     const state = String(body.state || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
-    const toolSlug = String(body.tool_slug || "student-loan-refinance-break-even-calculator")
+    const rawSlug = String(body.tool_slug || body.source || "student-loan-refinance-break-even-calculator")
       .trim()
       .toLowerCase()
-      .replace(/^\\/+|\\/+$/g, "");
-    const rawAmount = Number(body.calculated_amount !== undefined ? body.calculated_amount : body.loan_balance || 0);
-    const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
-    const thresholdUsd = 50000;
+      .replace(/^\\/+|\\/+$/g, "")
+      .replace(/^tools\\//, "");
+    const toolSlug = rawSlug || "student-loan-refinance-break-even-calculator";
     const reqPartner = String(body.partner_key || "splash_financial").trim().toLowerCase();
     const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, reqPartner)
       ? reqPartner
@@ -2320,6 +2474,70 @@ export async function onRequestPost(context) {
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
+
+    const hasQuoteFields =
+      body.calculated_amount !== undefined ||
+      body.loan_balance !== undefined ||
+      body.state !== undefined ||
+      body.capital_band !== undefined ||
+      body.partner_sharing_consent !== undefined;
+
+    if (!hasQuoteFields) {
+      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        return new Response(
+          JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
+          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+      const ts = new Date().toISOString();
+      const randSuffix = Math.random().toString(36).slice(2, 10);
+      const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
+      const redirectUrl = `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
+      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug);
+      const playbookRecord = {
+        lead_id: leadId,
+        property_id: "prexvo",
+        lead_type: "playbook_subscription",
+        lifecycle_stage: "playbook_subscribed",
+        tool_slug: toolSlug,
+        vertical: "student_loan_refinance",
+        email,
+        calculated_amount: 0,
+        threshold_usd: 50000,
+        partner_key: partnerKey,
+        partner_rep_desk: "Splash Financial Partner Desk",
+        redirect_url: redirectUrl,
+        monetization_strategy: "playbook_to_toolkit_checkout",
+        ...checkoutOffer,
+        captured_at: ts,
+      };
+      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord);
+      Object.assign(playbookRecord, emailDispatch);
+
+      const buf = getMemoryBuffer();
+      buf.unshift(playbookRecord);
+      if (buf.length > 250) buf.length = 250;
+
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.put === "function") {
+        await kv.put(leadId, JSON.stringify(playbookRecord), { expirationTtl: 90 * 86400 });
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          status: "playbook_subscribed",
+          persisted: true,
+          message: "Your custom student loan calculation worksheet and repayment checklist have been queued.",
+          ...playbookRecord,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const rawAmount = Number(body.calculated_amount !== undefined ? body.calculated_amount : body.loan_balance || 0);
+    const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
+    const thresholdUsd = 50000;
 
     if (calculatedAmount < thresholdUsd) {
       return new Response(
@@ -2386,10 +2604,13 @@ export async function onRequestPost(context) {
     const liveBase = PARTNER_ROUTES[partnerKey];
     const liveDestinationUrl = `${liveBase}${liveBase.includes("?") ? "&" : "?"}${qs}`;
     const actionBusDispatched = calculatedAmount >= 100000;
+    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug);
 
     const record = {
       lead_id: leadId,
       property_id: "prexvo",
+      lead_type: "qualified_quote",
+      lifecycle_stage: "captured",
       tool_slug: toolSlug,
       vertical: "student_loan_refinance",
       email,
@@ -2403,8 +2624,13 @@ export async function onRequestPost(context) {
       redirect_url: redirectUrl,
       live_destination_url: liveDestinationUrl,
       action_bus_dispatched: actionBusDispatched,
+      monetization_strategy: "dual_partner_and_checkout",
+      ...checkoutOffer,
       captured_at: ts,
     };
+
+    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record);
+    Object.assign(record, emailDispatch);
 
     const buf = getMemoryBuffer();
     buf.unshift(record);
@@ -2430,10 +2656,12 @@ export async function onRequestPost(context) {
     else:
         lead_js = """/**
  * Cloudflare Pages Function: ProfitHelm B2B & Tax Partner Quote Intake (/api/lead-capture)
- * Captures TCPA-consented commercial quote requests across high-value thresholds:
+ * Captures TCPA-consented commercial quote requests and regulatory playbook subscriptions
+ * across high-value thresholds:
  * - $100,000+ on 1031 Exchange or CapEx / Section 179
  * - $50,000+ on Invoice Factoring
- * Keeps sub-threshold calculations frictionless, persists CPL records in PROFITHELM_LEADS KV,
+ * Keeps sub-threshold calculations frictionless, dispatches ZeptoMail transactional playbooks,
+ * attaches programmable Stripe Checkout offers, persists CPL and playbook records in PROFITHELM_LEADS KV,
  * routes to the highest-yielding live partner with pre-filled context, and flags $100,000+ leads
  * for HumanActionBus dispatch to OTR Solutions, E-file, and IPX1031 partner desks.
  * Zero AI slop. Zero em-dashes. Zero en-dashes.
@@ -2474,6 +2702,10 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
       partnerKey: "otr_solutions_factoring",
       partnerRepDesk: "Wade Fenton at OTR Solutions",
       liveBase: "https://www.otrsolutions.com/freight-factoring/",
+      offerSku: "ph_commercial_capital_audit_toolkit",
+      offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
+      offerPriceUsd: 49,
+      offerPriceCents: 4900,
     };
   }
   if (
@@ -2492,6 +2724,10 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
       partnerKey: "ipx1031",
       partnerRepDesk: "IPX1031 Exchange Desk",
       liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+      offerSku: "ph_1031_boot_replacement_workpapers",
+      offerTitle: "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit",
+      offerPriceUsd: 79,
+      offerPriceCents: 7900,
     };
   }
   if (
@@ -2510,6 +2746,10 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
       partnerKey: "crest_capital",
       partnerRepDesk: "Aaron Rosenthal at E-file and Xendoo Commercial Tax Desk",
       liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+      offerSku: "ph_commercial_capital_audit_toolkit",
+      offerTitle: "ProfitHelm Commercial Capital & Section 179 Depreciation Workpapers",
+      offerPriceUsd: 49,
+      offerPriceCents: 4900,
     };
   }
   return {
@@ -2518,6 +2758,10 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
     partnerKey: reqPartner || "turbotax",
     partnerRepDesk: "Aaron Rosenthal at E-file and OTR Solutions Commercial Desk",
     liveBase: "https://www.jdoqocy.com/click-101906407-11917161",
+    offerSku: "ph_statutory_tax_audit_workpapers",
+    offerTitle: "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite",
+    offerPriceUsd: 49,
+    offerPriceCents: 4900,
   };
 }
 
@@ -2529,6 +2773,125 @@ function deriveCapitalBand(amount) {
   return "under_50k";
 }
 
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec) {
+  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  if (!stripeKey || typeof fetch !== "function") {
+    return {
+      offer_sku: spec.offerSku,
+      offer_title: spec.offerTitle,
+      offer_price_usd: spec.offerPriceUsd,
+      checkout_url: fallbackUrl,
+      checkout_session_id: `cs_edge_${leadId}`,
+      checkout_mode: "edge_checkout_rail",
+    };
+  }
+  try {
+    const params = new URLSearchParams({
+      mode: "payment",
+      "payment_method_types[0]": "card",
+      customer_email: email,
+      client_reference_id: leadId,
+      success_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}`,
+      cancel_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}`,
+      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][unit_amount]": String(spec.offerPriceCents),
+      "line_items[0][price_data][product_data][name]": spec.offerTitle,
+      "line_items[0][quantity]": "1",
+      "metadata[lead_id]": leadId,
+      "metadata[property_id]": "profithelm",
+      "metadata[tool_slug]": toolSlug,
+      "metadata[offer_sku]": spec.offerSku,
+    });
+    const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${stripeKey}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+    const data = await resp.json();
+    if (resp.ok && data && data.url) {
+      return {
+        offer_sku: spec.offerSku,
+        offer_title: spec.offerTitle,
+        offer_price_usd: spec.offerPriceUsd,
+        checkout_url: data.url,
+        checkout_session_id: data.id || `cs_live_${leadId}`,
+        checkout_mode: "stripe_live_session",
+      };
+    }
+  } catch (_) {}
+  return {
+    offer_sku: spec.offerSku,
+    offer_title: spec.offerTitle,
+    offer_price_usd: spec.offerPriceUsd,
+    checkout_url: fallbackUrl,
+    checkout_session_id: `cs_edge_${leadId}`,
+    checkout_mode: "edge_checkout_rail",
+  };
+}
+
+async function dispatchEdgeZeptoMailPlaybook(env, record) {
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+    : "";
+  if (!zeptoToken || typeof fetch !== "function") {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: null,
+    };
+  }
+  const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
+  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
+  const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
+  const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+  const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+    `<h2>Your ProfitHelm Statutory Calculation Worksheet &amp; Compliance Briefing</h2>` +
+    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
+    `<p>Model Amount: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
+    `<p><a href="https://profithelm.com${record.redirect_url}">Access Matched Commercial Desk (${record.partner_rep_desk || "ProfitHelm Partner Desk"})</a></p>` +
+    `<p><a href="https://profithelm.com${record.checkout_url}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `</div>`;
+  try {
+    const resp = await fetch(`${apiBase}/email`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({
+        from: { address: fromEmail, name: fromName },
+        to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+        subject: `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`,
+        htmlbody: htmlBody,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      return {
+        zeptomail_dispatched: true,
+        zeptomail_status: "sent_edge_zeptomail",
+        zeptomail_request_id: data.request_id || "ok",
+      };
+    }
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: (data && data.error && data.error.request_id) || null,
+    };
+  } catch (_) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: null,
+    };
+  }
+}
+
 export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -2536,6 +2899,24 @@ export async function onRequestOptions() {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL(request.url);
+  if (reqUrl.searchParams.get("checkout") === "1") {
+    const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
+    const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
+    const toolSlug = reqUrl.searchParams.get("tool_slug") || "section-1031-calculator";
+    const spec = resolveVerticalAndThreshold(toolSlug, "");
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        status: "checkout_session_ready",
+        property_id: "profithelm",
+        lead_id: leadId,
+        ...offer,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
   const kv = getLeadsKv(env);
@@ -2571,8 +2952,16 @@ export async function onRequestGet(context) {
     }
   }
 
+  const summary = {
+    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
+    playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
+    zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
+    checkout_offers_count: leads.filter((l) => Boolean(l.checkout_url)).length,
+    action_bus_dispatched_count: leads.filter((l) => Boolean(l.action_bus_dispatched)).length,
+  };
+
   return new Response(
-    JSON.stringify({ ok: true, success: true, property_id: "profithelm", count: leads.length, leads }),
+    JSON.stringify({ ok: true, success: true, property_id: "profithelm", count: leads.length, summary, leads }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
 }
@@ -2582,10 +2971,12 @@ export async function onRequestPost(context) {
     const { request, env } = context;
     const body = await request.json();
     const email = (body.email || "").trim().toLowerCase();
-    const toolSlug = String(body.tool_slug || "general")
+    const rawSlug = String(body.tool_slug || body.source || "general")
       .trim()
       .toLowerCase()
-      .replace(/^\\/+|\\/+$/g, "");
+      .replace(/^\\/+|\\/+$/g, "")
+      .replace(/^tools\\//, "");
+    const toolSlug = rawSlug || "general";
     const reqPartner = String(body.partner_key || "").trim().toLowerCase();
     const spec = resolveVerticalAndThreshold(toolSlug, reqPartner);
 
@@ -2603,9 +2994,38 @@ export async function onRequestPost(context) {
         );
       }
       const ts = new Date().toISOString();
+      const randSuffix = Math.random().toString(36).slice(2, 10);
+      const leadId = `lead_profithelm_${Date.now()}_${randSuffix}`;
+      const redirectUrl = `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
+      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec);
+      const playbookRecord = {
+        lead_id: leadId,
+        property_id: "profithelm",
+        lead_type: "playbook_subscription",
+        lifecycle_stage: "playbook_subscribed",
+        tool_slug: toolSlug,
+        vertical: spec.vertical,
+        email,
+        calculated_amount: 0,
+        threshold_usd: spec.thresholdUsd,
+        partner_key: spec.partnerKey,
+        partner_rep_desk: spec.partnerRepDesk,
+        redirect_url: redirectUrl,
+        monetization_strategy: "playbook_to_toolkit_checkout",
+        ...checkoutOffer,
+        captured_at: ts,
+      };
+      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord);
+      Object.assign(playbookRecord, emailDispatch);
+
+      const buf = getMemoryBuffer();
+      buf.unshift(playbookRecord);
+      if (buf.length > 250) buf.length = 250;
+
       const kv = getLeadsKv(env);
       if (kv && typeof kv.put === "function") {
-        await kv.put(`lead:${toolSlug}:${email}`, JSON.stringify({ email, toolSlug, ts }), {
+        await kv.put(leadId, JSON.stringify(playbookRecord), { expirationTtl: 90 * 86400 });
+        await kv.put(`lead:${toolSlug}:${email}`, JSON.stringify(playbookRecord), {
           expirationTtl: 90 * 86400,
         });
       }
@@ -2614,8 +3034,9 @@ export async function onRequestPost(context) {
           ok: true,
           success: true,
           status: "playbook_subscribed",
+          persisted: true,
           message: "Your custom calculation worksheet and compliance checklist have been queued.",
-          redirect_url: `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}`,
+          ...playbookRecord,
         }),
         { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
@@ -2689,10 +3110,13 @@ export async function onRequestPost(context) {
     const redirectUrl = `/r/${spec.partnerKey}?${qs}`;
     const liveDestinationUrl = `${spec.liveBase}${spec.liveBase.includes("?") ? "&" : "?"}${qs}`;
     const actionBusDispatched = calculatedAmount >= 100000;
+    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec);
 
     const record = {
       lead_id: leadId,
       property_id: "profithelm",
+      lead_type: "qualified_quote",
+      lifecycle_stage: "captured",
       tool_slug: toolSlug,
       vertical: spec.vertical,
       email,
@@ -2706,8 +3130,13 @@ export async function onRequestPost(context) {
       redirect_url: redirectUrl,
       live_destination_url: liveDestinationUrl,
       action_bus_dispatched: actionBusDispatched,
+      monetization_strategy: "dual_partner_and_checkout",
+      ...checkoutOffer,
       captured_at: ts,
     };
+
+    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record);
+    Object.assign(record, emailDispatch);
 
     const buf = getMemoryBuffer();
     buf.unshift(record);

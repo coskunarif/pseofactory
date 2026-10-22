@@ -1881,7 +1881,59 @@ def build_parser() -> argparse.ArgumentParser:
     p_cr.add_argument("--dry-run", action="store_true", help="Evaluate cohort reflection without persisting ledger or propagating winning patterns")
     p_cr.add_argument("--json", action="store_true", help="Output cohort reflection report as structured JSON")
 
+    p_lm = subparsers.add_parser(
+        "lead-monitor",
+        help="Monitor captured leads, sync edge KV endpoints to local ledger, dispatch transactional playbooks, and verify Stripe Checkout readiness",
+    )
+    p_lm.add_argument("--property", "--tenant", dest="property", type=str, default=None, help="Filter by property ID (profithelm or prexvo)")
+    p_lm.add_argument("--sync-edge", action="store_true", help="Pull live captured leads from Cloudflare Pages edge /api/lead-capture endpoints")
+    p_lm.add_argument("--fulfill", action="store_true", help="Dispatch transactional playbook emails for unfulfilled leads")
+    p_lm.add_argument("--recipient-override", type=str, default=None, help="Override recipient email address for live fulfillment verification")
+    p_lm.add_argument("--verify-providers", action="store_true", help="Execute live provider probes against ZeptoMail/Zoho Mail and Stripe Checkout APIs")
+    p_lm.add_argument("--json", action="store_true", help="Output lead monitoring report as structured JSON")
+
     return parser
+
+
+def cmd_lead_monitor(args: argparse.Namespace) -> int:
+    """
+    Monitors captured leads across ProfitHelm and Prexvo, synchronizes live Cloudflare edge
+    `/api/lead-capture` records into `.agy/captured_leads.jsonl`, fulfills transactional
+    playbooks, and verifies live ZeptoMail/Zoho Mail and Stripe Checkout session readiness.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.partner_tracker import (
+        sync_edge_leads_to_ledger,
+        get_lead_monitoring_summary,
+    )
+
+    sync_report = None
+    if getattr(args, "sync_edge", False):
+        sync_report = sync_edge_leads_to_ledger(
+            auto_fulfill_unfulfilled=bool(getattr(args, "fulfill", False)),
+            fulfill_recipient_override=getattr(args, "recipient_override", None),
+        )
+
+    summary = get_lead_monitoring_summary(
+        property_id=getattr(args, "property", None),
+        verify_live_providers=bool(getattr(args, "verify_providers", False)),
+    )
+    if sync_report is not None:
+        summary["edge_sync"] = sync_report
+
+    if getattr(args, "json", False):
+        print(json.dumps(summary, indent=2))
+    else:
+        print(
+            f"[PASS] Lead Monitor: total={summary['total_leads']} | "
+            f"profithelm={summary['by_property'].get('profithelm', 0)} | "
+            f"prexvo={summary['by_property'].get('prexvo', 0)} | "
+            f"fulfilled={summary['transactional_fulfilled_count']} | "
+            f"action_bus={summary['action_bus_dispatched_count']} | "
+            f"pipeline_usd=${summary['total_pipeline_calculated_usd']:,.2f} | "
+            f"checkout_offers_usd=${summary['total_checkout_offer_pipeline_usd']:,.2f}"
+        )
+    return 0
 
 
 def cmd_north_star(args: argparse.Namespace) -> int:
@@ -2059,6 +2111,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_north_star(args)
     elif args.command == "cohort-reflection":
         return cmd_cohort_reflection(args)
+    elif args.command == "lead-monitor":
+        return cmd_lead_monitor(args)
     else:
         parser.print_help()
         return 1

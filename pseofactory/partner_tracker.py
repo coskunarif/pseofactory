@@ -17,12 +17,14 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import re
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Set
+from urllib.parse import urlencode
 
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.affiliates import (
@@ -2346,9 +2348,18 @@ class PartnerTrackingEngine:
             "capital band, and calculated amount) with matched institutional lending, tax, or exchange partners."
         )
 
+        monetization_offer = resolve_lead_monetization_offer(
+            property_id=prop_clean,
+            tool_slug=slug_clean,
+            vertical=eff_vertical,
+            lead_id=lead_id,
+        )
+
         lead_record: Dict[str, Any] = {
             "lead_id": lead_id,
             "property_id": prop_clean,
+            "lead_type": "qualified_quote",
+            "lifecycle_stage": "captured",
             "tool_slug": slug_clean,
             "vertical": eff_vertical,
             "email": email_clean,
@@ -2362,6 +2373,14 @@ class PartnerTrackingEngine:
             "partner_rep_desk": eval_info["partner_rep_desk"],
             "redirect_url": edge_redirect_url,
             "live_destination_url": live_destination_url,
+            "monetization_strategy": "dual_partner_and_checkout",
+            "offer_sku": monetization_offer["offer_sku"],
+            "offer_title": monetization_offer["offer_title"],
+            "offer_price_usd": monetization_offer["offer_price_usd"],
+            "checkout_url": monetization_offer["checkout_url"],
+            "checkout_session_id": monetization_offer["checkout_session_id"],
+            "checkout_mode": monetization_offer["checkout_mode"],
+            "fulfillment_status": "ready_for_dispatch",
             "traffic_source": traffic_source,
             "captured_at": now_iso,
         }
@@ -2397,6 +2416,8 @@ class PartnerTrackingEngine:
             "frictionless_mode": False,
             "lead_id": lead_id,
             "property_id": prop_clean,
+            "lead_type": "qualified_quote",
+            "lifecycle_stage": "captured",
             "tool_slug": slug_clean,
             "vertical": eff_vertical,
             "email": email_clean,
@@ -2409,9 +2430,135 @@ class PartnerTrackingEngine:
             "partner_rep_desk": eval_info["partner_rep_desk"],
             "redirect_url": edge_redirect_url,
             "live_destination_url": live_destination_url,
+            "monetization_strategy": "dual_partner_and_checkout",
+            "offer_sku": monetization_offer["offer_sku"],
+            "offer_title": monetization_offer["offer_title"],
+            "offer_price_usd": monetization_offer["offer_price_usd"],
+            "checkout_url": monetization_offer["checkout_url"],
+            "checkout_session_id": monetization_offer["checkout_session_id"],
+            "checkout_mode": monetization_offer["checkout_mode"],
             "action_bus_dispatched": action_item is not None,
             "action_bus_item_id": action_item.action_id if action_item else None,
             "ledger_path": eff_ledger,
+        }
+
+    def ingest_playbook_subscription(
+        self,
+        property_id: str,
+        tool_slug: str,
+        email: str,
+        calculated_amount: float = 0.0,
+        traffic_source: str = "playbook_lead_magnet",
+        leads_ledger_path: Optional[Any] = None,
+        auto_dispatch_email: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Ingests a first-party regulatory playbook or calculation worksheet subscription,
+        attaches a programmable Stripe Checkout upgrade offer, persists the lead with a
+        canonical `lead_<property>_*` ID to `.agy/captured_leads.jsonl`, and optionally
+        dispatches the transactional playbook email via ZeptoMail / Zoho Mail failover.
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.affiliates import is_restricted_public_service_slug
+
+        prop_clean = (property_id or "profithelm").strip().lower()
+        if prop_clean not in ("profithelm", "prexvo"):
+            raise ValueError(f"Unsupported property_id '{property_id}'.")
+        slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
+        if slug_clean.startswith("tools/"):
+            slug_clean = slug_clean[len("tools/"):]
+
+        if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
+            raise ValueError(
+                f"Restricted public-service asset '{slug_clean}' cannot capture commercial student loan refinance leads."
+            )
+
+        email_clean = (email or "").strip().lower()
+        if not email_clean or "@" not in email_clean or "." not in email_clean.split("@", 1)[-1]:
+            raise ValueError("A valid email address is required for playbook subscription.")
+
+        eval_info = evaluate_lead_quote_threshold(
+            property_id=prop_clean,
+            tool_slug=slug_clean if slug_clean not in {"general", "index", "about", "privacy"} else (
+                "student-loan-refinance-break-even-calculator" if prop_clean == "prexvo" else "section-1031-calculator"
+            ),
+            calculated_amount=calculated_amount,
+        )
+        eff_vertical = eval_info["vertical"]
+        eff_partner_key = eval_info["primary_partner_key"] or (
+            "splash_financial" if prop_clean == "prexvo" else "turbotax"
+        )
+        amount_val = max(0.0, float(calculated_amount or 0.0))
+        now_iso = datetime.now(timezone.utc).isoformat()
+        digest = hashlib.sha256(
+            f"playbook:{prop_clean}:{slug_clean}:{email_clean}:{int(round(amount_val))}".encode("utf-8")
+        ).hexdigest()[:12]
+        lead_id = f"lead_{prop_clean}_{digest}"
+
+        monetization_offer = resolve_lead_monetization_offer(
+            property_id=prop_clean,
+            tool_slug=slug_clean,
+            vertical=eff_vertical,
+            lead_id=lead_id,
+        )
+        redirect_url = (
+            f"/r/{eff_partner_key}?source={slug_clean}&slot=playbook_subscription&lead_id={lead_id}"
+        )
+
+        record: Dict[str, Any] = {
+            "lead_id": lead_id,
+            "property_id": prop_clean,
+            "lead_type": "playbook_subscription",
+            "lifecycle_stage": "playbook_subscribed",
+            "tool_slug": slug_clean,
+            "vertical": eff_vertical,
+            "email": email_clean,
+            "calculated_amount": amount_val,
+            "threshold_usd": float(eval_info["threshold_usd"] or 50000.0),
+            "partner_key": eff_partner_key,
+            "partner_rep_desk": eval_info["partner_rep_desk"],
+            "redirect_url": redirect_url,
+            "monetization_strategy": "playbook_to_toolkit_checkout",
+            "offer_sku": monetization_offer["offer_sku"],
+            "offer_title": monetization_offer["offer_title"],
+            "offer_price_usd": monetization_offer["offer_price_usd"],
+            "checkout_url": monetization_offer["checkout_url"],
+            "checkout_session_id": monetization_offer["checkout_session_id"],
+            "checkout_mode": monetization_offer["checkout_mode"],
+            "fulfillment_status": "ready_for_dispatch",
+            "traffic_source": traffic_source,
+            "captured_at": now_iso,
+        }
+
+        if auto_dispatch_email:
+            dispatch_res = dispatch_transactional_playbook(
+                lead_record=record,
+                execute_live=True,
+                allow_zoho_failover=True,
+            )
+            record["zeptomail_dispatched"] = dispatch_res["dispatched"]
+            record["zeptomail_status"] = dispatch_res["status"]
+            record["zeptomail_request_id"] = dispatch_res.get("zeptomail_request_id")
+            record["email_provider"] = dispatch_res.get("provider")
+            record["email_message_id"] = dispatch_res.get("message_id")
+            if dispatch_res["dispatched"]:
+                record["lifecycle_stage"] = "fulfilled"
+                record["fulfillment_status"] = "dispatched"
+
+        eff_ledger = (
+            str(leads_ledger_path)
+            if leads_ledger_path
+            else os.path.join(os.path.dirname(__file__), "..", ".agy", "captured_leads.jsonl")
+        )
+        os.makedirs(os.path.dirname(os.path.abspath(eff_ledger)), exist_ok=True)
+        with open(eff_ledger, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+
+        return {
+            "status": "playbook_subscribed",
+            "persisted": True,
+            "ledger_path": eff_ledger,
+            **record,
         }
 
     def get_captured_leads(
@@ -2419,7 +2566,7 @@ class PartnerTrackingEngine:
         property_id: Optional[str] = None,
         leads_ledger_path: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
-        """Reads persisted CPL lead records from `.agy/captured_leads.jsonl`."""
+        """Reads persisted CPL and playbook lead records from `.agy/captured_leads.jsonl`."""
         eff_ledger = (
             str(leads_ledger_path)
             if leads_ledger_path
@@ -2443,6 +2590,759 @@ class PartnerTrackingEngine:
                 except Exception:
                     continue
         return records
+
+
+def resolve_lead_monetization_offer(
+    property_id: str,
+    tool_slug: str,
+    vertical: str = "",
+    lead_id: str = "",
+) -> Dict[str, Any]:
+    """
+    Resolves the tenant-isolated first-party Stripe Checkout monetization offer for a given
+    calculator slug and vertical. Uses one-time programmable Checkout packages (statutory workpapers
+    and decision audit toolkits) rather than complex recurring CRM billing to maximize immediate
+    conversion and eliminate subscription churn friction.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import is_restricted_public_service_slug
+
+    prop_clean = (property_id or "profithelm").strip().lower()
+    slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
+    vert_clean = (vertical or "").strip().lower()
+    eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
+
+    if prop_clean == "prexvo":
+        if is_restricted_public_service_slug(slug_clean, slug_clean):
+            raise ValueError(
+                f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
+            )
+        offer_sku = "px_refi_amortization_decision_audit"
+        offer_title = "Prexvo Private Refinance vs Federal Protections Decision Audit Kit"
+        offer_price_usd = 39.0
+        offer_price_cents = 3900
+        canonical_domain = "https://prexvo.com"
+        tool_path = f"/{slug_clean}/" if slug_clean != "index" else "/"
+    else:
+        if "1031" in slug_clean or "1031" in vert_clean or "exchange" in slug_clean:
+            offer_sku = "ph_1031_boot_replacement_workpapers"
+            offer_title = "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit"
+            offer_price_usd = 79.0
+            offer_price_cents = 7900
+        elif any(t in slug_clean or t in vert_clean for t in ("factoring", "invoice", "179", "equipment", "capex")):
+            offer_sku = "ph_commercial_capital_audit_toolkit"
+            offer_title = "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers"
+            offer_price_usd = 49.0
+            offer_price_cents = 4900
+        else:
+            offer_sku = "ph_statutory_tax_audit_workpapers"
+            offer_title = "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite"
+            offer_price_usd = 49.0
+            offer_price_cents = 4900
+        canonical_domain = "https://profithelm.com"
+        tool_path = f"/tools/{slug_clean}/" if slug_clean not in ("index", "general") else "/"
+
+    assert_no_forbidden_dashes(offer_title, context="offer_title")
+    checkout_query = urlencode(
+        {
+            "checkout": "1",
+            "lead_id": eff_lead_id,
+            "sku": offer_sku,
+            "tool_slug": slug_clean,
+        }
+    )
+    checkout_url = f"/api/lead-capture?{checkout_query}"
+    return {
+        "property_id": prop_clean,
+        "tool_slug": slug_clean,
+        "offer_sku": offer_sku,
+        "offer_title": offer_title,
+        "offer_price_usd": offer_price_usd,
+        "offer_price_cents": offer_price_cents,
+        "currency": "usd",
+        "billing_mode": "payment",
+        "checkout_url": checkout_url,
+        "live_checkout_endpoint": f"{canonical_domain}{checkout_url}",
+        "checkout_session_id": f"cs_edge_{eff_lead_id}",
+        "checkout_mode": "edge_checkout_rail",
+        "success_url": f"{canonical_domain}{tool_path}?checkout_status=success&lead_id={eff_lead_id}",
+        "cancel_url": f"{canonical_domain}{tool_path}?checkout_status=cancelled&lead_id={eff_lead_id}",
+    }
+
+
+def _load_stripe_credentials() -> Dict[str, str]:
+    """
+    Loads Stripe credentials from environment variables or `~/.config/stripe/config.toml`.
+    """
+    creds: Dict[str, str] = {
+        "account_id": os.environ.get("STRIPE_ACCOUNT_ID", "acct_1T6fSTIq0ckFsf5j"),
+        "secret_key": os.environ.get("STRIPE_SECRET_KEY", "").strip(),
+        "publishable_key": os.environ.get("STRIPE_PUBLISHABLE_KEY", "").strip(),
+        "source": "environment" if os.environ.get("STRIPE_SECRET_KEY") else "stripe_cli_config",
+    }
+    cfg_path = os.path.expanduser("~/.config/stripe/config.toml")
+    if os.path.isfile(cfg_path):
+        try:
+            import tomllib
+            with open(cfg_path, "rb") as fh:
+                parsed = tomllib.load(fh)
+            def_sec = parsed.get("default", {}) or {}
+            if def_sec.get("account_id"):
+                creds["account_id"] = str(def_sec["account_id"])
+            if not creds["publishable_key"]:
+                creds["publishable_key"] = str(
+                    def_sec.get("live_mode_pub_key") or def_sec.get("test_mode_pub_key") or ""
+                )
+            if not creds["secret_key"]:
+                raw_live = str(def_sec.get("live_mode_api_key") or "")
+                raw_test = str(def_sec.get("test_mode_api_key") or "")
+                if raw_live and "*" not in raw_live:
+                    creds["secret_key"] = raw_live
+                elif raw_test and "*" not in raw_test:
+                    creds["secret_key"] = raw_test
+            creds["key_expires_at"] = str(
+                def_sec.get("live_mode_key_expires_at") or def_sec.get("test_mode_key_expires_at") or ""
+            )
+        except Exception:
+            pass
+    return creds
+
+
+def create_stripe_checkout_session(
+    property_id: str,
+    tool_slug: str,
+    customer_email: str,
+    lead_id: str = "",
+    vertical: str = "",
+    execute_live: bool = False,
+    stripe_secret_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Creates or validates a programmable Stripe Checkout Session (`POST /v1/checkout/sessions`)
+    for the tenant's statutory workpaper or decision audit toolkit.
+    When `execute_live=True`, calls `https://api.stripe.com/v1/checkout/sessions` and records
+    the real Stripe provider response (HTTP 200 session `id`/`url` or exact provider error code
+    such as `api_key_expired`), while guaranteeing a deterministic edge checkout fallback rail.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.request
+    import urllib.error
+
+    prop_clean = (property_id or "profithelm").strip().lower()
+    slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
+    email_clean = (customer_email or "").strip().lower()
+    if not email_clean or "@" not in email_clean:
+        raise ValueError("A valid customer_email is required to create a Stripe Checkout session.")
+
+    eff_lead_id = (lead_id or f"lead_{prop_clean}_{hashlib.sha256(email_clean.encode()).hexdigest()[:10]}").strip()
+    offer = resolve_lead_monetization_offer(
+        property_id=prop_clean,
+        tool_slug=slug_clean,
+        vertical=vertical,
+        lead_id=eff_lead_id,
+    )
+    creds = _load_stripe_credentials()
+    eff_key = (stripe_secret_key if stripe_secret_key is not None else creds.get("secret_key", "")).strip()
+
+    form_params = {
+        "mode": "payment",
+        "payment_method_types[0]": "card",
+        "customer_email": email_clean,
+        "client_reference_id": eff_lead_id,
+        "success_url": offer["success_url"],
+        "cancel_url": offer["cancel_url"],
+        "line_items[0][price_data][currency]": offer["currency"],
+        "line_items[0][price_data][unit_amount]": str(offer["offer_price_cents"]),
+        "line_items[0][price_data][product_data][name]": offer["offer_title"],
+        "line_items[0][quantity]": "1",
+        "metadata[lead_id]": eff_lead_id,
+        "metadata[property_id]": prop_clean,
+        "metadata[tool_slug]": slug_clean,
+        "metadata[offer_sku]": offer["offer_sku"],
+    }
+
+    result: Dict[str, Any] = {
+        "property_id": prop_clean,
+        "tool_slug": slug_clean,
+        "lead_id": eff_lead_id,
+        "customer_email": email_clean,
+        "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
+        "stripe_publishable_key_present": bool(creds.get("publishable_key")),
+        "offer_sku": offer["offer_sku"],
+        "offer_title": offer["offer_title"],
+        "offer_price_usd": offer["offer_price_usd"],
+        "offer_price_cents": offer["offer_price_cents"],
+        "billing_mode": "payment",
+        "checkout_url": offer["checkout_url"],
+        "live_checkout_endpoint": offer["live_checkout_endpoint"],
+        "checkout_session_id": offer["checkout_session_id"],
+        "checkout_mode": "edge_checkout_rail",
+        "request_payload": form_params,
+        "provider_called": False,
+        "provider_http_status": None,
+        "provider_error_code": None,
+        "provider_message": None,
+    }
+
+    if execute_live and eff_key:
+        result["provider_called"] = True
+        req = urllib.request.Request(
+            "https://api.stripe.com/v1/checkout/sessions",
+            data=urlencode(form_params).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {eff_key}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body_data = json.loads(resp.read().decode("utf-8"))
+                result["provider_http_status"] = resp.status
+                if body_data.get("url"):
+                    result["checkout_url"] = str(body_data["url"])
+                if body_data.get("id"):
+                    result["checkout_session_id"] = str(body_data["id"])
+                result["checkout_mode"] = "stripe_live_session"
+                result["provider_message"] = "Stripe Checkout Session created."
+        except urllib.error.HTTPError as exc:
+            result["provider_http_status"] = exc.code
+            raw_err = exc.read().decode("utf-8", errors="ignore")
+            try:
+                err_json = json.loads(raw_err).get("error", {})
+                result["provider_error_code"] = err_json.get("code") or err_json.get("type")
+                result["provider_message"] = err_json.get("message")
+            except Exception:
+                result["provider_error_code"] = f"http_{exc.code}"
+                result["provider_message"] = raw_err[:240]
+        except Exception as exc:
+            result["provider_error_code"] = "network_error"
+            result["provider_message"] = str(exc)
+
+    return result
+
+
+def _load_email_engine_credentials() -> Dict[str, str]:
+    """
+    Loads ZeptoMail v1.1 and Nango/Zoho Mail OAuth credentials from environment variables or
+    `/home/ubuntuadmin/projects/arif-cli/social/email-engine/.env`.
+    """
+    env_map: Dict[str, str] = {}
+    env_file = "/home/ubuntuadmin/projects/arif-cli/social/email-engine/.env"
+    if os.path.isfile(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#") or "=" not in stripped:
+                        continue
+                    k, v = stripped.split("=", 1)
+                    env_map[k.strip()] = v.strip().strip('"').strip("'")
+        except Exception:
+            pass
+    for key in (
+        "ZEPTOMAIL_TOKEN",
+        "ZEPTO_TOKEN_DEFAULT",
+        "ZEPTO_API_BASE",
+        "ZEPTOMAIL_FROM_EMAIL",
+        "ZEPTOMAIL_FROM_NAME",
+        "NANGO_CONNECTION_ID",
+        "NANGO_INTEGRATION_ID",
+        "NANGO_BASE_URL",
+        "NANGO_SECRET_KEY",
+    ):
+        if os.environ.get(key):
+            env_map[key] = os.environ[key].strip()
+    return env_map
+
+
+def render_transactional_playbook_email(lead_record: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Renders a strictly tenant-isolated, zero-em-dash, zero-en-dash HTML and plain-text
+    transactional playbook email for ProfitHelm or Prexvo leads.
+    """
+    prop_clean = str(lead_record.get("property_id", "profithelm")).strip().lower()
+    tool_slug = str(lead_record.get("tool_slug", "general")).strip().lower()
+    lead_id = str(lead_record.get("lead_id", f"lead_{prop_clean}_preview"))
+    email = str(lead_record.get("email", "recipient@example.com"))
+    amount_val = float(lead_record.get("calculated_amount") or 0.0)
+    capital_band = str(lead_record.get("capital_band") or "standard")
+    state_code = str(lead_record.get("state") or "US")
+    offer = resolve_lead_monetization_offer(
+        property_id=prop_clean,
+        tool_slug=tool_slug,
+        vertical=str(lead_record.get("vertical") or ""),
+        lead_id=lead_id,
+    )
+    offer_title = str(lead_record.get("offer_title") or offer["offer_title"])
+    offer_price = float(lead_record.get("offer_price_usd") or offer["offer_price_usd"])
+    checkout_endpoint = offer["live_checkout_endpoint"]
+
+    if prop_clean == "prexvo":
+        brand_name = "Prexvo Research Desk"
+        domain_base = "https://prexvo.com"
+        partner_desk = str(lead_record.get("partner_rep_desk") or "Splash Financial Partner Desk")
+        redirect_path = str(lead_record.get("redirect_url") or f"/r/splash_financial?source={tool_slug}")
+        partner_url = f"{domain_base}{redirect_path}" if redirect_path.startswith("/") else redirect_path
+        subject = f"[Prexvo Playbook] Your Student Loan Refinance Worksheet ({tool_slug})"
+        checklist_items = [
+            "Verify weighted average interest rate across all federal and private loan tranches.",
+            "Compare private refinance APR savings against federal IDR and PSLF forgiveness trade-offs.",
+            "Review state-specific borrower protections and cosigner release milestones before locking rates.",
+        ]
+    else:
+        brand_name = "ProfitHelm Statutory Research Desk"
+        domain_base = "https://profithelm.com"
+        partner_desk = str(lead_record.get("partner_rep_desk") or "ProfitHelm Commercial Partner Desk")
+        redirect_path = str(lead_record.get("redirect_url") or f"/r/turbotax?source={tool_slug}")
+        partner_url = f"{domain_base}{redirect_path}" if redirect_path.startswith("/") else redirect_path
+        subject = f"[ProfitHelm Playbook] Your Statutory Calculation Worksheet & Checklist ({tool_slug})"
+        checklist_items = [
+            "Lock baseline calculation inputs and preserve timestamped workpaper assumptions for audit readiness.",
+            "Verify statutory phase-out thresholds, state conformity adjustments, and filing deadlines.",
+            "Compare institutional financing or exchange desk structures before executing binding agreements.",
+        ]
+
+    li_html = "".join(f"<li style='margin-bottom:6px;'>{item}</li>" for item in checklist_items)
+    html_body = (
+        "<div style='font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:0 auto;"
+        "padding:24px;border:1px solid #e2e8f0;border-radius:8px;color:#0f172a;line-height:1.6;'>"
+        f"<div style='font-size:12px;font-weight:700;text-transform:uppercase;color:#1d4ed8;letter-spacing:0.05em;'>"
+        f"{brand_name}</div>"
+        f"<h2 style='margin:8px 0 12px;font-size:20px;color:#0f172a;'>Your Calculation Worksheet &amp; Action Plan</h2>"
+        f"<p style='margin:0 0 12px;font-size:14px;color:#334155;'>"
+        f"Reference ID: <strong>{lead_id}</strong> | Scenario Tool: <strong>{tool_slug}</strong> | "
+        f"Jurisdiction: <strong>{state_code}</strong> | Model Amount: <strong>${amount_val:,.2f}</strong> "
+        f"(Band: <strong>{capital_band}</strong>)</p>"
+        "<h3 style='font-size:15px;margin:16px 0 8px;color:#0f172a;'>Mandatory Verification Checklist</h3>"
+        f"<ul style='margin:0 0 16px;padding-left:20px;font-size:14px;color:#334155;'>{li_html}</ul>"
+        "<div style='background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;padding:16px;margin-bottom:16px;'>"
+        f"<div style='font-size:14px;font-weight:700;color:#0f172a;margin-bottom:6px;'>"
+        f"Step 1: Direct Audit Workpaper Toolkit (${offer_price:.0f} One-Time)</div>"
+        f"<p style='margin:0 0 10px;font-size:13px;color:#475569;'>{offer_title}</p>"
+        f"<a href='{checkout_endpoint}' style='display:inline-block;background:#1d4ed8;color:#ffffff;"
+        "text-decoration:none;padding:10px 16px;border-radius:6px;font-size:13px;font-weight:600;'>"
+        f"Unlock Audit Toolkit (${offer_price:.0f})</a>"
+        "</div>"
+        "<div style='background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:16px;'>"
+        f"<div style='font-size:14px;font-weight:700;color:#166534;margin-bottom:6px;'>"
+        f"Step 2: Matched Institutional Partner Desk ({partner_desk})</div>"
+        f"<a href='{partner_url}' style='display:inline-block;background:#15803d;color:#ffffff;"
+        "text-decoration:none;padding:10px 16px;border-radius:6px;font-size:13px;font-weight:600;'>"
+        "Proceed to Matched Partner Desk</a>"
+        "</div>"
+        "</div>"
+    )
+    text_body = (
+        f"{brand_name}\n"
+        f"Reference ID: {lead_id} | Scenario Tool: {tool_slug} | Jurisdiction: {state_code} | "
+        f"Model Amount: ${amount_val:,.2f} (Band: {capital_band})\n\n"
+        "Mandatory Verification Checklist:\n"
+        + "\n".join(f"- {item}" for item in checklist_items)
+        + f"\n\nStep 1: {offer_title} (${offer_price:.0f}): {checkout_endpoint}\n"
+        + f"Step 2: Matched Partner Desk ({partner_desk}): {partner_url}\n"
+    )
+
+    assert_no_forbidden_dashes(subject, context="playbook_email_subject")
+    assert_no_forbidden_dashes(html_body, context="playbook_email_html")
+    assert_no_forbidden_dashes(text_body, context="playbook_email_text")
+    return {
+        "subject": subject,
+        "html_body": html_body,
+        "text_body": text_body,
+        "recipient_email": email,
+        "checkout_endpoint": checkout_endpoint,
+        "partner_url": partner_url,
+    }
+
+
+def dispatch_transactional_playbook(
+    lead_record: Dict[str, Any],
+    execute_live: bool = True,
+    allow_zoho_failover: bool = True,
+    recipient_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Dispatches the transactional calculation worksheet and compliance playbook email.
+    Primary Rail: ZeptoMail v1.1 REST API (`https://api.zeptomail.com/v1.1/email`).
+    Automatic Verified Failover Rail: Zoho Mail REST API (`https://mail.zoho.com/api/accounts/.../messages`
+    via Nango OAuth) when ZeptoMail returns `SM_111` (sender domain awaiting DKIM re-verification).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.request
+    import urllib.error
+
+    rendered = render_transactional_playbook_email(lead_record)
+    target_email = (recipient_override or rendered["recipient_email"] or "").strip().lower()
+    if not target_email or "@" not in target_email:
+        raise ValueError("A valid recipient email address is required to dispatch transactional playbook.")
+
+    env_creds = _load_email_engine_credentials()
+    zepto_token = (env_creds.get("ZEPTOMAIL_TOKEN") or env_creds.get("ZEPTO_TOKEN_DEFAULT") or "").strip()
+    zepto_base = (env_creds.get("ZEPTO_API_BASE") or "https://api.zeptomail.com/v1.1").rstrip("/")
+    from_email = (env_creds.get("ZEPTOMAIL_FROM_EMAIL") or "arif@profithelm.com").strip()
+    from_name = (env_creds.get("ZEPTOMAIL_FROM_NAME") or "Arif Coskun").strip()
+
+    result: Dict[str, Any] = {
+        "dispatched": False,
+        "status": "queued",
+        "provider": None,
+        "recipient_email": target_email,
+        "from_email": from_email,
+        "subject": rendered["subject"],
+        "zeptomail_attempted": False,
+        "zeptomail_http_status": None,
+        "zeptomail_error_code": None,
+        "zeptomail_request_id": None,
+        "zoho_failover_attempted": False,
+        "zoho_http_status": None,
+        "message_id": None,
+        "mail_id": None,
+    }
+
+    if not execute_live:
+        result["status"] = "dry_run_ready"
+        return result
+
+    if zepto_token:
+        result["zeptomail_attempted"] = True
+        auth_header = zepto_token if zepto_token.startswith("Zoho-enczapikey") else f"Zoho-enczapikey {zepto_token}"
+        zepto_payload = {
+            "from": {"address": from_email, "name": from_name},
+            "to": [{"email_address": {"address": target_email, "name": target_email.split("@")[0]}}],
+            "subject": rendered["subject"],
+            "htmlbody": rendered["html_body"],
+            "textbody": rendered["text_body"],
+        }
+        req = urllib.request.Request(
+            f"{zepto_base}/email",
+            data=json.dumps(zepto_payload).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": auth_header,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                result["zeptomail_http_status"] = resp.status
+                result["zeptomail_request_id"] = resp_data.get("request_id")
+                result["dispatched"] = True
+                result["status"] = "sent_zeptomail"
+                result["provider"] = "zeptomail_v1"
+                result["message_id"] = resp_data.get("request_id")
+                return result
+        except urllib.error.HTTPError as exc:
+            result["zeptomail_http_status"] = exc.code
+            raw_err = exc.read().decode("utf-8", errors="ignore")
+            try:
+                err_obj = json.loads(raw_err).get("error", {})
+                result["zeptomail_request_id"] = err_obj.get("request_id")
+                details = err_obj.get("details") or []
+                detail_code = details[0].get("code") if details and isinstance(details[0], dict) else None
+                result["zeptomail_error_code"] = detail_code or err_obj.get("code")
+            except Exception:
+                result["zeptomail_error_code"] = f"http_{exc.code}"
+        except Exception as exc:
+            result["zeptomail_error_code"] = str(exc)
+
+    if allow_zoho_failover and all(
+        env_creds.get(k) for k in ("NANGO_BASE_URL", "NANGO_CONNECTION_ID", "NANGO_INTEGRATION_ID", "NANGO_SECRET_KEY")
+    ):
+        result["zoho_failover_attempted"] = True
+        try:
+            nango_url = (
+                f"{env_creds['NANGO_BASE_URL'].rstrip('/')}/connection/{env_creds['NANGO_CONNECTION_ID']}"
+                f"?provider_config_key={env_creds['NANGO_INTEGRATION_ID']}&refresh_token=true"
+            )
+            n_req = urllib.request.Request(
+                nango_url,
+                headers={"Authorization": f"Bearer {env_creds['NANGO_SECRET_KEY']}"},
+            )
+            with urllib.request.urlopen(n_req, timeout=15) as n_resp:
+                n_data = json.loads(n_resp.read().decode("utf-8"))
+                access_token = n_data["credentials"]["access_token"]
+
+            acct_req = urllib.request.Request(
+                "https://mail.zoho.com/api/accounts",
+                headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            )
+            with urllib.request.urlopen(acct_req, timeout=15) as a_resp:
+                acct_list = json.loads(a_resp.read().decode("utf-8")).get("data", [])
+                account_id = acct_list[0]["accountId"]
+
+            zoho_payload = {
+                "fromAddress": from_email,
+                "toAddress": target_email,
+                "subject": rendered["subject"],
+                "content": rendered["html_body"],
+                "mailFormat": "html",
+                "askReceipt": "no",
+                "encoding": "UTF-8",
+            }
+            z_req = urllib.request.Request(
+                f"https://mail.zoho.com/api/accounts/{account_id}/messages",
+                data=json.dumps(zoho_payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Zoho-oauthtoken {access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(z_req, timeout=15) as z_resp:
+                z_data = json.loads(z_resp.read().decode("utf-8")).get("data", {})
+                result["zoho_http_status"] = z_resp.status
+                result["dispatched"] = True
+                result["status"] = "sent_zoho_verified_failover"
+                result["provider"] = "zoho_mail_oauth"
+                result["message_id"] = z_data.get("messageId")
+                result["mail_id"] = z_data.get("mailId")
+                return result
+        except Exception as exc:
+            result["status"] = f"failover_error:{exc}"
+
+    return result
+
+
+def sync_edge_leads_to_ledger(
+    leads_ledger_path: Optional[Any] = None,
+    auto_fulfill_unfulfilled: bool = False,
+    fulfill_recipient_override: Optional[str] = None,
+    edge_urls: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Fetches live captured leads from Cloudflare Pages edge endpoints (`/api/lead-capture`)
+    across both ProfitHelm and Prexvo, merges and deduplicates them into `.agy/captured_leads.jsonl`
+    with structured lifecycle and Stripe Checkout fields, and optionally dispatches transactional
+    playbook fulfillment emails for newly synced leads.
+    """
+    import urllib.request
+
+    eff_ledger = (
+        str(leads_ledger_path)
+        if leads_ledger_path
+        else os.path.join(os.path.dirname(__file__), "..", ".agy", "captured_leads.jsonl")
+    )
+    os.makedirs(os.path.dirname(os.path.abspath(eff_ledger)), exist_ok=True)
+
+    existing_records: List[Dict[str, Any]] = []
+    seen_ids: Dict[str, int] = {}
+    if os.path.isfile(eff_ledger):
+        with open(eff_ledger, "r", encoding="utf-8") as fh:
+            for line in fh:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                    if isinstance(rec, dict) and rec.get("lead_id"):
+                        lid = str(rec["lead_id"])
+                        seen_ids[lid] = len(existing_records)
+                        existing_records.append(rec)
+                except Exception:
+                    continue
+
+    urls = edge_urls or {
+        "profithelm": "https://profithelm.com/api/lead-capture",
+        "prexvo": "https://prexvo.com/api/lead-capture",
+    }
+    edge_status: Dict[str, Any] = {}
+    newly_synced = 0
+    fulfilled_count = 0
+
+    for prop_id, url in urls.items():
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "PseoFactoryLeadMonitor/1.0"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+                remote_leads = payload.get("leads", []) if isinstance(payload, dict) else []
+                edge_status[prop_id] = {
+                    "ok": True,
+                    "http_status": resp.status,
+                    "remote_count": len(remote_leads),
+                }
+                for item in remote_leads:
+                    if not isinstance(item, dict) or not item.get("lead_id"):
+                        continue
+                    lid = str(item["lead_id"])
+                    slug = str(item.get("tool_slug") or "general")
+                    vert = str(item.get("vertical") or "")
+                    offer = resolve_lead_monetization_offer(prop_id, slug, vert, lead_id=lid)
+                    enriched = {
+                        "lead_type": item.get("lead_type") or (
+                            "qualified_quote" if item.get("partner_sharing_consent") else "playbook_subscription"
+                        ),
+                        "lifecycle_stage": item.get("lifecycle_stage") or "captured",
+                        "monetization_strategy": item.get("monetization_strategy") or "dual_partner_and_checkout",
+                        "offer_sku": item.get("offer_sku") or offer["offer_sku"],
+                        "offer_title": item.get("offer_title") or offer["offer_title"],
+                        "offer_price_usd": item.get("offer_price_usd") or offer["offer_price_usd"],
+                        "checkout_url": item.get("checkout_url") or offer["checkout_url"],
+                        "checkout_session_id": item.get("checkout_session_id") or offer["checkout_session_id"],
+                        "checkout_mode": item.get("checkout_mode") or offer["checkout_mode"],
+                        "fulfillment_status": item.get("fulfillment_status") or "ready_for_dispatch",
+                        **item,
+                    }
+                    if lid not in seen_ids:
+                        if auto_fulfill_unfulfilled:
+                            disp = dispatch_transactional_playbook(
+                                enriched,
+                                execute_live=True,
+                                allow_zoho_failover=True,
+                                recipient_override=fulfill_recipient_override,
+                            )
+                            enriched["zeptomail_dispatched"] = disp["dispatched"]
+                            enriched["zeptomail_status"] = disp["status"]
+                            enriched["zeptomail_request_id"] = disp.get("zeptomail_request_id")
+                            enriched["email_provider"] = disp.get("provider")
+                            enriched["email_message_id"] = disp.get("message_id")
+                            if disp["dispatched"]:
+                                enriched["lifecycle_stage"] = "fulfilled"
+                                enriched["fulfillment_status"] = "dispatched"
+                                fulfilled_count += 1
+                        seen_ids[lid] = len(existing_records)
+                        existing_records.append(enriched)
+                        newly_synced += 1
+                    else:
+                        idx = seen_ids[lid]
+                        merged = {**enriched, **existing_records[idx]}
+                        if auto_fulfill_unfulfilled and merged.get("lifecycle_stage") != "fulfilled":
+                            disp = dispatch_transactional_playbook(
+                                merged,
+                                execute_live=True,
+                                allow_zoho_failover=True,
+                                recipient_override=fulfill_recipient_override,
+                            )
+                            merged["zeptomail_dispatched"] = disp["dispatched"]
+                            merged["zeptomail_status"] = disp["status"]
+                            merged["zeptomail_request_id"] = disp.get("zeptomail_request_id")
+                            merged["email_provider"] = disp.get("provider")
+                            merged["email_message_id"] = disp.get("message_id")
+                            if disp["dispatched"]:
+                                merged["lifecycle_stage"] = "fulfilled"
+                                merged["fulfillment_status"] = "dispatched"
+                                fulfilled_count += 1
+                        existing_records[idx] = merged
+        except Exception as exc:
+            edge_status[prop_id] = {"ok": False, "error": str(exc)}
+
+    with open(eff_ledger, "w", encoding="utf-8") as fh:
+        for rec in existing_records:
+            fh.write(json.dumps(rec) + "\n")
+
+    return {
+        "ledger_path": eff_ledger,
+        "total_ledger_leads": len(existing_records),
+        "newly_synced_count": newly_synced,
+        "fulfilled_count": fulfilled_count,
+        "edge_status": edge_status,
+    }
+
+
+def get_lead_monitoring_summary(
+    property_id: Optional[str] = None,
+    leads_ledger_path: Optional[Any] = None,
+    verify_live_providers: bool = False,
+) -> Dict[str, Any]:
+    """
+    Returns structured lead lifecycle monitoring visibility across ProfitHelm and Prexvo,
+    including counts by property, lifecycle stage, lead type, vertical, total calculated capital
+    pipeline, first-party Stripe Checkout offer pipeline, and live provider readiness status.
+    """
+    engine = PartnerTrackingEngine()
+    leads = engine.get_captured_leads(property_id=property_id, leads_ledger_path=leads_ledger_path)
+
+    by_property: Dict[str, int] = {"profithelm": 0, "prexvo": 0}
+    by_stage: Dict[str, int] = {}
+    by_type: Dict[str, int] = {}
+    by_vertical: Dict[str, int] = {}
+    total_calc_usd = 0.0
+    total_offer_usd = 0.0
+    action_bus_count = 0
+    fulfilled_count = 0
+
+    for rec in leads:
+        p = str(rec.get("property_id") or "profithelm").lower()
+        by_property[p] = by_property.get(p, 0) + 1
+        st = str(rec.get("lifecycle_stage") or "captured")
+        by_stage[st] = by_stage.get(st, 0) + 1
+        lt = str(rec.get("lead_type") or "qualified_quote")
+        by_type[lt] = by_type.get(lt, 0) + 1
+        vt = str(rec.get("vertical") or "general")
+        by_vertical[vt] = by_vertical.get(vt, 0) + 1
+        total_calc_usd += float(rec.get("calculated_amount") or 0.0)
+        total_offer_usd += float(rec.get("offer_price_usd") or 0.0)
+        if rec.get("action_bus_dispatched"):
+            action_bus_count += 1
+        if rec.get("zeptomail_dispatched") or st == "fulfilled":
+            fulfilled_count += 1
+
+    summary: Dict[str, Any] = {
+        "total_leads": len(leads),
+        "by_property": by_property,
+        "by_lifecycle_stage": by_stage,
+        "by_lead_type": by_type,
+        "by_vertical": by_vertical,
+        "action_bus_dispatched_count": action_bus_count,
+        "transactional_fulfilled_count": fulfilled_count,
+        "total_pipeline_calculated_usd": round(total_calc_usd, 2),
+        "total_checkout_offer_pipeline_usd": round(total_offer_usd, 2),
+        "leads": leads,
+    }
+
+    if verify_live_providers:
+        stripe_probe = create_stripe_checkout_session(
+            property_id="profithelm",
+            tool_slug="section-1031-calculator",
+            customer_email="arif@profithelm.com",
+            lead_id="lead_profithelm_verify",
+            execute_live=True,
+        )
+        email_probe = dispatch_transactional_playbook(
+            lead_record={
+                "lead_id": "lead_profithelm_verify",
+                "property_id": "profithelm",
+                "tool_slug": "section-1031-calculator",
+                "vertical": "1031_exchange",
+                "email": "arif.coskun@profithelm.com",
+                "state": "WA",
+                "capital_band": "250k_500k",
+                "calculated_amount": 350000.0,
+                "partner_rep_desk": "IPX1031 Exchange Desk",
+                "redirect_url": "/r/ipx1031?source=section-1031-calculator&slot=partner_quote_intake",
+            },
+            execute_live=True,
+            allow_zoho_failover=True,
+        )
+        summary["provider_verification"] = {
+            "stripe": {
+                "account_id": stripe_probe["stripe_account_id"],
+                "publishable_key_present": stripe_probe["stripe_publishable_key_present"],
+                "provider_called": stripe_probe["provider_called"],
+                "provider_http_status": stripe_probe["provider_http_status"],
+                "provider_error_code": stripe_probe["provider_error_code"],
+                "checkout_mode": stripe_probe["checkout_mode"],
+                "checkout_url": stripe_probe["checkout_url"],
+                "live_checkout_endpoint": stripe_probe["live_checkout_endpoint"],
+            },
+            "email_responder": {
+                "dispatched": email_probe["dispatched"],
+                "status": email_probe["status"],
+                "provider": email_probe["provider"],
+                "zeptomail_attempted": email_probe["zeptomail_attempted"],
+                "zeptomail_http_status": email_probe["zeptomail_http_status"],
+                "zeptomail_error_code": email_probe["zeptomail_error_code"],
+                "zeptomail_request_id": email_probe["zeptomail_request_id"],
+                "zoho_failover_attempted": email_probe["zoho_failover_attempted"],
+                "zoho_http_status": email_probe["zoho_http_status"],
+                "message_id": email_probe["message_id"],
+            },
+        }
+
+    return summary
 
 
 def evaluate_lead_quote_threshold(
@@ -2621,4 +3521,23 @@ def ingest_qualified_lead(
     )
 
 
-
+def ingest_playbook_subscription(
+    property_id: str,
+    tool_slug: str,
+    email: str,
+    calculated_amount: float = 0.0,
+    traffic_source: str = "playbook_lead_magnet",
+    leads_ledger_path: Optional[Any] = None,
+    auto_dispatch_email: bool = False,
+) -> Dict[str, Any]:
+    """Top-level helper to ingest a first-party playbook subscription lead with Stripe Checkout offer."""
+    engine = PartnerTrackingEngine()
+    return engine.ingest_playbook_subscription(
+        property_id=property_id,
+        tool_slug=tool_slug,
+        email=email,
+        calculated_amount=calculated_amount,
+        traffic_source=traffic_source,
+        leads_ledger_path=leads_ledger_path,
+        auto_dispatch_email=auto_dispatch_email,
+    )
