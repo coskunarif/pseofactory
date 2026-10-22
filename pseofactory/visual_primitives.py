@@ -846,6 +846,24 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       white-space: normal !important;
       text-align: center;
     }
+    .partner-quote-intake-drawer {
+      padding: 16px 18px;
+      border-radius: 10px;
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      border-left: 4px solid var(--accent);
+      margin-bottom: 18px;
+      max-width: 100%;
+    }
+    .partner-quote-badge {
+      display: inline-block;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
     @media (max-width: 640px) {
       body {
         padding-left: 12px;
@@ -1543,6 +1561,32 @@ def _render_runtime_sync_events_js() -> str:
           lnk.setAttribute("data-traffic-source", trafficSource);
           lnk.setAttribute("data-tier", tier);
         }
+        var quoteDrawer = document.getElementById("partner-quote-intake-step");
+        if (quoteDrawer) {
+          var qThresh = parseFloat(quoteDrawer.getAttribute("data-quote-threshold") || "100000") || 100000;
+          var effVal = (!isNaN(numVal) && numVal > 0) ? numVal : (parseFloat(quoteDrawer.getAttribute("data-calculated-amount") || "0") || 0);
+          quoteDrawer.setAttribute("data-calculated-amount", String(Math.round(effVal)));
+          var qForm = document.getElementById("partner-quote-intake-form");
+          var qNote = document.getElementById("partner-quote-frictionless-note");
+          var bandSelect = document.getElementById("quote-intake-capital-band");
+          if (effVal >= qThresh) {
+            quoteDrawer.setAttribute("data-threshold-active", "true");
+            quoteDrawer.setAttribute("data-frictionless-mode", "false");
+            if (qForm) qForm.style.display = "block";
+            if (qNote) qNote.style.display = "none";
+            if (bandSelect) {
+              if (effVal >= 500000) bandSelect.value = "500k_plus";
+              else if (effVal >= 250000) bandSelect.value = "250k_500k";
+              else if (effVal >= 100000) bandSelect.value = "100k_250k";
+              else bandSelect.value = "50k_100k";
+            }
+          } else {
+            quoteDrawer.setAttribute("data-threshold-active", "false");
+            quoteDrawer.setAttribute("data-frictionless-mode", "true");
+            if (qForm) qForm.style.display = "none";
+            if (qNote) qNote.style.display = "block";
+          }
+        }
       } catch (err) {}
     }
 
@@ -2025,6 +2069,71 @@ def _render_runtime_sync_events_js() -> str:
           }
         } catch (err) {}
       }
+    }, true);
+
+    document.addEventListener("submit", function(e) {
+      var qForm = e.target && e.target.id === "partner-quote-intake-form" ? e.target : null;
+      if (!qForm) return;
+      e.preventDefault();
+      try {
+        var drawer = document.getElementById("partner-quote-intake-step");
+        var statusNode = document.getElementById("partner-quote-intake-status");
+        var emailInp = document.getElementById("quote-intake-email");
+        var stateInp = document.getElementById("quote-intake-state");
+        var bandInp = document.getElementById("quote-intake-capital-band");
+        var consentInp = document.getElementById("quote-intake-consent");
+        var emailVal = emailInp ? String(emailInp.value || "").trim() : "";
+        var stateVal = stateInp ? String(stateInp.value || "CA").trim() : "CA";
+        var bandVal = bandInp ? String(bandInp.value || "100k_250k").trim() : "100k_250k";
+        var hasConsent = Boolean(consentInp && consentInp.checked);
+        if (!emailVal || emailVal.indexOf("@") === -1) {
+          if (statusNode) statusNode.textContent = "Please enter a valid email address to receive your matched quote.";
+          return;
+        }
+        if (!hasConsent) {
+          if (statusNode) statusNode.textContent = "Please check the TCPA partner sharing consent box to proceed.";
+          return;
+        }
+        var calcAmt = drawer ? (parseFloat(drawer.getAttribute("data-calculated-amount") || "100000") || 100000) : 100000;
+        var toolSlug = drawer ? (drawer.getAttribute("data-tool-slug") || resolveCurrentToolSlug()) : resolveCurrentToolSlug();
+        var partnerKey = drawer ? (drawer.getAttribute("data-partner-key") || "") : "";
+        var vertical = drawer ? (drawer.getAttribute("data-vertical") || "") : "";
+        var reqPayload = {
+          email: emailVal,
+          state: stateVal,
+          capital_band: bandVal,
+          calculated_amount: calcAmt,
+          partner_sharing_consent: true,
+          tool_slug: toolSlug,
+          partner_key: partnerKey,
+          vertical: vertical,
+          traffic_source: resolveTrafficSourceAttribution()
+        };
+        if (statusNode) statusNode.textContent = "Routing consented quote parameters to matched partner desk...";
+        if (drawer) drawer.setAttribute("data-lead-captured", "true");
+        emitWorkbenchEngagementBeacon("partner_quote_intake_submit", "partner_quote_intake_cta", {
+          state: stateVal,
+          capital_band: bandVal,
+          calculated_amount: calcAmt
+        });
+        if (typeof window.fetch === "function") {
+          window.fetch("/api/lead-capture", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(reqPayload),
+            keepalive: true
+          }).then(function(res) {
+            return res.json();
+          }).then(function(data) {
+            if (data && data.redirect_url) {
+              if (statusNode) {
+                statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal...";
+              }
+              if (drawer) drawer.setAttribute("data-redirect-url", data.redirect_url);
+            }
+          }).catch(function() {});
+        }
+      } catch (err) {}
     }, true);
 
     if (document.readyState === "loading") {
@@ -3118,6 +3227,7 @@ def normalize_html_visual_primitives(
             f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
             or any(tok not in prim_body for tok in REQUIRED_PRIMITIVE_TOKENS)
             or ".serp-depth-workbench" not in prim_body
+            or ".partner-quote-intake-drawer" not in prim_body
             or ".tool-header.hero-section" not in prim_body
             or has_token_inversion
         )
@@ -3328,6 +3438,7 @@ def normalize_html_visual_primitives(
                 or "updateInteractiveCliffAndComparator" not in sync_body
                 or "emitWorkbenchEngagementBeacon" not in sync_body
                 or "syncOutboundAffiliateLinks" not in sync_body
+                or "partner-quote-intake-form" not in sync_body
                 or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body

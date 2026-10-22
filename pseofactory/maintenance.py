@@ -6411,6 +6411,7 @@ class RetroReflectionEngine:
             or "updateSerpWorkbenchSynchronously" not in html_content
             or "updateInteractiveCliffAndComparator" not in html_content
             or "emitWorkbenchEngagementBeacon" not in html_content
+            or "partner-quote-intake-form" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)
@@ -6949,6 +6950,31 @@ class RetroReflectionEngine:
             updated = re.sub(r"\bCalculator(?:\s+Calculator)+\b", "Calculator", updated, flags=re.IGNORECASE)
             if "title_dedup" not in repaired:
                 repaired.append("title_dedup")
+        try:
+            from pseofactory.competitor import render_partner_quote_intake_html
+            quote_intake_html = render_partner_quote_intake_html(
+                slug=slug,
+                property_id=property_id,
+                topic_label=topic_label,
+                statutory_authority=stat_auth,
+            )
+            if quote_intake_html and 'id="partner-quote-intake-step"' not in updated:
+                if '<div id="multi-year-cliff-visualizer"' in updated:
+                    updated = updated.replace(
+                        '      <div id="multi-year-cliff-visualizer"',
+                        f'{quote_intake_html}\n      <div id="multi-year-cliff-visualizer"',
+                        1,
+                    )
+                    repaired.append("partner_quote_intake")
+            elif not quote_intake_html and 'id="partner-quote-intake-step"' in updated:
+                updated = re.sub(
+                    r'\s*<div id="partner-quote-intake-step"[\s\S]*?</form>\s*</div>',
+                    "",
+                    updated,
+                    flags=re.IGNORECASE,
+                )
+        except Exception:
+            pass
         try:
             from pseofactory.affiliates import normalize_html_callout_message_match
             norm_html = normalize_html_callout_message_match(updated, property_id=property_id)

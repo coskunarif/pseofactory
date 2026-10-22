@@ -2175,14 +2175,569 @@ export async function onRequestGet(context) {{
     return telemetry_js
 
 
+def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
+    """
+    Generates the deterministic Cloudflare Pages Function (functions/api/lead-capture.js)
+    for ProfitHelm or Prexvo TCPA-compliant partner quote intake and CPL lead capture.
+    Enforces vertical thresholds ($100k+ 1031/CapEx, $50k+ Factoring, $50k+ Prexvo Refi),
+    keeps sub-threshold calculations frictionless, persists consented CPL records in KV,
+    routes to the highest-yielding live partner with pre-filled context, and flags $100k+
+    leads for HumanActionBus operator dispatch.
+    Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
+    """
+    prop_clean = (property_id or "").strip().lower()
+    if prop_clean not in ("profithelm", "prexvo"):
+        raise ValueError(
+            f"Edge lead capture function generation is only supported for profithelm or prexvo (got '{property_id}')."
+        )
+
+    if prop_clean == "prexvo":
+        lead_js = """/**
+ * Cloudflare Pages Function: Prexvo Student Loan Refinance Partner Quote Intake (/api/lead-capture)
+ * Captures TCPA-consented borrower quote requests ($50,000+ student loan refinance threshold),
+ * keeps sub-threshold calculations frictionless, blocks restricted YMYL public-service pages,
+ * persists CPL records in PREXVO_LEADS KV, and flags $100,000+ leads for Splash Financial rep dispatch.
+ * Zero AI slop. Zero em-dashes. Zero en-dashes.
+ */
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Cache-Control": "private, no-cache, no-store, must-revalidate",
+  "X-Robots-Tag": "noindex, nofollow",
+};
+
+const RESTRICTED_PUBLIC_SERVICE_SLUGS = [
+  "pslf-qualifying-payment-simulator",
+  "ibr-hardship-cap-calculator",
+  "save-plan-litigation-transition",
+  "disclaimers",
+  "methodology",
+];
+
+const PARTNER_ROUTES = {
+  splash_financial: "https://www.splashfinancial.com/student-loan-refinance",
+  credible: "https://www.credible.com/refinance-student-loans",
+  sofi: "https://www.sofi.com/refinance-student-loan/",
+  earnest: "https://www.earnest.com/student-loan-refinancing",
+  edvestin: "https://edvestinu.com/refinance-student-loans/",
+};
+
+function getLeadsKv(env) {
+  if (!env) return null;
+  return env.PREXVO_LEADS || env.PREXVO_TELEMETRY_KV || env.TELEMETRY_KV || null;
+}
+
+function getMemoryBuffer() {
+  if (!globalThis.__PSEOFACTORY_LEADS_BUFFER__) {
+    globalThis.__PSEOFACTORY_LEADS_BUFFER__ = [];
+  }
+  return globalThis.__PSEOFACTORY_LEADS_BUFFER__;
+}
+
+function deriveCapitalBand(amount) {
+  if (amount >= 500000) return "500k_plus";
+  if (amount >= 250000) return "250k_500k";
+  if (amount >= 100000) return "100k_250k";
+  if (amount >= 50000) return "50k_100k";
+  return "under_50k";
+}
+
+export async function onRequestOptions() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+export async function onRequestGet(context) {
+  const { request, env } = context;
+  const reqUrl = new URL(request.url);
+  const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
+  const kv = getLeadsKv(env);
+  const leads = [];
+  const seen = new Set();
+
+  if (kv && typeof kv.list === "function" && typeof kv.get === "function") {
+    try {
+      const listRes = await kv.list({ prefix: "lead_prexvo_", limit });
+      const keys = Array.isArray(listRes.keys) ? listRes.keys : [];
+      const fetched = await Promise.all(
+        keys.map(async (k) => {
+          try {
+            return await kv.get(k.name, { type: "json" });
+          } catch (_) {
+            return null;
+          }
+        })
+      );
+      for (const item of fetched) {
+        if (item && item.lead_id && !seen.has(item.lead_id)) {
+          seen.add(item.lead_id);
+          leads.push(item);
+        }
+      }
+    } catch (_) {}
+  }
+
+  for (const memItem of getMemoryBuffer()) {
+    if (memItem && memItem.lead_id && !seen.has(memItem.lead_id)) {
+      seen.add(memItem.lead_id);
+      leads.push(memItem);
+    }
+  }
+
+  return new Response(
+    JSON.stringify({ ok: true, property_id: "prexvo", count: leads.length, leads }),
+    { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+  );
+}
+
+export async function onRequestPost(context) {
+  try {
+    const { request, env } = context;
+    const body = await request.json();
+    const email = (body.email || "").trim().toLowerCase();
+    const state = String(body.state || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
+    const toolSlug = String(body.tool_slug || "student-loan-refinance-break-even-calculator")
+      .trim()
+      .toLowerCase()
+      .replace(/^\\/+|\\/+$/g, "");
+    const rawAmount = Number(body.calculated_amount !== undefined ? body.calculated_amount : body.loan_balance || 0);
+    const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
+    const thresholdUsd = 50000;
+    const reqPartner = String(body.partner_key || "splash_financial").trim().toLowerCase();
+    const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, reqPartner)
+      ? reqPartner
+      : "splash_financial";
+
+    if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Restricted public-service asset cannot capture commercial student loan refinance leads.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (calculatedAmount < thresholdUsd) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          status: "frictionless_sub_threshold",
+          persisted: false,
+          frictionless_mode: true,
+          property_id: "prexvo",
+          tool_slug: toolSlug,
+          vertical: "student_loan_refinance",
+          calculated_amount: calculatedAmount,
+          threshold_usd: thresholdUsd,
+          partner_key: partnerKey,
+          redirect_url: `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=frictionless_direct`,
+          action_bus_dispatched: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Please enter a valid email address." }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (state.length !== 2) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Please select a valid 2-letter US state." }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (body.partner_sharing_consent !== true) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Explicit TCPA partner_sharing_consent is required to match your refinance quote.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount)).trim();
+    const ts = new Date().toISOString();
+    const randSuffix = Math.random().toString(36).slice(2, 10);
+    const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
+    const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
+    const qs = new URLSearchParams({
+      source: toolSlug,
+      slot: "partner_quote_intake",
+      subid,
+      state,
+      capital_band: capitalBand,
+      amount: String(Math.round(calculatedAmount)),
+      lead_id: leadId,
+    }).toString();
+
+    const redirectUrl = `/r/${partnerKey}?${qs}`;
+    const liveBase = PARTNER_ROUTES[partnerKey];
+    const liveDestinationUrl = `${liveBase}${liveBase.includes("?") ? "&" : "?"}${qs}`;
+    const actionBusDispatched = calculatedAmount >= 100000;
+
+    const record = {
+      lead_id: leadId,
+      property_id: "prexvo",
+      tool_slug: toolSlug,
+      vertical: "student_loan_refinance",
+      email,
+      state,
+      capital_band: capitalBand,
+      calculated_amount: calculatedAmount,
+      threshold_usd: thresholdUsd,
+      partner_sharing_consent: true,
+      partner_key: partnerKey,
+      partner_rep_desk: "Splash Financial Partner Desk",
+      redirect_url: redirectUrl,
+      live_destination_url: liveDestinationUrl,
+      action_bus_dispatched: actionBusDispatched,
+      captured_at: ts,
+    };
+
+    const buf = getMemoryBuffer();
+    buf.unshift(record);
+    if (buf.length > 250) buf.length = 250;
+
+    const kv = getLeadsKv(env);
+    if (kv && typeof kv.put === "function") {
+      await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+    }
+
+    return new Response(JSON.stringify({ ok: true, status: "captured", persisted: true, ...record }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ ok: false, error: "Unable to process refinance quote request." }),
+      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+}
+"""
+    else:
+        lead_js = """/**
+ * Cloudflare Pages Function: ProfitHelm B2B & Tax Partner Quote Intake (/api/lead-capture)
+ * Captures TCPA-consented commercial quote requests across high-value thresholds:
+ * - $100,000+ on 1031 Exchange or CapEx / Section 179
+ * - $50,000+ on Invoice Factoring
+ * Keeps sub-threshold calculations frictionless, persists CPL records in PROFITHELM_LEADS KV,
+ * routes to the highest-yielding live partner with pre-filled context, and flags $100,000+ leads
+ * for HumanActionBus dispatch to OTR Solutions, E-file, and IPX1031 partner desks.
+ * Zero AI slop. Zero em-dashes. Zero en-dashes.
+ */
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Cache-Control": "private, no-cache, no-store, must-revalidate",
+  "X-Robots-Tag": "noindex, nofollow",
+};
+
+function getLeadsKv(env) {
+  if (!env) return null;
+  return env.PROFITHELM_LEADS || env.PROFITHELM_TELEMETRY_KV || env.TELEMETRY_KV || null;
+}
+
+function getMemoryBuffer() {
+  if (!globalThis.__PSEOFACTORY_LEADS_BUFFER__) {
+    globalThis.__PSEOFACTORY_LEADS_BUFFER__ = [];
+  }
+  return globalThis.__PSEOFACTORY_LEADS_BUFFER__;
+}
+
+function resolveVerticalAndThreshold(toolSlug, reqPartner) {
+  const s = (toolSlug || "").toLowerCase();
+  if (
+    s.includes("factoring") ||
+    s.includes("invoice") ||
+    s.includes("line-of-credit") ||
+    s.includes("working-capital") ||
+    reqPartner === "otr_solutions_factoring"
+  ) {
+    return {
+      vertical: "invoice_factoring",
+      thresholdUsd: 50000,
+      partnerKey: "otr_solutions_factoring",
+      partnerRepDesk: "Wade Fenton at OTR Solutions",
+      liveBase: "https://www.otrsolutions.com/freight-factoring/",
+    };
+  }
+  if (
+    s.includes("1031") ||
+    s.includes("like-kind") ||
+    s.includes("exchange") ||
+    s.includes("8824") ||
+    s.includes("3840") ||
+    s.includes("boot") ||
+    s.includes("dst") ||
+    reqPartner === "ipx1031"
+  ) {
+    return {
+      vertical: "1031_exchange",
+      thresholdUsd: 100000,
+      partnerKey: "ipx1031",
+      partnerRepDesk: "IPX1031 Exchange Desk",
+      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+    };
+  }
+  if (
+    s.includes("179") ||
+    s.includes("equipment") ||
+    s.includes("lease") ||
+    s.includes("macrs") ||
+    s.includes("depreciation") ||
+    s.includes("vehicle") ||
+    s.includes("gvwr") ||
+    reqPartner === "crest_capital"
+  ) {
+    return {
+      vertical: "capex_section_179",
+      thresholdUsd: 100000,
+      partnerKey: "crest_capital",
+      partnerRepDesk: "Aaron Rosenthal at E-file and Xendoo Commercial Tax Desk",
+      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+    };
+  }
+  return {
+    vertical: "b2b_tax_advisory",
+    thresholdUsd: 100000,
+    partnerKey: reqPartner || "turbotax",
+    partnerRepDesk: "Aaron Rosenthal at E-file and OTR Solutions Commercial Desk",
+    liveBase: "https://www.jdoqocy.com/click-101906407-11917161",
+  };
+}
+
+function deriveCapitalBand(amount) {
+  if (amount >= 500000) return "500k_plus";
+  if (amount >= 250000) return "250k_500k";
+  if (amount >= 100000) return "100k_250k";
+  if (amount >= 50000) return "50k_100k";
+  return "under_50k";
+}
+
+export async function onRequestOptions() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+export async function onRequestGet(context) {
+  const { request, env } = context;
+  const reqUrl = new URL(request.url);
+  const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
+  const kv = getLeadsKv(env);
+  const leads = [];
+  const seen = new Set();
+
+  if (kv && typeof kv.list === "function" && typeof kv.get === "function") {
+    try {
+      const listRes = await kv.list({ prefix: "lead_profithelm_", limit });
+      const keys = Array.isArray(listRes.keys) ? listRes.keys : [];
+      const fetched = await Promise.all(
+        keys.map(async (k) => {
+          try {
+            return await kv.get(k.name, { type: "json" });
+          } catch (_) {
+            return null;
+          }
+        })
+      );
+      for (const item of fetched) {
+        if (item && item.lead_id && !seen.has(item.lead_id)) {
+          seen.add(item.lead_id);
+          leads.push(item);
+        }
+      }
+    } catch (_) {}
+  }
+
+  for (const memItem of getMemoryBuffer()) {
+    if (memItem && memItem.lead_id && !seen.has(memItem.lead_id)) {
+      seen.add(memItem.lead_id);
+      leads.push(memItem);
+    }
+  }
+
+  return new Response(
+    JSON.stringify({ ok: true, property_id: "profithelm", count: leads.length, leads }),
+    { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+  );
+}
+
+export async function onRequestPost(context) {
+  try {
+    const { request, env } = context;
+    const body = await request.json();
+    const email = (body.email || "").trim().toLowerCase();
+    const toolSlug = String(body.tool_slug || "general")
+      .trim()
+      .toLowerCase()
+      .replace(/^\\/+|\\/+$/g, "");
+    const reqPartner = String(body.partner_key || "").trim().toLowerCase();
+    const spec = resolveVerticalAndThreshold(toolSlug, reqPartner);
+
+    const hasQuoteFields =
+      body.calculated_amount !== undefined ||
+      body.state !== undefined ||
+      body.capital_band !== undefined ||
+      body.partner_sharing_consent !== undefined;
+
+    if (!hasQuoteFields) {
+      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "Please enter a valid business email address." }),
+          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+      const ts = new Date().toISOString();
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.put === "function") {
+        await kv.put(`lead:${toolSlug}:${email}`, JSON.stringify({ email, toolSlug, ts }), {
+          expirationTtl: 90 * 86400,
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          status: "playbook_subscribed",
+          message: "Your custom calculation worksheet and compliance checklist have been queued.",
+          redirect_url: `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}`,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const rawAmount = Number(body.calculated_amount || 0);
+    const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
+
+    if (calculatedAmount < spec.thresholdUsd) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          status: "frictionless_sub_threshold",
+          persisted: false,
+          frictionless_mode: true,
+          property_id: "profithelm",
+          tool_slug: toolSlug,
+          vertical: spec.vertical,
+          calculated_amount: calculatedAmount,
+          threshold_usd: spec.thresholdUsd,
+          partner_key: spec.partnerKey,
+          redirect_url: `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=frictionless_direct`,
+          action_bus_dispatched: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Please enter a valid business email address." }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const state = String(body.state || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
+    if (state.length !== 2) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Please select a valid 2-letter US state." }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (body.partner_sharing_consent !== true) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Explicit TCPA partner_sharing_consent is required to dispatch your commercial quote.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount)).trim();
+    const ts = new Date().toISOString();
+    const randSuffix = Math.random().toString(36).slice(2, 10);
+    const leadId = `lead_profithelm_${Date.now()}_${randSuffix}`;
+    const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
+    const qs = new URLSearchParams({
+      source: toolSlug,
+      slot: "partner_quote_intake",
+      subid,
+      state,
+      capital_band: capitalBand,
+      amount: String(Math.round(calculatedAmount)),
+      lead_id: leadId,
+    }).toString();
+
+    const redirectUrl = `/r/${spec.partnerKey}?${qs}`;
+    const liveDestinationUrl = `${spec.liveBase}${spec.liveBase.includes("?") ? "&" : "?"}${qs}`;
+    const actionBusDispatched = calculatedAmount >= 100000;
+
+    const record = {
+      lead_id: leadId,
+      property_id: "profithelm",
+      tool_slug: toolSlug,
+      vertical: spec.vertical,
+      email,
+      state,
+      capital_band: capitalBand,
+      calculated_amount: calculatedAmount,
+      threshold_usd: spec.thresholdUsd,
+      partner_sharing_consent: true,
+      partner_key: spec.partnerKey,
+      partner_rep_desk: spec.partnerRepDesk,
+      redirect_url: redirectUrl,
+      live_destination_url: liveDestinationUrl,
+      action_bus_dispatched: actionBusDispatched,
+      captured_at: ts,
+    };
+
+    const buf = getMemoryBuffer();
+    buf.unshift(record);
+    if (buf.length > 250) buf.length = 250;
+
+    const kv = getLeadsKv(env);
+    if (kv && typeof kv.put === "function") {
+      await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+    }
+
+    return new Response(JSON.stringify({ ok: true, status: "captured", persisted: true, ...record }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ ok: false, error: "Unable to process commercial quote request." }),
+      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+}
+"""
+
+    assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function")
+    return lead_js
+
+
 def sync_tenant_edge_redirect_function(
     repo_path: Union[str, Path],
     property_id: str = "profithelm",
     hub: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Synchronizes the tenant Cloudflare Pages edge redirect handler (functions/r/[partner].js)
-    and edge telemetry endpoint (functions/api/telemetry.js) when repo_path contains a functions/r
+    Synchronizes the tenant Cloudflare Pages edge redirect handler (functions/r/[partner].js),
+    edge telemetry endpoint (functions/api/telemetry.js), and TCPA-compliant lead capture
+    endpoint (functions/api/lead-capture.js) when repo_path contains a functions/r
     directory and property_id is profithelm or prexvo.
     Zero em-dashes. Zero en-dashes.
     """
@@ -2204,6 +2759,7 @@ def sync_tenant_edge_redirect_function(
     active_hub = hub if hub is not None else MonetizationHub()
     js_code = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
     telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
+    lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
 
     prop_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {})
     registry_map = PREXVO_AFFILIATES if prop_clean == "prexvo" else PROFITHELM_AFFILIATES
@@ -2226,15 +2782,20 @@ def sync_tenant_edge_redirect_function(
         except Exception:
             pass
 
-    # Synchronize functions/api/telemetry.js (and dist/functions/api/telemetry.js when dist/functions exists)
+    # Synchronize functions/api/telemetry.js and functions/api/lead-capture.js
     api_dir = repo / "functions" / "api"
     telemetry_file = api_dir / "telemetry.js"
+    lead_capture_file = api_dir / "lead-capture.js"
     telemetry_updated = False
+    lead_capture_updated = False
     try:
         api_dir.mkdir(parents=True, exist_ok=True)
         if not telemetry_file.is_file() or telemetry_file.read_text(encoding="utf-8") != telemetry_js:
             telemetry_file.write_text(telemetry_js, encoding="utf-8")
             telemetry_updated = True
+        if not lead_capture_file.is_file() or lead_capture_file.read_text(encoding="utf-8") != lead_capture_js:
+            lead_capture_file.write_text(lead_capture_js, encoding="utf-8")
+            lead_capture_updated = True
     except Exception:
         pass
 
@@ -2245,6 +2806,10 @@ def sync_tenant_edge_redirect_function(
             dist_telemetry_file = dist_api_dir / "telemetry.js"
             if not dist_telemetry_file.is_file() or dist_telemetry_file.read_text(encoding="utf-8") != telemetry_js:
                 dist_telemetry_file.write_text(telemetry_js, encoding="utf-8")
+                dist_needs_update = True
+            dist_lead_file = dist_api_dir / "lead-capture.js"
+            if not dist_lead_file.is_file() or dist_lead_file.read_text(encoding="utf-8") != lead_capture_js:
+                dist_lead_file.write_text(lead_capture_js, encoding="utf-8")
                 dist_needs_update = True
         except Exception:
             pass
@@ -2265,6 +2830,14 @@ def sync_tenant_edge_redirect_function(
                         'id = "153917b16871453a9f07bfb39ff3fd98"\n'
                     )
                     w_new = w_new.rstrip() + "\n" + kv_block
+                if 'binding = "PREXVO_LEADS"' not in w_new:
+                    kv_leads_block = (
+                        "\n# Cloudflare KV Binding for Prexvo Consented Refinance Quote Leads\n"
+                        "[[kv_namespaces]]\n"
+                        'binding = "PREXVO_LEADS"\n'
+                        'id = "153917b16871453a9f07bfb39ff3fd98"\n'
+                    )
+                    w_new = w_new.rstrip() + "\n" + kv_leads_block
             elif prop_clean == "profithelm":
                 if 'binding = "PROFITHELM_LEADS"' not in w_new:
                     w_new = (
@@ -2291,11 +2864,18 @@ def sync_tenant_edge_redirect_function(
     if target_file.is_file():
         try:
             existing = target_file.read_text(encoding="utf-8")
-            if existing == js_code and not dist_needs_update and not telemetry_updated and not wrangler_updated:
+            if (
+                existing == js_code
+                and not dist_needs_update
+                and not telemetry_updated
+                and not lead_capture_updated
+                and not wrangler_updated
+            ):
                 return {
                     "status": "UNCHANGED",
                     "path": str(target_file),
                     "telemetry_path": str(telemetry_file),
+                    "lead_capture_path": str(lead_capture_file),
                     "wrangler_path": str(wrangler_file),
                     "live_direct_partners": live_direct_partners,
                 }
@@ -2307,9 +2887,11 @@ def sync_tenant_edge_redirect_function(
         "status": "UPDATED",
         "path": str(target_file),
         "telemetry_path": str(telemetry_file),
+        "lead_capture_path": str(lead_capture_file),
         "wrangler_path": str(wrangler_file),
         "live_direct_partners": live_direct_partners,
     }
+
 
 
 

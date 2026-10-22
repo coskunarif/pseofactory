@@ -744,3 +744,123 @@ class HumanActionBus:
         )
         return items
 
+    def route_high_value_qualified_lead(
+        self,
+        property_id: str,
+        tool_slug: str,
+        email: str,
+        state: str,
+        capital_band: str,
+        calculated_amount: float,
+        partner_sharing_consent: bool,
+        partner_key: Optional[str] = None,
+        vertical: str = "",
+        lead_id: str = "",
+        redirect_url: str = "",
+    ) -> Optional[ActionItem]:
+        """
+        Dispatches $100,000+ consented B2B and student loan refinance leads onto the
+        HumanActionBus so direct partner reps at OTR Solutions, E-file, IPX1031, and
+        Splash Financial can be closed with empirical proof of consented demand.
+        Strictly enforces tenant isolation and zero forbidden dashes.
+        """
+        if not partner_sharing_consent:
+            raise ValueError("Cannot dispatch unconsented lead to HumanActionBus.")
+
+        amount_val = float(calculated_amount or 0.0)
+        if amount_val < 100000.0:
+            return None
+
+        prop_clean = (property_id or "profithelm").strip().lower()
+        if prop_clean not in ("profithelm", "prexvo"):
+            raise ValueError(f"Unsupported property_id '{property_id}' for lead dispatch.")
+
+        slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
+        state_clean = re.sub(r"[^A-Za-z]", "", (state or "US")).upper()[:2] or "US"
+        band_clean = re.sub(r"[^a-zA-Z0-9_+$kK-]", "", (capital_band or "100k_plus")).replace(" - ", "_")
+        vert_clean = (vertical or "").strip().lower()
+        req_key = (partner_key or "").strip().lower()
+
+        if prop_clean == "prexvo":
+            if req_key in B2B_PARTNER_KEYS or req_key in PROFITHELM_AFFILIATES:
+                raise ValueError(
+                    f"Strict isolation violation: B2B partner '{req_key}' cannot be dispatched on Prexvo."
+                )
+            eff_key = req_key if req_key in PREXVO_AFFILIATES else "splash_financial"
+            eff_name = "Splash Financial"
+            rep_target = "Splash Financial Partner Desk"
+        else:
+            if req_key in STUDENT_LOAN_PARTNER_KEYS or req_key in PREXVO_AFFILIATES:
+                raise ValueError(
+                    f"Strict isolation violation: Student loan partner '{req_key}' cannot be dispatched on ProfitHelm."
+                )
+            if vert_clean == "invoice_factoring" or req_key == "otr_solutions_factoring" or "factoring" in slug_clean:
+                eff_key = "otr_solutions_factoring"
+                eff_name = "OTR Solutions"
+                rep_target = "Wade Fenton at OTR Solutions"
+            elif vert_clean == "1031_exchange" or req_key == "ipx1031" or "1031" in slug_clean:
+                eff_key = "ipx1031"
+                eff_name = "IPX1031"
+                rep_target = "IPX1031 Exchange Desk"
+            elif req_key == "turbotax" or "tax" in slug_clean:
+                eff_key = "turbotax"
+                eff_name = "E-file"
+                rep_target = "Aaron Rosenthal at E-file and OTR Solutions Commercial Desk"
+            elif req_key in PROFITHELM_AFFILIATES:
+                eff_key = req_key
+                eff_name = PROFITHELM_AFFILIATES[req_key].name.replace("\u2014", ": ").replace("\u2013", "-")
+                rep_target = "Aaron Rosenthal at E-file, Wade Fenton at OTR Solutions, and IPX1031 Exchange Desk"
+            else:
+                eff_key = "turbotax"
+                eff_name = "E-file"
+                rep_target = "Aaron Rosenthal at E-file, Wade Fenton at OTR Solutions, and IPX1031 Exchange Desk"
+
+        email_clean = (email or "").strip().lower()
+        if "@" in email_clean:
+            local_part, domain_part = email_clean.split("@", 1)
+            masked_email = f"{local_part[:2]}***@{domain_part}"
+        else:
+            masked_email = "consented_lead"
+
+        amount_fmt = f"${int(round(amount_val)):,}"
+        lead_ref = lead_id or f"lead-{prop_clean}-{int(round(amount_val))}"
+        proof_line = (
+            f"Consented high-value lead {lead_ref}: amount={amount_fmt}, band={band_clean}, "
+            f"state={state_clean}, slug={slug_clean}, contact={masked_email}, tcpa_consent=true"
+        )
+        rep_closing_line = (
+            f"Close direct partner agreement with {rep_target} using empirical proof of "
+            f"{amount_fmt} consented buyer demand on {slug_clean}"
+        )
+
+        title = (
+            f"{eff_name}: High-Value {amount_fmt} Consented Lead Dispatch ({state_clean})"
+        )
+        description = (
+            f"Captured TCPA-consented {amount_fmt} quote request (band {band_clean}, state {state_clean}) "
+            f"on {slug_clean}. Present empirical demand proof to {rep_target} to finalize direct CPL/CPA terms."
+        )
+
+        item = self.route_asset_manual_dependency(
+            property_id=prop_clean,
+            asset_slug=slug_clean,
+            partner_key=eff_key,
+            partner_name=eff_name,
+            title=title,
+            description=description,
+            action_type="HIGH_VALUE_LEAD_DISPATCH",
+            severity="CRITICAL" if amount_val >= 250000.0 else "HIGH",
+            missing_requirements=[proof_line, rep_closing_line],
+            candidate_url=redirect_url or "",
+            impressions=250,
+            outbound_clicks=10,
+        )
+        # Ensure high-value lead dispatch reflects direct CPL/CPA deal value floor
+        min_lead_impact = round(max(float(item.estimated_monthly_revenue_impact_usd or 0.0), amount_val * 0.005), 2)
+        if min_lead_impact > float(item.estimated_monthly_revenue_impact_usd or 0.0):
+            item.estimated_monthly_revenue_impact_usd = min_lead_impact
+            self._assert_item_invariants(item)
+            self.save()
+        return item
+
+

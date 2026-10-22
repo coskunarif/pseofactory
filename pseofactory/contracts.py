@@ -7724,7 +7724,7 @@ def detect_placeholder_verification_token_issues(
 
     raw = token_or_html.strip()
     tokens: List[str] = []
-    if "<meta" in raw.lower():
+    if any(t in raw.lower() for t in ("<meta", "<html", "<!doctype", "<head", "<body", "<main")):
         for m in re.finditer(
             r'<meta\b[^>]*name=["\']google-site-verification["\'][^>]*>',
             raw,

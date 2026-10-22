@@ -2199,4 +2199,426 @@ class PartnerTrackingEngine:
             "properties": properties_summary,
         }
 
+    def evaluate_lead_quote_threshold(
+        self,
+        property_id: str,
+        tool_slug: str,
+        calculated_amount: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Instance wrapper around evaluate_lead_quote_threshold."""
+        return evaluate_lead_quote_threshold(
+            property_id=property_id,
+            tool_slug=tool_slug,
+            calculated_amount=calculated_amount,
+        )
+
+    def ingest_qualified_lead(
+        self,
+        property_id: str,
+        tool_slug: str,
+        email: str,
+        state: str,
+        capital_band: str,
+        calculated_amount: float,
+        partner_sharing_consent: bool,
+        partner_key: Optional[str] = None,
+        vertical: Optional[str] = None,
+        traffic_source: str = "calculator_quote_intake",
+        leads_ledger_path: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Ingests a TCPA-consented partner quote request from the native calculator intake drawer:
+        1. Enforces YMYL public-service exclusion (PSLF, IBR hardship, SAVE litigation stay free of private refi).
+        2. Evaluates vertical high-value thresholds ($100k+ on 1031 Exchange or CapEx/Section 179,
+           $50k+ on Invoice Factoring, $50k+ on Prexvo Student Loan Refinance).
+        3. Keeps sub-threshold calculations frictionless (no forced gating).
+        4. Persists consented high-value leads into `.agy/captured_leads.jsonl`.
+        5. Routes the user to the highest-yielding live partner or co-registration URL with pre-filled context.
+        6. Dispatches $100,000+ B2B and student loan refinance leads onto HumanActionBus so direct
+           partner reps at OTR Solutions, E-file, IPX1031, and Splash Financial can be closed with
+           empirical proof of consented demand.
+        """
+        import hashlib
+        from urllib.parse import urlencode
+        from pseofactory.affiliates import is_restricted_public_service_slug
+
+        prop_clean = (property_id or "profithelm").strip().lower()
+        if prop_clean not in ("profithelm", "prexvo"):
+            raise ValueError(f"Unsupported property_id '{property_id}'.")
+
+        slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
+        if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
+            raise ValueError(
+                f"Restricted public-service asset '{slug_clean}' cannot capture commercial student loan refinance leads."
+            )
+
+        eval_info = evaluate_lead_quote_threshold(
+            property_id=prop_clean,
+            tool_slug=slug_clean,
+            calculated_amount=calculated_amount,
+        )
+        if not eval_info["eligible"]:
+            raise ValueError(
+                f"Asset '{slug_clean}' on '{prop_clean}' is ineligible for commercial partner quote intake."
+            )
+
+        amount_val = float(eval_info["calculated_amount"])
+        threshold_val = float(eval_info["threshold_usd"])
+        eff_vertical = (vertical or eval_info["vertical"]).strip().lower()
+        eff_partner_key = (partner_key or eval_info["primary_partner_key"]).strip().lower()
+
+        if prop_clean == "prexvo":
+            if eff_partner_key in B2B_PARTNER_KEYS or eff_partner_key in PROFITHELM_AFFILIATES:
+                raise ValueError(
+                    f"Strict isolation violation: B2B partner '{eff_partner_key}' cannot be used on Prexvo."
+                )
+            if eff_partner_key not in PREXVO_AFFILIATES:
+                eff_partner_key = "splash_financial"
+        else:
+            if eff_partner_key in STUDENT_LOAN_PARTNER_KEYS or eff_partner_key in PREXVO_AFFILIATES:
+                raise ValueError(
+                    f"Strict isolation violation: Student loan partner '{eff_partner_key}' cannot be used on ProfitHelm."
+                )
+            if eff_partner_key not in PROFITHELM_AFFILIATES:
+                eff_partner_key = eval_info["primary_partner_key"]
+
+        # Sub-threshold calculations stay frictionless without forced gating
+        if not eval_info["qualifies_for_quote_intake"]:
+            fallback_route = f"/r/{eff_partner_key}?source={slug_clean}&slot=frictionless_direct"
+            return {
+                "status": "frictionless_sub_threshold",
+                "persisted": False,
+                "frictionless_mode": True,
+                "property_id": prop_clean,
+                "tool_slug": slug_clean,
+                "vertical": eff_vertical,
+                "calculated_amount": amount_val,
+                "threshold_usd": threshold_val,
+                "partner_key": eff_partner_key,
+                "redirect_url": fallback_route,
+                "action_bus_dispatched": False,
+                "action_bus_item_id": None,
+            }
+
+        if partner_sharing_consent is not True:
+            raise ValueError(
+                "Explicit TCPA partner_sharing_consent=True is required to submit a qualified partner quote request."
+            )
+
+        email_clean = (email or "").strip().lower()
+        if not email_clean or "@" not in email_clean or "." not in email_clean.split("@", 1)[-1]:
+            raise ValueError("A valid email address is required for qualified partner quote intake.")
+
+        state_clean = re.sub(r"[^A-Za-z]", "", (state or "")).upper()[:2]
+        if len(state_clean) != 2:
+            raise ValueError("A valid 2-letter US state code is required for qualified partner quote intake.")
+
+        band_clean = (capital_band or eval_info["capital_band"]).strip()
+        assert_no_forbidden_dashes(band_clean, context="capital_band")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        digest = hashlib.sha256(
+            f"{prop_clean}:{slug_clean}:{email_clean}:{state_clean}:{int(round(amount_val))}".encode("utf-8")
+        ).hexdigest()[:12]
+        lead_id = f"lead_{prop_clean}_{digest}"
+
+        subid_val = f"cpl_{slug_clean[:24]}_{state_clean.lower()}_{int(round(amount_val))}"
+        query_params = urlencode(
+            {
+                "source": slug_clean,
+                "slot": "partner_quote_intake",
+                "subid": subid_val,
+                "state": state_clean,
+                "capital_band": band_clean,
+                "amount": str(int(round(amount_val))),
+                "lead_id": lead_id,
+            }
+        )
+        edge_redirect_url = f"/r/{eff_partner_key}?{query_params}"
+
+        # Resolve highest-yielding live destination URL with pre-filled context
+        live_dest_base = eval_info["live_destination_url"]
+        sep = "&" if "?" in live_dest_base else "?"
+        live_destination_url = f"{live_dest_base}{sep}{query_params}"
+
+        tcpa_consent_text = (
+            "Explicit borrower/company consent granted to share quote parameters (email, state, "
+            "capital band, and calculated amount) with matched institutional lending, tax, or exchange partners."
+        )
+
+        lead_record: Dict[str, Any] = {
+            "lead_id": lead_id,
+            "property_id": prop_clean,
+            "tool_slug": slug_clean,
+            "vertical": eff_vertical,
+            "email": email_clean,
+            "state": state_clean,
+            "capital_band": band_clean,
+            "calculated_amount": amount_val,
+            "threshold_usd": threshold_val,
+            "partner_sharing_consent": True,
+            "tcpa_consent_text": tcpa_consent_text,
+            "partner_key": eff_partner_key,
+            "partner_rep_desk": eval_info["partner_rep_desk"],
+            "redirect_url": edge_redirect_url,
+            "live_destination_url": live_destination_url,
+            "traffic_source": traffic_source,
+            "captured_at": now_iso,
+        }
+
+        eff_ledger = (
+            str(leads_ledger_path)
+            if leads_ledger_path
+            else os.path.join(os.path.dirname(__file__), "..", ".agy", "captured_leads.jsonl")
+        )
+        os.makedirs(os.path.dirname(os.path.abspath(eff_ledger)), exist_ok=True)
+        with open(eff_ledger, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(lead_record) + "\n")
+
+        action_item: Optional[ActionItem] = None
+        if amount_val >= 100000.0:
+            action_item = self.action_bus.route_high_value_qualified_lead(
+                property_id=prop_clean,
+                tool_slug=slug_clean,
+                email=email_clean,
+                state=state_clean,
+                capital_band=band_clean,
+                calculated_amount=amount_val,
+                partner_sharing_consent=True,
+                partner_key=eff_partner_key,
+                vertical=eff_vertical,
+                lead_id=lead_id,
+                redirect_url=edge_redirect_url,
+            )
+
+        return {
+            "status": "captured",
+            "persisted": True,
+            "frictionless_mode": False,
+            "lead_id": lead_id,
+            "property_id": prop_clean,
+            "tool_slug": slug_clean,
+            "vertical": eff_vertical,
+            "email": email_clean,
+            "state": state_clean,
+            "capital_band": band_clean,
+            "calculated_amount": amount_val,
+            "threshold_usd": threshold_val,
+            "partner_sharing_consent": True,
+            "partner_key": eff_partner_key,
+            "partner_rep_desk": eval_info["partner_rep_desk"],
+            "redirect_url": edge_redirect_url,
+            "live_destination_url": live_destination_url,
+            "action_bus_dispatched": action_item is not None,
+            "action_bus_item_id": action_item.action_id if action_item else None,
+            "ledger_path": eff_ledger,
+        }
+
+    def get_captured_leads(
+        self,
+        property_id: Optional[str] = None,
+        leads_ledger_path: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """Reads persisted CPL lead records from `.agy/captured_leads.jsonl`."""
+        eff_ledger = (
+            str(leads_ledger_path)
+            if leads_ledger_path
+            else os.path.join(os.path.dirname(__file__), "..", ".agy", "captured_leads.jsonl")
+        )
+        if not os.path.isfile(eff_ledger):
+            return []
+        prop_clean = property_id.strip().lower() if property_id else None
+        records: List[Dict[str, Any]] = []
+        with open(eff_ledger, "r", encoding="utf-8") as fh:
+            for line in fh:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                    if isinstance(rec, dict):
+                        if prop_clean and str(rec.get("property_id", "")).lower() != prop_clean:
+                            continue
+                        records.append(rec)
+                except Exception:
+                    continue
+        return records
+
+
+def evaluate_lead_quote_threshold(
+    property_id: str,
+    tool_slug: str,
+    calculated_amount: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Determines whether a calculator tool slug and user-entered calculation amount cross
+    the high-value partner quote intake threshold:
+    - $100,000+ on 1031 Exchange or CapEx / Section 179
+    - $50,000+ on Invoice Factoring
+    - $50,000+ on Prexvo Student Loan Refinance (while keeping restricted YMYL public-service
+      pages like PSLF, IBR hardship, and SAVE litigation strictly free of private refinance offers).
+    """
+    from pseofactory.affiliates import is_restricted_public_service_slug
+
+    prop_clean = (property_id or "profithelm").strip().lower()
+    slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
+    amount_val = max(0.0, float(calculated_amount or 0.0))
+
+    non_tool_slugs = {"index", "about", "privacy", "terms", "disclaimers", "methodology"}
+    if slug_clean in non_tool_slugs:
+        return {
+            "property_id": prop_clean,
+            "tool_slug": slug_clean,
+            "vertical": "informational_governance",
+            "eligible": False,
+            "threshold_usd": 0.0,
+            "calculated_amount": amount_val,
+            "qualifies_for_quote_intake": False,
+            "qualifies_for_action_bus_dispatch": False,
+            "frictionless_mode": True,
+            "capital_band": "under_50k",
+            "primary_partner_key": "",
+            "partner_rep_desk": "",
+            "live_destination_url": "",
+        }
+
+    if prop_clean == "prexvo":
+        if is_restricted_public_service_slug(slug_clean, slug_clean):
+            return {
+                "property_id": prop_clean,
+                "tool_slug": slug_clean,
+                "vertical": "restricted_public_service_ymyl",
+                "eligible": False,
+                "threshold_usd": 0.0,
+                "calculated_amount": amount_val,
+                "qualifies_for_quote_intake": False,
+                "qualifies_for_action_bus_dispatch": False,
+                "frictionless_mode": True,
+                "capital_band": "under_50k",
+                "primary_partner_key": "",
+                "partner_rep_desk": "",
+                "live_destination_url": "",
+            }
+        threshold_usd = 50000.0
+        vertical = "student_loan_refinance"
+        primary_partner_key = "splash_financial"
+        partner_rep_desk = "Splash Financial Partner Desk"
+        live_destination_url = "https://www.splashfinancial.com/student-loan-refinance"
+    else:
+        if any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
+            threshold_usd = 50000.0
+            vertical = "invoice_factoring"
+            primary_partner_key = "otr_solutions_factoring"
+            partner_rep_desk = "Wade Fenton at OTR Solutions"
+            live_destination_url = "https://www.otrsolutions.com/freight-factoring/"
+        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
+            threshold_usd = 100000.0
+            vertical = "1031_exchange"
+            primary_partner_key = "ipx1031"
+            partner_rep_desk = "IPX1031 Exchange Desk"
+            live_destination_url = "https://xendoo.pxf.io/c/7932737/1357375/16354"
+        elif any(
+            tok in slug_clean
+            for tok in (
+                "179",
+                "equipment",
+                "lease",
+                "macrs",
+                "depreciation",
+                "vehicle",
+                "gvwr",
+                "ford",
+                "chevy",
+                "ram",
+                "toyota",
+                "tesla",
+                "gmc",
+                "cadillac",
+                "mercedes",
+                "bmw",
+                "audi",
+                "porsche",
+                "rivian",
+                "jeep",
+                "land-rover",
+                "lexus",
+                "lincoln",
+                "nissan",
+                "subaru",
+                "volvo",
+            )
+        ):
+            threshold_usd = 100000.0
+            vertical = "capex_section_179"
+            primary_partner_key = "crest_capital"
+            partner_rep_desk = "Aaron Rosenthal at E-file and Xendoo Commercial Tax Desk"
+            live_destination_url = "https://xendoo.pxf.io/c/7932737/1357375/16354"
+        else:
+            threshold_usd = 100000.0
+            vertical = "b2b_tax_advisory"
+            primary_partner_key = "turbotax"
+            partner_rep_desk = "Aaron Rosenthal at E-file and OTR Solutions Commercial Desk"
+            live_destination_url = "https://www.jdoqocy.com/click-101906407-11917161"
+
+    if amount_val >= 500000.0:
+        capital_band = "500k_plus"
+    elif amount_val >= 250000.0:
+        capital_band = "250k_500k"
+    elif amount_val >= 100000.0:
+        capital_band = "100k_250k"
+    elif amount_val >= 50000.0:
+        capital_band = "50k_100k"
+    else:
+        capital_band = "under_50k"
+
+    qualifies = amount_val >= threshold_usd
+    return {
+        "property_id": prop_clean,
+        "tool_slug": slug_clean,
+        "vertical": vertical,
+        "eligible": True,
+        "threshold_usd": threshold_usd,
+        "calculated_amount": amount_val,
+        "qualifies_for_quote_intake": qualifies,
+        "qualifies_for_action_bus_dispatch": qualifies and amount_val >= 100000.0,
+        "frictionless_mode": not qualifies,
+        "capital_band": capital_band,
+        "primary_partner_key": primary_partner_key,
+        "partner_rep_desk": partner_rep_desk,
+        "live_destination_url": live_destination_url,
+    }
+
+
+def ingest_qualified_lead(
+    property_id: str,
+    tool_slug: str,
+    email: str,
+    state: str,
+    capital_band: str,
+    calculated_amount: float,
+    partner_sharing_consent: bool,
+    partner_key: Optional[str] = None,
+    vertical: Optional[str] = None,
+    traffic_source: str = "calculator_quote_intake",
+    leads_ledger_path: Optional[Any] = None,
+    action_bus_path: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Top-level helper to ingest a qualified partner quote lead and dispatch $100k+ leads to HumanActionBus."""
+    bus = HumanActionBus(bus_path=action_bus_path) if action_bus_path else HumanActionBus()
+    engine = PartnerTrackingEngine(action_bus=bus)
+    return engine.ingest_qualified_lead(
+        property_id=property_id,
+        tool_slug=tool_slug,
+        email=email,
+        state=state,
+        capital_band=capital_band,
+        calculated_amount=calculated_amount,
+        partner_sharing_consent=partner_sharing_consent,
+        partner_key=partner_key,
+        vertical=vertical,
+        traffic_source=traffic_source,
+        leads_ledger_path=leads_ledger_path,
+    )
+
+
 

@@ -3416,6 +3416,232 @@ def _render_stateful_scenario_comparator_html(
     )
 
 
+def render_partner_quote_intake_html(
+    slug: str,
+    property_id: str,
+    topic_label: str = "",
+    statutory_authority: str = "",
+    baseline_amount: Optional[float] = None,
+) -> str:
+    """
+    Renders the native, TCPA-compliant partner-quote intake step (#partner-quote-intake-step)
+    capturing email, borrower/company state, capital_band, and explicit partner_sharing_consent
+    whenever a visitor's calculation crosses high-value thresholds:
+      - $100,000+ on 1031 Exchange or CapEx / Section 179
+      - $50,000+ on Invoice Factoring
+      - $50,000+ on Prexvo Student Loan Refinance
+    Strictly returns an empty string on restricted YMYL public-service pages (PSLF, IBR hardship,
+    SAVE litigation, disclaimers, methodology) so public-service pages stay 100% free of commercial
+    private refinance offers.
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    from pseofactory.partner_tracker import evaluate_lead_quote_threshold
+
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    slug_clean = str(slug or "index").strip().strip("/").lower() or "index"
+
+    default_amt = baseline_amount
+    if default_amt is None:
+        if prop_clean == "prexvo":
+            default_amt = 68500.0
+        elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
+            default_amt = 85000.0
+        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
+            default_amt = 450000.0
+        else:
+            default_amt = 125000.0
+
+    eval_info = evaluate_lead_quote_threshold(
+        property_id=prop_clean,
+        tool_slug=slug_clean,
+        calculated_amount=float(default_amt),
+    )
+    if not eval_info.get("eligible"):
+        return ""
+
+    threshold_int = int(round(float(eval_info["threshold_usd"])))
+    threshold_fmt = f"${threshold_int:,}"
+    amt_int = int(round(float(eval_info["calculated_amount"])))
+    vertical = str(eval_info["vertical"])
+    partner_key = str(eval_info["primary_partner_key"])
+    default_band = str(eval_info["capital_band"])
+    is_active = bool(eval_info["qualifies_for_quote_intake"])
+    active_attr = "true" if is_active else "false"
+    frictionless_attr = "false" if is_active else "true"
+    form_display = "block" if is_active else "none"
+    note_display = "none" if is_active else "block"
+
+    us_states = (
+        ("CA", "California (CA)"),
+        ("TX", "Texas (TX)"),
+        ("NY", "New York (NY)"),
+        ("FL", "Florida (FL)"),
+        ("IL", "Illinois (IL)"),
+        ("PA", "Pennsylvania (PA)"),
+        ("OH", "Ohio (OH)"),
+        ("GA", "Georgia (GA)"),
+        ("NC", "North Carolina (NC)"),
+        ("MI", "Michigan (MI)"),
+        ("NJ", "New Jersey (NJ)"),
+        ("VA", "Virginia (VA)"),
+        ("WA", "Washington (WA)"),
+        ("AZ", "Arizona (AZ)"),
+        ("MA", "Massachusetts (MA)"),
+        ("TN", "Tennessee (TN)"),
+        ("IN", "Indiana (IN)"),
+        ("MO", "Missouri (MO)"),
+        ("MD", "Maryland (MD)"),
+        ("WI", "Wisconsin (WI)"),
+        ("CO", "Colorado (CO)"),
+        ("MN", "Minnesota (MN)"),
+        ("SC", "South Carolina (SC)"),
+        ("AL", "Alabama (AL)"),
+        ("LA", "Louisiana (LA)"),
+        ("KY", "Kentucky (KY)"),
+        ("OR", "Oregon (OR)"),
+        ("OK", "Oklahoma (OK)"),
+        ("CT", "Connecticut (CT)"),
+        ("UT", "Utah (UT)"),
+        ("NV", "Nevada (NV)"),
+        ("DC", "District of Columbia (DC)"),
+    )
+    state_options_html = "\n".join(
+        f'              <option value="{st_code}"{" selected" if st_code == "CA" else ""}>{st_label}</option>'
+        for st_code, st_label in us_states
+    )
+
+    bands = (
+        ("50k_100k", "$50,000 to $99,999"),
+        ("100k_250k", "$100,000 to $249,999"),
+        ("250k_500k", "$250,000 to $499,999"),
+        ("500k_plus", "$500,000+ Institutional Tier"),
+    )
+    band_options_html = "\n".join(
+        f'              <option value="{b_code}"{" selected" if b_code == default_band else ""}>{b_label}</option>'
+        for b_code, b_label in bands
+    )
+
+    if prop_clean == "prexvo":
+        is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
+        heading_text = f"Qualified Borrower Rate-Match Intake ({threshold_fmt}+ Balance Tier)"
+        sub_text = (
+            f"Calculations at or above {threshold_fmt} qualify for direct institutional rate-table matching "
+            f"with pre-filled loan parameters. Calculations below {threshold_fmt} remain 100% frictionless with zero registration."
+        )
+        email_label = "Borrower Email Address"
+        state_label = "Borrower Residence State"
+        if is_explicit_refi:
+            band_label = "Refinance Loan Balance Tier"
+            consent_copy = (
+                "I provide explicit TCPA partner_sharing_consent authorizing Prexvo to share my email, residence state, "
+                "and loan balance tier with matched student loan refinance marketplace partners (including Splash Financial) "
+                "to generate a pre-filled rate quote. Refinancing federal student loans permanently waives federal protections."
+            )
+            btn_text = "Unlock Matched Refinance Rate Quote & Continue"
+        else:
+            band_label = "Student Loan Balance Tier"
+            consent_copy = (
+                "I provide explicit TCPA partner_sharing_consent authorizing Prexvo to share my email, residence state, "
+                "and loan balance tier with matched student loan marketplace partners (including Splash Financial) "
+                "to generate a pre-filled rate-table quote."
+            )
+            btn_text = "Unlock Matched Rate-Table Quote & Continue"
+    else:
+        if vertical == "1031_exchange":
+            heading_text = f"Qualified Intermediary & Tax Advisory Quote Intake ({threshold_fmt}+ Exchange Tier)"
+            sub_text = (
+                f"Exchange deferrals at or above {threshold_fmt} qualify for priority Qualified Intermediary escrow "
+                f"fee quotes and multi-state CPA boot reconciliation. Sub-threshold calculations stay 100% frictionless."
+            )
+            band_label = "Relinquished Property / Exchange Capital Band"
+        elif vertical == "invoice_factoring":
+            heading_text = f"Commercial Factoring & Working Capital Quote Intake ({threshold_fmt}+ Volume Tier)"
+            sub_text = (
+                f"Monthly receivable volume at or above {threshold_fmt} qualifies for direct non-recourse factoring "
+                f"advance rates and same-day funding quotes. Sub-threshold calculations stay 100% frictionless."
+            )
+            band_label = "Monthly Invoice / Working Capital Band"
+        elif vertical == "capex_section_179":
+            heading_text = f"Commercial Equipment & Section 179 Tax Quote Intake ({threshold_fmt}+ CapEx Tier)"
+            sub_text = (
+                f"Capital equipment acquisitions at or above {threshold_fmt} qualify for direct equipment financing "
+                f"rate sheets and CPA depreciation audit schedules. Sub-threshold calculations stay 100% frictionless."
+            )
+            band_label = "Equipment CapEx / Deduction Capital Band"
+        else:
+            heading_text = f"Commercial CPA & Advisory Quote Intake ({threshold_fmt}+ Exposure Tier)"
+            sub_text = (
+                f"Commercial calculations at or above {threshold_fmt} qualify for direct CPA tax preparation "
+                f"and entity structuring fee quotes. Sub-threshold calculations stay 100% frictionless."
+            )
+            band_label = "Annual Exposure / Capital Band"
+
+        email_label = "Work or Business Email Address"
+        state_label = "Company Filing State"
+        consent_copy = (
+            "I provide explicit TCPA partner_sharing_consent authorizing ProfitHelm to share my business email, "
+            "filing state, and capital band with matched commercial finance, tax, or exchange partners "
+            "(including OTR Solutions, E-file, and IPX1031) to prepare a customized quote and route me to the partner portal."
+        )
+        btn_text = "Request Matched Partner Quote & Continue"
+
+    vertical_attr = vertical
+    if prop_clean == "prexvo" and not ("refinance" in slug_clean or "refinancing" in slug_clean):
+        vertical_attr = "student_loan_rate_match"
+
+    return (
+        f'      <div id="partner-quote-intake-step" class="partner-quote-intake-drawer" '
+        f'data-mechanic="partner_quote_intake" '
+        f'data-property-id="{prop_clean}" '
+        f'data-tool-slug="{slug_clean}" '
+        f'data-vertical="{vertical_attr}" '
+        f'data-partner-key="{partner_key}" '
+        f'data-quote-threshold="{threshold_int}" '
+        f'data-calculated-amount="{amt_int}" '
+        f'data-threshold-active="{active_attr}" '
+        f'data-frictionless-mode="{frictionless_attr}">\n'
+        f'        <div class="partner-quote-header">\n'
+        f'          <span class="partner-quote-badge">High-Value Threshold Quote Desk ({threshold_fmt}+)</span>\n'
+        f'          <h3 style="margin: 6px 0 6px 0; font-size: 1.08rem;">{heading_text}</h3>\n'
+        f'          <p style="font-size: 13.5px; color: var(--text-secondary, #cbd5e1); margin: 0 0 10px 0;">{sub_text}</p>\n'
+        f'        </div>\n'
+        f'        <div id="partner-quote-frictionless-note" class="partner-quote-frictionless-note" aria-live="polite" style="display: {note_display}; font-size: 13px; color: var(--text-secondary, #94a3b8); padding: 8px 12px; border-radius: 6px; background: rgba(15, 23, 42, 0.5);">\n'
+        f'          Frictionless Calculator Mode Active: Your current calculation is below the {threshold_fmt} institutional quote threshold. Instant results remain 100% unlocked with zero registration required.\n'
+        f'        </div>\n'
+        f'        <form id="partner-quote-intake-form" class="partner-quote-form-body" action="/api/lead-capture" method="POST" style="display: {form_display};" novalidate>\n'
+        f'          <div class="serp-sub-inputs-grid" style="margin-bottom: 12px;">\n'
+        f'            <div class="serp-input-cell">\n'
+        f'              <label for="quote-intake-email">{email_label}</label>\n'
+        f'              <input type="email" id="quote-intake-email" name="email" class="touch-target calc-number-input" required autocomplete="email" aria-label="{email_label}">\n'
+        f'            </div>\n'
+        f'            <div class="serp-input-cell">\n'
+        f'              <label for="quote-intake-state">{state_label}</label>\n'
+        f'              <select id="quote-intake-state" name="state" class="touch-target serp-select-input" required aria-label="{state_label}">\n'
+        f'{state_options_html}\n'
+        f'              </select>\n'
+        f'            </div>\n'
+        f'            <div class="serp-input-cell">\n'
+        f'              <label for="quote-intake-capital-band">{band_label}</label>\n'
+        f'              <select id="quote-intake-capital-band" name="capital_band" class="touch-target serp-select-input" required aria-label="{band_label}">\n'
+        f'{band_options_html}\n'
+        f'              </select>\n'
+        f'            </div>\n'
+        f'          </div>\n'
+        f'          <div class="partner-quote-consent-row" style="margin-bottom: 12px;">\n'
+        f'            <label for="quote-intake-consent" class="touch-target partner-quote-consent-label" style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; min-width: 44px; padding: 6px 0; cursor: pointer; font-size: 12.5px; line-height: 1.45; color: var(--text-secondary, #cbd5e1);">\n'
+        f'              <input type="checkbox" id="quote-intake-consent" name="partner_sharing_consent" value="true" required class="touch-target" aria-label="Explicit TCPA Partner Sharing Consent" style="min-width: 44px; min-height: 44px; margin: 0; flex-shrink: 0; accent-color: var(--accent, #38bdf8);">\n'
+        f'              <span>{consent_copy}</span>\n'
+        f'            </label>\n'
+        f'          </div>\n'
+        f'          <div class="partner-quote-actions" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">\n'
+        f'            <button type="submit" id="btn-submit-partner-quote" class="touch-target btn-primary partner-quote-submit-btn" data-cta-slot="partner_quote_intake_cta" style="min-height: 48px; min-width: 48px; padding: 12px 20px; font-size: 16px; font-weight: 700; cursor: pointer;">{btn_text}</button>\n'
+        f'          </div>\n'
+        f'          <div id="partner-quote-intake-status" class="partner-quote-status" aria-live="polite" style="font-size: 13px; color: var(--text-secondary, #94a3b8); margin-top: 8px;">Ready to route pre-filled {threshold_fmt}+ quote parameters upon explicit consent.</div>\n'
+        f'        </form>\n'
+        f'      </div>'
+    )
+
+
 def _render_saveable_decision_blueprint_html(
     slug: str,
     topic_label: str,
@@ -3455,9 +3681,10 @@ def render_serp_incumbent_depth_upgrade_block(
       3. Live Reactive Multi-Segment SVG Visual Breakdown Bar Chart
       4. Authoritative Primary Data Reference Schedule Table (e.g. 10-tier CA FTB 540 schedule)
       5. Dynamic Calculation-Bound Commercial Intent Callout (#dynamic-commercial-intent-banner)
-      6. Multi-Year Statutory & Repayment Cliff Visualizer (#multi-year-cliff-visualizer)
-      7. Stateful Side-by-Side Scenario Comparator (#stateful-scenario-comparator)
-      8. Saveable Decision Blueprint (#saveable-decision-blueprint)
+      6. Native TCPA-Compliant Partner Quote Intake Step (#partner-quote-intake-step)
+      7. Multi-Year Statutory & Repayment Cliff Visualizer (#multi-year-cliff-visualizer)
+      8. Stateful Side-by-Side Scenario Comparator (#stateful-scenario-comparator)
+      9. Saveable Decision Blueprint (#saveable-decision-blueprint)
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     s_low = str(slug or "").strip().lower()
@@ -3533,6 +3760,13 @@ def render_serp_incumbent_depth_upgrade_block(
         f'            </tr>'
         for c1, c2, c3, c4 in spec["table_rows"]
     )
+    quote_intake_html = render_partner_quote_intake_html(
+        slug=s_low,
+        property_id=property_id,
+        topic_label=topic_label,
+        statutory_authority=statutory_authority,
+    )
+    quote_intake_block = f"{quote_intake_html}\n" if quote_intake_html else ""
     cliff_html = _render_multi_year_cliff_visualizer_html(
         topic_label=topic_label,
         is_prexvo=is_prexvo,
@@ -3577,6 +3811,7 @@ def render_serp_incumbent_depth_upgrade_block(
         f'        </svg>\n'
         f'      </div>\n'
         f'{spec["banner_html"]}\n'
+        f'{quote_intake_block}'
         f'{cliff_html}\n'
         f'{comparator_html}\n'
         f'{blueprint_html}\n'
@@ -3596,6 +3831,7 @@ def render_serp_incumbent_depth_upgrade_block(
         f'      </div>\n'
         f'    </section>'
     )
+
 
 
 def render_competitor_winning_pattern_blocks(
@@ -4224,11 +4460,13 @@ __all__ = [
     "benchmark_all_properties",
     "run_blind_spot_pass",
     "_format_safe_heading_topic",
+    "render_partner_quote_intake_html",
     "render_serp_incumbent_depth_upgrade_block",
     "render_competitor_winning_pattern_blocks",
     "get_competitive_incumbent_profile",
     "evaluate_bespoke_vs_systemic_upgrades",
 ]
+
 
 
 
