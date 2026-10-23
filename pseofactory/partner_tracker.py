@@ -737,6 +737,113 @@ class PartnerTrackingEngine:
         )
         return any(tok in u_lower for tok in tracked_tokens)
 
+    def auto_promote_approved_links(
+        self,
+        classifications: List[PartnerEmailClassification],
+        persist: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Closes the autonomous inbox-to-vault-to-edge link promotion loop:
+        - Promotes APPLICATION_APPROVED classifications that carry a verified network-tracked
+          affiliate URL (Impact pxf.io, PartnerStack try.rippling.com, CJ click-<pid>-<aid>,
+          FirstPromoter fpr=/via=/fp_ref=, Mercury /r/) directly into the vault's
+          approved_tracking_url / edge upgrade table.
+        - Rejects bare merchant homepages (e.g. https://ramp.com/ or https://wallethub.com/)
+          and records them under awaiting_portal_link_extraction so unverified homepages
+          never overwrite monetized fallback routes.
+        - Respects Prexvo Gate 1 and HumanActionBus operator gates.
+        """
+        promoted: List[Dict[str, Any]] = []
+        awaiting_portal_link: List[Dict[str, Any]] = []
+        skipped_gated: List[Dict[str, Any]] = []
+
+        native_brand_tokens = {
+            "rippling": "rippling",
+            "coinledger": "coinledger",
+            "koinly": "koinly",
+            "gusto": "gusto",
+            "kalshi": "kalshi",
+            "ramp": "ramp",
+            "rho": "rho",
+            "mercury": "mercury",
+        }
+
+        for c in sorted(classifications, key=lambda x: x.date):
+            if c.classification_type != "APPLICATION_APPROVED":
+                continue
+            prop_clean = (c.property_id or "profithelm").strip().lower()
+            p_key = (c.partner_key or "").strip().lower()
+            cand_url = (c.candidate_url or "").strip()
+
+            if c.requires_operator_decision or prop_clean == "prexvo":
+                skipped_gated.append(
+                    {
+                        "email_id": c.email_id,
+                        "property_id": prop_clean,
+                        "partner_key": p_key,
+                        "partner_name": c.partner_name,
+                        "reason": "Requires explicit operator confirmation or Prexvo Gate 1 verification",
+                    }
+                )
+                continue
+
+            if not cand_url or not validate_affiliate_url(cand_url) or not self._is_network_tracked_affiliate_url(cand_url):
+                awaiting_portal_link.append(
+                    {
+                        "email_id": c.email_id,
+                        "property_id": prop_clean,
+                        "partner_key": p_key,
+                        "partner_name": c.partner_name,
+                        "network": c.network,
+                        "candidate_url": cand_url,
+                        "reason": "Approved in email but candidate_url is a bare homepage; awaiting portal tracking link extraction",
+                    }
+                )
+                continue
+
+            prop_section = self.hub.vault_data.setdefault("properties", {}).setdefault(prop_clean, {})
+            partners_dict = prop_section.setdefault("partners", {})
+            p_entry = partners_dict.setdefault(p_key, {})
+            p_entry["approved_tracking_url"] = cand_url
+
+            expected_brand_tok = native_brand_tokens.get(p_key)
+            is_native_brand_match = bool(
+                expected_brand_tok and expected_brand_tok in (c.partner_name or "").lower()
+            )
+            if is_native_brand_match:
+                p_entry["url"] = cand_url
+                p_entry["status"] = "live"
+                self.hub._vault.setdefault(prop_clean, {})[p_key] = {
+                    "status": "live",
+                    "url": cand_url,
+                    "direct_url": cand_url,
+                    "category": c.category,
+                }
+
+            promoted.append(
+                {
+                    "email_id": c.email_id,
+                    "property_id": prop_clean,
+                    "partner_key": p_key,
+                    "partner_name": c.partner_name,
+                    "network": c.network,
+                    "promoted_url": cand_url,
+                    "promotion_tier": "native_live" if is_native_brand_match else "edge_direct_contract_upgrade",
+                }
+            )
+
+        if persist and promoted:
+            self.hub.save_vault()
+
+        return {
+            "promoted_count": len(promoted),
+            "promoted": promoted,
+            "awaiting_portal_link_extraction_count": len(awaiting_portal_link),
+            "awaiting_portal_link_extraction": awaiting_portal_link,
+            "skipped_gated_count": len(skipped_gated),
+            "skipped_gated": skipped_gated,
+        }
+
     def _evaluate_network_payout_readiness(self) -> Dict[str, Dict[str, Any]]:
         """
         Inspects master_networks and property metadata in monetization_vault.json to verify
@@ -1204,7 +1311,13 @@ class PartnerTrackingEngine:
                     or "rejected" in corr.lower()
                 ):
                     op_state = "DECLINED_COVERED_BY_FALLBACK"
-                    if prop_id == "profithelm" and p_key in ("ramp", "rho"):
+                    if prop_id == "profithelm" and p_key == "ramp":
+                        reason = (
+                            "PartnerStack Marketplace application stck_sHqgUkyEIAPgiL declined "
+                            "(cooldown until 2026-10-23T00:00:00Z); Impact.com Ramp (#51436) approved "
+                            "in Newsletter #1591 awaiting pxf.io link extraction; covered by Mercury Startup Banking ($250 CPA) fallback."
+                        )
+                    elif prop_id == "profithelm" and p_key == "rho":
                         reason = (
                             "PartnerStack Marketplace application stck_sHqgUkyEIAPgiL declined "
                             "(cooldown until 2026-10-23T00:00:00Z, 4 applications on hold); "

@@ -687,6 +687,48 @@ class MonetizationHub:
             "errors": errors,
         }
 
+    def get_direct_contract_upgrades(self, property_id: str = "profithelm") -> Dict[str, str]:
+        """
+        Extracts verified network-tracked direct contract URLs from the monetization vault
+        (such as impact_tracking_url, cj_approved_tracking_url, cj_approved_lawdepot_tracking_url,
+        and approved_tracking_url) so the edge redirect function automatically promotes newly
+        approved contracts without manual hardcoding.
+        """
+        prop_clean = (property_id or "profithelm").strip().lower()
+        target_prop = "profithelm" if prop_clean == "exchange1031" else prop_clean
+        upgrades: Dict[str, str] = {}
+        if target_prop == "profithelm":
+            upgrades.update(
+                {
+                    "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
+                    "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
+                    "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
+                    "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
+                }
+            )
+        prop_section = self.vault_data.get("properties", {}).get(target_prop, {})
+        partners_dict = prop_section.get("partners", {}) if isinstance(prop_section, dict) else {}
+        for p_key, p_meta in partners_dict.items():
+            if not isinstance(p_meta, dict):
+                continue
+            for url_field in (
+                "approved_tracking_url",
+                "impact_tracking_url",
+                "cj_approved_tracking_url",
+                "cj_approved_lawdepot_tracking_url",
+            ):
+                cand = str(p_meta.get(url_field) or "").strip()
+                if cand and validate_affiliate_url(cand):
+                    upgrades[p_key] = cand
+                    break
+        return upgrades
+
     def _is_direct_profithelm_tool(self, tool_slug: str) -> bool:
         """Determines if a tool slug is explicitly mapped to a direct ProfitHelm partner."""
         s = (tool_slug or "").strip().lower()

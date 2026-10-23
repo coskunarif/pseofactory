@@ -2028,5 +2028,103 @@ def test_partner_earnings_ledger_sync_and_commission_email_ingestion(
     assert_no_forbidden_dashes(json.dumps(updated_ledger), context="partner_earnings_ledger")
 
 
+def test_autonomous_link_promotion_and_new_zoho_classifications(
+    tmp_path, temp_bus_path, temp_email_paths
+):
+    """
+    Verifies:
+    1. Classification of Zoho Notification #851 (FreeTaxUSA CJ approval), Notification #857
+       (WalletHub CJ approval), Inbox #1009 (ERGO NEXT Insurance Impact decline), and
+       Inbox #1025 (Invoice Simple Impact decline).
+    2. PartnerTrackingEngine.auto_promote_approved_links() promotes verified network-tracked
+       URLs into the vault's approved_tracking_url / edge direct_contract_upgrades while holding
+       bare homepages (e.g. https://ramp.com/, https://wallethub.com/) in awaiting_portal_link_extraction.
+    3. Edge redirect functions for both ProfitHelm and Prexvo synthesize sub-attribution from
+       both ?source_tool=...&cta_slot=... and ?source=...&slot=... query parameter aliases.
+    """
+    from pseofactory.edge import generate_edge_redirect_function
 
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
 
+    new_zoho_emails = [
+        EmailMessage(
+            id="notif-851",
+            message_id="<851@cj.com>",
+            account="zoho",
+            mailbox="Notification",
+            subject="FreeTaxUSA Affiliate Program: Welcome to the FreeTaxUSA Affiliate Program!",
+            sender_name="FreeTaxUSA Affiliate Program",
+            sender_email="affiliates@freetaxusa.com",
+            date="2026-10-21T11:15:01-07:00",
+            body_snippet="Welcome to the FreeTaxUSA Affiliate Program (#1722649)! Earn 10%-20% commission on paid products.",
+        ),
+        EmailMessage(
+            id="notif-857",
+            message_id="<857@cj.com>",
+            account="zoho",
+            mailbox="Notification",
+            subject="WalletHub Affiliate Program: Welcome to the WalletHub Affiliate Program!",
+            sender_name="WalletHub Affiliate Program",
+            sender_email="no-response@cj.com",
+            date="2026-10-23T00:30:03-07:00",
+            body_snippet="Welcome to the WalletHub Affiliate Program (#6002798)! Earn $50 CPA for WalletHub Premium.",
+        ),
+        EmailMessage(
+            id="1009",
+            message_id="<1009@impact.com>",
+            account="zoho",
+            mailbox="Inbox",
+            subject="Promotion Request Declined for ERGO NEXT Insurance",
+            sender_name="impact.com",
+            sender_email="notifications@app.impact.com",
+            date="2026-10-22T09:11:10-07:00",
+            body_snippet="ERGO NEXT Insurance has declined your application to promote their brand.",
+        ),
+        EmailMessage(
+            id="1025",
+            message_id="<1025@impact.com>",
+            account="zoho",
+            mailbox="Inbox",
+            subject="Promotion Request Declined for Invoice Simple",
+            sender_name="impact.com",
+            sender_email="notifications@app.impact.com",
+            date="2026-10-23T12:14:21-07:00",
+            body_snippet="Invoice Simple has declined your application to promote their brand.",
+        ),
+    ]
+
+    classified = email_engine.classify_partner_emails(new_zoho_emails)
+    by_id = {c.email_id: c for c in classified}
+
+    assert by_id["notif-851"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["notif-851"].partner_key == "taxslayer"
+    assert by_id["notif-851"].network == "CJ Affiliate"
+
+    assert by_id["notif-857"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["notif-857"].partner_key == "mercury"
+    assert by_id["notif-857"].network == "CJ Affiliate"
+
+    assert by_id["1009"].classification_type == "APPLICATION_DECLINED"
+    assert by_id["1009"].partner_key == "next_insurance_b2b"
+
+    assert by_id["1025"].classification_type == "APPLICATION_DECLINED"
+    assert by_id["1025"].partner_key == "otr_solutions_factoring"
+
+    promo_result = tracker.auto_promote_approved_links(classified, persist=False)
+    assert promo_result["promoted_count"] == 1
+    assert promo_result["promoted"][0]["email_id"] == "notif-851"
+    assert promo_result["awaiting_portal_link_extraction_count"] == 1
+    assert promo_result["awaiting_portal_link_extraction"][0]["email_id"] == "notif-857"
+
+    upgrades = tracker.hub.get_direct_contract_upgrades("profithelm")
+    assert upgrades["taxslayer"] == "https://www.dpbolvw.net/click-101906407-15704796"
+
+    ph_edge_js = generate_edge_redirect_function("profithelm", hub=tracker.hub)
+    px_edge_js = generate_edge_redirect_function("prexvo", hub=tracker.hub)
+    assert 'normParams.get("source_tool") || normParams.get("source")' in ph_edge_js
+    assert 'normParams.get("cta_slot") || normParams.get("slot")' in ph_edge_js
+    assert 'normParams.get("source_tool") || normParams.get("source")' in px_edge_js
+    assert 'normParams.get("cta_slot") || normParams.get("slot")' in px_edge_js

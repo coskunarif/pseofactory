@@ -56,6 +56,8 @@ ZOHO_NOTIFICATION_PARTNER_DOMAINS: Tuple[str, ...] = (
     "lendkey.com",
     "gusto.com",
     "freetaxusa.com",
+    "wallethub.com",
+    "invoicesimple.com",
 )
 
 
@@ -168,6 +170,13 @@ class EmailIngestionEngine:
     Enforces rate-limiting, local caching, and deterministic partner classification.
     """
 
+    DEFAULT_CACHE_PATH = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", ".agy", "email_cache.json")
+    )
+    DEFAULT_STATE_PATH = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", ".agy", "email_sync_state.json")
+    )
+
     def __init__(
         self,
         cache_path: Optional[str] = None,
@@ -175,6 +184,7 @@ class EmailIngestionEngine:
         min_poll_interval: int = DEFAULT_MIN_POLL_INTERVAL_SECONDS,
         himalaya_bin: str = "himalaya",
     ):
+        self._has_custom_state_path = state_path is not None
         self.cache_path = cache_path or os.path.join(
             os.path.dirname(__file__), "..", ".agy", "email_cache.json"
         )
@@ -244,6 +254,13 @@ class EmailIngestionEngine:
         return True, 0
 
     def record_poll(self, account: str, success: bool = True, error: str = "") -> None:
+        if (
+            not self._has_custom_state_path
+            and "PYTEST_CURRENT_TEST" in os.environ
+            and os.getenv("PSEUFACTORY_LIVE_EMAIL") != "1"
+            and error == "Offline mode: simulated IMAP disabled in test environment"
+        ):
+            return
         state = self.load_state()
         accounts = state.setdefault("accounts", {})
         accounts[account] = {
@@ -302,11 +319,17 @@ class EmailIngestionEngine:
             self.record_poll("zoho", success=False, error=f"JSON parse error: {exc}")
             return []
 
-    def read_message_body(self, message_id: str, account: str = "zoho") -> str:
+    def read_message_body(
+        self,
+        message_id: str,
+        account: str = "zoho",
+        mailbox: Optional[str] = None,
+    ) -> str:
         """Reads message body via himalaya or returns empty string on failure."""
-        code, stdout, stderr = self.run_himalaya_command(
-            ["message", "read", str(message_id), "-a", account]
-        )
+        cmd_args = ["message", "read", str(message_id), "-a", account]
+        if mailbox and mailbox.lower() != "inbox":
+            cmd_args.extend(["-f", mailbox])
+        code, stdout, stderr = self.run_himalaya_command(cmd_args)
         if code == 0:
             return stdout
         return ""
@@ -467,6 +490,29 @@ class EmailIngestionEngine:
                 assert_no_forbidden_dashes(subject_clean, context=f"Email subject {mid}")
                 assert_no_forbidden_dashes(sender_name_clean, context=f"Sender name {mid}")
 
+                existing_notif = cached_dict.get(mid)
+                notif_body_snippet = (
+                    existing_notif.get("body_snippet", "")
+                    if existing_notif and existing_notif.get("body_snippet") != subject_clean
+                    else ""
+                )
+                if fetch_bodies_for_partner_keys and not notif_body_snippet:
+                    raw_env_id = str(env.get("id", ""))
+                    if raw_env_id:
+                        full_notif_body = self.read_message_body(
+                            raw_env_id, account=zoho_account, mailbox="Notification"
+                        )
+                        notif_body_snippet = (
+                            full_notif_body[:2000]
+                            .replace("\u2014", "-")
+                            .replace("\u2013", "-")
+                        )
+                        assert_no_forbidden_dashes(
+                            notif_body_snippet, context=f"Email body {mid}"
+                        )
+                if not notif_body_snippet:
+                    notif_body_snippet = subject_clean
+
                 msg = EmailMessage(
                     id=mid,
                     message_id=msg_id_hdr,
@@ -476,7 +522,7 @@ class EmailIngestionEngine:
                     subject=subject_clean,
                     sender_name=sender_name_clean,
                     sender_email=sender_email,
-                    body_snippet=subject_clean,
+                    body_snippet=notif_body_snippet,
                     raw_headers={"size": env.get("size")},
                     flags=[f.get("iana", "") for f in (env.get("flags") or []) if isinstance(f, dict)],
                 )
@@ -509,6 +555,29 @@ class EmailIngestionEngine:
                 assert_no_forbidden_dashes(subject_clean, context=f"Email subject {mid}")
                 assert_no_forbidden_dashes(sender_name_clean, context=f"Sender name {mid}")
 
+                existing_news = cached_dict.get(mid)
+                news_body_snippet = (
+                    existing_news.get("body_snippet", "")
+                    if existing_news and existing_news.get("body_snippet") != subject_clean
+                    else ""
+                )
+                if fetch_bodies_for_partner_keys and not news_body_snippet:
+                    raw_env_id = str(env.get("id", ""))
+                    if raw_env_id:
+                        full_news_body = self.read_message_body(
+                            raw_env_id, account=zoho_account, mailbox="Newsletter"
+                        )
+                        news_body_snippet = (
+                            full_news_body[:2000]
+                            .replace("\u2014", "-")
+                            .replace("\u2013", "-")
+                        )
+                        assert_no_forbidden_dashes(
+                            news_body_snippet, context=f"Email body {mid}"
+                        )
+                if not news_body_snippet:
+                    news_body_snippet = subject_clean
+
                 msg = EmailMessage(
                     id=mid,
                     message_id=msg_id_hdr,
@@ -518,7 +587,7 @@ class EmailIngestionEngine:
                     subject=subject_clean,
                     sender_name=sender_name_clean,
                     sender_email=sender_email,
-                    body_snippet=subject_clean,
+                    body_snippet=news_body_snippet,
                     raw_headers={"size": env.get("size")},
                     flags=[f.get("iana", "") for f in (env.get("flags") or []) if isinstance(f, dict)],
                 )
@@ -989,6 +1058,62 @@ class EmailIngestionEngine:
                 )
                 continue
 
+            if msg.mailbox != "Sent" and "freetaxusa" in combined_text and (
+                "welcome to the freetaxusa" in combined_text
+                or "your application has been approved" in combined_text
+                or "approved" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="taxslayer",
+                        partner_name="FreeTaxUSA Affiliate Program",
+                        category="TAX_INTELLIGENCE",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="FreeTaxUSA Affiliate Program (#1722649) approved on CJ Affiliate (10%-20% commission on paid products, 30-day cookie via Zoho Notification #851).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url or "https://www.dpbolvw.net/click-101906407-15704796",
+                        network="CJ Affiliate",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and "wallethub" in combined_text and (
+                "welcome to the wallethub" in combined_text
+                or "your application has been approved" in combined_text
+                or "approved" in combined_text
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="mercury",
+                        partner_name="WalletHub Affiliate Program",
+                        category="STARTUP_BANKING",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="WalletHub Affiliate Program (#6002798) approved on CJ Affiliate ($50 CPA for WalletHub Premium/Premium+ subscriptions, 7-day cookie via Zoho Notification #857).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url or "https://wallethub.com/",
+                        network="CJ Affiliate",
+                    )
+                )
+                continue
+
             # Automated Conversion, Lead, and Payout Alert Ingestion
             if msg.mailbox != "Sent":
                 is_commission_alert = any(
@@ -1275,10 +1400,15 @@ class EmailIngestionEngine:
                 )
                 continue
 
-            # 0b. ERGO NEXT Insurance Affiliate Application (Impact.com digest)
+            # 0b. ERGO NEXT Insurance Affiliate Application / Decline (Impact.com)
             if msg.mailbox != "Sent" and (
                 "ergo next insurance" in combined_text or "next insurance" in body_lower
             ):
+                is_declined_next = (
+                    "declined" in subj_lower
+                    or "promotion request declined" in body_lower
+                    or "declined your application" in body_lower
+                )
                 classifications.append(
                     PartnerEmailClassification(
                         email_id=msg.id,
@@ -1287,12 +1417,49 @@ class EmailIngestionEngine:
                         partner_key="next_insurance_b2b",
                         partner_name="Next Insurance Commercial B2B",
                         category="COMMERCIAL_INSURANCE",
-                        classification_type="APPLICATION_SUBMITTED",
+                        classification_type="APPLICATION_DECLINED" if is_declined_next else "APPLICATION_SUBMITTED",
                         requires_operator_decision=False,
-                        summary="Application submitted to ERGO NEXT Insurance via Impact.com (#15709). Awaiting partner review and tracking link issuance.",
-                        urgency="MEDIUM",
+                        summary=(
+                            "ERGO NEXT Insurance (#15709) declined Impact.com promotion request (Inbox #1009, site size filter). Slot covered at edge by Sovrn Commerce fallback."
+                            if is_declined_next
+                            else "Application submitted to ERGO NEXT Insurance via Impact.com (#15709). Awaiting partner review and tracking link issuance."
+                        ),
+                        urgency="LOW" if is_declined_next else "MEDIUM",
                         deadline=None,
-                        missing_requirements=["Pending Impact.com vendor review for ERGO NEXT Insurance (#15709)"],
+                        missing_requirements=(
+                            ["Direct B2B agency partnership or traffic scale review required for ERGO NEXT Insurance (#15709)"]
+                            if is_declined_next
+                            else ["Pending Impact.com vendor review for ERGO NEXT Insurance (#15709)"]
+                        ),
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url,
+                        network="Impact.com",
+                    )
+                )
+                continue
+
+            # 0c. Invoice Simple Promotion Request Declined (Impact.com #29915)
+            if msg.mailbox != "Sent" and "invoice simple" in combined_text and (
+                "declined" in subj_lower
+                or "promotion request declined" in body_lower
+                or "declined your application" in body_lower
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="otr_solutions_factoring",
+                        partner_name="Invoice Simple",
+                        category="LOGISTICS_TRADE",
+                        classification_type="APPLICATION_DECLINED",
+                        requires_operator_decision=False,
+                        summary="Invoice Simple (#29915) declined Impact.com promotion request (Inbox #1025, site size filter). Covered by Sovrn Commerce / direct OTR Solutions pipeline.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,

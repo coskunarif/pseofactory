@@ -1090,7 +1090,9 @@ const TRACKING_PARAMS = [
   "utm_content",
   "gclid",
   "source_tool",
+  "source",
   "cta_slot",
+  "slot",
   "ph_tier",
   "tier",
 ];
@@ -1269,8 +1271,8 @@ export async function onRequest(context) {{
     }}
   }}
 
-  const sourceTool = normParams.get("source_tool") || "";
-  const ctaSlot = normParams.get("cta_slot") || "";
+  const sourceTool = normParams.get("source_tool") || normParams.get("source") || "";
+  const ctaSlot = normParams.get("cta_slot") || normParams.get("slot") || "";
   const phTier = normParams.get("ph_tier") || "";
   const effectiveSubid =
     normParams.get("subid") ||
@@ -1371,6 +1373,8 @@ export async function onRequest(context) {{
         "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
         "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
     }
+    if hasattr(active_hub, "get_direct_contract_upgrades"):
+        direct_contract_upgrades.update(active_hub.get_direct_contract_upgrades("profithelm"))
     sovrn_fallback_upgrades = {
         "ipx1031": "https://dlpcapital.com/",
     }
@@ -1532,7 +1536,9 @@ const TRACKING_PARAMS = [
   "ph_tier",
   "tier",
   "source_tool",
+  "source",
   "cta_slot",
+  "slot",
 ];
 
 const CJ_DOMAINS = [
@@ -1722,8 +1728,8 @@ export async function onRequest(context) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
-  const sourceTool = normParams.get("source_tool") || "";
-  const ctaSlot = normParams.get("cta_slot") || "";
+  const sourceTool = normParams.get("source_tool") || normParams.get("source") || "";
+  const ctaSlot = normParams.get("cta_slot") || normParams.get("slot") || "";
   const phTier = normParams.get("ph_tier") || "";
   const effectiveSubid =
     normParams.get("subid") ||
