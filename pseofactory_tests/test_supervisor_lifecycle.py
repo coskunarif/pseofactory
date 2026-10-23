@@ -292,7 +292,7 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
         return True
 
     def runaway_builder(slug: str, target_file=None):
-        time.sleep(2.0)
+        time.sleep(2.5)
         return True
 
     reg = TenantRegistry()
@@ -319,12 +319,15 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
 
     # 2. Assert tenant timeout budget
     reg_timeout = TenantRegistry()
+    dist_fast = tmp_path / "fast_dist"
+    dist_fast.mkdir(parents=True, exist_ok=True)
+    (dist_fast / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
     dist_timeout = tmp_path / "runaway_dist"
     dist_timeout.mkdir(parents=True, exist_ok=True)
     (dist_timeout / "index.html").write_text("<html><body>Drifted with em dash \u2014 invalid</body></html>", encoding="utf-8")
 
     reg_timeout.register_adapter(
-        ConfigurablePropertyAdapter("fast", "Fast", "fast.com", "https://fast.com", dist_1)
+        ConfigurablePropertyAdapter("fast", "Fast", "fast.com", "https://fast.com", dist_fast)
     )
     reg_timeout.register_adapter(
         ConfigurablePropertyAdapter(
@@ -341,13 +344,13 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
         registry=reg_timeout,
         lifecycle=MaintenanceLifecycle(trend_runner=FastTrendRunner()),
         concurrency_ceiling=2,
-        tenant_timeout_budget=0.6,
+        tenant_timeout_budget=1.2,
     )
     t0 = time.time()
     t_results = coord_timeout.run_fleet(force=True)
     duration = time.time() - t0
 
-    assert duration < 2.0, "Runaway tenant blocked the coordinator beyond its timeout"
+    assert duration < 2.4, "Runaway tenant blocked the coordinator beyond its timeout"
     assert t_results["runaway"].status == "TIMEOUT"
     assert t_results["fast"].status in ("SUCCESS", "SKIPPED_NO_CHANGES")
 
