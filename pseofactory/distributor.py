@@ -1017,22 +1017,22 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"current_qre_spend": 800000, "prior_three_year_avg_qre": 500000, "asc_credit_rate": 0.14},
     },
     "s-corp-reasonable-salary-tax-calculator": {
-        "formula": "round((net_business_income - reasonable_salary) * se_tax_rate, 2)",
-        "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0, "se_tax_rate": 0.153},
-        "published_output": 19125.0,
-        "sample_calculation": "($220,000 S-Corp net income minus $95,000 reasonable W-2 salary) * 15.3% FICA tax rate = $19,125 annual payroll tax savings under IRC Section 1366",
+        "formula": "round(oasdi_savings + medicare_savings, 0)",
+        "inputs": {"oasdi_savings": 10056.4, "medicare_savings": 3123.6},
+        "published_output": 13180.0,
+        "sample_calculation": "On $220,000 S-Corp net income vs $95,000 W-2 salary, OASDI caps at the $176,100 wage base ($10,056.40 OASDI savings + $3,123.60 Medicare savings = $13,180 annual FICA tax savings under IRC Section 1366)",
         "statutory_claim_key": "standard_deduction_2026_single",
         "statutory_claim_value": 16100,
         "query_params": {"net_business_income": 220000, "reasonable_salary": 95000, "se_tax_rate": 0.153},
     },
     "section-301-tariff-landed-cost-calculator": {
         "formula": "round(customs_value_fob * (1.0 + combined_duty_and_301_rate) + freight_and_mpf_hmf, 2)",
-        "inputs": {"customs_value_fob": 120000.0, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6800.0},
-        "published_output": 161000.0,
-        "sample_calculation": "$120,000 FOB customs value + $34,200 (28.5% combined HTSUS & Section 301 duty) + $6,800 freight/MPF/HMF = $161,000 total landed cost",
+        "inputs": {"customs_value_fob": 120000.0, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6766.0},
+        "published_output": 160966.0,
+        "sample_calculation": "$120,000 FOB customs value + $34,200 (28.5% combined HTSUS & Section 301 duty) + $6,766 ($6,000 freight + $528.40 MPF + $237.50 HMF) = $160,966 total landed cost",
         "statutory_claim_key": "standard_deduction_2026_single",
         "statutory_claim_value": 16100,
-        "query_params": {"customs_value_fob": 120000, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6800},
+        "query_params": {"customs_value_fob": 120000, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6766},
     },
     "workers-comp-and-payroll-burden-calculator": {
         "formula": "round(annual_payroll * (statutory_tax_rate + (workers_comp_rate_per_100 / 100.0)), 2)",
@@ -1772,10 +1772,10 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=linkedin&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator&utm_content=company_post"
         text = (
-            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $19,125 in annual FICA payroll tax.\n\n"
+            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $13,180 in annual FICA payroll tax.\n\n"
             f"Under IRC Section 1366 and IRS Revenue Ruling 74-44, S-corporation shareholder-employees must pay reasonable W-2 compensation before taking FICA-exempt pass-through distributions.\n\n"
             f"Key findings from our S-Corp compensation optimizer:\n"
-            f"• Shielding $125,000 in K-1 distributions from the 15.3% self-employment tax rate yields $19,125 in gross FICA savings.\n"
+            f"• Accounting for the $176,100 Social Security OASDI wage base cap, shielding $125,000 in K-1 distributions yields $13,180 in FICA savings.\n"
             f"• Lower W-2 wages reduce the W-2 wage base available for the 20% IRC Section 199A QBI deduction.\n"
             f"• BLS OEWS occupational wage percentiles anchor audit-defensible officer compensation benchmarks.\n\n"
             f"Model your exact S-Corp W-2 salary, FICA savings, and Section 199A QBI impact:\n"
@@ -1783,12 +1783,12 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"#SCorp #TaxStrategy #ReasonableCompensation #SmallBusinessTax #Section199A #CPA"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
-        url = f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800&utm_source=linkedin&utm_medium=social&utm_campaign=section-301-tariff-landed-cost-calculator&utm_content=company_post"
+        url = f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6766&utm_source=linkedin&utm_medium=social&utm_campaign=section-301-tariff-landed-cost-calculator&utm_content=company_post"
         text = (
-            f"A $120,000 FOB import shipment hit with a 28.5% combined HTSUS and Section 301 duty plus $6,800 fees reaches $161,000 landed cost.\n\n"
+            f"A $120,000 FOB import shipment hit with a 28.5% combined HTSUS and Section 301 duty plus $6,766 fees reaches $160,966 landed cost.\n\n"
             f"Pursuant to Trade Act of 1974 Section 301 (19 U.S.C. Section 2411) and 19 CFR Part 24, importers must stack punitive Section 301 surcharges onto base MFN duties and CBP processing fees.\n\n"
             f"Key findings from our import landed cost engine:\n"
-            f"• $120,000 FOB value incurs $34,200 in combined duty (28.5%) plus $6,800 freight/MPF/HMF, totaling $161,000 (+34.2% over FOB).\n"
+            f"• $120,000 FOB value incurs $34,200 in combined duty (28.5%) plus $6,766 freight/MPF/HMF, totaling $160,966 (+34.1% over FOB).\n"
             f"• CBP Merchandise Processing Fee (0.3464%, capped at $634.62) and Harbor Maintenance Fee (0.125%) compound on ocean entries.\n"
             f"• Customs duties and freight capitalize into inventory cost under IRC Section 263A (UNICAP).\n\n"
             f"Calculate your exact HTSUS duty, Section 301 tariff, and unit landed cost:\n"
@@ -1972,13 +1972,13 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
         text = (
-            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $19,125 in 15.3% FICA tax.\n\n"
+            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $13,180 in FICA payroll tax.\n\n"
             f"check your S-Corp split:\n{url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
-        url = f"{POST_URL_BASE}/tools/{slug}/?fob=120000&duty=28.5&fees=6800&utm_source=x"
+        url = f"{POST_URL_BASE}/tools/{slug}/?fob=120000&duty=28.5&fees=6766&utm_source=x"
         text = (
-            f"a $120k FOB import at 28.5% Section 301 duty + $6,800 freight/MPF hits $161,000 landed cost.\n\n"
+            f"a $120k FOB import at 28.5% Section 301 duty + $6,766 freight/MPF hits $160,966 landed cost.\n\n"
             f"calculate landed cost:\n{url}"
         )
     elif slug == "workers-comp-and-payroll-burden-calculator":
@@ -2130,13 +2130,13 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=facebook&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator"
         text = (
-            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $19,125 in 15.3% FICA self-employment taxes under IRC Section 1366.\n\n"
+            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,180 in FICA self-employment taxes under IRC Section 1366.\n\n"
             f"Compare your S-Corp salary split and Section 199A QBI deduction trade-offs here: {url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
-        url = f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800&utm_source=facebook&utm_medium=social&utm_campaign=section-301-tariff-landed-cost-calculator"
+        url = f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6766&utm_source=facebook&utm_medium=social&utm_campaign=section-301-tariff-landed-cost-calculator"
         text = (
-            f"On a $120,000 FOB import shipment subject to a 28.5% combined HTSUS and Section 301 tariff ($34,200 duty) plus $6,800 in ocean freight, MPF, and HMF, your total landed cost reaches $161,000.\n\n"
+            f"On a $120,000 FOB import shipment subject to a 28.5% combined HTSUS and Section 301 tariff ($34,200 duty) plus $6,766 in ocean freight, MPF, and HMF, your total landed cost reaches $160,966.\n\n"
             f"Calculate your HTSUS duty, Section 301 surcharges, and unit margins here: {url}"
         )
     elif slug == "workers-comp-and-payroll-burden-calculator":
@@ -4306,14 +4306,14 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
         text = (
-            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $19,125 in FICA tax.\n\n"
+            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $13,180 in FICA tax.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
-        url = f"{POST_URL_BASE}/tools/{slug}/?fob=120000&duty=28.5&fees=6800&utm_source=x"
+        url = f"{POST_URL_BASE}/tools/{slug}/?fob=120000&duty=28.5&fees=6766&utm_source=x"
         text = (
-            f"a $120k FOB import at 28.5% Section 301 duty + $6,800 fees hits $161,000 landed.\n\n"
+            f"a $120k FOB import at 28.5% Section 301 duty + $6,766 fees hits $160,966 landed.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -4837,7 +4837,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "OPTIMIZE YOUR S-CORP SALARY VS DISTRIBUTION SPLIT:\n"
-            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves up to $19,125 in self-employment tax.\n\n"
+            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,180 in FICA self-employment tax.\n\n"
             "Model your exact S-Corp FICA savings and QBI impact on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=youtube&utm_medium=video&utm_campaign=s-corp-reasonable-salary-tax-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under IRC Section 1366, Section 3111, Section 199A, and IRS Rev. Rul. 74-44."
@@ -4880,7 +4880,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "section-301-tariff-landed-cost-calculator": {
         "title": "Section 301 Tariff & Import Landed Cost Calculator [HTSUS]",
-        "preset_query": "customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800",
+        "preset_query": "customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6766",
         "chapters": [
             "19 U.S.C. Section 2411 Trade Act Section 301 Tariffs",
             "HTSUS Base Duty Stacking & FOB Customs Valuation",
@@ -4889,9 +4889,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR TRUE IMPORT LANDED COST:\n"
-            "On a $120,000 FOB shipment subject to a 28.5% combined HTSUS and Section 301 tariff plus $6,800 freight/MPF/HMF, total landed cost reaches $161,000.\n\n"
+            "On a $120,000 FOB shipment subject to a 28.5% combined HTSUS and Section 301 tariff plus $6,766 freight/MPF/HMF, total landed cost reaches $160,966.\n\n"
             "Model your HTSUS duty, Section 301 surcharges, and unit margins on ProfitHelm:\n"
-            f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800&utm_source=youtube&utm_medium=video&utm_campaign=section-301-tariff-landed-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6766&utm_source=youtube&utm_medium=video&utm_campaign=section-301-tariff-landed-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under 19 U.S.C. Section 2411 (Section 301), 19 CFR Part 24, and USITC HTSUS schedules."
         ),
         "tags": [
@@ -5391,9 +5391,86 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         brand_name = "Prexvo"
         canonical_base = "https://prexvo.com"
         ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Title IV Statutory Framework"
-        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "225% Poverty Line Exemption & Discretionary Formula"
+        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Title IV Statutory Exemption & Formula Mechanics"
         ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Repayment Plan Comparison & Interest Subsidies"
         ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on Prexvo"
+        if slug in ("ibr-hardship-cap-calculator", "paye-sunset-calculator"):
+            seg1_script = (
+                f"Under HEA Section 493C and 34 CFR 685.209, Income-Based Repayment and Pay As You Earn protect 150% of the HHS Federal Poverty Guideline ($23,475 single in 2026). "
+                f"Statutory partial financial hardship rules cap monthly payments at the 10-year Standard ceiling for a {out_fmt} benchmark. "
+                f"Prexvo calculates your exact 150% poverty deduction and monthly obligations across household sizes."
+            )
+            seg2_script = (
+                "Federal student loan borrowers compare 20-year PAYE and 25-year IBR forgiveness against the 2026 Repayment Assistance Plan under 34 CFR Part 685. "
+                "Maintaining the 10-year Standard payment ceiling under HEA Section 493C protects borrowers whose incomes grow during repayment. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
+        elif slug in ("icr-repayment-calculator", "parent-plus-double-consolidation", "parent-plus-double-consolidation-repayment-calculator"):
+            seg1_script = (
+                f"Under 34 CFR 685.209(b) and 34 CFR 685.220, Income-Contingent Repayment shields 100% of the HHS Federal Poverty Guideline ($15,650 single in 2026) and assesses 20% of discretionary income. "
+                f"Comparing single consolidation ICR against two-step Direct Consolidation verifies a {out_fmt} benchmark across Parent PLUS portfolios. "
+                f"Prexvo calculates your exact 100% poverty threshold and monthly obligations across household sizes."
+            )
+            seg2_script = (
+                "Federal student loan borrowers compare single-consolidation 20% ICR formulas against 12-year income-adjusted fixed amortization under 34 CFR Part 685. "
+                "Consolidating Parent PLUS loans into a Direct Consolidation Loan also unlocks 120-payment Public Service Loan Forgiveness eligibility. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
+        elif slug == "tiered-standard-calculator":
+            seg1_script = (
+                f"Under 34 CFR 685.208(c), Direct Consolidation Tiered Standard repayment sets fixed amortization terms from 10 to 30 years based strictly on total loan balance tiers. "
+                f"Crossing the $60,000 consolidation balance threshold unlocks the 30-year fixed amortization schedule for a {out_fmt} benchmark. "
+                f"Prexvo calculates your exact consolidation balance tier and monthly fixed obligations across loan portfolios."
+            )
+            seg2_script = (
+                "Federal student loan borrowers compare 10-year, 20-year, and 30-year fixed Tiered Standard schedules against income-driven plans under 34 CFR Part 685. "
+                "Fixed balance-tier amortization lowers required monthly cash outflow without requiring annual income recertification. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
+        elif slug == "grad-plus-borrowing-cap-calculator":
+            seg1_script = (
+                f"Under HEA Section 455 and 34 CFR 685.203, Direct Unsubsidized graduate borrowing is capped at $20,500 annually and $138,500 in aggregate debt. "
+                f"Accounting for Grad PLUS sunset rules and statutory loan origination fees under HEA Section 455(c) verifies a {out_fmt} benchmark. "
+                f"Prexvo calculates your exact annual borrowing limits and net disbursement amounts across graduate degree programs."
+            )
+            seg2_script = (
+                "Graduate and professional borrowers compare statutory Direct Unsubsidized caps against total cost of attendance under 34 CFR Part 685. "
+                "Modeling origination fee deductions and multi-year borrowing ceilings prevents unexpected mid-degree funding shortfalls. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
+        elif slug in ("pslf-qualifying-payment-simulator", "pslf-qualifying-payment-and-buyback-calculator", "pslf-buyback-calculator"):
+            seg1_script = (
+                f"Under 34 CFR 685.219 and IRC Section 108(f), Public Service Loan Forgiveness discharges 100% of remaining Direct Loan debt tax-free after 120 qualifying monthly payments. "
+                f"Applying the 34 CFR 685.219(g) Hold Harmless buyback provision to eligible deferment or forbearance months verifies a {out_fmt} benchmark. "
+                f"Prexvo calculates your exact 120-payment forgiveness timeline and buyback settlement across qualifying employers."
+            )
+            seg2_script = (
+                "Public-sector student loan borrowers compare historical IDR buyback rates against ongoing income-driven repayment under 34 CFR Part 685. "
+                "Minimizing monthly qualifying payments under Title IV rules directly maximizes the tax-free balance discharged at payment 120. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
+        elif slug == "student-loan-refinance-break-even-calculator":
+            seg1_script = (
+                f"Under Title IV 34 CFR Part 685 and Truth in Lending 12 CFR Part 1026, refinancing federal student loans permanently waives federal protections including IDR subsidies and PSLF. "
+                f"Comparing private amortization interest savings against forfeited federal benefits verifies a {out_fmt} benchmark. "
+                f"Prexvo calculates your exact net present value break-even rate spread before you exit Title IV protections."
+            )
+            seg2_script = (
+                "Federal student loan borrowers compare private refinance APR reductions against statutory Title IV unpaid interest waivers and forgiveness horizons. "
+                "Refinancing federal student loans permanently waives federal protections, requiring a strict quantitative break-even audit. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
+        else:
+            seg1_script = (
+                f"Under HEA Section 493C and Department of Education regulations, income-driven repayment plans protect discretionary income above the HHS Poverty Guidelines. "
+                f"The 2026 Repayment Assistance Plan increases this exemption to 225% of the federal poverty line while subsidizing unpaid interest for a {out_fmt} benchmark. "
+                f"Prexvo calculates your exact discretionary threshold and monthly obligations across household sizes."
+            )
+            seg2_script = (
+                "Federal student loan borrowers compare standard tiered amortization against income-driven repayment under 34 CFR Part 685. "
+                "Under RAP statutory rules, the federal government covers 100% of unpaid monthly interest to prevent negative amortization. "
+                "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
+            )
         segments = [
             {
                 "timestamp": "00:00",
@@ -5413,12 +5490,8 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "seconds": 30,
                 "speaker": "[Narrator]",
                 "section_title": ch1,
-                "target_query": f"{query} poverty line",
-                "spoken_script": (
-                    f"Under HEA Section 493C and Department of Education regulations, income-driven repayment plans protect discretionary income above the HHS Poverty Guidelines. "
-                    f"The 2026 Repayment Assistance Plan increases this exemption to 225% of the federal poverty line while subsidizing unpaid interest for a {out_fmt} benchmark. "
-                    f"Prexvo calculates your exact discretionary threshold and monthly obligations across household sizes."
-                ),
+                "target_query": f"{query} statutory formula",
+                "spoken_script": seg1_script,
                 "entities": ["Prexvo", "HEA Section 493C", "HHS Poverty Guidelines"],
             },
             {
@@ -5427,12 +5500,8 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "speaker": "[Narrator]",
                 "section_title": ch2,
                 "target_query": f"{query} repayment plans",
-                "spoken_script": (
-                    "Federal student loan borrowers compare standard tiered amortization against income-driven repayment under 34 CFR Part 685. "
-                    "Under RAP statutory rules, the federal government covers 100% of unpaid monthly interest to prevent negative amortization. "
-                    "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
-                ),
-                "entities": ["Prexvo", "34 CFR Part 685", "Repayment Assistance Plan"],
+                "spoken_script": seg2_script,
+                "entities": ["Prexvo", "34 CFR Part 685", "Title IV"],
             },
             {
                 "timestamp": "01:30",
@@ -6662,13 +6731,13 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         "li_hook": "For consolidated Parent PLUS borrowers, ICR's dual formula (20% discretionary income vs 12-year income-adjusted fixed factor) often triggers the 12-year cap first.",
         "li_body": (
             "Income-Contingent Repayment (ICR) under 34 CFR 685.209(b) is the sole income-driven plan accessible to single-consolidated Parent PLUS loans, and its math differs sharply from RAP and IBR:\n\n"
-            "• 100% FPL Exemption Floor: ICR shields only 100% of the HHS Federal Poverty Guideline ($16,200 single in 2026) and assesses 20% of remaining income.\n"
+            "• 100% FPL Exemption Floor: ICR shields only 100% of the HHS Federal Poverty Guideline ($15,650 single in 2026) and assesses 20% of remaining income.\n"
             "• 12-Year Income Factor Alternative: When 20% of discretionary income exceeds a 12-year fixed amortization multiplied by the Department of Education income percentage factor, the lower 12-year figure applies.\n"
             "• PSLF Eligibility: Consolidating Parent PLUS loans into a Direct Consolidation Loan under ICR unlocks the 120-payment PSLF track for public-sector parents."
         ),
         "fb_body": (
             "Because single-consolidated Parent PLUS loans are excluded from IBR and PAYE, Income-Contingent Repayment (ICR) is the primary path to qualify for 120-payment Public Service Loan Forgiveness.\n\n"
-            "Unlike RAP or IBR, ICR calculates your bill two ways every year: 20% of discretionary income above 100% of the federal poverty line, OR a 12-year fixed amortization adjusted by an income multiplier, charging whichever is lower. Grounded in statutory 34 CFR 685.209(b) rules."
+            "Unlike RAP or IBR, ICR calculates your bill two ways every year: 20% of discretionary income above 100% of the federal poverty line ($15,650 single in 2026), OR a 12-year fixed amortization adjusted by an income multiplier, charging whichever is lower. Grounded in statutory 34 CFR 685.209(b) rules."
         ),
     },
     "save-plan-transition-to-rap-repayment-calculator": {
@@ -6779,15 +6848,15 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     "student-loan-refinance-break-even-calculator": {
         "query": "balance=75000&agi=110000&rate=7.2&deps=0",
         "x_hook": "refinancing $75k in 7.2% federal loans to 5.2% private saves $9,140 only if Title IV IDR subsidies and PSLF value equal $0.",
-        "li_hook": "Refinancing $75,000 in 7.2% Direct Loans into a 5.2% private note saves $9,140 in interest only when your AGI exceeds the Title IV subsidy threshold.",
+        "li_hook": "Refinancing $75,000 in 7.2% Direct Loans into a 5.2% private note saves $9,140 in interest only when your AGI exceeds the Title IV subsidy threshold, because refinancing federal student loans permanently waives federal protections.",
         "li_body": (
             "Evaluating a federal-to-private student loan refinance under Title IV (34 CFR Part 685) and Truth in Lending (12 CFR Part 1026) requires pricing three statutory forfeitures:\n\n"
             "• Unpaid Interest Subsidy Value: Under 2026 RAP, the Department of Education waives 100% of unpaid monthly interest above your 225% FPL payment.\n"
-            "• Tax-Free PSLF & IDR Forgiveness: Private refinancing permanently forfeits IRC Section 108(f) public service discharge and 240/300-month IDR forgiveness.\n"
+            "• Tax-Free PSLF & IDR Forgiveness: Refinancing federal student loans permanently waives federal protections, including IRC Section 108(f) public service discharge and 240/300-month IDR forgiveness.\n"
             "• Net Present Value Break-Even Spread: A private APR must beat your effective subsidy-adjusted federal rate by at least 150 to 200 bps to justify losing statutory forbearance."
         ),
         "fb_body": (
-            "Before refinancing $75,000 in 7.2% federal student loans into a 5.2% private rate (which saves $9,140 in nominal interest only when federal subsidies equal $0), borrowers must price the exact dollar value of forfeited Title IV protections.\n\n"
+            "Before refinancing $75,000 in 7.2% federal student loans into a 5.2% private rate (which saves $9,140 in nominal interest only when federal subsidies equal $0), borrowers must price the exact dollar value of forfeited Title IV protections because refinancing federal student loans permanently waives federal protections.\n\n"
             "If your AGI qualifies you for 225% FPL RAP interest subsidies or 120-payment PSLF forgiveness under 34 CFR 685.219, a lower private rate can still increase your net lifetime out-of-pocket cost. Grounded in statutory Title IV 34 CFR Part 685 and 12 CFR Part 1026 rules."
         ),
     },
@@ -6797,7 +6866,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a 2-person household at $65,000 AGI deducts $47,587.50 (225% FPL) and receives a 100% unpaid interest waiver.",
         "li_body": (
             "The 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685 restructures Title IV discretionary income math around three core rules:\n\n"
-            "• 225% HHS Poverty Exemption: Shields $33,975 for a single filer and $47,587.50 for a 2-person household before assessing discretionary income.\n"
+            "• 225% HHS Poverty Exemption: Shields $35,212.50 for a single filer and $47,587.50 for a 2-person household before assessing discretionary income.\n"
             "• 100% Unpaid Interest Subsidy: When your required RAP payment ($248.23/mo) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $76.77/mo is waived.\n"
             "• Principal Balance Protection: Zero negative amortization ensures your loan balance never increases while making on-time RAP payments."
         ),
@@ -6984,12 +7053,46 @@ def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
+    if slug in ("ibr-hardship-cap-calculator", "paye-sunset-calculator"):
+        statutory_footer = (
+            "Under Title IV HEA Section 493C and 34 CFR 685.209, IBR and PAYE shield income up to 150% of HHS Poverty Guidelines ($23,475 single) "
+            "and cap monthly payments at the 10-year Standard repayment ceiling. "
+        )
+    elif slug in ("icr-repayment-calculator", "parent-plus-double-consolidation", "parent-plus-double-consolidation-repayment-calculator"):
+        statutory_footer = (
+            "Under Title IV 34 CFR 685.209(b) and 34 CFR 685.220, Income-Contingent Repayment shields 100% of HHS Poverty Guidelines ($15,650 single) "
+            "and assesses the lesser of 20% of discretionary income or a 12-year income-adjusted fixed schedule. "
+        )
+    elif slug == "tiered-standard-calculator":
+        statutory_footer = (
+            "Under Title IV 34 CFR 685.208(c), Direct Consolidation Tiered Standard repayment sets fixed amortization terms from 10 to 30 years "
+            "based on total loan balance tiers ($60,000+ unlocks the 30-year fixed schedule). "
+        )
+    elif slug == "grad-plus-borrowing-cap-calculator":
+        statutory_footer = (
+            "Under Title IV HEA Section 455 and 34 CFR 685.203, Direct Unsubsidized graduate borrowing is capped at $20,500 annually "
+            "and $138,500 in aggregate debt. "
+        )
+    elif slug in ("pslf-qualifying-payment-simulator", "pslf-qualifying-payment-and-buyback-calculator", "pslf-buyback-calculator"):
+        statutory_footer = (
+            "Under Title IV 34 CFR 685.219 and IRC Section 108(f), Public Service Loan Forgiveness discharges 100% of remaining Direct Loan debt tax-free "
+            "after 120 qualifying monthly payments. "
+        )
+    elif slug == "student-loan-refinance-break-even-calculator":
+        statutory_footer = (
+            "Under Title IV 34 CFR Part 685 and Truth in Lending 12 CFR Part 1026, refinancing federal student loans permanently waives federal protections "
+            "including IDR interest subsidies and 120-payment PSLF discharge. "
+        )
+    else:
+        statutory_footer = (
+            "Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines ($35,212.50 single / $47,587.50 family of 2) "
+            "and provides a 100% unpaid monthly interest subsidy. "
+        )
     text = (
         f"How do 2026 student loan repayment plans differ under federal regulations for {title}?\n\n"
         f"{scen['li_hook']}\n\n"
         f"{scen['li_body']}\n\n"
-        f"Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines "
-        f"and provides a 100% unpaid monthly interest subsidy. "
+        f"{statutory_footer}"
         f"Borrowers can run side-by-side repayment projections on the free Prexvo {title}: {deep_url}"
     )
     clean_text = _sanitize_distribution_text(text)
@@ -7033,12 +7136,12 @@ def _generate_prexvo_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str,
         f"## Statutory Framework Breakdown\n\n"
         f"{scen['li_body']}\n\n"
         f"### 1. Repayment Assistance Plan (RAP)\n"
-        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level ($33,975 single / $47,587.50 family of 2)\n"
+        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level ($35,212.50 single / $47,587.50 family of 2)\n"
         f"- Discretionary Income Assessment Rate: 10%\n"
         f"- Interest Subsidy: 100% of unpaid monthly interest waived by the Department of Education\n"
         f"- Standard Payment Cap: None\n\n"
         f"### 2. Income-Based Repayment (IBR)\n"
-        f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level\n"
+        f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level ($23,475 single / $31,725 family of 2)\n"
         f"- Assessment Rate: 10% for new borrowers, 15% for legacy borrowers\n"
         f"- Payment Cap: Strictly capped at the 10-year Standard Repayment Plan baseline under HEA Section 493C\n\n"
         f"## Quantitative Modeling and Tool Access\n\n"

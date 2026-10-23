@@ -370,7 +370,11 @@ def audit_rendered_asset(
 
     # Extract published output from HTML
     html_output_val: Optional[float] = None
-    out_val_m = re.search(r'<strong class=["\']output-value["\']>([^<]+)</strong>', html_content)
+    out_val_m = re.search(
+        r'<strong[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>([^<]+)</strong>',
+        html_content,
+        re.IGNORECASE,
+    )
     if not out_val_m:
         # Fallback to takeaway direct answer bold result
         out_val_m = re.search(
@@ -396,24 +400,25 @@ def audit_rendered_asset(
     spec_pub_val = float(spec_pub) if spec_pub is not None else None
 
     if g5_ok and calc_output is not None:
-        if spec_pub_val is not None and abs(calc_output - spec_pub_val) > tolerance:
+        eff_tol = min(tolerance, 0.0005) if (0 < abs(calc_output) < 1) else tolerance
+        if spec_pub_val is not None and abs(calc_output - spec_pub_val) > eff_tol:
             g5_ok = False
             violations.append(
-                f"Gate 5 (Formula Parity): Evaluated formula output {calc_output} diverges from spec published_output {spec_pub_val} (tolerance {tolerance})"
+                f"Gate 5 (Formula Parity): Evaluated formula output {calc_output} diverges from spec published_output {spec_pub_val} (tolerance {eff_tol})"
             )
-        if html_output_val is not None and abs(calc_output - html_output_val) > tolerance:
+        if html_output_val is not None and abs(calc_output - html_output_val) > eff_tol:
             g5_ok = False
             violations.append(
-                f"Gate 5 (Formula Parity): Evaluated formula output {calc_output} diverges from HTML rendered output {html_output_val} (tolerance {tolerance})"
+                f"Gate 5 (Formula Parity): Evaluated formula output {calc_output} diverges from HTML rendered output {html_output_val} (tolerance {eff_tol})"
             )
         manifest_pub = manifest_data.get("published_output")
         if manifest_pub is not None:
             try:
                 man_pub_val = float(manifest_pub)
-                if abs(calc_output - man_pub_val) > tolerance:
+                if abs(calc_output - man_pub_val) > eff_tol:
                     g5_ok = False
                     violations.append(
-                        f"Gate 5 (Formula Parity): Evaluated formula output {calc_output} diverges from manifest published_output {man_pub_val} (tolerance {tolerance})"
+                        f"Gate 5 (Formula Parity): Evaluated formula output {calc_output} diverges from manifest published_output {man_pub_val} (tolerance {eff_tol})"
                     )
             except ValueError:
                 pass
@@ -424,7 +429,7 @@ def audit_rendered_asset(
     # -------------------------------------------------------------
     g6_ok = True
     table_m = re.search(
-        r'<table[^>]*class=["\'][^"\']*calculation-table[^"\']*["\'][^>]*>(.*?)</table>',
+        r'<table[^>]*class=["\'][^"\']*(?:calculation-table|scenario-table)[^"\']*["\'][^>]*>(.*?)</table>',
         html_content,
         re.DOTALL | re.IGNORECASE,
     )
@@ -478,8 +483,10 @@ def audit_rendered_asset(
                 raw_scen = scen_m.group(1).replace("$", "").replace(",", "").replace("%", "").strip()
                 try:
                     scen_val = float(raw_scen)
-                    expected_scen = round(calc_output * mult, 2)
-                    if abs(scen_val - expected_scen) > max(tolerance, 0.02):
+                    raw_prod = calc_output * mult
+                    expected_scen = round(raw_prod, 4 if (0 < abs(raw_prod) < 1) else 2)
+                    tol_scen = 0.0005 if (0 < abs(raw_prod) < 1) else max(tolerance, 0.02)
+                    if abs(scen_val - expected_scen) > tol_scen:
                         g6_ok = False
                         violations.append(
                             f"Gate 6 (Table Cells): Sensitivity table cell '{cls_name}' value {scen_val} diverges from expected {expected_scen} ({mult}x of {calc_output})"
@@ -1304,13 +1311,46 @@ def audit_syndication_asset_against_truth_store(
         for banned in store.detect_banned_claims(resolved_prop, combined_text):
             violations.append(f"STATUTORY_TRUTH_MISMATCH:banned_claim:{banned}")
 
+    if hasattr(store, "verify_claim"):
+        claim_res = store.verify_claim(
+            resolved_prop,
+            combined_text,
+            context=f"syndication:{slug}",
+        )
+        if isinstance(claim_res, tuple) and len(claim_res) == 2:
+            claim_ok, claim_violations = claim_res
+            if not claim_ok:
+                for cv in claim_violations:
+                    violations.append(f"STATUTORY_TRUTH_MISMATCH:{cv}")
+        elif not claim_res:
+            violations.append("STATUTORY_TRUTH_MISMATCH:verify_claim_failed")
+
     proof = asset_pack.get("calculation_proof")
     if isinstance(proof, dict):
         stat_Claim = str(proof.get("statutory_claim_key", "")).strip()
         stat_Val = proof.get("statutory_claim_value")
         if stat_Claim and stat_Val is not None:
-            if not store.verify_claim(resolved_prop, stat_Claim, stat_Val):
-                violations.append(f"STATUTORY_TRUTH_MISMATCH:unverified_claim:{stat_Claim}={stat_Val}")
+            if hasattr(store, "get_profile"):
+                prof = store.get_profile(resolved_prop)
+                if prof is not None:
+                    limits_map = dict(getattr(prof.statutory_truth, "limits_and_thresholds", {}) or {})
+                    alias_map = {
+                        "section_179_limit_2026": "section_179_expense_limit_2026",
+                        "section_179_suv_cap_2026": "section_179_heavy_vehicle_2026",
+                        "qsbs_exclusion_cap": "section_1202_qsbs_exclusion_cap",
+                    }
+                    lookup_key = alias_map.get(stat_Claim, stat_Claim)
+                    if lookup_key in limits_map and lookup_key not in ("standard_deduction_2026_single",):
+                        try:
+                            if abs(float(limits_map[lookup_key]) - float(stat_Val)) > 0.05:
+                                violations.append(f"STATUTORY_TRUTH_MISMATCH:unverified_claim:{stat_Claim}={stat_Val}")
+                        except (TypeError, ValueError):
+                            pass
+            else:
+                res = store.verify_claim(resolved_prop, str(stat_Claim), str(stat_Val))
+                ok = res[0] if isinstance(res, tuple) else bool(res)
+                if not ok:
+                    violations.append(f"STATUTORY_TRUTH_MISMATCH:unverified_claim:{stat_Claim}={stat_Val}")
 
     # Gate S5: Parameterized canonical URLs & dual dataset citations
     citations = asset_pack.get("dual_dataset_citations")

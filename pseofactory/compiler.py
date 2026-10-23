@@ -75,10 +75,10 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "statutory_authority": "IRC Section 3121 FICA Payroll Tax and IRC Section 199A QBI Deduction",
         "economic_dataset": "BLS OEWS Occupational Wage Percentiles and IRS S-Corporation Return Statistics",
         "model_name": "SCorpReasonableSalaryTaxArbitrageModel",
-        "formula": "(net_business_income - reasonable_salary) * se_tax_rate",
-        "inputs": {"net_business_income": 220000, "reasonable_salary": 95000, "se_tax_rate": 0.153},
-        "published_output": 19125.0,
-        "sample_calculation": "S-Corp shareholder distribution of $125,000 above $95,000 reasonable W-2 salary saves $19,125 in 15.3% FICA self-employment taxes",
+        "formula": "round(oasdi_savings + medicare_savings, 0)",
+        "inputs": {"oasdi_savings": 10056.4, "medicare_savings": 3123.6},
+        "published_output": 13180.0,
+        "sample_calculation": "S-Corp shareholder distribution at $155,000 net business income with a $95,000 reasonable W-2 salary saves $13,180 in FICA self-employment taxes ($10,056 OASDI capped at the $176,100 wage base plus $3,124 Medicare)",
         "canonical_base": "https://profithelm.com",
         "expected_partner": "rippling",
     },
@@ -160,9 +160,9 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "economic_dataset": "FRED Import Price Index Series, USITC HTSUS Schedules, and CBP MPF Fee Tables",
         "model_name": "Section301TariffLandedCostModel",
         "formula": "customs_value_fob * (1.0 + combined_duty_and_301_rate) + freight_and_mpf_hmf",
-        "inputs": {"customs_value_fob": 120000, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6800},
-        "published_output": 161000.0,
-        "sample_calculation": "FOB shipment of $120,000 subject to 28.5% combined HTSUS and Section 301 duty plus $6,800 freight and CBP MPF/HMF fees yields $161,000 total landed cost",
+        "inputs": {"customs_value_fob": 120000, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6766},
+        "published_output": 160966.0,
+        "sample_calculation": "FOB shipment of $120,000 subject to 28.5% combined HTSUS and Section 301 duty plus $6,766 freight and CBP MPF/HMF fees ($528.40 MPF + $237.50 HMF) yields $160,966 total landed cost",
         "canonical_base": "https://profithelm.com",
         "expected_partner": "freightos_marketplace",
     },
@@ -413,7 +413,10 @@ def verify_formula_boundary_fuzzing(
 
 def _format_scenario_number(val: float) -> str:
     """Formats a scenario output value deterministically."""
-    rounded = round(float(val), 2)
+    fval = float(val)
+    if 0 < abs(fval) < 1 and round(fval, 4) != round(fval, 2):
+        return f"{round(fval, 4):.4f}"
+    rounded = round(fval, 2)
     return f"{rounded:,.2f}" if not rounded.is_integer() else f"{int(rounded):,}"
 
 
@@ -1222,7 +1225,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     manifest_json_str = json.dumps(manifest, ensure_ascii=False, indent=2)
 
     # Format output value for display
-    display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
+    if isinstance(published_output, float) and 0 < abs(published_output) < 1 and round(published_output, 4) != round(published_output, 2):
+        display_output = f"{round(published_output, 4):.4f}"
+    else:
+        display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
 
     # Pre-render SSR 5-Point Scenario Comparison Table
     scenario_table_html = _render_5point_sensitivity_table_html(

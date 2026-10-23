@@ -1848,3 +1848,177 @@ def test_multi_channel_social_conversion_and_deeplink_hydration(tmp_path):
     assert agg["by_traffic_source"]["linkedin_company"]["deeplink_hydrations"] == 1
     assert agg["by_traffic_source"]["linkedin_company"]["outbound_clicks"] == 1
 
+
+def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_path):
+    """
+    Verifies the upgraded deterministic TruthReconciliationEngine, TenantFactStore,
+    audit_rendered_asset, audit_syndication_asset_against_truth_store, and RetroReflectionEngine
+    across ProfitHelm and Prexvo mathematical, statutory, and cross-element parity invariants.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.audit import (
+        audit_rendered_asset,
+        audit_syndication_asset_against_truth_store,
+    )
+    from pseofactory.distributor import generate_social_syndication_pack
+    from pseofactory.gsc_remediation import (
+        _normalize_meta_120_155,
+        _normalize_title_50_60,
+        compile_remediation_overlay_spec,
+    )
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.tenant_facts import TenantFactStore, TruthReconciliationEngine
+    from pseofactory.verifier import verify_html_cross_web_consensus_and_corroboration
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
+
+    # 1. Runtime script uses 20% bonus depreciation (0.20) and tenant-aware offer price fallback
+    runtime_js = render_runtime_synchronizer_script()
+    assert "remBasis * 0.20" in runtime_js
+    assert "remBasis * 0.80" not in runtime_js
+    assert "offer_price_usd || 29" not in runtime_js
+
+    # 2. ProfitHelm HTML truth reconciliation heals 80% bonus, HoH 12700, S-Corp $19,125, Tariff $161,000, Treasury 0.06
+    drifted_ph_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<title>S-Corp Reasonable Salary Tax Calculator 2026 | ProfitHelm</title>'
+        '<link rel="canonical" href="https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/"></head>'
+        '<body><main>'
+        '<script>var b = remBasis * 0.80; var hoh = { single: 8600, mfj: 17200, hoh: 12700 };</script>'
+        '<p>Saves $19,125 in self-employment tax ($15,500 OASDI + $3,625 Medicare). '
+        'Section 301 landed cost is $161,000 ($6,800 freight). Formula: Yield / (1: 13.3% state rate).</p>'
+        '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Offer","price":"29"}</script>'
+        '</main></body></html>'
+    )
+    ph_issues_before = TruthReconciliationEngine.audit_html_truth_reconciliation(
+        drifted_ph_html,
+        tenant="profithelm",
+        rel_path="tools/s-corp-reasonable-salary-tax-calculator/index.html",
+    )
+    assert len(ph_issues_before) >= 5
+    gate_before = verify_html_cross_web_consensus_and_corroboration(
+        drifted_ph_html,
+        rel_path="tools/s-corp-reasonable-salary-tax-calculator/index.html",
+        require_corroboration=False,
+    )
+    assert gate_before["status"] == "FAIL"
+
+    healed_ph_html, ph_repairs = TruthReconciliationEngine.reconcile_html_truth(
+        drifted_ph_html,
+        tenant="profithelm",
+        slug="s-corp-reasonable-salary-tax-calculator",
+    )
+    assert ph_repairs
+    assert "remBasis * 0.20" in healed_ph_html
+    assert "hoh: 12900" in healed_ph_html
+    assert "$13,180 in self-employment tax ($10,056 OASDI + $3,124 Medicare)" in healed_ph_html
+    assert "(1 - 13.3% state rate)" in healed_ph_html
+    assert '"price":"49"' in healed_ph_html
+    assert (
+        TruthReconciliationEngine.audit_html_truth_reconciliation(
+            healed_ph_html,
+            tenant="profithelm",
+            rel_path="tools/s-corp-reasonable-salary-tax-calculator/index.html",
+        )
+        == []
+    )
+
+    # 3. Prexvo plan-specific statutory threshold reconciliation (IBR 150%, ICR 100%, Tiered Standard 34 CFR 685.208, Grad PLUS, PSLF)
+    drifted_ibr_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<link rel="canonical" href="https://prexvo.com/tools/ibr-hardship-cap-calculator/"></head>'
+        '<body><main><h1>IBR Hardship Cap Calculator</h1>'
+        '<div class="quick-answer-body"><p>Calculates 2026 payments using the 225% FPL ($35,212.50) exemption and 300-month timeline.</p></div>'
+        '</main></body></html>'
+    )
+    assert TruthReconciliationEngine.audit_html_truth_reconciliation(
+        drifted_ibr_html,
+        tenant="prexvo",
+        rel_path="tools/ibr-hardship-cap-calculator/index.html",
+    )
+    healed_ibr_html, _ = TruthReconciliationEngine.reconcile_html_truth(
+        drifted_ibr_html,
+        tenant="prexvo",
+        slug="ibr-hardship-cap-calculator",
+    )
+    assert "150% FPL ($23,475)" in healed_ibr_html
+    assert "225% FPL" not in healed_ibr_html
+    assert (
+        TruthReconciliationEngine.audit_html_truth_reconciliation(
+            healed_ibr_html,
+            tenant="prexvo",
+            rel_path="tools/ibr-hardship-cap-calculator/index.html",
+        )
+        == []
+    )
+
+    # 4. Non-calculator Prexvo pages (disclaimers, methodology, privacy, about, tools-directory) preserve non-calculator titles/meta
+    disc_title = _normalize_title_50_60("Disclaimers", "Prexvo", "prexvo")
+    assert "Disclaimers" in disc_title
+    assert "Calculator" not in disc_title
+    disc_meta = _normalize_meta_120_155("Disclaimers", "prexvo", "disclaimers")
+    assert 120 <= len(disc_meta) <= 155
+    assert "225% HHS Poverty" not in disc_meta
+    assert "Calculate Disclaimers" not in disc_meta
+
+    # 5. Sub-dollar 4-decimal precision for treasury-yield-calculator (0.0554)
+    treasury_m = RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS["treasury-yield-calculator"]
+    assert treasury_m["published_output"] == 0.0554
+    treasury_html = (
+        '<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>'
+        '<link rel="canonical" href="https://profithelm.com/tools/treasury-yield-calculator/"></head>'
+        '<body><main><h1>Treasury Yield Calculator</h1></main></body></html>'
+    )
+    retro_treasury_html, _ = RetroReflectionEngine.retrofit_html(
+        treasury_html,
+        property_id="profithelm",
+        slug="treasury-yield-calculator",
+        canonical_url="https://profithelm.com/tools/treasury-yield-calculator/",
+    )
+    assert 'data-baseline-output="0.0554">0.0554</strong>' in retro_treasury_html
+    assert 'class="scenario-baseline">0.0554</strong>' in retro_treasury_html
+    treasury_audit = audit_rendered_asset(
+        retro_treasury_html,
+        candidate_spec=treasury_m,
+        tenant="profithelm",
+    )
+    assert treasury_audit.gate_results["formula_evaluation_parity"] is True
+    assert treasury_audit.gate_results["table_cell_truthfulness"] is True
+
+    # 6. Syndication truth audit unpacks TenantFactStore.verify_claim tuple and catches stale claims
+    valid_scorp_pack = generate_social_syndication_pack(
+        "s-corp-reasonable-salary-tax-calculator",
+        property_id="profithelm",
+    )
+    scorp_synd_res = audit_syndication_asset_against_truth_store(
+        valid_scorp_pack,
+        property_id="profithelm",
+        fact_store=TenantFactStore.get_instance(),
+    )
+    assert scorp_synd_res["passed"] is True
+    assert scorp_synd_res["violations"] == []
+
+    stale_pack = dict(valid_scorp_pack)
+    stale_pack["linkedin"] = dict(valid_scorp_pack["linkedin"])
+    stale_pack["linkedin"]["content"] = stale_pack["linkedin"]["content"] + " Bonus depreciation is 80% in 2026."
+    stale_synd_res = audit_syndication_asset_against_truth_store(
+        stale_pack,
+        property_id="profithelm",
+        fact_store=TenantFactStore.get_instance(),
+    )
+    assert stale_synd_res["passed"] is False
+    assert any("STATUTORY_TRUTH_MISMATCH" in v for v in stale_synd_res["violations"])
+
+    # 7. Equipment lease overlay spec uses IRC Section 162(a)(3) and FASB ASC 842
+    equip_spec = compile_remediation_overlay_spec(
+        {
+            "target_url": "https://profithelm.com/tools/equipment-lease-tax-deduction/",
+            "query": "equipment lease tax deduction calculator",
+            "impressions": 120,
+            "position": 8.5,
+        },
+        tenant_id="profithelm",
+    )
+    assert "162(a)(3)" in equip_spec["quick_answer"]
+    assert "ASC 842" in equip_spec["quick_answer"]
+
+

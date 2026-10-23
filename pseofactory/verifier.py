@@ -5764,6 +5764,18 @@ def verify_html_cross_web_consensus_and_corroboration(
     detected = detect_uncorroborated_statutory_claims(html_content, rel_path=rel_path)
     issues.extend(detected)
 
+    lower_doc = html_content.lower()
+    if "<html" in lower_doc and ("profithelm" in lower_doc or "prexvo" in lower_doc):
+        from pseofactory.tenant_facts import TruthReconciliationEngine
+        inferred_tenant = "prexvo" if "prexvo" in lower_doc else "profithelm"
+        for recon_issue in TruthReconciliationEngine.audit_html_truth_reconciliation(
+            html_content,
+            tenant=inferred_tenant,
+            rel_path=rel_path,
+        ):
+            if recon_issue not in issues:
+                issues.append(recon_issue)
+
     if require_corroboration:
         try:
             assert_cross_web_consensus_and_corroboration(

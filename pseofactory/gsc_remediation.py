@@ -1729,7 +1729,24 @@ def _normalize_title_50_60(
     max_base = 60 - len(suffix)
     min_base = 50 - len(suffix)
 
-    if "calculator" not in base.lower():
+    _non_calc_exact = {
+        "disclaimers",
+        "disclaimer",
+        "methodology",
+        "statutory methodology",
+        "privacy",
+        "privacy policy",
+        "about",
+        "about us",
+        "terms",
+        "contact",
+        "tools directory",
+        "tools",
+    }
+    _base_no_yr = re.sub(r"\b(202[4-9]|203\d)\b", "", base.lower()).strip(" |-:")
+    is_non_calc_title = _base_no_yr in _non_calc_exact and "calculator" not in raw_title.lower()
+
+    if "calculator" not in base.lower() and not is_non_calc_title:
         max_for_calc = max_base - len(" Calculator")
         if len(base) > max_for_calc:
             b_words = base.split()
@@ -1794,7 +1811,7 @@ def _normalize_title_50_60(
         while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
             b_words.pop()
         base = " ".join(b_words).rstrip(" |-&:")
-        if "calculator" not in base.lower() and len(base) + len(" Calculator") <= max_base:
+        if "calculator" not in base.lower() and not is_non_calc_title and len(base) + len(" Calculator") <= max_base:
             base = f"{base} Calculator"
 
     cand = f"{base}{suffix}"
@@ -1909,10 +1926,45 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
 
     has_meta_defect = bool(
         re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", clean, re.IGNORECASE)
+        or re.search(r"\bCalculate\s+(?:tools\s+directory|disclaimers|methodology|privacy|about)\b", clean, re.IGNORECASE)
         or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b", clean, re.IGNORECASE)
         or (
-            any(k in q_low for k in ("refinance", "icr", "income contingent", "ibr hardship", "hardship cap"))
+            any(
+                k in q_low
+                for k in (
+                    "refinance",
+                    "icr",
+                    "income contingent",
+                    "ibr hardship",
+                    "hardship cap",
+                    "paye",
+                    "pay as you earn",
+                    "income based",
+                    "income-based",
+                    "tiered standard",
+                    "tiered-standard",
+                    "grad plus",
+                    "grad-plus",
+                    "borrowing cap",
+                    "parent plus",
+                    "parent-plus",
+                    "double consolidation",
+                    "married filing separately",
+                    "married-filing-separately",
+                    "pslf",
+                    "public service",
+                    "disclaimer",
+                    "methodology",
+                    "privacy",
+                    "about",
+                    "tools directory",
+                )
+            )
             and "225% hhs poverty" in clean.lower()
+        )
+        or (
+            any(k in q_low for k in ("equipment lease", "equipment-lease"))
+            and "$2,560,000" in clean.lower()
         )
     )
     if (
@@ -1925,11 +1977,65 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
 
     def _build_default_meta(lbl: str) -> Tuple[str, str]:
         if tenant_id == "prexvo":
+            if "disclaimer" in q_low:
+                return (
+                    "Review Prexvo federal Title IV statutory disclaimers, non-advisory disclosures, "
+                    "and 34 CFR Part 685 regulatory modeling boundaries.",
+                    " Grounded in federal Title IV 34 CFR Part 685 compliance.",
+                )
+            if "methodology" in q_low:
+                return (
+                    "Explore Prexvo deterministic Title IV student loan calculation methodology under "
+                    "34 CFR Part 685, HEA Section 455, and HHS poverty guidelines.",
+                    " Grounded in federal Title IV 34 CFR Part 685 statutes.",
+                )
+            if "privacy" in q_low:
+                return (
+                    "Review Prexvo zero-PII client-side calculation privacy architecture, browser "
+                    "storage policies, and strict data protection standards.",
+                    " Grounded in institutional client-side privacy architecture.",
+                )
+            if "about" in q_low:
+                return (
+                    "Learn how Prexvo engineers deterministic Title IV student loan repayment models "
+                    "verified against 34 CFR Part 685 and federal statutes.",
+                    " Grounded in federal Title IV 34 CFR Part 685 regulations.",
+                )
+            if "tools directory" in q_low or "tools-directory" in q_low or q_low.strip() in ("tools", "tools tools"):
+                return (
+                    "Browse Prexvo deterministic Title IV student loan calculators for RAP, IBR, PAYE, "
+                    "ICR, PSLF Buyback, Parent PLUS, and Refinance analysis.",
+                    " Grounded in federal Title IV 34 CFR Part 685 schedules.",
+                )
             if "refinance" in q_low or "break-even" in q_low or "break even" in q_low:
                 return (
                     "Calculate student loan refinance APR savings, monthly payment reductions, "
                     "and exact break-even horizons versus federal Title IV protections.",
                     " Verified under TILA Regulation Z and Title IV 34 CFR Part 685.",
+                )
+            if "grad plus" in q_low or "grad-plus" in q_low or "borrowing cap" in q_low or "borrowing-cap" in q_low:
+                return (
+                    "Calculate federal graduate student loan borrowing caps ($20,500 annual Direct "
+                    "Unsubsidized, $138,500 aggregate) and Grad PLUS phase-out rules.",
+                    " Verified under HEA Section 455(a) and 34 CFR 685.203.",
+                )
+            if "tiered standard" in q_low or "tiered-standard" in q_low or "685.208" in q_low:
+                return (
+                    "Calculate Tiered Standard student loan monthly payments under 34 CFR 685.208 "
+                    "across fixed 10, 12, 15, 20, and 30-year balance schedules.",
+                    " Verified under HEA Section 455(d) and 34 CFR 685.208.",
+                )
+            if "married filing separately" in q_low or "married-filing-separately" in q_low or "mfs" in q_low:
+                return (
+                    "Calculate Married Filing Separately student loan payment savings under 34 CFR "
+                    "685.209(e) by excluding spousal AGI vs separate tax filing cost.",
+                    " Verified under 34 CFR 685.209(e) and IRC Section 1(j).",
+                )
+            if "parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low:
+                return (
+                    "Calculate Parent PLUS Double Consolidation repayment options comparing 10% IDR "
+                    "discretionary formulas against 20% single-consolidation ICR.",
+                    " Verified under Title IV 34 CFR 685.209(b) and 685.220.",
                 )
             if "icr" in q_low or "income contingent" in q_low or "income-contingent" in q_low:
                 return (
@@ -1955,7 +2061,7 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "statutory New and Old IBR monthly caps under Title IV 34 CFR Part 685.",
                     " Verified under OBBBA Title VIII and HEA Section 493C.",
                 )
-            if any(k in q_low for k in ("ibr", "hardship", "paye", "pay as you earn")) and "rap" not in q_low:
+            if any(k in q_low for k in ("ibr", "hardship", "paye", "pay as you earn", "income based", "income-based")) and "rap" not in q_low:
                 return (
                     f"Calculate {lbl} under Title IV 34 CFR 685.209 using 150% HHS Poverty "
                     f"Guidelines ($23,475 single exemption), hardship caps, and forgiveness rules.",
@@ -1965,6 +2071,42 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                 f"Calculate {lbl} obligations under Title IV 34 CFR Part 685 using 225% HHS Poverty "
                 f"Guidelines, discretionary income caps, and forgiveness rules.",
                 " Verified under Title IV 34 CFR Part 685 statutory rules.",
+            )
+        if "disclaimer" in q_low:
+            return (
+                "Review ProfitHelm statutory tax and financial modeling disclaimers, CPA/attorney "
+                "non-advisory disclosures, and IRS regulatory scope.",
+                " Grounded in Internal Revenue Code compliance standards.",
+            )
+        if "methodology" in q_low:
+            return (
+                "Explore ProfitHelm deterministic statutory calculation methodology grounded in "
+                "Internal Revenue Code schedules and GAAP financial standards.",
+                " Grounded in IRS revenue procedures and GAAP standards.",
+            )
+        if "privacy" in q_low:
+            return (
+                "Review ProfitHelm client-side financial modeling privacy standards, zero-PII "
+                "browser execution rules, and data security commitments.",
+                " Grounded in zero-PII client-side browser architecture.",
+            )
+        if "about" in q_low:
+            return (
+                "Learn how ProfitHelm builds deterministic tax, treasury, and corporate finance "
+                "calculators verified against primary IRS statutes.",
+                " Grounded in Internal Revenue Code statutory schedules.",
+            )
+        if "tools directory" in q_low or "tools-directory" in q_low or q_low.strip() in ("tools", "tools tools"):
+            return (
+                "Browse ProfitHelm deterministic tax and corporate finance calculators for Section "
+                "179, Section 1031, S-Corp FICA, and 2027 tax brackets.",
+                " Grounded in Internal Revenue Code statutory schedules.",
+            )
+        if "equipment lease" in q_low or "equipment-lease" in q_low or "162(a)(3)" in q_low:
+            return (
+                "Calculate commercial equipment operating lease tax deductions under IRC Section "
+                "162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
+                " Grounded in IRC Section 162(a)(3) and FASB ASC 842 rules.",
             )
         if "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
             return (
@@ -2087,12 +2229,20 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
                 f"spouses file separate federal returns, comparing annual IDR payment savings against the "
                 f"marginal tax liability increase from forfeiting joint filing tax credits."
             ).split()
-        elif any(k in combined_low for k in ("tiered-standard", "tiered standard", "grad-plus", "grad plus")):
+        elif any(k in combined_low for k in ("grad-plus", "grad plus", "borrowing-cap", "borrowing cap")):
+            base_words = (
+                f"Under Higher Education Act Section 455(a) and 34 CFR 685.203, {short_q} "
+                f"enforces the $20,500 annual Direct Unsubsidized graduate borrowing limit and "
+                f"$138,500 aggregate statutory loan ceiling while modeling OBBBA Grad PLUS phase-out "
+                f"caps, 4.228 percent federal origination fees, and residual professional school "
+                f"funding gaps."
+            ).split()
+        elif any(k in combined_low for k in ("tiered-standard", "tiered standard", "685.208")):
             base_words = (
                 f"Under Higher Education Act Section 455(d) and 34 CFR 685.208, {short_q} "
-                f"establishes fixed monthly amortization schedules scaled across 10, 12, 15, 20, or 25 "
-                f"years by total Title IV debt balance alongside statutory aggregate Direct Unsubsidized "
-                f"and Grad PLUS borrowing ceilings."
+                f"establishes fixed monthly amortization schedules scaled across 10, 12, 15, 20, "
+                f"and 30 years (120 to 360 monthly payments) by total Title IV loan balance, "
+                f"calculating level principal and interest obligations without annual income recertification."
             ).split()
         elif any(k in combined_low for k in ("refinance", "break-even", "break even")):
             base_words = (
@@ -2101,7 +2251,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
                 f"value of forfeited federal benefits including 100 percent RAP unpaid interest waivers and "
                 f"tax-free Public Service Loan Forgiveness under 26 U.S.C. 108(f)(1)."
             ).split()
-        elif any(k in combined_low for k in ("ibr-hardship", "paye-sunset", "paye sunset", "ibr hardship")) and "rap-vs" not in combined_low:
+        elif any(k in combined_low for k in ("ibr-hardship", "paye-sunset", "paye sunset", "ibr hardship", "income-based", "income based", "student-loan-repayment")) and "rap-vs" not in combined_low:
             base_words = (
                 f"Under Title IV regulation 34 CFR 685.209 and 20 U.S.C. 1098e, {short_q} determines monthly "
                 f"obligations using the 150 percent HHS Poverty Guideline exemption ($23,475 protected "
@@ -2251,6 +2401,17 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         filler_pool = [
             "Includes", "state", "conformity", "analysis", "and", "IRC",
             "Section", "1045", "tax-free", "rollover", "thresholds.",
+        ]
+    elif any(k in combined_low for k in ("equipment-lease", "equipment lease", "162(a)(3)", "operating-lease", "operating lease")):
+        base_words = (
+            f"Under IRC Section 162(a)(3) and FASB ASC 842 lease accounting standards, {short_q} "
+            f"deducts 100 percent of qualifying business-use commercial operating lease rental payments "
+            f"as ordinary and necessary operating expenses on IRS Schedule C or Form 1120-S without "
+            f"triggering Section 179 SUV caps or Section 280F depreciation recapture."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "IRS", "Revenue", "Ruling", "55-540",
+            "true", "lease", "criteria", "and", "ASC", "842.",
         ]
     elif any(k in combined_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")):
         clean_179_q = re.sub(
@@ -3047,6 +3208,69 @@ def _build_vertical_profithelm_overlay_blocks(
                 },
             ],
         }
+    if any(k in comb for k in ("equipment-lease", "equipment lease", "162(a)(3)", "operating-lease", "operating lease")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 162(a)(3) Operating Lease & ASC 842 Rules",
+                f"Audit-Ready {heading_label} Rental Deduction vs Section 179 Purchase Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-lease-operating",
+                    "label": f"{heading_label} Standard Operating Lease ($24k Annual Lease, 85% Business Use)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"lease_annual_payment": 24000, "business_use_pct": 85, "marginal_tax_rate_pct": 32},
+                    "description": "True commercial operating lease deducting $20,400 in Year-1 rental payments under IRC Section 162(a)(3).",
+                },
+                {
+                    "id": "preset-lease-fleet",
+                    "label": f"{heading_label} Commercial Fleet & Medical Lease ($60k Annual Lease, 100% Use)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"lease_annual_payment": 60000, "business_use_pct": 100, "marginal_tax_rate_pct": 37},
+                    "description": "Full 100% business-use operating lease bypassing Section 280F luxury auto caps and preserving off-credit-line liquidity.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$24,000 Annual Operating Lease Payment (85% Business Use, 32% Bracket)",
+                    "baseline": "$0 Capitalized Down Payment Outlay",
+                    "optimized": "$20,400 IRC Section 162(a)(3) Deduction ($6,528 Tax Saved)",
+                    "delta": "+$6,528 Immediate Operating Tax Shield",
+                    "authority": "IRC Section 162(a)(3), Rev. Rul. 55-540 & FASB ASC 842",
+                },
+                {
+                    "scenario": "$1 Bargain Purchase Option Recharacterization Trap",
+                    "baseline": "Disallowed as IRC Section 162 Lease Rental Expense",
+                    "optimized": "Fair Market Value (FMV) Renewal Option Preserves True Lease",
+                    "delta": "Prevents Retroactive Capitalization & Interest Recalculation",
+                    "authority": "IRS Revenue Ruling 55-540 & IRC Section 167",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How are commercial equipment operating lease payments deducted under IRC Section 162(a)(3)?",
+                    "answer": (
+                        "Under IRC Section 162(a)(3), rental payments for equipment used in an active trade or business under a "
+                        "true operating lease are 100% deductible (multiplied by business-use percentage) in the tax year paid or "
+                        "incurred on IRS Schedule C or Form 1120-S."
+                    ),
+                },
+                {
+                    "question": "When does the IRS recharacterize an equipment lease as a conditional purchase under Revenue Ruling 55-540?",
+                    "answer": (
+                        "Under IRS Revenue Ruling 55-540, if a contract includes a nominal $1 buyout option, transfers title automatically, "
+                        "or sets rental payments materially above fair rental value, the IRS recharacterizes the agreement as a capital "
+                        "purchase subject to IRC Section 179 and MACRS depreciation rules."
+                    ),
+                },
+            ],
+        }
     return {
         "h2_headings": [
             f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
@@ -3528,7 +3752,123 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Compare IDR Subsidy vs Standard 10-Year Schedule",
                 },
             ]
-        elif any(k in low for k in ("ibr", "hardship", "paye", "pay as you earn")) and "rap" not in low:
+        elif any(k in low for k in ("grad-plus", "grad plus", "borrowing-cap", "borrowing cap")):
+            assertions = [
+                f"In 2026, {heading_label} enforces the $20,500 annual Direct Unsubsidized graduate loan limit and $138,500 aggregate statutory borrowing ceiling under Higher Education Act Section 455(a) and 34 CFR 685.203.",
+                "Under 2026-2027 OBBBA Title VIII statutory transitions and 34 CFR 685.200, graduate and professional borrowers must account for the 4.228% federal Direct Grad PLUS origination fee and program-level aggregate borrowing caps.",
+                "Under 34 CFR 685.203(b), the $138,500 graduate aggregate Direct Loan limit includes all prior undergraduate subsidized and unsubsidized principal balances (with a $65,500 maximum subsidized sub-limit).",
+            ]
+            matrix = [
+                {
+                    "profile": "Master's / MBA Graduate Student ($42k Annual Cost of Attendance)",
+                    "statutory_threshold": "$20,500 Annual Direct Unsubsidized Cap (34 CFR 685.203)",
+                    "optimal_path": "Exhaust $20,500 Direct Unsubsidized First (1.057% Fee vs 4.228% PLUS Fee)",
+                    "net_dollar_impact": "$650 Origination Fee Saved on Base $20,500 Tranche",
+                    "next_action": "Calculate Residual COA Funding Gap Above $20,500",
+                },
+                {
+                    "profile": "Medical / Dental / Law Professional Student ($138.5k Aggregate Limit)",
+                    "statutory_threshold": "$138,500 Standard Graduate Aggregate Limit (HEA Section 455(a))",
+                    "optimal_path": "Verify Health Professions Higher Unsubsidized Ceiling & OBBBA Cap",
+                    "net_dollar_impact": "$21,500 Net Origination & Interest Drag Avoided Over 4 Years",
+                    "next_action": "Model Multi-Year Professional School Borrowing Schedule",
+                },
+                {
+                    "profile": "Returning Graduate Borrower with $45k Prior Undergrad Direct Loans",
+                    "statutory_threshold": "Remaining Aggregate Direct Unsubsidized Room ($93,500)",
+                    "optimal_path": "Track Remaining Aggregate Direct Limit Before Final Academic Year",
+                    "net_dollar_impact": "$93,500 Remaining Direct Unsubsidized Eligibility Preserved",
+                    "next_action": "Audit NSLDS Aggregate Principal Balance",
+                },
+            ]
+        elif any(k in low for k in ("tiered-standard", "tiered standard", "685.208")):
+            assertions = [
+                f"In 2026, {heading_label} establishes fixed monthly amortization terms of 10, 12, 15, 20, or 30 years (120 to 360 monthly payments) scaled by total Title IV debt balance under 34 CFR 685.208 and HEA Section 455(d).",
+                "Under 34 CFR 685.208(j), consolidation and tiered standard loan balances of $60,000 or more amortize over up to 360 fixed monthly payments ($379.24/mo on $60,000 at 6.5% APR vs $681.29/mo on the 10-year Standard plan).",
+                "Under 34 CFR 685.219(c), tiered or consolidation standard repayment terms exceeding 10 years do not count toward 120-payment Public Service Loan Forgiveness (PSLF) unless switched to an eligible IDR plan.",
+            ]
+            matrix = [
+                {
+                    "profile": "High-Balance Borrower ($60k+ Balance, Seeking Fixed Level Payments)",
+                    "statutory_threshold": "30-Year (360-Month) Balance Tier >= $60,000 (34 CFR 685.208)",
+                    "optimal_path": "30-Year Tiered Standard ($379.24/mo) with Voluntary Principal Prepayments",
+                    "net_dollar_impact": "$302.05/mo Mandatory Cash Flow Reduction vs 10-Year Standard ($681.29/mo)",
+                    "next_action": "Compare 10-Year vs 30-Year Amortization Interest Cost",
+                },
+                {
+                    "profile": "Mid-Balance Borrower ($20k to $39,999 Total Title IV Debt)",
+                    "statutory_threshold": "15-Year to 20-Year Balance Tier (180 to 240 Monthly Payments)",
+                    "optimal_path": "Select 15-Year Tiered Standard or 10-Year Standard Cap",
+                    "net_dollar_impact": "$168.40/mo Lower Fixed Obligation Without Annual Income Recertification",
+                    "next_action": "Verify Statutory Balance Tier Bracket",
+                },
+                {
+                    "profile": "Public Service / 501(c)(3) Borrower on Consolidation Standard Plan",
+                    "statutory_threshold": "10-Year Standard Equivalency Requirement (34 CFR 685.219)",
+                    "optimal_path": "Transition From >10-Year Tiered Standard to IBR or RAP Immediately",
+                    "net_dollar_impact": "Preserves 100% PSLF Qualifying Payment Credit",
+                    "next_action": "Switch Repayment Plan to PSLF-Eligible IDR Track",
+                },
+            ]
+        elif any(k in low for k in ("icr", "income contingent", "income-contingent", "parent-plus", "parent plus", "double-consolidation")):
+            assertions = [
+                f"In 2026, {heading_label} calculates monthly payments as the lesser of 20% of discretionary income above 100% of the HHS poverty guideline ($15,650 single baseline) or a 12-year fixed payment adjusted by an income percentage factor under 34 CFR 685.209(b).",
+                "Under Higher Education Act Section 455(d) and 34 CFR 685.209, single-consolidated federal Parent PLUS loans are statutorily restricted to the Income-Contingent Repayment (ICR) plan unless double-consolidated prior to the statutory cutoff.",
+                "At $65,000 AGI and $60,000 loan balance (6.5% APR), the 34 CFR 685.209(b) 12-year income-adjusted cap reduces the monthly ICR obligation to $651.25/mo compared to $822.50/mo under the raw 20% discretionary formula.",
+            ]
+            matrix = [
+                {
+                    "profile": "Single Borrower on ICR ($65k AGI, $60k Direct Loan at 6.5%)",
+                    "statutory_threshold": "100% Federal Poverty Exemption ($15,650 Single ICR Baseline)",
+                    "optimal_path": "12-Year Fixed Payment Adjusted by Income Percentage Factor (34 CFR 685.209(b))",
+                    "net_dollar_impact": "$651.25/mo Capped ICR Payment ($171.25/mo Below 20% Discretionary Formula)",
+                    "next_action": "Compare 12-Year IPF Cap vs 20% Discretionary Formula",
+                },
+                {
+                    "profile": "Consolidated Parent PLUS Borrower ($85k Balance, $72k AGI)",
+                    "statutory_threshold": "20% Discretionary Income Above 100% HHS Poverty Guideline",
+                    "optimal_path": "Direct Consolidation Into ICR + Public Service Employment Track",
+                    "net_dollar_impact": "$141.65/mo Reduction vs 10-Year Standard ($847.50/mo vs $989.15/mo)",
+                    "next_action": "Evaluate Parent PLUS ICR & PSLF Eligibility",
+                },
+                {
+                    "profile": "Legacy Double-Consolidated Parent PLUS Borrower",
+                    "statutory_threshold": "10% Discretionary Rate Above 150%-225% Poverty Exemption",
+                    "optimal_path": "Maintain RAP / IBR Enrollment Completed Before Statutory Sunset",
+                    "net_dollar_impact": "$540.94/mo Payment Savings vs 20% Single-Consolidation ICR",
+                    "next_action": "Verify Annual IDR Income Recertification Deadline",
+                },
+            ]
+        elif any(k in low for k in ("refinance", "break-even", "break even")):
+            assertions = [
+                f"In 2026, {heading_label} compares private fixed-rate APR interest savings under TILA Regulation Z (12 CFR Part 1026) against the net present value of permanently forfeited federal Title IV protections under 34 CFR Part 685.",
+                "Refinancing federal Direct or PLUS loans into a private student loan permanently waives eligibility for Public Service Loan Forgiveness (34 CFR 685.219), 100% RAP unpaid interest subsidies, and statutory disability or death discharges.",
+                "On a $60,000 balance at 6.5% federal APR, refinancing to a 5.0% private APR saves $990.00 in annual interest ($82.50/mo) when the borrower has zero projected federal forgiveness and stable private-sector cash flow.",
+            ]
+            matrix = [
+                {
+                    "profile": "High-Income Private-Sector Borrower ($60k Debt, 6.5% Fed -> 5.0% Refi)",
+                    "statutory_threshold": "Zero Projected Federal Forgiveness at 10-Year Standard Ceiling",
+                    "optimal_path": "Private Fixed-Rate Refinance With 0% Origination Fee",
+                    "net_dollar_impact": "$990.00 Annual Interest Savings ($4,950 Over 5-Year Horizon)",
+                    "next_action": "Verify Zero PSLF / IDR Subsidy Forfeiture Risk",
+                },
+                {
+                    "profile": "501(c)(3) / Government Borrower ($85k Debt, $65k AGI)",
+                    "statutory_threshold": "120-Payment Tax-Free PSLF Discharge (34 CFR 685.219 & IRC 108(f))",
+                    "optimal_path": "Retain Federal Direct Loans on RAP / IBR (Do Not Refinance)",
+                    "net_dollar_impact": "$48,200 Tax-Free Principal Forgiveness Preserved",
+                    "next_action": "Switch to PSLF Qualifying Payment Simulator",
+                },
+                {
+                    "profile": "Moderate-Income Borrower Receiving RAP Interest Waiver ($55k AGI)",
+                    "statutory_threshold": "100% Unpaid Monthly Interest Subsidy Under 34 CFR 685.209",
+                    "optimal_path": "Keep Federal Direct Loans to Capture Unpaid Interest Waiver",
+                    "net_dollar_impact": "$1,650 Annual Federal Interest Subsidy Preserved",
+                    "next_action": "Compare Effective Subsidized Federal Rate vs Private APR",
+                },
+            ]
+        elif any(k in low for k in ("ibr", "hardship", "paye", "pay as you earn", "income-based", "income based", "student-loan-repayment")) and "rap" not in low:
             assertions = [
                 f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the federal poverty guideline ($23,475 single baseline) under 34 CFR 685.209.",
                 "Under 34 CFR 685.209 and 20 U.S.C. 1098e, monthly IBR and PAYE obligations never exceed the 10-year Standard Repayment ceiling calculated at repayment entry once partial financial hardship is established.",
@@ -3923,7 +4263,195 @@ def _build_vertical_prexvo_overlay_blocks(
                 },
             ],
         }
-    if any(k in comb for k in ("ibr", "hardship", "paye", "pay as you earn")) and "rap" not in comb:
+    if any(k in comb for k in ("grad-plus", "grad plus", "borrowing-cap", "borrowing cap")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: HEA Section 455(a) & 34 CFR 685.203 Graduate Borrowing Limits",
+                f"Comparing {heading_label} $20,500 Unsubsidized Cap vs Grad PLUS Phase-Out",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-grad-unsub-baseline",
+                    "label": f"{heading_label} Standard Graduate Track ($20,500 Annual Unsubsidized Cap)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"annual_unsubsidized_cap": 20500, "coa": 45000, "aid": 10000},
+                    "description": "Exhausting the $20,500 annual Direct Unsubsidized graduate limit (1.057% fee) before evaluating residual COA funding.",
+                },
+                {
+                    "id": "preset-grad-professional",
+                    "label": f"{heading_label} Professional Degree Aggregate Ceiling ($138,500 Cap)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"annual_unsubsidized_cap": 20500, "coa": 75000, "aid": 15000},
+                    "description": "Multi-year professional program tracking the $138,500 cumulative Direct Loan limit and 4.228% PLUS origination fee.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "Annual Graduate Borrowing Tranche ($20,500 Statutory Unsubsidized Cap)",
+                    "baseline": "$867 Origination Fee Drag (at 4.228% Grad PLUS Rate)",
+                    "optimized": "$217 Origination Fee (at 1.057% Direct Unsubsidized Rate)",
+                    "delta": "-$650 Upfront Fee Saved on First $20,500",
+                    "authority": "HEA Section 455(a) & 34 CFR 685.203",
+                },
+                {
+                    "scenario": "Cumulative Graduate + Undergraduate Direct Loan Aggregate Limit",
+                    "baseline": "$138,500 Statutory Aggregate Unsubsidized Cap ($65,500 Subsidized)",
+                    "optimized": "Proactive NSLDS Aggregate Tracking Across Semesters",
+                    "delta": "Prevents Mid-Year Disbursement Cap Rejection",
+                    "authority": "34 CFR 685.203(b) & OBBBA Title VIII",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"What is the annual and aggregate federal Direct Unsubsidized limit for {query_clean}?",
+                    "answer": (
+                        "Under Higher Education Act Section 455(a) and 34 CFR 685.203, graduate and professional students "
+                        "may borrow up to $20,500 per academic year in Federal Direct Unsubsidized Loans, subject to a "
+                        "$138,500 cumulative aggregate limit that includes any unpaid undergraduate Direct Loan principal."
+                    ),
+                },
+                {
+                    "question": "How do OBBBA Grad PLUS phase-out rules affect new vs grandfathered graduate borrowers?",
+                    "answer": (
+                        "Under OBBBA Title VIII statutory transition rules, grandfathered borrowers enrolled in their current "
+                        "program prior to the statutory cutoff retain legacy Grad PLUS access up to certified Cost of Attendance, "
+                        "whereas new cohorts are governed by statutory annual and aggregate unsubsidized caps."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("tiered-standard", "tiered standard", "685.208")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: 34 CFR 685.208 Balance-Based Amortization Schedules",
+                f"Comparing {heading_label} 10-to-30 Year Fixed Tiers vs IDR Caps",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-tiered-60k",
+                    "label": f"{heading_label} $60,000+ Balance Tier (30-Year / 360-Month Schedule)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 60000, "interest_rate": 6.5},
+                    "description": "30-year (360-month) fixed amortization ($379.24/mo) for Title IV balances of $60,000 or more under 34 CFR 685.208.",
+                },
+                {
+                    "id": "preset-tiered-35k",
+                    "label": f"{heading_label} $20k-$39k Mid-Balance Tier (20-Year / 240-Month Schedule)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 35000, "interest_rate": 6.5},
+                    "description": "20-year (240-month) fixed level payment schedule without annual AGI recertification.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$60,000 Federal Direct Loan Balance at 6.5% Fixed APR",
+                    "baseline": "$681.29 / mo (10-Year / 120-Month Standard Plan)",
+                    "optimized": "$379.24 / mo (30-Year / 360-Month Tiered Standard Plan)",
+                    "delta": "-$302.05 / mo (-44.3% Fixed Monthly Outflow)",
+                    "authority": "34 CFR 685.208(j) & HEA Section 455(d)",
+                },
+                {
+                    "scenario": "Public Service (PSLF) Eligibility on >10-Year Tiered Standard",
+                    "baseline": "0 Qualifying PSLF Credits on 12-to-30 Year Tiers",
+                    "optimized": "100% PSLF Credits on 10-Year Standard or IDR Plans",
+                    "delta": "Preserves 120-Month Tax-Free PSLF Discharge",
+                    "authority": "34 CFR 685.219(c) & 34 CFR 685.208",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How are repayment terms assigned by loan balance under 34 CFR 685.208 for {query_clean}?",
+                    "answer": (
+                        "Under 34 CFR 685.208, fixed standard repayment terms scale by total loan balance: 10 years for balances "
+                        "under $7,500, 12 years ($7,500 to $9,999), 15 years ($10,000 to $19,999), 20 years ($20,000 to $39,999), "
+                        "25 years ($40,000 to $59,999), and 30 years (360 months) for balances of $60,000 or more."
+                    ),
+                },
+                {
+                    "question": "Do payments on a 20-year or 30-year Tiered Standard plan count toward PSLF?",
+                    "answer": (
+                        "No. Under 34 CFR 685.219(c), only the 10-year Standard Repayment Plan (120 months) and qualifying "
+                        "Income-Driven Repayment (IDR) plans count toward Public Service Loan Forgiveness."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("refinance", "break-even", "break even")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: Private APR Savings vs Title IV Protection Forfeiture",
+                f"Comparing {heading_label} Under TILA Reg Z & 34 CFR Part 685",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-refi-baseline",
+                    "label": f"{heading_label} Private Rate Reduction ($60k Balance, 6.5% -> 5.0% APR)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 60000, "agi": 95000, "interest_rate": 6.5, "private_refi_rate": 5.0},
+                    "description": "High-earner private-sector borrower with $0 federal forgiveness capturing $990/yr in interest savings.",
+                },
+                {
+                    "id": "preset-refi-pslf-trap",
+                    "label": f"{heading_label} Public Service / IDR Subsidy Retention Check ($85k Balance)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"loan_balance": 85000, "agi": 65000, "interest_rate": 6.8, "private_refi_rate": 5.2},
+                    "description": "Quantifying the negative net present value of forfeiting tax-free PSLF or RAP unpaid interest waivers.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$60,000 Unsubsidized Balance (6.5% Federal APR vs 5.0% Private APR, $0 Forgiveness)",
+                    "baseline": "$3,900 Annual Federal Interest Accrual ($681.29/mo)",
+                    "optimized": "$2,910 Annual Refinanced Interest ($636.39/mo)",
+                    "delta": "-$990.00 / yr Interest Saved (-$44.90 / mo)",
+                    "authority": "12 CFR Part 1026 (TILA Reg Z) & 34 CFR 685.208",
+                },
+                {
+                    "scenario": "Refinancing Federal Direct Loans While Eligible for PSLF or RAP Subsidy",
+                    "baseline": "100% PSLF Tax-Free Discharge & RAP Interest Waiver Active",
+                    "optimized": "Permanently Forfeited Upon Private Loan Origination",
+                    "delta": "Irreversible Loss of Title IV Statutory Protections",
+                    "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"What federal protections are permanently waived when executing {query_clean}?",
+                    "answer": (
+                        "Refinancing federal student loans into a private loan permanently waives federal Title IV protections, "
+                        "including Income-Driven Repayment (RAP, IBR, PAYE, ICR), 120-month tax-free Public Service Loan Forgiveness "
+                        "(34 CFR 685.219), 100% unpaid interest subsidies, and federal death or total and permanent disability discharge."
+                    ),
+                },
+                {
+                    "question": "When is student loan refinancing mathematically positive on a risk-adjusted basis?",
+                    "answer": (
+                        "Refinancing produces positive net present value only when your stable private-sector income places your "
+                        "monthly payment at or above the 10-year Standard ceiling (leaving $0 projected federal forgiveness) and "
+                        "the private fixed APR reduces your rate by at least 100 to 150 basis points."
+                    ),
+                },
+            ],
+        }
+    if any(k in comb for k in ("ibr", "hardship", "paye", "pay as you earn", "income-based", "income based", "student-loan-repayment")) and "rap" not in comb:
         return {
             "h2_headings": [
                 f"{heading_label}: 2026 Title IV Statutory Rules & Formula",
@@ -4015,7 +4543,7 @@ def _build_vertical_prexvo_overlay_blocks(
         "comparison_rows": [
             {
                 "scenario": "Single Filer ($60,000 Loan, $65,000 AGI)",
-                "baseline": "$519.06 / mo (150% Poverty Threshold)",
+                "baseline": "$519.06 / mo (15% Pre-2014 Old IBR at 150% Poverty)",
                 "optimized": "$248.23 / mo (225% Poverty Exemption)",
                 "delta": "-$270.83 / mo (-52.2% Obligation)",
                 "authority": "34 CFR 685.209 & 42 U.S.C. 9902(2)",

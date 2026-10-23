@@ -1090,6 +1090,12 @@ def _render_runtime_sync_maps_js() -> str:
 
     function formatOutNum(val) {
       if (isNaN(val) || !isFinite(val)) return "0";
+      if (Math.abs(val) > 0 && Math.abs(val) < 1) {
+        return new Intl.NumberFormat("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 4
+        }).format(Math.round(val * 10000) / 10000);
+      }
       var rounded = Math.round(val * 100) / 100;
       var isInt = Math.abs(rounded-Math.round(rounded)) < 1e-6;
       return new Intl.NumberFormat("en-US", {
@@ -1394,11 +1400,11 @@ def _render_runtime_sync_workbench_js() -> str:
           } else if (pClass === "heavy_suv") {
             var suv179 = Math.min(cost, 30500);
             var remBasis = Math.max(0, cost-suv179);
-            rawAllow = suv179 + Math.round(remBasis * 0.80);
+            rawAllow = suv179 + Math.round(remBasis * 0.20);
           } else {
             var base179 = Math.min(cost, max179);
             var rem179 = Math.max(0, cost-base179);
-            rawAllow = base179 + Math.round(rem179 * 0.80);
+            rawAllow = base179 + Math.round(rem179 * 0.20);
           }
           var writeOff = Math.min(rawAllow, Math.max(20400, incCap));
           var taxSaved = Math.round(writeOff * 0.35);
@@ -2433,7 +2439,8 @@ def _render_runtime_sync_events_js() -> str:
                 statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
                 statusBox.textContent = "Playbook queued (" + (data.lead_id || "verified") + "). ";
                 if (data.checkout_url) {
-                  appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || 29) + ")", true);
+                  var defTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49;
+                  appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || defTierPrice) + ")", true);
                 }
                 if (data.redirect_url) {
                   appendActionLink(statusBox, "playbook-partner-link", data.redirect_url, "Matched Partner Desk", false);
@@ -2518,7 +2525,8 @@ def _render_runtime_sync_events_js() -> str:
                 statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal... ";
                 appendActionLink(statusNode, "quote-matched-partner-link", data.redirect_url, "Continue to Matched Partner Desk", false);
                 if (data.checkout_url) {
-                  appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || 29) + ")", true);
+                  var qDefTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49;
+                  appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || qDefTierPrice) + ")", true);
                 }
               }
             }
@@ -2919,6 +2927,9 @@ def _detect_visual_and_ux_contract_issues_cached(
             or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
             or "__pseoRuntimeSyncInitialized" not in sync_match.group(1)
             or "updateOutputsSynchronously" not in sync_match.group(1)
+            or "remBasis * 0.80" in sync_match.group(1)
+            or "rem179 * 0.80" in sync_match.group(1)
+            or "offer_price_usd || 29" in sync_match.group(1)
             or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_match.group(1)
         ):
             issues.append(
@@ -3845,6 +3856,10 @@ def normalize_html_visual_primitives(
                 or "data-checkout-trigger" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
+                or "remBasis * 0.80" in sync_body
+                or "rem179 * 0.80" in sync_body
+                or "offer_price_usd || 29" in sync_body
+                or "isPrexvo" in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:

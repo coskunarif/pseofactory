@@ -228,6 +228,12 @@ def _build_profithelm_profile() -> TenantTruthProfile:
             "tcja_vs_sunset_single_125k_tcja_tax": 19181.0,
             "tcja_vs_sunset_single_125k_sunset_tax": 23530.0,
             "tcja_vs_sunset_single_125k_delta": 4349.0,
+            "saas_runway_baseline_monthly_revenue": 33000.0,
+            "saas_runway_baseline_monthly_burn": 45000.0,
+            "saas_runway_baseline_net_monthly_burn": 12000.0,
+            "scorp_155k_95k_salary_fica_savings": 13180.0,
+            "section_301_tariff_120k_fob_landed_cost": 160966.0,
+            "section_179_heavy_suv_85k_80pct_first_year_deduction": 38000.0,
         },
     )
 
@@ -384,11 +390,53 @@ def _build_prexvo_profile() -> TenantTruthProfile:
             "poverty_guidelines_2026_hhs_per_additional": 5500.0,
             "rap_exemption_2026_single_contiguous": 35212.50,
             "ibr_exemption_2026_single_contiguous": 23475.00,
+            "icr_exemption_2026_single_contiguous": 15650.00,
+            "icr_poverty_guideline_threshold": 1.00,
+            "grad_plus_unsubsidized_annual_cap": 20500.00,
+            "grad_plus_unsubsidized_aggregate_cap": 138500.00,
             "rap_default_60k_loan_65k_agi_monthly": 248.23,
+            "rap_default_60k_loan_65k_agi_rounded_monthly": 248.0,
             "rap_default_60k_loan_65k_agi_subsidy": 76.77,
             "rap_default_60k_loan_95k_agi_monthly": 498.23,
             "ibr_new_default_60k_loan_65k_agi_monthly": 346.04,
             "ibr_legacy_default_60k_loan_65k_agi_monthly": 519.06,
+            "std_10yr_60k_6pct8_monthly": 681.29,
+            "tiered_std_60k_6pct8_monthly": 379.24,
+            "tiered_std_delta_60k_monthly": 302.05,
+            "tiered_std_25k_monthly": 168.40,
+            "parent_plus_std_10yr_70k_monthly": 822.50,
+            "parent_plus_icr_70k_90k_agi_monthly": 651.25,
+            "parent_plus_icr_savings_monthly": 171.25,
+            "parent_plus_rap_ineligible_monthly": 325.00,
+            "mfs_joint_rap_165k_agi_monthly": 989.15,
+            "mfs_separate_rap_85k_agi_monthly": 306.56,
+            "mfs_joint_ibr_165k_agi_monthly": 847.50,
+            "mfs_separate_ibr_85k_agi_monthly": 540.94,
+            "mfs_joint_vs_ibr_delta_monthly": 141.65,
+            "save_vs_standard_60k_monthly": 1105.73,
+            "save_interest_accrual_monthly": 273.23,
+            "save_forbearance_accrual_monthly": 666.67,
+            "ibr_post2014_45k_loan_65k_agi_monthly": 179.38,
+            "ibr_pre2014_45k_loan_65k_agi_monthly": 270.83,
+            "ibr_std_cap_45k_loan_monthly": 335.25,
+            "paye_45k_loan_60k_agi_monthly": 97.81,
+            "paye_75k_loan_85k_agi_monthly": 430.42,
+            "paye_75k_loan_85k_agi_rounded_monthly": 430.00,
+            "paye_pre2014_75k_loan_85k_agi_monthly": 645.63,
+            "paye_std_cap_75k_loan_monthly": 766.25,
+            "pslf_rap_55k_agi_monthly": 124.11,
+            "pslf_ibr_55k_agi_monthly": 223.23,
+            "pslf_monthly_accrual_55k_monthly": 284.17,
+            "pslf_subsidy_55k_monthly": 60.94,
+            "rap_85k_agi_monthly": 410.84,
+            "rap_85k_agi_rounded_monthly": 411.00,
+            "ibr_pre2014_85k_agi_monthly": 738.06,
+            "ibr_pre2014_85k_agi_rounded_monthly": 738.00,
+            "std_10yr_65k_loan_monthly": 636.39,
+            "rap_45k_agi_monthly": 44.90,
+            "rap_50k_agi_monthly": 82.50,
+            "rap_55k_agi_monthly": 164.90,
+            "refi_break_even_monthly_savings": 82.50,
         },
     )
 
@@ -724,22 +772,90 @@ class TenantFactStore:
                         f"Stale TCJA vs 2027 Sunset figure '{st_tok}' detected: contradicts ground-truth statutory engine ($19,181 TCJA tax, $23,530 Sunset tax, +$4,349 delta at $125k Single; $30,416 Sunset tax at $150k Single)"
                     )
 
+            # Stale 2027 Sunset Head of Household standard deduction ($12,700 instead of $12,900)
+            if "head_of_household: 12700" in text or "head_of_household' ? 12700" in text or 'head_of_household" ? 12700' in text:
+                violations.append(
+                    "Stale 2027 Sunset Head of Household standard deduction '12700' detected in calculation logic: ground-truth statutory baseline is $12,900"
+                )
+
+            # Stale 80% bonus depreciation in runtime sync script or 2026 prose
+            if "rembasis * 0.80" in text_lower or "rem179 * 0.80" in text_lower:
+                violations.append(
+                    "Stale 80% bonus depreciation multiplier ('* 0.80') detected in workbench calculation logic: 2026 statutory IRC 168(k) bonus depreciation rate is 20% ('* 0.20')"
+                )
+            if re.search(
+                r"(?:(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation[^\.\n]{0,80}?2026|bonus\s+depreciation\s+(?:is|rate\s+is)\s+(?:60|80)%[^\.\n]{0,80}?2026|in\s+2026[^\.\n]{0,80}?(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation)",
+                text_lower,
+            ):
+                violations.append(
+                    "Stale 2026 bonus depreciation rate (60%/80%) detected: 2026 statutory IRC 168(k) bonus depreciation rate is 20%"
+                )
+
+            # Unverified $29 offer fallback in JS
+            if "offer_price_usd || 29" in text:
+                violations.append(
+                    "Unverified offer_price_usd fallback '29' detected in runtime script: contradicts ProfitHelm ($49) and Prexvo ($19) canonical pricing tiers"
+                )
+
+            # Corrupted subtraction syntax from aggressive hyphen replacement
+            if "(1: 13.3% state rate)" in text or "(100%: 15% exclusion)" in text:
+                violations.append(
+                    "Corrupted mathematical subtraction syntax detected ('(1: 13.3% state rate)' or '(100%: 15% exclusion)'); must preserve minus sign in mathematical formulas"
+                )
+
+            # Un-capped OASDI S-Corp FICA savings ($19,125 instead of $13,180 at $155k net / $95k salary)
+            if ("$19,125" in text or '"published_output": 19125' in text or "produces 19,125.00" in text_lower) and (
+                "s-corp" in text_lower or "reasonable salary" in text_lower or "reasonable-salary" in text_lower
+            ):
+                violations.append(
+                    "Stale S-Corp FICA tax savings figure '$19,125' detected: ignores the 2026 $176,100 Social Security OASDI wage base cap under IRC Section 3121 (verified savings at $155k net / $95k salary is $13,180)"
+                )
+
+            # Rounded Section 301 tariff landed cost ($161,000 instead of $160,966 when MPF/HMF are $528.40/$237.50)
+            if (
+                '"published_output": 161000' in text
+                or 'data-baseline-output="161000' in text
+                or "produces 161,000.00" in text_lower
+                or ("$161,000" in text and ("$528.40" in text or "$160,966" in text or "merchandise processing fee" in text_lower))
+            ) and ("301" in text_lower and "tariff" in text_lower):
+                violations.append(
+                    "Inexact Section 301 tariff landed cost figure '$161,000' detected: ground-truth landed cost at $120,000 FOB + $34,200 duty + $6,000 freight + $528.40 MPF + $237.50 HMF is $160,966"
+                )
+
         elif tenant_norm == "prexvo":
             # PSLF qualifying payments: strictly 120 payments
             if "pslf" in text_lower or "public service" in text_lower:
-                pslf_matches = re.findall(
+                if "120 to 240 certified monthly payments" in text_lower and (
+                    "pslf" in (context or "").lower()
+                    or "public-service" in (context or "").lower()
+                    or "pslf buyback calculator determines" in text_lower
+                    or "pslf qualifying payment simulator determines" in text_lower
+                ):
+                    violations.append(
+                        "PSLF payment requirement contradiction: claiming '120 to 240 certified monthly payments' for PSLF contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
+                    )
+                pslf_matches = re.finditer(
                     r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]{0,140}?(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?|(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?[^\.\n]{0,140}?(?:pslf|public\s+service\s+loan\s+forgiveness))',
                     text,
                     re.IGNORECASE,
                 )
-                for m in pslf_matches:
-                    p_str = m[0] or m[1]
+                for m_obj in pslf_matches:
+                    p_str = m_obj.group(1) or m_obj.group(2)
+                    span_low = m_obj.group(0).lower()
                     try:
                         payments = int(p_str)
                         if payments != 120:
-                            violations.append(
-                                f"PSLF payment requirement contradiction: claimed {payments} payments contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
+                            # Allow sentences that explicitly pair 120-payment PSLF with 240/300-payment IDR forgiveness
+                            has_explicit_120_pslf = bool(
+                                re.search(
+                                    r"(?:120[-\s]+(?:qualifying\s+|monthly\s+|certified\s+)?(?:payment|month)[^\.\n]{0,60}?(?:pslf|public\s+service)|(?:pslf|public\s+service)[^\.\n]{0,60}?120[-\s]+(?:qualifying\s+|monthly\s+|certified\s+)?(?:payment|month)|pslf\s*\(120)",
+                                    span_low,
+                                )
                             )
+                            if not (payments in (240, 300) and has_explicit_120_pslf):
+                                violations.append(
+                                    f"PSLF payment requirement contradiction: claimed {payments} payments contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
+                                )
                     except ValueError:
                         pass
 
@@ -771,13 +887,26 @@ class TenantFactStore:
                     "Incomplete IBR statutory rate '15% Discretionary' in comparison table cell: must specify '10% to 15% Discretionary' covering post-2014 new borrowers (10%) and pre-2014 borrowers (15%) under 34 CFR 685.209"
                 )
 
-            # Plan-specific contradiction: attributing 225% ($35,212.50) to IBR Hardship Cap or PAYE Sunset calculation
+            # Unverified $29 offer fallback in JS
+            if "offer_price_usd || 29" in text:
+                violations.append(
+                    "Unverified offer_price_usd fallback '29' detected in runtime script: contradicts Prexvo ($19) canonical pricing tier"
+                )
+
+            # Plan-specific contradiction: attributing 225% ($35,212.50) to IBR, PAYE, ICR, Tiered Standard, Grad PLUS, Refinance, or institutional pages
             if re.search(
-                r"(?:ibr\s+hardship(?:\s+cap)?\s+calculator|paye\s+sunset(?:\s+eligibility)?(?:\s+calculator)?)\s+(?:determines\s+monthly\s+obligations\s+using\s+the\s+225\s+percent|subtracts\s+225\s+percent)",
+                r"(?:ibr\s+hardship(?:\s+cap)?(?:\s+calculator)?|paye\s+sunset(?:\s+eligibility)?(?:\s+calculator)?|icr\s+repayment(?:\s+calculator)?|income[-\s]contingent\s+repayment|tiered\s+standard(?:\s+repayment)?(?:\s+calculator)?|grad\s+plus(?:\s+borrowing)?(?:\s+cap)?(?:\s+calculator)?|student\s+loan\s+refinance(?:\s+break[-\s]even)?(?:\s+calculator)?|parent\s+plus\s+repayment)\s+(?:determines\s+monthly\s+obligations\s+using\s+the\s+225\s+percent|subtracts\s+225\s+percent|under\s+title\s+iv\s+34\s+cfr\s+part\s+685\s+using\s+225%)",
                 text_lower,
             ):
                 violations.append(
-                    "Prexvo plan-threshold contradiction: IBR and PAYE use 150% HHS Poverty Guideline ($23,475 single exemption), whereas 225% ($35,212.50) applies to RAP"
+                    "Prexvo plan-threshold contradiction: non-RAP plan (IBR, PAYE, ICR, Tiered Standard, Grad PLUS, Parent PLUS, or Refinance) misattributed to RAP 225% HHS Poverty Guideline ($35,212.50)"
+                )
+            if re.search(
+                r"calculate\s+(?:tools\s+directory|disclaimers|methodology|privacy|about)\s+under\s+title\s+iv",
+                text_lower,
+            ):
+                violations.append(
+                    "Prexvo non-tool institutional page contains calculator template meta/prose ('Calculate ... under Title IV')"
                 )
 
         is_valid = len(violations) == 0
@@ -805,7 +934,7 @@ class TruthReconciliationEngine:
     Zero LLM calls, 100% deterministic, idempotent, zero em-dashes, zero en-dashes.
     """
 
-    VERSION: str = "2026.10.21-v1"
+    VERSION: str = "2026.10.23-v2"
 
     SPECULATIVE_FILLER_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
         ("In today's rapidly evolving tax landscape, ", ""),
@@ -890,6 +1019,57 @@ class TruthReconciliationEngine:
             "Math.min(basis, 31300) + Math.max(0, basis - 31300) * 0.60",
             "Math.min(basis, 30500) + Math.max(0, basis - 30500) * 0.20",
         ),
+        # 2027 Sunset Head of Household standard deduction ($12,700 -> $12,900) & runtime bonus depreciation (80% -> 20%)
+        ("head_of_household: 12700", "head_of_household: 12900"),
+        ("hoh: 12700", "hoh: 12900"),
+        ("(status === 'head_of_household' ? 12700 : 8600)", "(status === 'head_of_household' ? 12900 : 8600)"),
+        ("remBasis * 0.80", "remBasis * 0.20"),
+        ("rem179 * 0.80", "rem179 * 0.20"),
+        (
+            "data.offer_price_usd || 29",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+        ),
+        (
+            "data.offer_price_usd || (isPrexvo ? 19 : 49)",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+        ),
+        ('"price":"29"', '"price":"49"'),
+        ('"price": "29"', '"price": "49"'),
+        ("$19,125 in self-employment tax ($15,500 OASDI + $3,625 Medicare)", "$13,180 in self-employment tax ($10,056 OASDI + $3,124 Medicare)"),
+        # Corrupted mathematical subtraction syntax
+        ("(1: 13.3% state rate)", "(1 - 13.3% state rate)"),
+        ("(100%: 15% exclusion)", "(100% - 15% exclusion)"),
+        # S-Corp reasonable salary OASDI wage base cap reconciliation ($19,125 -> $13,180)
+        (
+            '"formula": "round((net_business_income - reasonable_w2_salary) * 0.153, 0)",\n  "inputs": {\n    "net_business_income": 225000.0,\n    "reasonable_w2_salary": 100000.0\n  },\n  "published_output": 19125.0,',
+            '"formula": "round((oasdi_taxable_delta * 0.124) + (medicare_taxable_delta * 0.029), 0)",\n  "inputs": {\n    "oasdi_taxable_delta": 81100.0,\n    "medicare_taxable_delta": 107425.0\n  },\n  "published_output": 13180.0,',
+        ),
+        (
+            "Deterministic evaluation of round((net_business_income: reasonable_w2_salary) * 0.153, 0) produces 19,125.00.",
+            "Deterministic evaluation of round((oasdi_taxable_delta * 0.124) + (medicare_taxable_delta * 0.029), 0) produces 13,180.00.",
+        ),
+        (
+            "Deterministic evaluation of round((net_business_income - reasonable_w2_salary) * 0.153, 0) produces 19,125.00.",
+            "Deterministic evaluation of round((oasdi_taxable_delta * 0.124) + (medicare_taxable_delta * 0.029), 0) produces 13,180.00.",
+        ),
+        # Section 301 tariff landed cost reconciliation ($161,000 -> $160,966)
+        (
+            '"freight_and_mpf_hmf": 6800.0',
+            '"freight_and_mpf_hmf": 6766.0',
+        ),
+        (
+            '"published_output": 161000.0',
+            '"published_output": 160966.0',
+        ),
+        (
+            "Deterministic evaluation of round(fob_value * (1.0 + section_301_rate + base_mfn_rate) + freight_and_mpf_hmf, 0) produces 161,000.00.",
+            "Deterministic evaluation of round(fob_value * (1.0 + section_301_rate + base_mfn_rate) + freight_and_mpf_hmf, 0) produces 160,966.00.",
+        ),
+        # Equipment Lease Tax Deduction overlay misattribution of Section 179 purchase caps
+        (
+            "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
+            "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
+        ),
     )
 
     PREXVO_IBR_PAYE_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
@@ -924,6 +1104,113 @@ class TruthReconciliationEngine:
         (
             "Single borrower at $65,000 AGI with 225% HHS poverty exemption ($248.23/mo RAP payment).",
             "Single borrower at $65,000 AGI with 150% HHS poverty exemption ($23,475 protected baseline).",
+        ),
+        (
+            "225% FPL ($35,212.50)",
+            "150% FPL ($23,475)",
+        ),
+    )
+
+    PREXVO_ALL_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        (
+            "data.offer_price_usd || 29",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+        ),
+        (
+            "data.offer_price_usd || (isPrexvo ? 19 : 49)",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+        ),
+        # Clarify RAP vs Old IBR 15% baseline in comparison tables
+        (
+            "<td>Prior Baseline (150% Poverty)</td>\n                  <td>$519.06 / mo</td>",
+            "<td>Prior Baseline (150% Poverty, 15% Old IBR)</td>\n                  <td>$519.06 / mo</td>",
+        ),
+        # PSLF Buyback & PSLF Simulator overlay/prose 120-payment accuracy
+        (
+            "Under Title IV regulation 34 CFR Part 685, PSLF Buyback Calculator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under 34 CFR 685.219(g), the PSLF Buyback Hold Harmless provision allows federal Direct Loan borrowers with 120 months of certified public service employment to buy back eligible deferment or forbearance months at the historical IDR rate, achieving tax-free forgiveness after 120 qualifying monthly payments.",
+        ),
+        (
+            "Under Title IV regulation 34 CFR Part 685, PSLF Qualifying Payment Simulator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under 34 CFR 685.219, Public Service Loan Forgiveness (PSLF) discharges 100 percent of remaining federal Direct Loan principal and interest tax-free after 120 qualifying monthly payments under an eligible income-driven repayment plan (RAP, IBR, PAYE, or ICR) while employed full-time by a qualifying public service employer.",
+        ),
+        # ICR & Parent PLUS 100% poverty ($15,650) accuracy
+        (
+            "Under Title IV regulation 34 CFR Part 685, ICR Repayment Calculator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Title IV regulation 34 CFR 685.209(b), the Income-Contingent Repayment (ICR) plan calculates monthly obligations as the lesser of 20 percent of discretionary income above 100 percent of the HHS Poverty Guideline ($15,650 single baseline) or a 12-year fixed payment adjusted by income, with forgiveness after 300 qualifying payments.",
+        ),
+        (
+            "Under 34 CFR Part 685, icr repayment calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under 34 CFR 685.209(b), icr repayment calculator subtracts 100 percent of the applicable HHS Poverty Guideline ($15,650 single baseline) from Adjusted Gross Income and assesses the lesser of 20 percent of discretionary income divided by 12 or a 12-year income-adjusted fixed payment.",
+        ),
+        (
+            "Calculate ICR Repayment under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+            "Calculate ICR Repayment under Title IV 34 CFR 685.209(b) using 100% HHS Poverty Guidelines ($15,650 single baseline) and 20% discretionary income rules.",
+        ),
+        (
+            "Calculate Parent PLUS Repayment Strategy under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+            "Calculate Parent PLUS Repayment Strategy under Title IV 34 CFR 685.209(b) using Direct Consolidation and ICR 100% HHS Poverty Guideline ($15,650) rules.",
+        ),
+        # Tiered Standard 34 CFR 685.208 accuracy
+        (
+            "Under Title IV regulation 34 CFR Part 685, Tiered Standard Repayment determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Title IV regulation 34 CFR 685.208, Tiered Standard Repayment determines fixed monthly obligations based on total entering Direct Loan principal across four statutory amortization tiers of 10, 12, 15, 20, and 30 years (120 to 360 monthly payments) with a $50 minimum monthly payment.",
+        ),
+        (
+            "Under 34 CFR Part 685, tiered standard repayment calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under 34 CFR 685.208, tiered standard repayment calculator determines fixed monthly obligations by amortizing total Direct Loan principal across statutory 120, 180, 240, or 360 monthly payment tiers based on entering loan balance.",
+        ),
+        (
+            "Calculate Tiered Standard Repayment under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+            "Calculate Tiered Standard Repayment under Title IV 34 CFR 685.208 across 10, 12, 15, 20, and 30-year fixed amortization schedules by loan balance.",
+        ),
+        # Grad PLUS Borrowing Cap HEA Section 455(a) & 34 CFR 685.203 accuracy
+        (
+            "Under Title IV of the Higher Education Act and 34 CFR 685.208, the Tiered Standard Repayment schedule assigns fixed amortization horizons of 10, 15, 20, or 25 years (120 to 300 monthly payments) strictly by total entering student loan balance, independent of borrower Adjusted Gross Income.",
+            "Under Title IV of the Higher Education Act (20 U.S.C. 1087e) and 34 CFR 685.203, federal graduate borrowing caps limit Direct Unsubsidized Loans to $20,500 annually ($138,500 aggregate cap), while Grad PLUS and private supplemental financing cover remaining certified Cost of Attendance.",
+        ),
+        (
+            "Under Title IV regulation 34 CFR Part 685, Grad PLUS Borrowing Cap determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Title IV of the Higher Education Act (20 U.S.C. 1087e) and 34 CFR 685.203, Grad PLUS Borrowing Cap models the $20,500 annual Direct Unsubsidized Loan ceiling, the $138,500 aggregate graduate limit, and Cost of Attendance funding gaps.",
+        ),
+        (
+            "Under 34 CFR Part 685, grad plus borrowing cap calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under HEA Section 455(a) and 34 CFR 685.203, grad plus borrowing cap calculator subtracts the $20,500 annual Direct Unsubsidized Loan limit and institutional aid from certified Cost of Attendance to quantify residual graduate funding gaps.",
+        ),
+        (
+            "Calculate Grad PLUS Borrowing Cap under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+            "Calculate Graduate Direct Unsubsidized ($20,500 annual / $138,500 aggregate) and Grad PLUS borrowing caps under Title IV HEA and 34 CFR 685.203.",
+        ),
+        # Student Loan Refinance Break-Even accuracy
+        (
+            "Under Title IV regulation 34 CFR Part 685, Student Loan Refinance Break-Even vs Title IV Protection Calculator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Truth in Lending Act (TILA) Regulation Z (12 CFR Part 1026) and Title IV benefit forfeiture rules, the Student Loan Refinance Break-Even Calculator compares private APR interest savings against the permanent forfeiture of federal IDR subsidies and PSLF forgiveness.",
+        ),
+        (
+            "Under 34 CFR Part 685, student loan refinance break even calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under 12 CFR Part 1026 and Title IV benefit forfeiture rules, student loan refinance break even calculator compares private refinance interest savings against the dollar value of forfeited federal IDR subsidies and PSLF forgiveness. Refinancing federal student loans permanently waives federal protections.",
+        ),
+        (
+            "Calculate Student Loan Refinance Break: Even vs Title IV Protection under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary.",
+            "Compare student loan refinance interest savings against forfeited Title IV IDR subsidies and PSLF forgiveness under 34 CFR Part 685.",
+        ),
+        # Income-Based Student Loan Repayment Calculator accuracy
+        (
+            "Under Title IV regulation 34 CFR Part 685, Income-Based Student Loan Repayment Calculator determines monthly obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected single-filer income) and a 10 percent discretionary rate. Qualifying borrowers receive a 100 percent unpaid interest subsidy and full principal forgiveness after 120 to 240 certified monthly payments.",
+            "Under Title IV regulation 34 CFR 685.209 and 20 U.S.C. 1098e, the Income-Based Student Loan Repayment Calculator compares 150 percent HHS Poverty Guideline ($23,475 single baseline) IBR payments against the 225 percent ($35,212.50) Repayment Assistance Plan (RAP) and 10-year Standard ceilings.",
+        ),
+        (
+            "Under 34 CFR Part 685, income based student loan repayment calculator subtracts 225 percent of the applicable HHS Poverty Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided by 12, with 100 percent of unpaid monthly interest waived.",
+            "Under 34 CFR 685.209 and 20 U.S.C. 1098e, income based student loan repayment calculator subtracts 150 percent of the applicable HHS Poverty Guideline ($23,475 single baseline) for IBR or 225 percent ($35,212.50) for RAP from Adjusted Gross Income to determine monthly obligations.",
+        ),
+        (
+            "Calculate Income-Based Student Loan Repayment under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and.",
+            "Calculate Income-Based Repayment (IBR) and RAP monthly payments under Title IV 34 CFR 685.209 using 150% and 225% HHS Poverty Guidelines.",
+        ),
+        # Married Filing Separately meta truncation repair
+        (
+            "Calculate Married Filing Separately Student Loan Tax vs IDR Calculator under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary.",
+            "Compare Married Filing Separately vs Jointly student loan payments under 34 CFR 685.209 against lost IRC tax credits to maximize net household savings.",
         ),
     )
 
@@ -964,6 +1251,11 @@ class TruthReconciliationEngine:
                     if "profithelm_statutory_truth_reconciled" not in repairs:
                         repairs.append("profithelm_statutory_truth_reconciled")
         else:
+            for old_str, new_str in cls.PREXVO_ALL_HTML_REPLACEMENTS:
+                if old_str in updated:
+                    updated = updated.replace(old_str, new_str)
+                    if "prexvo_plan_threshold_reconciled" not in repairs:
+                        repairs.append("prexvo_plan_threshold_reconciled")
             is_ibr_or_paye = (
                 any(k in combined_slug for k in ("ibr-hardship", "paye-sunset"))
                 or "IBR Hardship Cap Calculator" in updated
@@ -975,6 +1267,40 @@ class TruthReconciliationEngine:
                         updated = updated.replace(old_str, new_str)
                         if "prexvo_plan_threshold_reconciled" not in repairs:
                             repairs.append("prexvo_plan_threshold_reconciled")
+                if "ibr-hardship" in combined_slug and '"name": "RAP vs IBR Repayment Calculator"' in updated:
+                    updated = updated.replace(
+                        '"name": "RAP vs IBR Repayment Calculator"',
+                        '"name": "IBR Hardship Cap & Partial Financial Hardship Calculator"',
+                    )
+                    if "prexvo_plan_threshold_reconciled" not in repairs:
+                        repairs.append("prexvo_plan_threshold_reconciled")
+            if any(k in combined_slug for k in ("icr-repayment", "tiered-standard", "grad-plus", "refinance")):
+                if (
+                    "<td>225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)</td>" in updated
+                    and "<td><strong>$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)</strong></td>" in updated
+                ):
+                    if "icr-repayment" in combined_slug:
+                        updated = updated.replace(
+                            "<td>225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)</td>\n          <td>2026 RAP / IBR with 100% Unpaid Interest Waiver</td>\n          <td><strong>$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)</strong></td>",
+                            "<td>100% Federal Poverty Exemption ($15,650 Single ICR Baseline)</td>\n          <td>Direct Consolidation into 34 CFR 685.209(b) ICR Schedule</td>\n          <td><strong>$651.25/mo ICR Payment ($171.25/mo Savings vs $822.50 10-Yr Standard)</strong></td>",
+                        )
+                    elif "tiered-standard" in combined_slug:
+                        updated = updated.replace(
+                            "<td>225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)</td>\n          <td>2026 RAP / IBR with 100% Unpaid Interest Waiver</td>\n          <td><strong>$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)</strong></td>",
+                            "<td>$60,000+ Balance Tier (30-Year / 360-Month Amortization)</td>\n          <td>34 CFR 685.208 Tiered Standard vs 10-Year Standard</td>\n          <td><strong>$379.24/mo Tiered Payment ($302.05/mo Lower Fixed Obligation vs $681.29/mo)</strong></td>",
+                        )
+                    elif "grad-plus" in combined_slug:
+                        updated = updated.replace(
+                            "<td>225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)</td>\n          <td>2026 RAP / IBR with 100% Unpaid Interest Waiver</td>\n          <td><strong>$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)</strong></td>",
+                            "<td>$20,500 Annual Direct Unsubsidized Cap ($138,500 Aggregate)</td>\n          <td>Exhaust Direct Unsubsidized Before Grad PLUS / Private Credit</td>\n          <td><strong>Lower Origination Fee (1.057% vs 4.228%) + Full Title IV IDR/PSLF Eligibility</strong></td>",
+                        )
+                    elif "refinance" in combined_slug:
+                        updated = updated.replace(
+                            "<td>225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)</td>\n          <td>2026 RAP / IBR with 100% Unpaid Interest Waiver</td>\n          <td><strong>$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)</strong></td>",
+                            "<td>$55,000 Balance Refinanced from 7.0% Federal to 5.2% Private APR</td>\n          <td>Private Refinance Only After Confirming Zero IDR/PSLF Value</td>\n          <td><strong>$990 First-Year Interest Savings (Permanently Waives Federal Protections)</strong></td>",
+                        )
+                    if "prexvo_plan_threshold_reconciled" not in repairs:
+                        repairs.append("prexvo_plan_threshold_reconciled")
 
         # 3. Ensure signal/index.html has a valid WebPage JSON-LD schema block if missing
         if (
@@ -1071,7 +1397,7 @@ class TruthReconciliationEngine:
         """
         Deterministically reconciles a persisted GSC overlay JSON dictionary against
         TenantFactStore ground truth so stale 2026 Section 179 caps ($1,250,000 / $3,130,000 / $31,300)
-        or Prexvo IBR/PAYE thresholds (225% / $35,212.50) are healed in place.
+        or Prexvo IBR/PAYE/ICR/Tiered/GradPLUS/PSLF/Refinance thresholds are healed in place.
         """
         import json as _json_lib
 
@@ -1097,10 +1423,17 @@ class TruthReconciliationEngine:
                     "capped at a $31,300 Section 179 deduction in 2026",
                     "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
                 ),
+                (
+                    "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
+                    "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
+                ),
             ):
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)
         else:
+            for old_s, new_s in cls.PREXVO_ALL_HTML_REPLACEMENTS:
+                if old_s in updated_str:
+                    updated_str = updated_str.replace(old_s, new_s)
             if any(k in ov_slug for k in ("ibr-hardship", "paye-sunset")) and "rap-vs" not in ov_slug:
                 for old_s, new_s in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
                     if old_s in updated_str:
@@ -1147,6 +1480,11 @@ class TruthReconciliationEngine:
             if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
                 violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
         else:
+            for old_str, _ in cls.PREXVO_ALL_HTML_REPLACEMENTS:
+                if old_str in html_content:
+                    msg = f"Unreconciled Prexvo statutory figure or plan claim: '{old_str[:60]}'"
+                    if msg not in violations:
+                        violations.append(msg)
             combined_slug = f"{rel_path.lower()} {slug.lower()}"
             is_ibr_or_paye = (
                 any(k in combined_slug for k in ("ibr-hardship", "paye-sunset"))
@@ -1159,6 +1497,8 @@ class TruthReconciliationEngine:
                         msg = f"Unreconciled Prexvo IBR/PAYE threshold figure: '{old_str[:60]}'"
                         if msg not in violations:
                             violations.append(msg)
+                if "ibr-hardship" in combined_slug and '"name": "RAP vs IBR Repayment Calculator"' in html_content:
+                    violations.append("IBR Hardship Cap Calculator JSON-LD SoftwareApplication name misattributed as 'RAP vs IBR Repayment Calculator'")
 
         return violations
 
