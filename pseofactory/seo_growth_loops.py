@@ -4863,7 +4863,22 @@ def evaluate_closed_loop_cohort_reflection(
                     ov_data["partner_offer"] = None
                     ov_changed = True
                 top_html_cand = d_dir / canon_ov_slug / "index.html"
-                if persist and top_html_cand.is_file():
+                if (
+                    persist
+                    and canon_ov_slug.lower()
+                    not in (
+                        "disclaimers",
+                        "methodology",
+                        "tools",
+                        "tools-directory",
+                        "privacy",
+                        "about",
+                        "terms",
+                        "contact",
+                        "index",
+                    )
+                    and top_html_cand.is_file()
+                ):
                     try:
                         raw_top_h = top_html_cand.read_text(encoding="utf-8", errors="ignore")
                         upd_top_h = inject_overlay_into_html(raw_top_h, ov_data)

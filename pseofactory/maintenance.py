@@ -7872,10 +7872,13 @@ class RetroReflectionEngine:
             )
         ):
             return True
-        if ov_s_low == "equipment-lease-tax-deduction" and "$2,560,000" in ov_body_dump:
+        t_val = str(raw_ov.get("title_rewrite") or raw_ov.get("title") or "")
+        m_val = str(raw_ov.get("meta_description") or "")
+        qa_meta_dump = f"{qa_str} {m_val}"
+        if ov_s_low == "equipment-lease-tax-deduction" and "$2,560,000" in qa_meta_dump:
             return True
         if any(k in ov_s_low for k in ("ibr-hardship", "paye-sunset")) and "rap-vs" not in ov_s_low and (
-            "225%" in ov_body_dump or "225 percent" in ov_body_dump or "$35,212.50" in ov_body_dump
+            "225%" in qa_meta_dump or "225 percent" in qa_meta_dump or "$35,212.50" in qa_meta_dump
         ):
             return True
         if ov_s_low in (
@@ -7886,9 +7889,8 @@ class RetroReflectionEngine:
             "pslf-buyback-calculator",
             "pslf-qualifying-payment-simulator",
             "student-loan-refinance-break-even-calculator",
-            "student-loan-repayment-calculator",
         ) and any(
-            bad_prexvo in ov_body_dump
+            bad_prexvo in qa_meta_dump
             for bad_prexvo in (
                 "225%",
                 "225 percent",
@@ -7897,12 +7899,15 @@ class RetroReflectionEngine:
             )
         ):
             return True
+        if ov_s_low == "student-loan-repayment-calculator" and (
+            "determines monthly obligations using the 225 percent" in qa_meta_dump
+            or "subtracts 225 percent" in qa_meta_dump
+        ):
+            return True
         from pseofactory.contracts import (
             detect_sentence_truncation_issues,
             detect_title_year_conflict_issues,
         )
-        t_val = str(raw_ov.get("title_rewrite") or raw_ov.get("title") or "")
-        m_val = str(raw_ov.get("meta_description") or "")
         if (
             detect_title_year_conflict_issues(t_val)
             or bool(

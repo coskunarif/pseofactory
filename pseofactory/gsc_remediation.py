@@ -5599,6 +5599,18 @@ def evaluate_expired_overlays(
                     if slug.startswith(f"{hub_pfx}-"):
                         act_slug_cands.append(f"{hub_pfx}/{slug[len(hub_pfx) + 1:]}")
                 for act_s in act_slug_cands:
+                    if act_s.lower() in (
+                        "tools",
+                        "tools-directory",
+                        "disclaimers",
+                        "methodology",
+                        "privacy",
+                        "about",
+                        "terms",
+                        "contact",
+                        "index",
+                    ):
+                        continue
                     for html_target in (
                         root / "dist" / "tools" / act_s / "index.html",
                         root / "dist" / f"{act_s}.html",
