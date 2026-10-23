@@ -709,3 +709,245 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
         assert out["getSummary"]["zeptomail_dispatched_count"] == 1
         assert out["getSummary"]["fulfilled_count"] == 1
 
+
+def test_edge_workers_synthetic_probe_isolation_zero_crm_billing_kv_spam(tmp_path):
+    import subprocess
+    import json
+    from pseofactory.edge import (
+        generate_edge_redirect_function,
+        generate_edge_telemetry_function,
+    )
+
+    for prop_id in ("profithelm", "prexvo"):
+        base_dir = tmp_path / f"{prop_id}_synthetic"
+        (base_dir / "functions" / "api").mkdir(parents=True)
+        (base_dir / "functions" / "r").mkdir(parents=True)
+        (base_dir / "functions" / "api" / "lead-capture.js").write_text(
+            generate_edge_lead_capture_function(prop_id), encoding="utf-8"
+        )
+        (base_dir / "functions" / "api" / "telemetry.js").write_text(
+            generate_edge_telemetry_function(prop_id), encoding="utf-8"
+        )
+        (base_dir / "functions" / "r" / "partner.js").write_text(
+            generate_edge_redirect_function(prop_id), encoding="utf-8"
+        )
+
+        slug = (
+            "section-1031-calculator"
+            if prop_id == "profithelm"
+            else "student-loan-refinance-break-even-calculator"
+        )
+        partner_key = "ipx1031" if prop_id == "profithelm" else "splash_financial"
+        node_script = f"""
+        Promise.all([
+          import("./functions/api/lead-capture.js"),
+          import("./functions/api/telemetry.js"),
+          import("./functions/r/partner.js")
+        ]).then(async ([leadMod, telMod, redirMod]) => {{
+          const kvStore = new Map();
+          let externalFetchCount = 0;
+          globalThis.fetch = async () => {{
+            externalFetchCount += 1;
+            return new Response("{{}}", {{ status: 200 }});
+          }};
+
+          const mockKv = {{
+            put: async (k, v) => kvStore.set(k, v),
+            list: async () => ({{ keys: [] }}),
+            get: async () => null
+          }};
+          const mockEnv = {{
+            ZEPTOMAIL_TOKEN: "Zoho-enczapikey live_token",
+            NANGO_SECRET_KEY: "live_nango_secret",
+            STRIPE_SECRET_KEY: "sk_live_secret",
+            PROFITHELM_LEADS: mockKv,
+            PREXVO_LEADS: mockKv,
+            PROFITHELM_TELEMETRY_KV: mockKv,
+            PREXVO_TELEMETRY_KV: mockKv,
+            PROFITHELM_CLICK_LEDGER: mockKv,
+            PREXVO_CLICK_LEDGER: mockKv
+          }};
+
+          const quoteReq = {{
+            url: "https://{prop_id}.com/api/lead-capture",
+            headers: new Headers({{
+              "content-type": "application/json",
+              "x-pseofactory-test": "1"
+            }}),
+            json: async () => ({{
+              email: "probe@synthetic.pseofactory.test",
+              state: "NY",
+              calculated_amount: 185000,
+              partner_sharing_consent: true,
+              tool_slug: "{slug}",
+              synthetic_test: true
+            }})
+          }};
+          const qRes = await leadMod.onRequestPost({{ request: quoteReq, env: mockEnv }});
+          const qData = await qRes.json();
+
+          const coReq = {{
+            url: "https://{prop_id}.com/api/lead-capture?checkout=1&tool_slug={slug}&synthetic_test=1",
+            headers: new Headers({{ "x-pseofactory-test": "1" }})
+          }};
+          const coRes = await leadMod.onRequestGet({{ request: coReq, env: mockEnv }});
+          const coData = await coRes.json();
+
+          const telReq = {{
+            url: "https://{prop_id}.com/api/telemetry?synthetic_test=1",
+            headers: new Headers({{
+              "content-type": "application/json",
+              "x-pseofactory-test": "1"
+            }}),
+            json: async () => ({{
+              schema_version: "2.0",
+              event_type: "synthetic_e2e_probe",
+              slug: "{slug}",
+              synthetic_test: true
+            }})
+          }};
+          const telRes = await telMod.onRequestPost({{ request: telReq, env: mockEnv }});
+          const telData = await telRes.json();
+
+          const redirReq = {{
+            url: "https://{prop_id}.com/r/{partner_key}?source_tool={slug}&synthetic_test=1",
+            headers: new Headers({{ "x-pseofactory-test": "1" }})
+          }};
+          const redirFn = redirMod.onRequestGet || redirMod.onRequest;
+          const redirRes = await redirFn({{
+            request: redirReq,
+            env: mockEnv,
+            params: {{ partner: "{partner_key}" }}
+          }});
+
+          console.log(JSON.stringify({{
+            kvSize: kvStore.size,
+            externalFetchCount,
+            qHeader: qRes.headers.get("X-Edge-Synthetic-Test"),
+            qData,
+            coData,
+            telHeader: telRes.headers.get("X-Edge-Synthetic-Test"),
+            telData,
+            redirStatus: redirRes.status,
+            redirHeader: redirRes.headers.get("X-Edge-Synthetic-Test"),
+            redirPartner: redirRes.headers.get("X-Edge-Partner")
+          }}));
+        }});
+        """
+        proc = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=base_dir,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout.strip())
+        assert out["kvSize"] == 0
+        assert out["externalFetchCount"] == 0
+        assert out["qHeader"] == "1"
+        assert out["qData"]["persisted"] is False
+        assert out["qData"]["synthetic_test"] is True
+        assert out["qData"]["zeptomail_status"] == "synthetic_test_suppressed"
+        assert out["qData"]["checkout_mode"] == "edge_checkout_rail"
+        assert out["qData"]["stripe_called"] is False
+        assert out["coData"]["status"] == "checkout_session_ready"
+        assert out["coData"]["checkout_mode"] == "edge_checkout_rail"
+        assert out["coData"]["synthetic_test"] is True
+        assert out["telHeader"] == "1"
+        assert out["telData"]["status"] == "RECORDED"
+        assert out["telData"]["persisted"] is False
+        assert out["telData"]["synthetic_test"] is True
+        assert out["redirStatus"] == 302
+        assert out["redirHeader"] == "1"
+        assert out["redirPartner"] == partner_key
+
+
+def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_path):
+    from pseofactory.browser_verifier import UnifiedBrowserAuditor
+    from pseofactory.server import EphemeralDistServer
+
+    auditor = UnifiedBrowserAuditor(dist_dir=tmp_path)
+    reachable, msg = auditor.check_cdp_reachability()
+    if not reachable:
+        pytest.skip(f"Chrome CDP unreachable: {msg}")
+
+    specs = [
+        {
+            "slug": "section-1031-calculator",
+            "title": "1031 Exchange Tax Deferral & Boot Calculator",
+            "model_name": "1031 Exchange Tax Deferral Model",
+            "property_id": "profithelm",
+            "canonical_base": "https://profithelm.com",
+            "formula": "gross_amount * (1.0 - effective_rate)",
+            "inputs": {"gross_amount": 450000.0, "effective_rate": 0.24},
+            "published_output": 342000.0,
+            "sample_calculation": "Evaluating $450,000 relinquished exchange equity at 24% effective tax rate yields $342,000.00 net retained basis.",
+            "statutory_authority": "IRC Section 1031 and IRS Form 8824",
+            "economic_dataset": "BEA Fixed Assets Series",
+        },
+        {
+            "slug": "student-loan-refinance-break-even-calculator",
+            "title": "Student Loan Refinance Break-Even Calculator",
+            "model_name": "Student Loan Refinance Break-Even Model",
+            "property_id": "prexvo",
+            "canonical_base": "https://prexvo.com",
+            "formula": "gross_amount * (1.0 - effective_rate)",
+            "inputs": {"gross_amount": 85000.0, "effective_rate": 0.06},
+            "published_output": 79900.0,
+            "sample_calculation": "Evaluating $85,000 loan balance at 6% rate factor yields $79,900.00 baseline output.",
+            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
+            "economic_dataset": "Federal Reserve G.19 Consumer Credit Series",
+        },
+    ]
+
+    for spec in specs:
+        prop_id = spec["property_id"]
+        slug = spec["slug"]
+        dist_dir = tmp_path / prop_id / "dist"
+        tool_dir = dist_dir / "tools" / slug
+        tool_dir.mkdir(parents=True, exist_ok=True)
+        compiled = compile_high_effort_page(spec)
+        html_str = compiled["html"]
+        if 'id="lead-capture-form"' not in html_str:
+            footer_form = (
+                '<form id="lead-capture-form" class="lead-capture-form">'
+                '<input type="email" name="email" placeholder="Enter work email" required>'
+                '<button type="submit">Send Playbook</button>'
+                '</form></body>'
+            )
+            html_str = html_str.replace("</body>", footer_form)
+        (tool_dir / "index.html").write_text(html_str, encoding="utf-8")
+        (dist_dir / "index.html").write_text(html_str, encoding="utf-8")
+
+        with EphemeralDistServer(dist_dir) as server:
+            prop_auditor = UnifiedBrowserAuditor(dist_dir=dist_dir)
+            route = f"/tools/{slug}/"
+            report = prop_auditor.audit_interactive_surface(server.base_url, route)
+            assert report["passed"] is True, f"Interactive audit failed for {prop_id}: {report}"
+            assert report["console_errors"] == []
+            assert report["page_errors"] == []
+            assert report["links_audit"]["invalid_links"] == []
+            assert report["links_audit"]["unrouted_affiliate_links"] == []
+            assert report["deep_link_hydration"]["tested"] is True
+            assert report["deep_link_hydration"]["passed"] is True
+            assert report["calculator_and_presets"]["tested"] is True
+            assert report["calculator_and_presets"]["passed"] is True
+            assert report["cliff_visualizer"]["present"] is True
+            assert report["cliff_visualizer"]["passed"] is True
+            assert report["scenario_comparator"]["present"] is True
+            assert report["scenario_comparator"]["passed"] is True
+            assert report["blueprint_actions"]["present"] is True
+            assert report["blueprint_actions"]["passed"] is True
+            assert report["playbook_lead_capture_and_checkout"]["present"] is True
+            assert report["playbook_lead_capture_and_checkout"]["passed"] is True
+            assert report["partner_quote_intake_and_checkout"]["present"] is True
+            assert report["partner_quote_intake_and_checkout"]["passed"] is True
+            assert report["affiliate_redirect_and_telemetry"]["tested"] is True
+            assert report["affiliate_redirect_and_telemetry"]["passed"] is True
+
+            assert len(server.captured_leads) >= 2
+            assert len(server.checkout_sessions) >= 2
+            assert len(server.telemetry_events) >= 1
+            assert len(server.redirect_events) >= 1
+
+

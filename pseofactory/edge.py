@@ -1092,6 +1092,7 @@ const TRACKING_PARAMS = [
   "source_tool",
   "cta_slot",
   "ph_tier",
+  "tier",
 ];
 
 const CJ_DOMAINS = [
@@ -1319,30 +1320,36 @@ export async function onRequest(context) {{
     return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
   }}
 
+  const isSyntheticProbe =
+    request.headers.get("x-pseofactory-test") === "1" ||
+    reqUrl.searchParams.get("synthetic_test") === "1";
   const eventId =
     "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
-  await persistEdgeRedirectTelemetry(context, {{
-    event_id: eventId,
-    event: "affiliate_click",
-    event_type: "affiliate_click",
-    property_id: "prexvo",
-    partner_key: rawPartner,
-    tool_slug: sourceTool || "direct",
-    source_tool: sourceTool || "direct",
-    cta_slot: ctaSlot || "edge_redirect",
-    subid: effectiveSubid || `${{rawPartner}}_edge`,
-    value_tier: phTier || "standard",
-    ph_tier: phTier || "standard",
-    path: reqUrl.pathname,
-    destination_url: finalRedirectUrl,
-    timestamp: new Date().toISOString(),
-  }});
+  if (!isSyntheticProbe) {{
+    await persistEdgeRedirectTelemetry(context, {{
+      event_id: eventId,
+      event: "affiliate_click",
+      event_type: "affiliate_click",
+      property_id: "prexvo",
+      partner_key: rawPartner,
+      tool_slug: sourceTool || "direct",
+      source_tool: sourceTool || "direct",
+      cta_slot: ctaSlot || "edge_redirect",
+      subid: effectiveSubid || `${{rawPartner}}_edge`,
+      value_tier: phTier || "standard",
+      ph_tier: phTier || "standard",
+      path: reqUrl.pathname,
+      destination_url: finalRedirectUrl,
+      timestamp: new Date().toISOString(),
+    }});
+  }}
 
   return makeRedirectResponse(finalRedirectUrl, {{
     "X-Edge-Partner": rawPartner,
     "X-Edge-Subid": effectiveSubid || "default",
     "X-Edge-Contract-Tier": hasDirectConfig ? "direct_env_override" : "direct_lending_marketplace",
-    "X-Edge-Telemetry": "recorded",
+    "X-Edge-Telemetry": isSyntheticProbe ? "synthetic_suppressed" : "recorded",
+    ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
   }});
 }}
 """
@@ -1523,6 +1530,7 @@ const TRACKING_PARAMS = [
   "utm_content",
   "gclid",
   "ph_tier",
+  "tier",
   "source_tool",
   "cta_slot",
 ];
@@ -1791,25 +1799,30 @@ export async function onRequest(context) {{
     }});
   }}
 
+  const isSyntheticProbe =
+    request.headers.get("x-pseofactory-test") === "1" ||
+    reqUrl.searchParams.get("synthetic_test") === "1";
   const eventId =
     "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
-  await persistEdgeRedirectTelemetry(context, {{
-    event_id: eventId,
-    event: "affiliate_click",
-    event_type: "affiliate_click",
-    property_id: "profithelm",
-    partner_key: rawPartner,
-    tool_slug: sourceTool || "direct",
-    source_tool: sourceTool || "direct",
-    cta_slot: ctaSlot || "edge_redirect",
-    subid: effectiveSubid || `${{rawPartner}}_edge`,
-    value_tier: phTier || "starter",
-    ph_tier: phTier || "starter",
-    contract_tier: contractTier,
-    path: reqUrl.pathname,
-    destination_url: finalRedirectUrl,
-    timestamp: new Date().toISOString(),
-  }});
+  if (!isSyntheticProbe) {{
+    await persistEdgeRedirectTelemetry(context, {{
+      event_id: eventId,
+      event: "affiliate_click",
+      event_type: "affiliate_click",
+      property_id: "profithelm",
+      partner_key: rawPartner,
+      tool_slug: sourceTool || "direct",
+      source_tool: sourceTool || "direct",
+      cta_slot: ctaSlot || "edge_redirect",
+      subid: effectiveSubid || `${{rawPartner}}_edge`,
+      value_tier: phTier || "starter",
+      ph_tier: phTier || "starter",
+      contract_tier: contractTier,
+      path: reqUrl.pathname,
+      destination_url: finalRedirectUrl,
+      timestamp: new Date().toISOString(),
+    }});
+  }}
 
   return new Response(null, {{
     status: 302,
@@ -1820,7 +1833,8 @@ export async function onRequest(context) {{
       "X-Edge-Partner": rawPartner,
       "X-Edge-Subid": effectiveSubid || "default",
       "X-Edge-Contract-Tier": contractTier,
-      "X-Edge-Telemetry": "recorded",
+      "X-Edge-Telemetry": isSyntheticProbe ? "synthetic_suppressed" : "recorded",
+      ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
     }},
   }});
 }}
@@ -1854,7 +1868,7 @@ def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
 const CORS_HEADERS = {{
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Pseofactory-Test",
   "Access-Control-Max-Age": "86400",
 }};
 
@@ -1954,6 +1968,12 @@ export async function onRequestPost(context) {{
       }}
     }}
 
+    const reqUrl = new URL(request.url);
+    const isSyntheticProbe =
+      request.headers.get("x-pseofactory-test") === "1" ||
+      reqUrl.searchParams.get("synthetic_test") === "1" ||
+      Boolean(payload && payload.synthetic_test === true);
+
     // Sanitize PII recursively (both top-level and inside properties/parameters)
     payload = deepSanitizePII(payload) || {{}};
 
@@ -2005,22 +2025,26 @@ export async function onRequestPost(context) {{
       payload.timestamp = new Date().toISOString();
     }}
 
-    appendInMemoryTelemetry(payload);
+    if (!isSyntheticProbe) {{
+      appendInMemoryTelemetry(payload);
 
-    // If Cloudflare KV binding exists (dedicated telemetry KV or shared leads KV), persist event
-    const kv = resolveTelemetryKV(env);
-    if (kv && typeof kv.put === "function") {{
-      try {{
-        await kv.put(eventId, JSON.stringify(payload), {{
-          expirationTtl: 60 * 86400,
-        }});
-      }} catch (_) {{}}
+      // If Cloudflare KV binding exists (dedicated telemetry KV or shared leads KV), persist event
+      const kv = resolveTelemetryKV(env);
+      if (kv && typeof kv.put === "function") {{
+        try {{
+          await kv.put(eventId, JSON.stringify(payload), {{
+            expirationTtl: 60 * 86400,
+          }});
+        }} catch (_) {{}}
+      }}
     }}
 
     return new Response(
       JSON.stringify({{
         ok: true,
         status: "RECORDED",
+        persisted: !isSyntheticProbe,
+        synthetic_test: isSyntheticProbe,
         event_id: eventId,
         event: eventName,
         property_id: payload.property_id,
@@ -2035,6 +2059,7 @@ export async function onRequestPost(context) {{
         status: 200,
         headers: {{
           "Content-Type": "application/json",
+          ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
           ...CORS_HEADERS,
         }},
       }}
@@ -2205,7 +2230,7 @@ def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
   "Cache-Control": "private, no-cache, no-store, must-revalidate",
   "X-Robots-Tag": "noindex, nofollow",
 };
@@ -2270,12 +2295,27 @@ function isSyntheticTestEmail(email) {
   return syntheticDomains.some((d) => e.endsWith(d));
 }
 
-async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
+function isSyntheticProbeRequest(request, body, email) {
+  try {
+    if (request && request.headers && typeof request.headers.get === "function") {
+      if (request.headers.get("x-pseofactory-test") === "1") return true;
+    }
+    if (request && request.url) {
+      const u = new URL(request.url);
+      if (u.searchParams.get("synthetic_test") === "1") return true;
+    }
+  } catch (_) {}
+  if (body && body.synthetic_test === true) return true;
+  const e = String(email || "").toLowerCase();
+  return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
+}
+
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false) {
   const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  if (!stripeKey || typeof fetch !== "function") {
+  if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
       offer_sku: PREXVO_TOOLKIT_OFFER.sku,
       offer_title: PREXVO_TOOLKIT_OFFER.title,
@@ -2298,8 +2338,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
       "payment_method_types[0]": "card",
       customer_email: email,
       client_reference_id: leadId,
-      success_url: `https://prexvo.com/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}`,
-      cancel_url: `https://prexvo.com/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}`,
+      success_url: `https://prexvo.com/tools/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}`,
+      cancel_url: `https://prexvo.com/tools/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}`,
       "line_items[0][price_data][currency]": PREXVO_TOOLKIT_OFFER.currency,
       "line_items[0][price_data][unit_amount]": String(PREXVO_TOOLKIT_OFFER.price_cents),
       "line_items[0][price_data][product_data][name]": PREXVO_TOOLKIT_OFFER.title,
@@ -2354,7 +2394,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
   };
 }
 
-async function dispatchEdgeZeptoMailPlaybook(env, record) {
+async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = false) {
+  if (isSyntheticProbe) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "synthetic_test_suppressed",
+      zeptomail_request_id: null,
+      fulfillment_status: "synthetic_verified",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -2498,17 +2546,26 @@ export async function onRequestGet(context) {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
     const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
     const toolSlug = reqUrl.searchParams.get("tool_slug") || "student-loan-refinance-break-even-calculator";
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug);
+    const isSynth = isSyntheticProbeRequest(request, null, email);
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth);
     return new Response(
       JSON.stringify({
         ok: true,
         success: true,
+        synthetic_test: isSynth,
         status: "checkout_session_ready",
         property_id: "prexvo",
         lead_id: leadId,
         ...offer,
       }),
-      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
     );
   }
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
@@ -2578,6 +2635,8 @@ export async function onRequestPost(context) {
       ? reqPartner
       : "splash_financial";
 
+    const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
+
     if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
       return new Response(
         JSON.stringify({
@@ -2607,7 +2666,7 @@ export async function onRequestPost(context) {
       const randSuffix = Math.random().toString(36).slice(2, 10);
       const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
       const redirectUrl = `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
-      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug);
+      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe);
       const playbookRecord = {
         lead_id: leadId,
         property_id: "prexvo",
@@ -2625,27 +2684,37 @@ export async function onRequestPost(context) {
         ...checkoutOffer,
         captured_at: ts,
       };
-      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord);
+      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord, isSyntheticProbe);
       Object.assign(playbookRecord, emailDispatch);
 
-      const buf = getMemoryBuffer();
-      buf.unshift(playbookRecord);
-      if (buf.length > 250) buf.length = 250;
+      if (!isSyntheticProbe) {
+        const buf = getMemoryBuffer();
+        buf.unshift(playbookRecord);
+        if (buf.length > 250) buf.length = 250;
 
-      const kv = getLeadsKv(env);
-      if (kv && typeof kv.put === "function") {
-        await kv.put(leadId, JSON.stringify(playbookRecord), { expirationTtl: 90 * 86400 });
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {
+          await kv.put(leadId, JSON.stringify(playbookRecord), { expirationTtl: 90 * 86400 });
+        }
       }
       return new Response(
         JSON.stringify({
           ok: true,
           success: true,
           status: "playbook_subscribed",
-          persisted: true,
+          persisted: !isSyntheticProbe,
+          synthetic_test: isSyntheticProbe,
           message: "Your custom student loan calculation worksheet and repayment checklist have been queued.",
           ...playbookRecord,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
+            ...CORS_HEADERS,
+          },
+        }
       );
     }
 
@@ -2718,7 +2787,7 @@ export async function onRequestPost(context) {
     const liveBase = PARTNER_ROUTES[partnerKey];
     const liveDestinationUrl = `${liveBase}${liveBase.includes("?") ? "&" : "?"}${qs}`;
     const actionBusDispatched = calculatedAmount >= 100000;
-    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug);
+    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe);
 
     const record = {
       lead_id: leadId,
@@ -2743,22 +2812,38 @@ export async function onRequestPost(context) {
       captured_at: ts,
     };
 
-    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record);
+    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
 
-    const buf = getMemoryBuffer();
-    buf.unshift(record);
-    if (buf.length > 250) buf.length = 250;
+    if (!isSyntheticProbe) {
+      const buf = getMemoryBuffer();
+      buf.unshift(record);
+      if (buf.length > 250) buf.length = 250;
 
-    const kv = getLeadsKv(env);
-    if (kv && typeof kv.put === "function") {
-      await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.put === "function") {
+        await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+      }
     }
 
-    return new Response(JSON.stringify({ ok: true, success: true, status: "captured", persisted: true, ...record }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        status: "captured",
+        persisted: !isSyntheticProbe,
+        synthetic_test: isSyntheticProbe,
+        ...record,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
   } catch (err) {
     return new Response(
       JSON.stringify({ ok: false, success: false, error: "Unable to process refinance quote request." }),
@@ -2784,7 +2869,7 @@ export async function onRequestPost(context) {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
   "Cache-Control": "private, no-cache, no-store, must-revalidate",
   "X-Robots-Tag": "noindex, nofollow",
 };
@@ -2902,12 +2987,27 @@ function isSyntheticTestEmail(email) {
   return syntheticDomains.some((d) => e.endsWith(d));
 }
 
-async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec) {
+function isSyntheticProbeRequest(request, body, email) {
+  try {
+    if (request && request.headers && typeof request.headers.get === "function") {
+      if (request.headers.get("x-pseofactory-test") === "1") return true;
+    }
+    if (request && request.url) {
+      const u = new URL(request.url);
+      if (u.searchParams.get("synthetic_test") === "1") return true;
+    }
+  } catch (_) {}
+  if (body && body.synthetic_test === true) return true;
+  const e = String(email || "").toLowerCase();
+  return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
+}
+
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false) {
   const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  if (!stripeKey || typeof fetch !== "function") {
+  if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
       offer_sku: spec.offerSku,
       offer_title: spec.offerTitle,
@@ -2986,7 +3086,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   };
 }
 
-async function dispatchEdgeZeptoMailPlaybook(env, record) {
+async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = false) {
+  if (isSyntheticProbe) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "synthetic_test_suppressed",
+      zeptomail_request_id: null,
+      fulfillment_status: "synthetic_verified",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -3131,17 +3239,26 @@ export async function onRequestGet(context) {
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
     const toolSlug = reqUrl.searchParams.get("tool_slug") || "section-1031-calculator";
     const spec = resolveVerticalAndThreshold(toolSlug, "");
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec);
+    const isSynth = isSyntheticProbeRequest(request, null, email);
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSynth);
     return new Response(
       JSON.stringify({
         ok: true,
         success: true,
+        synthetic_test: isSynth,
         status: "checkout_session_ready",
         property_id: "profithelm",
         lead_id: leadId,
         ...offer,
       }),
-      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
     );
   }
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
@@ -3208,6 +3325,7 @@ export async function onRequestPost(context) {
     const reqPartner = String(body.partner_key || "").trim().toLowerCase();
     const spec = resolveVerticalAndThreshold(toolSlug, reqPartner);
 
+    const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
     const hasQuoteFields =
       body.calculated_amount !== undefined ||
       body.state !== undefined ||
@@ -3225,7 +3343,7 @@ export async function onRequestPost(context) {
       const randSuffix = Math.random().toString(36).slice(2, 10);
       const leadId = `lead_profithelm_${Date.now()}_${randSuffix}`;
       const redirectUrl = `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
-      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec);
+      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe);
       const playbookRecord = {
         lead_id: leadId,
         property_id: "profithelm",
@@ -3243,30 +3361,40 @@ export async function onRequestPost(context) {
         ...checkoutOffer,
         captured_at: ts,
       };
-      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord);
+      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord, isSyntheticProbe);
       Object.assign(playbookRecord, emailDispatch);
 
-      const buf = getMemoryBuffer();
-      buf.unshift(playbookRecord);
-      if (buf.length > 250) buf.length = 250;
+      if (!isSyntheticProbe) {
+        const buf = getMemoryBuffer();
+        buf.unshift(playbookRecord);
+        if (buf.length > 250) buf.length = 250;
 
-      const kv = getLeadsKv(env);
-      if (kv && typeof kv.put === "function") {
-        await kv.put(leadId, JSON.stringify(playbookRecord), { expirationTtl: 90 * 86400 });
-        await kv.put(`lead:${toolSlug}:${email}`, JSON.stringify(playbookRecord), {
-          expirationTtl: 90 * 86400,
-        });
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {
+          await kv.put(leadId, JSON.stringify(playbookRecord), { expirationTtl: 90 * 86400 });
+          await kv.put(`lead:${toolSlug}:${email}`, JSON.stringify(playbookRecord), {
+            expirationTtl: 90 * 86400,
+          });
+        }
       }
       return new Response(
         JSON.stringify({
           ok: true,
           success: true,
           status: "playbook_subscribed",
-          persisted: true,
+          persisted: !isSyntheticProbe,
+          synthetic_test: isSyntheticProbe,
           message: "Your custom calculation worksheet and compliance checklist have been queued.",
           ...playbookRecord,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
+            ...CORS_HEADERS,
+          },
+        }
       );
     }
 
@@ -3338,7 +3466,7 @@ export async function onRequestPost(context) {
     const redirectUrl = `/r/${spec.partnerKey}?${qs}`;
     const liveDestinationUrl = `${spec.liveBase}${spec.liveBase.includes("?") ? "&" : "?"}${qs}`;
     const actionBusDispatched = calculatedAmount >= 100000;
-    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec);
+    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe);
 
     const record = {
       lead_id: leadId,
@@ -3363,22 +3491,38 @@ export async function onRequestPost(context) {
       captured_at: ts,
     };
 
-    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record);
+    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
 
-    const buf = getMemoryBuffer();
-    buf.unshift(record);
-    if (buf.length > 250) buf.length = 250;
+    if (!isSyntheticProbe) {
+      const buf = getMemoryBuffer();
+      buf.unshift(record);
+      if (buf.length > 250) buf.length = 250;
 
-    const kv = getLeadsKv(env);
-    if (kv && typeof kv.put === "function") {
-      await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.put === "function") {
+        await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+      }
     }
 
-    return new Response(JSON.stringify({ ok: true, success: true, status: "captured", persisted: true, ...record }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        status: "captured",
+        persisted: !isSyntheticProbe,
+        synthetic_test: isSyntheticProbe,
+        ...record,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
   } catch (err) {
     return new Response(
       JSON.stringify({ ok: false, success: false, error: "Unable to process commercial quote request." }),

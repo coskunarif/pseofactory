@@ -614,6 +614,27 @@ class UnifiedBrowserAuditor:
         return result;
     })()"""
 
+    JS_INIT_ERROR_AND_SYNTHETIC_HOOK = """(() => {
+        window.__PSEO_SYNTHETIC_TEST__ = true;
+        window.__pseoPageErrors = window.__pseoPageErrors || [];
+        window.__pseoConsoleErrors = window.__pseoConsoleErrors || [];
+        window.addEventListener('error', (ev) => {
+            const msg = ev && (ev.message || (ev.error && ev.error.message)) ? String(ev.message || ev.error.message) : 'window_error';
+            window.__pseoPageErrors.push(msg);
+        });
+        window.addEventListener('unhandledrejection', (ev) => {
+            const reason = ev && ev.reason ? String(ev.reason.message || ev.reason) : 'unhandledrejection';
+            window.__pseoPageErrors.push(reason);
+        });
+        const origConsoleError = console.error ? console.error.bind(console) : null;
+        console.error = function(...args) {
+            try {
+                window.__pseoConsoleErrors.push(args.map(a => String(a && a.message ? a.message : a)).join(' '));
+            } catch (e) {}
+            if (origConsoleError) return origConsoleError(...args);
+        };
+    })();"""
+
     JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {
         const failures = [];
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary';
@@ -652,7 +673,322 @@ class UnifiedBrowserAuditor:
                 failures.push({ widget_id: 'data-calc-preset', detail: 'Clicking [data-calc-preset] button did not synchronize inputs, outputs, or active state' });
             }
         }
+        const affiliateAnchors = Array.from(document.querySelectorAll('a[data-partner], a.affiliate-cta-link, .partner-card a[href], .calc-inline-cta a[href], .overlay-partner-offer a[href]'));
+        affiliateAnchors.forEach((a, idx) => {
+            const rawHref = a.getAttribute('href') || '';
+            if (!rawHref.startsWith('/r/')) {
+                failures.push({ widget_id: a.id || ('affiliate_cta_' + idx), detail: 'Affiliate CTA href does not route through /r/ edge redirect: ' + rawHref });
+            }
+            const rel = (a.getAttribute('rel') || '').toLowerCase();
+            if (!rel.includes('sponsored') || !rel.includes('nofollow')) {
+                failures.push({ widget_id: a.id || ('affiliate_cta_rel_' + idx), detail: 'Affiliate CTA missing rel sponsored/nofollow: ' + rel });
+            }
+        });
+        if (Array.isArray(window.__pseoPageErrors) && window.__pseoPageErrors.length > 0) {
+            failures.push({ widget_id: 'runtime_page_errors', detail: window.__pseoPageErrors.join('; ') });
+        }
+        if (Array.isArray(window.__pseoConsoleErrors) && window.__pseoConsoleErrors.length > 0) {
+            failures.push({ widget_id: 'runtime_console_errors', detail: window.__pseoConsoleErrors.join('; ') });
+        }
         return failures;
+    })()"""
+
+    JS_RUN_E2E_INTERACTIVE_SURFACE = """(async () => {
+        window.__PSEO_SYNTHETIC_TEST__ = true;
+        const report = {
+            route: window.location.pathname,
+            console_errors: Array.isArray(window.__pseoConsoleErrors) ? [...window.__pseoConsoleErrors] : [],
+            page_errors: Array.isArray(window.__pseoPageErrors) ? [...window.__pseoPageErrors] : [],
+            links_audit: { total_links: 0, internal_links: 0, affiliate_links: 0, invalid_links: [], unrouted_affiliate_links: [] },
+            deep_link_hydration: { tested: false, passed: true, detail: '' },
+            calculator_and_presets: { tested: false, passed: true, before_snapshot: '', after_snapshot: '', preset_clicked: false },
+            cliff_visualizer: { present: false, passed: true, before_values: [], after_values: [] },
+            scenario_comparator: { present: false, passed: true, pinned_a: '', pinned_b: '', live_delta: '' },
+            blueprint_actions: { present: false, passed: true, saved_status: '', shared_status: '', storage_keys: 0 },
+            playbook_lead_capture_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
+            partner_quote_intake_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
+            affiliate_redirect_and_telemetry: { tested: false, passed: true, redirect_status: 0, redirect_location: '', telemetry_status: '' }
+        };
+
+        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary';
+        const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
+
+        // 1. Links audit (internal + affiliate/outbound)
+        const allAnchors = Array.from(document.querySelectorAll('a[href]'));
+        report.links_audit.total_links = allAnchors.length;
+        for (const a of allAnchors) {
+            const href = (a.getAttribute('href') || '').trim();
+            if (!href || href === '#' || href.startsWith('javascript:')) {
+                report.links_audit.invalid_links.push(href || '(empty)');
+                continue;
+            }
+            const isAff = a.hasAttribute('data-partner') || a.classList.contains('affiliate-cta-link') || Boolean(a.closest('.partner-card, .calc-inline-cta, .overlay-partner-offer, #vetted-commercial-handoff')) || href.startsWith('/r/');
+            if (isAff) {
+                report.links_audit.affiliate_links += 1;
+                const rel = (a.getAttribute('rel') || '').toLowerCase();
+                if (!href.startsWith('/r/') || !rel.includes('sponsored') || !rel.includes('nofollow')) {
+                    report.links_audit.unrouted_affiliate_links.push({ href: href, rel: rel, id: a.id || '' });
+                }
+            } else if (href.startsWith('/') || href.startsWith(window.location.origin) || href.startsWith('#')) {
+                report.links_audit.internal_links += 1;
+                if (href.startsWith('#') && href.length > 1) {
+                    const targetId = href.slice(1);
+                    if (!document.getElementById(targetId)) {
+                        report.links_audit.invalid_links.push(href);
+                    }
+                }
+            }
+        }
+
+        // 2. Primary calculator input, cliff visualizer, scenario comparator, presets, and deep-link hydration
+        const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
+        const cliffRoot = document.getElementById('multi-year-cliff-visualizer') || document.querySelector('.serp-cliff-chart');
+        const cliffValueSelector = '[id^="cliff-exposure-"], [id^="serp-cliff-val-"]';
+        if (cliffRoot) {
+            report.cliff_visualizer.present = true;
+            report.cliff_visualizer.before_values = Array.from(document.querySelectorAll(cliffValueSelector)).map(el => (el.innerText || el.textContent || '').trim());
+        }
+
+        const compRoot = document.getElementById('stateful-scenario-comparator');
+        const pinABtn = document.querySelector('[data-scenario-pin="A"]');
+        const pinBBtn = document.querySelector('[data-scenario-pin="B"]');
+        const pinResetBtn = document.querySelector('[data-scenario-pin="RESET"]');
+        if (compRoot || pinABtn) {
+            report.scenario_comparator.present = true;
+        }
+
+        if (primaryInp) {
+            report.calculator_and_presets.tested = true;
+            const origVal = primaryInp.value;
+            const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 50000;
+            const maxNum = parseFloat(primaryInp.getAttribute('max') || '') || 10000000;
+            const minNum = parseFloat(primaryInp.getAttribute('min') || '0') || 0;
+
+            if (pinABtn) {
+                pinABtn.click();
+            }
+
+            report.calculator_and_presets.before_snapshot = snapshotOutputs();
+            let nextNum = Math.round(curNum * 1.45 + 250);
+            if (nextNum > maxNum) nextNum = Math.max(minNum + 10, Math.round(curNum * 0.6));
+            if (nextNum === curNum) nextNum = curNum + 100;
+            primaryInp.value = String(nextNum);
+            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
+            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
+            report.calculator_and_presets.after_snapshot = snapshotOutputs();
+            if (report.calculator_and_presets.before_snapshot === report.calculator_and_presets.after_snapshot) {
+                report.calculator_and_presets.passed = false;
+            }
+
+            if (cliffRoot) {
+                report.cliff_visualizer.after_values = Array.from(document.querySelectorAll(cliffValueSelector)).map(el => (el.innerText || el.textContent || '').trim());
+                if (report.cliff_visualizer.after_values.length === 0 || report.cliff_visualizer.before_values.join('|') === report.cliff_visualizer.after_values.join('|')) {
+                    report.cliff_visualizer.passed = false;
+                }
+            }
+
+            if (pinBBtn) {
+                pinBBtn.click();
+                const aNode = document.getElementById('comp-a-retained') || document.getElementById('serp-scn-a-retained');
+                const bNode = document.getElementById('comp-b-retained') || document.getElementById('serp-scn-b-retained');
+                const dNode = document.getElementById('comp-live-delta') || document.getElementById('comp-b-delta') || document.getElementById('serp-scn-delta-banner');
+                report.scenario_comparator.pinned_a = aNode ? (aNode.innerText || aNode.textContent || '').trim() : '';
+                report.scenario_comparator.pinned_b = bNode ? (bNode.innerText || bNode.textContent || '').trim() : '';
+                report.scenario_comparator.live_delta = dNode ? (dNode.innerText || dNode.textContent || '').trim() : '';
+                if (!report.scenario_comparator.pinned_a || !report.scenario_comparator.pinned_b || report.scenario_comparator.pinned_a === '$0') {
+                    report.scenario_comparator.passed = false;
+                }
+                if (pinResetBtn) {
+                    pinResetBtn.click();
+                }
+            }
+
+            // Deep-link hydration via URL query + popstate
+            const rawKey = (primaryInp.name || primaryInp.id || 'amount').replace(/^field-/, '');
+            const hydratedNum = Math.min(maxNum, Math.max(minNum + 5, Math.round(curNum * 1.25 + 120)));
+            const origUrl = window.location.pathname + window.location.search + window.location.hash;
+            window.history.replaceState(null, '', window.location.pathname + '?' + encodeURIComponent(rawKey) + '=' + encodeURIComponent(String(hydratedNum)));
+            window.dispatchEvent(new PopStateEvent('popstate'));
+            if (typeof window.__pseoHydrateFromUrl === 'function') {
+                window.__pseoHydrateFromUrl();
+            }
+            report.deep_link_hydration.tested = true;
+            report.deep_link_hydration.passed = String(primaryInp.value) === String(hydratedNum);
+            report.deep_link_hydration.detail = 'key=' + rawKey + ', expected=' + hydratedNum + ', actual=' + primaryInp.value;
+            window.history.replaceState(null, '', origUrl);
+        }
+
+        const presetBtn = document.querySelector('button[data-calc-preset], .btn-preset[data-calc-preset], .serp-archetype-btn[data-calc-preset], a.scenario-preset-link[href*="?"]');
+        if (presetBtn) {
+            if (presetBtn.tagName !== 'A') {
+                presetBtn.click();
+                report.calculator_and_presets.preset_clicked = true;
+            } else {
+                report.calculator_and_presets.preset_clicked = true;
+            }
+        }
+
+        // 3. Saveable Decision Blueprint actions
+        const saveBtn = document.querySelector('[data-blueprint-action="save"]');
+        const shareBtn = document.querySelector('[data-blueprint-action="share"]');
+        const statusNode = document.getElementById('blueprint-status-readout') || document.getElementById('serp-blueprint-status') || document.querySelector('.serp-blueprint-status');
+        if (saveBtn) {
+            report.blueprint_actions.present = true;
+            saveBtn.click();
+            report.blueprint_actions.saved_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
+            if (shareBtn) {
+                shareBtn.click();
+                report.blueprint_actions.shared_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
+            }
+            let bpKeys = 0;
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i) || '';
+                    if (k.startsWith('pseo_blueprint')) bpKeys += 1;
+                }
+            } catch (e) {}
+            report.blueprint_actions.storage_keys = bpKeys;
+            if (!report.blueprint_actions.saved_status || bpKeys === 0) {
+                report.blueprint_actions.passed = false;
+            }
+        }
+
+        // 4. Playbook subscription form POST + checkout trigger
+        const leadForm = document.getElementById('lead-capture-form') || document.querySelector('form.lead-capture-form');
+        if (leadForm) {
+            report.playbook_lead_capture_and_checkout.present = true;
+            const emailInp = leadForm.querySelector('input[type="email"], input[name="email"]');
+            if (emailInp) {
+                emailInp.value = 'playbook-probe@synthetic.pseofactory.test';
+            }
+            leadForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            for (let i = 0; i < 30; i++) {
+                await new Promise(r => setTimeout(r, 50));
+                if (leadForm.getAttribute('data-submission-state') === 'success' || leadForm.getAttribute('data-submission-state') === 'fallback_saved') {
+                    break;
+                }
+            }
+            report.playbook_lead_capture_and_checkout.submission_state = leadForm.getAttribute('data-submission-state') || '';
+            const pbPartner = document.getElementById('playbook-partner-link');
+            const pbCheckout = document.getElementById('playbook-checkout-link');
+            report.playbook_lead_capture_and_checkout.partner_href = pbPartner ? (pbPartner.getAttribute('href') || '') : '';
+            if (pbCheckout) {
+                pbCheckout.click();
+                for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 50));
+                    if (pbCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
+                        break;
+                    }
+                }
+                report.playbook_lead_capture_and_checkout.checkout_status = pbCheckout.getAttribute('data-checkout-status') || '';
+                report.playbook_lead_capture_and_checkout.checkout_session_id = pbCheckout.getAttribute('data-checkout-session-id') || '';
+            }
+            if (
+                report.playbook_lead_capture_and_checkout.submission_state !== 'success' ||
+                !report.playbook_lead_capture_and_checkout.partner_href.startsWith('/r/') ||
+                report.playbook_lead_capture_and_checkout.checkout_status !== 'checkout_session_ready'
+            ) {
+                report.playbook_lead_capture_and_checkout.passed = false;
+            }
+        }
+
+        // 5. Partner Quote Intake form POST + checkout trigger
+        const quoteForm = document.getElementById('partner-quote-intake-form') || document.querySelector('form.partner-quote-intake-form');
+        if (quoteForm) {
+            report.partner_quote_intake_and_checkout.present = true;
+            const qEmail = document.getElementById('quote-intake-email') || quoteForm.querySelector('input[type="email"]');
+            const qConsent = document.getElementById('quote-tcpa-consent') || quoteForm.querySelector('input[type="checkbox"]');
+            if (qEmail) qEmail.value = 'quote-probe@synthetic.pseofactory.test';
+            if (qConsent) qConsent.checked = true;
+            quoteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            for (let i = 0; i < 30; i++) {
+                await new Promise(r => setTimeout(r, 50));
+                if (quoteForm.getAttribute('data-submission-state') === 'success' || quoteForm.getAttribute('data-submission-state') === 'fallback_saved') {
+                    break;
+                }
+            }
+            report.partner_quote_intake_and_checkout.submission_state = quoteForm.getAttribute('data-submission-state') || '';
+            const qPartner = document.getElementById('quote-matched-partner-link');
+            const qCheckout = document.getElementById('quote-matched-checkout-link');
+            report.partner_quote_intake_and_checkout.partner_href = qPartner ? (qPartner.getAttribute('href') || '') : '';
+            if (qCheckout) {
+                qCheckout.click();
+                for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 50));
+                    if (qCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
+                        break;
+                    }
+                }
+                report.partner_quote_intake_and_checkout.checkout_status = qCheckout.getAttribute('data-checkout-status') || '';
+                report.partner_quote_intake_and_checkout.checkout_session_id = qCheckout.getAttribute('data-checkout-session-id') || '';
+            }
+            if (
+                report.partner_quote_intake_and_checkout.submission_state !== 'success' ||
+                !report.partner_quote_intake_and_checkout.partner_href.startsWith('/r/') ||
+                report.partner_quote_intake_and_checkout.checkout_status !== 'checkout_session_ready'
+            ) {
+                report.partner_quote_intake_and_checkout.passed = false;
+            }
+        }
+
+        // 6. Outbound /r/<partner> redirect & /api/telemetry edge round-trip
+        const firstAff = document.querySelector('a[href^="/r/"]');
+        if (firstAff) {
+            report.affiliate_redirect_and_telemetry.tested = true;
+            try {
+                const telResp = await fetch('/api/telemetry?synthetic_test=1', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
+                    body: JSON.stringify({
+                        schema_version: '2.0',
+                        event_type: 'synthetic_e2e_probe',
+                        slug: window.location.pathname,
+                        synthetic_test: true
+                    })
+                });
+                const telData = await telResp.json();
+                report.affiliate_redirect_and_telemetry.telemetry_status = telData.status || '';
+            } catch (e) {
+                report.affiliate_redirect_and_telemetry.passed = false;
+            }
+            try {
+                const rawHref = firstAff.getAttribute('href') || '/r/collective';
+                const sep = rawHref.includes('?') ? '&' : '?';
+                const redirResp = await fetch(rawHref + sep + 'synthetic_test=1', {
+                    method: 'GET',
+                    headers: { 'X-Pseofactory-Test': '1' },
+                    redirect: 'manual'
+                });
+                report.affiliate_redirect_and_telemetry.redirect_status = redirResp.status;
+                report.affiliate_redirect_and_telemetry.redirect_location = redirResp.headers.get('Location') || redirResp.url || '';
+                if (redirResp.type !== 'opaqueredirect' && redirResp.status !== 302 && redirResp.status !== 200) {
+                    report.affiliate_redirect_and_telemetry.passed = false;
+                }
+            } catch (e) {
+                report.affiliate_redirect_and_telemetry.passed = false;
+            }
+            if (report.affiliate_redirect_and_telemetry.telemetry_status !== 'ok' && report.affiliate_redirect_and_telemetry.telemetry_status !== 'RECORDED') {
+                report.affiliate_redirect_and_telemetry.passed = false;
+            }
+        }
+
+        report.console_errors = Array.isArray(window.__pseoConsoleErrors) ? [...window.__pseoConsoleErrors] : [];
+        report.page_errors = Array.isArray(window.__pseoPageErrors) ? [...window.__pseoPageErrors] : [];
+        report.passed = (
+            report.console_errors.length === 0 &&
+            report.page_errors.length === 0 &&
+            report.links_audit.invalid_links.length === 0 &&
+            report.links_audit.unrouted_affiliate_links.length === 0 &&
+            report.deep_link_hydration.passed &&
+            report.calculator_and_presets.passed &&
+            report.cliff_visualizer.passed &&
+            report.scenario_comparator.passed &&
+            report.blueprint_actions.passed &&
+            report.playbook_lead_capture_and_checkout.passed &&
+            report.partner_quote_intake_and_checkout.passed &&
+            report.affiliate_redirect_and_telemetry.passed
+        );
+        return report;
     })()"""
 
     JS_CHECK_RESIZE_AND_INTERACTION_CLS = """new Promise(resolve => {
@@ -995,6 +1331,13 @@ class UnifiedBrowserAuditor:
                 msg_counter[0] += 1
                 await self._send_cdp(new_ws, "Page.enable", msg_id=msg_counter[0])
                 msg_counter[0] += 1
+                await self._send_cdp(
+                    new_ws,
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
+                    msg_id=msg_counter[0],
+                )
+                msg_counter[0] += 1
                 await self._send_cdp(new_ws, "Runtime.enable", msg_id=msg_counter[0])
                 msg_counter[0] += 1
                 await self._send_cdp(new_ws, "Network.enable", msg_id=msg_counter[0])
@@ -1027,6 +1370,112 @@ class UnifiedBrowserAuditor:
     def audit_route(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for verifying a single route."""
         return asyncio.run(self.verify_route(base_url, route))
+
+    async def verify_interactive_surface(
+        self,
+        base_url: str,
+        route: str,
+        msg_counter: Optional[List[int]] = None,
+        ws: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Executes a full real-browser E2E interactive surface verification on a route:
+        - Zero console errors and zero uncaught page exceptions
+        - Internal and affiliate link integrity (/r/<partner> + sponsored/nofollow)
+        - Deep-link URL query parameter hydration and popstate sync
+        - Dynamic calculator input/slider mutation and preset clicks
+        - Multi-year statutory cliff visualizer dynamic updates
+        - Stateful scenario comparator A/B pinning and delta computation
+        - Saveable decision blueprint persistence and status readout
+        - Playbook subscription form POST (/api/lead-capture) + checkout trigger round-trip
+        - TCPA partner quote intake form POST (/api/lead-capture) + checkout trigger round-trip
+        - Outbound /r/<partner> redirect and /api/telemetry edge round-trip
+        """
+        import websockets
+
+        if msg_counter is None:
+            msg_counter = [1]
+
+        async def _run_on_ws(active_ws: Any) -> Dict[str, Any]:
+            page_url = f"{base_url.rstrip('/')}{route}"
+            msg_counter[0] += 1
+            await self._send_cdp(
+                active_ws,
+                "Emulation.setDeviceMetricsOverride",
+                {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
+                msg_id=msg_counter[0],
+            )
+            msg_counter[0] += 1
+            await self._send_cdp(active_ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
+            for _ in range(30):
+                await asyncio.sleep(0.05)
+                msg_counter[0] += 1
+                rs = await self._eval_js(
+                    active_ws,
+                    "document.readyState === 'complete' && document.body && document.body.children.length > 0",
+                    msg_id=msg_counter[0],
+                )
+                if rs:
+                    break
+            await asyncio.sleep(0.05)
+            msg_counter[0] += 1
+            res = await self._eval_js(active_ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+            return res if isinstance(res, dict) else {"passed": False, "route": route, "error": "invalid_eval_result"}
+
+        if ws is not None:
+            return await _run_on_ws(ws)
+
+        req_new = urllib.request.Request(f"{self.cdp_base}/json/new", method="PUT")
+        with urllib.request.urlopen(req_new, timeout=10) as r:
+            info = json.loads(r.read().decode("utf-8"))
+
+        tab_id = info["id"]
+        ws_url = info["webSocketDebuggerUrl"]
+
+        try:
+            async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as new_ws:
+                msg_counter[0] += 1
+                await self._send_cdp(new_ws, "Page.enable", msg_id=msg_counter[0])
+                msg_counter[0] += 1
+                await self._send_cdp(
+                    new_ws,
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
+                    msg_id=msg_counter[0],
+                )
+                msg_counter[0] += 1
+                await self._send_cdp(new_ws, "Runtime.enable", msg_id=msg_counter[0])
+                msg_counter[0] += 1
+                await self._send_cdp(new_ws, "Network.enable", msg_id=msg_counter[0])
+                msg_counter[0] += 1
+                await self._send_cdp(new_ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
+                msg_counter[0] += 1
+                await self._send_cdp(
+                    new_ws,
+                    "Network.setBlockedURLs",
+                    {
+                        "urls": [
+                            "*googletagmanager.com*",
+                            "*google-analytics.com*",
+                            "*fonts.googleapis.com*",
+                            "*fonts.gstatic.com*",
+                            "*cloudflareinsights.com*",
+                        ]
+                    },
+                    msg_id=msg_counter[0],
+                )
+                return await _run_on_ws(new_ws)
+        finally:
+            req_close = urllib.request.Request(f"{self.cdp_base}/json/close/{tab_id}", method="PUT")
+            try:
+                with urllib.request.urlopen(req_close, timeout=5):
+                    pass
+            except Exception:
+                pass
+
+    def audit_interactive_surface(self, base_url: str, route: str) -> Dict[str, Any]:
+        """Synchronous wrapper for full E2E interactive surface verification on a route."""
+        return asyncio.run(self.verify_interactive_surface(base_url, route))
 
     def run_audit(self, sample_size: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -1080,6 +1529,13 @@ class UnifiedBrowserAuditor:
                     async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
                         msg_counter[0] += 1
                         await self._send_cdp(ws, "Page.enable", msg_id=msg_counter[0])
+                        msg_counter[0] += 1
+                        await self._send_cdp(
+                            ws,
+                            "Page.addScriptToEvaluateOnNewDocument",
+                            {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
+                            msg_id=msg_counter[0],
+                        )
                         msg_counter[0] += 1
                         await self._send_cdp(ws, "Runtime.enable", msg_id=msg_counter[0])
                         msg_counter[0] += 1

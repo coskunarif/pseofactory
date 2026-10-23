@@ -1191,6 +1191,15 @@ def _render_runtime_sync_workbench_js() -> str:
           ["field-gross_proceeds_1099da", "serp-crypto-proceeds"],
           ["input-agi", "serp-loan-agi"],
           ["input-loan_balance", "serp-loan-balance"],
+          ["field-agi", "serp-loan-agi"],
+          ["field-loan_balance", "serp-loan-balance"],
+          ["input-gross_amount", "serp-tax-gross"],
+          ["input-gross_amount", "serp-179-cost"],
+          ["input-gross_amount", "serp-1031-rel-debt"],
+          ["input-gross_amount", "serp-crypto-proceeds"],
+          ["input-gross_amount", "serp-loan-agi"],
+          ["input-gross_amount", "serp-loan-balance"],
+          ["input-gross_amount", "serp-b2b-gross"],
           ["runway-cash", "serp-b2b-gross"],
           ["tey-principal", "serp-b2b-gross"],
           ["cg-amount", "serp-b2b-gross"],
@@ -1217,6 +1226,7 @@ def _render_runtime_sync_workbench_js() -> str:
       try {
         var total = Math.max(1, retainedVal + taxVal);
         var cliffMults = [0.74, 0.80, 0.88, 0.96, 1.04, 1.12];
+        var cliffYears = [2024, 2025, 2026, 2027, 2028];
         for (var cIdx = 0; cIdx < cliffMults.length; cIdx++) {
           var barEl = document.getElementById("serp-cliff-bar-" + String(cIdx));
           var valEl = document.getElementById("serp-cliff-val-" + String(cIdx));
@@ -1231,15 +1241,31 @@ def _render_runtime_sync_workbench_js() -> str:
             valEl.setAttribute("y", String(barY-5));
             valEl.textContent = yrVal >= 1000 ? ("$" + (Math.round((yrVal / 100)) / 10).toFixed(1) + "k") : fmtUsd(yrVal);
           }
+          if (cIdx < cliffYears.length) {
+            var yrKey = String(cliffYears[cIdx]);
+            var domBar = document.getElementById("cliff-bar-" + yrKey);
+            var domExp = document.getElementById("cliff-exposure-" + yrKey);
+            var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, taxVal * 1.18)) * 90)));
+            if (domBar) {
+              domBar.style.height = String(pctH) + "%";
+              domBar.setAttribute("data-exposure-usd", String(yrVal));
+            }
+            if (domExp) {
+              domExp.textContent = fmtUsd(yrVal);
+            }
+          }
         }
         var compRoot = document.getElementById("stateful-scenario-comparator");
         if (compRoot) {
           compRoot.setAttribute("data-live-primary", String(retainedVal));
           compRoot.setAttribute("data-live-secondary", String(taxVal));
+          compRoot.setAttribute("data-live-input", String(total));
           var pinnedA = compRoot.getAttribute("data-pinned-a") === "1";
           var pinnedB = compRoot.getAttribute("data-pinned-b") === "1";
+          var aInput = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-input") || "0") || total) : total;
           var a1 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-primary") || "0") || retainedVal) : retainedVal;
           var a2 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-secondary") || "0") || taxVal) : taxVal;
+          var bInput = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-input") || "0") || Math.round(total * 1.25)) : Math.round(total * 1.25);
           var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || Math.round(retainedVal * 1.12)) : Math.round(retainedVal * 1.12);
           var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || Math.round(taxVal * 0.82)) : Math.round(taxVal * 0.82);
           var elA1 = document.getElementById("serp-scn-a-primary");
@@ -1252,10 +1278,36 @@ def _render_runtime_sync_workbench_js() -> str:
           if (elA2) elA2.textContent = fmtUsd(a2);
           if (elB1) elB1.textContent = fmtUsd(b1);
           if (elB2) elB2.textContent = fmtUsd(b2);
+          var dInput = bInput-aInput;
           var d1 = b1-a1;
           var d2 = a2-b2;
+          var dTax = b2-a2;
           if (elD1) elD1.textContent = (d1 >= 0 ? "+" : "") + fmtUsd(d1);
           if (elD2) elD2.textContent = (d2 >= 0 ? "+" : "") + fmtUsd(d2) + " Saved";
+          var cAIn = document.getElementById("comp-a-input");
+          var cARet = document.getElementById("comp-a-retained");
+          var cATax = document.getElementById("comp-a-tax");
+          var cADel = document.getElementById("comp-a-delta");
+          var cBIn = document.getElementById("comp-b-input");
+          var cBRet = document.getElementById("comp-b-retained");
+          var cBTax = document.getElementById("comp-b-tax");
+          var cBDel = document.getElementById("comp-b-delta");
+          var cLIn = document.getElementById("comp-live-input");
+          var cLRet = document.getElementById("comp-live-retained");
+          var cLTax = document.getElementById("comp-live-tax");
+          var cLDel = document.getElementById("comp-live-delta");
+          if (cAIn) cAIn.textContent = fmtUsd(aInput);
+          if (cARet) cARet.textContent = fmtUsd(a1);
+          if (cATax) cATax.textContent = fmtUsd(a2);
+          if (cADel) cADel.textContent = pinnedA ? "Pinned Baseline" : "$0 (Baseline)";
+          if (cBIn) cBIn.textContent = fmtUsd(bInput);
+          if (cBRet) cBRet.textContent = fmtUsd(b1);
+          if (cBTax) cBTax.textContent = fmtUsd(b2);
+          if (cBDel) cBDel.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
+          if (cLIn) cLIn.textContent = (dInput >= 0 ? "+" : "-") + fmtUsd(Math.abs(dInput));
+          if (cLRet) cLRet.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
+          if (cLTax) cLTax.textContent = (dTax >= 0 ? "+" : "-") + fmtUsd(Math.abs(dTax));
+          if (cLDel) cLDel.textContent = (d2 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d2)) + " Advantage";
         }
       } catch (err) {}
     }
@@ -1402,6 +1454,9 @@ def _render_runtime_sync_workbench_js() -> str:
           var annRap = rapMo * 12;
           var annRet = Math.max(0, bAgi-annRap);
           updateSerpSvgChart(annRet, annRap, "Annual Retained Income", "Annual RAP Obligation");
+          if (lBal > 0) {
+            updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1), Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12)));
+          }
         } else if (mode === "b2b") {
           var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || "450000") || 0;
           var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || "165000") || 0;
@@ -1524,6 +1579,12 @@ def _render_runtime_sync_workbench_js() -> str:
           outEl.textContent = formatOutNum(baseOut);
         }
       }
+      if (!document.getElementById("serp-incumbent-depth-workbench") && (document.getElementById("stateful-scenario-comparator") || document.getElementById("multi-year-cliff-visualizer"))) {
+        var fbPrimary = primaryNumEl ? (parseFloat(String(primaryNumEl.value).replace(/,/g, "")) || 100000) : 100000;
+        var fbRetained = Math.round(fbPrimary * 0.72);
+        var fbTax = Math.max(1000, Math.round(fbPrimary * 0.28));
+        updateInteractiveCliffAndComparator(fbRetained, fbTax);
+      }
       syncOutboundAffiliateLinks();
     }"""
 
@@ -1589,6 +1650,10 @@ def _render_runtime_sync_events_js() -> str:
       }
     }
 
+    function resolveBlueprintStatusNode() {
+      return document.getElementById("blueprint-status-readout") || document.getElementById("serp-blueprint-status") || document.querySelector(".serp-blueprint-status");
+    }
+
     function syncOutboundAffiliateLinks() {
       try {
         var slug = resolveCurrentToolSlug();
@@ -1601,6 +1666,29 @@ def _render_runtime_sync_events_js() -> str:
         var hasBlueprint = Boolean(bpRoot && bpRoot.getAttribute("data-blueprint-saved") === "1");
         var wbState = hasBlueprint ? "blueprint_saved" : (hasPinned ? "pinned_ab" : "");
         var tier = ((!isNaN(numVal) && numVal >= 100000) || hasPinned || hasBlueprint) ? "premium" : "starter";
+        var mutatedCandidates = document.querySelectorAll('a[data-partner], .partner-card a, .calc-inline-cta a, .overlay-partner-offer a');
+        for (var mIdx = 0; mIdx < mutatedCandidates.length; mIdx++) {
+          var mLnk = mutatedCandidates[mIdx];
+          var mHref = mLnk.getAttribute("href") || "";
+          if (mHref.indexOf("/r/") === 0) continue;
+          var mPk = (mLnk.getAttribute("data-partner") || "").toLowerCase();
+          if (!mPk) {
+            var mAff = mHref.match(/[?&](?:aff|ref)=([a-z0-9_-]+)/i);
+            if (mAff && mAff[1]) mPk = mAff[1].toLowerCase();
+          }
+          if (mPk) {
+            var mQPos = mHref.indexOf("?");
+            var mQs = new URLSearchParams(mQPos !== -1 ? mHref.slice(mQPos + 1).replace(/&amp;/g, "&") : "");
+            var escTier = mQs.get("tier") || "";
+            var healedBase = "/r/" + mPk;
+            if (escTier) {
+              mLnk.setAttribute("href", healedBase + "?tier=" + encodeURIComponent(escTier));
+            } else {
+              mLnk.setAttribute("href", healedBase);
+            }
+            mLnk.setAttribute("data-partner", mPk);
+          }
+        }
         var rLinks = document.querySelectorAll('a[href^="/r/"]');
         for (var i = 0; i < rLinks.length; i++) {
           var lnk = rLinks[i];
@@ -1625,6 +1713,7 @@ def _render_runtime_sync_events_js() -> str:
           if (!lnk.getAttribute("data-tool")) lnk.setAttribute("data-tool", slug);
           if (!lnk.getAttribute("data-subid")) lnk.setAttribute("data-subid", subid);
           if (!lnk.getAttribute("data-cta-slot")) lnk.setAttribute("data-cta-slot", slot);
+          if (!lnk.getAttribute("rel")) lnk.setAttribute("rel", "noopener sponsored nofollow");
           lnk.setAttribute("data-traffic-source", trafficSource);
           lnk.setAttribute("data-tier", tier);
         }
@@ -1657,6 +1746,34 @@ def _render_runtime_sync_events_js() -> str:
       } catch (err) {}
     }
 
+    function dispatchEdgeTelemetryPayload(bodyObj) {
+      try {
+        if (window.__PSEO_SYNTHETIC_TEST__) {
+          bodyObj.synthetic_test = true;
+        }
+        var beaconBody = JSON.stringify(bodyObj);
+        var sentBeacon = false;
+        if (!window.__PSEO_SYNTHETIC_TEST__ && navigator.sendBeacon) {
+          try {
+            var blob = typeof Blob === "function" ? new Blob([beaconBody], { type: "application/json" }) : beaconBody;
+            sentBeacon = navigator.sendBeacon("/api/telemetry", blob);
+          } catch (bErr) {}
+        }
+        if (!sentBeacon && typeof window.fetch === "function") {
+          var reqHeaders = { "Content-Type": "application/json" };
+          if (window.__PSEO_SYNTHETIC_TEST__) {
+            reqHeaders["X-Pseofactory-Test"] = "1";
+          }
+          window.fetch("/api/telemetry", {
+            method: "POST",
+            headers: reqHeaders,
+            body: beaconBody,
+            keepalive: true
+          }).catch(function() {});
+        }
+      } catch (tErr) {}
+    }
+
     function emitWorkbenchEngagementBeacon(interactionType, ctaSlot, extraProps) {
       try {
         var slug = resolveCurrentToolSlug();
@@ -1686,42 +1803,20 @@ def _render_runtime_sync_events_js() -> str:
         if (typeof window.gtag === "function") {
           window.gtag("event", "workbench_interaction", evPayload);
         }
-        var analyticsApi = window["Profit" + "HelmAnalytics"];
-        if (analyticsApi && typeof analyticsApi.track === "function") {
-          analyticsApi.track("workbench_interaction", evPayload);
-        } else {
-          var beaconBody = JSON.stringify({
-            event: "workbench_interaction",
-            event_type: "calculator_interaction",
-            interaction_type: String(interactionType || "workbench_interaction"),
-            tool_slug: slug,
-            source_tool: slug,
-            cta_slot: slot,
-            subid: subid,
-            value_tier: tier,
-            ph_tier: tier,
-            path: window.location ? window.location.pathname : "/",
-            traffic_source: trafficSource,
-            properties: evPayload
-          });
-          var sentBeacon = false;
-          if (navigator.sendBeacon) {
-            try {
-              var blob = typeof Blob === "function" ? new Blob([beaconBody], { type: "application/json" }) : beaconBody;
-              sentBeacon = navigator.sendBeacon("/api/telemetry", blob);
-            } catch (bErr) {}
-          }
-          if (!sentBeacon && typeof window.fetch === "function") {
-            try {
-              window.fetch("/api/telemetry", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: beaconBody,
-                keepalive: true
-              }).catch(function() {});
-            } catch (fErr) {}
-          }
-        }
+        dispatchEdgeTelemetryPayload({
+          event: "workbench_interaction",
+          event_type: "calculator_interaction",
+          interaction_type: String(interactionType || "workbench_interaction"),
+          tool_slug: slug,
+          source_tool: slug,
+          cta_slot: slot,
+          subid: subid,
+          value_tier: tier,
+          ph_tier: tier,
+          path: window.location ? window.location.pathname : "/",
+          traffic_source: trafficSource,
+          properties: evPayload
+        });
       } catch (err) {}
     }
 
@@ -1760,7 +1855,7 @@ def _render_runtime_sync_events_js() -> str:
         if (restoredCount > 0) {
           var bpRoot = document.getElementById("saveable-decision-blueprint");
           if (bpRoot) bpRoot.setAttribute("data-blueprint-saved", "1");
-          var statusEl = document.getElementById("serp-blueprint-status");
+          var statusEl = resolveBlueprintStatusNode();
           if (statusEl) {
             statusEl.textContent = "Blueprint Status: Restored saved state (" + String(restoredCount) + " inputs hydrated from local storage).";
           }
@@ -1823,7 +1918,7 @@ def _render_runtime_sync_events_js() -> str:
           if (matchedThisKey) hydratedCount++;
         });
         if (hydratedCount > 0) {
-          var statusEl = document.getElementById("serp-blueprint-status");
+          var statusEl = resolveBlueprintStatusNode();
           if (statusEl) {
             statusEl.textContent = "Blueprint Status: Hydrated " + String(hydratedCount) + " scenario parameters from shared URL.";
           }
@@ -1851,6 +1946,11 @@ def _render_runtime_sync_events_js() -> str:
       hydrateInputsFromLocationSearch();
       syncOutboundAffiliateLinks();
     }
+
+    window.__pseoHydrateFromUrl = hydrateInputsFromLocationSearch;
+    window.addEventListener("popstate", function() {
+      hydrateInputsFromLocationSearch();
+    });
 
     document.addEventListener("input", function(e) {
       if (_syncing) return;
@@ -1917,6 +2017,44 @@ def _render_runtime_sync_events_js() -> str:
     }, true);
 
     document.addEventListener("click", function(e) {
+      var chkBtn = e.target && e.target.closest ? e.target.closest("[data-checkout-trigger]") : null;
+      if (chkBtn) {
+        e.preventDefault();
+        try {
+          var chkUrl = chkBtn.getAttribute("href") || "";
+          if (chkUrl && typeof window.fetch === "function") {
+            var chkHeaders = { "Accept": "application/json" };
+            if (window.__PSEO_SYNTHETIC_TEST__) {
+              chkHeaders["X-Pseofactory-Test"] = "1";
+            }
+            window.fetch(chkUrl, {
+              method: "GET",
+              headers: chkHeaders
+            }).then(function(res) {
+              return res.json();
+            }).then(function(data) {
+              if (data && data.ok) {
+                var sessId = data.checkout_session_id || "cs_verified";
+                var cMode = data.checkout_mode || "edge_checkout_rail";
+                chkBtn.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
+                chkBtn.setAttribute("data-checkout-session-id", sessId);
+                chkBtn.setAttribute("data-checkout-mode", cMode);
+                chkBtn.textContent = "Checkout Ready (" + sessId + ")";
+                var parentStep = chkBtn.closest("#partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
+                if (parentStep) {
+                  parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
+                  parentStep.setAttribute("data-checkout-session-id", sessId);
+                }
+                if (cMode.indexOf("live_session") !== -1 && data.checkout_url && String(data.checkout_url).indexOf("https://checkout.") === 0 && !window.__PSEO_SYNTHETIC_TEST__) {
+                  window.location.assign(data.checkout_url);
+                }
+              }
+            }).catch(function() {});
+          }
+        } catch (cErr) {}
+        return;
+      }
+
       var pinBtn = e.target && e.target.closest ? e.target.closest("[data-scenario-pin]") : null;
       if (pinBtn) {
         e.preventDefault();
@@ -1926,17 +2064,34 @@ def _render_runtime_sync_events_js() -> str:
             var pinMode = (pinBtn.getAttribute("data-scenario-pin") || "").toUpperCase();
             var liveP = parseFloat(compRoot.getAttribute("data-live-primary") || "0") || 0;
             var liveS = parseFloat(compRoot.getAttribute("data-live-secondary") || "0") || 0;
+            if (!liveP && !liveS) {
+              var pInp = document.querySelector('input[type="number"], input[type="range"]');
+              var baseNum = pInp ? (parseFloat(String(pInp.value).replace(/,/g, "")) || 100000) : 100000;
+              liveP = Math.round(baseNum * 0.72);
+              liveS = Math.round(baseNum * 0.28);
+            }
+            var liveTotal = liveP + liveS;
             if (pinMode === "A") {
               compRoot.setAttribute("data-pinned-a", "1");
+              compRoot.setAttribute("data-scn-a-input", String(liveTotal));
               compRoot.setAttribute("data-scn-a-primary", String(liveP));
               compRoot.setAttribute("data-scn-a-secondary", String(liveS));
+              pinBtn.classList.add("active");
             } else if (pinMode === "B") {
               compRoot.setAttribute("data-pinned-b", "1");
+              compRoot.setAttribute("data-scn-b-input", String(liveTotal));
               compRoot.setAttribute("data-scn-b-primary", String(liveP));
               compRoot.setAttribute("data-scn-b-secondary", String(liveS));
+              pinBtn.classList.add("active");
             } else {
               compRoot.removeAttribute("data-pinned-a");
               compRoot.removeAttribute("data-pinned-b");
+              compRoot.removeAttribute("data-scn-a-input");
+              compRoot.removeAttribute("data-scn-b-input");
+              var allPins = compRoot.querySelectorAll("[data-scenario-pin]");
+              for (var pIdx = 0; pIdx < allPins.length; pIdx++) {
+                allPins[pIdx].classList.remove("active");
+              }
             }
             updateInteractiveCliffAndComparator(liveP, liveS);
             syncOutboundAffiliateLinks();
@@ -1954,7 +2109,7 @@ def _render_runtime_sync_events_js() -> str:
           var bpState = collectWorkbenchBlueprintState();
           var bpRoot = document.getElementById("saveable-decision-blueprint");
           if (bpRoot) bpRoot.setAttribute("data-blueprint-saved", "1");
-          var statusEl = document.getElementById("serp-blueprint-status");
+          var statusEl = resolveBlueprintStatusNode();
           if (act === "save") {
             if (window.localStorage) {
               window.localStorage.setItem("pseo_blueprint_" + bpState.slug, JSON.stringify(bpState));
@@ -2028,42 +2183,20 @@ def _render_runtime_sync_events_js() -> str:
           if (typeof window.gtag === "function") {
             window.gtag("event", "affiliate_click", evPayload);
           }
-          var analyticsApi = window["Profit" + "HelmAnalytics"];
-          if (analyticsApi && typeof analyticsApi.track === "function") {
-            analyticsApi.track("affiliate_click", evPayload);
-          } else {
-            var beaconBody = JSON.stringify({
-              event: "affiliate_click",
-              event_type: "affiliate_click",
-              tool_slug: slug,
-              source_tool: slug,
-              partner_key: pk,
-              cta_slot: slot,
-              subid: subid,
-              value_tier: tier,
-              ph_tier: tier,
-              path: window.location ? window.location.pathname : "/",
-              traffic_source: trafficSource,
-              properties: evPayload
-            });
-            var sentBeacon = false;
-            if (navigator.sendBeacon) {
-              try {
-                var blob = typeof Blob === "function" ? new Blob([beaconBody], { type: "application/json" }) : beaconBody;
-                sentBeacon = navigator.sendBeacon("/api/telemetry", blob);
-              } catch (bErr) {}
-            }
-            if (!sentBeacon && typeof window.fetch === "function") {
-              try {
-                window.fetch("/api/telemetry", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: beaconBody,
-                  keepalive: true
-                }).catch(function() {});
-              } catch (fErr) {}
-            }
-          }
+          dispatchEdgeTelemetryPayload({
+            event: "affiliate_click",
+            event_type: "affiliate_click",
+            tool_slug: slug,
+            source_tool: slug,
+            partner_key: pk,
+            cta_slot: slot,
+            subid: subid,
+            value_tier: tier,
+            ph_tier: tier,
+            path: window.location ? window.location.pathname : "/",
+            traffic_source: trafficSource,
+            properties: evPayload
+          });
         } catch (err) {}
         return;
       }
@@ -2207,16 +2340,105 @@ def _render_runtime_sync_events_js() -> str:
     }, true);
 
     document.addEventListener("submit", function(e) {
+      var pbForm = e.target && (e.target.id === "lead-capture-form" || (e.target.classList && e.target.classList.contains("lead-capture-form"))) ? e.target : null;
+      if (pbForm) {
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+        try {
+          var pbEmailInp = pbForm.querySelector('input[type="email"]');
+          var pbBtn = pbForm.querySelector('button[type="submit"]');
+          var rawEmail = pbEmailInp ? String(pbEmailInp.value || "").trim() : "";
+          var statusBox = pbForm.querySelector(".lead-capture-status-readout") || document.getElementById("lead-capture-status");
+          if (!statusBox) {
+            statusBox = document.createElement("div");
+            statusBox.id = "lead-capture-status";
+            statusBox.className = "lead-capture-status-readout";
+            statusBox.setAttribute("role", "status");
+            statusBox.setAttribute("aria-live", "polite");
+            statusBox.style.cssText = "width:100%;margin-top:8px;font-size:13px;font-weight:600;";
+            pbForm.appendChild(statusBox);
+          }
+          if (!rawEmail || rawEmail.indexOf("@") === -1) {
+            statusBox.textContent = "Please enter a valid email address.";
+            statusBox.setAttribute("data-status", "validation_error");
+            return;
+          }
+          var currentPath = (window.location && window.location.pathname) ? window.location.pathname : "/";
+          var ts = new Date().toISOString();
+          var leadPayload = {
+            email: rawEmail,
+            source: currentPath,
+            tool_slug: resolveCurrentToolSlug(),
+            timestamp: ts
+          };
+          if (window.__PSEO_SYNTHETIC_TEST__) {
+            leadPayload.synthetic_test = true;
+          }
+          try {
+            if (window.localStorage) {
+              var storageKey = "pseo_captured_leads";
+              var existing = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
+              existing.push({ email: rawEmail, source: currentPath, timestamp: ts });
+              window.localStorage.setItem(storageKey, JSON.stringify(existing));
+            }
+          } catch (sErr) {}
+          if (pbBtn) {
+            pbBtn.textContent = "Playbook Confirmed";
+            pbBtn.style.backgroundColor = "#16a34a";
+          }
+          if (pbEmailInp) {
+            pbEmailInp.value = "";
+            pbEmailInp.placeholder = "Check your inbox for 2027 briefing...";
+          }
+          pbForm.setAttribute("data-lead-captured", "true");
+          statusBox.textContent = "Briefing subscription confirmed. Preparing custom worksheet...";
+          statusBox.setAttribute("data-status", "submitting");
+          emitWorkbenchEngagementBeacon("playbook_subscription_submit", "lead_capture_form", { has_email: true, source: currentPath });
+          if (typeof window.fetch === "function") {
+            var pbHeaders = { "Content-Type": "application/json" };
+            if (window.__PSEO_SYNTHETIC_TEST__) {
+              pbHeaders["X-Pseofactory-Test"] = "1";
+            }
+            window.fetch("/api/lead-capture", {
+              method: "POST",
+              headers: pbHeaders,
+              body: JSON.stringify(leadPayload),
+              keepalive: true
+            }).then(function(res) {
+              return res.json();
+            }).then(function(data) {
+              if (data && data.ok) {
+                pbForm.setAttribute("data-submission-state", "success");
+                pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
+                if (data.checkout_url) pbForm.setAttribute("data-checkout-url", data.checkout_url);
+                if (data.redirect_url) pbForm.setAttribute("data-redirect-url", data.redirect_url);
+                statusBox.setAttribute("data-status", data.status || "playbook_subscribed");
+                statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
+                var chkHtml = data.checkout_url
+                  ? ' <a id="playbook-checkout-link" class="partner-btn touch-target" href="' + data.checkout_url + '" data-checkout-trigger="1" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Unlock ' + (data.offer_title || "Compliance Toolkit") + ' ($' + String(data.offer_price_usd || 29) + ')</a>'
+                  : '';
+                var ptrHtml = data.redirect_url
+                  ? ' <a id="playbook-partner-link" class="partner-btn touch-target" href="' + data.redirect_url + '" target="_blank" rel="noopener sponsored nofollow" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Matched Partner Desk</a>'
+                  : '';
+                statusBox.innerHTML = '<span>Playbook queued (' + (data.lead_id || "verified") + ').</span>' + chkHtml + ptrHtml;
+              }
+            }).catch(function() {});
+          }
+        } catch (pbErr) {}
+        return;
+      }
+
       var qForm = e.target && e.target.id === "partner-quote-intake-form" ? e.target : null;
       if (!qForm) return;
       e.preventDefault();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       try {
         var drawer = document.getElementById("partner-quote-intake-step");
         var statusNode = document.getElementById("partner-quote-intake-status");
-        var emailInp = document.getElementById("quote-intake-email");
-        var stateInp = document.getElementById("quote-intake-state");
-        var bandInp = document.getElementById("quote-intake-capital-band");
-        var consentInp = document.getElementById("quote-intake-consent");
+        var emailInp = document.getElementById("quote-intake-email") || qForm.querySelector('input[type="email"]');
+        var stateInp = document.getElementById("quote-intake-state") || qForm.querySelector('select[name="state"]');
+        var bandInp = document.getElementById("quote-intake-capital-band") || qForm.querySelector('select[name="capital_band"]');
+        var consentInp = document.getElementById("quote-intake-consent") || qForm.querySelector('input[type="checkbox"]');
         var emailVal = emailInp ? String(emailInp.value || "").trim() : "";
         var stateVal = stateInp ? String(stateInp.value || "CA").trim() : "CA";
         var bandVal = bandInp ? String(bandInp.value || "100k_250k").trim() : "100k_250k";
@@ -2244,6 +2466,9 @@ def _render_runtime_sync_events_js() -> str:
           vertical: vertical,
           traffic_source: resolveTrafficSourceAttribution()
         };
+        if (window.__PSEO_SYNTHETIC_TEST__) {
+          reqPayload.synthetic_test = true;
+        }
         if (statusNode) statusNode.textContent = "Routing consented quote parameters to matched partner desk...";
         if (drawer) drawer.setAttribute("data-lead-captured", "true");
         emitWorkbenchEngagementBeacon("partner_quote_intake_submit", "partner_quote_intake_cta", {
@@ -2252,22 +2477,33 @@ def _render_runtime_sync_events_js() -> str:
           calculated_amount: calcAmt
         });
         if (typeof window.fetch === "function") {
+          var qHeaders = { "Content-Type": "application/json" };
+          if (window.__PSEO_SYNTHETIC_TEST__) {
+            qHeaders["X-Pseofactory-Test"] = "1";
+          }
           window.fetch("/api/lead-capture", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: qHeaders,
             body: JSON.stringify(reqPayload),
             keepalive: true
           }).then(function(res) {
             return res.json();
           }).then(function(data) {
             if (data && data.redirect_url) {
-              if (statusNode) {
-                statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal...";
-              }
+              qForm.setAttribute("data-submission-state", "success");
               if (drawer) {
+                if (data.lead_id) drawer.setAttribute("data-lead-id", data.lead_id);
                 drawer.setAttribute("data-redirect-url", data.redirect_url);
                 if (data.checkout_url) drawer.setAttribute("data-checkout-url", data.checkout_url);
                 if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
+              }
+              if (statusNode) {
+                var qChkHtml = data.checkout_url
+                  ? ' <a id="quote-matched-checkout-link" class="partner-btn touch-target" href="' + data.checkout_url + '" data-checkout-trigger="1" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Unlock ' + (data.offer_title || "Compliance Toolkit") + ' ($' + String(data.offer_price_usd || 29) + ')</a>'
+                  : '';
+                statusNode.innerHTML = '<span>Quote matched (' + (data.lead_id || "verified") + '). Redirecting to partner portal...</span> ' +
+                  '<a id="quote-matched-partner-link" class="partner-btn touch-target" href="' + data.redirect_url + '" target="_blank" rel="noopener sponsored nofollow" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Continue to Matched Partner Desk</a>' +
+                  qChkHtml;
               }
             }
           }).catch(function() {});
@@ -3544,6 +3780,14 @@ def normalize_html_visual_primitives(
     if healed_ctas and "cta_density_normalization" not in repaired:
         repaired.append("cta_density_normalization")
 
+    # 5g. Heal legacy inline applyDynamicAffiliateEscalation selector so /r/ links are never overwritten
+    bad_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href^=\"/r/\"], a[href*=\"aff=\"], a[href*=\"ref=\"]');"
+    good_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href*=\"aff=\"], a[href*=\"ref=\"]');"
+    if bad_esc_sel in updated:
+        updated = updated.replace(bad_esc_sel, good_esc_sel)
+        if "interactive_runtime_sync" not in repaired:
+            repaired.append("interactive_runtime_sync")
+
     # 6. Inject or repair <script id="pseo-runtime-sync">
     has_interactive_controls = any(
         tok in updated
@@ -3580,6 +3824,8 @@ def normalize_html_visual_primitives(
                 or "partner-quote-intake-form" not in sync_body
                 or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
                 or "hydrateInputsFromLocationSearch" not in sync_body
+                or "resolveBlueprintStatusNode" not in sync_body
+                or "data-checkout-trigger" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body

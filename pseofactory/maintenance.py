@@ -6546,6 +6546,8 @@ class RetroReflectionEngine:
             or "emitWorkbenchEngagementBeacon" not in html_content
             or "partner-quote-intake-form" not in html_content
             or "hydrateInputsFromLocationSearch" not in html_content
+            or "resolveBlueprintStatusNode" not in html_content
+            or "data-checkout-trigger" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)
@@ -7885,6 +7887,7 @@ class RetroReflectionEngine:
                     or 'data-status="pending"' in content
                     or "Calculate & File Taxes Online with TaxAct" in content
                     or ('href="/r/' in content and "source_tool=" not in content)
+                    or ('id="pseo-runtime-sync"' in content and "resolveBlueprintStatusNode" not in content)
                 ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
@@ -9239,10 +9242,10 @@ def reflect_and_recompile_all_assets(
                 if app_js_file.is_file():
                     app_js_src = app_js_file.read_text(encoding="utf-8")
                     app_js_changed = False
-                    old_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href*=\"aff=\"], a[href*=\"ref=\"]');"
-                    new_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href^=\"/r/\"], a[href*=\"aff=\"], a[href*=\"ref=\"]');"
-                    if old_esc_sel in app_js_src:
-                        app_js_src = app_js_src.replace(old_esc_sel, new_esc_sel, 1)
+                    bad_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href^=\"/r/\"], a[href*=\"aff=\"], a[href*=\"ref=\"]');"
+                    good_esc_sel = "const affiliateLinks = document.querySelectorAll('a[href*=\"aff=\"], a[href*=\"ref=\"]');"
+                    if bad_esc_sel in app_js_src:
+                        app_js_src = app_js_src.replace(bad_esc_sel, good_esc_sel, 1)
                         app_js_changed = True
                     old_vb_sel = "document.querySelectorAll('.btn-affiliate-cta, .calc-primary-cta, [data-affiliate-cta], .affiliate-cta, a.btn-primary')"
                     new_vb_sel = "document.querySelectorAll('a[href^=\"/r/\"], .calc-inline-cta a, .partner-card a, .overlay-partner-offer a, .btn-affiliate-cta, .calc-primary-cta, [data-affiliate-cta], .affiliate-cta, a.btn-primary')"
