@@ -580,3 +580,132 @@ def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
         assert out["coData"]["status"] == "checkout_session_ready"
         assert out["coData"]["offer_sku"] == out["pbData"]["offer_sku"]
 
+
+def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path):
+    import subprocess
+    import json
+    from pseofactory.partner_tracker import sync_cloudflare_pages_lead_credentials
+
+    dry_pages = sync_cloudflare_pages_lead_credentials(execute_live=False)
+    assert "profithelm" in dry_pages["projects"]
+    assert "prexvo" in dry_pages["projects"]
+    assert "NANGO_SECRET_KEY" in dry_pages["projects"]["profithelm"]["bound_keys"]
+    assert "STRIPE_ACCOUNT_ID" in dry_pages["projects"]["prexvo"]["bound_keys"]
+
+    for prop_id in ("profithelm", "prexvo"):
+        fn_dir = tmp_path / f"{prop_id}_failover" / "functions" / "api"
+        fn_dir.mkdir(parents=True)
+        fn_file = fn_dir / "lead-capture.js"
+        fn_file.write_text(generate_edge_lead_capture_function(prop_id), encoding="utf-8")
+
+        slug = (
+            "section-1031-calculator"
+            if prop_id == "profithelm"
+            else "student-loan-refinance-break-even-calculator"
+        )
+        node_script = f"""
+        import("./functions/api/lead-capture.js").then(async mod => {{
+          const kvStore = new Map();
+          globalThis.fetch = async (url, init) => {{
+            const u = String(url);
+            if (u.includes("api.zeptomail.com")) {{
+              return new Response(JSON.stringify({{
+                error: {{
+                  code: "TM_4001",
+                  request_id: "2d6f.mock.zepto.req",
+                  details: [{{ code: "SM_111", message: "Sender address not verified" }}]
+                }}
+              }}), {{ status: 401 }});
+            }}
+            if (u.includes("api.nango.dev/connection")) {{
+              return new Response(JSON.stringify({{
+                credentials: {{ access_token: "1000.mock_zoho_oauth_token" }}
+              }}), {{ status: 200 }});
+            }}
+            if (u.includes("mail.zoho.com/api/accounts")) {{
+              return new Response(JSON.stringify({{
+                status: {{ code: 200 }},
+                data: {{ messageId: "177564400999888777", mailId: "177564400999888777" }}
+              }}), {{ status: 200 }});
+            }}
+            if (u.includes("api.stripe.com/v1/checkout/sessions")) {{
+              return new Response(JSON.stringify({{
+                error: {{ code: "api_key_expired", message: "Expired API Key provided" }}
+              }}), {{ status: 401 }});
+            }}
+            return new Response("{{}}", {{ status: 200 }});
+          }};
+
+          const mockEnv = {{
+            ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_token",
+            NANGO_SECRET_KEY: "mock_nango_secret",
+            NANGO_CONNECTION_ID: "mock_nango_conn",
+            ZOHO_MAIL_ACCOUNT_ID: "676891000000008002",
+            STRIPE_ACCOUNT_ID: "acct_1T6fSTIq0ckFsf5j",
+            STRIPE_PUBLISHABLE_KEY: "pk_live_mock",
+            STRIPE_SECRET_KEY: "sk_test_expired",
+            PROFITHELM_LEADS: {{
+              put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+              list: async ({{ prefix }}) => ({{
+                keys: Array.from(kvStore.keys()).filter(k => k.startsWith(prefix)).map(name => ({{ name }}))
+              }}),
+              get: async (k) => kvStore.get(k) || null
+            }},
+            PREXVO_LEADS: {{
+              put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+              list: async ({{ prefix }}) => ({{
+                keys: Array.from(kvStore.keys()).filter(k => k.startsWith(prefix)).map(name => ({{ name }}))
+              }}),
+              get: async (k) => kvStore.get(k) || null
+            }}
+          }};
+
+          const quoteReq = {{
+            url: "https://{prop_id}.com/api/lead-capture",
+            headers: new Headers({{ "content-type": "application/json" }}),
+            json: async () => ({{
+              email: "cfo@freightfleet-logistics.com",
+              state: "TX",
+              calculated_amount: 175000,
+              partner_sharing_consent: true,
+              tool_slug: "{slug}"
+            }})
+          }};
+          const qRes = await mod.onRequestPost({{ request: quoteReq, env: mockEnv }});
+          const qData = await qRes.json();
+
+          const getReq = {{
+            url: "https://{prop_id}.com/api/lead-capture?limit=50",
+            headers: new Headers()
+          }};
+          const getRes = await mod.onRequestGet({{ request: getReq, env: mockEnv }});
+          const getData = await getRes.json();
+
+          console.log(JSON.stringify({{ qStatus: qRes.status, qData, getSummary: getData.summary }}));
+        }});
+        """
+        proc = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=tmp_path / f"{prop_id}_failover",
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout.strip())
+        assert out["qStatus"] == 200
+        assert out["qData"]["zeptomail_dispatched"] is True
+        assert out["qData"]["zeptomail_status"] == "sent_edge_zoho_verified_failover"
+        assert out["qData"]["zeptomail_http_status"] == 401
+        assert out["qData"]["zeptomail_error_code"] == "SM_111"
+        assert out["qData"]["zeptomail_request_id"] == "2d6f.mock.zepto.req"
+        assert out["qData"]["email_provider"] == "zoho_mail_oauth"
+        assert out["qData"]["email_message_id"] == "177564400999888777"
+        assert out["qData"]["lifecycle_stage"] == "fulfilled"
+        assert out["qData"]["fulfillment_status"] == "dispatched"
+        assert out["qData"]["stripe_called"] is True
+        assert out["qData"]["stripe_http_status"] == 401
+        assert out["qData"]["stripe_error_code"] == "api_key_expired"
+        assert out["qData"]["checkout_mode"] == "edge_checkout_rail"
+        assert out["getSummary"]["zeptomail_dispatched_count"] == 1
+        assert out["getSummary"]["fulfilled_count"] == 1
+

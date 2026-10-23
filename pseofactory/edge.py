@@ -2255,8 +2255,25 @@ function deriveCapitalBand(amount) {
   return "under_50k";
 }
 
+function isSyntheticTestEmail(email) {
+  const e = String(email || "").toLowerCase();
+  const syntheticDomains = [
+    "@example.com",
+    "@example.org",
+    "@test.com",
+    "@localhost",
+    "@freightfleet-logistics.com",
+    "@pacific-industrial.com",
+    "@medcenter-cohort.org",
+    "@metro-health.org",
+  ];
+  return syntheticDomains.some((d) => e.endsWith(d));
+}
+
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
   const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
+  const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
+  const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   if (!stripeKey || typeof fetch !== "function") {
     return {
@@ -2266,8 +2283,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
       checkout_url: fallbackUrl,
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
+      stripe_account_id: stripeAccountId,
+      stripe_publishable_key_present: stripePubKeyPresent,
+      stripe_called: false,
+      stripe_http_status: null,
+      stripe_error_code: null,
     };
   }
+  let stripeHttpStatus = null;
+  let stripeErrorCode = null;
   try {
     const params = new URLSearchParams({
       mode: "payment",
@@ -2293,7 +2317,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
       },
       body: params.toString(),
     });
-    const data = await resp.json();
+    stripeHttpStatus = resp.status;
+    const data = await resp.json().catch(() => ({}));
     if (resp.ok && data && data.url) {
       return {
         offer_sku: PREXVO_TOOLKIT_OFFER.sku,
@@ -2302,9 +2327,18 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
         checkout_url: data.url,
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
+        stripe_account_id: stripeAccountId,
+        stripe_publishable_key_present: stripePubKeyPresent,
+        stripe_called: true,
+        stripe_http_status: resp.status,
+        stripe_error_code: null,
       };
     }
-  } catch (_) {}
+    const errObj = (data && data.error) || {};
+    stripeErrorCode = errObj.code || errObj.type || `http_${resp.status}`;
+  } catch (_) {
+    stripeErrorCode = "network_error";
+  }
   return {
     offer_sku: PREXVO_TOOLKIT_OFFER.sku,
     offer_title: PREXVO_TOOLKIT_OFFER.title,
@@ -2312,6 +2346,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug) {
     checkout_url: fallbackUrl,
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
+    stripe_account_id: stripeAccountId,
+    stripe_publishable_key_present: stripePubKeyPresent,
+    stripe_called: true,
+    stripe_http_status: stripeHttpStatus,
+    stripe_error_code: stripeErrorCode,
   };
 }
 
@@ -2319,17 +2358,20 @@ async function dispatchEdgeZeptoMailPlaybook(env, record) {
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
-  if (!zeptoToken || typeof fetch !== "function") {
+  const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
+  const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
+  if ((!zeptoToken && (!nangoSecretKey || !nangoConnId)) || typeof fetch !== "function") {
     return {
       zeptomail_dispatched: false,
       zeptomail_status: "queued_central_responder",
       zeptomail_request_id: null,
+      fulfillment_status: "ready_for_dispatch",
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@prexvo.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
-  const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+  const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`;
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your Prexvo Student Loan Refinance Worksheet &amp; Decision Checklist</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
@@ -2337,41 +2379,112 @@ async function dispatchEdgeZeptoMailPlaybook(env, record) {
     `<p><a href="https://prexvo.com${record.redirect_url}">Compare Matched Lender Rates (${record.partner_rep_desk || "Splash Financial Partner Desk"})</a></p>` +
     `<p><a href="https://prexvo.com${record.checkout_url}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
-  try {
-    const resp = await fetch(`${apiBase}/email`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: authHeader,
-      },
-      body: JSON.stringify({
-        from: { address: fromEmail, name: fromName },
-        to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
-        subject: `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`,
-        htmlbody: htmlBody,
-      }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (resp.ok) {
-      return {
-        zeptomail_dispatched: true,
-        zeptomail_status: "sent_edge_zeptomail",
-        zeptomail_request_id: data.request_id || (data.data && data.data[0] && data.data[0]. additional_info) || "ok",
-      };
+  let zeptoAttempted = false;
+  let zeptoHttpStatus = null;
+  let zeptoErrorCode = null;
+  let zeptoRequestId = null;
+  if (zeptoToken) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
     }
-    return {
-      zeptomail_dispatched: false,
-      zeptomail_status: "queued_central_responder",
-      zeptomail_request_id: (data && data.error && data.error.request_id) || null,
-    };
-  } catch (_) {
-    return {
-      zeptomail_dispatched: false,
-      zeptomail_status: "queued_central_responder",
-      zeptomail_request_id: null,
-    };
   }
+  if (nangoSecretKey && nangoConnId) {
+    try {
+      const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
+      const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
+      const nangoResp = await fetch(
+        `${nangoBase}/connection/${encodeURIComponent(nangoConnId)}?provider_config_key=${encodeURIComponent(nangoIntegration)}&refresh_token=true`,
+        { headers: { Authorization: `Bearer ${nangoSecretKey}`, Accept: "application/json" } }
+      );
+      const nangoData = await nangoResp.json().catch(() => ({}));
+      const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
+      if (accessToken) {
+        const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const deliveryRecipient = isSyntheticTestEmail(record.email)
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          : record.email;
+        const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            fromAddress: zohoFromEmail,
+            toAddress: deliveryRecipient,
+            subject: emailSubject,
+            content: htmlBody,
+            mailFormat: "html",
+            askReceipt: "no",
+            encoding: "UTF-8",
+          }),
+        });
+        const zohoJson = await zohoResp.json().catch(() => ({}));
+        const zohoMsg = (zohoJson && zohoJson.data) || {};
+        if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
+          const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          return {
+            zeptomail_dispatched: true,
+            zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
+            zeptomail_http_status: zeptoHttpStatus,
+            zeptomail_error_code: zeptoErrorCode,
+            zeptomail_request_id: zeptoRequestId,
+            email_provider: "zoho_mail_oauth",
+            email_message_id: msgId,
+            fulfillment_status: "dispatched",
+            lifecycle_stage: "fulfilled",
+          };
+        }
+      }
+    } catch (_) {}
+  }
+  return {
+    zeptomail_dispatched: false,
+    zeptomail_status: "queued_central_responder",
+    zeptomail_http_status: zeptoHttpStatus,
+    zeptomail_error_code: zeptoErrorCode,
+    zeptomail_request_id: zeptoRequestId,
+    fulfillment_status: "ready_for_dispatch",
+  };
 }
 
 export async function onRequestOptions() {
@@ -2437,6 +2550,7 @@ export async function onRequestGet(context) {
     qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
     playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
+    fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     checkout_offers_count: leads.filter((l) => Boolean(l.checkout_url)).length,
     action_bus_dispatched_count: leads.filter((l) => Boolean(l.action_bus_dispatched)).length,
   };
@@ -2773,8 +2887,25 @@ function deriveCapitalBand(amount) {
   return "under_50k";
 }
 
+function isSyntheticTestEmail(email) {
+  const e = String(email || "").toLowerCase();
+  const syntheticDomains = [
+    "@example.com",
+    "@example.org",
+    "@test.com",
+    "@localhost",
+    "@freightfleet-logistics.com",
+    "@pacific-industrial.com",
+    "@medcenter-cohort.org",
+    "@metro-health.org",
+  ];
+  return syntheticDomains.some((d) => e.endsWith(d));
+}
+
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec) {
   const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
+  const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   if (!stripeKey || typeof fetch !== "function") {
     return {
@@ -2784,8 +2915,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       checkout_url: fallbackUrl,
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
+      stripe_account_id: stripeAccountId,
+      stripe_publishable_key_present: stripePubKeyPresent,
+      stripe_called: false,
+      stripe_http_status: null,
+      stripe_error_code: null,
     };
   }
+  let stripeHttpStatus = null;
+  let stripeErrorCode = null;
   try {
     const params = new URLSearchParams({
       mode: "payment",
@@ -2811,7 +2949,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       },
       body: params.toString(),
     });
-    const data = await resp.json();
+    stripeHttpStatus = resp.status;
+    const data = await resp.json().catch(() => ({}));
     if (resp.ok && data && data.url) {
       return {
         offer_sku: spec.offerSku,
@@ -2820,9 +2959,18 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         checkout_url: data.url,
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
+        stripe_account_id: stripeAccountId,
+        stripe_publishable_key_present: stripePubKeyPresent,
+        stripe_called: true,
+        stripe_http_status: resp.status,
+        stripe_error_code: null,
       };
     }
-  } catch (_) {}
+    const errObj = (data && data.error) || {};
+    stripeErrorCode = errObj.code || errObj.type || `http_${resp.status}`;
+  } catch (_) {
+    stripeErrorCode = "network_error";
+  }
   return {
     offer_sku: spec.offerSku,
     offer_title: spec.offerTitle,
@@ -2830,6 +2978,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     checkout_url: fallbackUrl,
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
+    stripe_account_id: stripeAccountId,
+    stripe_publishable_key_present: stripePubKeyPresent,
+    stripe_called: true,
+    stripe_http_status: stripeHttpStatus,
+    stripe_error_code: stripeErrorCode,
   };
 }
 
@@ -2837,17 +2990,20 @@ async function dispatchEdgeZeptoMailPlaybook(env, record) {
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
-  if (!zeptoToken || typeof fetch !== "function") {
+  const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
+  const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
+  if ((!zeptoToken && (!nangoSecretKey || !nangoConnId)) || typeof fetch !== "function") {
     return {
       zeptomail_dispatched: false,
       zeptomail_status: "queued_central_responder",
       zeptomail_request_id: null,
+      fulfillment_status: "ready_for_dispatch",
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
-  const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+  const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`;
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your ProfitHelm Statutory Calculation Worksheet &amp; Compliance Briefing</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
@@ -2855,41 +3011,112 @@ async function dispatchEdgeZeptoMailPlaybook(env, record) {
     `<p><a href="https://profithelm.com${record.redirect_url}">Access Matched Commercial Desk (${record.partner_rep_desk || "ProfitHelm Partner Desk"})</a></p>` +
     `<p><a href="https://profithelm.com${record.checkout_url}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
-  try {
-    const resp = await fetch(`${apiBase}/email`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: authHeader,
-      },
-      body: JSON.stringify({
-        from: { address: fromEmail, name: fromName },
-        to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
-        subject: `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`,
-        htmlbody: htmlBody,
-      }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (resp.ok) {
-      return {
-        zeptomail_dispatched: true,
-        zeptomail_status: "sent_edge_zeptomail",
-        zeptomail_request_id: data.request_id || "ok",
-      };
+  let zeptoAttempted = false;
+  let zeptoHttpStatus = null;
+  let zeptoErrorCode = null;
+  let zeptoRequestId = null;
+  if (zeptoToken) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
     }
-    return {
-      zeptomail_dispatched: false,
-      zeptomail_status: "queued_central_responder",
-      zeptomail_request_id: (data && data.error && data.error.request_id) || null,
-    };
-  } catch (_) {
-    return {
-      zeptomail_dispatched: false,
-      zeptomail_status: "queued_central_responder",
-      zeptomail_request_id: null,
-    };
   }
+  if (nangoSecretKey && nangoConnId) {
+    try {
+      const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
+      const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
+      const nangoResp = await fetch(
+        `${nangoBase}/connection/${encodeURIComponent(nangoConnId)}?provider_config_key=${encodeURIComponent(nangoIntegration)}&refresh_token=true`,
+        { headers: { Authorization: `Bearer ${nangoSecretKey}`, Accept: "application/json" } }
+      );
+      const nangoData = await nangoResp.json().catch(() => ({}));
+      const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
+      if (accessToken) {
+        const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const deliveryRecipient = isSyntheticTestEmail(record.email)
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          : record.email;
+        const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            fromAddress: zohoFromEmail,
+            toAddress: deliveryRecipient,
+            subject: emailSubject,
+            content: htmlBody,
+            mailFormat: "html",
+            askReceipt: "no",
+            encoding: "UTF-8",
+          }),
+        });
+        const zohoJson = await zohoResp.json().catch(() => ({}));
+        const zohoMsg = (zohoJson && zohoJson.data) || {};
+        if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
+          const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          return {
+            zeptomail_dispatched: true,
+            zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
+            zeptomail_http_status: zeptoHttpStatus,
+            zeptomail_error_code: zeptoErrorCode,
+            zeptomail_request_id: zeptoRequestId,
+            email_provider: "zoho_mail_oauth",
+            email_message_id: msgId,
+            fulfillment_status: "dispatched",
+            lifecycle_stage: "fulfilled",
+          };
+        }
+      }
+    } catch (_) {}
+  }
+  return {
+    zeptomail_dispatched: false,
+    zeptomail_status: "queued_central_responder",
+    zeptomail_http_status: zeptoHttpStatus,
+    zeptomail_error_code: zeptoErrorCode,
+    zeptomail_request_id: zeptoRequestId,
+    fulfillment_status: "ready_for_dispatch",
+  };
 }
 
 export async function onRequestOptions() {
@@ -2956,6 +3183,7 @@ export async function onRequestGet(context) {
     qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
     playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
+    fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     checkout_offers_count: leads.filter((l) => Boolean(l.checkout_url)).length,
     action_bus_dispatched_count: leads.filter((l) => Boolean(l.action_bus_dispatched)).length,
   };

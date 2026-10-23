@@ -3107,17 +3107,172 @@ def dispatch_transactional_playbook(
     return result
 
 
+CF_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
+CF_LEADS_KV_NAMESPACES: Dict[str, str] = {
+    "profithelm": "983a21b6fcd54fbb884740017b7d96f1",
+    "prexvo": "153917b16871453a9f07bfb39ff3fd98",
+}
+
+
+def _load_wrangler_oauth_token() -> str:
+    """Loads the Cloudflare OAuth bearer token from Wrangler config or environment."""
+    env_tok = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    if env_tok:
+        return env_tok
+    cfg_path = os.path.expanduser("~/.config/.wrangler/config/default.toml")
+    if os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped.startswith("oauth_token") and "=" in stripped:
+                        return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            pass
+    return ""
+
+
+def _sync_record_to_cloudflare_kv(prop_id: str, lead_id: str, record: Dict[str, Any]) -> bool:
+    """Writes an updated lead record back to the tenant's Cloudflare KV namespace."""
+    import urllib.request
+
+    ns_id = CF_LEADS_KV_NAMESPACES.get(prop_id.strip().lower())
+    token = _load_wrangler_oauth_token()
+    if not ns_id or not token or not lead_id:
+        return False
+    url = (
+        f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}"
+        f"/storage/kv/namespaces/{ns_id}/values/{urllib.parse.quote(lead_id, safe='')}"
+    )
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(record).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "wrangler/4.151.1",
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
+def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[str, Any]:
+    """
+    Binds live ZeptoMail v1.1, Nango/Zoho Mail OAuth failover, and Stripe Checkout credentials
+    onto both `profithelm` and `prexvo` Cloudflare Pages projects (`production` and `preview`
+    deployment configs) so edge `POST /api/lead-capture` executes sub-second fulfillment and
+    live Stripe session telemetry directly inside the Worker.
+    """
+    import urllib.request
+
+    email_creds = _load_email_engine_credentials()
+    stripe_creds = _load_stripe_credentials()
+    cf_token = _load_wrangler_oauth_token()
+
+    shared_vars: Dict[str, str] = {
+        "ZEPTOMAIL_TOKEN": email_creds.get("ZEPTOMAIL_TOKEN") or email_creds.get("ZEPTO_TOKEN_DEFAULT") or "",
+        "ZEPTO_API_BASE": email_creds.get("ZEPTO_API_BASE") or "https://api.zeptomail.com/v1.1",
+        "NANGO_BASE_URL": email_creds.get("NANGO_BASE_URL") or "https://api.nango.dev",
+        "NANGO_CONNECTION_ID": email_creds.get("NANGO_CONNECTION_ID") or "",
+        "NANGO_INTEGRATION_ID": email_creds.get("NANGO_INTEGRATION_ID") or "zoho-mail",
+        "NANGO_SECRET_KEY": email_creds.get("NANGO_SECRET_KEY") or "",
+        "ZOHO_MAIL_ACCOUNT_ID": "676891000000008002",
+        "ZOHO_FROM_EMAIL": "arif@profithelm.com",
+        "STRIPE_ACCOUNT_ID": stripe_creds.get("account_id") or "acct_1T6fSTIq0ckFsf5j",
+        "STRIPE_PUBLISHABLE_KEY": stripe_creds.get("publishable_key") or "",
+        "STRIPE_SECRET_KEY": stripe_creds.get("secret_key") or "",
+    }
+
+    projects_spec = {
+        "profithelm": {
+            **shared_vars,
+            "CANONICAL_BASE": "https://profithelm.com",
+            "DOMAIN": "profithelm.com",
+            "ZEPTOMAIL_FROM_EMAIL": "arif@profithelm.com",
+            "ZEPTOMAIL_FROM_NAME": "ProfitHelm Research Desk",
+        },
+        "prexvo": {
+            **shared_vars,
+            "CANONICAL_BASE": "https://prexvo.com",
+            "DOMAIN": "prexvo.com",
+            "ZEPTOMAIL_FROM_EMAIL": "noreply@prexvo.com",
+            "ZEPTOMAIL_FROM_NAME": "Prexvo Research Desk",
+        },
+    }
+
+    report: Dict[str, Any] = {
+        "execute_live": execute_live,
+        "cloudflare_token_present": bool(cf_token),
+        "projects": {},
+    }
+
+    for proj_name, kv_vars in projects_spec.items():
+        non_empty_vars = {k: {"value": v} for k, v in kv_vars.items() if v}
+        if not execute_live or not cf_token:
+            report["projects"][proj_name] = {
+                "updated": False,
+                "bound_keys": sorted(non_empty_vars.keys()),
+            }
+            continue
+        patch_body = {
+            "deployment_configs": {
+                "production": {"env_vars": non_empty_vars},
+                "preview": {"env_vars": non_empty_vars},
+            }
+        }
+        url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/pages/projects/{proj_name}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(patch_body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {cf_token}",
+                "Content-Type": "application/json",
+                "User-Agent": "wrangler/4.151.1",
+            },
+            method="PATCH",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                prod_env = (
+                    resp_data.get("result", {})
+                    .get("deployment_configs", {})
+                    .get("production", {})
+                    .get("env_vars", {})
+                ) or {}
+                report["projects"][proj_name] = {
+                    "updated": bool(resp_data.get("success")),
+                    "http_status": resp.status,
+                    "bound_keys": sorted(non_empty_vars.keys()),
+                    "active_production_env_keys": sorted(prod_env.keys()),
+                }
+        except Exception as exc:
+            report["projects"][proj_name] = {
+                "updated": False,
+                "error": str(exc),
+                "bound_keys": sorted(non_empty_vars.keys()),
+            }
+
+    return report
+
+
 def sync_edge_leads_to_ledger(
     leads_ledger_path: Optional[Any] = None,
     auto_fulfill_unfulfilled: bool = False,
     fulfill_recipient_override: Optional[str] = None,
     edge_urls: Optional[Dict[str, str]] = None,
+    write_back_kv: bool = True,
 ) -> Dict[str, Any]:
     """
     Fetches live captured leads from Cloudflare Pages edge endpoints (`/api/lead-capture`)
     across both ProfitHelm and Prexvo, merges and deduplicates them into `.agy/captured_leads.jsonl`
-    with structured lifecycle and Stripe Checkout fields, and optionally dispatches transactional
-    playbook fulfillment emails for newly synced leads.
+    with structured lifecycle and Stripe Checkout fields, optionally dispatches transactional
+    playbook fulfillment emails for any unfulfilled leads, and writes fulfilled state back to KV.
     """
     import urllib.request
 
@@ -3152,6 +3307,7 @@ def sync_edge_leads_to_ledger(
     edge_status: Dict[str, Any] = {}
     newly_synced = 0
     fulfilled_count = 0
+    kv_updated_count = 0
 
     for prop_id, url in urls.items():
         try:
@@ -3186,8 +3342,17 @@ def sync_edge_leads_to_ledger(
                         "fulfillment_status": item.get("fulfillment_status") or "ready_for_dispatch",
                         **item,
                     }
+                    edge_already_fulfilled = bool(
+                        enriched.get("zeptomail_dispatched") and enriched.get("email_message_id")
+                    )
+                    if edge_already_fulfilled:
+                        enriched["lifecycle_stage"] = "fulfilled"
+                        enriched["fulfillment_status"] = "dispatched"
+
                     if lid not in seen_ids:
-                        if auto_fulfill_unfulfilled:
+                        if edge_already_fulfilled:
+                            fulfilled_count += 1
+                        elif auto_fulfill_unfulfilled:
                             disp = dispatch_transactional_playbook(
                                 enriched,
                                 execute_live=True,
@@ -3203,13 +3368,30 @@ def sync_edge_leads_to_ledger(
                                 enriched["lifecycle_stage"] = "fulfilled"
                                 enriched["fulfillment_status"] = "dispatched"
                                 fulfilled_count += 1
+                                if write_back_kv and _sync_record_to_cloudflare_kv(prop_id, lid, enriched):
+                                    kv_updated_count += 1
                         seen_ids[lid] = len(existing_records)
                         existing_records.append(enriched)
                         newly_synced += 1
                     else:
                         idx = seen_ids[lid]
-                        merged = {**enriched, **existing_records[idx]}
-                        if auto_fulfill_unfulfilled and merged.get("lifecycle_stage") != "fulfilled":
+                        local_rec = existing_records[idx]
+                        merged = {**local_rec, **enriched}
+                        if local_rec.get("lifecycle_stage") == "fulfilled" and not edge_already_fulfilled:
+                            for fk in (
+                                "lifecycle_stage",
+                                "fulfillment_status",
+                                "zeptomail_dispatched",
+                                "zeptomail_status",
+                                "zeptomail_request_id",
+                                "email_provider",
+                                "email_message_id",
+                            ):
+                                if local_rec.get(fk) is not None:
+                                    merged[fk] = local_rec[fk]
+                            if write_back_kv and _sync_record_to_cloudflare_kv(prop_id, lid, merged):
+                                kv_updated_count += 1
+                        elif auto_fulfill_unfulfilled and merged.get("lifecycle_stage") != "fulfilled":
                             disp = dispatch_transactional_playbook(
                                 merged,
                                 execute_live=True,
@@ -3225,6 +3407,8 @@ def sync_edge_leads_to_ledger(
                                 merged["lifecycle_stage"] = "fulfilled"
                                 merged["fulfillment_status"] = "dispatched"
                                 fulfilled_count += 1
+                                if write_back_kv and _sync_record_to_cloudflare_kv(prop_id, lid, merged):
+                                    kv_updated_count += 1
                         existing_records[idx] = merged
         except Exception as exc:
             edge_status[prop_id] = {"ok": False, "error": str(exc)}
@@ -3238,6 +3422,7 @@ def sync_edge_leads_to_ledger(
         "total_ledger_leads": len(existing_records),
         "newly_synced_count": newly_synced,
         "fulfilled_count": fulfilled_count,
+        "kv_updated_count": kv_updated_count,
         "edge_status": edge_status,
     }
 

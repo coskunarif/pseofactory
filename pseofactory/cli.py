@@ -1887,6 +1887,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lm.add_argument("--property", "--tenant", dest="property", type=str, default=None, help="Filter by property ID (profithelm or prexvo)")
     p_lm.add_argument("--sync-edge", action="store_true", help="Pull live captured leads from Cloudflare Pages edge /api/lead-capture endpoints")
+    p_lm.add_argument("--sync-pages-secrets", action="store_true", help="Bind ZeptoMail, Nango/Zoho OAuth, and Stripe credentials onto Cloudflare Pages projects")
     p_lm.add_argument("--fulfill", action="store_true", help="Dispatch transactional playbook emails for unfulfilled leads")
     p_lm.add_argument("--recipient-override", type=str, default=None, help="Override recipient email address for live fulfillment verification")
     p_lm.add_argument("--verify-providers", action="store_true", help="Execute live provider probes against ZeptoMail/Zoho Mail and Stripe Checkout APIs")
@@ -1903,9 +1904,14 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.partner_tracker import (
+        sync_cloudflare_pages_lead_credentials,
         sync_edge_leads_to_ledger,
         get_lead_monitoring_summary,
     )
+
+    pages_secrets_report = None
+    if getattr(args, "sync_pages_secrets", False):
+        pages_secrets_report = sync_cloudflare_pages_lead_credentials(execute_live=True)
 
     sync_report = None
     if getattr(args, "sync_edge", False):
@@ -1918,6 +1924,8 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
         property_id=getattr(args, "property", None),
         verify_live_providers=bool(getattr(args, "verify_providers", False)),
     )
+    if pages_secrets_report is not None:
+        summary["pages_secrets_sync"] = pages_secrets_report
     if sync_report is not None:
         summary["edge_sync"] = sync_report
 
