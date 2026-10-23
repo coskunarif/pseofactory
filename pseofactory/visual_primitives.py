@@ -1654,6 +1654,23 @@ def _render_runtime_sync_events_js() -> str:
       return document.getElementById("blueprint-status-readout") || document.getElementById("serp-blueprint-status") || document.querySelector(".serp-blueprint-status");
     }
 
+    function appendActionLink(parent, linkId, hrefUrl, labelText, isCheckout) {
+      if (!parent || !hrefUrl) return;
+      var aEl = document.createElement("a");
+      aEl.id = linkId;
+      aEl.className = "partner-btn touch-target";
+      aEl.setAttribute("href", String(hrefUrl));
+      aEl.style.cssText = "margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;";
+      if (isCheckout) {
+        aEl.setAttribute("data-checkout-trigger", "1");
+      } else {
+        aEl.setAttribute("target", "_blank");
+        aEl.setAttribute("rel", "noopener sponsored nofollow");
+      }
+      aEl.textContent = labelText;
+      parent.appendChild(aEl);
+    }
+
     function syncOutboundAffiliateLinks() {
       try {
         var slug = resolveCurrentToolSlug();
@@ -2414,13 +2431,13 @@ def _render_runtime_sync_events_js() -> str:
                 if (data.redirect_url) pbForm.setAttribute("data-redirect-url", data.redirect_url);
                 statusBox.setAttribute("data-status", data.status || "playbook_subscribed");
                 statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
-                var chkHtml = data.checkout_url
-                  ? ' <a id="playbook-checkout-link" class="partner-btn touch-target" href="' + data.checkout_url + '" data-checkout-trigger="1" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Unlock ' + (data.offer_title || "Compliance Toolkit") + ' ($' + String(data.offer_price_usd || 29) + ')</a>'
-                  : '';
-                var ptrHtml = data.redirect_url
-                  ? ' <a id="playbook-partner-link" class="partner-btn touch-target" href="' + data.redirect_url + '" target="_blank" rel="noopener sponsored nofollow" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Matched Partner Desk</a>'
-                  : '';
-                statusBox.innerHTML = '<span>Playbook queued (' + (data.lead_id || "verified") + ').</span>' + chkHtml + ptrHtml;
+                statusBox.textContent = "Playbook queued (" + (data.lead_id || "verified") + "). ";
+                if (data.checkout_url) {
+                  appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || 29) + ")", true);
+                }
+                if (data.redirect_url) {
+                  appendActionLink(statusBox, "playbook-partner-link", data.redirect_url, "Matched Partner Desk", false);
+                }
               }
             }).catch(function() {});
           }
@@ -2498,12 +2515,11 @@ def _render_runtime_sync_events_js() -> str:
                 if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
               }
               if (statusNode) {
-                var qChkHtml = data.checkout_url
-                  ? ' <a id="quote-matched-checkout-link" class="partner-btn touch-target" href="' + data.checkout_url + '" data-checkout-trigger="1" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Unlock ' + (data.offer_title || "Compliance Toolkit") + ' ($' + String(data.offer_price_usd || 29) + ')</a>'
-                  : '';
-                statusNode.innerHTML = '<span>Quote matched (' + (data.lead_id || "verified") + '). Redirecting to partner portal...</span> ' +
-                  '<a id="quote-matched-partner-link" class="partner-btn touch-target" href="' + data.redirect_url + '" target="_blank" rel="noopener sponsored nofollow" style="margin-left:6px;display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;">Continue to Matched Partner Desk</a>' +
-                  qChkHtml;
+                statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal... ";
+                appendActionLink(statusNode, "quote-matched-partner-link", data.redirect_url, "Continue to Matched Partner Desk", false);
+                if (data.checkout_url) {
+                  appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || 29) + ")", true);
+                }
               }
             }
           }).catch(function() {});
@@ -3825,6 +3841,7 @@ def normalize_html_visual_primitives(
                 or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
                 or "hydrateInputsFromLocationSearch" not in sync_body
                 or "resolveBlueprintStatusNode" not in sync_body
+                or "appendActionLink" not in sync_body
                 or "data-checkout-trigger" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body

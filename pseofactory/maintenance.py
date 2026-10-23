@@ -6547,6 +6547,7 @@ class RetroReflectionEngine:
             or "partner-quote-intake-form" not in html_content
             or "hydrateInputsFromLocationSearch" not in html_content
             or "resolveBlueprintStatusNode" not in html_content
+            or "appendActionLink" not in html_content
             or "data-checkout-trigger" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
@@ -7887,7 +7888,7 @@ class RetroReflectionEngine:
                     or 'data-status="pending"' in content
                     or "Calculate & File Taxes Online with TaxAct" in content
                     or ('href="/r/' in content and "source_tool=" not in content)
-                    or ('id="pseo-runtime-sync"' in content and "resolveBlueprintStatusNode" not in content)
+                    or ('id="pseo-runtime-sync"' in content and ("resolveBlueprintStatusNode" not in content or "appendActionLink" not in content))
                 ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
