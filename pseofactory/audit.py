@@ -1078,6 +1078,7 @@ def _extract_channel_text_and_urls(channel_name: str, payload: Any) -> Dict[str,
         text = payload.strip()
     elif isinstance(payload, dict):
         parts: List[str] = []
+        has_primary_content = isinstance(payload.get("content"), str) and bool(payload["content"].strip())
         for key in (
             "title",
             "content",
@@ -1093,6 +1094,13 @@ def _extract_channel_text_and_urls(channel_name: str, payload: Any) -> Dict[str,
             val = payload.get(key)
             if isinstance(val, str) and val.strip():
                 parts.append(val.strip())
+        if not has_primary_content:
+            for fallback_key in ("teaser_content", "first_comment"):
+                fval = payload.get(fallback_key)
+                if isinstance(fval, str) and fval.strip():
+                    parts.append(fval.strip())
+        elif "http" not in str(payload.get("content", "")) and isinstance(payload.get("first_comment"), str):
+            parts.append(payload["first_comment"].strip())
         if channel_name == "youtube":
             tr = payload.get("transcript")
             if isinstance(tr, str) and tr.strip():

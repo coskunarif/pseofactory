@@ -2469,6 +2469,21 @@ def aggregate_outbound_partner_engagement(
     by_cta_slot: Dict[str, Dict[str, Any]] = {}
     by_page_and_slot: Dict[str, Dict[str, Any]] = {}
     by_subid: Dict[str, Dict[str, Any]] = {}
+    by_traffic_source: Dict[str, Dict[str, Any]] = {}
+
+    def _ensure_traffic_source(ts_val: str) -> Dict[str, Any]:
+        ts_clean = (ts_val or "direct_or_referral").strip().lower() or "direct_or_referral"
+        if ts_clean not in by_traffic_source:
+            by_traffic_source[ts_clean] = {
+                "traffic_source": ts_clean,
+                "views": 0,
+                "calculator_interactions": 0,
+                "deeplink_hydrations": 0,
+                "outbound_clicks": 0,
+                "estimated_revenue_yield_usd": 0.0,
+                "slugs": {},
+            }
+        return by_traffic_source[ts_clean]
 
     def _ensure_slug(slug_val: str, prop_val: str) -> Dict[str, Any]:
         if slug_val not in by_slug:
@@ -2493,6 +2508,7 @@ def aggregate_outbound_partner_engagement(
                 "top_converting_cta_slot": "",
                 "cta_slots": {},
                 "partners": {},
+                "traffic_sources": {},
             }
         return by_slug[slug_val]
 
@@ -2624,6 +2640,13 @@ def aggregate_outbound_partner_engagement(
             or "starter"
         ).strip().lower()
 
+        traffic_source = str(
+            ev.get("traffic_source")
+            or props.get("traffic_source")
+            or mon.get("traffic_source")
+            or "direct_or_referral"
+        ).strip().lower() or "direct_or_referral"
+
         payout = 0.0
         for p_src in (props, mon, ev):
             raw_pay = p_src.get("payout_usd") or p_src.get("revenue_usd") or p_src.get("revenue") or p_src.get("amount")
@@ -2637,6 +2660,8 @@ def aggregate_outbound_partner_engagement(
         s_rec = _ensure_slug(slug, ev_prop)
         slot_rec = _ensure_cta_slot(cta_slot)
         ps_rec = _ensure_page_and_slot(slug, cta_slot, ev_prop)
+        ts_rec = _ensure_traffic_source(traffic_source)
+        s_rec["traffic_sources"][traffic_source] = s_rec["traffic_sources"].get(traffic_source, 0) + 1
         s_slot = s_rec["cta_slots"].setdefault(
             cta_slot,
             {"cta_slot": cta_slot, "views": 0, "intent_interactions": 0, "outbound_clicks": 0, "estimated_revenue_yield_usd": 0.0},
@@ -2661,7 +2686,7 @@ def aggregate_outbound_partner_engagement(
             )
             or etype.startswith("select_preset")
             or etype == "preset_click"
-            or interaction_type.startswith(("scenario_pin", "blueprint_", "preset_hydration"))
+            or interaction_type.startswith(("scenario_pin", "blueprint_", "preset_hydration", "social_deeplink_hydrated"))
         )
         is_outbound_click = etype in ("affiliate_click", "click_conversion_cta", "outbound_redirect", "partner_cta_click")
 
@@ -2670,6 +2695,7 @@ def aggregate_outbound_partner_engagement(
             s_slot["views"] += 1
             slot_rec["views_exposed"] += 1
             ps_rec["views"] += 1
+            ts_rec["views"] += 1
             if partner_key:
                 p_rec = _ensure_partner(partner_key, ev_prop)
                 p_rec["views_exposed"] += 1
@@ -2691,10 +2717,14 @@ def aggregate_outbound_partner_engagement(
 
         if is_calc_intent:
             s_rec["calculator_interactions"] += 1
+            ts_rec["calculator_interactions"] += 1
+            ts_rec["slugs"][slug] = ts_rec["slugs"].get(slug, 0) + 1
+            if interaction_type == "social_deeplink_hydrated":
+                ts_rec["deeplink_hydrations"] += 1
             if (
                 "workbench" in etype
                 or etype in ("scenario_pin", "blueprint_save", "blueprint_share", "blueprint_export")
-                or interaction_type.startswith(("scenario_pin", "blueprint_", "preset_hydration"))
+                or interaction_type.startswith(("scenario_pin", "blueprint_", "preset_hydration", "social_deeplink_hydrated"))
             ):
                 s_rec["workbench_interactions"] = s_rec.get("workbench_interactions", 0) + 1
             if "scenario_pin" in etype or interaction_type.startswith("scenario_pin"):
@@ -2727,6 +2757,8 @@ def aggregate_outbound_partner_engagement(
 
         if is_outbound_click:
             s_rec["outbound_clicks"] += 1
+            ts_rec["outbound_clicks"] += 1
+            ts_rec["slugs"][slug] = ts_rec["slugs"].get(slug, 0) + 1
             sub_low = subid_val.lower()
             is_synthetic_probe = any(
                 tok in sub_low
@@ -2761,6 +2793,7 @@ def aggregate_outbound_partner_engagement(
             s_slot["estimated_revenue_yield_usd"] = round(s_slot["estimated_revenue_yield_usd"] + click_yield, 4)
             slot_rec["estimated_revenue_yield_usd"] = round(slot_rec["estimated_revenue_yield_usd"] + click_yield, 4)
             ps_rec["estimated_revenue_yield_usd"] = round(ps_rec["estimated_revenue_yield_usd"] + click_yield, 4)
+            ts_rec["estimated_revenue_yield_usd"] = round(ts_rec["estimated_revenue_yield_usd"] + click_yield, 4)
 
             if subid_val:
                 sub_entry = by_subid.setdefault(
@@ -2874,6 +2907,7 @@ def aggregate_outbound_partner_engagement(
         "by_cta_slot": by_cta_slot,
         "by_page_and_slot": by_page_and_slot,
         "by_subid": by_subid,
+        "by_traffic_source": by_traffic_source,
     }
 
 

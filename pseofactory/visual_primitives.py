@@ -981,20 +981,38 @@ def _render_runtime_sync_maps_js() -> str:
     }
 
     var PRESET_KEY_ALIASES = {
-      "cost": ["purchase_price", "sec179-cost", "equipment_cost", "gross_income", "tax-income", "net_business_income", "loan_balance", "gross_amount", "serp-179-cost"],
-      "bracket": ["marginal_tax_rate_pct", "sec179-bracket", "tey-fed-bracket", "effective_rate"],
-      "revenue": ["runway-revenue", "gross_income", "tax-income", "net_business_income", "gross_amount", "agi"],
+      "cost": ["purchase_price", "sec179-cost", "equipment_cost", "vehicle_cost", "gross_income", "tax-income", "net_business_income", "loan_balance", "gross_amount", "serp-179-cost"],
+      "vehicle_cost": ["purchase_price", "sec179-cost", "equipment_cost", "serp-179-cost"],
+      "equipment_cost": ["purchase_price", "sec179-cost", "equipment_cost", "serp-179-cost"],
+      "use": ["business_use_pct", "sec179-business-use", "business_use_fraction"],
+      "business_use_fraction": ["business_use_pct", "sec179-business-use"],
+      "bracket": ["marginal_tax_rate_pct", "sec179-bracket", "tey-fed-bracket", "effective_rate", "marginal_tax_rate"],
+      "marginal_tax_rate": ["marginal_tax_rate_pct", "sec179-bracket", "tey-fed-bracket", "effective_rate"],
+      "revenue": ["runway-revenue", "gross_income", "tax-income", "net_business_income", "gross_amount", "agi", "annual_procedure_net_revenue"],
+      "rev": ["runway-revenue", "annual_procedure_net_revenue", "gross_income", "net_business_income"],
+      "annual_procedure_net_revenue": ["annual_procedure_net_revenue", "runway-revenue", "net_business_income", "serp-179-cost"],
       "cogs": ["reasonable_salary", "runway-expenses", "adjusted_cost_basis", "sec1031-basis"],
       "income": ["gross_income", "tax-income", "agi", "cg-ordinary-income", "net_business_income", "pm-tax-income", "crypto-ordinary-income", "serp-tax-gross", "serp-loan-agi"],
+      "net_business_income": ["net_business_income", "gross_income", "tax-income", "serp-b2b-gross"],
+      "salary": ["reasonable_salary", "serp-b2b-deduction"],
+      "reasonable_salary": ["reasonable_salary", "serp-b2b-deduction"],
       "gross_amount": ["gross_income", "tax-income", "sec179-cost", "sec1031-sale-price", "loan_balance", "agi", "runway-cash", "crypto-short-term", "tey-principal", "pm-tax-gain", "cg-ordinary-income", "bond_amount", "invoice_face_value", "current_year_domestic_qre", "declared_customs_value", "annual_covered_payroll", "equipment_cost", "gross_proceeds_1099da", "serp-tax-gross", "serp-179-cost", "serp-1031-rel-debt", "serp-b2b-gross", "serp-crypto-proceeds", "serp-loan-agi"],
       "taxable_income": ["gross_income", "tax-income", "serp-tax-gross"],
       "marginal_rate": ["sec179-bracket", "tey-fed-bracket", "marginal_tax_rate_pct"],
       "sale_price": ["sec1031-sale-price", "sec1031-sale-price-slider", "serp-1031-rel-debt"],
-      "basis": ["sec1031-basis", "sec1031-basis-slider", "adjusted_cost_basis", "serp-crypto-basis"],
+      "sale": ["sec1031-sale-price", "sec1031-sale-price-slider", "serp-1031-rel-debt", "cg-amount", "cg-amount-slider", "serp-b2b-gross"],
+      "basis": ["sec1031-basis", "sec1031-basis-slider", "adjusted_cost_basis", "cost_basis", "serp-crypto-basis"],
+      "cost_basis": ["adjusted_cost_basis", "sec1031-basis", "serp-crypto-basis"],
+      "proceeds": ["gross_proceeds_1099da", "crypto-short-term", "serp-crypto-proceeds"],
+      "gross_proceeds": ["gross_proceeds_1099da", "crypto-short-term", "serp-crypto-proceeds"],
       "depreciation": ["sec1031-depreciation", "sec1031-depreciation-slider", "serp-1031-depr"],
+      "depr": ["sec1031-depreciation", "sec1031-depreciation-slider", "serp-1031-depr"],
       "from_state": ["sec1031-from-state"],
+      "from": ["sec1031-from-state"],
       "to_state": ["sec1031-to-state"],
+      "to": ["sec1031-to-state"],
       "rep_price": ["sec1031-rep-price", "sec1031-rep-price-slider", "serp-1031-rep-debt"],
+      "rep": ["sec1031-rep-price", "sec1031-rep-price-slider", "serp-1031-rep-debt"],
       "sec1031-replacement": ["sec1031-rep-price", "sec1031-rep-price-slider", "serp-1031-rep-debt"],
       "short_term": ["crypto-short-term", "crypto-short-term-slider", "serp-crypto-proceeds"],
       "short": ["crypto-short-term", "crypto-short-term-slider", "serp-crypto-proceeds"],
@@ -1002,11 +1020,14 @@ def _render_runtime_sync_maps_js() -> str:
       "long": ["crypto-long-term", "crypto-long-term-slider"],
       "staking": ["crypto-staking", "crypto-staking-slider"],
       "ordinary_income": ["crypto-ordinary-income", "crypto-ordinary-income-slider", "cg-ordinary-income", "tax-income", "gross_income"],
+      "ordinary": ["crypto-ordinary-income", "crypto-ordinary-income-slider", "cg-ordinary-income", "tax-income", "gross_income"],
       "gain": ["crypto-short-term", "cg-amount", "pm-tax-gain", "arb-capital", "serp-crypto-proceeds"],
       "cggain": ["cg-amount", "cg-amount-slider"],
+      "pmgain": ["pm-tax-gain", "pm-tax-gain-slider"],
       "deduction": ["cg-ordinary-income", "cg-ordinary-slider", "serp-b2b-deduction", "serp-tax-pretax"],
-      "state": ["crypto-state", "tax-state", "cg-state", "tey-state", "state_jurisdiction"],
+      "state": ["crypto-state", "tax-state", "cg-state", "tey-state", "state_jurisdiction", "pm-tax-state"],
       "state_rate": ["cg-state", "tax-state", "crypto-state", "tey-state", "state_jurisdiction"],
+      "status": ["tax-status", "cg-status", "crypto-status", "pm-tax-status", "filing_status"],
       "cash": ["runway-cash", "runway-cash-slider", "serp-b2b-gross"],
       "expenses": ["runway-expenses", "runway-expenses-slider", "serp-b2b-deduction"],
       "burn": ["runway-expenses", "runway-expenses-slider", "serp-b2b-deduction"],
@@ -1016,7 +1037,10 @@ def _render_runtime_sync_maps_js() -> str:
       "yes": ["arb-yes-cents", "arb-yes-slider"],
       "no": ["arb-no-cents", "arb-no-slider"],
       "capital": ["arb-capital", "arb-capital-slider", "tey-principal", "tey-principal-slider"],
-      "principal": ["tey-principal", "tey-principal-slider", "arb-capital", "loan_balance"],
+      "principal": ["tey-principal", "tey-principal-slider", "arb-capital", "loan_balance", "serp-loan-balance"],
+      "balance": ["loan_balance", "serp-loan-balance", "tey-principal"],
+      "agi": ["agi", "serp-loan-agi", "gross_income", "tax-income"],
+      "deps": ["dependents", "family_size", "serp-loan-family"],
       "tbill_yield": ["tey-tbill-yield", "tey-tbill-slider"],
       "tbill": ["tey-tbill-yield", "tey-tbill-slider"],
       "hysa_yield": ["tey-hysa-yield", "tey-hysa-slider"],
@@ -1024,20 +1048,42 @@ def _render_runtime_sync_maps_js() -> str:
       "fed_bracket": ["tey-fed-bracket", "sec179-bracket"],
       "fed": ["tey-fed-bracket", "sec179-bracket"],
       "niit": ["tey-niit"],
+      "bond": ["bond_amount", "bond_penalty_amount", "field-bond_amount", "serp-b2b-gross"],
+      "bond_penalty_amount": ["bond_amount", "bond_penalty_amount", "field-bond_amount", "serp-b2b-gross"],
+      "rate": ["credit_tier_rate_pct", "bond_rate_pct", "interest_rate", "serp-loan-rate"],
+      "credit_tier_rate_pct": ["credit_tier_rate_pct", "bond_rate_pct", "field-bond_rate_pct"],
+      "invoice": ["invoice_face_value", "field-invoice_face_value", "field-invoice_slider", "serp-b2b-gross"],
+      "invoice_face_value": ["invoice_face_value", "field-invoice_face_value", "field-invoice_slider", "serp-b2b-gross"],
       "invoice_amount": ["invoice_face_value", "field-invoice_face_value", "field-invoice_slider", "serp-b2b-gross"],
       "dso_days": ["days_outstanding", "field-days_outstanding"],
-      "factor_fee": ["factoring_fee_pct", "field-factoring_fee_pct"],
+      "fee": ["factoring_fee_pct", "factor_fee_rate", "field-factoring_fee_pct"],
+      "factor_fee": ["factoring_fee_pct", "factor_fee_rate", "field-factoring_fee_pct"],
+      "factor_fee_rate": ["factoring_fee_pct", "factor_fee_rate", "field-factoring_fee_pct"],
       "loc_apr": ["loc_apr_pct", "field-loc_apr_pct"],
       "advance_rate": ["advance_rate_pct", "field-advance_rate_pct"],
+      "qre": ["current_year_domestic_qre", "current_qre_spend", "field-current_year_domestic_qre", "field-qre_slider", "serp-b2b-gross"],
+      "current_qre_spend": ["current_year_domestic_qre", "current_qre_spend", "field-current_year_domestic_qre", "field-qre_slider", "serp-b2b-gross"],
       "domestic_qre": ["current_year_domestic_qre", "field-current_year_domestic_qre", "field-qre_slider", "serp-b2b-gross"],
       "foreign_qre": ["current_year_foreign_qre", "field-current_year_foreign_qre"],
+      "base": ["prior_3yr_avg_qre", "prior_three_year_avg_qre", "field-prior_3yr_avg_qre", "serp-b2b-deduction"],
+      "prior_three_year_avg_qre": ["prior_3yr_avg_qre", "prior_three_year_avg_qre", "field-prior_3yr_avg_qre", "serp-b2b-deduction"],
       "prior_qre": ["prior_3yr_avg_qre", "field-prior_3yr_avg_qre"],
+      "fob": ["declared_customs_value", "customs_value_fob", "field-declared_customs_value", "field-customs_slider", "serp-b2b-gross"],
+      "customs_value_fob": ["declared_customs_value", "customs_value_fob", "field-declared_customs_value", "field-customs_slider", "serp-b2b-gross"],
       "customs_value": ["declared_customs_value", "field-declared_customs_value", "field-customs_slider", "serp-b2b-gross"],
+      "duty": ["section_301_rate_pct", "field-section_301_rate_pct"],
       "combined_duty_and_301_rate": ["section_301_rate_pct", "field-section_301_rate_pct"],
-      "freight_and_mpf_hmf": ["ocean_freight_insurance", "field-ocean_freight_insurance"],
+      "fees": ["ocean_freight_insurance", "field-ocean_freight_insurance", "serp-b2b-deduction"],
+      "freight_and_mpf_hmf": ["ocean_freight_insurance", "field-ocean_freight_insurance", "serp-b2b-deduction"],
+      "payroll": ["annual_covered_payroll", "annual_payroll", "field-annual_covered_payroll", "field-payroll_slider", "serp-b2b-gross"],
+      "annual_payroll": ["annual_covered_payroll", "annual_payroll", "field-annual_covered_payroll", "field-payroll_slider", "serp-b2b-gross"],
       "annual_wage": ["annual_covered_payroll", "field-annual_covered_payroll", "field-payroll_slider", "serp-b2b-gross"],
+      "wc": ["wc_base_rate_per_100", "workers_comp_rate_per_100", "field-wc_base_rate_per_100"],
+      "workers_comp_rate_per_100": ["wc_base_rate_per_100", "workers_comp_rate_per_100", "field-wc_base_rate_per_100"],
       "wc_rate_per_100": ["wc_base_rate_per_100", "field-wc_base_rate_per_100"],
       "emr_multiplier": ["experience_mod_rate", "field-experience_mod_rate"],
+      "lease": ["year_one_financing_payments", "annual_lease_payment", "serp-b2b-deduction"],
+      "year_one_financing_payments": ["year_one_financing_payments", "annual_lease_payment", "serp-b2b-deduction"],
       "lease_annual_payment": ["equipment_cost", "field-equipment_cost", "field-cost_slider", "serp-179-cost"]
     };
     PRESET_KEY_ALIASES["kal" + "shi_price"] = ["arb-yes-cents", "arb-yes-slider"];
@@ -1504,6 +1550,27 @@ def _render_runtime_sync_events_js() -> str:
         if (ref.indexOf("google.com/goto") !== -1 || ref.indexOf("google.com/url?q=") !== -1 && locSearch.indexOf("ai_mode") !== -1 || locSearch.indexOf("utm_source=google_ai_mode") !== -1 || locSearch.indexOf("ai_mode=1") !== -1) {
           return "google_ai_mode";
         }
+        if (locSearch.indexOf("utm_source=linkedin") !== -1 || ref.indexOf("linkedin.com") !== -1 || ref.indexOf("lnkd.in") !== -1) {
+          return "linkedin_company";
+        }
+        if (locSearch.indexOf("utm_source=facebook") !== -1 || ref.indexOf("facebook.com") !== -1 || ref.indexOf("fb.com") !== -1) {
+          return "facebook_social";
+        }
+        if (locSearch.indexOf("utm_source=youtube") !== -1 || ref.indexOf("youtube.com") !== -1 || ref.indexOf("youtu.be") !== -1) {
+          return "youtube_video";
+        }
+        if (locSearch.indexOf("utm_source=x") !== -1 || locSearch.indexOf("utm_source=twitter") !== -1 || ref.indexOf("t.co") !== -1 || ref.indexOf("x.com") !== -1 || ref.indexOf("twitter.com") !== -1) {
+          return "x_social";
+        }
+        if (locSearch.indexOf("utm_source=github") !== -1 || ref.indexOf("github.com") !== -1 || ref.indexOf("gist.github.com") !== -1) {
+          return "github_gist";
+        }
+        if (locSearch.indexOf("utm_source=substack") !== -1 || ref.indexOf("substack.com") !== -1) {
+          return "substack_editorial";
+        }
+        if (locSearch.indexOf("utm_source=ghost") !== -1 || ref.indexOf("ghost.io") !== -1) {
+          return "ghost_editorial";
+        }
         if (ref.indexOf("chatgpt.com") !== -1 || ref.indexOf("openai.com") !== -1 || locSearch.indexOf("utm_source=chatgpt") !== -1) {
           return "chatgpt_search";
         }
@@ -1702,6 +1769,73 @@ def _render_runtime_sync_events_js() -> str:
       } catch (err) {}
     }
 
+    function hydrateInputsFromLocationSearch() {
+      try {
+        var rawSearch = (window.location && window.location.search) ? window.location.search : "";
+        if (!rawSearch || rawSearch.length <= 1) return 0;
+        var qs = new URLSearchParams(rawSearch);
+        var ignoreParams = {
+          "utm_source": 1, "utm_medium": 1, "utm_campaign": 1, "utm_content": 1, "utm_term": 1,
+          "fbclid": 1, "gclid": 1, "li_fat_id": 1, "twclid": 1, "ref": 1, "source_tool": 1,
+          "subid": 1, "cta_slot": 1, "traffic_source": 1, "ph_tier": 1, "wb_state": 1, "ai_mode": 1
+        };
+        var hydratedCount = 0;
+        qs.forEach(function(rawVal, rawKey) {
+          if (!rawKey || ignoreParams[rawKey.toLowerCase()] || rawVal === null || rawVal === "") return;
+          var k = String(rawKey);
+          var dashK = k.replace(/_/g, "-");
+          var candidates = [k, dashK].concat(PRESET_KEY_ALIASES[k] || []).concat(PRESET_KEY_ALIASES[dashK] || []);
+          var matchedThisKey = false;
+          for (var cIdx = 0; cIdx < candidates.length; cIdx++) {
+            var cKey = candidates[cIdx];
+            var el = document.getElementById("field-" + cKey) || document.getElementById("input-" + cKey) || document.getElementById(cKey) || document.querySelector('[name="' + cKey + '"]');
+            if (el && (el.tagName === "INPUT" || el.tagName === "SELECT")) {
+              var valStr = String(rawVal).trim();
+              if (el.type === "checkbox") {
+                el.checked = (valStr === "true" || valStr === "1" || valStr === "yes");
+              } else if (el.tagName === "SELECT") {
+                el.value = valStr;
+                if (el.value !== valStr && el.options) {
+                  for (var oIdx = 0; oIdx < el.options.length; oIdx++) {
+                    if (String(el.options[oIdx].value).toLowerCase() === valStr.toLowerCase()) {
+                      el.selectedIndex = oIdx;
+                      break;
+                    }
+                  }
+                }
+              } else {
+                var numVal = parseFloat(valStr.replace(/,/g, ""));
+                var baseDef = parseFloat(el.getAttribute("data-pseo-base-val") || el.value || "0");
+                if (!isNaN(numVal) && numVal > 0 && numVal <= 1 && !isNaN(baseDef) && baseDef >= 5 && /(rate|bracket|use|pct|fraction)/i.test(k + "_" + cKey)) {
+                  valStr = String(Math.round(numVal * 10000) / 100);
+                }
+                el.value = valStr;
+                var pairedR = findPairedRangeInput(el);
+                if (pairedR && !/^retro-range-/.test(pairedR.id || "")) {
+                  pairedR.value = valStr;
+                }
+              }
+              matchedThisKey = true;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+          if (matchedThisKey) hydratedCount++;
+        });
+        if (hydratedCount > 0) {
+          var statusEl = document.getElementById("serp-blueprint-status");
+          if (statusEl) {
+            statusEl.textContent = "Blueprint Status: Hydrated " + String(hydratedCount) + " scenario parameters from shared URL.";
+          }
+          updateOutputsSynchronously();
+          emitWorkbenchEngagementBeacon("social_deeplink_hydrated", "calculator_result_inline", { hydrated_count: hydratedCount });
+        }
+        return hydratedCount;
+      } catch (err) {
+        return 0;
+      }
+    }
+
     function initBaseValues() {
       var inputs = document.querySelectorAll('input[type="number"], input[type="range"]');
       for (var i = 0; i < inputs.length; i++) {
@@ -1714,6 +1848,7 @@ def _render_runtime_sync_events_js() -> str:
         }
       }
       restoreSavedBlueprintIfPresent();
+      hydrateInputsFromLocationSearch();
       syncOutboundAffiliateLinks();
     }
 

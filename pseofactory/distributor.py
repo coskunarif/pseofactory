@@ -953,6 +953,96 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "statutory_claim_value": 2560000,
         "query_params": {"lease_annual_payment": 24000, "business_use_pct": 0.85},
     },
+    "commercial-heavy-vehicle-section-179-weight-calculator": {
+        "formula": "round(vehicle_cost * business_use_fraction * marginal_tax_rate, 2)",
+        "inputs": {"vehicle_cost": 95000.0, "business_use_fraction": 0.9, "marginal_tax_rate": 0.35},
+        "published_output": 29925.0,
+        "sample_calculation": "$95,000 commercial vehicle over 6,000 lbs GVWR * 90% business use * 35% marginal rate = $29,925 Year-1 IRC Section 179 tax savings",
+        "statutory_claim_key": "section_179_limit_2026",
+        "statutory_claim_value": 2560000,
+        "query_params": {"vehicle_cost": 95000, "business_use_fraction": 0.9, "marginal_tax_rate": 0.35},
+    },
+    "contractor-surety-bond-cost-calculator": {
+        "formula": "round(bond_penalty_amount * (credit_tier_rate_pct / 100.0), 2)",
+        "inputs": {"bond_penalty_amount": 50000.0, "credit_tier_rate_pct": 1.5},
+        "published_output": 750.0,
+        "sample_calculation": "$50,000 Miller Act / contractor surety bond penalty * 1.5% preferred underwriting rate = $750 annual bond premium (vs $2,500 at 5% standard tier)",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"bond_penalty_amount": 50000, "credit_tier_rate_pct": 1.5},
+    },
+    "crypto-tax-form-1099-da-mandatory-reporting": {
+        "formula": "round((proceeds - cost_basis) * marginal_rate, 2)",
+        "inputs": {"proceeds": 50000.0, "cost_basis": 30000.0, "marginal_rate": 0.35},
+        "published_output": 7000.0,
+        "sample_calculation": "$50,000 Form 1099-DA gross proceeds minus $30,000 verified cost basis = $20,000 net taxable gain ($7,000 tax at 35% vs $17,500 unadjusted)",
+        "statutory_claim_key": "niit_surtax_rate",
+        "statutory_claim_value": 0.038,
+        "query_params": {"proceeds": 50000, "cost_basis": 30000},
+    },
+    "equipment-lease-vs-buy-section-179-calculator": {
+        "formula": "round(equipment_cost * marginal_tax_rate, 2)",
+        "inputs": {"equipment_cost": 180000.0, "marginal_tax_rate": 0.32},
+        "published_output": 57600.0,
+        "sample_calculation": "$180,000 commercial equipment acquisition * 32% marginal tax rate = $57,600 Year-1 IRC Section 179 tax shield vs $39,600 Year-1 lease deduction",
+        "statutory_claim_key": "section_179_limit_2026",
+        "statutory_claim_value": 2560000,
+        "query_params": {"equipment_cost": 180000, "marginal_tax_rate": 0.32, "year_one_financing_payments": 39600},
+    },
+    "invoice-factoring-vs-business-line-of-credit-calculator": {
+        "formula": "round(invoice_face_value * factor_fee_rate, 2)",
+        "inputs": {"invoice_face_value": 100000.0, "factor_fee_rate": 0.025},
+        "published_output": 2500.0,
+        "sample_calculation": "$100,000 B2B invoice * 2.5% 30-day factoring discount fee = $2,500 financing cost (30.4% annualized APR vs 10.5% commercial line of credit)",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"invoice_face_value": 100000, "factor_fee_rate": 0.025},
+    },
+    "medical-and-dental-equipment-section-179-roi-calculator": {
+        "formula": "round(equipment_cost * marginal_tax_rate, 2)",
+        "inputs": {"equipment_cost": 150000.0, "marginal_tax_rate": 0.35},
+        "published_output": 52500.0,
+        "sample_calculation": "$150,000 clinical imaging / CBCT equipment * 35% marginal tax rate = $52,500 Year-1 IRC Section 179 tax savings ($97,500 net after-tax cost)",
+        "statutory_claim_key": "section_179_limit_2026",
+        "statutory_claim_value": 2560000,
+        "query_params": {"equipment_cost": 150000, "marginal_tax_rate": 0.35, "annual_procedure_net_revenue": 96000},
+    },
+    "r-and-d-tax-credit-section-174-amortization-calculator": {
+        "formula": "round((current_qre_spend - (0.5 * prior_three_year_avg_qre)) * asc_credit_rate, 2)",
+        "inputs": {"current_qre_spend": 800000.0, "prior_three_year_avg_qre": 500000.0, "asc_credit_rate": 0.14},
+        "published_output": 77000.0,
+        "sample_calculation": "($800,000 current domestic QRE minus 50% of $500,000 3-year average) * 14% IRC Section 41(c)(4) ASC rate = $77,000 R&D tax credit",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"current_qre_spend": 800000, "prior_three_year_avg_qre": 500000, "asc_credit_rate": 0.14},
+    },
+    "s-corp-reasonable-salary-tax-calculator": {
+        "formula": "round((net_business_income - reasonable_salary) * se_tax_rate, 2)",
+        "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0, "se_tax_rate": 0.153},
+        "published_output": 19125.0,
+        "sample_calculation": "($220,000 S-Corp net income minus $95,000 reasonable W-2 salary) * 15.3% FICA tax rate = $19,125 annual payroll tax savings under IRC Section 1366",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"net_business_income": 220000, "reasonable_salary": 95000, "se_tax_rate": 0.153},
+    },
+    "section-301-tariff-landed-cost-calculator": {
+        "formula": "round(customs_value_fob * (1.0 + combined_duty_and_301_rate) + freight_and_mpf_hmf, 2)",
+        "inputs": {"customs_value_fob": 120000.0, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6800.0},
+        "published_output": 161000.0,
+        "sample_calculation": "$120,000 FOB customs value + $34,200 (28.5% combined HTSUS & Section 301 duty) + $6,800 freight/MPF/HMF = $161,000 total landed cost",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"customs_value_fob": 120000, "combined_duty_and_301_rate": 0.285, "freight_and_mpf_hmf": 6800},
+    },
+    "workers-comp-and-payroll-burden-calculator": {
+        "formula": "round(annual_payroll * (statutory_tax_rate + (workers_comp_rate_per_100 / 100.0)), 2)",
+        "inputs": {"annual_payroll": 500000.0, "statutory_tax_rate": 0.0865, "workers_comp_rate_per_100": 3.45},
+        "published_output": 60500.0,
+        "sample_calculation": "$500,000 annual payroll * (8.65% statutory FICA/FUTA/SUTA + $3.45/$100 NCCI workers comp rate) = $60,500 employer labor burden (+12.1%)",
+        "statutory_claim_key": "standard_deduction_2026_single",
+        "statutory_claim_value": 16100,
+        "query_params": {"annual_payroll": 500000, "statutory_tax_rate": 0.0865, "workers_comp_rate_per_100": 3.45},
+    },
     "student-loan-repayment-calculator": {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
         "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
@@ -1395,6 +1485,46 @@ def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     return {k: _sanitize_distribution_text(v) for k, v in raw_res.items()}
 
 
+def _build_zero_link_teaser_content(text: str, platform: str = "linkedin", brand: str = "ProfitHelm") -> str:
+    """
+    Produces a feed-suppression-resistant, zero-external-link native post body (`teaser_content`)
+    by replacing inline outbound URLs with a platform-native pointer to the parameterized
+    deep link in the first comment / reply.
+    """
+    cta_pointer = (
+        f" Pre-filled {brand} scenario link in the first reply."
+        if platform == "x"
+        else f" Run your pre-filled scenario on {brand} via the link in the first comment."
+    )
+    cleaned_lines: List[str] = []
+    for raw_line in text.splitlines():
+        if "http://" in raw_line or "https://" in raw_line:
+            stripped = re.sub(r"https?://\S+", "", raw_line).strip()
+            if stripped.endswith(":"):
+                stripped = stripped[:-1].strip()
+            if stripped:
+                cleaned_lines.append(f"{stripped}.{cta_pointer}")
+            else:
+                cleaned_lines.append(cta_pointer.strip())
+        else:
+            cleaned_lines.append(raw_line)
+    res = "\n".join(cleaned_lines).strip()
+    if platform == "x" and len(res) > 280:
+        res = res[:280].rstrip()
+    return _sanitize_distribution_text(res)
+
+
+def _with_first_comment_utm(url: str, platform: Optional[str] = None) -> str:
+    res = url
+    if platform and "utm_source=" not in res:
+        sep = "&" if "?" in res else "?"
+        res = f"{res}{sep}utm_source={platform}&utm_medium=social"
+    if "utm_content=" in res:
+        return re.sub(r"utm_content=[^&#]+", "utm_content=first_comment", res)
+    sep = "&" if "?" in res else "?"
+    return f"{res}{sep}utm_content=first_comment"
+
+
 def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = None) -> Dict[str, Any]:
     """Generates authoritative, technical LinkedIn post for Company Page."""
     from pseofactory.contracts import assert_linkedin
@@ -1470,8 +1600,8 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"{url}\n\n"
             f"#CapitalGains #TaxPlanning #WealthManagement #QuantitativeFinance #Investments #TCJA"
         )
-    elif slug == "section-179-calculator":
-        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&use=100&utm_source=linkedin&utm_medium=social&utm_campaign=section-179-calculator&utm_content=company_post"
+    elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&use=100&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
         text = (
             f"Deploying $500,000 into qualifying capital assets delivers an immediate $105,000 first-year cash tax reduction under IRC Section 179.\n\n"
             f"Under IRC Section 179 and Section 168(k), first-year asset expensing faces major statutory phase-downs before bonus depreciation expires in 2027.\n\n"
@@ -1522,6 +1652,162 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"{url}\n\n"
             f"#PredictionMarkets #TaxStrategy #Section1256 #Kalshi #EventContracts #QuantitativeTrading"
         )
+    elif slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=linkedin&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator&utm_content=company_post"
+        text = (
+            f"Qualified C-corporation founders holding stock over 5 years exclude $10,000,000 in exit gains ($2,380,000 federal tax saved).\n\n"
+            f"Under IRC Section 1202, original-issue domestic C-corp shares issued below the $50,000,000 gross asset threshold qualify for a 100% federal capital gains and Section 1411 NIIT exclusion.\n\n"
+            f"Key findings from our statutory QSBS model:\n"
+            f"• Excludes the greater of $10,000,000 or 10x adjusted basis ($2,380,000 federal LTCG + 3.8% NIIT saved on a $10M exit).\n"
+            f"• Non-conforming states like California disallow Section 1202, requiring separate state tax reserve modeling.\n"
+            f"• Shareholder-level trust stacking and IRC Section 1045 rollovers preserve eligibility across early exits.\n\n"
+            f"Model your exact Section 1202 exclusion cap and state tax exposure:\n"
+            f"{url}\n\n"
+            f"#QSBS #Section1202 #StartupTax #VentureCapital #Founders #TaxPlanning"
+        )
+    elif slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
+        text = (
+            f"Deducting $24,000 in commercial equipment lease payments at 85% business use shields $20,400 of ordinary income under IRC Section 162.\n\n"
+            f"With federal bonus depreciation stepping down to 20% in 2026 under IRC Section 168(k), operators must compare IRC Section 162(a)(3) operating lease write-offs against Section 179 expensing caps.\n\n"
+            f"Key findings from our commercial equipment tax model:\n"
+            f"• A $24,000 annual lease commitment at 85% business use yields a $20,400 direct ordinary income deduction.\n"
+            f"• Operating leases bypass state-level Section 179 non-conformity caps (such as California's $25,000 deduction ceiling).\n"
+            f"• Preserves balance-sheet liquidity under FASB ASC 842 while locking predictable yearly tax shields.\n\n"
+            f"Compare your commercial lease deduction against Section 179 expensing:\n"
+            f"{url}\n\n"
+            f"#EquipmentLeasing #Section179 #CorporateTax #CFO #CapEx #TaxPlanning"
+        )
+    elif slug == "commercial-heavy-vehicle-section-179-weight-calculator":
+        url = f"{POST_URL_BASE}/tools/commercial-heavy-vehicle-section-179-weight-calculator/?vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35&utm_source=linkedin&utm_medium=social&utm_campaign=commercial-heavy-vehicle-section-179-weight-calculator&utm_content=company_post"
+        text = (
+            f"Placing a $95,000 commercial vehicle over 6,000 lbs GVWR in service at 90% business use unlocks $29,925 in Year-1 federal tax savings.\n\n"
+            f"Under IRC Section 179(b)(5) and Section 280F, Gross Vehicle Weight Rating (GVWR) determines whether a commercial vehicle qualifies for full first-year expensing or hits luxury auto caps.\n\n"
+            f"Key statutory findings from our heavy vehicle model:\n"
+            f"• A $95,000 work truck over 6,000 lbs GVWR at 90% business use ($85,500 depreciable basis) saves $29,925 in the 35% bracket.\n"
+            f"• Heavy SUVs (6,001 to 14,000 lbs GVWR) face a $30,500 Section 179 cap plus 20% bonus depreciation in 2026.\n"
+            f"• Dropping below 50% business use triggers mandatory MACRS depreciation recapture on Form 4797.\n\n"
+            f"Calculate your exact GVWR classification and Year-1 vehicle tax write-off:\n"
+            f"{url}\n\n"
+            f"#Section179 #CommercialVehicles #TaxPlanning #FleetManagement #CFO #BonusDepreciation"
+        )
+    elif slug == "contractor-surety-bond-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/contractor-surety-bond-cost-calculator/?bond_penalty_amount=50000&credit_tier_rate_pct=1.5&utm_source=linkedin&utm_medium=social&utm_campaign=contractor-surety-bond-cost-calculator&utm_content=company_post"
+        text = (
+            f"Securing a $50,000 contractor surety bond at a 1.5% preferred underwriting rate costs $750 per year versus $2,500 in standard tiers.\n\n"
+            f"Under the Federal Miller Act (40 U.S.C. Sections 3131-3134) and state contractor licensing statutes, surety bond premiums scale directly with bond penalty limits and underwriter credit tiers.\n\n"
+            f"Key findings from our surety underwriting calculator:\n"
+            f"• A $50,000 bond penalty at a 1.5% preferred rate requires a $750 annual premium ($1,750 saved vs 5.0% standard risk rates).\n"
+            f"• Federal construction contracts exceeding $150,000 mandate 100% performance and payment bond coverage.\n"
+            f"• Surety premiums are 100% deductible as ordinary and necessary business expenses under IRC Section 162.\n\n"
+            f"Estimate your exact contractor license or Miller Act bond premium:\n"
+            f"{url}\n\n"
+            f"#SuretyBonds #ConstructionFinance #MillerAct #Contractors #CommercialInsurance #CFO"
+        )
+    elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
+        url = f"{POST_URL_BASE}/tools/crypto-tax-form-1099-da-mandatory-reporting/?proceeds=50000&cost_basis=30000&utm_source=linkedin&utm_medium=social&utm_campaign=crypto-tax-form-1099-da-mandatory-reporting&utm_content=company_post"
+        text = (
+            f"Reconciling $30,000 in verified cost basis against $50,000 in Form 1099-DA proceeds prevents $10,500 in overpaid tax ($7,000 vs $17,500).\n\n"
+            f"Under IRC Section 6045 and Treasury Decision 10000, custodial digital asset brokers report gross proceeds on IRS Form 1099-DA, often omitting historical cost basis for wallet-to-exchange transfers.\n\n"
+            f"Key statutory rules in our Form 1099-DA reconciliation engine:\n"
+            f"• On $50,000 gross proceeds with $30,000 verified basis, true tax at 35% is $7,000 instead of $17,500 on unadjusted proceeds.\n"
+            f"• Unverified TIN or missing basis documentation risks 24% statutory backup withholding under IRC Section 3406.\n"
+            f"• Wallet-by-wallet specific identification under Rev. Proc. 2024-28 is mandatory to defend cost basis lots.\n\n"
+            f"Audit your Form 1099-DA gross proceeds and cost basis exposure:\n"
+            f"{url}\n\n"
+            f"#Form1099DA #CryptoTax #DigitalAssets #TaxCompliance #IRSSection6045 #Accounting"
+        )
+    elif slug == "equipment-lease-vs-buy-section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/equipment-lease-vs-buy-section-179-calculator/?equipment_cost=180000&marginal_tax_rate=0.32&year_one_financing_payments=39600&utm_source=linkedin&utm_medium=social&utm_campaign=equipment-lease-vs-buy-section-179-calculator&utm_content=company_post"
+        text = (
+            f"Acquiring $180,000 in commercial machinery at a 32% tax rate captures a $57,600 Year-1 IRC Section 179 tax shield versus leasing.\n\n"
+            f"Capital-intensive operators evaluating equipment acquisition in 2026 must weigh upfront IRC Section 179 expensing ($2,560,000 limit) against IRC Section 162(a)(3) operating lease deductions.\n\n"
+            f"Key findings from our Lease vs Buy NPV engine:\n"
+            f"• Purchasing $180,000 of equipment yields a $57,600 Year-1 tax reduction at a 32% marginal rate ($122,400 net after-tax cost).\n"
+            f"• Operating lease payments of $39,600/yr deduct $12,672 in Year-1 tax while preserving $140,400 in upfront treasury cash.\n"
+            f"• State Section 179 conformity caps and opportunity cost of capital determine the 5-year after-tax breakeven.\n\n"
+            f"Run a side-by-side Section 179 buy versus operating lease simulation:\n"
+            f"{url}\n\n"
+            f"#Section179 #EquipmentFinancing #LeaseVsBuy #CFO #CapitalAllocation #TaxStrategy"
+        )
+    elif slug == "invoice-factoring-vs-business-line-of-credit-calculator":
+        url = f"{POST_URL_BASE}/tools/invoice-factoring-vs-business-line-of-credit-calculator/?invoice_face_value=100000&factor_fee_rate=0.025&utm_source=linkedin&utm_medium=social&utm_campaign=invoice-factoring-vs-business-line-of-credit-calculator&utm_content=company_post"
+        text = (
+            f"A 2.5% 30-day factoring fee on $100,000 in B2B receivables costs $2,500 upfront, equating to a 30.4% annualized APR.\n\n"
+            f"Commercial operators bridging net-30 to net-90 accounts receivable gaps must convert flat UCC Article 9 factoring discount fees into true annualized APRs to compare against revolving bank lines.\n\n"
+            f"Key findings from our working capital cost engine:\n"
+            f"• Factoring a $100,000 invoice at a 2.5% 30-day discount charges $2,500 (30.4% APR on face value, 35.8% effective APR on an 85% advance).\n"
+            f"• Drawing $85,000 on a 10.5% commercial line of credit for 30 days costs $734 in interest, saving $1,766 per turn.\n"
+            f"• Factoring fees and revolving credit interest are deductible subject to IRC Section 163(j) 30% ATI limits.\n\n"
+            f"Compare your invoice factoring discount fee against revolving credit APR:\n"
+            f"{url}\n\n"
+            f"#WorkingCapital #InvoiceFactoring #CommercialCredit #CFO #TreasuryManagement #B2BFinance"
+        )
+    elif slug == "medical-and-dental-equipment-section-179-roi-calculator":
+        url = f"{POST_URL_BASE}/tools/medical-and-dental-equipment-section-179-roi-calculator/?equipment_cost=150000&marginal_tax_rate=0.35&annual_procedure_net_revenue=96000&utm_source=linkedin&utm_medium=social&utm_campaign=medical-and-dental-equipment-section-179-roi-calculator&utm_content=company_post"
+        text = (
+            f"Deploying $150,000 into clinical imaging or CBCT equipment at a 35% marginal rate captures $52,500 in Year-1 Section 179 tax savings.\n\n"
+            f"Medical, dental, and surgical practices acquiring diagnostic hardware in 2026 can combine IRC Section 179 first-year expensing with procedure reimbursement cash flows to compress payback horizons.\n\n"
+            f"Key findings from our clinical CapEx ROI model:\n"
+            f"• A $150,000 equipment purchase in the 35% bracket generates a $52,500 immediate tax shield, lowering net cost to $97,500.\n"
+            f"• Paired with $96,000 in annual net procedure revenue ($8,000/mo), full after-tax capital payback occurs in 12.2 months.\n"
+            f"• Equipment must be placed in service by December 31 with over 50% clinical business use under IRC Section 179.\n\n"
+            f"Model your practice equipment Section 179 write-off and payback period:\n"
+            f"{url}\n\n"
+            f"#HealthcareFinance #DentalPractice #Section179 #MedicalEquipment #PracticeManagement #TaxPlanning"
+        )
+    elif slug == "r-and-d-tax-credit-section-174-amortization-calculator":
+        url = f"{POST_URL_BASE}/tools/r-and-d-tax-credit-section-174-amortization-calculator/?current_qre_spend=800000&prior_three_year_avg_qre=500000&asc_credit_rate=0.14&utm_source=linkedin&utm_medium=social&utm_campaign=r-and-d-tax-credit-section-174-amortization-calculator&utm_content=company_post"
+        text = (
+            f"On $800,000 in domestic software QREs ($500k 3-year base), IRC Section 41(c)(4) delivers a $77,000 R&D tax credit alongside Section 174.\n\n"
+            f"Engineering and SaaS companies must simultaneously model mandatory 5-year domestic R&D capitalization under IRC Section 174 and dollar-for-dollar Alternative Simplified Credit (ASC) offsets under Section 41.\n\n"
+            f"Key statutory findings from our R&D tax model:\n"
+            f"• $800,000 in current QREs above a $500,000 3-year average generates a $77,000 gross ASC credit (14% above 50% base).\n"
+            f"• Section 174 mid-year convention limits Year-1 domestic amortization to 10% ($80,000), deferring $720,000 across Years 2-6.\n"
+            f"• Electing the IRC Section 280C(c) reduced credit preserves full amortization deductions while avoiding taxable income add-backs.\n\n"
+            f"Calculate your Section 41 R&D credit and 5-year Section 174 schedule:\n"
+            f"{url}\n\n"
+            f"#RDTaxCredit #Section174 #Section41 #SaaSFinance #StartupTax #CFO"
+        )
+    elif slug == "s-corp-reasonable-salary-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=linkedin&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator&utm_content=company_post"
+        text = (
+            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $19,125 in annual FICA payroll tax.\n\n"
+            f"Under IRC Section 1366 and IRS Revenue Ruling 74-44, S-corporation shareholder-employees must pay reasonable W-2 compensation before taking FICA-exempt pass-through distributions.\n\n"
+            f"Key findings from our S-Corp compensation optimizer:\n"
+            f"• Shielding $125,000 in K-1 distributions from the 15.3% self-employment tax rate yields $19,125 in gross FICA savings.\n"
+            f"• Lower W-2 wages reduce the W-2 wage base available for the 20% IRC Section 199A QBI deduction.\n"
+            f"• BLS OEWS occupational wage percentiles anchor audit-defensible officer compensation benchmarks.\n\n"
+            f"Model your exact S-Corp W-2 salary, FICA savings, and Section 199A QBI impact:\n"
+            f"{url}\n\n"
+            f"#SCorp #TaxStrategy #ReasonableCompensation #SmallBusinessTax #Section199A #CPA"
+        )
+    elif slug == "section-301-tariff-landed-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800&utm_source=linkedin&utm_medium=social&utm_campaign=section-301-tariff-landed-cost-calculator&utm_content=company_post"
+        text = (
+            f"A $120,000 FOB import shipment hit with a 28.5% combined HTSUS and Section 301 duty plus $6,800 fees reaches $161,000 landed cost.\n\n"
+            f"Pursuant to Trade Act of 1974 Section 301 (19 U.S.C. Section 2411) and 19 CFR Part 24, importers must stack punitive Section 301 surcharges onto base MFN duties and CBP processing fees.\n\n"
+            f"Key findings from our import landed cost engine:\n"
+            f"• $120,000 FOB value incurs $34,200 in combined duty (28.5%) plus $6,800 freight/MPF/HMF, totaling $161,000 (+34.2% over FOB).\n"
+            f"• CBP Merchandise Processing Fee (0.3464%, capped at $634.62) and Harbor Maintenance Fee (0.125%) compound on ocean entries.\n"
+            f"• Customs duties and freight capitalize into inventory cost under IRC Section 263A (UNICAP).\n\n"
+            f"Calculate your exact HTSUS duty, Section 301 tariff, and unit landed cost:\n"
+            f"{url}\n\n"
+            f"#Section301 #Tariffs #SupplyChain #ImportCompliance #LandedCost #CFO"
+        )
+    elif slug == "workers-comp-and-payroll-burden-calculator":
+        url = f"{POST_URL_BASE}/tools/workers-comp-and-payroll-burden-calculator/?annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45&utm_source=linkedin&utm_medium=social&utm_campaign=workers-comp-and-payroll-burden-calculator&utm_content=company_post"
+        text = (
+            f"On $500,000 in annual payroll, an 8.65% statutory tax rate plus $3.45/$100 workers comp rate adds $60,500 (+12.1%) in employer burden.\n\n"
+            f"Under IRC Sections 3111 and 3301 alongside state NCCI workers compensation manuals, true employee cost extends well beyond base W-2 wages.\n\n"
+            f"Key findings from our labor burden modeling engine:\n"
+            f"• $500,000 covered payroll incurs $43,250 in statutory FICA/FUTA/SUTA taxes and $17,250 in workers comp premium ($60,500 total burden).\n"
+            f"• Lowering your Experience Modification Rate (EMR) from 1.20 to 0.85 cuts annual workers comp premiums by nearly 30%.\n"
+            f"• Accurate per-hour labor burden pricing prevents margin erosion on fixed-bid commercial contracts.\n\n"
+            f"Calculate your fully burdened payroll and NCCI workers comp cost:\n"
+            f"{url}\n\n"
+            f"#PayrollTax #WorkersComp #LaborBurden #HRTech #ConstructionFinance #CFO"
+        )
     else:
         url = _build_parameterized_calculator_url(
             slug,
@@ -1534,7 +1820,9 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     citations = get_dual_dataset_citations(slug)
     stat_cite = citations["statutory_source"]
     econ_cite = citations["economic_source"]
-    first_comment = f"Model your exact scenario live on ProfitHelm: {url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
+    fc_url = _with_first_comment_utm(url)
+    first_comment = f"Model your exact scenario live on ProfitHelm: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
+    teaser_content = _build_zero_link_teaser_content(text, platform="linkedin", brand="ProfitHelm")
 
     cid = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID")
     if not cid:
@@ -1546,14 +1834,18 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             cid = DEFAULT_TENANT_LINKEDIN_IDS.get(prop, LINKEDIN_COMPANY_ID)
 
     assert_linkedin(text)
+    assert_linkedin(teaser_content)
     return {
         "platform": "linkedin",
         "entity_type": "company",
         "company_id": cid,
+        "post_mode": "zero_link_teaser_plus_first_comment",
         "target_url": url,
+        "first_comment_url": fc_url,
         "content": text,
+        "teaser_content": teaser_content,
         "first_comment": first_comment,
-        "command_hint": f'linkedin-cli post "{text[:80]}..." --company-id {cid}',
+        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {cid}',
     }
 
 
@@ -1562,89 +1854,155 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     tool = _resolve_tool(tool_slug)
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
-    url = _build_parameterized_calculator_url(
+    full_url = _build_parameterized_calculator_url(
         slug,
         proof["query_params"],
         {"utm_source": "x", "utm_medium": "social", "utm_campaign": slug},
     )
+    url = full_url
 
-    if tool_slug == "irs-2027-tax-brackets":
+    if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
             f"a $125k single filer in CA faces a +$4,349 (+22.7%) federal tax jump as brackets revert.\n\n"
             f"run your 2027 numbers:\n{url}"
         )
-    elif tool_slug == "crypto-tax-calculator":
+    elif slug == "crypto-tax-calculator":
         url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&state=CA&utm_source=x&utm_medium=social&utm_campaign=crypto-tax-calculator"
         text = (
             f"IRS Form 1099-DA matching is live. $60k in swaps and staking triggers $15,000 in tax.\n\n"
             f"check your 1099-DA tax:\n{url}"
         )
-    elif tool_slug == "saas-runway-calculator":
+    elif slug == "saas-runway-calculator":
         url = f"{POST_URL_BASE}/tools/saas-runway-calculator/?cash=1200000&burn=65000&rev=25000&utm_source=x&utm_medium=social&utm_campaign=saas-runway-calculator"
         text = (
-            f"dividing $1.2M cash by $65k gross burn misses 7.8 months of compounding MRR runway.\n\n"
+            f"dividing $1.2M cash by $65k gross burn misses 7.8 months of MRR runway (26.3 mo ZCD).\n\n"
             f"model your zero cash date:\n{url}"
         )
-    elif tool_slug == "prediction-market-odds":
+    elif slug == "prediction-market-odds":
         url = f"{POST_URL_BASE}/tools/prediction-market-odds/?yes=52&no=44&capital=10000&utm_source=x&utm_medium=social&utm_campaign=prediction-market-odds"
         text = (
             f"52c Kalshi Yes + 44c Polymarket No locks a 4.0% synthetic spread ($400 net on $10k).\n\n"
             f"check odds and kelly size:\n{url}"
         )
-    elif tool_slug == "tcja-sunset-capital-gains":
+    elif slug == "tcja-sunset-capital-gains":
         url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&state=CA&utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"$150k salary + $100k gain in CA hits a 30.2% effective rate once 3.8% NIIT bites.\n\n"
+            f"$150k salary + $100k gain in CA hits a 30.2% rate ($30,200 tax) once 3.8% NIIT bites.\n\n"
             f"model your capital gains:\n{url}"
         )
-    elif tool_slug == "section-179-calculator":
-        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&utm_source=x&utm_medium=social&utm_campaign=section-179-calculator"
+    elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&utm_source=x"
         text = (
             f"2026 bonus depreciation drops to 20%, but IRC 179 saves $43,750 tax on $125k gear.\n\n"
             f"calculate your write-off:\n{url}"
         )
-    elif tool_slug == "treasury-yield-calculator":
+    elif slug == "treasury-yield-calculator":
         url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&state=CA&utm_source=x&utm_medium=social&utm_campaign=treasury-yield-calculator"
         text = (
             f"a 4.80% T-Bill in CA equals a 6.13% HYSA via 31 USC 3124 (+$3,212/yr on $250k).\n\n"
             f"compare after-tax yield:\n{url}"
         )
-    elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?gain=10000000&basis=500000&years=5&utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
+    elif slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=x"
         text = (
             f"IRC Section 1202 lets C-corp founders exclude $10M ($2,380,000 federal tax saved).\n\n"
             f"check your QSBS cap:\n{url}"
         )
-    elif tool_slug == "equipment-lease-tax-deduction":
-        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=x&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
+    elif slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=x"
         text = (
             f"with 2026 bonus depreciation at 20%, a $24k lease at 85% use deducts $20,400/yr.\n\n"
             f"compare lease vs buy:\n{url}"
         )
-    elif tool_slug == "section-1031-calculator":
+    elif slug == "section-1031-calculator":
         url = f"{POST_URL_BASE}/tools/section-1031-calculator/?sale=1500000&basis=600000&depr=250000&utm_source=x&utm_medium=social&utm_campaign=section-1031-calculator"
         text = (
             f"selling a $1.5M property ($600k basis) without a 1031 exchange triggers $292,500 tax.\n\n"
             f"model your 1031 deferral:\n{url}"
         )
-    elif tool_slug == "prediction-market-tax":
-        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&venue=kalshi&utm_source=x&utm_medium=social&utm_campaign=prediction-market-tax"
+    elif slug == "prediction-market-tax":
+        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&venue=kalshi&utm_source=x"
         text = (
-            f"a $35k Kalshi gain pays $7,840 (60/40 rate) vs $13,860 ordinary tax on Polymarket.\n\n"
+            f"a $35k Kalshi gain pays $7,840 (60/40 rate) vs $13,860 ordinary tax on Polymarket ($6,020 saved).\n\n"
             f"compare contract tax:\n{url}"
+        )
+    elif slug == "commercial-heavy-vehicle-section-179-weight-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=95000&use=90&bracket=35&utm_source=x"
+        text = (
+            f"a $95k commercial truck over 6,000 lbs GVWR at 90% business use saves $29,925 Year-1 tax.\n\n"
+            f"check your GVWR write-off:\n{url}"
+        )
+    elif slug == "contractor-surety-bond-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?bond=50000&rate=1.5&utm_source=x"
+        text = (
+            f"a $50k Miller Act contractor surety bond costs $750/yr at 1.5% preferred rate vs $2,500 standard.\n\n"
+            f"price your surety bond:\n{url}"
+        )
+    elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
+        url = f"{POST_URL_BASE}/tools/{slug}/?proceeds=50000&basis=30000&utm_source=x"
+        text = (
+            f"on $50k Form 1099-DA proceeds, verifying $30k cost basis cuts tax to $7,000 vs $17,500 unadjusted.\n\n"
+            f"audit your 1099-DA basis:\n{url}"
+        )
+    elif slug == "equipment-lease-vs-buy-section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=180000&bracket=32&lease=39600&utm_source=x"
+        text = (
+            f"buying $180k of equipment at a 32% tax rate captures a $57,600 Year-1 IRC 179 tax shield.\n\n"
+            f"compare lease vs buy:\n{url}"
+        )
+    elif slug == "invoice-factoring-vs-business-line-of-credit-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?invoice=100000&fee=2.5&utm_source=x"
+        text = (
+            f"a 2.5% 30-day factoring fee on a $100k invoice costs $2,500 (30.4% APR vs 10.5% bank LOC).\n\n"
+            f"benchmark your APR:\n{url}"
+        )
+    elif slug == "medical-and-dental-equipment-section-179-roi-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=150000&bracket=35&rev=96000&utm_source=x"
+        text = (
+            f"acquiring $150k in clinical imaging gear at 35% marginal rate saves $52,500 Year-1 tax via IRC 179.\n\n"
+            f"model your practice ROI:\n{url}"
+        )
+    elif slug == "r-and-d-tax-credit-section-174-amortization-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?qre=800000&base=500000&utm_source=x"
+        text = (
+            f"$800k in domestic software QREs ($500k base) unlocks a $77,000 IRC 41 ASC credit with Sec 174.\n\n"
+            f"model your R&D credit:\n{url}"
+        )
+    elif slug == "s-corp-reasonable-salary-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
+        text = (
+            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $19,125 in 15.3% FICA tax.\n\n"
+            f"check your S-Corp split:\n{url}"
+        )
+    elif slug == "section-301-tariff-landed-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?fob=120000&duty=28.5&fees=6800&utm_source=x"
+        text = (
+            f"a $120k FOB import at 28.5% Section 301 duty + $6,800 freight/MPF hits $161,000 landed cost.\n\n"
+            f"calculate landed cost:\n{url}"
+        )
+    elif slug == "workers-comp-and-payroll-burden-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?payroll=500000&wc=3.45&utm_source=x"
+        text = (
+            f"on $500k payroll, 8.65% FICA/FUTA + $3.45/$100 workers comp adds $60,500 (+12.1%) labor burden.\n\n"
+            f"check your labor burden:\n{url}"
         )
     else:
         dyn = _generate_dynamic_distribution_copy(tool)
         text = dyn["x_content"]
 
-    first_comment = f"model your exact numbers on ProfitHelm:\n{url}"
+    fc_url = _with_first_comment_utm(full_url)
+    first_comment = f"model your exact numbers on ProfitHelm:\n{fc_url}"
+    teaser_content = _build_zero_link_teaser_content(text, platform="x", brand="ProfitHelm")
 
     assert_x_post(text)
+    assert_x_post(teaser_content)
     return {
         "platform": "x",
-        "target_url": url,
+        "target_url": full_url,
+        "first_comment_url": fc_url,
         "content": text,
+        "teaser_content": teaser_content,
         "first_comment": first_comment,
         "char_count": len(text),
     }
@@ -1661,82 +2019,146 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
         {"utm_source": "facebook", "utm_medium": "social", "utm_campaign": slug},
     )
 
-    if tool_slug == "irs-2027-tax-brackets":
+    if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
             f"A single filer earning $125,000 in California faces an extra $4,349 (+22.7%) in federal income tax once the 24% marginal bracket reverts to 28% and standard deductions compress.\n\n"
             f"We mapped the exact 2026 vs 2027 bracket thresholds across all 50 states so you can see where your marginal dollar lands: {url}"
         )
-    elif tool_slug == "crypto-tax-calculator":
+    elif slug == "crypto-tax-calculator":
         url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&staking=5000&ordinary=85000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=crypto-tax-calculator"
         text = (
             f"With IRS Form 1099-DA exchange reporting active in 2026, $60,000 across short-term token swaps, long-term disposals, and staking rewards produces a $15,000 combined federal and state tax bill.\n\n"
             f"Here is the open calculator we built to separate ordinary staking yield from 0%/15%/20% capital gains tiers and 3.8% NIIT: {url}"
         )
-    elif tool_slug == "saas-runway-calculator":
+    elif slug == "saas-runway-calculator":
         url = f"{POST_URL_BASE}/tools/saas-runway-calculator/?cash=1200000&burn=65000&rev=25000&growth=5&utm_source=facebook&utm_medium=social&utm_campaign=saas-runway-calculator"
         text = (
             f"Dividing $1,200,000 in bank cash by $65,000 gross burn gives 18.5 months of runway, but factoring in $25,000 MRR compounding at 5% monthly extends the true Zero Cash Date to 26.3 months.\n\n"
             f"You can stress-test your net burn, hiring cohorts, and ASC 205-40 going-concern cushion here: {url}"
         )
-    elif tool_slug == "prediction-market-odds":
+    elif slug == "prediction-market-odds":
         url = f"{POST_URL_BASE}/tools/prediction-market-odds/?yes=52&no=44&capital=10000&utm_source=facebook&utm_medium=social&utm_campaign=prediction-market-odds"
         text = (
             f"When a Kalshi Yes contract trades at 52 cents and the opposing Polymarket No contract trades at 44 cents, the 96-cent combined cost locks a 4.0% synthetic spread ($400 net on $10,000).\n\n"
             f"We built a deterministic calculator to check fee-adjusted implied probabilities and Half-Kelly stake sizing: {url}"
         )
-    elif tool_slug == "tcja-sunset-capital-gains":
+    elif slug == "tcja-sunset-capital-gains":
         url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&period=long_term&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
             f"Even when statutory long-term capital gains tiers stay at 0%, 15%, and 20%, stacking a $100,000 gain on top of $150,000 salary in California pushes your effective tax rate on that gain to 30.2% ($30,200 total tax) once the unindexed $200,000 NIIT threshold kicks in.\n\n"
             f"Run your ordinary income and capital gains stack across all 50 states here: {url}"
         )
-    elif tool_slug == "section-179-calculator":
-        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&use=100&utm_source=facebook&utm_medium=social&utm_campaign=section-179-calculator"
+    elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&use=100&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
         text = (
             f"Federal bonus depreciation dropped to 20% for 2026 and hits 0% in 2027, which means equipment and heavy commercial vehicle buyers have to rely on IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out threshold) to capture full first-year write-offs.\n\n"
             f"On a $125,000 equipment purchase in the 35% bracket, Section 179 still saves $43,750 in first-year cash taxes. Check your federal and state conformity numbers here: {url}"
         )
-    elif tool_slug == "treasury-yield-calculator":
+    elif slug == "treasury-yield-calculator":
         url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&hysa=4.25&state=CA&fed=35&niit=true&utm_source=facebook&utm_medium=social&utm_campaign=treasury-yield-calculator"
         text = (
             f"Because 31 U.S.C. Section 3124 exempts direct US Treasury Bills from state and local income taxes, a 4.80% 4-week T-Bill in California equals a 6.13% high-yield savings account.\n\n"
             f"On $250,000 in treasury cash, that state tax exemption saves $3,212 a year compared to a 4.25% commercial bank HYSA. Compare your state's tax-equivalent yield here: {url}"
         )
-    elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?gain=10000000&basis=500000&years=5&utm_source=facebook&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
+    elif slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=facebook&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
         text = (
             f"Under IRC Section 1202, qualified C-corporation stock held for 5 years excludes the greater of $10,000,000 or 10x adjusted basis from federal capital gains tax ($2,380,000 in federal LTCG and NIIT saved), though non-conforming states like California still tax the exit.\n\n"
             f"Check your QSBS exclusion cap and state tax exposure here: {url}"
         )
-    elif tool_slug == "equipment-lease-tax-deduction":
-        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=facebook&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
+    elif slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
         text = (
             f"With federal bonus depreciation down to 20% in 2026, deducting $20,400 on a $24,000 operating lease (85% business use) under IRC Section 162 can beat a financed purchase when state Section 179 caps (like California's $25,000 limit) block upfront write-offs.\n\n"
             f"Run a side-by-side after-tax NPV comparison for your equipment acquisition here: {url}"
         )
-    elif tool_slug == "section-1031-calculator":
+    elif slug == "section-1031-calculator":
         url = f"{POST_URL_BASE}/tools/section-1031-calculator/?sale=1500000&basis=600000&depr=250000&rep=1800000&from=CA&to=TX&utm_source=facebook&utm_medium=social&utm_campaign=section-1031-calculator"
         text = (
             f"Selling a $1,500,000 commercial property ($600,000 adjusted basis, $250,000 accumulated depreciation) outright triggers $292,500 in immediate federal capital gains, 25% Section 1250 depreciation recapture, and 3.8% NIIT.\n\n"
             f"Rolling the proceeds into a $1,800,000 replacement property under IRC Section 1031 defers 100% of that liability. Model your boot, debt relief, and 45/180-day deadlines here: {url}"
         )
-    elif tool_slug == "prediction-market-tax":
+    elif slug == "prediction-market-tax":
         url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&status=single&state=NY&venue=kalshi&utm_source=facebook&utm_medium=social&utm_campaign=prediction-market-tax"
         text = (
             f"A $35,000 event contract gain on CFTC-regulated Kalshi incurs $7,840 in federal tax under IRC Section 1256 (60/40 blended capital gains) compared to $13,860 as ordinary income on Polymarket, saving $6,020.\n\n"
             f"Compare your Section 1256 vs ordinary event contract tax exposure here: {url}"
         )
+    elif slug == "commercial-heavy-vehicle-section-179-weight-calculator":
+        url = f"{POST_URL_BASE}/tools/commercial-heavy-vehicle-section-179-weight-calculator/?vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35&utm_source=facebook&utm_medium=social&utm_campaign=commercial-heavy-vehicle-section-179-weight-calculator"
+        text = (
+            f"Placing a $95,000 commercial truck or cargo van over 6,000 lbs GVWR in service at 90% business use unlocks $29,925 in immediate Year-1 federal tax savings under IRC Section 179(b)(5), whereas heavy SUVs cap at $30,500 plus 20% bonus depreciation.\n\n"
+            f"Check your exact vehicle weight class and Year-1 depreciation deduction here: {url}"
+        )
+    elif slug == "contractor-surety-bond-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/contractor-surety-bond-cost-calculator/?bond_penalty_amount=50000&credit_tier_rate_pct=1.5&utm_source=facebook&utm_medium=social&utm_campaign=contractor-surety-bond-cost-calculator"
+        text = (
+            f"A $50,000 contractor license or Federal Miller Act surety bond costs $750 per year at a 1.5% preferred underwriting rate compared to $2,500 per year in standard credit tiers.\n\n"
+            f"Model your bond penalty amount and credit tier rate here: {url}"
+        )
+    elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
+        url = f"{POST_URL_BASE}/tools/crypto-tax-form-1099-da-mandatory-reporting/?proceeds=50000&cost_basis=30000&utm_source=facebook&utm_medium=social&utm_campaign=crypto-tax-form-1099-da-mandatory-reporting"
+        text = (
+            f"When an exchange reports $50,000 in gross digital asset proceeds on IRS Form 1099-DA without your transfer cost basis, documenting your $30,000 basis lowers your taxable gain to $20,000 ($7,000 tax at 35% instead of $17,500).\n\n"
+            f"Reconcile your Form 1099-DA proceeds and cost basis lots here: {url}"
+        )
+    elif slug == "equipment-lease-vs-buy-section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/equipment-lease-vs-buy-section-179-calculator/?equipment_cost=180000&marginal_tax_rate=0.32&year_one_financing_payments=39600&utm_source=facebook&utm_medium=social&utm_campaign=equipment-lease-vs-buy-section-179-calculator"
+        text = (
+            f"Purchasing $180,000 in commercial machinery at a 32% marginal rate captures a $57,600 Year-1 IRC Section 179 tax shield, while an operating lease at $39,600/yr preserves upfront working capital and deducts 100% of lease payments under IRC Section 162.\n\n"
+            f"Run a side-by-side after-tax NPV comparison for your equipment acquisition here: {url}"
+        )
+    elif slug == "invoice-factoring-vs-business-line-of-credit-calculator":
+        url = f"{POST_URL_BASE}/tools/invoice-factoring-vs-business-line-of-credit-calculator/?invoice_face_value=100000&factor_fee_rate=0.025&utm_source=facebook&utm_medium=social&utm_campaign=invoice-factoring-vs-business-line-of-credit-calculator"
+        text = (
+            f"A 2.5% 30-day invoice factoring fee on $100,000 in B2B receivables costs $2,500 upfront, which equates to a 30.4% annualized APR compared to 10.5% on a commercial bank line of credit.\n\n"
+            f"Compare your invoice factoring discount fee against revolving credit APR here: {url}"
+        )
+    elif slug == "medical-and-dental-equipment-section-179-roi-calculator":
+        url = f"{POST_URL_BASE}/tools/medical-and-dental-equipment-section-179-roi-calculator/?equipment_cost=150000&marginal_tax_rate=0.35&annual_procedure_net_revenue=96000&utm_source=facebook&utm_medium=social&utm_campaign=medical-and-dental-equipment-section-179-roi-calculator"
+        text = (
+            f"Acquiring $150,000 in clinical imaging or dental CBCT equipment at a 35% marginal tax rate generates $52,500 in Year-1 IRC Section 179 tax savings, dropping the net after-tax cost to $97,500.\n\n"
+            f"Calculate your practice equipment write-off and procedure payback period here: {url}"
+        )
+    elif slug == "r-and-d-tax-credit-section-174-amortization-calculator":
+        url = f"{POST_URL_BASE}/tools/r-and-d-tax-credit-section-174-amortization-calculator/?current_qre_spend=800000&prior_three_year_avg_qre=500000&asc_credit_rate=0.14&utm_source=facebook&utm_medium=social&utm_campaign=r-and-d-tax-credit-section-174-amortization-calculator"
+        text = (
+            f"On $800,000 in domestic software QREs ($500,000 prior 3-year average), the 14% IRC Section 41 Alternative Simplified Credit delivers a $77,000 R&D tax credit to help offset mandatory 5-year Section 174 amortization.\n\n"
+            f"Model your Section 41 credit and 5-year Section 174 schedule here: {url}"
+        )
+    elif slug == "s-corp-reasonable-salary-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=facebook&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator"
+        text = (
+            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $19,125 in 15.3% FICA self-employment taxes under IRC Section 1366.\n\n"
+            f"Compare your S-Corp salary split and Section 199A QBI deduction trade-offs here: {url}"
+        )
+    elif slug == "section-301-tariff-landed-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/section-301-tariff-landed-cost-calculator/?customs_value_fob=120000&combined_duty_and_301_rate=0.285&freight_and_mpf_hmf=6800&utm_source=facebook&utm_medium=social&utm_campaign=section-301-tariff-landed-cost-calculator"
+        text = (
+            f"On a $120,000 FOB import shipment subject to a 28.5% combined HTSUS and Section 301 tariff ($34,200 duty) plus $6,800 in ocean freight, MPF, and HMF, your total landed cost reaches $161,000.\n\n"
+            f"Calculate your HTSUS duty, Section 301 surcharges, and unit margins here: {url}"
+        )
+    elif slug == "workers-comp-and-payroll-burden-calculator":
+        url = f"{POST_URL_BASE}/tools/workers-comp-and-payroll-burden-calculator/?annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45&utm_source=facebook&utm_medium=social&utm_campaign=workers-comp-and-payroll-burden-calculator"
+        text = (
+            f"On $500,000 in annual W-2 payroll, combining an 8.65% statutory FICA/FUTA/SUTA rate with a $3.45 per $100 NCCI workers compensation rate adds $60,500 (+12.1%) in mandatory employer labor burden.\n\n"
+            f"Calculate your fully burdened hourly and annual payroll cost here: {url}"
+        )
     else:
         dyn = _generate_dynamic_distribution_copy(tool)
         text = dyn["fb_content"]
 
-    first_comment = f"Interactive scenario calculator (pre-filled with baseline inputs, zero login): {url}"
+    fc_url = _with_first_comment_utm(url)
+    first_comment = f"Interactive scenario calculator (pre-filled with baseline inputs, zero login): {fc_url}"
+    teaser_content = _build_zero_link_teaser_content(text, platform="facebook", brand="ProfitHelm")
 
     return {
         "platform": "facebook",
         "target_url": url,
+        "first_comment_url": fc_url,
         "content": text,
+        "teaser_content": teaser_content,
         "first_comment": first_comment,
     }
 
@@ -3683,19 +4105,26 @@ def generate_linkedin_company_post_with_citations(tool_slug: str, stat_cite: str
         f"• Economic Benchmark: {econ_cite}"
     )
 
-    if "\n#" in content:
+    if "Empirical & Statutory Foundation:" in content:
+        new_content = content
+    elif "\n#" in content:
         parts = content.rsplit("\n#", 1)
         new_content = f"{parts[0]}{citation_block}\n\n#{parts[1]}"
     else:
         new_content = f"{content}{citation_block}"
 
-    first_comment = f"Model your exact scenario live on ProfitHelm: {base['target_url']}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
+    fc_url = _with_first_comment_utm(base["target_url"])
+    first_comment = f"Model your exact scenario live on ProfitHelm: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
+    teaser_content = _build_zero_link_teaser_content(new_content, platform="linkedin", brand="ProfitHelm")
 
     assert_linkedin(new_content)
+    assert_linkedin(teaser_content)
     return {
         **base,
         "content": new_content,
+        "teaser_content": teaser_content,
         "first_comment": first_comment,
+        "first_comment_url": fc_url,
         "statutory_source": stat_cite,
         "economic_source": econ_cite,
     }
@@ -3709,16 +4138,26 @@ def generate_facebook_post_with_citations(tool_slug: str, stat_cite: str, econ_c
 
     fb_citation = f" Grounded in statutory {stat_cite} rules and empirical {econ_cite} benchmarks."
 
-    if "\n#" in content:
+    if "Grounded in statutory " in content:
+        new_content = content
+    elif "\n#" in content:
         parts = content.rsplit("\n#", 1)
         new_content = f"{parts[0]}{fb_citation}\n\n#{parts[1]}"
     else:
         new_content = f"{content}{fb_citation}"
 
+    fc_url = _with_first_comment_utm(base["target_url"])
+    first_comment = f"Interactive scenario calculator (pre-filled with baseline inputs, zero login): {fc_url}"
+    teaser_content = _build_zero_link_teaser_content(new_content, platform="facebook", brand="ProfitHelm")
+
     assert_no_forbidden_dashes(new_content, context=f"{tool_slug} facebook post")
+    assert_no_forbidden_dashes(teaser_content, context=f"{tool_slug} facebook teaser")
     return {
         **base,
         "content": new_content,
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "first_comment_url": fc_url,
         "statutory_source": stat_cite,
         "economic_source": econ_cite,
     }
@@ -3729,90 +4168,167 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     from pseofactory.contracts import assert_x_post
     tool = _resolve_tool(tool_slug)
     slug = tool["slug"]
-    url = f"{POST_URL_BASE}/tools/{slug}/?utm_source=x&utm_medium=social&utm_campaign={slug}"
+    proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
+    full_url = _build_parameterized_calculator_url(
+        slug,
+        proof["query_params"],
+        {"utm_source": "x", "utm_medium": "social", "utm_campaign": slug},
+    )
+    url = full_url
     s_stat, s_econ = _abbreviate_citations_for_x(stat_cite, econ_cite)
 
-    if tool_slug == "irs-2027-tax-brackets":
+    if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
             f"a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "crypto-tax-calculator":
+    elif slug == "crypto-tax-calculator":
         url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&state=CA&utm_source=x&utm_medium=social&utm_campaign=crypto-tax-calculator"
         text = (
             f"$60k in crypto swaps and staking triggers $15,000 tax under Form 1099-DA.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "saas-runway-calculator":
+    elif slug == "saas-runway-calculator":
         url = f"{POST_URL_BASE}/tools/saas-runway-calculator/?cash=1200000&burn=65000&rev=25000&utm_source=x&utm_medium=social&utm_campaign=saas-runway-calculator"
         text = (
-            f"dividing $1.2M cash by $65k gross burn misses 7.8 months of MRR runway.\n\n"
+            f"dividing $1.2M cash by $65k gross burn misses 7.8 mo of MRR runway (26.3 mo ZCD).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "prediction-market-odds":
+    elif slug == "prediction-market-odds":
         url = f"{POST_URL_BASE}/tools/prediction-market-odds/?yes=52&no=44&capital=10000&utm_source=x&utm_medium=social&utm_campaign=prediction-market-odds"
         text = (
             f"52c Kalshi Yes + 44c Polymarket No locks a 4.0% synthetic spread ($400 on $10k).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "tcja-sunset-capital-gains":
+    elif slug == "tcja-sunset-capital-gains":
         url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&state=CA&utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
         text = (
-            f"$150k salary + $100k gain in CA hits a 30.2% rate once 3.8% NIIT bites.\n\n"
+            f"$150k salary + $100k gain in CA hits a 30.2% rate ($30,200 tax) via 3.8% NIIT.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "section-179-calculator":
-        url = f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&utm_source=x&utm_medium=social&utm_campaign=section-179-calculator"
+    elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&utm_source=x"
         text = (
             f"2026 bonus depreciation drops to 20%, but IRC 179 saves $43,750 tax on $125k gear.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "treasury-yield-calculator":
+    elif slug == "treasury-yield-calculator":
         url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&state=CA&utm_source=x&utm_medium=social&utm_campaign=treasury-yield-calculator"
         text = (
             f"a 4.80% T-Bill in CA equals a 6.13% HYSA (+$3,212/yr on $250k).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "section-1031-calculator":
+    elif slug == "section-1031-calculator":
         url = f"{POST_URL_BASE}/tools/section-1031-calculator/?sale=1500000&basis=600000&depr=250000&utm_source=x&utm_medium=social&utm_campaign=section-1031-calculator"
         text = (
             f"exchanging a $1.5M property ($600k basis) defers $292,500 in tax.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "prediction-market-tax":
-        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&venue=kalshi&utm_source=x&utm_medium=social&utm_campaign=prediction-market-tax"
+    elif slug == "prediction-market-tax":
+        url = f"{POST_URL_BASE}/tools/prediction-market-tax/?pmgain=35000&income=120000&venue=kalshi&utm_source=x"
         text = (
-            f"$35k Kalshi gain pays $7,840 (60/40 rate) vs $13,860 ordinary tax on Polymarket.\n\n"
+            f"$35k Kalshi gain pays $7,840 (60/40) vs $13,860 Polymarket tax ($6,020 saved).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?utm_source=x&utm_medium=social&utm_campaign=tcja-sunset-capital-gains"
+    elif slug == "qsbs-section-1202-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=x"
         text = (
-            f"IRC 1202 lets C-corp founders exclude up to $10M or 10x basis from federal exit tax.\n\n"
+            f"IRC 1202 lets C-corp founders exclude $10M ($2,380,000 federal exit tax saved).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
-    elif tool_slug == "equipment-lease-tax-deduction":
-        url = f"{POST_URL_BASE}/tools/equipment-lease-tax-deduction/?utm_source=x&utm_medium=social&utm_campaign=equipment-lease-tax-deduction"
+    elif slug == "equipment-lease-tax-deduction":
+        url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=x"
         text = (
-            f"operating lease write-offs vs 20% bonus depreciation and IRC 179 caps.\n\n"
+            f"a $24k operating lease at 85% business use deducts $20,400/yr under IRC 162.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "commercial-heavy-vehicle-section-179-weight-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=95000&use=90&bracket=35&utm_source=x"
+        text = (
+            f"a $95k truck >6,000 lbs GVWR at 90% business use saves $29,925 Year-1 tax.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "contractor-surety-bond-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?bond=50000&rate=1.5&utm_source=x"
+        text = (
+            f"a $50k Miller Act surety bond costs $750/yr at 1.5% preferred vs $2,500 standard.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
+        url = f"{POST_URL_BASE}/tools/{slug}/?proceeds=50000&basis=30000&utm_source=x"
+        text = (
+            f"on $50k Form 1099-DA proceeds, $30k verified basis cuts tax to $7,000 vs $17,500.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "equipment-lease-vs-buy-section-179-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=180000&bracket=32&lease=39600&utm_source=x"
+        text = (
+            f"buying $180k of gear at 32% tax rate captures a $57,600 Year-1 IRC 179 shield.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "invoice-factoring-vs-business-line-of-credit-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?invoice=100000&fee=2.5&utm_source=x"
+        text = (
+            f"a 2.5% 30-day factoring fee on $100k costs $2,500 (30.4% APR vs 10.5% bank LOC).\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "medical-and-dental-equipment-section-179-roi-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?cost=150000&bracket=35&rev=96000&utm_source=x"
+        text = (
+            f"acquiring $150k in clinical imaging gear at 35% saves $52,500 Year-1 IRC 179 tax.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "r-and-d-tax-credit-section-174-amortization-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?qre=800000&base=500000&utm_source=x"
+        text = (
+            f"$800k in software QREs ($500k base) unlocks a $77,000 IRC 41 credit with Sec 174.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "s-corp-reasonable-salary-tax-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
+        text = (
+            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $19,125 in FICA tax.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "section-301-tariff-landed-cost-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?fob=120000&duty=28.5&fees=6800&utm_source=x"
+        text = (
+            f"a $120k FOB import at 28.5% Section 301 duty + $6,800 fees hits $161,000 landed.\n\n"
+            f"Grounded in {s_stat} and {s_econ}.\n"
+            f"{url}"
+        )
+    elif slug == "workers-comp-and-payroll-burden-calculator":
+        url = f"{POST_URL_BASE}/tools/{slug}/?payroll=500000&wc=3.45&utm_source=x"
+        text = (
+            f"on $500k payroll, 8.65% FICA/FUTA + $3.45/$100 workers comp adds $60,500 burden.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
     else:
-        clean_title = tool.get("short_title", tool_slug.replace("-", " ").title())[:24].lower()
+        clean_title = tool.get("short_title", slug.replace("-", " ").title())[:24].lower()
+        out_fmt = proof["published_output_formatted"]
         text = (
-            f"deterministic statutory model for {clean_title}.\n\n"
+            f"statutory model for {clean_title} verifies {out_fmt} benchmark.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -3834,13 +4350,18 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
         else:
             text = text[:280]
 
-    first_comment = f"model your exact numbers on ProfitHelm:\n{url}"
+    fc_url = _with_first_comment_utm(full_url)
+    first_comment = f"model your exact numbers on ProfitHelm:\n{fc_url}"
+    teaser_content = _build_zero_link_teaser_content(text, platform="x", brand="ProfitHelm")
 
     assert_x_post(text)
+    assert_x_post(teaser_content)
     return {
         "platform": "x",
-        "target_url": url,
+        "target_url": full_url,
+        "first_comment_url": fc_url,
         "content": text,
+        "teaser_content": teaser_content,
         "first_comment": first_comment,
         "char_count": len(text),
         "statutory_source": stat_cite,
@@ -4238,7 +4759,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "BENCHMARK YOUR WORKING CAPITAL APR:\n"
-            "A 2.5% 30-day invoice factoring fee on $100,000 in B2B receivables equates to a 30.4% annualized APR compared to 9% to 12% on a commercial line of credit.\n\n"
+            "A 2.5% 30-day invoice factoring fee ($2,500 fee) on $100,000 in B2B receivables equates to a 30.4% annualized APR compared to 9% to 12% on a commercial line of credit.\n\n"
             "Compare factoring fees against revolving credit live on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/invoice-factoring-vs-business-line-of-credit-calculator/?invoice_face_value=100000&factor_fee_rate=0.025&utm_source=youtube&utm_medium=video&utm_campaign=invoice-factoring-vs-business-line-of-credit-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under UCC Article 9, Truth in Lending APR math, and IRC Section 163(j)."
@@ -4333,7 +4854,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "section-179-vehicle-equipment-deduction": {
         "title": "Section 179 Commercial Vehicle & Equipment Deduction Tool",
-        "preset_query": "lease_annual_payment=24000&business_use_pct=0.85",
+        "preset_query": "cost=125000&year=2026&bracket=35&use=100",
         "chapters": [
             "IRC Section 179 Commercial Vehicle & Machinery Scope",
             "Section 280F Passenger Auto Caps vs Heavy Fleet Assets",
@@ -4342,9 +4863,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR COMMERCIAL FLEET & EQUIPMENT WRITE-OFF:\n"
-            "Combining IRC Section 179 expensing ($2,560,000 cap) with 20% bonus depreciation unlocks a $20,400 deduction on $24,000 commercial vehicle and equipment commitments at 85% business use.\n\n"
+            "Deploying $125,000 into qualifying commercial vehicles and equipment under IRC Section 179 ($2,560,000 cap) saves $43,750 in Year-1 cash taxes at a 35% marginal rate.\n\n"
             "Run your commercial vehicle and equipment numbers on ProfitHelm:\n"
-            f"{POST_URL_BASE}/tools/section-179-vehicle-equipment-deduction/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=youtube&utm_medium=video&utm_campaign=section-179-vehicle-equipment-deduction-demo&utm_content=pinned_comment\n\n"
+            f"{POST_URL_BASE}/tools/section-179-vehicle-equipment-deduction/?cost=125000&year=2026&bracket=35&use=100&utm_source=youtube&utm_medium=video&utm_campaign=section-179-vehicle-equipment-deduction-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under IRC Section 179, Section 168(k), and Section 280F."
         ),
         "tags": [
@@ -5531,16 +6052,22 @@ def generate_social_syndication_pack(
     stat_cite = citations["statutory_source"]
     econ_cite = citations["economic_source"]
 
-    if include_citations:
+    if norm_prop == "prexvo":
+        base_url = f"https://prexvo.com/tools/{slug}/"
+        li_pack = _generate_prexvo_linkedin(tool, base_url)
+        x_pack = _generate_prexvo_x(tool, base_url)
+        fb_pack = _generate_prexvo_facebook(tool, base_url)
+        first_comment = li_pack.get("first_comment", f"Model your exact scenario on Prexvo:\n{url}")
+    elif include_citations:
         li_pack = generate_linkedin_company_post_with_citations(slug, stat_cite, econ_cite)
         x_pack = generate_x_post_with_citations(slug, stat_cite, econ_cite)
         fb_pack = generate_facebook_post_with_citations(slug, stat_cite, econ_cite)
+        first_comment = li_pack.get("first_comment", f"Model your exact scenario live on ProfitHelm: {url}")
     else:
         li_pack = generate_linkedin_company_post(slug)
         x_pack = generate_x_post(slug)
         fb_pack = generate_facebook_post(slug)
-
-    first_comment = li_pack.get("first_comment", f"Model your exact scenario live on ProfitHelm: {url}")
+        first_comment = li_pack.get("first_comment", f"Model your exact scenario live on ProfitHelm: {url}")
 
     return {
         "tool_slug": slug,
@@ -6116,7 +6643,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "paye-sunset-calculator": {
         "query": "balance=85000&agi=90000&rate=6.5&deps=0",
-        "x_hook": "on $85k graduate debt at $90k AGI, staying grandfathered in PAYE keeps 20-yr forgiveness vs 25 yrs on legacy IBR.",
+        "x_hook": "on $85k graduate debt at $90k AGI, staying grandfathered in PAYE keeps 20-yr (240-payment) forgiveness vs 300 on IBR.",
         "li_hook": "Graduate borrowers with $85,000 in Direct Loans face a critical 5-year forgiveness penalty if they exit grandfathered PAYE into legacy IBR during the 2026 sunset.",
         "li_body": (
             "Evaluating the 2026 Pay As You Earn (PAYE) sunset under 34 CFR 685.209 requires comparing three interacting statutory levers:\n\n"
@@ -6131,7 +6658,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "icr-repayment-calculator": {
         "query": "balance=75000&agi=80000&rate=7.5&deps=0",
-        "x_hook": "Parent PLUS borrowers on ICR pay the lesser of 20% discretionary income or a 12-year income-adjusted fixed schedule.",
+        "x_hook": "Parent PLUS borrowers on ICR pay the lesser of 20% discretionary income or a 12-yr fixed schedule toward 120 PSLF payments.",
         "li_hook": "For consolidated Parent PLUS borrowers, ICR's dual formula (20% discretionary income vs 12-year income-adjusted fixed factor) often triggers the 12-year cap first.",
         "li_body": (
             "Income-Contingent Repayment (ICR) under 34 CFR 685.209(b) is the sole income-driven plan accessible to single-consolidated Parent PLUS loans, and its math differs sharply from RAP and IBR:\n\n"
@@ -6221,7 +6748,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "parent-plus-double-consolidation-repayment-calculator": {
         "query": "balance=110000&agi=88000&rate=7.6&deps=0",
-        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430/mo (10% RAP).",
+        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430.42/mo (10% RAP).",
         "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% RAP via two-step Direct Consolidation cuts monthly obligations from $1,196.67 (ICR) to $430.42.",
         "li_body": (
             "Parent PLUS loans carry the highest statutory interest rates under Title IV and are barred from direct enrollment in 10% IDR plans unless consolidated properly:\n\n"
@@ -6236,7 +6763,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "parent-plus-double-consolidation": {
         "query": "balance=110000&agi=88000&rate=7.6&deps=0",
-        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430/mo (10% RAP).",
+        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430.42/mo (10% RAP).",
         "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% RAP via two-step Direct Consolidation cuts monthly obligations from $1,196.67 (ICR) to $430.42.",
         "li_body": (
             "Parent PLUS loans carry the highest statutory interest rates under Title IV and are barred from direct enrollment in 10% IDR plans unless consolidated properly:\n\n"
@@ -6337,10 +6864,26 @@ def _generate_prexvo_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     if len(clean_post) > 280:
         clean_post = _sanitize_distribution_text(f"{scen['x_hook']}\n{deep_url}")
     if len(clean_post) > 280:
+        short_param_url = f"{url}{sep}{scen['query']}&utm_source=x"
+        clean_post = _sanitize_distribution_text(f"{scen['x_hook']}\n{short_param_url}")
+    if len(clean_post) > 280:
         short_url = f"{url}{sep}utm_source=x"
         clean_post = _sanitize_distribution_text(f"{scen['x_hook'][:270 - len(short_url)]}\n{short_url}")
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = f"model your exact numbers on Prexvo:\n{fc_url}"
+    teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="Prexvo")
     assert_x_post(clean_post)
-    return {"platform": "x", "target_url": deep_url, "content": clean_post, "character_count": len(clean_post)}
+    assert_x_post(teaser_content)
+    return {
+        "platform": "x",
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "content": clean_post,
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "char_count": len(clean_post),
+        "character_count": len(clean_post),
+    }
 
 
 def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
@@ -6367,13 +6910,25 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
         f"#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt"
     )
     clean_content = _sanitize_distribution_text(raw_text)
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = (
+        f"Model your exact scenario on Prexvo:\n{fc_url}\n\n"
+        f"Authority: Title IV Higher Education Act (34 CFR Part 685)\n"
+        f"Benchmark: HHS Poverty Guidelines and Department of Education Federal Student Aid"
+    )
+    teaser_content = _build_zero_link_teaser_content(clean_content, platform="linkedin", brand="Prexvo")
     assert_linkedin(clean_content)
+    assert_linkedin(teaser_content)
     return {
         "platform": "linkedin",
+        "entity_type": "company",
         "company_id": company_id,
         "target_url": deep_url,
+        "first_comment_url": fc_url,
         "content": clean_content,
-        "first_comment": f"Model your exact scenario on Prexvo:\n{deep_url}",
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "char_count": len(clean_content),
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
     }
@@ -6386,12 +6941,18 @@ def _generate_prexvo_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     deep_url = f"{url}{sep}{scen['query']}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
     raw_text = f"{scen['fb_body']}\n\nRun your numbers here: {deep_url}"
     clean_content = _sanitize_distribution_text(raw_text)
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = f"Interactive Title IV scenario calculator (pre-filled, zero login): {fc_url}"
+    teaser_content = _build_zero_link_teaser_content(clean_content, platform="facebook", brand="Prexvo")
     assert_no_forbidden_dashes(clean_content, context=f"{slug} facebook")
+    assert_no_forbidden_dashes(teaser_content, context=f"{slug} facebook teaser")
     return {
         "platform": "facebook",
         "content": clean_content,
+        "teaser_content": teaser_content,
         "target_url": deep_url,
-        "first_comment": f"Interactive Title IV scenario calculator (pre-filled, zero login): {deep_url}",
+        "first_comment_url": fc_url,
+        "first_comment": first_comment,
     }
 
 
@@ -6723,6 +7284,243 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     return distribution_pack
 
 
+def _build_facebook_groups_catalog_entry(
+    slug: str,
+    tool_spec: Dict[str, Any],
+    pack: Dict[str, Any],
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Builds a deterministic Facebook Groups community distribution catalog entry
+    using native zero-link teaser content + first-comment parameterized deep links.
+    Zero em-dashes. Zero en-dashes.
+    """
+    norm_prop = _normalize_property_id(property_id)
+    title = str(tool_spec.get("short_title") or tool_spec.get("title") or slug.replace("-", " ").title())
+    fb_pack = pack.get("facebook") if isinstance(pack.get("facebook"), dict) else {}
+    teaser = str(fb_pack.get("teaser_content") or _build_zero_link_teaser_content(str(fb_pack.get("content") or "")))
+    first_comment = str(fb_pack.get("first_comment") or pack.get("first_comment") or "")
+    target_url = str(fb_pack.get("first_comment_url") or fb_pack.get("target_url") or pack.get("parameterized_url") or "")
+
+    if norm_prop == "prexvo":
+        if "pslf" in slug or "teacher" in slug:
+            queries = ["PSLF public service loan forgiveness", "educators student debt relief", "nonprofit borrowers Title IV"]
+            group_names = ["Public Service Loan Forgiveness (PSLF) Support", "Educators & Healthcare Student Debt Strategy"]
+        elif "parent" in slug or "joint" in slug:
+            queries = ["Parent PLUS loan repayment strategy", "spousal consolidation loan separation", "federal student loan borrowers"]
+            group_names = ["Parent PLUS & Family Education Finance", "Federal Student Loan Consolidation Forum"]
+        else:
+            queries = ["2026 RAP vs IBR student loans", "federal student loan repayment planning", "graduate borrower debt strategy"]
+            group_names = ["Federal Student Loan Repayment & IDR Strategy", "Graduate & Professional Student Debt Forum"]
+    else:
+        if "179" in slug or "vehicle" in slug or "equipment" in slug or "macrs" in slug:
+            queries = ["small business equipment tax strategy", "Section 179 CPA & CFO forum", "commercial fleet & contractor finance"]
+            group_names = ["Small Business Tax & CPA Strategy Network", "Equipment & Commercial Fleet Owners Forum"]
+        elif "crypto" in slug or "prediction" in slug:
+            queries = ["crypto tax Form 1099-DA traders", "Section 1256 event contract traders", "digital asset CPA tax planning"]
+            group_names = ["Crypto & Digital Asset Tax Strategy", "Quantitative Event Contract & Section 1256 Traders"]
+        elif "1031" in slug or "qsbs" in slug:
+            queries = ["commercial real estate 1031 exchange investors", "QSBS Section 1202 startup founders", "family office tax deferral"]
+            group_names = ["Commercial Real Estate 1031 Exchange Investors", "Founder & Family Office Tax Planning"]
+        else:
+            queries = ["B2B CFO & controller finance", "S-Corp & LLC owner tax optimization", "corporate treasury & cash management"]
+            group_names = ["CFO & Controller Financial Modeling Network", "S-Corp & Small Business Tax Optimization"]
+
+    groups = [
+        {
+            "name": gname,
+            "topic": queries[0],
+            "post_mode": "zero_link_teaser_plus_first_comment",
+            "teaser_content": teaser,
+            "first_comment": first_comment,
+            "target_url": target_url,
+        }
+        for gname in group_names
+    ]
+    return {
+        "slug": slug,
+        "tool_title": title,
+        "post_mode": "zero_link_teaser_plus_first_comment",
+        "teaser_content": teaser,
+        "first_comment": first_comment,
+        "target_url": target_url,
+        "queries_searched": queries,
+        "total_unique_groups": len(groups),
+        "groups": groups,
+    }
+
+
+def prioritize_distribution_queue_by_referral_yield(
+    property_id: str = "profithelm",
+    tools: Optional[List[Any]] = None,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Ranks tenant tools for social syndication and broadcast dispatch by combining:
+    1. Commercial/statutory yield priority (calculate_composite_revenue_priority for ProfitHelm,
+       statutory urgency weight for Prexvo).
+    2. GSC organic striking-distance impressions (positions 4.0 to 20.0 get a referral
+       acceleration boost so social clicks and citations compound organic discovery).
+    3. Historical outbound partner engagement telemetry (.agy/partner_engagement_events.jsonl).
+    4. Unbroadcasted freshness bonus for tools still in SYNDICATED_STAGED mode.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+    from pseofactory.qualification import is_retired_or_consolidated_slug
+
+    norm_prop = _normalize_property_id(property_id)
+    company_id = "106482194" if norm_prop == "prexvo" else "143884102"
+
+    resolved_root: Optional[Path] = Path(repo_root).resolve() if repo_root else None
+    if resolved_root is None:
+        try:
+            from pseofactory.maintenance import TenantRegistry
+            adapter = TenantRegistry.default().get_adapter(norm_prop)
+            if adapter and getattr(adapter, "repo_path", None):
+                resolved_root = Path(adapter.repo_path).resolve()
+        except Exception:
+            resolved_root = None
+
+    if tools is None:
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+        raw_tools = list(PREXVO_DEFAULT_TOOLS) if norm_prop == "prexvo" else (list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS))
+    else:
+        raw_tools = list(tools)
+
+    target_tools = []
+    for t in raw_tools:
+        slug_val = t["slug"] if isinstance(t, dict) else str(t)
+        if is_retired_or_consolidated_slug(slug_val, norm_prop):
+            continue
+        target_tools.append(_resolve_tool(t) if isinstance(t, (str, dict)) else t)
+
+    # Load GSC impressions & positions if available
+    gsc_by_slug: Dict[str, Dict[str, float]] = {}
+    if resolved_root and resolved_root.is_dir():
+        for gsc_fname in ("gsc_live_metrics.json", "analytics_48h_baseline.json"):
+            gsc_path = resolved_root / ".agy" / gsc_fname
+            if gsc_path.is_file():
+                try:
+                    gsc_data = json.loads(gsc_path.read_text(encoding="utf-8"))
+                    rows = gsc_data.get("top_pages") or gsc_data.get("pages") or gsc_data.get("rows") or []
+                    if isinstance(rows, list):
+                        for r in rows:
+                            if not isinstance(r, dict):
+                                continue
+                            page_str = str(r.get("page") or r.get("url") or r.get("slug") or "")
+                            for t_obj in target_tools:
+                                s_k = t_obj["slug"]
+                                if f"/tools/{s_k}" in page_str or page_str.strip("/") == s_k:
+                                    impr = float(r.get("impressions", 0) or 0)
+                                    pos = float(r.get("position", 0.0) or 0.0)
+                                    cur = gsc_by_slug.setdefault(s_k, {"impressions": 0.0, "position": 0.0})
+                                    cur["impressions"] = max(cur["impressions"], impr)
+                                    if pos > 0 and (cur["position"] == 0.0 or pos < cur["position"]):
+                                        cur["position"] = pos
+                except Exception:
+                    pass
+
+    # Load partner click telemetry if available
+    clicks_by_slug: Dict[str, int] = {}
+    if resolved_root and resolved_root.is_dir():
+        events_path = resolved_root / ".agy" / "partner_engagement_events.jsonl"
+        if events_path.is_file():
+            try:
+                for line in events_path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    ev = json.loads(line)
+                    if isinstance(ev, dict):
+                        s_ev = str(ev.get("tool_slug") or ev.get("slug") or "").strip()
+                        if s_ev:
+                            clicks_by_slug[s_ev] = clicks_by_slug.get(s_ev, 0) + 1
+            except Exception:
+                pass
+
+    # Load broadcast ledger to check staged vs live status
+    staged_slugs: set[str] = set()
+    if resolved_root and resolved_root.is_dir():
+        b_path = resolved_root / ".agy" / "broadcast_ledger.json"
+        if b_path.is_file():
+            try:
+                b_list = json.loads(b_path.read_text(encoding="utf-8"))
+                if isinstance(b_list, list):
+                    for item in b_list:
+                        if isinstance(item, dict) and str(item.get("mode", "")).upper() == "SYNDICATED_STAGED":
+                            staged_slugs.add(str(item.get("slug", "")))
+            except Exception:
+                pass
+
+    prexvo_urgency_weights: Dict[str, float] = {
+        "2026-rap-calculator": 68.0,
+        "ibr-vs-rap-calculator": 65.0,
+        "pslf-buyback-calculator": 62.0,
+        "student-loan-tax-bomb-calculator": 59.0,
+        "married-filing-separately-student-loan-calculator": 57.0,
+        "parent-plus-consolidation-calculator": 55.0,
+        "joint-consolidation-loan-separation-act-calculator": 54.0,
+        "save-plan-forbearance-interest-calculator": 52.0,
+        "discretionary-income-poverty-line-calculator": 50.0,
+        "grad-school-loan-cap-calculator": 48.0,
+        "medical-dental-residency-loan-deferment-calculator": 47.0,
+        "tiered-standard-repayment-calculator": 45.0,
+        "teacher-loan-forgiveness-vs-pslf-calculator": 44.0,
+    }
+
+    ranked: List[Dict[str, Any]] = []
+    for t_obj in target_tools:
+        slug = t_obj["slug"]
+        proof = _resolve_tool_calculation_proof(t_obj, property_id=norm_prop)
+        gsc_info = gsc_by_slug.get(slug, {"impressions": 0.0, "position": 0.0})
+        impressions = int(gsc_info["impressions"])
+        position = float(gsc_info["position"])
+        is_striking_distance = bool(4.0 <= position <= 20.0)
+        partner_clicks = int(clicks_by_slug.get(slug, 0))
+
+        rev_score = 45.0
+        if norm_prop == "prexvo":
+            rev_score = prexvo_urgency_weights.get(slug, 45.0)
+        else:
+            try:
+                from pseofactory.affiliates import calculate_composite_revenue_priority
+                aff_keys = t_obj.get("affiliates") or []
+                first_partner = aff_keys[0] if aff_keys else "mercury"
+                rev_res = calculate_composite_revenue_priority(
+                    partner_key=first_partner,
+                    impressions=max(impressions, 50),
+                    position=position if position > 0 else 9.5,
+                    intent_class="STATUTORY_CALCULATOR",
+                )
+                rev_score = float(rev_res.get("composite_priority_score", 45.0) or 45.0)
+            except Exception:
+                rev_score = 50.0 if t_obj.get("affiliates") else 40.0
+
+        gsc_boost = min(impressions * 0.5, 35.0) + (15.0 if is_striking_distance else 0.0)
+        click_boost = min(partner_clicks * 5.0, 25.0)
+        freshness_boost = 10.0 if (not staged_slugs or slug in staged_slugs) else 0.0
+        total_score = round(rev_score + gsc_boost + click_boost + freshness_boost, 2)
+
+        ranked.append({
+            "slug": slug,
+            "title": t_obj.get("title", slug),
+            "property_id": norm_prop,
+            "company_id": company_id,
+            "priority_score": total_score,
+            "revenue_priority_score": round(rev_score, 2),
+            "gsc_impressions": impressions,
+            "gsc_position": round(position, 2),
+            "striking_distance": is_striking_distance,
+            "partner_clicks": partner_clicks,
+            "parameterized_url": proof["parameterized_url"],
+            "first_comment_url": _with_first_comment_utm(proof["parameterized_url"], "linkedin"),
+        })
+
+    ranked.sort(key=lambda item: (-item["priority_score"], item["slug"]))
+    for idx, item in enumerate(ranked, start=1):
+        item["rank"] = idx
+    return ranked
+
+
 def export_all_syndication_files(
     output_dir = None,
     tools = None,
@@ -6853,18 +7651,24 @@ def export_all_syndication_files(
     ]
     active_slugs = {t["slug"] for t in target_tools if isinstance(t, dict) and "slug" in t}
 
-    # Prune retired or non-active orphan tool directories in output_dir when tools was inferred
-    # (or always prune retired/consolidated slugs when tools was explicitly passed)
+    # Prune retired or non-active orphan tool directories and root syndication files in output_dir
     if output_dir.exists() and not dry_run:
         import shutil as _shutil
         for item in sorted(output_dir.iterdir()):
             if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
                 if is_retired_or_consolidated_slug(item.name, property_id) or (tools is None and item.name not in active_slugs):
                     _shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file():
+                for suffix in ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt"):
+                    if item.name.endswith(suffix):
+                        cand_slug = item.name[:-len(suffix)]
+                        if is_retired_or_consolidated_slug(cand_slug, property_id) or (tools is None and cand_slug not in active_slugs):
+                            item.unlink(missing_ok=True)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
     tool_map = {t["slug"]: t for t in target_tools}
+    fb_catalog: Dict[str, Any] = {}
 
     for slug, pack in all_assets.items():
         tool_dir = output_dir / slug
@@ -6932,6 +7736,7 @@ def export_all_syndication_files(
 
         # 5. Facebook
         (tool_dir / "facebook.txt").write_text(pack["facebook"]["content"], encoding="utf-8")
+        fb_catalog[slug] = _build_facebook_groups_catalog_entry(slug, tool_spec, pack, property_id=property_id)
 
         # 6. Ghost Article (Canonical Cross-Post & Full Mathematical Proof)
         ghost_pack = pack["ghost"]
@@ -6961,6 +7766,34 @@ def export_all_syndication_files(
         # 9. Regulatory Alert Lead Magnet Copy (HWL-1076)
         (tool_dir / "regulatory_lead_magnet.txt").write_text(pack["regulatory_lead_magnet"]["content"], encoding="utf-8")
 
+        # 9b. Root-level syndication discovery files required by GSC distribution readiness checks
+        proof_obj = pack.get("calculation_proof") or _resolve_tool_calculation_proof(tool_spec, property_id=property_id)
+        param_url = str(pack.get("parameterized_url") or proof_obj.get("parameterized_url") or pack.get("url") or "")
+        brand_label = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+        root_linkedin_md = (
+            f"# {tool_spec.get('title', slug)}\n\n"
+            f"{pack['linkedin']['content']}\n\n"
+            f"First Comment Link: {pack['linkedin'].get('first_comment_url') or param_url}\n"
+        )
+        assert_no_forbidden_dashes(root_linkedin_md, context=f"{slug}-linkedin.md")
+        assert_no_personal_attribution(root_linkedin_md, context=f"{slug}-linkedin.md")
+        (output_dir / f"{slug}-linkedin.md").write_text(root_linkedin_md, encoding="utf-8")
+
+        root_newsletter_md = (
+            f"Subject: {pack['newsletter_hook'].get('subject', tool_spec.get('title', slug))}\n\n"
+            f"{pack['newsletter_hook']['content']}\n"
+        )
+        assert_no_forbidden_dashes(root_newsletter_md, context=f"{slug}-newsletter.md")
+        (output_dir / f"{slug}-newsletter.md").write_text(root_newsletter_md, encoding="utf-8")
+
+        root_substack_notes = (
+            f"{tool_spec.get('title', slug)}: Verified statutory calculation ({proof_obj.get('scenario_label', '2026 baseline')}) "
+            f"yields {proof_obj.get('published_output_formatted', '')} ({proof_obj.get('sample_calculation', '')}). "
+            f"Run your scenario on {brand_label}: {param_url}\n"
+        )
+        assert_no_forbidden_dashes(root_substack_notes, context=f"{slug}-Substack Notes-post.txt")
+        (output_dir / f"{slug}-Substack Notes-post.txt").write_text(root_substack_notes, encoding="utf-8")
+
         # 10. YouTube Syndication Copy & Metadata (HWL-1202)
         yt_pack = pack.get("youtube") or generate_youtube_syndication(tool_spec, property_id=property_id)
         pinned_comment = yt_pack.get("pinned_comment", "")
@@ -6983,6 +7816,18 @@ def export_all_syndication_files(
         (tool_dir / "youtube_pinned_comment.txt").write_text(pinned_comment, encoding="utf-8")
         (tool_dir / "youtube_transcript.txt").write_text(yt_pack["transcript"], encoding="utf-8")
         (tool_dir / "youtube_metadata.json").write_text(json.dumps(yt_pack, indent=2), encoding="utf-8")
+
+    # Export Facebook Groups distribution catalog to tenant .agy/ directory when not in foreign test context
+    if fb_catalog and not dry_run and not _is_test_context(output_dir, property_id):
+        try:
+            agy_dir = output_dir.parent / ".agy"
+            if agy_dir.is_dir():
+                fb_json = json.dumps(fb_catalog, indent=2, ensure_ascii=False) + "\n"
+                assert_no_forbidden_dashes(fb_json, context="facebook_groups_catalog.json")
+                (agy_dir / "facebook_groups_catalog.json").write_text(fb_json, encoding="utf-8")
+                (agy_dir / "facebook_groups_catalog.dryrun.json").write_text(fb_json, encoding="utf-8")
+        except Exception:
+            pass
 
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
     if property_id == "profithelm" and not _is_test_context(output_dir, property_id):
@@ -7105,7 +7950,7 @@ Calculations and statutory rules derived from:
                 f"**Empirical Data Sources:** HHS Federal Poverty Guidelines & Department of Education Federal Student Aid Portfolio\n\n"
                 f"## Repayment Plan Statutory Comparison Matrix (2026 Baseline)\n\n"
                 f"| Plan Name | Discretionary Income Exemption | Monthly Payment Rate | Unpaid Interest Subsidy | Forgiveness Horizon |\n"
-                f"| :--- | :--- | :--- | :--- |\n"
+                f"| :--- | :--- | :--- | :--- | :--- |\n"
                 f"| **2026 RAP** | 225% of Federal Poverty Line | 10% of Discretionary Income | 100% Unpaid Interest Waived | 240 - 300 Months |\n"
                 f"| **New IBR (Post-2014)** | 150% of Federal Poverty Line | 10% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 240 Months (20 Yrs) |\n"
                 f"| **Legacy IBR (Pre-2014)** | 150% of Federal Poverty Line | 15% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 300 Months (25 Yrs) |\n"
@@ -7130,6 +7975,12 @@ Calculations and statutory rules derived from:
                         if c_item.is_dir() and not c_item.name.startswith(".") and c_item.name != "ai_benchmarks":
                             if is_retired_or_consolidated_slug(c_item.name, property_id) or c_item.name not in active_slugs:
                                 _shutil.rmtree(c_item, ignore_errors=True)
+                        elif c_item.is_file():
+                            for suffix in ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt"):
+                                if c_item.name.endswith(suffix):
+                                    cand_slug = c_item.name[:-len(suffix)]
+                                    if is_retired_or_consolidated_slug(cand_slug, property_id) or cand_slug not in active_slugs:
+                                        c_item.unlink(missing_ok=True)
                 for slug in all_assets:
                     src_tool_dir = output_dir / slug
                     dst_tool_dir = central_synd_dir / slug
@@ -7137,6 +7988,10 @@ Calculations and statutory rules derived from:
                         (dst_tool_dir / "reddit.md").unlink(missing_ok=True)
                         (dst_tool_dir / "reddit_teardown.md").unlink(missing_ok=True)
                         _shutil.copytree(src_tool_dir, dst_tool_dir, dirs_exist_ok=True)
+                    for suffix in ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt"):
+                        root_f = output_dir / f"{slug}{suffix}"
+                        if root_f.is_file():
+                            _shutil.copy2(root_f, central_synd_dir / f"{slug}{suffix}")
                 for top_file in ("github_seed_discovery.md", "affiliate_routes_verified.json"):
                     if (output_dir / top_file).is_file():
                         _shutil.copy2(output_dir / top_file, central_synd_dir / top_file)
@@ -7378,17 +8233,25 @@ def dispatch_to_distribution_lead(
         # Stage syndication files
         export_all_syndication_files(tools=target_tools, dry_run=dry_run, run_id=eff_run_id, property_id=property_id)
 
-        # Sync tenant broadcast_ledger.json when not dry_run
+        repo_dir: Optional[Path] = None
+        if dist_dir:
+            repo_dir = Path(dist_dir).resolve().parent
+        elif adapter and getattr(adapter, "repo_path", None):
+            repo_dir = Path(adapter.repo_path).resolve()
+        elif adapter and getattr(adapter, "dist_dir", None):
+            repo_dir = Path(adapter.dist_dir).resolve().parent
+
+        prioritized_queue = prioritize_distribution_queue_by_referral_yield(
+            property_id=property_id,
+            tools=target_tools,
+            repo_root=repo_dir,
+        )
+        priority_by_slug = {item["slug"]: item["priority_score"] for item in prioritized_queue}
+        corp_company_id = "106482194" if _normalize_property_id(property_id) == "prexvo" else "143884102"
+
+        # Sync tenant broadcast_ledger.json and corporate LinkedIn schedule queue when not dry_run
         now_iso = datetime.now(timezone.utc).isoformat()
         if not dry_run:
-            repo_dir: Optional[Path] = None
-            if dist_dir:
-                repo_dir = Path(dist_dir).resolve().parent
-            elif adapter and getattr(adapter, "repo_path", None):
-                repo_dir = Path(adapter.repo_path).resolve()
-            elif adapter and getattr(adapter, "dist_dir", None):
-                repo_dir = Path(adapter.dist_dir).resolve().parent
-
             is_foreign_pytest = bool(
                 ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)
                 and repo_dir is not None
@@ -7423,6 +8286,9 @@ def dispatch_to_distribution_lead(
                                     dispatches_map.setdefault("github_gist", "STAGED")
                                 if e_slug in all_assets:
                                     e["post_url"] = all_assets[e_slug].get("parameterized_url") or all_assets[e_slug].get("url") or e.get("post_url")
+                                    e["first_comment"] = all_assets[e_slug].get("first_comment")
+                                    e["company_id"] = corp_company_id
+                                    e["priority_score"] = priority_by_slug.get(e_slug, 45.0)
                                 seen_slugs.add(e_slug)
                                 existing_entries.append(e)
                     except Exception:
@@ -7436,7 +8302,10 @@ def dispatch_to_distribution_lead(
                             "timestamp": now_iso,
                             "mode": "SYNDICATED_STAGED",
                             "run_id": eff_run_id,
+                            "company_id": corp_company_id,
+                            "priority_score": priority_by_slug.get(slug, 45.0),
                             "post_url": pack_obj.get("parameterized_url") or f"{canon_base}/tools/{slug}/",
+                            "first_comment": pack_obj.get("first_comment"),
                             "dispatches": {
                                 "x": "STAGED",
                                 "linkedin": "STAGED",
@@ -7453,7 +8322,38 @@ def dispatch_to_distribution_lead(
                             "metrics": None,
                         })
                         seen_slugs.add(slug)
+                existing_entries.sort(key=lambda item: (-float(item.get("priority_score", 0.0) or 0.0), str(item.get("slug", ""))))
                 b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
+
+                # Sync corporate LinkedIn schedule queue (strictly non-personal company_id broadcasts)
+                li_queue_path = Path("/home/ubuntuadmin/projects/arif-cli/social/linkedin-toolkit/data/queue.json")
+                if li_queue_path.parent.is_dir() and not _is_test_context(dist_dir, property_id):
+                    try:
+                        existing_li_queue: List[Dict[str, Any]] = []
+                        if li_queue_path.is_file():
+                            raw_li = json.loads(li_queue_path.read_text(encoding="utf-8"))
+                            if isinstance(raw_li, list):
+                                for li_item in raw_li:
+                                    if isinstance(li_item, dict) and str(li_item.get("company_id", "")) not in ("", corp_company_id, "112710753"):
+                                        existing_li_queue.append(li_item)
+                        for p_item in prioritized_queue:
+                            s_key = p_item["slug"]
+                            if s_key in all_assets and isinstance(all_assets[s_key].get("linkedin"), dict):
+                                li_pack = all_assets[s_key]["linkedin"]
+                                existing_li_queue.append({
+                                    "slug": s_key,
+                                    "property_id": _normalize_property_id(property_id),
+                                    "company_id": corp_company_id,
+                                    "priority_score": p_item["priority_score"],
+                                    "text": li_pack["content"],
+                                    "teaser_content": li_pack.get("teaser_content", ""),
+                                    "first_comment": li_pack.get("first_comment", ""),
+                                    "target_url": li_pack.get("first_comment_url") or li_pack.get("target_url", ""),
+                                })
+                        existing_li_queue.sort(key=lambda x: (-float(x.get("priority_score", 0.0) or 0.0), str(x.get("slug", ""))))
+                        li_queue_path.write_text(json.dumps(existing_li_queue, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                    except Exception:
+                        pass
 
         ledger.record_token(dist_token, {"property_id": property_id, "run_id": eff_run_id, "tools_count": len(target_tools)})
     except Exception as exc:
@@ -7475,12 +8375,17 @@ def dispatch_to_distribution_lead(
     norm_prop = _normalize_property_id(property_id)
     prop_draft_file = draft_dir / f"distribution_draft_{norm_prop}.json"
     draft_lock_file = draft_dir / ".distribution_draft.lock"
+    top_slug = prioritized_queue[0]["slug"] if prioritized_queue else (next(iter(all_assets.keys()), ""))
+    top_li_pack = all_assets.get(top_slug, {}).get("linkedin", {}) if top_slug else {}
+    sample_li_teaser = top_li_pack.get("teaser_content") or top_li_pack.get("content", "")
     result: Dict[str, Any] = {
         "status": "STAGED" if dry_run else "SUCCESS",
         "property_id": property_id,
+        "company_id": corp_company_id,
         "run_id": eff_run_id,
         "dry_run": dry_run,
         "total_assets_generated": total_assets,
+        "prioritized_queue": prioritized_queue,
         "all_assets": all_assets,
         "channels": active_channels,
         "omitted_channels": ["reddit"],
@@ -7489,10 +8394,11 @@ def dispatch_to_distribution_lead(
         "voice_check_passed": voice_ok,
         "release_commands": [
             f'x-cli post "{sample_draft}"',
+            f'linkedin-cli post "{sample_li_teaser}" --company-id {corp_company_id}',
         ],
         "owner_calls": [
             "Approve live X post release (x-cli post / x-cli thread)",
-            "Approve live social distribution on LinkedIn / Facebook pages",
+            f"Approve live corporate LinkedIn broadcast (--company-id {corp_company_id}) & Facebook community distribution",
             "Approve Ghost article & exact-match GitHub Gist publication",
             "Approve YouTube video uploads or channel modifications",
         ],

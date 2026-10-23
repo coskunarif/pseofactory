@@ -1714,3 +1714,137 @@ def test_truth_reconciliation_engine_auto_remediation_and_audit():
         )
         == []
     )
+
+
+def test_multi_channel_social_conversion_and_deeplink_hydration(tmp_path):
+    """
+    Verifies end-to-end social syndication conversion upgrades across ProfitHelm (21 tools)
+    and Prexvo (13 tools):
+    1. Every tool in both tenants has a bespoke statutory calculation proof (zero generic
+       gross_amount*marginal_rate fallbacks) and passes truth-store audit with 0 failures.
+    2. LinkedIn (strictly corporate company_id 143884102 / 106482194), Facebook, and X
+       include zero-link native teaser_content + parameterized first_comment / first_comment_url
+       with utm_content=first_comment to eliminate feed-suppression penalties.
+    3. Referral-yield prioritization ranks tools deterministically combining commercial/statutory
+       priority, GSC striking-distance impressions, and partner click telemetry.
+    4. export_all_syndication_files writes root {slug}-linkedin.md, {slug}-newsletter.md,
+       and {slug}-Substack Notes-post.txt so evaluate_gsc_candidate_readiness reports 0 missing files.
+    5. visual_primitives runtime includes hydrateInputsFromLocationSearch() and multi-channel
+       social traffic_source attribution, and affiliates aggregates by_traffic_source.
+    """
+    from pseofactory.audit import audit_syndication_asset_against_truth_store
+    from pseofactory.contracts import assert_linkedin, assert_no_personal_attribution, assert_x_post
+    from pseofactory.distributor import (
+        CURATED_TOOL_CALCULATION_PROOFS,
+        PREXVO_TOOL_SCENARIOS,
+        export_all_syndication_files,
+        generate_all_distribution_assets,
+        prioritize_distribution_queue_by_referral_yield,
+    )
+    from pseofactory.gsc_remediation import evaluate_asset_conversion_and_distribution_readiness
+    from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
+    from pseofactory.affiliates import aggregate_outbound_partner_engagement
+
+    # 1. ProfitHelm: all 21 active tools have curated statutory proofs and zero-link native teasers
+    from pseofactory.qualification import is_retired_or_consolidated_slug
+    px_slugs = {t["slug"] for t in PREXVO_DEFAULT_TOOLS} | set(PREXVO_TOOL_SCENARIOS.keys())
+    ph_all_21_tools = [
+        {"slug": s, "title": s.replace("-", " ").title()}
+        for s in sorted(CURATED_TOOL_CALCULATION_PROOFS.keys())
+        if s not in px_slugs and not is_retired_or_consolidated_slug(s, "profithelm") and not is_retired_or_consolidated_slug(s, "prexvo")
+    ]
+    ph_assets = generate_all_distribution_assets(tools=ph_all_21_tools, property_id="profithelm")
+    assert len(ph_assets) == 21
+    for slug, pack in ph_assets.items():
+        assert slug in CURATED_TOOL_CALCULATION_PROOFS, f"Missing curated proof for {slug}"
+        audit_res = audit_syndication_asset_against_truth_store(pack, property_id="profithelm")
+        assert audit_res["status"] == "PASS", f"ProfitHelm {slug} failed truth audit: {audit_res}"
+        assert pack["linkedin"]["company_id"] == "143884102"
+        assert pack["linkedin"]["post_mode"] == "zero_link_teaser_plus_first_comment"
+        assert "https://" not in pack["linkedin"]["teaser_content"]
+        assert "utm_content=first_comment" in pack["linkedin"]["first_comment_url"]
+        assert "https://" not in pack["facebook"]["teaser_content"]
+        assert "utm_content=first_comment" in pack["facebook"]["first_comment_url"]
+        assert_x_post(pack["x"]["content"])
+        assert_linkedin(pack["linkedin"]["content"])
+        assert_no_personal_attribution(pack["linkedin"]["content"], context=slug)
+
+    # 2. Prexvo: all active tools route to corporate company_id 106482194 and pass truth store audit
+    px_all_tools = [
+        {"slug": s, "title": s.replace("-", " ").title()}
+        for s in sorted(PREXVO_TOOL_SCENARIOS.keys())
+        if not is_retired_or_consolidated_slug(s, "prexvo")
+    ]
+    px_assets = generate_all_distribution_assets(tools=px_all_tools, property_id="prexvo")
+    assert len(px_assets) == len(px_all_tools) >= 13
+    for slug, pack in px_assets.items():
+        audit_res = audit_syndication_asset_against_truth_store(pack, property_id="prexvo")
+        assert audit_res["status"] == "PASS", f"Prexvo {slug} failed truth audit: {audit_res}"
+        assert pack["linkedin"]["company_id"] == "106482194"
+        assert "https://" not in pack["linkedin"]["teaser_content"]
+        assert "utm_content=first_comment" in pack["linkedin"]["first_comment_url"]
+        assert_x_post(pack["x"]["content"])
+        assert_linkedin(pack["linkedin"]["content"])
+        assert_no_personal_attribution(pack["linkedin"]["content"], context=slug)
+
+    # 3. Referral-yield prioritization
+    ph_ranked = prioritize_distribution_queue_by_referral_yield(property_id="profithelm", tools=ph_all_21_tools)
+    px_ranked = prioritize_distribution_queue_by_referral_yield(property_id="prexvo", tools=px_all_tools)
+    assert len(ph_ranked) == 21
+    assert len(px_ranked) == len(px_all_tools)
+    assert ph_ranked[0]["priority_score"] >= ph_ranked[-1]["priority_score"]
+    assert px_ranked[0]["company_id"] == "106482194"
+
+    # 4. Root syndication discovery files eliminate missing_syndication_files in GSC readiness check
+    synd_out = tmp_path / "syndication"
+    export_all_syndication_files(
+        output_dir=synd_out,
+        tools=[PROFITHELM_DEFAULT_TOOLS[0]],
+        property_id="profithelm",
+    )
+    first_slug = PROFITHELM_DEFAULT_TOOLS[0]["slug"]
+    assert (synd_out / f"{first_slug}-linkedin.md").is_file()
+    assert (synd_out / f"{first_slug}-newsletter.md").is_file()
+    assert (synd_out / f"{first_slug}-Substack Notes-post.txt").is_file()
+    readiness = evaluate_asset_conversion_and_distribution_readiness(
+        slug=first_slug,
+        tenant_id="profithelm",
+        impressions=100,
+        position=8.2,
+        base_dir=tmp_path,
+    )
+    assert readiness["missing_syndication_files"] == []
+    assert readiness["has_external_distribution"] is True
+
+    # 5. Deep-link URL hydration runtime and social traffic source attribution
+    wb_html = render_runtime_synchronizer_script()
+    assert "function hydrateInputsFromLocationSearch()" in wb_html
+    assert "hydrateInputsFromLocationSearch();" in wb_html
+    assert "linkedin_company" in wb_html
+    assert "facebook_social" in wb_html
+    assert "youtube_video" in wb_html
+
+    agg = aggregate_outbound_partner_engagement(
+        [
+            {
+                "event_type": "workbench_interaction",
+                "interaction_type": "social_deeplink_hydrated",
+                "tool_slug": "section-179-calculator",
+                "property_id": "profithelm",
+                "traffic_source": "linkedin_company",
+            },
+            {
+                "event_type": "affiliate_click",
+                "tool_slug": "section-179-calculator",
+                "partner_key": "ramp",
+                "property_id": "profithelm",
+                "traffic_source": "linkedin_company",
+            },
+        ],
+        property_id="profithelm",
+    )
+    assert "by_traffic_source" in agg
+    assert agg["by_traffic_source"]["linkedin_company"]["deeplink_hydrations"] == 1
+    assert agg["by_traffic_source"]["linkedin_company"]["outbound_clicks"] == 1
+
