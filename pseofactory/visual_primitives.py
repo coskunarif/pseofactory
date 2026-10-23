@@ -3579,6 +3579,7 @@ def normalize_html_visual_primitives(
                 or "syncOutboundAffiliateLinks" not in sync_body
                 or "partner-quote-intake-form" not in sync_body
                 or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
+                or "hydrateInputsFromLocationSearch" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body

@@ -6545,6 +6545,7 @@ class RetroReflectionEngine:
             or "updateInteractiveCliffAndComparator" not in html_content
             or "emitWorkbenchEngagementBeacon" not in html_content
             or "partner-quote-intake-form" not in html_content
+            or "hydrateInputsFromLocationSearch" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)
