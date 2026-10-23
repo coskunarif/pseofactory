@@ -6218,6 +6218,41 @@ def _normalize_page_structure_and_geo_parity(
                     + updated[qa_m_norm.end() :]
                 )
                 changed = True
+    else:
+        qa_aside_m = re.search(
+            r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
+            updated,
+            re.IGNORECASE,
+        )
+        if qa_aside_m:
+            qa_aside_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_aside_m.group(1))).strip()
+            if detect_sentence_truncation_issues(qa_aside_plain):
+                qb_m = re.search(
+                    r'(<div[^>]*class=["\'][^"\']*quick-answer-body[^"\']*["\'][^>]*>)([\s\S]*?)(</div>)',
+                    qa_aside_m.group(0),
+                    re.IGNORECASE,
+                )
+                if qb_m:
+                    healed_qa = _normalize_quick_answer_40_60_words(
+                        topic_label or slug.replace("-", " "),
+                        property_id,
+                        slug=slug,
+                    )
+                    if healed_qa:
+                        new_aside = (
+                            qa_aside_m.group(0)[: qb_m.start()]
+                            + qb_m.group(1)
+                            + f"<p>{healed_qa}</p>"
+                            + qb_m.group(3)
+                            + qa_aside_m.group(0)[qb_m.end() :]
+                        )
+                        if new_aside != qa_aside_m.group(0):
+                            updated = (
+                                updated[: qa_aside_m.start()]
+                                + new_aside
+                                + updated[qa_aside_m.end() :]
+                            )
+                            changed = True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
     recon_html, recon_repairs = TruthReconciliationEngine.reconcile_html_truth(
@@ -6665,6 +6700,8 @@ class RetroReflectionEngine:
             "sample_calculation": sample_calc,
         }
 
+    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str], Tuple[str, List[str]]] = {}
+
     @classmethod
     def retrofit_html(
         cls,
@@ -6680,8 +6717,22 @@ class RetroReflectionEngine:
         Returns (updated_html, list_of_repaired_mechanics).
         Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
         """
+        cache_key: Optional[Tuple[str, str, str]] = None
+        if manifest_override is None and html_content:
+            h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
+            cache_key = (h_digest, str(property_id).lower(), str(slug))
+            cached_res = cls._RETROFIT_HTML_CACHE.get(cache_key)
+            if cached_res is not None:
+                out_html, out_rep = cached_res
+                if dist_dir is None or not (Path(dist_dir) / "manifests" / f"{slug}.json").is_file():
+                    return out_html, list(out_rep)
+
         missing = cls.audit_html_mechanics(html_content)
         if not missing:
+            if cache_key is not None:
+                if len(cls._RETROFIT_HTML_CACHE) > 512:
+                    cls._RETROFIT_HTML_CACHE.clear()
+                cls._RETROFIT_HTML_CACHE[cache_key] = (html_content, [])
             return html_content, []
 
         repaired: List[str] = []
@@ -7104,6 +7155,13 @@ class RetroReflectionEngine:
         if "deterministic_visual_primitives" in missing or vp_repaired or geo_norm_changed:
             if "deterministic_visual_primitives" not in repaired:
                 repaired.append("deterministic_visual_primitives")
+
+        if cache_key is not None:
+            if len(cls._RETROFIT_HTML_CACHE) > 512:
+                cls._RETROFIT_HTML_CACHE.clear()
+            cls._RETROFIT_HTML_CACHE[cache_key] = (updated, list(repaired))
+            updated_digest = hashlib.sha256(updated.encode("utf-8", errors="ignore")).hexdigest()
+            cls._RETROFIT_HTML_CACHE[(updated_digest, str(property_id).lower(), str(slug))] = (updated, [])
 
         return updated, repaired
 
@@ -7724,12 +7782,24 @@ class RetroReflectionEngine:
                         "Legal Entity: ProfitHelm LLC\n"
                     )
 
+                def _tool_sort_key(item: Tuple[str, Dict[str, str]]) -> Tuple[int, str]:
+                    k = item[0]
+                    if not is_prexvo:
+                        if k == "irs-2027-tax-brackets":
+                            return (0, k)
+                        if k == "crypto-tax-calculator":
+                            return (1, k)
+                    return (2, k)
+
                 sections_out: List[str] = [header_block]
-                for idx, (s_key, m_info) in enumerate(sorted(tool_meta.items()), start=1):
+                for idx, (s_key, m_info) in enumerate(sorted(tool_meta.items(), key=_tool_sort_key), start=1):
+                    sec_title = m_info["title"]
+                    if not is_prexvo and s_key == "crypto-tax-calculator":
+                        sec_title = "Crypto Tax Liability & Capital Gains Calculator 2027"
                     if is_prexvo:
                         q_syn = f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
                         sections_out.append(
-                            f"## {idx}. {m_info['title']}\n"
+                            f"## {idx}. {sec_title}\n"
                             f"Canonical URL: {m_info['url']}\n"
                             f"Query Syntax: {q_syn}\n"
                             f"Summary: {m_info['description']}\n"
@@ -7737,7 +7807,7 @@ class RetroReflectionEngine:
                         )
                     else:
                         sections_out.append(
-                            f"## {idx}. {m_info['title']}\n"
+                            f"## {idx}. {sec_title}\n"
                             f"Canonical URL: {m_info['url']}\n"
                             f"Description: {m_info['description']}\n"
                             f"Direct Statutory Answer: {m_info['quick_answer']}\n"
