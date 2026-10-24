@@ -2621,7 +2621,9 @@ def _render_runtime_sync_events_js() -> str:
           if (statusNode) statusNode.textContent = "Please check the TCPA partner sharing consent box to proceed.";
           return;
         }
-        var calcAmt = drawer ? (parseFloat(drawer.getAttribute("data-calculated-amount") || "100000") || 100000) : 100000;
+        var qThreshAmt = drawer ? (parseFloat(drawer.getAttribute("data-quote-threshold") || "50000") || 50000) : 50000;
+        var rawDrawerAmt = drawer ? (parseFloat(drawer.getAttribute("data-calculated-amount") || "100000") || 100000) : 100000;
+        var calcAmt = Math.max(rawDrawerAmt, qThreshAmt);
         var toolSlug = drawer ? (drawer.getAttribute("data-tool-slug") || resolveCurrentToolSlug()) : resolveCurrentToolSlug();
         var partnerKey = drawer ? (drawer.getAttribute("data-partner-key") || "") : "";
         var vertical = drawer ? (drawer.getAttribute("data-vertical") || "") : "";
@@ -3968,6 +3970,24 @@ def normalize_html_visual_primitives(
         if "interactive_runtime_sync" not in repaired:
             repaired.append("interactive_runtime_sync")
 
+    # 5h. Ensure every commercial calculator page with #partner-quote-intake-step also exposes #lead-capture-form ("Get Free Playbook")
+    if 'id="partner-quote-intake-step"' in updated and 'id="lead-capture-form"' not in updated:
+        playbook_card_html = (
+            '      <div class="playbook-capture-card" style="margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated, #f8fafc);">\n'
+            '        <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">Personalized Calculation Playbook &amp; Statutory Workpaper</div>\n'
+            '        <form id="lead-capture-form" class="lead-capture-form" action="/api/lead-capture" method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;" novalidate>\n'
+            '          <input type="email" name="email" placeholder="Enter email for personalized playbook" aria-label="Email for personalized playbook" required class="touch-target" style="padding:10px 14px;border-radius:6px;border:1px solid var(--border);min-height:44px;flex:1;min-width:220px;" />\n'
+            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary,#1d4ed8);color:#fff;font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
+            '        </form>\n'
+            '      </div>\n'
+        )
+        updated = updated.replace(
+            '<div id="partner-quote-intake-step"',
+            playbook_card_html + '      <div id="partner-quote-intake-step"',
+            1,
+        )
+        repaired.append("playbook_lead_capture_form")
+
     # 6. Inject or repair <script id="pseo-runtime-sync">
     has_interactive_controls = any(
         tok in updated
@@ -4007,6 +4027,7 @@ def normalize_html_visual_primitives(
                 or "resolveBlueprintStatusNode" not in sync_body
                 or "appendActionLink" not in sync_body
                 or "renderPlaybookAndFulfillmentDrawer" not in sync_body
+                or "qThreshAmt" not in sync_body
                 or "data-checkout-trigger" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body

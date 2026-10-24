@@ -7042,6 +7042,8 @@ class RetroReflectionEngine:
             or "resolveBlueprintStatusNode" not in html_content
             or "appendActionLink" not in html_content
             or "renderPlaybookAndFulfillmentDrawer" not in html_content
+            or "qThreshAmt" not in html_content
+            or ('id="partner-quote-intake-step"' in html_content and 'id="lead-capture-form"' not in html_content)
             or "data-checkout-trigger" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
