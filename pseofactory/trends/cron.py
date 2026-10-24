@@ -423,6 +423,7 @@ class TrendCronRunner:
                 existing_tools_map = {"prexvo": [], "profithelm": []}
                 GSC_EMPIRICAL_CLUSTER_TRAFFIC = {}
 
+            gsc_rows_by_prop: Dict[str, List[Dict[str, Any]]] = {"prexvo": [], "profithelm": []}
             try:
                 for p_id in ("prexvo", "profithelm"):
                     if total_site_impressions == 500:
@@ -442,27 +443,45 @@ class TrendCronRunner:
                                 "position": dr.position,
                             }
                     for wr in win_rows:
+                        gsc_rows_by_prop[p_id].append({
+                            "query": wr.query,
+                            "page": wr.page,
+                            "impressions": wr.impressions,
+                            "clicks": wr.clicks,
+                            "ctr": wr.ctr,
+                            "position": wr.position,
+                        })
                         p_parts = [pt for pt in wr.page.split("/") if pt and pt not in ("https:", "http:", "profithelm.com", "prexvo.com", "tools")]
                         s_key = p_parts[0].lower() if p_parts else sanitize_url_slug(wr.query)
-                        b_entry = gsc_qp_by_prop_slug[p_id].setdefault(
-                            s_key,
-                            {
-                                "impressions": 0,
-                                "clicks": 0,
-                                "best_position": 100.0,
-                                "devices": dev_by_page.get(wr.page, {}),
-                            },
-                        )
-                        b_entry["impressions"] += wr.impressions
-                        b_entry["clicks"] += wr.clicks
-                        if 0.0 < wr.position < b_entry["best_position"]:
-                            b_entry["best_position"] = wr.position
+                        full_subroute_key = "/".join(p_parts).lower() if p_parts else s_key
+                        for key_cand in {s_key, full_subroute_key}:
+                            b_entry = gsc_qp_by_prop_slug[p_id].setdefault(
+                                key_cand,
+                                {
+                                    "impressions": 0,
+                                    "clicks": 0,
+                                    "best_position": 100.0,
+                                    "best_striking_position": 100.0,
+                                    "best_striking_impressions": -1,
+                                    "devices": dev_by_page.get(wr.page, {}),
+                                },
+                            )
+                            b_entry["impressions"] += wr.impressions
+                            b_entry["clicks"] += wr.clicks
+                            if 0.0 < wr.position < b_entry["best_position"]:
+                                b_entry["best_position"] = wr.position
+                            if 4.0 <= wr.position <= 15.0 and wr.impressions >= b_entry["best_striking_impressions"]:
+                                b_entry["best_striking_impressions"] = wr.impressions
+                                b_entry["best_striking_position"] = wr.position
                     for tool in existing_tools_map.get(p_id, []):
                         t_slug = str(tool.get("slug", "")).strip().lower()
                         if t_slug and t_slug in gsc_qp_by_prop_slug[p_id]:
                             g_info = gsc_qp_by_prop_slug[p_id][t_slug]
-                            if "position" not in tool and g_info["best_position"] < 100.0:
-                                tool["position"] = g_info["best_position"]
+                            if "position" not in tool:
+                                if g_info.get("best_striking_position", 100.0) < 100.0:
+                                    tool["position"] = g_info["best_striking_position"]
+                                elif g_info["best_position"] < 100.0:
+                                    tool["position"] = g_info["best_position"]
                             tool["gsc_impressions_28d"] = g_info["impressions"]
                             tool["gsc_devices"] = g_info["devices"]
             except Exception:
@@ -655,9 +674,13 @@ class TrendCronRunner:
                         keyword_rollups.append(rollup)
                     continue
 
-                # Step 4C: Cannibalization check against tenant existing tools
+                # Step 4C: Cannibalization check against tenant existing tools and live/persisted GSC query rankings
                 tenant_tools = existing_tools_map.get(assigned_property, [])
-                cannibal_info = check_search_intent_cannibalization(clean_q, existing_tools=tenant_tools)
+                cannibal_info = check_search_intent_cannibalization(
+                    clean_q,
+                    existing_tools=tenant_tools,
+                    gsc_rows=gsc_rows_by_prop.get(assigned_property),
+                )
 
                 cann_score = 0.0
                 matching_tool = None
@@ -666,9 +689,20 @@ class TrendCronRunner:
                 if cannibal_info.get("is_cannibalizing"):
                     cann_score = 0.85
                     matching_tool = cannibal_info.get("parent_slug")
-                    if "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
+                    if cannibal_info.get("ranking_position") is not None:
+                        pos = float(cannibal_info["ranking_position"])
+                    elif "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
                         if "position" in cannibal_info["matched_tool"]:
                             pos = float(cannibal_info["matched_tool"]["position"])
+                    subroute_str = str(cannibal_info.get("target_subroute") or "").strip("/")
+                    if subroute_str.startswith("tools/"):
+                        sub_key = subroute_str[len("tools/"):].strip("/").lower()
+                        sub_g_info = gsc_qp_by_prop_slug.get(assigned_property, {}).get(sub_key)
+                        if sub_g_info and cannibal_info.get("ranking_position") is None:
+                            if sub_g_info.get("best_striking_position", 100.0) < 100.0:
+                                pos = float(sub_g_info["best_striking_position"])
+                            elif sub_g_info.get("best_position", 100.0) < 100.0:
+                                pos = float(sub_g_info["best_position"])
 
                 # Check if cannibalization context was pre-supplied (e.g. from evaluation fixtures)
                 if "cannibalization_context" in raw_meta:

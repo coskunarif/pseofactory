@@ -1467,6 +1467,41 @@ def load_consolidated_gsc_query_rows(
                 except Exception:
                     pass
 
+        # Also merge 28-day query-by-page windows from TrendHistoryDB when not in synthetic unit test isolation
+        if "PYTEST_CURRENT_TEST" not in os.environ or not (root / "profithelm" / "data" / "statutory.db").is_file():
+            try:
+                from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+                local_tdb = root / "pseofactory" / "trends" / "data" / "trend_history.db"
+                sibling_tdb = root.parent / "trend_history.db"
+                central_tdb = root.parent / "pseofactory" / "pseofactory" / "trends" / "data" / "trend_history.db"
+                t_path = (
+                    local_tdb
+                    if local_tdb.is_file()
+                    else (
+                        sibling_tdb
+                        if sibling_tdb.is_file()
+                        else (DEFAULT_DB_PATH if DEFAULT_DB_PATH.is_file() else central_tdb)
+                    )
+                )
+                if t_path.is_file() and ("PYTEST_CURRENT_TEST" not in os.environ or str(root).startswith("/home/ubuntuadmin/projects/")):
+                    with TrendHistoryDB(t_path) as tdb:
+                        curr_win_rows = tdb.get_gsc_query_page_windows(prop, window_key="recent_28d")
+                        for cw in curr_win_rows:
+                            snapshot_latest_rows.append(
+                                {
+                                    "query": cw.query,
+                                    "page": cw.page,
+                                    "impressions": cw.impressions,
+                                    "clicks": cw.clicks,
+                                    "ctr": cw.ctr,
+                                    "position": cw.position,
+                                    "recorded_at": cw.recorded_at,
+                                }
+                            )
+            except Exception:
+                pass
+
         # Merge snapshot_latest_rows for queries not already present or with richer snapshot history
         if snapshot_latest_rows:
             if not raw_current_rows:
@@ -1735,7 +1770,7 @@ def identify_content_decay(
         elif pos_delta >= position_drop_threshold and max(curr_impr, base_impr) >= 2:
             decay_type = "RANK_DECAY"
             severity = "HIGH" if (curr_pos <= 25.0 or curr_impr >= 10 or pos_delta >= 5.0) else "MEDIUM"
-        elif curr_pos <= 12.0 and curr_impr >= 8 and curr_ctr < (expected_ctr * 0.5):
+        elif curr_pos <= 15.0 and curr_impr >= 8 and curr_ctr < (expected_ctr * 0.5):
             decay_type = "CTR_DECAY"
             severity = "HIGH" if curr_impr >= 15 else "MEDIUM"
         elif curr_pos <= 15.0 and mob_impr >= 6 and mob_ctr_gap >= 0.015 and mob_ctr < (expected_ctr * 0.6):
@@ -1930,11 +1965,24 @@ def discover_internal_linking_opportunities(
     for r in gsc_bundle.get("current_rows") or []:
         if not isinstance(r, dict):
             continue
+        q_str_check = str(r.get("query") or "").strip().lower()
+        if "site:" in q_str_check:
+            continue
         cp = str(r.get("canonical_path") or "").rstrip("/") or "/"
         imp = int(float(r.get("impressions", 0) or 0))
+        r_pos = float(r.get("position", 100.0) or 100.0)
+        r_is_striking = 4.0 <= r_pos <= 15.0
+        r_is_top20 = 1.0 <= r_pos <= 20.0
         prev = best_query_by_path.get(cp)
-        if prev is None or imp > int(prev.get("impressions", 0)):
+        if prev is None:
             best_query_by_path[cp] = r
+        else:
+            p_pos = float(prev.get("position", 100.0) or 100.0)
+            p_imp = int(float(prev.get("impressions", 0) or 0))
+            p_is_striking = 4.0 <= p_pos <= 15.0
+            p_is_top20 = 1.0 <= p_pos <= 20.0
+            if (r_is_striking, r_is_top20, imp, -r_pos) > (p_is_striking, p_is_top20, p_imp, -p_pos):
+                best_query_by_path[cp] = r
 
     path_to_file: Dict[str, Path] = {}
     title_by_path: Dict[str, str] = {}
@@ -2108,10 +2156,15 @@ def discover_internal_linking_opportunities(
             if not recommended_donors and "/tools" not in existing_sources and site_p != "/tools":
                 recommended_donors = ["/tools/"]
 
-            anchor_text = _clean_dashes(
-                title_by_path.get(site_p)
-                or (top_q.title() if top_q else site_p.strip("/").split("/")[-1].replace("-", " ").title())
-            )
+            if 4.0 <= pos <= 15.0 and top_q and "site:" not in top_q.lower():
+                anchor_text = _clean_dashes(
+                    f"{top_q.title()} Calculator" if "calculator" not in top_q.lower() else top_q.title()
+                )
+            else:
+                anchor_text = _clean_dashes(
+                    title_by_path.get(site_p)
+                    or (top_q.title() if top_q else site_p.strip("/").split("/")[-1].replace("-", " ").title())
+                )
             opp_type = (
                 "ORPHAN_PAGE"
                 if is_orphan
@@ -2122,10 +2175,11 @@ def discover_internal_linking_opportunities(
                 )
             )
             contextual_scarcity_boost = 15.0 if under_three_ctx else 0.0
+            striking_boost = 45.0 if (4.0 <= pos <= 15.0) else (35.0 if (3.0 < pos <= 20.0) else 0.0)
             priority_score = round(
                 (100.0 if is_orphan else 0.0)
                 + (impr * 2.5)
-                + (35.0 if 3.0 < pos <= 20.0 else 0.0)
+                + striking_boost
                 + max(0.0, 20.0 - in_deg)
                 + contextual_scarcity_boost,
                 2,
@@ -2344,7 +2398,9 @@ def compile_search_opportunity_briefs(
         seen_pq: Dict[str, Dict[str, Any]] = {}
         for pr in p_rows:
             qk = str(pr.get("query") or "").strip().lower()
-            if not qk:
+            if not qk or "site:" in qk or qk in ("ordermetrics", "profithelm", "prexvo"):
+                continue
+            if "crypto-tax-calculator" in c_path and "futures" in qk and "crypto" not in qk:
                 continue
             if qk not in seen_pq or int(float(pr.get("impressions", 0) or 0)) > int(float(seen_pq[qk].get("impressions", 0) or 0)):
                 seen_pq[qk] = pr
@@ -2353,7 +2409,36 @@ def compile_search_opportunity_briefs(
         if not dedup_p_rows:
             continue
 
-        primary = dedup_p_rows[0]
+        top_3_rows = [
+            x
+            for x in dedup_p_rows
+            if 0.0 < float(x.get("position", 100.0) or 100.0) < 4.0 or int(float(x.get("clicks", 0) or 0)) > 0
+        ]
+        striking_4_15_rows = [
+            x
+            for x in dedup_p_rows
+            if 4.0 <= float(x.get("position", 100.0) or 100.0) <= 15.0
+        ]
+        striking_16_20_rows = [
+            x
+            for x in dedup_p_rows
+            if 15.0 < float(x.get("position", 100.0) or 100.0) <= 20.0
+        ]
+
+        # Prioritize genuine position 4-15 striking-distance queries over position 21-100 noise
+        if striking_4_15_rows:
+            primary = striking_4_15_rows[0]
+        elif top_3_rows:
+            primary = top_3_rows[0]
+        elif striking_16_20_rows:
+            primary = striking_16_20_rows[0]
+        else:
+            primary = dedup_p_rows[0]
+
+        protected_primary_query = _clean_dashes(str(top_3_rows[0].get("query") or "")) if top_3_rows else ""
+        top_3_winner_queries = [_clean_dashes(str(x.get("query") or "")) for x in top_3_rows if str(x.get("query") or "").strip()]
+        striking_4_15_queries = [_clean_dashes(str(x.get("query") or "")) for x in striking_4_15_rows if str(x.get("query") or "").strip()]
+
         tot_impr = sum(int(float(x.get("impressions", 0) or 0)) for x in dedup_p_rows)
         tot_clicks = sum(int(float(x.get("clicks", 0) or 0)) for x in dedup_p_rows)
         if tot_impr <= 0:
@@ -2361,6 +2446,11 @@ def compile_search_opportunity_briefs(
 
         pos_rows = [float(x.get("position", 50.0) or 50.0) for x in dedup_p_rows if float(x.get("position", 0.0) or 0.0) > 0.0]
         best_pos = min(pos_rows) if pos_rows else 15.0
+        best_striking_pos = (
+            min(float(x.get("position", 15.0) or 15.0) for x in striking_4_15_rows)
+            if striking_4_15_rows
+            else best_pos
+        )
         w_pos = (
             sum(
                 (float(x.get("position", 0.0) or 0.0) or best_pos) * max(1, int(float(x.get("impressions", 0) or 0)))
@@ -2378,7 +2468,7 @@ def compile_search_opportunity_briefs(
         leaf_slug = _slug_from_url_or_query(target_url=target_url, query=primary_query)
         grouped_qs = []
         seen_q: Set[str] = set()
-        for pr in dedup_p_rows:
+        for pr in (striking_4_15_rows + top_3_rows + striking_16_20_rows + dedup_p_rows):
             q_str = _clean_dashes(str(pr.get("query") or "").strip())
             if q_str and q_str.lower() not in seen_q:
                 grouped_qs.append(q_str)
@@ -2399,10 +2489,13 @@ def compile_search_opportunity_briefs(
             "target_url": target_url,
             "query": primary_query,
             "grouped_queries": grouped_qs[:15],
+            "top_3_winner_queries": top_3_winner_queries[:5],
+            "striking_4_15_queries": striking_4_15_queries[:10],
+            "protected_primary_query": protected_primary_query,
             "impressions": tot_impr,
             "clicks": tot_clicks,
             "ctr": curr_ctr,
-            "position": round(best_pos, 2),
+            "position": round(best_striking_pos if (striking_4_15_rows and not top_3_rows) else best_pos, 2),
             "ai_citation_vacant": ai_res["ai_citation_vacant"],
             "ai_cited_domains": ai_res["ai_cited_domains"],
             "weaker_cited_domains": ai_res["weaker_cited_domains"],
@@ -2417,7 +2510,7 @@ def compile_search_opportunity_briefs(
 
         opportunity_class = (
             "STRIKING_DISTANCE_PAGE_1"
-            if best_pos <= 10.0
+            if (best_pos <= 10.0 or bool(striking_4_15_rows))
             else ("STRIKING_DISTANCE_PAGE_2" if best_pos <= 25.0 else "EARLY_INDEXATION_EXPANSION")
         )
         ai_math_boost = (
@@ -2430,7 +2523,7 @@ def compile_search_opportunity_briefs(
         roi_score = round(
             max(
                 float(roi_eval["roi_score"]),
-                tot_impr * (2.5 if best_pos <= 15.0 else (1.6 if best_pos <= 30.0 else 1.0)) * (1.0 + ctr_gap * 5.0) * ai_math_boost,
+                tot_impr * (2.5 if (best_pos <= 15.0 or bool(striking_4_15_rows)) else (1.6 if best_pos <= 30.0 else 1.0)) * (1.0 + ctr_gap * 5.0) * ai_math_boost,
             )
             * conv_slot_mult
             * fan_out_mult,
@@ -2446,13 +2539,18 @@ def compile_search_opportunity_briefs(
             "canonical_path": c_path,
             "opportunity_class": opportunity_class,
             "primary_query": primary_query,
-            "supporting_queries": grouped_qs[1:10],
+            "protected_primary_query": overlay_spec.get("protected_primary_query", protected_primary_query),
+            "title_protection_mode": overlay_spec.get("title_protection_mode", "STANDARD_NORMALIZE"),
+            "top_3_winner_queries": top_3_winner_queries[:5],
+            "striking_4_15_queries": striking_4_15_queries[:10],
+            "supporting_queries": [q for q in grouped_qs if q != primary_query][:9],
             "ai_fan_out_queries": fan_out_queries[:10],
             "is_ai_fan_out_cluster": bool(primary_fan_out["is_ai_fan_out"] or len(fan_out_queries) > 0),
             "total_cluster_queries": len(grouped_qs),
             "total_impressions": tot_impr,
             "total_clicks": tot_clicks,
             "best_position": round(best_pos, 2),
+            "best_striking_4_15_position": round(best_striking_pos, 2) if striking_4_15_rows else None,
             "weighted_position": round(w_pos, 2),
             "current_ctr": curr_ctr,
             "target_ctr": target_ctr,
@@ -2472,6 +2570,8 @@ def compile_search_opportunity_briefs(
             "compiled_brief_spec": {
                 "title_rewrite": overlay_spec.get("title_rewrite", ""),
                 "secondary_title_modifier": overlay_spec.get("secondary_title_modifier", ""),
+                "title_protection_mode": overlay_spec.get("title_protection_mode", "STANDARD_NORMALIZE"),
+                "protected_primary_query": overlay_spec.get("protected_primary_query", protected_primary_query),
                 "meta_description": overlay_spec.get("meta_description", ""),
                 "quick_answer": overlay_spec.get("quick_answer", ""),
                 "autonomous_citation_assertions": overlay_spec.get("autonomous_citation_assertions", []),

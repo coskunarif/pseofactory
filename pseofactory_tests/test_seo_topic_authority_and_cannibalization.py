@@ -952,3 +952,215 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     no_js_res = v_leaf.check_no_js_rendering_gate(dist_dir)
     assert no_js_res["status"] == "PASS"
     assert no_js_res["issues"] == []
+
+
+def test_striking_distance_4_15_duplicate_suppression_title_protection_and_subintent_injection(tmp_path):
+    """
+    Verifies the end-to-end striking-distance (positions 4-15) upgrade loop:
+      1. Suppresses duplicate BUILD_PAGE creation when an existing URL already ranks 4-15
+         in GSC or covers the statutory regime (converting to REFACTOR_PAGE on the canonical
+         hub or state subroute), while allowing genuinely distinct statutory tools.
+      2. Weighs title tightening vs top-3 winner protection (PROTECT_TOP3_WINNER vs
+         TIGHTEN_STRIKING_4_15).
+      3. Injects exact missing query-level sub-intent H2s and FAQs (MFJ vs Single,
+         2026 vs 2027 Tax Tables, State Capital Gains Deferral, Partial 1031 Boot,
+         Section 179 vs Bonus Depreciation, RAP 2026 Tiered AGI Schedule, College Loan Estimator).
+      4. Reinforces internal anchor links with position 4-15 query-aligned anchors.
+      5. Filters 'site:' scraper queries and prevents pos 80-95 queries from masquerading
+         as position 4-15 primary brief queries.
+    """
+    from pseofactory.gsc_remediation import (
+        _resolve_contextual_internal_links,
+        compile_remediation_overlay_spec,
+        resolve_striking_distance_title_strategy,
+    )
+    from pseofactory.qualification import (
+        check_search_intent_cannibalization,
+        evaluate_query_modifier_expansion_vs_distinct_tool,
+        qualify_search_intent,
+        reconcile_void_candidates_queue,
+    )
+    from pseofactory.seo_growth_loops import compile_search_opportunity_briefs
+
+    gsc_rows = [
+        {
+            "query": "2027 tax brackets married filing jointly",
+            "page": "https://profithelm.com/tools/irs-2027-tax-brackets/",
+            "impressions": 37,
+            "clicks": 0,
+            "position": 9.76,
+        },
+        {
+            "query": "tax deferral calculator",
+            "page": "https://profithelm.com/tools/section-1031-calculator/texas/",
+            "impressions": 14,
+            "clicks": 0,
+            "position": 10.5,
+        },
+    ]
+
+    # 1. Duplicate suppression via GSC rows + sub-intent modifier classification
+    mod_mfj = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "2027 tax brackets married filing jointly",
+        gsc_rows=gsc_rows,
+        property_id="profithelm",
+    )
+    assert mod_mfj["decision"] == "EXPAND_EXISTING_PAGE"
+    assert mod_mfj["action"] == "REFACTOR_PAGE"
+    assert mod_mfj["parent_slug"] == "irs-2027-tax-brackets"
+    assert mod_mfj["ranking_position"] == 9.76
+
+    mod_me = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "maine capital gains tax",
+        property_id="profithelm",
+    )
+    assert mod_me["decision"] == "EXPAND_EXISTING_PAGE"
+    assert mod_me["action"] == "REFACTOR_PAGE"
+    assert mod_me["target_subroute"] == "/tools/section-1031-calculator/maine/"
+
+    mod_boot = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "partial 1031 exchange boot calculator",
+        property_id="profithelm",
+    )
+    assert mod_boot["decision"] == "EXPAND_EXISTING_PAGE"
+    assert mod_boot["parent_slug"] == "section-1031-calculator"
+
+    mod_179 = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "how to calculate section 179 deduction",
+        property_id="profithelm",
+    )
+    assert mod_179["decision"] == "EXPAND_EXISTING_PAGE"
+    assert mod_179["parent_slug"] == "section-179-calculator"
+
+    mod_rap = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "rap calculator",
+        property_id="prexvo",
+    )
+    assert mod_rap["decision"] == "EXPAND_EXISTING_PAGE"
+    assert mod_rap["parent_slug"] == "rap-payment-calculator"
+
+    # Genuinely distinct statutory regime still qualifies for BUILD_PAGE
+    mod_distinct = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "interstate 1031 exchange replacement property rules",
+        property_id="profithelm",
+    )
+    assert mod_distinct["decision"] == "LAUNCH_DISTINCT_TOOL"
+    assert mod_distinct["action"] == "BUILD_PAGE"
+
+    # qualify_search_intent routes ranking 4-15 GSC queries to REFACTOR_PAGE
+    qual_res = qualify_search_intent(
+        {
+            "query": "tax deferral calculator",
+            "impressions": 14,
+            "gsc_rows": gsc_rows,
+        }
+    )
+    assert qual_res["action"] == "REFACTOR_PAGE"
+    assert qual_res["canonical_slug"] == "section-1031-calculator"
+
+    # 2. Queue reconciliation converts cannibalizing BUILD_PAGE:PENDING to REFACTOR_PAGE and drops site: queries
+    vc_file = tmp_path / "void_candidates.jsonl"
+    vc_file.write_text(
+        "\n".join(
+            [
+                json.dumps({"slug": "site-profithelm-probe", "query": 'site:irs.gov "2026" "section 179"', "action": "BUILD_PAGE", "status": "PENDING"}),
+                json.dumps({"slug": "2026-ca-tax-brackets-single", "query": "2026 ca tax brackets single", "action": "BUILD_PAGE", "status": "PENDING"}),
+                json.dumps({"slug": "partial-1031-exchange-boot-calculator", "query": "partial 1031 exchange boot calculator", "action": "BUILD_PAGE", "status": "PENDING"}),
+                json.dumps({"slug": "qsbs-section-1202-tax-calculator", "query": "qsbs section 1202 tax calculator", "action": "BUILD_PAGE", "status": "PENDING"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rec_summary = reconcile_void_candidates_queue(vc_file)
+    assert rec_summary == 4
+    reconciled_rows = [json.loads(line) for line in vc_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(reconciled_rows) == 4
+    assert reconciled_rows[0]["action"] == "REJECT"
+    assert reconciled_rows[0]["status"] == "REJECTED"
+    assert all(r["action"] == "REFACTOR_PAGE" and r["status"] in ("REFACTOR_PENDING", "REJECTED") for r in reconciled_rows[1:])
+
+    # 3. Title trade-off: PROTECT_TOP3_WINNER vs TIGHTEN_STRIKING_4_15 + Sub-intent section injection
+    spec_protected = compile_remediation_overlay_spec(
+        {
+            "slug": "irs-2027-tax-brackets",
+            "tenant_id": "profithelm",
+            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/",
+            "query": "2027 tax brackets married filing jointly",
+            "protected_primary_query": "2027 federal tax tables",
+            "top_3_winner_queries": ["2027 federal tax tables"],
+            "striking_4_15_queries": ["2027 tax brackets married filing jointly", "2027 tax brackets"],
+            "grouped_queries": ["2027 federal tax tables", "2027 tax brackets married filing jointly"],
+            "position": 2.0,
+            "impressions": 152,
+            "clicks": 3,
+        }
+    )
+    assert spec_protected["title_protection_mode"] == "PROTECT_TOP3_WINNER"
+    assert spec_protected["protected_primary_query"] == "2027 federal tax tables"
+    assert 50 <= len(spec_protected["title_rewrite"]) <= 60
+    assert "Form 1120-S" not in spec_protected["title_rewrite"]
+    assert any("Married Filing Jointly" in h for h in spec_protected["h2_headings"])
+    assert any("Tax Tables" in h for h in spec_protected["h2_headings"])
+
+    spec_tightened = compile_remediation_overlay_spec(
+        {
+            "slug": "rap-payment-calculator",
+            "tenant_id": "prexvo",
+            "target_url": "https://prexvo.com/tools/rap-payment-calculator/",
+            "query": "rap calculator",
+            "striking_4_15_queries": ["rap calculator"],
+            "position": 10.75,
+            "impressions": 8,
+            "clicks": 0,
+        }
+    )
+    assert spec_tightened["title_protection_mode"] == "TIGHTEN_STRIKING_4_15"
+    assert 50 <= len(spec_tightened["title_rewrite"]) <= 60
+    assert "RAP" in spec_tightened["title_rewrite"]
+    assert any("RAP Tiered AGI Schedule" in h for h in spec_tightened["h2_headings"])
+
+    # 4. Internal link anchor reinforcement for striking-distance pages
+    ph_links = _resolve_contextual_internal_links("profithelm", "irs-2027-tax-brackets", "2027 tax brackets")
+    ph_by_href = {item["href"]: item["anchor"] for item in ph_links}
+    assert "/tools/irs-2027-tax-brackets/california/" in ph_by_href
+    assert "CA Tax Brackets" in ph_by_href["/tools/irs-2027-tax-brackets/california/"]
+
+    # 5. Brief compilation separates pos 4-15 queries from pos 90+ noise and drops site: queries
+    brief_rep = compile_search_opportunity_briefs(
+        "profithelm",
+        repo_root=tmp_path,
+        consolidated_gsc={
+            "current_rows": [
+                {
+                    "query": 'site:irs.gov "2026" "section 179"',
+                    "canonical_path": "/tools/section-179-calculator",
+                    "impressions": 1,
+                    "clicks": 0,
+                    "position": 4.0,
+                },
+                {
+                    "query": "179 calculator for businesses",
+                    "canonical_path": "/tools/section-179-calculator",
+                    "impressions": 13,
+                    "clicks": 0,
+                    "position": 91.8,
+                },
+                {
+                    "query": "how to calculate section 179 deduction",
+                    "canonical_path": "/tools/section-179-calculator",
+                    "impressions": 4,
+                    "clicks": 0,
+                    "position": 8.5,
+                },
+            ]
+        },
+        apply_overlays=False,
+        persist=False,
+    )
+    assert len(brief_rep["briefs"]) == 1
+    b_179 = brief_rep["briefs"][0]
+    assert b_179["primary_query"] == "how to calculate section 179 deduction"
+    assert b_179["best_striking_4_15_position"] == 8.5
+    assert 'site:irs.gov' not in json.dumps(b_179)
+

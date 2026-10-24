@@ -380,15 +380,191 @@ def compute_statutory_signature(spec: Dict[str, Any]) -> str:
     return f"authority={auth_norm}|inputs={sorted_keys}|formula={formula_norm}"
 
 
+def _match_gsc_ranking_cannibalization(
+    clean_q: str,
+    eff_gsc_rows: List[Dict[str, Any]],
+    q_state_top: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Checks live/persisted GSC query-by-page rankings (positions 1-20, prioritizing 4-15)."""
+    import urllib.parse
+
+    norm_q_gsc = normalize_search_intent_tokens(clean_q)
+    q_state_gsc = norm_q_gsc["state_slug"] or q_state_top
+    q_core_gsc = norm_q_gsc["core_tokens"]
+    best_gsc_hit: Optional[Tuple[Tuple[int, float, float], Dict[str, Any]]] = None
+    for r in eff_gsc_rows:
+        if not isinstance(r, dict):
+            continue
+        r_query = re.sub(r"\s+", " ", re.sub(r"[-_]+", " ", str(r.get("query") or "").lower()).strip())
+        r_page = str(r.get("canonical_url") or r.get("page") or r.get("target_url") or r.get("url") or "").strip()
+        if not r_query or not r_page:
+            continue
+        try:
+            r_pos = float(r.get("position", 100.0) or 100.0)
+        except (TypeError, ValueError):
+            r_pos = 100.0
+        try:
+            r_impr = int(float(r.get("impressions", 0) or 0))
+        except (TypeError, ValueError):
+            r_impr = 0
+        if not (1.0 <= r_pos <= 20.0):
+            continue
+        norm_r = normalize_search_intent_tokens(r_query)
+        exact_or_core_match = (
+            r_query == clean_q
+            or (
+                q_core_gsc
+                and norm_r["core_tokens"] == q_core_gsc
+                and norm_r["state_slug"] == q_state_gsc
+            )
+        )
+        if not exact_or_core_match:
+            continue
+        p_path = urllib.parse.urlsplit(r_page).path if "://" in r_page else r_page
+        norm_p = "/" + p_path.strip("/") + "/" if p_path.strip("/") else "/"
+        p_parts = [pt for pt in norm_p.split("/") if pt]
+        if len(p_parts) >= 2 and p_parts[0] == "tools":
+            p_slug = p_parts[1].lower()
+        elif p_parts:
+            p_slug = p_parts[-1].lower()
+        else:
+            continue
+        if is_retired_or_consolidated_slug(p_slug):
+            res_red = resolve_redirected_gsc_target(target_url=r_page, query=r_query)
+            if res_red.get("canonical_slug") and not res_red.get("is_off_topic_sink"):
+                p_slug = str(res_red["canonical_slug"])
+                norm_p = str(res_red["canonical_path"] or norm_p)
+            else:
+                continue
+        in_4_15 = 1 if (4.0 <= r_pos <= 15.0) else 0
+        rank_key = (in_4_15, float(r_impr), -r_pos)
+        hit_payload = {
+            "cannibalized": True,
+            "is_cannibalized": True,
+            "is_cannibalizing": True,
+            "parent_slug": p_slug,
+            "target_subroute": norm_p,
+            "ranking_url": r_page,
+            "ranking_position": round(r_pos, 2),
+            "ranking_impressions": r_impr,
+            "reason": "existing_url_ranks_in_gsc_striking_distance" if in_4_15 else "existing_url_ranks_in_gsc_top_20",
+            "matched_tool": {"slug": p_slug, "url": r_page},
+        }
+        if best_gsc_hit is None or rank_key > best_gsc_hit[0]:
+            best_gsc_hit = (rank_key, hit_payload)
+    return best_gsc_hit[1] if best_gsc_hit is not None else None
+
+
+def _match_core_topic_modifier_variant(
+    tool: Dict[str, Any],
+    tool_slug: str,
+    q_core: Set[str],
+    slug_core: Set[str],
+) -> Optional[Dict[str, Any]]:
+    """Checks core topic match after stripping filing-status and year modifiers."""
+    is_match = False
+    if q_core == slug_core or (
+        {"tax", "brackets"}.issubset(q_core)
+        and {"tax", "brackets"}.issubset(slug_core)
+        and q_core.issubset({"irs", "tax", "brackets", "federal", "income", "standard", "deduction"})
+    ):
+        is_match = True
+    elif tool_slug == "tcja-sunset-capital-gains" and (
+        (
+            {"capital", "gains"}.issubset(q_core)
+            and q_core.issubset({"irs", "capital", "gains", "tax", "brackets", "tcja", "sunset", "long", "term", "short"})
+        )
+        or (
+            "qsbs" in q_core
+            and q_core.issubset({"qsbs", "exclusion", "section", "1202", "tax", "capital", "gains"})
+        )
+    ):
+        is_match = True
+    elif tool_slug == "section-1031-calculator" and (
+        (
+            "1031" in q_core
+            and ("partial" in q_core or "boot" in q_core)
+            and q_core.issubset({"partial", "1031", "exchange", "boot", "tax", "deferral", "section", "like", "kind"})
+        )
+        or q_core == {"tax", "deferral"}
+    ):
+        is_match = True
+    elif tool_slug == "section-179-calculator" and (
+        (
+            "179" in q_core
+            and q_core.issubset(
+                {
+                    "179", "section", "deduction", "tax", "how", "do", "i", "to",
+                    "is", "calculate", "calculated", "figure", "out", "can", "you",
+                    "computer", "software", "equipment", "vehicle", "bonus",
+                    "depreciation", "limit", "limits", "and", "for", "businesses",
+                }
+            )
+        )
+        or q_core == {"vehicle", "bonus", "depreciation"}
+    ):
+        is_match = True
+    elif tool_slug == "prediction-market-odds" and {"prediction", "market"}.issubset(q_core) and q_core.issubset(
+        {"kalshi", "polymarket", "prediction", "market", "odds", "arbitrage", "strategy", "implied", "probability"}
+    ):
+        is_match = True
+    elif tool_slug == "rap-payment-calculator" and "rap" in q_core and "ibr" not in q_core and q_core.issubset(
+        {"rap", "payment", "repayment", "assistance", "plan", "student", "loan", "loans", "details", "monthly"}
+    ):
+        is_match = True
+    elif tool_slug == "rap-vs-ibr-calculator" and "ibr" in q_core and (
+        "rap" in q_core or {"repayment", "assistance", "plan"}.issubset(q_core)
+    ):
+        is_match = True
+    elif tool_slug in ("student-loan-repayment-calculator", "ibr-hardship-cap-calculator") and (
+        (
+            q_core.issubset({"student", "college", "loan", "loans", "payment", "repayment", "estimator", "monthly"})
+            and ({"loan", "payment"}.issubset(q_core) or {"loan", "repayment"}.issubset(q_core))
+        )
+        or (
+            "ibr" in q_core
+            and "rap" not in q_core
+            and q_core.issubset({"ibr", "student", "loan", "loans", "tax", "bomb", "hardship", "cap", "payment", "repayment"})
+        )
+        or (
+            {"student", "loan", "forgiveness"}.issubset(q_core)
+            and q_core.issubset({"student", "loan", "loans", "forgiveness", "update", "details", "tax"})
+        )
+    ):
+        is_match = True
+    elif tool_slug == "pslf-qualifying-payment-simulator" and "pslf" in q_core and q_core.issubset(
+        {"pslf", "buyback", "months", "reconsideration", "student", "loan", "loans", "qualifying", "payment", "forgiveness"}
+    ):
+        is_match = True
+    elif tool_slug == "save-plan-litigation-transition" and {"save", "plan"}.issubset(q_core) and q_core.issubset(
+        {"student", "loan", "loans", "save", "plan", "forbearance", "interest", "capitalization", "litigation", "transition"}
+    ):
+        is_match = True
+
+    if is_match:
+        return {
+            "cannibalized": True,
+            "is_cannibalized": True,
+            "is_cannibalizing": True,
+            "parent_slug": tool_slug,
+            "target_subroute": f"/tools/{tool_slug}/",
+            "reason": "matches_core_topic_modifier_variant",
+            "matched_tool": tool,
+        }
+    return None
+
+
 def check_search_intent_cannibalization(
     query: str,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     token_overlap_threshold: float = 0.50,
     sitemap_urls: Optional[List[str]] = None,
     candidate_spec: Optional[Dict[str, Any]] = None,
+    gsc_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates whether a candidate query cannibalizes existing tool catalog intent,
+    live/persisted GSC query-by-page rankings (positions 1-20, especially 4-15 striking distance),
     statutory parameter signatures, secondary keywords, slug tokens, state sub-routes,
     synonym/filing-modifier variants, scenario-comparison clones, or indexed sitemap URLs.
     Zero em-dashes. Zero en-dashes.
@@ -416,6 +592,15 @@ def check_search_intent_cannibalization(
         if q_state_top and not extract_state_subroute_from_query(t_slug):
             return f"/tools/{t_slug}/{q_state_top}/"
         return f"/tools/{t_slug}/"
+
+    # 0. Check live/persisted GSC query-by-page rankings when provided (positions 1-20, prioritizing 4-15)
+    eff_gsc_rows = gsc_rows if gsc_rows is not None else (
+        candidate_spec.get("gsc_rows") if isinstance(candidate_spec, dict) else None
+    )
+    if eff_gsc_rows and clean_q:
+        gsc_hit = _match_gsc_ranking_cannibalization(clean_q, eff_gsc_rows, q_state_top)
+        if gsc_hit is not None:
+            return gsc_hit
 
     # 1. Deterministic evaluation against existing tools catalog
     best_slug_match = None
@@ -611,8 +796,20 @@ def check_search_intent_cannibalization(
                         is_tax_bracket_hub = {"tax", "brackets"}.issubset(hub_tokens) and (
                             {"tax", "brackets"}.issubset(q_core) or ("brackets" in q_core and "tax" in q_expanded)
                         )
-                        is_1031_hub = "1031" in hub_tokens and "1031" in q_core and not (
-                            len(q_core - {"1031", "exchange", "section", "like", "kind", "deferral", "tax", "property", "real", "estate"}) >= 2
+                        is_1031_hub = (
+                            "1031" in hub_tokens
+                            and (
+                                (
+                                    "1031" in q_core
+                                    and not (
+                                        len(q_core - {"1031", "exchange", "section", "like", "kind", "deferral", "tax", "property", "real", "estate"}) >= 2
+                                    )
+                                )
+                                or (
+                                    ({"capital", "gains"} <= q_core or {"tax", "deferral"} <= q_core)
+                                    and q_core.issubset({"capital", "gains", "tax", "deferral", "real", "estate", "property", "state"})
+                                )
+                            )
                         )
                         is_179_hub = "179" in hub_tokens and "179" in q_core and not (
                             len(q_core - {"179", "section", "deduction", "tax", "depreciation", "bonus", "limit", "limits"}) >= 2
@@ -650,44 +847,14 @@ def check_search_intent_cannibalization(
 
                 # (iv) Core topic match after stripping filing status & year modifiers
                 if q_core and norm_slug["core_tokens"] and q_state == norm_slug["state_slug"]:
-                    if q_core == norm_slug["core_tokens"] or (
-                        {"tax", "brackets"}.issubset(q_core)
-                        and {"tax", "brackets"}.issubset(norm_slug["core_tokens"])
-                        and q_core.issubset({"irs", "tax", "brackets"})
-                    ):
-                        return {
-                            "cannibalized": True,
-                            "is_cannibalized": True,
-                            "is_cannibalizing": True,
-                            "parent_slug": tool_slug,
-                            "target_subroute": f"/tools/{tool_slug}/",
-                            "reason": "matches_core_topic_modifier_variant",
-                            "matched_tool": tool,
-                        }
-                    if tool_slug == "tcja-sunset-capital-gains" and {"capital", "gains"}.issubset(q_core) and q_core.issubset(
-                        {"irs", "capital", "gains", "tax", "brackets", "tcja", "sunset", "long", "term", "short"}
-                    ):
-                        return {
-                            "cannibalized": True,
-                            "is_cannibalized": True,
-                            "is_cannibalizing": True,
-                            "parent_slug": tool_slug,
-                            "target_subroute": f"/tools/{tool_slug}/",
-                            "reason": "matches_core_topic_modifier_variant",
-                            "matched_tool": tool,
-                        }
-                    if tool_slug == "prediction-market-odds" and {"prediction", "market"}.issubset(q_core) and q_core.issubset(
-                        {"kalshi", "polymarket", "prediction", "market", "odds", "arbitrage", "strategy", "implied", "probability"}
-                    ):
-                        return {
-                            "cannibalized": True,
-                            "is_cannibalized": True,
-                            "is_cannibalizing": True,
-                            "parent_slug": tool_slug,
-                            "target_subroute": f"/tools/{tool_slug}/",
-                            "reason": "matches_core_topic_modifier_variant",
-                            "matched_tool": tool,
-                        }
+                    core_hit = _match_core_topic_modifier_variant(
+                        tool=tool,
+                        tool_slug=tool_slug,
+                        q_core=q_core,
+                        slug_core=norm_slug["core_tokens"],
+                    )
+                    if core_hit is not None:
+                        return core_hit
 
     # 2. Check against sitemap URLs if provided
     if sitemap_urls and clean_q:
@@ -719,6 +886,96 @@ def check_search_intent_cannibalization(
         "parent_slug": "none",
         "reason": "distinct_asset",
         "matched_tool": None,
+    }
+
+
+def evaluate_query_modifier_expansion_vs_distinct_tool(
+    query: str,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+    gsc_rows: Optional[List[Dict[str, Any]]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Deterministically weighs whether a query modifier warrants expanding/refactoring an
+    existing canonical URL (EXPAND_EXISTING_PAGE -> REFACTOR_PAGE) versus launching a
+    genuinely distinct statutory calculator (LAUNCH_DISTINCT_TOOL -> BUILD_PAGE).
+    Decision rules:
+      1. Existing URL already ranks in GSC positions 4-15 (or 1-20) -> EXPAND_EXISTING_PAGE
+         (suppresses duplicate page creation to avoid splitting impressions and link equity).
+      2. Modifier represents a filing-status tier, tax-year schedule, state sub-route,
+         sub-scenario parameter (e.g. partial 1031 boot, vehicle bonus depreciation,
+         QSBS exclusion, RAP/IBR/PSLF sub-intent), or phrasing synonym of an existing
+         calculator -> EXPAND_EXISTING_PAGE.
+      3. Modifier introduces an orthogonal statutory authority and distinct mathematical
+         formula/inputs not modeled by any existing calculator -> LAUNCH_DISTINCT_TOOL.
+    Zero em-dashes. Zero en-dashes.
+    """
+    clean_q = str(query or "").strip()
+    prop = "prexvo" if "prexvo" in str(property_id or "").lower() else "profithelm"
+    tools_catalog = list(existing_tools) if existing_tools is not None else (
+        list(_DEFAULT_PREXVO_CORE_TOOLS) if prop == "prexvo" else list(_DEFAULT_PROFITHELM_CORE_TOOLS)
+    )
+    cannibal = check_search_intent_cannibalization(
+        clean_q,
+        existing_tools=tools_catalog,
+        gsc_rows=gsc_rows,
+    )
+    if cannibal.get("is_cannibalizing") and cannibal.get("parent_slug") not in (None, "", "none"):
+        p_slug = str(cannibal["parent_slug"])
+        subroute = str(cannibal.get("target_subroute") or f"/tools/{p_slug}/")
+        r_pos = cannibal.get("ranking_position")
+        reason = str(cannibal.get("reason") or "matches_existing_tool_intent")
+        if r_pos is not None and 1.0 <= float(r_pos) < 4.0:
+            rec_action = "PROTECT_TOP3_WINNER"
+            mod_class = "EXISTING_TOP_3_WINNER"
+        elif r_pos is not None and 4.0 <= float(r_pos) <= 15.0:
+            rec_action = "REFACTOR_PAGE"
+            mod_class = "EXISTING_STRIKING_DISTANCE_4_15"
+        elif "state_subroute" in reason or "state" in reason:
+            rec_action = "REFACTOR_PAGE"
+            mod_class = "JURISDICTION_STATE_SUBROUTE_MODIFIER"
+        else:
+            rec_action = "REFACTOR_PAGE"
+            mod_class = "SAME_CALCULATOR_SUB_INTENT_MODIFIER"
+        return {
+            "query": clean_q,
+            "decision": "EXPAND_EXISTING_PAGE",
+            "action": rec_action,
+            "recommended_action": rec_action,
+            "suppress_duplicate_build": True,
+            "is_cannibalizing": True,
+            "parent_slug": p_slug,
+            "target_subroute": subroute,
+            "ranking_url": cannibal.get("ranking_url", ""),
+            "ranking_position": r_pos,
+            "ranking_impressions": cannibal.get("ranking_impressions", 0),
+            "modifier_classification": mod_class,
+            "reason": reason,
+            "tradeoff_rationale": (
+                f"Query '{clean_q}' shares statutory and arithmetic intent with '{subroute}' "
+                f"({mod_class}); expanding the existing page with targeted sub-intent sections "
+                f"and tightened headings captures position 4-15 CTR gains without authority dilution."
+            ),
+        }
+
+    return {
+        "query": clean_q,
+        "decision": "LAUNCH_DISTINCT_TOOL",
+        "action": "BUILD_PAGE",
+        "recommended_action": "BUILD_PAGE",
+        "suppress_duplicate_build": False,
+        "is_cannibalizing": False,
+        "parent_slug": "none",
+        "target_subroute": "",
+        "ranking_url": "",
+        "ranking_position": None,
+        "ranking_impressions": 0,
+        "modifier_classification": "DISTINCT_STATUTORY_CALCULATOR",
+        "reason": "distinct_asset",
+        "tradeoff_rationale": (
+            f"Query '{clean_q}' introduces a distinct statutory regime and mathematical formula "
+            f"not covered by any existing canonical calculator."
+        ),
     }
 
 
@@ -1013,17 +1270,22 @@ def qualify_search_intent(
             "reason": f"0 impressions across {days_observed} days",
         })
 
-    # 3. Match against existing tool catalog and cannibalization detection
+    # 3. Match against existing tool catalog, GSC query-page rankings, and cannibalization detection
     matching_tool = query_data.get("matching_tool")
     cannibal = check_search_intent_cannibalization(
         q_text,
         existing_tools=existing_tools,
         sitemap_urls=sitemap_urls,
         candidate_spec=query_data,
+        gsc_rows=query_data.get("gsc_rows"),
     )
 
     if matching_tool is None and cannibal.get("is_cannibalizing") and cannibal.get("parent_slug") != "none":
         matching_tool = cannibal.get("parent_slug")
+        if cannibal.get("ranking_position") is not None and (pos <= 0.0 or pos >= 99.0):
+            pos = float(cannibal["ranking_position"])
+        if cannibal.get("ranking_impressions") and impr <= 0:
+            impr = int(cannibal["ranking_impressions"])
 
     if matching_tool is None and existing_tools:
         q_lower = q_text.lower()
@@ -1092,6 +1354,7 @@ def qualify_search_intent(
                 "position": pos,
                 "impressions": impr,
                 "matching_tool": matching_tool,
+                "canonical_slug": matching_tool,
                 "target_subroute": target_subroute,
                 "measurement_lock_days": 28,
                 "overlay_spec": overlay_spec,
@@ -1106,6 +1369,7 @@ def qualify_search_intent(
                 "position": pos,
                 "impressions": impr,
                 "matching_tool": matching_tool,
+                "canonical_slug": matching_tool,
                 "target_subroute": target_subroute,
                 "reason": f"Top-ranking position {pos} - preserve existing authority",
             })
@@ -1118,6 +1382,7 @@ def qualify_search_intent(
             "position": pos,
             "impressions": impr,
             "matching_tool": matching_tool,
+            "canonical_slug": matching_tool,
             "target_subroute": target_subroute,
             "reason": f"Position {pos} > 20 matches existing tool '{matching_tool}' - avoid cannibalizing URL bloat",
         })
@@ -2090,11 +2355,14 @@ def _clean_tool_mixed_topical_signals(
     return changed
 
 
-def reconcile_void_candidates_queue(vc_path: Union[str, Path]) -> int:
+def reconcile_void_candidates_queue(
+    vc_path: Union[str, Path],
+    gsc_rows: Optional[List[Dict[str, Any]]] = None,
+) -> int:
     """
-    Reconciles a void_candidates.jsonl topic queue against consolidated/retired slugs
-    and synthetic/off-topic patterns so the autonomous pipeline never re-queues or resurrects
-    retired duplicate pages.
+    Reconciles a void_candidates.jsonl topic queue against consolidated/retired slugs,
+    synthetic/off-topic patterns, and canonical/GSC striking-distance tools so the autonomous
+    pipeline never re-queues or builds duplicate pages for queries an existing URL already covers.
     Returns the number of updated or deduplicated records.
     Zero em-dashes. Zero en-dashes.
     """
@@ -2111,6 +2379,7 @@ def reconcile_void_candidates_queue(vc_path: Union[str, Path]) -> int:
     all_clone_maps: Dict[str, Dict[str, str]] = {}
     all_clone_maps.update(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
     all_clone_maps.update(CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
+    combined_core_tools = list(_DEFAULT_PROFITHELM_CORE_TOOLS) + list(_DEFAULT_PREXVO_CORE_TOOLS)
 
     updated_count = 0
     reconciled_records: List[Dict[str, Any]] = []
@@ -2127,11 +2396,11 @@ def reconcile_void_candidates_queue(vc_path: Union[str, Path]) -> int:
         slug_from_query = re.sub(r"[^a-z0-9]+", "-", raw_query).strip("-") if raw_query else ""
         eff_slug = raw_slug or slug_from_query
 
-        if is_synthetic_test_candidate(eff_slug or raw_query, rec_copy):
+        if is_synthetic_test_candidate(eff_slug or raw_query, rec_copy) or "site:" in raw_query:
             if rec_copy.get("status") != "REJECTED" or rec_copy.get("action") != "REJECT":
                 rec_copy["status"] = "REJECTED"
                 rec_copy["action"] = "REJECT"
-                rec_copy["status_reason"] = "Rejected synthetic or off-topic candidate"
+                rec_copy["status_reason"] = "Rejected synthetic, scraper, or off-topic candidate"
                 updated_count += 1
         elif eff_slug in all_clone_maps or slug_from_query in all_clone_maps:
             matched_key = eff_slug if eff_slug in all_clone_maps else slug_from_query
@@ -2153,13 +2422,34 @@ def reconcile_void_candidates_queue(vc_path: Union[str, Path]) -> int:
                 updated_count += 1
         else:
             act = str(rec_copy.get("action") or "").strip().upper()
-            if act in ("REJECT", "MONITOR") and rec_copy.get("status") != "REJECTED":
+            cur_status = str(rec_copy.get("status") or "").strip().upper()
+            if act in ("REJECT", "MONITOR") and cur_status != "REJECTED":
                 rec_copy["status"] = "REJECTED"
                 rec_copy["status_reason"] = (
                     rec_copy.get("status_reason")
                     or f"Engine verdict {act}: {rec_copy.get('decision_reason') or 'not actionable'}"
                 )
                 updated_count += 1
+            elif act == "BUILD_PAGE" and cur_status not in ("BUILT", "REJECTED"):
+                mod_eval = evaluate_query_modifier_expansion_vs_distinct_tool(
+                    raw_query or eff_slug.replace("-", " "),
+                    existing_tools=combined_core_tools,
+                    gsc_rows=gsc_rows,
+                )
+                if mod_eval.get("suppress_duplicate_build") and mod_eval.get("parent_slug") not in (None, "", "none"):
+                    p_slug = str(mod_eval["parent_slug"])
+                    t_sub = str(mod_eval.get("target_subroute") or f"/tools/{p_slug}/")
+                    rec_copy["action"] = "REFACTOR_PAGE"
+                    rec_copy["status"] = "REFACTOR_PENDING"
+                    rec_copy["matching_tool"] = p_slug
+                    rec_copy["canonical_slug"] = p_slug
+                    rec_copy["target_subroute"] = t_sub
+                    rec_copy["redirect_target"] = t_sub
+                    rec_copy["modifier_decision"] = "EXPAND_EXISTING_PAGE"
+                    rec_copy["status_reason"] = (
+                        f"Suppressed duplicate BUILD_PAGE; routed to REFACTOR_PAGE on {t_sub} ({mod_eval.get('modifier_classification')})"
+                    )
+                    updated_count += 1
 
         reconciled_records.append(rec_copy)
 

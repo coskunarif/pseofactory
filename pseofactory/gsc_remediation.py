@@ -348,25 +348,28 @@ def _resolve_contextual_internal_links(
         base_hub = {"anchor": "Title IV Student Loan Calculators Directory", "href": "/tools/"}
         if any(k in combined for k in ("pslf", "public-service", "public service", "teacher", "joint", "spousal")):
             cluster = [
-                {"anchor": "PSLF 120 Qualifying Payment Simulator", "href": "/tools/pslf-qualifying-payment-simulator/"},
+                {"anchor": "PSLF 120 Qualifying Payment Simulator & Buyback Calculator", "href": "/tools/pslf-qualifying-payment-simulator/"},
+                {"anchor": "Repayment Assistance Plan (RAP) Calculator & 2026 Monthly Payment Schedule", "href": "/tools/rap-payment-calculator/"},
                 {"anchor": "SAVE Plan Litigation & Transition Guide", "href": "/tools/save-plan-litigation-transition/"},
                 {"anchor": "IBR Financial Hardship Cap Calculator", "href": "/tools/ibr-hardship-cap-calculator/"},
                 {"anchor": "Married Filing Separately Student Loan Calculator", "href": "/tools/married-filing-separately-student-loan-calculator/"},
-                {"anchor": "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
+                {"anchor": "College & Income-Based / Income-Driven Student Loan Repayment Calculator (IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
             ]
         elif any(k in combined for k in ("parent-plus", "parent plus", "consolidation", "icr", "double")):
             cluster = [
                 {"anchor": "Parent PLUS Double Consolidation Loop Analyzer", "href": "/tools/parent-plus-double-consolidation/"},
                 {"anchor": "ICR Income-Contingent Repayment Calculator", "href": "/tools/icr-repayment-calculator/"},
+                {"anchor": "Repayment Assistance Plan (RAP) Calculator & 2026 Monthly Payment Schedule", "href": "/tools/rap-payment-calculator/"},
                 {"anchor": "Grad PLUS Borrowing Cap Calculator", "href": "/tools/grad-plus-borrowing-cap-calculator/"},
-                {"anchor": "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
+                {"anchor": "College & Income-Based / Income-Driven Student Loan Repayment Calculator (IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
                 {"anchor": "Tiered Standard Repayment Schedule Calculator", "href": "/tools/tiered-standard-calculator/"},
             ]
         else:
             cluster = [
-                {"anchor": "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
+                {"anchor": "Repayment Assistance Plan (RAP) Calculator & 2026 Monthly Payment Schedule", "href": "/tools/rap-payment-calculator/"},
+                {"anchor": "College & Income-Based / Income-Driven Student Loan Repayment Calculator (IBR & RAP)", "href": "/tools/student-loan-repayment-calculator/"},
                 {"anchor": "RAP vs IBR Monthly Payment Calculator", "href": "/tools/rap-vs-ibr-calculator/"},
-                {"anchor": "PSLF 120 Qualifying Payment Simulator", "href": "/tools/pslf-qualifying-payment-simulator/"},
+                {"anchor": "PSLF 120 Qualifying Payment Simulator & Buyback Calculator", "href": "/tools/pslf-qualifying-payment-simulator/"},
                 {"anchor": "ICR Income-Contingent Repayment Calculator", "href": "/tools/icr-repayment-calculator/"},
                 {"anchor": "PAYE Sunset & IBR Transition Calculator", "href": "/tools/paye-sunset-calculator/"},
             ]
@@ -390,11 +393,13 @@ def _resolve_contextual_internal_links(
             ]
         elif any(k in combined for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal")):
             cluster = [
-                {"anchor": "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator", "href": "/tools/irs-2027-tax-brackets/"},
-                {"anchor": "California 2027 Tax Brackets & Marginal Rate Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
+                {"anchor": "IRS 2027 Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
+                {"anchor": "CA Tax Brackets 2026-2027 & California Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
                 {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
+                {"anchor": "NJ Tax Bracket & New Jersey 2027 Income Tax Rate Calculator", "href": "/tools/irs-2027-tax-brackets/new-jersey/"},
+                {"anchor": "KY State Income Tax Rate 2027 & Kentucky Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/kentucky/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
-                {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "Section 1031 Tax Deferral & Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
             ]
             if "/" in s_norm:
                 sp_parts = [p for p in s_norm.split("/") if p]
@@ -404,16 +409,18 @@ def _resolve_contextual_internal_links(
                     cluster.insert(
                         1,
                         {
-                            "anchor": f"{st_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
+                            "anchor": f"{st_label} Section 1031 Tax Deferral & Capital Gains Calculator",
                             "href": f"/tools/section-1031-calculator/{st_slug}/",
                         },
                     )
         elif any(k in combined for k in ("1031", "cost-segregation", "cost segregation", "bonus-depreciation", "opportunity-zone", "dst", "721", "real-estate", "cap-rate")):
             cluster = [
-                {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
-                {"anchor": "Texas Section 1031 Like-Kind Exchange & Boot Tax Calculator", "href": "/tools/section-1031-calculator/texas/"},
-                {"anchor": "California Section 1031 Like-Kind Exchange & Clawback Calculator", "href": "/tools/section-1031-calculator/california/"},
+                {"anchor": "Section 1031 Tax Deferral & Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "Texas Section 1031 Tax Deferral & Capital Gains Tax Calculator", "href": "/tools/section-1031-calculator/texas/"},
+                {"anchor": "California Section 1031 Tax Deferral & FTB Form 3840 Clawback Calculator", "href": "/tools/section-1031-calculator/california/"},
                 {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
+                {"anchor": "Maine Capital Gains Tax & Section 1031 Exchange Deferral Calculator", "href": "/tools/section-1031-calculator/maine/"},
+                {"anchor": "1031 Exchange Ohio & Real Estate Tax Deferral Calculator", "href": "/tools/section-1031-calculator/ohio/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
@@ -433,16 +440,20 @@ def _resolve_contextual_internal_links(
         else:
             cluster = [
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
-                {"anchor": "Section 1031 Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "Section 1031 Tax Deferral & Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "CA Tax Brackets 2026-2027 & California Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
-                {"anchor": "IRS 2027 Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
+                {"anchor": "IRS 2027 Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
                 {"anchor": "GMC Yukon XL Section 179 Heavy SUV Deduction Calculator", "href": "/tools/section-179-calculator/gmc-yukon-xl/"},
             ]
 
     selected = [base_hub]
+    seen_hrefs = {base_hub["href"].rstrip("/")}
     for item in cluster:
-        if item["href"].rstrip("/") != self_href.rstrip("/") and len(selected) < 5:
+        norm_h = item["href"].rstrip("/")
+        if norm_h != self_href.rstrip("/") and norm_h not in seen_hrefs and len(selected) < 7:
+            seen_hrefs.add(norm_h)
             selected.append({
                 "anchor": _strip_forbidden_dashes(item["anchor"]),
                 "href": item["href"],
@@ -1278,8 +1289,10 @@ def expected_ctr_for_position(position: float) -> float:
         return EXPECTED_CTR_CURVE[1]
     if pos_int <= 10:
         return EXPECTED_CTR_CURVE.get(pos_int, 0.018)
+    if pos_int <= 15:
+        return {11: 0.017, 12: 0.016, 13: 0.015, 14: 0.014, 15: 0.013}.get(pos_int, 0.015)
     if pos_int <= 20:
-        return 0.015
+        return 0.012
     return 0.01
 
 
@@ -1447,7 +1460,7 @@ def calculate_candidate_roi(
         severity_factor = 1.5
         action_type = "REWRITE_TITLE_META_AND_SCHEMA"
     elif "STRIKING" in anomaly_type:
-        severity_factor = 1.25
+        severity_factor = 1.35 if (4.0 <= position <= 15.0) else 1.25
         action_type = "INJECT_STRIKING_DISTANCE_OVERLAY"
     elif anomaly_type in (
         "CONTENT_QUALITY_OR_ANSWER_DEFICIENCY",
@@ -1587,6 +1600,7 @@ def calculate_candidate_roi(
         "conversion_gap_detected": conversion_gap,
         "distribution_gap_detected": distribution_gap,
         "yield_optimization_needed": yield_opt_needed,
+        "striking_distance_4_15": bool(4.0 <= position <= 15.0),
         "position": position,
         "impressions": impressions,
         "clicks": clicks,
@@ -1608,38 +1622,159 @@ def _resolve_secondary_title_modifier(
     """
     Deterministically derives a compact parenthetical secondary query modifier
     from grouped GSC queries or statutory domain context so primary pages capture
-    long-tail query variants without creating cannibalizing spin-off URLs.
+    long-tail query variants without creating cannibalizing spin-off URLs or
+    cross-vertical contamination (e.g. Form 1120-S on a tax-bracket page).
     """
     cand = candidate or {}
     explicit = str(cand.get("secondary_modifier") or "").strip(" ()|-:")
     if explicit:
         return _strip_forbidden_dashes(explicit)
 
-    grouped = cand.get("grouped_queries") or cand.get("secondary_queries") or []
-    blob = f"{query_clean} {slug} " + " ".join(
+    grouped = cand.get("striking_4_15_queries") or cand.get("grouped_queries") or cand.get("secondary_queries") or []
+    primary_low = f"{query_clean} {slug}".lower()
+    grouped_low = " ".join(
         str(g.get("query", g) if isinstance(g, dict) else g) for g in grouped
-    )
-    low = blob.lower()
+    ).lower()
+    low = f"{primary_low} {grouped_low}"
+
     if tenant_id == "prexvo":
-        if "pslf" in low or "120" in low or "public service" in low:
-            return "PSLF Rules"
-        if "rap" in low or "repayment assistance" in low:
+        if "pslf" in primary_low or "120" in primary_low or "public service" in primary_low:
+            return "Buyback & 120-Mo" if "buyback" in low else "PSLF Rules"
+        if "rap" in primary_low or "repayment assistance" in primary_low:
             return "2026 RAP"
+        if "college loan" in low and "college" not in query_clean.lower():
+            return "College & IDR"
         if "ibr" in low or "save" in low or "income" in low:
             return "IDR Plan"
         return "Title IV Rules"
 
-    if "1031" in low or "8824" in low or "boot" in low or "exchange" in low:
+    if any(k in primary_low for k in ("tax-bracket", "tax bracket", "tax tables", "tax rate", "income tax rate")):
+        if ("married" in grouped_low or "jointly" in grouped_low) and "married" not in query_clean.lower():
+            return "Single & MFJ"
+        if "tables" in grouped_low and "tables" not in query_clean.lower():
+            return "Rates & Tables"
+        return "IRC Sec 1(j)"
+    if any(k in primary_low for k in ("1031", "8824", "boot", "exchange", "deferral")):
+        if "capital gains" in grouped_low and "capital gains" not in query_clean.lower():
+            return "Capital Gains"
+        if "deferral" in grouped_low and "deferral" not in query_clean.lower():
+            return "Tax Deferral"
         return "Form 8824"
-    if "s-corp" in low or "s corp" in low or "1120-s" in low or "salary" in low:
+    if any(k in primary_low for k in ("s-corp", "s corp", "1120-s", "salary")):
         return "Form 1120-S"
-    if "179" in low or "4562" in low or "depreciation" in low or "bonus" in low:
+    if any(k in primary_low for k in ("179", "4562", "depreciation", "bonus")):
         return "Form 4562"
-    if "199a" in low or "qbi" in low or "8995" in low:
+    if any(k in primary_low for k in ("199a", "qbi", "8995")):
         return "IRC 199A"
-    if "burn" in low or "runway" in low or "saas" in low or "cac" in low:
+    if any(k in primary_low for k in ("burn", "runway", "saas", "cac")):
         return "2026 Model"
+    if "1031" in low or "8824" in low:
+        return "Form 8824"
+    if "179" in low or "4562" in low:
+        return "Form 4562"
     return "2026 Rules"
+
+
+def resolve_striking_distance_title_strategy(
+    heading_label: str,
+    query_clean: str,
+    slug: str,
+    tenant_id: str,
+    brand: str,
+    candidate: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Weighs the trade-off between aggressively tightening a page's title around a
+    high-impression position 4-15 striking-distance query versus protecting the
+    primary terms that already drive top-three rankings (pos <= 3.5) or clicks on
+    that same URL:
+      - PROTECT_TOP3_WINNER: When the URL already has a top-3 ranking query or
+        click-winning query, preserves the winning primary core tokens in the
+        title anchor and weaves the highest-impression position 4-15 modifier into
+        the secondary qualifier (zero regression of top-3 winners).
+      - TIGHTEN_STRIKING_4_15: When the URL has no top-3/click winner at risk and
+        ranks in positions 4-15, tightens the title front-loaded around the
+        highest-impression position 4-15 query.
+    Zero em-dashes. Zero en-dashes.
+    """
+    cand = candidate or {}
+    pos = float(cand.get("position", 10.0) or 10.0)
+    clicks = int(float(cand.get("clicks", 0) or 0))
+    top_3_winners = [
+        str(q.get("query", q) if isinstance(q, dict) else q).strip()
+        for q in (cand.get("top_3_winner_queries") or [])
+        if str(q.get("query", q) if isinstance(q, dict) else q).strip()
+    ]
+    striking_4_15 = [
+        str(q.get("query", q) if isinstance(q, dict) else q).strip()
+        for q in (cand.get("striking_4_15_queries") or [])
+        if str(q.get("query", q) if isinstance(q, dict) else q).strip()
+    ]
+    protected_primary = str(cand.get("protected_primary_query") or "").strip()
+    if not protected_primary and top_3_winners:
+        protected_primary = top_3_winners[0]
+    elif not protected_primary and (1.0 <= pos <= 3.5 or clicks > 0):
+        protected_primary = query_clean
+
+    secondary_mod = _resolve_secondary_title_modifier(
+        query_clean=query_clean,
+        slug=slug,
+        tenant_id=tenant_id,
+        candidate=cand,
+    )
+
+    has_top3_or_click_winner = bool(protected_primary or top_3_winners or (1.0 <= pos <= 3.5) or clicks > 0)
+    if has_top3_or_click_winner:
+        prot_low = protected_primary.lower()
+        q_low = query_clean.lower()
+        seed_label = heading_label
+        # Ensure winning primary core tokens (e.g. '2027', 'Tables', 'CA', 'California', '1031 Deferral') remain in seed
+        if "tables" in prot_low and "tables" not in seed_label.lower() and secondary_mod == "IRC Sec 1(j)":
+            secondary_mod = "Tax Tables"
+        elif ("married" in prot_low or "jointly" in prot_low) and "married" not in seed_label.lower():
+            secondary_mod = "Single & MFJ"
+        elif striking_4_15:
+            s_top = striking_4_15[0].lower()
+            if ("married" in s_top or "jointly" in s_top) and "married" not in seed_label.lower():
+                secondary_mod = "Single & MFJ"
+            elif "tables" in s_top and "tables" not in seed_label.lower():
+                secondary_mod = "Rates & Tables"
+            elif "capital gains" in s_top and "capital gains" not in seed_label.lower():
+                secondary_mod = "Capital Gains"
+            elif "deferral" in s_top and "deferral" not in seed_label.lower():
+                secondary_mod = "Tax Deferral"
+        if "2027" in prot_low and not re.search(r"\b(202[4-9]|203\d)\b", seed_label):
+            title_seed = f"{seed_label} 2027"
+        elif re.search(r"\b(202[4-9]|203\d)\b", seed_label):
+            title_seed = seed_label
+        else:
+            title_seed = f"{seed_label} 2026"
+        mode = "PROTECT_TOP3_WINNER"
+    else:
+        # Position 4-15 striking-distance tightening: front-load the high-impression query
+        seed_label = heading_label
+        if slug.startswith("irs-2027-tax-brackets/") and "2027" not in seed_label and "2026" not in seed_label:
+            title_seed = f"{seed_label} 2026-2027"
+        elif re.search(r"\b(202[4-9]|203\d)\b", seed_label):
+            title_seed = seed_label
+        else:
+            title_seed = f"{seed_label} 2026"
+        mode = "TIGHTEN_STRIKING_4_15" if (4.0 <= pos <= 15.0 or striking_4_15) else "STANDARD_NORMALIZE"
+
+    title_rewrite = _normalize_title_50_60(
+        title_seed,
+        brand=brand,
+        tenant_id=tenant_id,
+        secondary_modifier=secondary_mod,
+    )
+    return {
+        "title_rewrite": title_rewrite,
+        "secondary_modifier": secondary_mod,
+        "title_protection_mode": mode,
+        "protected_primary_query": protected_primary,
+        "top_3_winner_queries": top_3_winners,
+        "striking_4_15_queries": striking_4_15,
+    }
 
 
 def _normalize_title_50_60(
@@ -3404,6 +3539,129 @@ def _build_tax_bracket_profithelm_overlay_blocks(
     }
 
 
+def _append_query_subintent_blocks(
+    base_blocks: Dict[str, Any],
+    *,
+    tenant_id: str,
+    slug: str,
+    query_clean: str,
+    heading_label: str,
+    pos: float,
+    ctr: float,
+    impr: int,
+    grouped_queries: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Injects exact missing statutory or calculator query-level sub-intent sections
+    (H2s, preset scenarios, comparison rows, and FAQ entries) when Search Console
+    position 4-15 queries carry specific sub-intent modifiers (such as 'married filing jointly',
+    'single', 'tables', 'capital gains', 'tax deferral', 'partial 1031 boot',
+    'how to calculate section 179', 'software', 'rap calculator', or 'college loan').
+    Zero em-dashes. Zero en-dashes.
+    """
+    h2s = list(base_blocks.get("h2_headings") or [])
+    presets = list(base_blocks.get("preset_scenarios") or [])
+    comp_rows = list(base_blocks.get("comparison_rows") or [])
+    faqs = list(base_blocks.get("faq_entries") or [])
+
+    all_qs = [query_clean] + [str(q) for q in (grouped_queries or []) if str(q).strip()]
+    joined_low = " ".join(all_qs).lower() + " " + slug.lower()
+
+    def _add_h2(text: str) -> None:
+        clean_h2 = _strip_forbidden_dashes(text)
+        if clean_h2 and not any(clean_h2.lower() == existing.lower() for existing in h2s):
+            h2s.append(clean_h2)
+
+    def _add_faq(question: str, answer: str) -> None:
+        clean_q = _strip_forbidden_dashes(question)
+        clean_a = _strip_forbidden_dashes(answer)
+        if clean_q and not any(clean_q.lower() == str(item.get("question", "")).lower() for item in faqs):
+            faqs.append({"question": clean_q, "answer": clean_a})
+
+    if tenant_id == "prexvo":
+        if any(k in joined_low for k in ("rap", "repayment assistance")):
+            _add_h2(f"{heading_label}: 2026 RAP Tiered AGI Schedule (1% to 10%) & 100% Unpaid Interest Subsidy")
+            _add_faq(
+                "How does the 2026 RAP calculator compute monthly student loan payments and interest waivers?",
+                (
+                    "Under OBBBA Title VIII and 34 CFR Part 685, the Repayment Assistance Plan (RAP) assesses "
+                    "1 percent to 10 percent of Adjusted Gross Income across statutory $10,000 AGI tiers (with a "
+                    "$50 per dependent monthly credit and $10 minimum monthly payment) while waiving 100 percent "
+                    "of unpaid monthly interest and matching up to $50 per month in principal reduction."
+                ),
+            )
+        if any(k in joined_low for k in ("college loan", "payment estimator", "student loan repayment")):
+            _add_h2(f"{heading_label}: Federal College Loan Payment Estimator Across Standard, IBR & RAP Plans")
+            _add_faq(
+                "How do I compare monthly college loan payments across 10-Year Standard, IBR, and RAP plans?",
+                (
+                    "Enter your total federal Direct Loan balance, Adjusted Gross Income, family size, and weighted "
+                    "interest rate to compare fixed 10-year Standard amortization under 34 CFR 685.208 against "
+                    "income-driven IBR (10% or 15% discretionary income under 20 U.S.C. 1098e) and 2026 RAP schedules."
+                ),
+            )
+    else:
+        is_tax_bracket = any(k in joined_low for k in ("tax-bracket", "tax bracket", "tax tables", "tax rate"))
+        is_1031 = any(k in joined_low for k in ("1031", "like-kind", "like kind", "8824"))
+        is_179 = "179" in joined_low or "4562" in joined_low
+
+        if is_tax_bracket:
+            if any(k in joined_low for k in ("married", "jointly", "single", "mfj")):
+                _add_h2(f"{heading_label}: Married Filing Jointly (MFJ) vs Single Filer Bracket Thresholds")
+                _add_faq(
+                    f"How do {heading_label} thresholds compare for Married Filing Jointly vs Single filers?",
+                    (
+                        "Under IRC Section 1(j) and conforming state rate schedules, Married Filing Jointly (MFJ) "
+                        "standard deductions and lower marginal bracket widths are set at 200 percent of Single filer "
+                        "thresholds ($30,000 MFJ vs $15,000 Single federal baseline before inflation indexing), "
+                        "preventing marriage penalty compression across the 10% through 35% tiers."
+                    ),
+                )
+            if any(k in joined_low for k in ("table", "tables", "2026", "2027", "california", "ca ", "new-jersey", "kentucky")):
+                _add_h2(f"{heading_label}: 2026 vs 2027 Statutory Tax Tables & Marginal Rate Schedule")
+                _add_faq(
+                    f"Where can I compare 2026 and 2027 statutory tax tables and rate schedules for {heading_label}?",
+                    (
+                        "The interactive calculator and piecewise schedule above reconcile 2026 and 2027 federal IRC "
+                        "Section 1(j) and state marginal tax tables side by side, computing both marginal rate tiers "
+                        "and combined effective tax rates after standard or itemized deductions."
+                    ),
+                )
+        elif is_1031:
+            if any(k in joined_low for k in ("capital gains", "deferral")) or "/" in slug:
+                _add_h2(f"{heading_label}: State Capital Gains Tax Deferral & Clawback Reporting Rules")
+                _add_faq(
+                    f"How does {heading_label} defer state capital gains tax alongside federal IRC Section 1031?",
+                    (
+                        "Conforming states follow IRC Section 1031(a) like-kind exchange rules for real property, "
+                        "deferring state capital gains tax alongside federal 20% LTCG, 3.8% NIIT, and 25% Section 1250 "
+                        "depreciation recapture. Clawback jurisdictions (including California FTB Form 3840, Oregon, "
+                        "Massachusetts, and Montana) require annual tracking when replacement property is acquired out of state."
+                    ),
+                )
+            if any(k in joined_low for k in ("partial", "boot", "mortgage")):
+                _add_h2(f"{heading_label}: Partial 1031 Exchange Cash & Mortgage Boot Calculation (IRC Section 1031(b))")
+        elif is_179:
+            if any(k in joined_low for k in ("how to", "software", "vehicle", "gvwr", "bonus", "for businesses")):
+                _add_h2(f"{heading_label}: How to Calculate Section 179 vs 20% Bonus Depreciation (Form 4562)")
+                _add_faq(
+                    "How do businesses calculate Section 179 expensing alongside 20% bonus depreciation on Form 4562?",
+                    (
+                        "Under IRC Section 179 and Section 168(k), businesses first apply the Section 179 dollar-for-dollar "
+                        "deduction (up to $2,560,000, phasing out above $4,090,000) to qualifying equipment, off-the-shelf "
+                        "software, and 6,000+ lb GVWR commercial vehicles, then apply 20% first-year bonus depreciation "
+                        "to remaining adjusted basis before MACRS recovery."
+                    ),
+                )
+
+    return {
+        "h2_headings": h2s,
+        "preset_scenarios": presets,
+        "comparison_rows": comp_rows,
+        "faq_entries": faqs,
+    }
+
+
 def compile_remediation_overlay_spec(
     candidate: Dict[str, Any],
     tenant_id: Optional[str] = None,
@@ -3446,6 +3704,7 @@ def compile_remediation_overlay_spec(
 
     from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, _format_safe_heading_topic
 
+    original_raw_query = _strip_forbidden_dashes(raw_query)
     rq_low = raw_query.lower()
     is_noisy_query = (
         not raw_query
@@ -3467,6 +3726,10 @@ def compile_remediation_overlay_spec(
                 "is income ",
                 "properties for",
                 "transfer tax",
+                "ordermetrics",
+                "futures tax",
+                "for gaming",
+                "bid bond",
                 "(",
                 ")",
                 '"',
@@ -3512,23 +3775,28 @@ def compile_remediation_overlay_spec(
     heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
     heading_label = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", heading_label)
 
-    secondary_mod = _resolve_secondary_title_modifier(
+    grouped_queries_list: List[str] = []
+    if original_raw_query and "site:" not in original_raw_query.lower():
+        grouped_queries_list.append(original_raw_query)
+    for gq in (candidate.get("grouped_queries") or candidate.get("striking_4_15_queries") or []):
+        gq_str = _strip_forbidden_dashes(str(gq.get("query", gq) if isinstance(gq, dict) else gq).strip())
+        if gq_str and "site:" not in gq_str.lower() and gq_str.lower() not in {x.lower() for x in grouped_queries_list}:
+            grouped_queries_list.append(gq_str)
+
+    cand_with_groups = dict(candidate)
+    if grouped_queries_list and not cand_with_groups.get("grouped_queries"):
+        cand_with_groups["grouped_queries"] = grouped_queries_list
+
+    title_strategy = resolve_striking_distance_title_strategy(
+        heading_label=heading_label,
         query_clean=query_clean,
         slug=slug,
         tenant_id=resolved_tenant,
-        candidate=candidate,
-    )
-    title_seed = (
-        heading_label
-        if re.search(r"\b(202[4-9]|203\d)\b", heading_label)
-        else f"{heading_label} 2026"
-    )
-    title_rewrite = _normalize_title_50_60(
-        title_seed,
         brand=brand,
-        tenant_id=resolved_tenant,
-        secondary_modifier=secondary_mod,
+        candidate=cand_with_groups,
     )
+    secondary_mod = title_strategy["secondary_modifier"]
+    title_rewrite = title_strategy["title_rewrite"]
     meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label)
     quick_answer = _normalize_quick_answer_40_60_words(heading_label, tenant_id=resolved_tenant, slug=slug)
 
@@ -3548,6 +3816,17 @@ def compile_remediation_overlay_spec(
             ctr=ctr,
             impr=impr,
         )
+        v_blocks = _append_query_subintent_blocks(
+            v_blocks,
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+            grouped_queries=grouped_queries_list,
+        )
         h2_headings = v_blocks["h2_headings"]
         preset_scenarios = v_blocks["preset_scenarios"]
         comparison_rows = v_blocks["comparison_rows"]
@@ -3565,6 +3844,17 @@ def compile_remediation_overlay_spec(
             pos=pos,
             ctr=ctr,
             impr=impr,
+        )
+        v_blocks = _append_query_subintent_blocks(
+            v_blocks,
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+            grouped_queries=grouped_queries_list,
         )
         h2_headings = v_blocks["h2_headings"]
         preset_scenarios = v_blocks["preset_scenarios"]
@@ -3636,6 +3926,10 @@ def compile_remediation_overlay_spec(
         "target_url": target_url,
         "query": query_clean,
         "secondary_title_modifier": secondary_mod,
+        "title_protection_mode": title_strategy["title_protection_mode"],
+        "protected_primary_query": title_strategy["protected_primary_query"],
+        "top_3_winner_queries": title_strategy["top_3_winner_queries"],
+        "striking_4_15_queries": title_strategy["striking_4_15_queries"],
         "section": sec_name,
         "template_section": sec_name,
         "child_sitemap": child_sm,

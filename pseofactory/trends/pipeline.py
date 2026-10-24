@@ -70,6 +70,7 @@ def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
     from pseofactory.qualification import (
         CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
         PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
+        evaluate_query_modifier_expansion_vs_distinct_tool,
         is_synthetic_test_candidate,
     )
 
@@ -78,10 +79,10 @@ def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
     slug_from_query = sanitize_url_slug(raw_query) if raw_query else ""
     eff_slug = raw_slug or slug_from_query
 
-    if is_synthetic_test_candidate(eff_slug or raw_query, record):
+    if is_synthetic_test_candidate(eff_slug or raw_query, record) or "site:" in raw_query:
         record["status"] = "REJECTED"
         record["action"] = "REJECT"
-        record["status_reason"] = "Rejected synthetic or off-topic candidate"
+        record["status_reason"] = "Rejected synthetic, scraper, or off-topic candidate"
         return record
 
     all_clone_maps = {**PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP, **CANNIBALIZING_CLONE_CONSOLIDATION_MAP}
@@ -96,9 +97,24 @@ def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
         record["status_reason"] = f"Consolidated into canonical hub {info['canonical_slug']} ({info['redirect_target']})"
         return record
 
+    action = str(record.get("action") or "").strip().upper()
+    if action == "BUILD_PAGE" and record.get("status") not in ("BUILT", "REJECTED"):
+        mod_eval = evaluate_query_modifier_expansion_vs_distinct_tool(raw_query or eff_slug.replace("-", " "))
+        if mod_eval.get("suppress_duplicate_build") and mod_eval.get("parent_slug") not in (None, "", "none"):
+            p_slug = str(mod_eval["parent_slug"])
+            t_sub = str(mod_eval.get("target_subroute") or f"/tools/{p_slug}/")
+            record["action"] = "REFACTOR_PAGE"
+            record["status"] = "REFACTOR_PENDING"
+            record["matching_tool"] = p_slug
+            record["canonical_slug"] = p_slug
+            record["target_subroute"] = t_sub
+            record["redirect_target"] = t_sub
+            record["modifier_decision"] = "EXPAND_EXISTING_PAGE"
+            record["status_reason"] = f"Suppressed duplicate BUILD_PAGE; routed to REFACTOR_PAGE on {t_sub}"
+            return record
+
     if record.get("status"):
         return record
-    action = str(record.get("action") or "").strip().upper()
     if action in ACTIONABLE_ENGINE_ACTIONS:
         record["status"] = "PENDING"
     else:
@@ -139,6 +155,7 @@ class TrendPipeline:
         sitemap_urls: Optional[List[str]] = None,
         sink_path: Optional[Union[str, Path]] = None,
         total_site_impressions: int = 500,
+        gsc_rows: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Executes end-to-end processing across raw breakout spikes.
@@ -221,11 +238,12 @@ class TrendPipeline:
 
             raw_meta = cand.metadata or {}
 
-            # Upfront search intent cannibalization screening against existing catalog
+            # Upfront search intent cannibalization screening against existing catalog and GSC rankings
             cannibal_info = check_search_intent_cannibalization(
                 cand.query,
                 existing_tools=existing_tools,
                 sitemap_urls=sitemap_urls,
+                gsc_rows=gsc_rows or raw_meta.get("gsc_rows"),
             )
 
             cann_score = 0.0
@@ -235,7 +253,9 @@ class TrendPipeline:
             if cannibal_info.get("is_cannibalizing"):
                 cann_score = 0.85
                 matching_tool = cannibal_info.get("parent_slug")
-                if "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
+                if cannibal_info.get("ranking_position") is not None:
+                    pos = float(cannibal_info["ranking_position"])
+                elif "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
                     if "position" in cannibal_info["matched_tool"]:
                         pos = float(cannibal_info["matched_tool"]["position"])
 
