@@ -712,6 +712,7 @@ class MonetizationHub:
                     "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
                     "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
                     "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
+                    "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
                 }
             )
         prop_section = self.vault_data.get("properties", {}).get(target_prop, {})

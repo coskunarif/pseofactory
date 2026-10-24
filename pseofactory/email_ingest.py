@@ -139,6 +139,7 @@ def _extract_candidate_url(text: str) -> str:
         "opt-out",
         "manage-preferences",
         "terms-of-service",
+        "email.cj.com/c/",
     )
     for raw in matches:
         cleaned = raw.rstrip(".,;:!?)")
@@ -339,6 +340,7 @@ class EmailIngestionEngine:
         limit: int = 30,
         force: bool = False,
         fetch_bodies_for_partner_keys: bool = True,
+        zoho_account: str = "zoho",
     ) -> List[EmailMessage]:
         """
         Ingests messages for arif.coskun@profithelm.com from Zoho via himalaya.
@@ -391,7 +393,7 @@ class EmailIngestionEngine:
             needs_body = any(t in text_to_check for t in partner_tokens)
 
             if needs_body and not body_text and fetch_bodies_for_partner_keys:
-                body_full = self.read_message_body(mid, account="zoho")
+                body_full = self.read_message_body(mid, account=zoho_account)
                 body_text = body_full[:2000] if body_full else ""
 
             # Normalize dashes in subject and snippet
@@ -768,6 +770,8 @@ class EmailIngestionEngine:
                 continue
             if "mailer-daemon@" in sender_lower or "postmaster@" in sender_lower:
                 continue
+            if subj_lower.startswith("[profithelm playbook") or subj_lower.startswith("[prexvo playbook"):
+                continue
 
             if msg.mailbox != "Sent" and "rho.co" in sender_lower and (
                 "become a partner" in body_lower or "rho partner portal" in body_lower
@@ -1060,6 +1064,8 @@ class EmailIngestionEngine:
 
             if msg.mailbox != "Sent" and "freetaxusa" in combined_text and (
                 "welcome to the freetaxusa" in combined_text
+                or "welcome to our affiliate program" in combined_text
+                or "freetaxusa affiliate program. welcome" in combined_text
                 or "your application has been approved" in combined_text
                 or "approved" in combined_text
             ):

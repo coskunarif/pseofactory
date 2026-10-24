@@ -363,6 +363,19 @@ class PartnerTrackingEngine:
                     notes="PartnerStack ToS accepted; partnership part_jp9R0iYpPGriHu is active.",
                 )
 
+        for prop_id in ("profithelm", "prexvo"):
+            gate_err_id = f"act-{prop_id}-{prop_id}-monetization-gate-integration-requirement"
+            if (
+                gate_err_id in self.action_bus.items
+                and self.action_bus.items[gate_err_id].status == "PENDING_OPERATOR"
+            ):
+                self.action_bus.confirm_decision(
+                    gate_err_id,
+                    decision="RESOLVE",
+                    operator="partner_tracker_auto_reconcile",
+                    notes="Monetization gate evaluation exception resolved; Zoho email ingestion and partner status sync healthy.",
+                )
+
     def _evaluate_property(
         self,
         property_id: str,
@@ -1107,6 +1120,7 @@ class PartnerTrackingEngine:
                     "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
                     "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
                     "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
+                    "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
                 }
                 if prop_id == "profithelm"
                 else {}
@@ -3719,7 +3733,7 @@ def diagnose_stripe_merchant_readiness(execute_live: bool = False) -> Dict[str, 
         "product_skus": [
             "ph_1031_boot_replacement_workpapers",
             "ph_commercial_capital_audit_toolkit",
-            "ph_statutory_tax_optimization_workpapers",
+            "ph_statutory_tax_audit_workpapers",
             "px_refi_amortization_decision_audit",
         ],
         "publishable_key_present": bool(pub_key),

@@ -1368,7 +1368,20 @@ export async function onRequest(context) {{
         "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "exeter1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "first_american": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "first_american_1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "national_funding_med": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "national_funding": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
+        "stripe": "https://join.ramp.com/c/7932737/3981015/51436",
+        "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
+        "freightos_marketplace": "https://join.ramp.com/c/7932737/3981015/51436",
+        "flexport": "https://join.ramp.com/c/7932737/3981015/51436",
+        "invoice_simple": "https://join.ramp.com/c/7932737/3981015/51436",
+        "simply_business": "https://try.rippling.com/mcfo1m09qiwt",
+        "next_insurance_b2b": "https://www.jdoqocy.com/click-101906407-16985242",
+        "interactive_brokers": "https://kalshi.pxf.io/c/7932737/3078072/37770",
         "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
         "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
         "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
@@ -1379,6 +1392,19 @@ export async function onRequest(context) {{
         direct_contract_upgrades.update(active_hub.get_direct_contract_upgrades("profithelm"))
     sovrn_fallback_upgrades = {
         "ipx1031": "https://dlpcapital.com/",
+        "exeter1031": "https://dlpcapital.com/",
+        "first_american": "https://www.groundfloor.us/",
+        "first_american_1031": "https://www.groundfloor.us/",
+        "national_funding_med": "https://staxpayments.com/",
+        "national_funding": "https://staxpayments.com/",
+        "stripe": "https://staxpayments.com/",
+        "otr_solutions_factoring": "https://www.invoicesimple.com/",
+        "freightos_marketplace": "https://www.invoicesimple.com/",
+        "flexport": "https://www.invoicesimple.com/",
+        "invoice_simple": "https://www.invoicesimple.com/",
+        "simply_business": "https://www.simplybusiness.com/",
+        "next_insurance_b2b": "https://www.nextinsurance.com/",
+        "interactive_brokers": "https://www.zacks.com/",
     }
 
     preferred_order = [
@@ -1462,9 +1488,14 @@ export async function onRequest(context) {{
         if ext_k not in ordered_keys:
             v_meta = SOVRN_VERIFIED_PAYING_MERCHANTS.get(ext_k, {})
             ext_url = str(v_meta.get("verified_url") or f"https://www.{ext_k}.com/").strip()
-            ext_direct_js = "true" if v_meta.get("is_direct") else "false"
             ext_direct_contract = direct_contract_upgrades.get(ext_k)
-            ext_extra = f'    directContractUrl: "{ext_direct_contract}",\n' if ext_direct_contract else ""
+            ext_sovrn_fallback = sovrn_fallback_upgrades.get(ext_k)
+            ext_direct_js = "true" if (v_meta.get("is_direct") and not ext_sovrn_fallback) else "false"
+            ext_extra = ""
+            if ext_direct_contract:
+                ext_extra += f'    directContractUrl: "{ext_direct_contract}",\n'
+            if ext_sovrn_fallback:
+                ext_extra += f'    sovrnFallbackUrl: "{ext_sovrn_fallback}",\n'
             catalog_entries.append(
                 f'  {ext_k}: {{\n'
                 f'    defaultUrl: "{ext_url}",\n'
@@ -1479,9 +1510,14 @@ export async function onRequest(context) {{
         if v_key not in ordered_keys:
             v_url = str(v_meta.get("verified_url") or "").strip()
             v_env = f"AFFILIATE_{v_key.upper()}_URL"
-            v_direct_js = "true" if v_meta.get("is_direct") else "false"
             v_direct_contract = direct_contract_upgrades.get(v_key)
-            v_extra = f'    directContractUrl: "{v_direct_contract}",\n' if v_direct_contract else ""
+            v_sovrn_fallback = sovrn_fallback_upgrades.get(v_key)
+            v_direct_js = "true" if (v_meta.get("is_direct") and not v_sovrn_fallback) else "false"
+            v_extra = ""
+            if v_direct_contract:
+                v_extra += f'    directContractUrl: "{v_direct_contract}",\n'
+            if v_sovrn_fallback:
+                v_extra += f'    sovrnFallbackUrl: "{v_sovrn_fallback}",\n'
             catalog_entries.append(
                 f'  {v_key}: {{\n'
                 f'    defaultUrl: "{v_url}",\n'

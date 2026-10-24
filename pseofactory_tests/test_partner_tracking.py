@@ -2136,3 +2136,165 @@ def test_autonomous_link_promotion_and_new_zoho_classifications(
     assert 'normParams.get("source_tool") || normParams.get("source")' in px_edge_js
     assert 'normParams.get("cta_slot") || normParams.get("slot")' in px_edge_js
 
+
+def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_factoring_edge_upgrade(
+    tmp_path, monkeypatch
+):
+    """
+    Verifies:
+      1. ingest_zoho fetches uncached Notification and Newsletter bodies cleanly
+         when PYTEST_CURRENT_TEST is absent from os.environ.
+      2. classify_partner_emails classifies real Zoho Notification #851 ("FreeTaxUSA Affiliate
+         Program. Welcome!" with email.cj.com/c/ wrapper links) as APPLICATION_APPROVED with
+         canonical CJ click URL, and skips self-dispatched [Prexvo Playbook] / [ProfitHelm Playbook]
+         transactional test emails.
+      3. _ensure_standing_operator_items auto-resolves stale PENDING_OPERATOR
+         monetization-gate-integration-requirement exception items.
+      4. diagnose_stripe_merchant_readiness reports canonical ph_statutory_tax_audit_workpapers SKU.
+      5. /r/otr_solutions_factoring upgrades to active Ramp Impact contract (#51436) when
+         SOVRN_COMMERCE_APPROVED is unset and falls back to Sovrn VigLink when SOVRN_COMMERCE_APPROVED=true.
+    """
+    import subprocess
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+    from pseofactory.email_ingest import EmailIngestionEngine, EmailMessage
+    from pseofactory.partner_tracker import (
+        PartnerTrackingEngine,
+        diagnose_stripe_merchant_readiness,
+    )
+
+    cache_file = tmp_path / "email_cache.json"
+    email_engine = EmailIngestionEngine(cache_path=str(cache_file), himalaya_bin="himalaya")
+
+    def fake_fetch_envelopes(mailbox="Inbox", page_size=30, force=False):
+        if mailbox == "Inbox":
+            return [
+                {
+                    "id": "1027",
+                    "from": [{"name": "Prexvo Research", "email": "arif@profithelm.com"}],
+                    "subject": "[Prexvo Playbook] Your Student Loan Refinance Worksheet & Repayment Audit",
+                    "date": "2026-10-24T11:00:00-07:00",
+                }
+            ]
+        if mailbox == "Sent":
+            return []
+        if mailbox == "Notification":
+            return [
+                {
+                    "id": "851",
+                    "from": [{"name": "FreeTaxUSA Affiliate Team", "email": "affiliates@freetaxusa.com"}],
+                    "subject": "FreeTaxUSA Affiliate Program. Welcome!",
+                    "date": "2026-10-23T09:15:00-07:00",
+                }
+            ]
+        if mailbox == "Newsletter":
+            return [
+                {
+                    "id": "1591",
+                    "from": [{"name": "Ramp Partner Team", "email": "partners@ramp.com"}],
+                    "subject": "Welcome to the Ramp Partner Program",
+                    "date": "2026-10-23T10:30:00-07:00",
+                }
+            ]
+        return []
+
+    read_calls = []
+
+    def fake_read_body(msg_id, account="zoho", mailbox="Inbox"):
+        read_calls.append((str(msg_id), account, mailbox))
+        if mailbox == "Notification" and str(msg_id) == "851":
+            return (
+                "Congratulations and welcome to our Affiliate Program. "
+                "Log in via https://email.cj.com/c/eJxE0L1uwyAUgOHn4a5I "
+                "to access your links."
+            )
+        if mailbox == "Newsletter" and str(msg_id) == "1591":
+            return "Welcome to the Ramp Partner Program on Impact.com."
+        return "Playbook worksheet body"
+
+    monkeypatch.setattr(email_engine, "fetch_zoho_envelopes", fake_fetch_envelopes)
+    monkeypatch.setattr(email_engine, "read_message_body", fake_read_body)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    ingested = []
+    ingest_err = None
+    try:
+        ingested = email_engine.ingest_zoho(limit=5, force=True, fetch_bodies_for_partner_keys=True)
+    except Exception as exc:
+        ingest_err = str(exc)
+    assert ingest_err is None, f"ingest_zoho failed to read Notification/Newsletter bodies: {ingest_err}"
+    assert ("851", "zoho", "Notification") in read_calls
+    assert ("1591", "zoho", "Newsletter") in read_calls
+
+    classified = email_engine.classify_partner_emails(ingested)
+    by_id = {c.email_id: c for c in classified}
+    assert "1027" not in by_id
+    assert by_id["notif-851"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["notif-851"].partner_key == "taxslayer"
+    assert by_id["notif-851"].candidate_url == "https://www.jdoqocy.com/click-101906407-12306188"
+    assert by_id["news-1591"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["news-1591"].partner_key == "ramp"
+
+    # Verify stale monetization-gate-integration-requirement item is auto-resolved
+    bus_path = tmp_path / "human_action_bus.json"
+    bus = HumanActionBus(bus_path=str(bus_path))
+    bus.route_manual_requirement(
+        property_id="prexvo",
+        partner_key="prexvo-monetization-gate",
+        partner_name="Prexvo Affiliate Readiness Gate",
+        title="Monetization Gate Evaluation Error: name 'zoho_account' is not defined",
+        description="Automated partner readiness evaluation encountered an exception.",
+        action_type="INTEGRATION_REQUIREMENT",
+        severity="HIGH",
+    )
+    stale_id = "act-prexvo-prexvo-monetization-gate-integration-requirement"
+    assert bus.items[stale_id].status == "PENDING_OPERATOR"
+
+    tracker = PartnerTrackingEngine(action_bus=bus, email_engine=email_engine)
+    tracker._ensure_standing_operator_items()
+    assert bus.items[stale_id].status == "RESOLVED"
+
+    # Verify Stripe SKU parity
+    stripe_diag = diagnose_stripe_merchant_readiness(execute_live=False)
+    assert "ph_statutory_tax_audit_workpapers" in stripe_diag["product_skus"]
+    assert "ph_statutory_tax_optimization_workpapers" not in stripe_diag["product_skus"]
+
+    # Verify /r/otr_solutions_factoring edge contract upgrade in Node.js
+    repo_dir = tmp_path / "profithelm"
+    (repo_dir / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    sync_tenant_edge_redirect_function(repo_dir, property_id="profithelm")
+    ph_r = repo_dir / "functions" / "r" / "[partner].js"
+
+    node_script = f"""
+    (async () => {{
+      const phRedirect = await import({json.dumps(ph_r.as_uri())});
+
+      // Default: Sovrn unapproved -> upgrades otr_solutions_factoring to active Ramp Impact contract (#51436)
+      const otrDirectRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake"),
+        env: {{}},
+        params: {{ partner: "otr_solutions_factoring" }}
+      }});
+      if (otrDirectRes.status !== 302) process.exit(10);
+      const otrDirectLoc = new URL(otrDirectRes.headers.get("Location"));
+      if (otrDirectLoc.hostname !== "join.ramp.com" || !otrDirectLoc.pathname.includes("/51436")) process.exit(11);
+      if (otrDirectLoc.searchParams.get("subId1") !== "invoice-factoring-cost-apr-calculator_quote_intake") process.exit(12);
+      if (otrDirectRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(13);
+
+      // When SOVRN_COMMERCE_APPROVED=true -> falls back to Sovrn VigLink wrapper
+      const otrSovrnRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake"),
+        env: {{ SOVRN_COMMERCE_APPROVED: "true" }},
+        params: {{ partner: "otr_solutions_factoring" }}
+      }});
+      const otrSovrnLoc = new URL(otrSovrnRes.headers.get("Location"));
+      if (otrSovrnLoc.hostname !== "redirect.viglink.com") process.exit(20);
+      if (otrSovrnRes.headers.get("X-Edge-Contract-Tier") !== "sovrn_fallback") process.exit(21);
+
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Node otr_solutions_factoring edge test failed (exit {proc.returncode}): {proc.stderr}"
+
+
