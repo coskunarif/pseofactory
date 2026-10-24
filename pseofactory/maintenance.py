@@ -5051,6 +5051,9 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if is_non_tool_inst and ('id="gsc-striking-overlay"' in html_content or 'class="gsc-overlay-container"' in html_content):
         return True
 
+    if "About Our Statutory Quantitative Research Group" in html_content:
+        return True
+
     if 'href="https://profithelm.com/signal/"' in html_content and "/static/signal" in canon_url:
         return True
 
@@ -5975,6 +5978,13 @@ def _normalize_page_structure_and_geo_parity(
 
     if 'href="https://profithelm.com/signal/"' in updated and "/static/signal" in (canonical_url or ""):
         updated = updated.replace('https://profithelm.com/signal/', 'https://profithelm.com/static/signal/')
+        changed = True
+
+    if "About Our Statutory Quantitative Research Group" in updated:
+        updated = updated.replace(
+            "About Our Statutory Quantitative Research Group",
+            "Corporate Background and Statutory Governance Standards",
+        )
         changed = True
 
     is_non_tool_slug = slug.lower() in (
@@ -8894,7 +8904,7 @@ class RetroReflectionEngine:
                     "disclaimers": "Legal Disclaimers & Statutory Compliance Notice",
                     "methodology": "Quantitative Research Methodology & Verification Standards",
                     "privacy": "Privacy Policy & Zero-Telemetry Data Governance",
-                    "about": "About Our Statutory Quantitative Research Group",
+                    "about": "Corporate Background and Statutory Governance Standards",
                     "tools-directory": "Statutory Financial Calculators and Decision Tools",
                 }
                 nt_geo_html, nt_geo_changed = _normalize_page_structure_and_geo_parity(
