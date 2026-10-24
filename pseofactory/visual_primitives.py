@@ -2176,6 +2176,19 @@ def _render_runtime_sync_events_js() -> str:
         try {
           var chkUrl = chkBtn.getAttribute("href") || "";
           if (chkUrl && typeof window.fetch === "function") {
+            var liveBp = collectWorkbenchBlueprintState();
+            var sep = chkUrl.indexOf("?") === -1 ? "?" : "&";
+            if (liveBp && liveBp.calculated_amount > 0 && chkUrl.indexOf("amount=") === -1) {
+              chkUrl += sep + "amount=" + encodeURIComponent(String(liveBp.calculated_amount));
+              sep = "&";
+            }
+            if (liveBp && liveBp.inputs && Object.keys(liveBp.inputs).length > 0 && chkUrl.indexOf("inputs_json=") === -1) {
+              chkUrl += sep + "inputs_json=" + encodeURIComponent(JSON.stringify(liveBp.inputs).slice(0, 600));
+              sep = "&";
+            }
+            if (liveBp && liveBp.outputs && Object.keys(liveBp.outputs).length > 0 && chkUrl.indexOf("outputs_json=") === -1) {
+              chkUrl += sep + "outputs_json=" + encodeURIComponent(JSON.stringify(liveBp.outputs).slice(0, 400));
+            }
             var chkHeaders = { "Accept": "application/json" };
             if (window.__PSEO_SYNTHETIC_TEST__) {
               chkHeaders["X-Pseofactory-Test"] = "1";

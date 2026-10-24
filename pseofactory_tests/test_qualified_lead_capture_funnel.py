@@ -1132,4 +1132,118 @@ console.log(JSON.stringify({{
         assert out["fulfillCsvHasHeader"] is True
 
 
+def test_trend_mined_statutory_timeseries_and_three_rail_monetization(tmp_path):
+    import json
+    import subprocess
+    from pseofactory.affiliates import qualify_monetization_opportunity
+    from pseofactory.partner_tracker import (
+        diagnose_stripe_merchant_readiness,
+        synthesize_personalized_audit_workpaper,
+    )
+
+    stripe_diag = diagnose_stripe_merchant_readiness(execute_live=False)
+    assert stripe_diag["stripe_account_id"] == "acct_1T6fSTIq0ckFsf5j"
+    assert stripe_diag["merchant_email"] == "arif.coskun@profithelm.com"
+    assert stripe_diag["display_name"] == "CoachOS"
+    assert stripe_diag["product_count"] >= 4
+    assert "ph_1031_boot_replacement_workpapers" in stripe_diag["product_skus"]
+    assert "px_refi_amortization_decision_audit" in stripe_diag["product_skus"]
+
+    q_1031 = qualify_monetization_opportunity(
+        "section 1031 exchange boot calculator",
+        slug="section-1031-calculator",
+        property_id="profithelm",
+        search_volume=1000,
+    )
+    assert q_1031["monetization_rail_mix"] == "three_rail_b2b_quote_stripe_asset_and_affiliate"
+    assert q_1031["stripe_digital_asset"]["eligible"] is True
+    assert q_1031["stripe_digital_asset"]["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+    assert q_1031["stripe_digital_asset"]["offer_price_usd"] == 79.0
+    assert q_1031["b2b_quote_intake"]["eligible"] is True
+    assert q_1031["estimated_stripe_asset_monthly_revenue_usd"] > 0
+    assert q_1031["total_compounded_monthly_revenue_usd"] > q_1031["estimated_monthly_revenue_usd"]
+
+    q_pslf = qualify_monetization_opportunity(
+        "pslf qualifying payment simulator",
+        slug="pslf-qualifying-payment-simulator",
+        property_id="prexvo",
+        search_volume=1000,
+    )
+    assert q_pslf["monetization_rail_mix"] == "public_service_non_commercial"
+    assert q_pslf["stripe_digital_asset"]["eligible"] is False
+    assert q_pslf["b2b_quote_intake"]["eligible"] is False
+    assert q_pslf["estimated_stripe_asset_monthly_revenue_usd"] == 0.0
+
+    for prop_id, slug, expected_series_id in [
+        ("profithelm", "section-1031-calculator", "fred_dgs10_yield"),
+        ("profithelm", "section-179-depreciation-calculator", "irs_sec179_cap"),
+        ("profithelm", "california-s-corp-reasonable-salary-tax-savings-calculator", "irs_sec199a_qbi"),
+        ("prexvo", "student-loan-refinance-break-even-calculator", "ed_direct_undergrad_rate"),
+    ]:
+        wp = synthesize_personalized_audit_workpaper(
+            property_id=prop_id,
+            tool_slug=slug,
+            lead_record={
+                "lead_id": f"lead_{prop_id}_trend",
+                "calculated_amount": 320000,
+                "state": "CA",
+                "scenario_inputs": {"custom_balance": 320000, "rate_pct": 5.25},
+                "scenario_outputs": {"primary": "$48,200"},
+            },
+            mode="paid_toolkit",
+        )
+        ts_list = wp["statutory_trend_timeseries"]
+        assert len(ts_list) >= 3
+        series_ids = {row["series_id"] for row in ts_list}
+        assert expected_series_id in series_ids
+        for row in ts_list:
+            pts = row.get("points") or {}
+            assert "2024" in pts
+            assert "2026" in pts
+            assert "2030" in pts
+        assert wp["custom_parameter_ledger"]["calculated_amount"] == 320000
+        assert wp["custom_parameter_ledger"]["inputs"]["custom_balance"] == 320000
+        assert f"TREND-{expected_series_id}" in wp["csv_content"]
+        assert "Multi-Year Statutory &amp; Macroeconomic Trend Benchmarks (2024 to 2030)" in wp["html_report"]
+
+        js_code = generate_edge_lead_capture_function(prop_id)
+        mod_path = tmp_path / f"edge_trend_{prop_id}_{slug[:12]}.mjs"
+        mod_path.write_text(js_code, encoding="utf-8")
+        runner = f"""
+import {{ onRequestGet }} from {json.dumps(str(mod_path))};
+const env = {{}};
+const inputsParam = encodeURIComponent(JSON.stringify({{ custom_amount: 410000, custom_rate: 5.4 }}));
+const chkReq = new Request("https://{prop_id}.com/api/lead-capture?checkout=1&lead_id=lead_custom_1&tool_slug={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
+  method: "GET",
+  headers: {{ "X-Pseofactory-Test": "1" }}
+}});
+const chkRes = await onRequestGet({{ request: chkReq, env }});
+const chkData = await chkRes.json();
+
+const ffReq = new Request("https://{prop_id}.com/api/lead-capture?fulfill=1&lead_id=lead_custom_1&tool_slug={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
+  method: "GET",
+  headers: {{ "X-Pseofactory-Test": "1" }}
+}});
+const ffRes = await onRequestGet({{ request: ffReq, env }});
+const ffData = await ffRes.json();
+console.log(JSON.stringify({{ chkData, ffData }}));
+"""
+        runner_path = tmp_path / f"run_trend_{prop_id}_{slug[:12]}.mjs"
+        runner_path.write_text(runner, encoding="utf-8")
+        proc = subprocess.run(["node", str(runner_path)], capture_output=True, text=True, check=True)
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert out["chkData"]["ok"] is True
+        assert out["chkData"]["stripe_account_id"] == "acct_1T6fSTIq0ckFsf5j"
+        assert out["chkData"]["stripe_merchant_email"] == "arif.coskun@profithelm.com"
+        assert out["chkData"]["calculated_amount"] == 410000
+        assert out["chkData"]["statutory_trend_series_count"] >= 3
+        assert out["ffData"]["ok"] is True
+        assert out["ffData"]["calculated_amount"] == 410000
+        assert len(out["ffData"]["statutory_trend_timeseries"]) >= 3
+        assert out["ffData"]["custom_parameter_ledger"]["calculated_amount"] == 410000
+        assert out["ffData"]["custom_parameter_ledger"]["inputs"]["custom_amount"] == 410000
+        assert f"TREND-{expected_series_id}" in out["ffData"]["csv_content"]
+
+
+
 

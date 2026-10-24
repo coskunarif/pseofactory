@@ -24,6 +24,10 @@
     "stripe": {
       "name": "Stripe",
       "account_id": "acct_1T6fSTIq0ckFsf5j",
+      "merchant_email": "arif.coskun@profithelm.com",
+      "display_name": "CoachOS",
+      "device_name": "IN-PF4HYA85",
+      "cli_key_expires_at": "2026-06-03",
       "enabled": true,
       "billing_mode": "payment",
       "fulfillment_engine": "personalized_statutory_workpaper_and_csv_bundle",
@@ -37,6 +41,7 @@
           "price_cents": 7900,
           "currency": "usd",
           "statutory_authority": "IRC Section 1031 and IRS Form 8824",
+          "trend_timeseries_ids": ["fred_dgs10_yield", "fred_cpilfesl_inflation", "irs_sec199a_qbi"],
           "deliverables": [
             "Personalized IRS Form 8824 Lines 15-25 Boot & Basis Reconciliation Workpaper (HTML/PDF)",
             "45-Day Identification & 180-Day Closing Statutory Deadline Compliance Schedule (CSV)",
@@ -52,6 +57,7 @@
           "price_cents": 4900,
           "currency": "usd",
           "statutory_authority": "IRC Section 179, Form 4562, and UCC Article 9",
+          "trend_timeseries_ids": ["irs_sec179_cap", "irs_sec179_phaseout", "irs_sec168k_bonus", "cbp_sec301_tariff", "fred_dgs10_yield"],
           "deliverables": [
             "Personalized Section 179 / MACRS & Commercial APR Cost Reconciliation Workpaper (HTML/PDF)",
             "5-Point Cash-Flow Sensitivity & Debt Service Coverage Schedule (CSV)",
@@ -67,6 +73,7 @@
           "price_cents": 4900,
           "currency": "usd",
           "statutory_authority": "26 U.S.C. Section 1, IRC Section 199A, and IRS Rev. Proc. 2025-32",
+          "trend_timeseries_ids": ["irs_sec199a_qbi", "ssa_fica_wage_base", "irs_sec168k_bonus", "fred_cpilfesl_inflation"],
           "deliverables": [
             "Personalized 2026-2027 TCJA Sunset Marginal Bracket & Entity Tax Workpaper (HTML/PDF)",
             "5-Point Statutory Exposure & Quarterly Safe-Harbor Reconciliation Schedule (CSV)",
@@ -82,6 +89,7 @@
           "price_cents": 3900,
           "currency": "usd",
           "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
+          "trend_timeseries_ids": ["ed_direct_undergrad_rate", "ed_idr_discretionary_levy", "ed_idr_fpl_multiplier", "hhs_fpl_single_base", "irs_sec108f_tax_free_forgiveness"],
           "deliverables": [
             "Personalized Title IV RAP/IBR vs Private Refinance Break-Even Audit Report (HTML/PDF)",
             "120-Month Amortization & Federal Protection Forfeiture Sensitivity Schedule (CSV)",

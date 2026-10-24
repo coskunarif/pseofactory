@@ -218,12 +218,41 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 if dist_srv is not None:
                     for item in dist_srv.captured_leads:
                         if item.get("lead_id") == lead_id:
-                            stored_rec = item
+                            stored_rec = dict(item)
                             break
+                eff_rec: Dict[str, Any] = stored_rec or {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug}
+                amt_raw = qs.get("amount", [""])[0]
+                if amt_raw:
+                    try:
+                        eff_rec["calculated_amount"] = float(amt_raw)
+                    except Exception:
+                        pass
+                state_raw = qs.get("state", [""])[0]
+                if state_raw:
+                    eff_rec["state"] = state_raw
+                email_raw = qs.get("email", [""])[0]
+                if email_raw:
+                    eff_rec["email"] = email_raw
+                inp_json_raw = qs.get("inputs_json", [""])[0]
+                if inp_json_raw:
+                    try:
+                        parsed_inps = json.loads(inp_json_raw)
+                        if isinstance(parsed_inps, dict):
+                            eff_rec["scenario_inputs"] = {**(eff_rec.get("scenario_inputs") or {}), **parsed_inps}
+                    except Exception:
+                        pass
+                out_json_raw = qs.get("outputs_json", [""])[0]
+                if out_json_raw:
+                    try:
+                        parsed_outs = json.loads(out_json_raw)
+                        if isinstance(parsed_outs, dict):
+                            eff_rec["scenario_outputs"] = {**(eff_rec.get("scenario_outputs") or {}), **parsed_outs}
+                    except Exception:
+                        pass
                 wp = synthesize_personalized_audit_workpaper(
                     property_id=prop_id,
                     tool_slug=tool_slug,
-                    lead_record=stored_rec or {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug},
+                    lead_record=eff_rec,
                     mode="paid_toolkit" if is_fulfill else "free_playbook",
                 )
                 fmt = qs.get("format", ["json"])[0].lower()
@@ -254,24 +283,52 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
                 tool_slug = qs.get("tool_slug", ["section-1031-calculator" if prop_id == "profithelm" else "student-loan-refinance-break-even-calculator"])[0]
                 offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id)
+                eff_rec_chk: Dict[str, Any] = {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug}
+                amt_raw = qs.get("amount", [""])[0]
+                if amt_raw:
+                    try:
+                        eff_rec_chk["calculated_amount"] = float(amt_raw)
+                    except Exception:
+                        pass
+                inp_json_raw = qs.get("inputs_json", [""])[0]
+                if inp_json_raw:
+                    try:
+                        parsed_inps = json.loads(inp_json_raw)
+                        if isinstance(parsed_inps, dict):
+                            eff_rec_chk["scenario_inputs"] = parsed_inps
+                    except Exception:
+                        pass
+                wp_chk = synthesize_personalized_audit_workpaper(
+                    property_id=prop_id,
+                    tool_slug=tool_slug,
+                    lead_record=eff_rec_chk,
+                    mode="paid_toolkit",
+                )
                 chk_record = {
                     "ok": True,
                     "success": True,
                     "status": "checkout_session_ready",
                     "property_id": prop_id,
                     "lead_id": lead_id,
+                    "workpaper_id": wp_chk["workpaper_id"],
                     "tool_slug": tool_slug,
                     "offer_sku": offer["offer_sku"],
                     "offer_title": offer["offer_title"],
                     "offer_price_usd": offer["offer_price_usd"],
                     "statutory_authority": offer["statutory_authority"],
                     "deliverables": offer["deliverables"],
+                    "calculated_amount": wp_chk["calculated_amount"],
+                    "capital_band": wp_chk["capital_band"],
+                    "custom_parameter_ledger": wp_chk["custom_parameter_ledger"],
+                    "statutory_trend_series_count": len(wp_chk.get("statutory_trend_timeseries") or []),
                     "checkout_url": offer["checkout_url"],
                     "playbook_url": offer["playbook_url"],
                     "fulfillment_url": offer["fulfillment_url"],
                     "csv_fulfillment_url": offer["csv_fulfillment_url"],
                     "checkout_session_id": offer["checkout_session_id"],
                     "checkout_mode": "edge_checkout_rail",
+                    "stripe_account_id": "acct_1T6fSTIq0ckFsf5j",
+                    "stripe_merchant_email": "arif.coskun@profithelm.com",
                 }
                 if dist_srv is not None:
                     dist_srv.checkout_sessions.append(chk_record)

@@ -2005,6 +2005,14 @@ class MarketIntelligenceEngine:
             "expected_bounty_usd": round(bounty_usd, 2),
             "effective_partner_yield": round(eff_yield, 2),
             "estimated_monthly_revenue_usd": round(est_rev, 2),
+            "monetization_rail_mix": monetization_qual.get("monetization_rail_mix", "three_rail_b2b_quote_stripe_asset_and_affiliate"),
+            "stripe_digital_asset": monetization_qual.get("stripe_digital_asset", {}),
+            "b2b_quote_intake": monetization_qual.get("b2b_quote_intake", {}),
+            "estimated_stripe_asset_monthly_revenue_usd": monetization_qual.get("estimated_stripe_asset_monthly_revenue_usd", 0.0),
+            "total_compounded_monthly_revenue_usd": round(
+                est_rev + float(monetization_qual.get("estimated_stripe_asset_monthly_revenue_usd", 0.0) or 0.0),
+                2,
+            ),
             "blueprint": {
                 "archetype": "standalone_factory",
                 "tenant_id": q_eval["recommended_tenant_id"],

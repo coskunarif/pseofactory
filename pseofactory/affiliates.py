@@ -3883,6 +3883,76 @@ def qualify_monetization_opportunity(
         else (rec_partners[0] if rec_partners else "")
     )
 
+    # Resolve 3-rail value ladder: Direct Stripe Digital Asset + B2B Quote Intake + Affiliate Bounty
+    stripe_asset_meta: Dict[str, Any] = {
+        "eligible": False,
+        "offer_sku": "",
+        "offer_title": "",
+        "offer_price_usd": 0.0,
+        "deliverables": [],
+        "trend_timeseries_ids": [],
+    }
+    b2b_quote_meta: Dict[str, Any] = {
+        "eligible": False,
+        "threshold_usd": 0.0,
+        "vertical": "none",
+    }
+    monetization_rail_mix = "unmonetized"
+    est_stripe_asset_rev = 0.0
+
+    if is_restricted_ps or not commercial_offers_allowed:
+        monetization_rail_mix = "public_service_non_commercial"
+    elif qualified:
+        try:
+            from pseofactory.partner_tracker import (
+                evaluate_lead_quote_threshold,
+                resolve_lead_monetization_offer,
+            )
+            eff_prop_for_offer = "prexvo" if resolved_prop == "prexvo" else "profithelm"
+            quote_eval = evaluate_lead_quote_threshold(eff_prop_for_offer, s_clean or "general", 250000.0)
+            b2b_quote_meta = {
+                "eligible": bool(quote_eval.get("eligible")),
+                "threshold_usd": float(quote_eval.get("threshold_usd") or 0.0),
+                "vertical": str(quote_eval.get("vertical") or "general"),
+            }
+            offer_eval = resolve_lead_monetization_offer(
+                property_id=eff_prop_for_offer,
+                tool_slug=s_clean or "general",
+                vertical=b2b_quote_meta["vertical"],
+            )
+            ts_ids = (
+                ["ed_direct_undergrad_rate", "ed_idr_discretionary_levy", "ed_idr_fpl_multiplier", "hhs_fpl_single_base", "irs_sec108f_tax_free_forgiveness"]
+                if eff_prop_for_offer == "prexvo"
+                else (
+                    ["fred_dgs10_yield", "fred_cpilfesl_inflation", "irs_sec199a_qbi"]
+                    if offer_eval["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+                    else (
+                        ["irs_sec179_cap", "irs_sec179_phaseout", "irs_sec168k_bonus", "cbp_sec301_tariff", "fred_dgs10_yield"]
+                        if offer_eval["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+                        else ["irs_sec199a_qbi", "ssa_fica_wage_base", "irs_sec168k_bonus", "fred_cpilfesl_inflation"]
+                    )
+                )
+            )
+            stripe_asset_meta = {
+                "eligible": True,
+                "offer_sku": str(offer_eval["offer_sku"]),
+                "offer_title": str(offer_eval["offer_title"]),
+                "offer_price_usd": float(offer_eval["offer_price_usd"]),
+                "deliverables": list(offer_eval.get("deliverables") or []),
+                "trend_timeseries_ids": ts_ids,
+            }
+            est_stripe_asset_rev = round(
+                est_clicks * 0.012 * float(offer_eval["offer_price_usd"]) * max(0.5, dur),
+                2,
+            )
+            monetization_rail_mix = (
+                "three_rail_b2b_quote_stripe_asset_and_affiliate"
+                if b2b_quote_meta["eligible"]
+                else "dual_rail_stripe_asset_and_affiliate"
+            )
+        except Exception:
+            monetization_rail_mix = "affiliate_only"
+
     result_payload: Dict[str, Any] = {
         "query": q_clean,
         "slug": s_clean,
@@ -3891,6 +3961,9 @@ def qualify_monetization_opportunity(
         "monetization_qualified": qualified,
         "commercial_offers_allowed": commercial_offers_allowed,
         "restricted_public_service": is_restricted_ps,
+        "monetization_rail_mix": monetization_rail_mix,
+        "stripe_digital_asset": stripe_asset_meta,
+        "b2b_quote_intake": b2b_quote_meta,
         "rejection_reason": rejection_reason,
         "primary_partner": primary_partner_key,
         "recommended_partners": rec_partners[:3],
@@ -3899,6 +3972,8 @@ def qualify_monetization_opportunity(
         "intent_weight": round(intent_weight, 4),
         "y_asset": y_asset,
         "estimated_monthly_revenue_usd": est_monthly_rev,
+        "estimated_stripe_asset_monthly_revenue_usd": est_stripe_asset_rev,
+        "total_compounded_monthly_revenue_usd": round(est_monthly_rev + est_stripe_asset_rev, 2),
         "partner_alignment_verified": bool(alignment["aligned"]),
         "alignment_violations": alignment.get("violations", []),
         "disclosures_required": disclosures,

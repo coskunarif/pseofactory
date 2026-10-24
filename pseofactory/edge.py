@@ -2414,14 +2414,71 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     },
   ];
 
-  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookQs = new URLSearchParams({
+    playbook: "1",
+    lead_id: leadId,
+    tool_slug: toolSlug,
+    amount: String(baseAmount),
+    state: stateCode,
+  });
+  const fulfillQs = new URLSearchParams({
+    fulfill: "1",
+    lead_id: leadId,
+    sku: PREXVO_TOOLKIT_OFFER.sku,
+    tool_slug: toolSlug,
+    amount: String(baseAmount),
+    state: stateCode,
+  });
+  if (Object.keys(inputs).length > 0) {
+    const inpStr = JSON.stringify(inputs).slice(0, 600);
+    playbookQs.set("inputs_json", inpStr);
+    fulfillQs.set("inputs_json", inpStr);
+  }
+  const playbookUrl = `/api/lead-capture?${playbookQs.toString()}`;
+  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
+
+  const statutoryTrendTimeseries = [
+    {
+      series_id: "ed_direct_undergrad_rate",
+      metric_label: "Title IV Direct Undergraduate Statutory Fixed Interest Rate",
+      statutory_citation: "20 U.S.C. 1087e(b)",
+      unit: "PCT",
+      points: { "2024": 5.5, "2025": 6.53, "2026": 6.39, "2027": 6.15, "2028": 5.95, "2029": 5.85, "2030": 5.8 },
+    },
+    {
+      series_id: "hhs_fpl_single_base",
+      metric_label: "HHS 48-State Single-Person Federal Poverty Guideline Base",
+      statutory_citation: "42 U.S.C. 9902(2)",
+      unit: "USD",
+      points: { "2024": 15060.0, "2025": 15650.0, "2026": 16120.0, "2027": 16600.0, "2028": 17100.0, "2029": 17610.0, "2030": 18140.0 },
+    },
+    {
+      series_id: "fred_dgs10_yield",
+      metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
+      statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
+      unit: "PCT",
+      points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
+    },
+  ];
+  const customParameterLedger = {
+    calculated_amount: baseAmount,
+    capital_band: capitalBand,
+    state: stateCode,
+    inputs,
+    outputs,
+  };
 
   const csvLines = ["Line Code,Statutory Line Item,Authority,Baseline Scenario,Optimized Scenario,Delta Impact"];
   for (const r of reconciliationSchedule) {
     csvLines.push(`"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`);
+  }
+  for (const ts of statutoryTrendTimeseries) {
+    const v24 = ts.points["2024"] || "";
+    const v26 = ts.points["2026"] || "";
+    const v30 = ts.points["2030"] || "";
+    csvLines.push(`"TREND-${ts.series_id}","${ts.metric_label} (2024-2030)","${ts.statutory_citation}","2024: ${v24} ${ts.unit}","2026: ${v26} ${ts.unit}","2030 Proj: ${v30} ${ts.unit}"`);
   }
   for (const [k, v] of Object.entries(inputs)) {
     csvLines.push(`"INPUT-${k}","Visitor Calculator Input (${k})","Live Workbench","${String(v).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}","Captured"`);
@@ -2441,6 +2498,14 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.effective_rate}</td>` +
     `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#15803d;">${s.estimated_net_benefit}</td></tr>`
   ).join("");
+  const trendHtml = statutoryTrendTimeseries.map((ts) =>
+    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;">${ts.metric_label}<div style="font-size:11px;color:#64748b;">${ts.statutory_citation}</div></td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2024"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2025"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${ts.points["2026"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2028"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2030"]} ${ts.unit}</td></tr>`
+  ).join("");
   const delivHtml = PREXVO_TOOLKIT_OFFER.deliverables.map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
   const badgeLabel = mode === "paid_toolkit" ? "PAID DECISION AUDIT WORKPAPER PACKAGE" : "PERSONALIZED REFINANCE PLAYBOOK & WORKSHEET";
   const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${PREXVO_TOOLKIT_OFFER.title} (${leadId})</title>` +
@@ -2455,7 +2520,9 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
     `<h2 style="font-size:16px;margin:18px 0 8px;">2. Rate-Spread &amp; Payoff Sensitivity Matrix</h2>` +
     `<table><thead><tr><th>Scenario Case</th><th>Modeled Principal</th><th>Effective APR</th><th>Estimated Lifetime Savings</th></tr></thead><tbody>${sensHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Included Audit Deliverables &amp; Verification Checklist</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Multi-Year Statutory &amp; Macroeconomic Trend Benchmarks (2024 to 2030)</h2>` +
+    `<table><thead><tr><th>Statutory Benchmark &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${trendHtml}</tbody></table>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">4. Included Audit Deliverables &amp; Verification Checklist</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
     `</div></body></html>`;
 
   return {
@@ -2473,8 +2540,10 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     state: stateCode,
     scenario_inputs: inputs,
     scenario_outputs: outputs,
+    custom_parameter_ledger: customParameterLedger,
     reconciliation_schedule: reconciliationSchedule,
     sensitivity_matrix: sensitivityMatrix,
+    statutory_trend_timeseries: statutoryTrendTimeseries,
     deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
@@ -2485,26 +2554,62 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   };
 }
 
-async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam) {
-  for (const item of getMemoryBuffer()) {
-    if (item && item.lead_id === leadId) return item;
+function parseEdgeJsonParam(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
   }
-  const kv = getLeadsKv(env);
-  if (kv && typeof kv.get === "function" && leadId) {
-    try {
-      const stored = await kv.get(leadId, { type: "json" });
-      if (stored && typeof stored === "object") return stored;
-    } catch (_) {}
+}
+
+async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
+  let baseRecord = null;
+  for (const item of getMemoryBuffer()) {
+    if (item && item.lead_id === leadId) {
+      baseRecord = { ...item };
+      break;
+    }
+  }
+  if (!baseRecord) {
+    const kv = getLeadsKv(env);
+    if (kv && typeof kv.get === "function" && leadId) {
+      try {
+        const stored = await kv.get(leadId, { type: "json" });
+        if (stored && typeof stored === "object") baseRecord = { ...stored };
+      } catch (_) {}
+    }
   }
   const parsedAmt = Number(amountParam || 0);
-  return {
-    lead_id: leadId || "lead_prexvo_direct",
-    property_id: "prexvo",
-    tool_slug: toolSlug || "student-loan-refinance-break-even-calculator",
-    calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 85000,
-    state: stateParam || "US",
-    email: emailParam || "borrower@prexvo.com",
-  };
+  const parsedInputs = parseEdgeJsonParam(inputsJsonParam);
+  const parsedOutputs = parseEdgeJsonParam(outputsJsonParam);
+  if (!baseRecord) {
+    baseRecord = {
+      lead_id: leadId || "lead_prexvo_direct",
+      property_id: "prexvo",
+      tool_slug: toolSlug || "student-loan-refinance-break-even-calculator",
+      calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 85000,
+      state: stateParam || "US",
+      email: emailParam || "borrower@prexvo.com",
+      scenario_inputs: parsedInputs || {},
+      scenario_outputs: parsedOutputs || {},
+    };
+  } else {
+    if (Number.isFinite(parsedAmt) && parsedAmt > 0) {
+      baseRecord.calculated_amount = parsedAmt;
+      baseRecord.capital_band = deriveCapitalBand(parsedAmt);
+    }
+    if (stateParam) baseRecord.state = stateParam;
+    if (emailParam) baseRecord.email = emailParam;
+    if (parsedInputs) {
+      baseRecord.scenario_inputs = { ...(baseRecord.scenario_inputs || {}), ...parsedInputs };
+    }
+    if (parsedOutputs) {
+      baseRecord.scenario_outputs = { ...(baseRecord.scenario_outputs || {}), ...parsedOutputs };
+    }
+  }
+  return baseRecord;
 }
 
 function isSyntheticTestEmail(email) {
@@ -2537,14 +2642,24 @@ function isSyntheticProbeRequest(request, body, email) {
   return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
 }
 
-async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false) {
-  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false, customRecord = null) {
+  const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, "paid_toolkit") : null;
+  const fallbackUrl = customBundle ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
+  const stripeMerchantEmail = "arif.coskun@profithelm.com";
+  const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  const extraFields = customBundle ? {
+    workpaper_id: customBundle.workpaper_id,
+    calculated_amount: customBundle.calculated_amount,
+    capital_band: customBundle.capital_band,
+    custom_parameter_ledger: customBundle.custom_parameter_ledger,
+    statutory_trend_series_count: Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0,
+  } : {};
   if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
       offer_sku: PREXVO_TOOLKIT_OFFER.sku,
@@ -2559,11 +2674,14 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
       stripe_account_id: stripeAccountId,
+      stripe_merchant_email: stripeMerchantEmail,
+      stripe_display_name: stripeDisplayName,
       stripe_publishable_key_present: stripePubKeyPresent,
       stripe_credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
       stripe_called: false,
       stripe_http_status: null,
       stripe_error_code: null,
+      ...extraFields,
     };
   }
   let stripeHttpStatus = null;
@@ -2581,10 +2699,13 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "line_items[0][price_data][product_data][name]": PREXVO_TOOLKIT_OFFER.title,
       "line_items[0][quantity]": "1",
       "metadata[lead_id]": leadId,
+      "metadata[workpaper_id]": `wp_${leadId}`,
       "metadata[property_id]": "prexvo",
       "metadata[tool_slug]": toolSlug,
       "metadata[offer_sku]": PREXVO_TOOLKIT_OFFER.sku,
-      "metadata[fulfillment_url]": fulfillmentUrl,
+      "metadata[merchant_email]": stripeMerchantEmail,
+      "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 85000),
+      "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
     });
     const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
@@ -2610,11 +2731,14 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
+        stripe_merchant_email: stripeMerchantEmail,
+        stripe_display_name: stripeDisplayName,
         stripe_publishable_key_present: stripePubKeyPresent,
         stripe_credential_status: "active_ready",
         stripe_called: true,
         stripe_http_status: resp.status,
         stripe_error_code: null,
+        ...extraFields,
       };
     }
     const errObj = (data && data.error) || {};
@@ -2635,11 +2759,14 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
     stripe_account_id: stripeAccountId,
+    stripe_merchant_email: stripeMerchantEmail,
+    stripe_display_name: stripeDisplayName,
     stripe_publishable_key_present: stripePubKeyPresent,
     stripe_credential_status: stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`,
     stripe_called: true,
     stripe_http_status: stripeHttpStatus,
     stripe_error_code: stripeErrorCode,
+    ...extraFields,
   };
 }
 
@@ -2813,7 +2940,9 @@ export async function onRequestGet(context) {
       toolSlug,
       reqUrl.searchParams.get("amount"),
       reqUrl.searchParams.get("state"),
-      email
+      email,
+      reqUrl.searchParams.get("inputs_json"),
+      reqUrl.searchParams.get("outputs_json")
     );
     const bundle = buildEdgePersonalizedWorkpaperBundle(storedRecord, isFulfill ? "paid_toolkit" : "free_playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
@@ -2871,7 +3000,17 @@ export async function onRequestGet(context) {
       );
     }
     const isSynth = isSyntheticProbeRequest(request, null, email);
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth);
+    const customRecord = await lookupEdgeLeadRecord(
+      env,
+      leadId,
+      toolSlug,
+      reqUrl.searchParams.get("amount"),
+      reqUrl.searchParams.get("state"),
+      email,
+      reqUrl.searchParams.get("inputs_json"),
+      reqUrl.searchParams.get("outputs_json")
+    );
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord);
     return new Response(
       JSON.stringify({
         ok: true,
@@ -3571,14 +3710,143 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     ];
   }
 
-  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookQs = new URLSearchParams({
+    playbook: "1",
+    lead_id: leadId,
+    tool_slug: toolSlug,
+    amount: String(baseAmount),
+    state: stateCode,
+  });
+  const fulfillQs = new URLSearchParams({
+    fulfill: "1",
+    lead_id: leadId,
+    sku: effSpec.offerSku,
+    tool_slug: toolSlug,
+    amount: String(baseAmount),
+    state: stateCode,
+  });
+  if (Object.keys(inputs).length > 0) {
+    const inpStr = JSON.stringify(inputs).slice(0, 600);
+    playbookQs.set("inputs_json", inpStr);
+    fulfillQs.set("inputs_json", inpStr);
+  }
+  const playbookUrl = `/api/lead-capture?${playbookQs.toString()}`;
+  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
+
+  let statutoryTrendTimeseries = [];
+  if (effSpec.offerSku === "ph_1031_boot_replacement_workpapers") {
+    statutoryTrendTimeseries = [
+      {
+        series_id: "fred_dgs10_yield",
+        metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
+        statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
+        unit: "PCT",
+        points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
+      },
+      {
+        series_id: "fred_cpilfesl_inflation",
+        metric_label: "Core CPI Less Food and Energy Annualized Index Adjustment",
+        statutory_citation: "BLS / FRED CPILFESL",
+        unit: "PCT",
+        points: { "2024": 3.4, "2025": 3.1, "2026": 2.8, "2027": 2.5, "2028": 2.3, "2029": 2.2, "2030": 2.1 },
+      },
+      {
+        series_id: "irs_sec199a_qbi",
+        metric_label: "IRC Section 199A Qualified Business Income Deduction Rate",
+        statutory_citation: "26 U.S.C. 199A",
+        unit: "PCT",
+        points: { "2024": 20.0, "2025": 20.0, "2026": 0.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
+      },
+      {
+        series_id: "irs_sec168k_bonus",
+        metric_label: "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
+        statutory_citation: "26 U.S.C. 168(k)(6)",
+        unit: "PCT",
+        points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
+      },
+    ];
+  } else if (effSpec.offerSku === "ph_commercial_capital_audit_toolkit") {
+    statutoryTrendTimeseries = [
+      {
+        series_id: "irs_sec179_cap",
+        metric_label: "IRC Section 179 Maximum Deduction Cap",
+        statutory_citation: "26 U.S.C. 179(b)(1)",
+        unit: "USD",
+        points: { "2024": 1220000.0, "2025": 1250000.0, "2026": 1290000.0, "2027": 1330000.0, "2028": 1370000.0, "2029": 1410000.0, "2030": 1450000.0 },
+      },
+      {
+        series_id: "irs_sec179_phaseout",
+        metric_label: "IRC Section 179 Investment Phaseout Threshold",
+        statutory_citation: "26 U.S.C. 179(b)(2)",
+        unit: "USD",
+        points: { "2024": 3050000.0, "2025": 3130000.0, "2026": 3220000.0, "2027": 3320000.0, "2028": 3420000.0, "2029": 3520000.0, "2030": 3630000.0 },
+      },
+      {
+        series_id: "irs_sec168k_bonus",
+        metric_label: "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
+        statutory_citation: "26 U.S.C. 168(k)(6)",
+        unit: "PCT",
+        points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
+      },
+      {
+        series_id: "fred_dgs10_yield",
+        metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
+        statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
+        unit: "PCT",
+        points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
+      },
+    ];
+  } else {
+    statutoryTrendTimeseries = [
+      {
+        series_id: "irs_sec199a_qbi",
+        metric_label: "IRC Section 199A Qualified Business Income Deduction Rate",
+        statutory_citation: "26 U.S.C. 199A",
+        unit: "PCT",
+        points: { "2024": 20.0, "2025": 20.0, "2026": 0.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
+      },
+      {
+        series_id: "ssa_fica_wage_base",
+        metric_label: "Social Security OASDI Maximum Taxable Wage Base",
+        statutory_citation: "26 U.S.C. 3121",
+        unit: "USD",
+        points: { "2024": 168600.0, "2025": 176100.0, "2026": 181800.0, "2027": 187500.0, "2028": 193500.0, "2029": 199700.0, "2030": 206100.0 },
+      },
+      {
+        series_id: "irs_sec168k_bonus",
+        metric_label: "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
+        statutory_citation: "26 U.S.C. 168(k)(6)",
+        unit: "PCT",
+        points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
+      },
+      {
+        series_id: "fred_dgs10_yield",
+        metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
+        statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
+        unit: "PCT",
+        points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
+      },
+    ];
+  }
+  const customParameterLedger = {
+    calculated_amount: baseAmount,
+    capital_band: capitalBand,
+    state: stateCode,
+    inputs,
+    outputs,
+  };
 
   const csvLines = ["Line Code,Statutory Line Item,Authority,Baseline Scenario,Optimized Scenario,Delta Impact"];
   for (const r of reconciliationSchedule) {
     csvLines.push(`"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`);
+  }
+  for (const ts of statutoryTrendTimeseries) {
+    const v24 = ts.points["2024"] !== undefined ? ts.points["2024"] : "";
+    const v26 = ts.points["2026"] !== undefined ? ts.points["2026"] : "";
+    const v30 = ts.points["2030"] !== undefined ? ts.points["2030"] : "";
+    csvLines.push(`"TREND-${ts.series_id}","${ts.metric_label} (2024-2030)","${ts.statutory_citation}","2024: ${v24} ${ts.unit}","2026: ${v26} ${ts.unit}","2030 Proj: ${v30} ${ts.unit}"`);
   }
   for (const [k, v] of Object.entries(inputs)) {
     csvLines.push(`"INPUT-${k}","Visitor Calculator Input (${k})","Live Workbench","${String(v).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}","Captured"`);
@@ -3598,6 +3866,14 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.effective_rate}</td>` +
     `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#15803d;">${s.estimated_net_benefit}</td></tr>`
   ).join("");
+  const trendHtml = statutoryTrendTimeseries.map((ts) =>
+    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;">${ts.metric_label}<div style="font-size:11px;color:#64748b;">${ts.statutory_citation}</div></td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2024"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2025"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${ts.points["2026"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2028"]} ${ts.unit}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2030"]} ${ts.unit}</td></tr>`
+  ).join("");
   const delivHtml = (effSpec.deliverables || []).map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
   const badgeLabel = mode === "paid_toolkit" ? "PAID STATUTORY AUDIT WORKPAPER PACKAGE" : "PERSONALIZED SCENARIO PLAYBOOK & WORKSHEET";
   const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${effSpec.offerTitle} (${leadId})</title>` +
@@ -3612,7 +3888,9 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
     `<h2 style="font-size:16px;margin:18px 0 8px;">2. Multi-Scenario Stress-Test &amp; Sensitivity Matrix</h2>` +
     `<table><thead><tr><th>Scenario Case</th><th>Modeled Principal</th><th>Effective Rate / Treatment</th><th>Estimated Net Benefit</th></tr></thead><tbody>${sensHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Included Audit Workpaper Deliverables &amp; Next Actions</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Multi-Year Statutory &amp; Macroeconomic Trend Benchmarks (2024 to 2030)</h2>` +
+    `<table><thead><tr><th>Statutory Benchmark &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${trendHtml}</tbody></table>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">4. Included Audit Workpaper Deliverables &amp; Next Actions</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
     `</div></body></html>`;
 
   return {
@@ -3630,8 +3908,10 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     state: stateCode,
     scenario_inputs: inputs,
     scenario_outputs: outputs,
+    custom_parameter_ledger: customParameterLedger,
     reconciliation_schedule: reconciliationSchedule,
     sensitivity_matrix: sensitivityMatrix,
+    statutory_trend_timeseries: statutoryTrendTimeseries,
     deliverables: effSpec.deliverables,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
@@ -3642,26 +3922,62 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   };
 }
 
-async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam) {
-  for (const item of getMemoryBuffer()) {
-    if (item && item.lead_id === leadId) return item;
+function parseEdgeJsonParam(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
   }
-  const kv = getLeadsKv(env);
-  if (kv && typeof kv.get === "function" && leadId) {
-    try {
-      const stored = await kv.get(leadId, { type: "json" });
-      if (stored && typeof stored === "object") return stored;
-    } catch (_) {}
+}
+
+async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
+  let baseRecord = null;
+  for (const item of getMemoryBuffer()) {
+    if (item && item.lead_id === leadId) {
+      baseRecord = { ...item };
+      break;
+    }
+  }
+  if (!baseRecord) {
+    const kv = getLeadsKv(env);
+    if (kv && typeof kv.get === "function" && leadId) {
+      try {
+        const stored = await kv.get(leadId, { type: "json" });
+        if (stored && typeof stored === "object") baseRecord = { ...stored };
+      } catch (_) {}
+    }
   }
   const parsedAmt = Number(amountParam || 0);
-  return {
-    lead_id: leadId || "lead_profithelm_direct",
-    property_id: "profithelm",
-    tool_slug: toolSlug || "section-1031-calculator",
-    calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 250000,
-    state: stateParam || "US",
-    email: emailParam || "cfo@profithelm.com",
-  };
+  const parsedInputs = parseEdgeJsonParam(inputsJsonParam);
+  const parsedOutputs = parseEdgeJsonParam(outputsJsonParam);
+  if (!baseRecord) {
+    baseRecord = {
+      lead_id: leadId || "lead_profithelm_direct",
+      property_id: "profithelm",
+      tool_slug: toolSlug || "section-1031-calculator",
+      calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 250000,
+      state: stateParam || "US",
+      email: emailParam || "cfo@profithelm.com",
+      scenario_inputs: parsedInputs || {},
+      scenario_outputs: parsedOutputs || {},
+    };
+  } else {
+    if (Number.isFinite(parsedAmt) && parsedAmt > 0) {
+      baseRecord.calculated_amount = parsedAmt;
+      baseRecord.capital_band = deriveCapitalBand(parsedAmt);
+    }
+    if (stateParam) baseRecord.state = stateParam;
+    if (emailParam) baseRecord.email = emailParam;
+    if (parsedInputs) {
+      baseRecord.scenario_inputs = { ...(baseRecord.scenario_inputs || {}), ...parsedInputs };
+    }
+    if (parsedOutputs) {
+      baseRecord.scenario_outputs = { ...(baseRecord.scenario_outputs || {}), ...parsedOutputs };
+    }
+  }
+  return baseRecord;
 }
 
 function isSyntheticTestEmail(email) {
@@ -3694,14 +4010,24 @@ function isSyntheticProbeRequest(request, body, email) {
   return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
 }
 
-async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false) {
-  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false, customRecord = null) {
+  const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, spec, "paid_toolkit") : null;
+  const fallbackUrl = customBundle ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
+  const stripeMerchantEmail = "arif.coskun@profithelm.com";
+  const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  const extraFields = customBundle ? {
+    workpaper_id: customBundle.workpaper_id,
+    calculated_amount: customBundle.calculated_amount,
+    capital_band: customBundle.capital_band,
+    custom_parameter_ledger: customBundle.custom_parameter_ledger,
+    statutory_trend_series_count: Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0,
+  } : {};
   if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
       offer_sku: spec.offerSku,
@@ -3716,11 +4042,14 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
       stripe_account_id: stripeAccountId,
+      stripe_merchant_email: stripeMerchantEmail,
+      stripe_display_name: stripeDisplayName,
       stripe_publishable_key_present: stripePubKeyPresent,
       stripe_credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
       stripe_called: false,
       stripe_http_status: null,
       stripe_error_code: null,
+      ...extraFields,
     };
   }
   let stripeHttpStatus = null;
@@ -3738,10 +4067,13 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "line_items[0][price_data][product_data][name]": spec.offerTitle,
       "line_items[0][quantity]": "1",
       "metadata[lead_id]": leadId,
+      "metadata[workpaper_id]": `wp_${leadId}`,
       "metadata[property_id]": "profithelm",
       "metadata[tool_slug]": toolSlug,
       "metadata[offer_sku]": spec.offerSku,
-      "metadata[fulfillment_url]": fulfillmentUrl,
+      "metadata[merchant_email]": stripeMerchantEmail,
+      "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 250000),
+      "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
     });
     const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
@@ -3767,11 +4099,14 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
+        stripe_merchant_email: stripeMerchantEmail,
+        stripe_display_name: stripeDisplayName,
         stripe_publishable_key_present: stripePubKeyPresent,
         stripe_credential_status: "active_ready",
         stripe_called: true,
         stripe_http_status: resp.status,
         stripe_error_code: null,
+        ...extraFields,
       };
     }
     const errObj = (data && data.error) || {};
@@ -3792,11 +4127,14 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
     stripe_account_id: stripeAccountId,
+    stripe_merchant_email: stripeMerchantEmail,
+    stripe_display_name: stripeDisplayName,
     stripe_publishable_key_present: stripePubKeyPresent,
     stripe_credential_status: stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`,
     stripe_called: true,
     stripe_http_status: stripeHttpStatus,
     stripe_error_code: stripeErrorCode,
+    ...extraFields,
   };
 }
 
@@ -3961,7 +4299,9 @@ export async function onRequestGet(context) {
       toolSlug,
       reqUrl.searchParams.get("amount"),
       reqUrl.searchParams.get("state"),
-      email
+      email,
+      reqUrl.searchParams.get("inputs_json"),
+      reqUrl.searchParams.get("outputs_json")
     );
     const bundle = buildEdgePersonalizedWorkpaperBundle(storedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
@@ -4010,7 +4350,17 @@ export async function onRequestGet(context) {
     const toolSlug = reqUrl.searchParams.get("tool_slug") || "section-1031-calculator";
     const spec = resolveVerticalAndThreshold(toolSlug, "");
     const isSynth = isSyntheticProbeRequest(request, null, email);
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSynth);
+    const customRecord = await lookupEdgeLeadRecord(
+      env,
+      leadId,
+      toolSlug,
+      reqUrl.searchParams.get("amount"),
+      reqUrl.searchParams.get("state"),
+      email,
+      reqUrl.searchParams.get("inputs_json"),
+      reqUrl.searchParams.get("outputs_json")
+    );
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSynth, customRecord);
     return new Response(
       JSON.stringify({
         ok: true,
