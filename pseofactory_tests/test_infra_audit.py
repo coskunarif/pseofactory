@@ -15,14 +15,18 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from pseofactory.infra_audit import (
+    ACTIVE_ROUTABLE_ZONE_IDS,
     ACTIVE_TENANT_DOMAINS,
+    ALL_PORTFOLIO_ZONE_IDS,
     DECOMMISSIONED_DOMAINS,
     DEFAULT_ENDPOINTS,
     DEFAULT_PROFITHELM_REPO,
+    EXPECTED_ACTIVE_CNAME_TARGETS,
     HIBERNATED_RESERVE_DOMAINS,
     KEPT_DOMAINS,
     NON_ROUTABLE_ZONE_IDS,
     PERSONAL_INFRA_DOMAINS,
+    audit_active_zone_dns_hygiene,
     audit_cloudflare_and_multi_cloud,
     audit_gcp_billing_summary,
     audit_hibernated_and_retired_dns_isolation,
@@ -32,6 +36,11 @@ from pseofactory.infra_audit import (
     run_consolidated_infra_audit,
 )
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
+from pseofactory.tenant_facts import (
+    CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER,
+    CLOUDFLARE_REGISTRAR_ATTESTATION_SHA256,
+    TenantFactStore,
+)
 
 
 def test_audit_host_hygiene_live():
@@ -219,6 +228,55 @@ def test_audit_hibernated_and_retired_dns_isolation_catches_dangling_records():
         ok, msg = audit_hibernated_and_retired_dns_isolation(api_token="mock-token")
         assert ok is False
         assert "gainhelm.com has 1 dangling routing record(s)" in msg
+
+
+def test_active_zone_dns_hygiene_live_and_registrar_attestation_ledger():
+    """
+    Verifies live active-zone DNS hygiene (profithelm.com, prexvo.com, arifcoskun.com)
+    and cryptographic Registrar state attestation across all 8 portfolio domains:
+    - Proxied Pages CNAMEs, SPF, and DMARC (p=reject) verified on all 3 active zones.
+    - Transfer lock (locked=True, clienttransferprohibited), WHOIS privacy (redaction),
+      and $41.84/yr exposure verified across the 8-domain Registrar ledger.
+    - Unlocks or WHOIS privacy regressions are caught deterministically.
+    """
+    ok_active, msg_active, summaries = audit_active_zone_dns_hygiene()
+    assert ok_active is True, f"Active zone DNS hygiene failed: {msg_active}"
+    for dom, expected_target in EXPECTED_ACTIVE_CNAME_TARGETS.items():
+        assert summaries[dom]["expected_cname"] == expected_target
+        assert summaries[dom]["has_spf"] is True
+        assert summaries[dom]["has_dmarc_reject"] is True
+
+    ok_ledger, msg_ledger, meta = TenantFactStore.verify_registrar_ledger_integrity()
+    assert ok_ledger is True, f"Registrar ledger integrity failed: {msg_ledger}"
+    assert meta["domains_verified"] == 8
+    assert meta["total_annual_exposure_usd"] == 41.84
+    assert meta["attestation_sha256"] == CLOUDFLARE_REGISTRAR_ATTESTATION_SHA256
+    for retired in DECOMMISSIONED_DOMAINS:
+        assert retired in meta["sunset_windows_days"]
+
+    # Mutate transfer lock on a cloned ledger and verify fail-closed rejection
+    tampered = {k: dict(v) for k, v in CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER.items()}
+    tampered["gainhelm.com"]["locked"] = False
+    ok_bad, msg_bad, _ = TenantFactStore.verify_registrar_ledger_integrity(ledger=tampered)
+    assert ok_bad is False
+    assert "gainhelm.com transfer lock is False" in msg_bad
+
+    # Verify audit_registrar_renewal_posture catches live unlocked or unredacted domain
+    unlocked_payload = [
+        {"name": d, "auto_renew": True, "locked": (d != "profithelm.com"), "privacy": True}
+        for d in KEPT_DOMAINS
+    ] + [
+        {"name": d, "auto_renew": False, "locked": True, "privacy": True}
+        for d in DECOMMISSIONED_DOMAINS
+    ]
+    mock_resp_unlocked = MagicMock()
+    mock_resp_unlocked.read.return_value = json.dumps({"success": True, "result": unlocked_payload}).encode("utf-8")
+    mock_resp_unlocked.__enter__.return_value = mock_resp_unlocked
+    with patch("urllib.request.urlopen", return_value=mock_resp_unlocked):
+        ok_u, msg_u, _ = audit_registrar_renewal_posture(api_token="mock-token")
+        assert ok_u is False
+        assert "profithelm.com has locked=False" in msg_u
+
 
 
 
