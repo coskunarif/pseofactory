@@ -6880,10 +6880,12 @@ class RetroReflectionEngine:
                     try:
                         curr_m = json.loads(script_m.group(1).strip())
                         curr_pub = float(curr_m.get("published_output") or 0.0)
+                        from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
                         if (
                             round(curr_pub, 4) != round(exp_pub, 4)
                             or str(curr_m.get("formula") or "") != expected_m["formula"]
                             or str(curr_m.get("sample_calculation") or "") != expected_m["sample_calculation"]
+                            or str(curr_m.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                         ):
                             if "calculation_manifest" not in missing:
                                 missing.append("calculation_manifest")
@@ -7115,6 +7117,18 @@ class RetroReflectionEngine:
                     except Exception:
                         raw = {}
 
+        sidecar_entity_type = ""
+        if dist_dir is not None:
+            sidecar_path_check = Path(dist_dir) / "manifests" / f"{slug}.json"
+            if sidecar_path_check.is_file():
+                try:
+                    sc_parsed = json.loads(sidecar_path_check.read_text(encoding="utf-8"))
+                    if isinstance(sc_parsed, dict):
+                        sidecar_entity_type = str(sc_parsed.get("entity_type") or "")
+                except Exception:
+                    pass
+        prior_entity_type = str((raw.get("entity_type") if isinstance(raw, dict) else "") or sidecar_entity_type)
+
         is_prexvo = property_id.lower() == "prexvo"
         default_stat, default_econ = (
             (
@@ -7226,11 +7240,17 @@ class RetroReflectionEngine:
             else str(raw.get("manifest_id") or f"{slug_id}-manifest").replace("/", "-")
         )
 
+        from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+
+        candidate_entity_type = str(raw.get("entity_type") or prior_entity_type or "")
+        if candidate_entity_type not in AI_MODE_ENTITY_TAXONOMY:
+            candidate_entity_type = "RepaymentPlanSpecification" if is_prexvo else "StatutoryDeduction"
+
         return {
             "manifest_id": resolved_manifest_id,
             "slug": slug,
             "model_name": model_name,
-            "entity_type": str(raw.get("entity_type") or "calculator"),
+            "entity_type": candidate_entity_type,
             "formula": formula,
             "inputs": clamped_inputs,
             "published_output": eval_out,
@@ -7267,6 +7287,16 @@ class RetroReflectionEngine:
                     return out_html, list(out_rep)
 
         missing = cls.audit_html_mechanics(html_content)
+        if not missing and dist_dir is not None:
+            sidecar_pre = Path(dist_dir) / "manifests" / f"{slug}.json"
+            if sidecar_pre.is_file():
+                try:
+                    from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+                    sc_pre_data = json.loads(sidecar_pre.read_text(encoding="utf-8"))
+                    if not isinstance(sc_pre_data, dict) or str(sc_pre_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY:
+                        missing.append("calculation_manifest")
+                except Exception:
+                    missing.append("calculation_manifest")
         if not missing:
             if cache_key is not None:
                 if len(cls._RETROFIT_HTML_CACHE) > 512:
@@ -7656,6 +7686,7 @@ class RetroReflectionEngine:
                 try:
                     existing_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
                     sidecar_stat = str(existing_sidecar.get("statutory_authority") or "")
+                    from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
                     sidecar_needs_heal = (
                         not isinstance(existing_sidecar, dict)
                         or not existing_sidecar.get("formula")
@@ -7664,6 +7695,7 @@ class RetroReflectionEngine:
                         or existing_sidecar.get("published_output") != manifest["published_output"]
                         or existing_sidecar.get("formula") != manifest["formula"]
                         or existing_sidecar.get("sample_calculation") != manifest["sample_calculation"]
+                        or str(existing_sidecar.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                         or (
                             property_id.lower() != "prexvo"
                             and (
