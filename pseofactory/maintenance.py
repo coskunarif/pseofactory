@@ -8585,14 +8585,18 @@ class RetroReflectionEngine:
         if cls._has_stale_llms_manifests(d, property_id):
             stale_pages["llms.txt"] = ["llms_manifest_parity"]
 
-        app_js_path = d / "static" / "js" / "app.js"
-        if app_js_path.is_file():
-            try:
-                app_js_txt = app_js_path.read_text(encoding="utf-8", errors="ignore")
-                if "head_of_household: 12700" in app_js_txt or "status === 'head_of_household' ? 12700" in app_js_txt:
-                    stale_pages["static/js/app.js"] = ["statutory_truth_reconciliation"]
-            except Exception:
-                pass
+        for app_js_path in (
+            d / "static" / "js" / "app.js",
+            d.parent / "static" / "js" / "app.js",
+            d.parent / "profithelm" / "static" / "js" / "app.js",
+        ):
+            if app_js_path.is_file():
+                try:
+                    app_js_txt = app_js_path.read_text(encoding="utf-8", errors="ignore")
+                    if "head_of_household: 12700" in app_js_txt or "status === 'head_of_household' ? 12700" in app_js_txt:
+                        stale_pages["static/js/app.js"] = ["statutory_truth_reconciliation"]
+                except Exception:
+                    pass
 
         videos_dir = d / "videos"
         if videos_dir.is_dir():
@@ -8808,23 +8812,32 @@ class RetroReflectionEngine:
             canonical_base=canonical_base,
         )
 
-        for js_cand in (d / "static" / "js" / "app.js", d.parent / "static" / "js" / "app.js"):
+        for js_cand in (
+            d / "static" / "js" / "app.js",
+            d.parent / "static" / "js" / "app.js",
+            d.parent / "profithelm" / "static" / "js" / "app.js",
+            d.parent / "profithelm" / "interactive_calculator.py",
+            d.parent / "profithelm" / "engine" / "tax_bracket.py",
+            d.parent / "profithelm" / "engine" / "capital_gains.py",
+            d.parent / "profithelm" / "engine" / "arbitrage_math.py",
+        ):
             if js_cand.is_file():
                 try:
                     raw_js = js_cand.read_text(encoding="utf-8", errors="ignore")
-                    healed_js = raw_js.replace(
-                        "head_of_household: 12700",
-                        "head_of_household: 12900",
-                    ).replace(
-                        "(status === 'head_of_household' ? 12700 : 8600)",
-                        "(status === 'head_of_household' ? 12900 : 8600)",
+                    healed_js = (
+                        raw_js.replace("head_of_household: 12700", "head_of_household: 12900")
+                        .replace(
+                            "(status === 'head_of_household' ? 12700 : 8600)",
+                            "(status === 'head_of_household' ? 12900 : 8600)",
+                        )
+                        .replace('"head_of_household": 12700.0', '"head_of_household": 12900.0')
+                        .replace('"head_of_household": 12700', '"head_of_household": 12900')
                     )
                     if healed_js != raw_js:
                         js_cand.write_text(healed_js, encoding="utf-8")
-                        if js_cand.is_relative_to(d):
-                            rel_js = js_cand.relative_to(d).as_posix()
-                            if rel_js not in retrofitted_paths:
-                                retrofitted_paths.append(rel_js)
+                        rel_js = js_cand.relative_to(d).as_posix() if js_cand.is_relative_to(d) else js_cand.name
+                        if rel_js not in retrofitted_paths:
+                            retrofitted_paths.append(rel_js)
                 except Exception:
                     pass
 
