@@ -295,7 +295,8 @@
           "active_campaigns": [
             "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770; 5 verified clicks / 11 raw clicks recorded including referring domain profithelm.com)",
             "xendoo (#16354 - Contract Active since 2026-10-19, $500.00 CPA per Onboarded Client via https://xendoo.pxf.io/c/7932737/1357375/16354; 1 raw click recorded)",
-            "gusto (#15154 - Contract Active since 2026-10-19 via Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com, $200-$300 CPA per sale via https://gusto.pxf.io/c/7932737/1226287/15154)"
+            "gusto (#15154 - Contract Active since 2026-10-19 via Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com, $200-$300 CPA per sale via https://gusto.pxf.io/c/7932737/1226287/15154)",
+            "ramp (#51436 - Contract Active since 2026-10-21 via Zoho Newsletter #1591, $100.00-$4,000.00 Closed Won / $50.00-$2,000.00 SQL via https://join.ramp.com/c/7932737/3981015/51436)"
           ],
           "submitted_campaigns": [
             "gusto (#15154 - uContractId 30477112, Inbox #967 + publisher intro Sent #271 to noelle.hyra@gusto.com)",
@@ -427,11 +428,12 @@
           "pipeline_tier": "live_revenue_ready",
           "url": "https://mercury.com/r/profithelm-llc",
           "direct_url": "https://mercury.com/r/profithelm-llc",
+          "cj_approved_wallethub_tracking_url": "https://www.jdoqocy.com/click-101906407-16952385",
           "edge_route": "/r/mercury",
           "category": "STARTUP_BANKING",
           "network": "PartnerStack / In-House",
           "bounty": "$250",
-          "correspondence_status": "Approved & Live (Customer referral link https://mercury.com/r/profithelm-llc extracted from app.mercury.com + Mercury Partnerships form submitted 2026-10-14 per Inbox #978 & Sent #236; $250 bonus on $10K deposit within 90 days)"
+          "correspondence_status": "Approved & Live (Customer referral link https://mercury.com/r/profithelm-llc extracted from app.mercury.com + Mercury Partnerships form submitted 2026-10-14 per Inbox #978 & Sent #236; $250 bonus on $10K deposit within 90 days; CJ Affiliate WalletHub / Evolution Finance #7238333 / #6002798 approved on 2026-10-23 via Notification #857 with tracking link https://www.jdoqocy.com/click-101906407-16952385)"
         },
         "rho": {
           "status": "awaiting_response",
@@ -479,12 +481,14 @@
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://ramp.com/",
           "direct_url": "https://ramp.com/",
+          "impact_verified_tracking_url": "https://join.ramp.com/c/7932737/3981015/51436",
+          "impact_ad_id": "3981015",
           "edge_route": "/r/ramp",
           "category": "CORPORATE_SPEND",
           "network": "Impact.com / In-House",
           "campaign_id": "51436",
           "bounty": "$100-$4000",
-          "correspondence_status": "Impact Marketplace Application Approved in Newsletter #1591 on 2026-10-21T14:54:06Z (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 submitted on 2026-10-18 in PENDING_CAMPAIGN_APPROVAL [$100-$4,000 Closed Won / $50-$2,000 SQL] + approved via Zoho Newsletter #1591 Welcome to the Ramp Partner Program from notifications@app.impact.com; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
+          "correspondence_status": "Impact Marketplace Application Approved in Newsletter #1591 on 2026-10-21T14:54:06Z & Live Tracking Link Extracted (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 Active since 2026-10-21 [$100-$4,000 Closed Won / $50-$2,000 SQL] via Ad #3981015 https://join.ramp.com/c/7932737/3981015/51436 wired at /r/ramp; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
@@ -552,6 +556,7 @@
           "url": "https://www.taxslayer.com/",
           "direct_url": "https://www.taxslayer.com/",
           "cj_approved_tracking_url": "https://www.dpbolvw.net/click-101906407-15704796",
+          "cj_approved_freetaxusa_tracking_url": "https://www.jdoqocy.com/click-101906407-12306188",
           "cj_approved_promo_10_off_url": "https://www.anrdoezrs.net/click-101906407-15719586",
           "cj_approved_promo_20_off_url": "https://www.anrdoezrs.net/click-101906407-17230749",
           "cj_approved_advertiser": "ezTaxReturn.com (#6874782 - 15% new customer / 5% returning customer, 90-day cookie)",
@@ -559,7 +564,7 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + ezTaxReturn.com (#6874782) Approved on 2026-10-19 (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; ezTaxReturn.com CJ Advertiser ID #6874782 approved via Notification #848 with tracking link https://www.dpbolvw.net/click-101906407-15704796 at 15% new customer / 5% returning customer commission and 90-day cookie + publisher intro Sent #268 to allwyn.symon@eztaxreturn.com; TaxSlayer CJ Advertiser ID #5273914 pending; wrapped via Sovrn Commerce /r/taxslayer)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + ezTaxReturn.com (#6874782) & FreeTaxUSA (#4526117 / #1722649) Approved (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; ezTaxReturn.com CJ Advertiser ID #6874782 approved via Notification #848 with tracking link https://www.dpbolvw.net/click-101906407-15704796 + FreeTaxUSA CJ Advertiser ID #4526117 approved on 2026-10-21 via Notification #851 with tracking link https://www.jdoqocy.com/click-101906407-12306188 wired at /r/freetaxusa; TaxSlayer CJ Advertiser ID #5273914 pending)",
           "cj_advertiser_id": "5273914",
           "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },
@@ -654,7 +659,7 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted & Qualification Questionnaire Answered in Full (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor on 2026-10-16T22:50Z + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z + answered all 7 qualification questions from Inbox #1005 via Sent #278 on 2026-10-20T17:34:43Z confirming zero OTR Solutions brand references on live pages; awaiting partnership agreement review)",
+          "correspondence_status": "Application Submitted & Qualification Questionnaire Answered in Full (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor [tfa_dbFormId=23, tfa_dbVersionId=37] on 2026-10-16T22:50Z and re-verified on 2026-10-23 + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z + answered all 7 qualification questions from Inbox #1005 via Sent #278 on 2026-10-20T17:34:43Z confirming zero OTR Solutions brand references on live pages; awaiting partnership agreement review)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"

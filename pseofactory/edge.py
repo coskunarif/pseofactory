@@ -1368,9 +1368,11 @@ export async function onRequest(context) {{
         "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
         "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
         "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-        "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
+        "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+        "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
         "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
     }
     if hasattr(active_hub, "get_direct_contract_upgrades"):
@@ -1497,6 +1499,8 @@ export async function onRequest(context) {{
         "eztaxreturn_com": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
         "lawdepot": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
         "xendoo_impact": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_IMPACT_URL"),
+        "ramp_impact": ("https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL"),
+        "wallethub": ("https://www.jdoqocy.com/click-101906407-16952385", "AFFILIATE_WALLETHUB_URL"),
     }
     for d_key, (d_url, d_env) in direct_network_aliases.items():
         if d_key not in ordered_keys:
@@ -1554,6 +1558,7 @@ const IMPACT_DOMAINS = [
   "ojrq.net",
   "evyy.net",
   "7eer.net",
+  "join.ramp.com",
 ];
 
 const DEFAULT_SOVRN_KEY = "{sovrn_key}";

@@ -2121,10 +2121,18 @@ def test_autonomous_link_promotion_and_new_zoho_classifications(
 
     upgrades = tracker.hub.get_direct_contract_upgrades("profithelm")
     assert upgrades["taxslayer"] == "https://www.dpbolvw.net/click-101906407-15704796"
+    assert upgrades["ramp"] == "https://join.ramp.com/c/7932737/3981015/51436"
+    assert upgrades["freetaxusa"] == "https://www.jdoqocy.com/click-101906407-12306188"
+    assert upgrades["wallethub"] == "https://www.jdoqocy.com/click-101906407-16952385"
 
     ph_edge_js = generate_edge_redirect_function("profithelm", hub=tracker.hub)
     px_edge_js = generate_edge_redirect_function("prexvo", hub=tracker.hub)
     assert 'normParams.get("source_tool") || normParams.get("source")' in ph_edge_js
     assert 'normParams.get("cta_slot") || normParams.get("slot")' in ph_edge_js
+    assert '"join.ramp.com"' in ph_edge_js
+    assert "https://join.ramp.com/c/7932737/3981015/51436" in ph_edge_js
+    assert "https://www.jdoqocy.com/click-101906407-12306188" in ph_edge_js
+    assert "https://www.jdoqocy.com/click-101906407-16952385" in ph_edge_js
     assert 'normParams.get("source_tool") || normParams.get("source")' in px_edge_js
     assert 'normParams.get("cta_slot") || normParams.get("slot")' in px_edge_js
+

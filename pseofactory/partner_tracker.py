@@ -724,6 +724,7 @@ class PartnerTrackingEngine:
         tracked_tokens = (
             ".pxf.io/c/",
             ".pxf.io/",
+            "join.ramp.com/c/",
             "try.rippling.com/",
             "fpr=",
             "via=",
@@ -804,7 +805,12 @@ class PartnerTrackingEngine:
             prop_section = self.hub.vault_data.setdefault("properties", {}).setdefault(prop_clean, {})
             partners_dict = prop_section.setdefault("partners", {})
             p_entry = partners_dict.setdefault(p_key, {})
-            p_entry["approved_tracking_url"] = cand_url
+            if "freetaxusa" in (c.partner_name or "").lower() and "12306188" in cand_url:
+                p_entry["cj_approved_freetaxusa_tracking_url"] = cand_url
+                if not p_entry.get("cj_approved_tracking_url"):
+                    p_entry["approved_tracking_url"] = cand_url
+            else:
+                p_entry["approved_tracking_url"] = cand_url
 
             expected_brand_tok = native_brand_tokens.get(p_key)
             is_native_brand_match = bool(
@@ -1095,9 +1101,11 @@ class PartnerTrackingEngine:
                     "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                     "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                     "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
                     "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
                     "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-                    "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
+                    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+                    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
                     "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
                 }
                 if prop_id == "profithelm"
@@ -1275,7 +1283,7 @@ class PartnerTrackingEngine:
                 elif prop_id == "profithelm" and p_key == "otr_solutions_factoring":
                     delta_note = (
                         "UPDATED: Sent #278 (17:34:43Z) answered Wade Fenton's 7 qualification "
-                        "questions from Inbox #1005 (12:04:48Z); transitioned from "
+                        "questions from Inbox #1005 (12:04:48Z) and submitted FormAssembly #23; transitioned from "
                         "ONBOARDING_ACTION_REQUIRED to PENDING_ADVERTISER_REVIEW."
                     )
 
@@ -1315,7 +1323,7 @@ class PartnerTrackingEngine:
                         reason = (
                             "PartnerStack Marketplace application stck_sHqgUkyEIAPgiL declined "
                             "(cooldown until 2026-10-23T00:00:00Z); Impact.com Ramp (#51436) approved "
-                            "in Newsletter #1591 awaiting pxf.io link extraction; covered by Mercury Startup Banking ($250 CPA) fallback."
+                            "in Newsletter #1591 and wired at edge via https://join.ramp.com/c/7932737/3981015/51436 ($100-$4,000 Closed Won / $50-$2,000 SQL)."
                         )
                     elif prop_id == "profithelm" and p_key == "rho":
                         reason = (

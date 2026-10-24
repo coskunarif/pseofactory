@@ -1045,14 +1045,14 @@ class EmailIngestionEngine:
                         category="CORPORATE_SPEND",
                         classification_type="APPLICATION_APPROVED",
                         requires_operator_decision=False,
-                        summary="Ramp Partner Program approved on Impact.com (#51436, $100-$4,000 Closed Won / $50-$2,000 SQL via Zoho Newsletter #1591).",
+                        summary="Ramp Partner Program approved on Impact.com (#51436, $100-$4,000 Closed Won / $50-$2,000 SQL via Zoho Newsletter #1591 and https://join.ramp.com/c/7932737/3981015/51436).",
                         urgency="LOW",
                         deadline=None,
                         missing_requirements=[],
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
-                        candidate_url=cand_url or "https://ramp.com/",
+                        candidate_url=cand_url or "https://join.ramp.com/c/7932737/3981015/51436",
                         network="Impact.com",
                     )
                 )
@@ -1073,14 +1073,14 @@ class EmailIngestionEngine:
                         category="TAX_INTELLIGENCE",
                         classification_type="APPLICATION_APPROVED",
                         requires_operator_decision=False,
-                        summary="FreeTaxUSA Affiliate Program (#1722649) approved on CJ Affiliate (10%-20% commission on paid products, 30-day cookie via Zoho Notification #851).",
+                        summary="FreeTaxUSA Affiliate Program (#1722649 / CJ #4526117) approved on CJ Affiliate (10%-20% commission on paid products, 30-day cookie via Zoho Notification #851 and https://www.jdoqocy.com/click-101906407-12306188).",
                         urgency="LOW",
                         deadline=None,
                         missing_requirements=[],
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
-                        candidate_url=cand_url or "https://www.dpbolvw.net/click-101906407-15704796",
+                        candidate_url=cand_url or "https://www.jdoqocy.com/click-101906407-12306188",
                         network="CJ Affiliate",
                     )
                 )

@@ -706,9 +706,11 @@ class MonetizationHub:
                     "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                     "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                     "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
                     "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
                     "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-                    "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
+                    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+                    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
                     "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
                 }
             )
@@ -720,6 +722,7 @@ class MonetizationHub:
             for url_field in (
                 "approved_tracking_url",
                 "impact_tracking_url",
+                "impact_verified_tracking_url",
                 "cj_approved_tracking_url",
                 "cj_approved_lawdepot_tracking_url",
             ):
@@ -727,6 +730,12 @@ class MonetizationHub:
                 if cand and validate_affiliate_url(cand):
                     upgrades[p_key] = cand
                     break
+            ft_cand = str(p_meta.get("cj_approved_freetaxusa_tracking_url") or "").strip()
+            if ft_cand and validate_affiliate_url(ft_cand):
+                upgrades["freetaxusa"] = ft_cand
+            wh_cand = str(p_meta.get("cj_approved_wallethub_tracking_url") or "").strip()
+            if wh_cand and validate_affiliate_url(wh_cand):
+                upgrades["wallethub"] = wh_cand
         return upgrades
 
     def _is_direct_profithelm_tool(self, tool_slug: str) -> bool:

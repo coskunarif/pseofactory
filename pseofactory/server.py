@@ -31,7 +31,8 @@ _LOCAL_PARTNER_DESTINATIONS: Dict[str, str] = {
     "kalshi": "https://kalshi.com/sign-up/?referral=f003999f-7392-4be9-b6d4-376d7de7ae7c",
     "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
     "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-    "freetaxusa": "https://www.dpbolvw.net/click-101906407-15704796",
+    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
     "efile": "https://www.jdoqocy.com/click-101906407-11917161",
     "eztaxreturn": "https://www.dpbolvw.net/click-101906407-15704796",
     "lawdepot": "https://www.jdoqocy.com/click-101906407-16985242",
@@ -48,9 +49,9 @@ _LOCAL_PARTNER_DESTINATIONS: Dict[str, str] = {
     "wealthfront": "https://www.wealthfront.com/",
     "fundrise": "https://fundrise.com/",
     "stripe": "https://stripe.com/",
-    "ramp": "https://ramp.com/",
+    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
     "rho": "https://www.rho.co/",
-    "gusto": "https://gusto.com/",
+    "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
 }
 
 

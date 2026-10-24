@@ -3479,12 +3479,6 @@ class RefactorCascadeEngine:
                             "failed": len(actionable_records),
                             "dependencies": [],
                         }
-                    if build_ok:
-                        RetroReflectionEngine.retrofit_estate(
-                            dist_dir=adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            canonical_base=adapter.canonical_base,
-                        )
             except LockContentionError as lce:
                 print(f"Lock contention on property '{adapter.property_id}': deferring bulk rebuild without DLQ routing.")
                 return {
@@ -8766,14 +8760,7 @@ class RetroReflectionEngine:
                 except Exception:
                     gsc_lifecycle_data = {}
 
-        active_overlays = cls._resolve_active_estate_overlays(
-            d,
-            property_id,
-            heal_legacy=True,
-            canonical_base=canonical_base,
-        )
-
-        # Scrub any DEGRADED_ROLLED_BACK overlays from dist HTML after overlay healing
+        # Scrub any DEGRADED_ROLLED_BACK overlays from dist HTML before overlay healing
         for overlays_dir in (d.parent / "content" / "overlays", agy_dir / "overlays"):
             if not overlays_dir.is_dir():
                 continue
@@ -10205,8 +10192,8 @@ def reflect_and_recompile_all_assets(
                 except Exception:
                     pass
 
-            # Always execute single-pass retro-reflection across existing dist inventory when full build, mutation, or forced reflection is requested
-            if should_run_full_build or estate_needed_mutation or force:
+            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess forced reflection is requested
+            if should_run_full_build or estate_needed_mutation or (force and not isinstance(adapter, SubprocessPropertyAdapter)):
                 try:
                     retro_res = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
@@ -10269,41 +10256,50 @@ def reflect_and_recompile_all_assets(
         if will_run_downstream:
             try:
                 downstream_executed = True
+                dist_html_sig_before = tuple(
+                    sorted(
+                        (str(f), f.stat().st_mtime_ns, f.stat().st_size)
+                        for f in adapter.dist_dir.rglob("*.html")
+                        if not f.name.startswith(".")
+                    )
+                ) if adapter.dist_dir.is_dir() else ()
                 downstream_summary = _execute_autonomous_downstream_chain(
                     adapter,
                     dry_run=False,
                     defer_live_indexing=defer_live_indexing,
                 )
-                ds_retro = RetroReflectionEngine.retrofit_estate(
-                    dist_dir=adapter.dist_dir,
-                    property_id=adapter.property_id,
-                    canonical_base=adapter.canonical_base,
-                )
-                retrofitted_count += int(ds_retro.get("retrofitted_count", 0))
-                from pseofactory.affiliates import normalize_html_callout_message_match
-                for html_f in sorted(adapter.dist_dir.rglob("*.html")):
-                    if html_f.name.startswith("."):
-                        continue
-                    raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
-                    norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
-                    if norm_c != raw_c:
-                        html_f.write_text(norm_c, encoding="utf-8")
-                        retrofitted_count += 1
-                evaluator._audit_cache.clear()
-                evaluator._fingerprint_cache.clear()
-                try:
-                    Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
-                except Exception:
-                    pass
+                dist_html_sig_after = tuple(
+                    sorted(
+                        (str(f), f.stat().st_mtime_ns, f.stat().st_size)
+                        for f in adapter.dist_dir.rglob("*.html")
+                        if not f.name.startswith(".")
+                    )
+                ) if adapter.dist_dir.is_dir() else ()
+                if dist_html_sig_after != dist_html_sig_before or should_run_full_build or estate_needed_mutation:
+                    ds_retro = RetroReflectionEngine.retrofit_estate(
+                        dist_dir=adapter.dist_dir,
+                        property_id=adapter.property_id,
+                        canonical_base=adapter.canonical_base,
+                    )
+                    retrofitted_count += int(ds_retro.get("retrofitted_count", 0))
+                    from pseofactory.affiliates import normalize_html_callout_message_match
+                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
+                        if html_f.name.startswith("."):
+                            continue
+                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
+                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
+                        if norm_c != raw_c:
+                            html_f.write_text(norm_c, encoding="utf-8")
+                            retrofitted_count += 1
+                    evaluator._audit_cache.clear()
+                    evaluator._fingerprint_cache.clear()
+                    try:
+                        Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
+                    except Exception:
+                        pass
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
-                evaluator._audit_cache.clear()
-                evaluator._fingerprint_cache.clear()
-                try:
-                    Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
-                except Exception:
-                    pass
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
 
         is_unmerged_worktree = (
