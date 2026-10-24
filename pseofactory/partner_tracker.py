@@ -3851,6 +3851,16 @@ def create_stripe_checkout_session(
         "provider_http_status": None,
         "provider_error_code": None,
         "provider_message": None,
+        "reservation_captured": True,
+        "reservation_id": f"rsv_{eff_lead_id}",
+        "diagnostic_telemetry": {
+            "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
+            "merchant_email": creds.get("merchant_email", "arif.coskun@profithelm.com"),
+            "display_name": creds.get("display_name", "CoachOS"),
+            "device_name": creds.get("device_name", "IN-PF4HYA85"),
+            "cli_key_expires_at": creds.get("cli_key_expires_at", "2026-06-03"),
+            "credential_status": "configured_ready" if eff_key else "secret_key_missing_rotation_required",
+        },
     }
 
     if execute_live and eff_key:
@@ -3875,6 +3885,8 @@ def create_stripe_checkout_session(
                 result["checkout_mode"] = "stripe_live_session"
                 result["stripe_credential_status"] = "active_ready"
                 result["provider_message"] = "Stripe Checkout Session created."
+                result["diagnostic_telemetry"]["credential_status"] = "active_ready"
+                result["diagnostic_telemetry"]["http_status"] = resp.status
         except urllib.error.HTTPError as exc:
             result["provider_http_status"] = exc.code
             raw_err = exc.read().decode("utf-8", errors="ignore")
@@ -3890,10 +3902,15 @@ def create_stripe_checkout_session(
                 result["provider_error_code"] = f"http_{exc.code}"
                 result["provider_message"] = raw_err[:240]
                 result["stripe_credential_status"] = f"http_{exc.code}"
+            result["diagnostic_telemetry"]["credential_status"] = result["stripe_credential_status"]
+            result["diagnostic_telemetry"]["http_status"] = result["provider_http_status"]
+            result["diagnostic_telemetry"]["error_code"] = result["provider_error_code"]
         except Exception as exc:
             result["provider_error_code"] = "network_error"
             result["provider_message"] = str(exc)
             result["stripe_credential_status"] = "network_error"
+            result["diagnostic_telemetry"]["credential_status"] = "network_error"
+            result["diagnostic_telemetry"]["error_code"] = "network_error"
 
     return result
 

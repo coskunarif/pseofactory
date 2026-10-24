@@ -10227,8 +10227,8 @@ def reflect_and_recompile_all_assets(
                 except Exception:
                     pass
 
-            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess forced reflection is requested
-            if should_run_full_build or estate_needed_mutation or (force and not isinstance(adapter, SubprocessPropertyAdapter)):
+            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, drift, or forced reflection is requested
+            if should_run_full_build or estate_needed_mutation or bool(drifted_records) or force:
                 try:
                     retro_res = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
@@ -10243,7 +10243,7 @@ def reflect_and_recompile_all_assets(
                         print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
             # Final pass to ensure all HTML pages in dist_dir pass callout destination message match
-            if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
+            if should_run_full_build or estate_needed_mutation or bool(drifted_records) or force or retrofitted_count > 0:
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     for html_f in sorted(adapter.dist_dir.rglob("*.html")):

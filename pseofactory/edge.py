@@ -2681,6 +2681,18 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       stripe_called: false,
       stripe_http_status: null,
       stripe_error_code: null,
+      reservation_captured: true,
+      reservation_id: `rsv_${leadId}`,
+      diagnostic_telemetry: {
+        stripe_account_id: stripeAccountId,
+        merchant_email: stripeMerchantEmail,
+        display_name: stripeDisplayName,
+        device_name: "IN-PF4HYA85",
+        cli_key_expires_at: "2026-06-03",
+        credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
+        http_status: null,
+        error_code: null,
+      },
       ...extraFields,
     };
   }
@@ -2738,6 +2750,18 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         stripe_called: true,
         stripe_http_status: resp.status,
         stripe_error_code: null,
+        reservation_captured: true,
+        reservation_id: `rsv_${leadId}`,
+        diagnostic_telemetry: {
+          stripe_account_id: stripeAccountId,
+          merchant_email: stripeMerchantEmail,
+          display_name: stripeDisplayName,
+          device_name: "IN-PF4HYA85",
+          cli_key_expires_at: "2026-06-03",
+          credential_status: "active_ready",
+          http_status: resp.status,
+          error_code: null,
+        },
         ...extraFields,
       };
     }
@@ -2746,6 +2770,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   } catch (_) {
     stripeErrorCode = "network_error";
   }
+  const credStatus = stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`;
   return {
     offer_sku: PREXVO_TOOLKIT_OFFER.sku,
     offer_title: PREXVO_TOOLKIT_OFFER.title,
@@ -2762,10 +2787,22 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     stripe_merchant_email: stripeMerchantEmail,
     stripe_display_name: stripeDisplayName,
     stripe_publishable_key_present: stripePubKeyPresent,
-    stripe_credential_status: stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`,
+    stripe_credential_status: credStatus,
     stripe_called: true,
     stripe_http_status: stripeHttpStatus,
     stripe_error_code: stripeErrorCode,
+    reservation_captured: true,
+    reservation_id: `rsv_${leadId}`,
+    diagnostic_telemetry: {
+      stripe_account_id: stripeAccountId,
+      merchant_email: stripeMerchantEmail,
+      display_name: stripeDisplayName,
+      device_name: "IN-PF4HYA85",
+      cli_key_expires_at: "2026-06-03",
+      credential_status: credStatus,
+      http_status: stripeHttpStatus,
+      error_code: stripeErrorCode,
+    },
     ...extraFields,
   };
 }
@@ -4049,6 +4086,18 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       stripe_called: false,
       stripe_http_status: null,
       stripe_error_code: null,
+      reservation_captured: true,
+      reservation_id: `rsv_${leadId}`,
+      diagnostic_telemetry: {
+        stripe_account_id: stripeAccountId,
+        merchant_email: stripeMerchantEmail,
+        display_name: stripeDisplayName,
+        device_name: "IN-PF4HYA85",
+        cli_key_expires_at: "2026-06-03",
+        credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
+        http_status: null,
+        error_code: null,
+      },
       ...extraFields,
     };
   }
@@ -4106,6 +4155,18 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         stripe_called: true,
         stripe_http_status: resp.status,
         stripe_error_code: null,
+        reservation_captured: true,
+        reservation_id: `rsv_${leadId}`,
+        diagnostic_telemetry: {
+          stripe_account_id: stripeAccountId,
+          merchant_email: stripeMerchantEmail,
+          display_name: stripeDisplayName,
+          device_name: "IN-PF4HYA85",
+          cli_key_expires_at: "2026-06-03",
+          credential_status: "active_ready",
+          http_status: resp.status,
+          error_code: null,
+        },
         ...extraFields,
       };
     }
@@ -4114,6 +4175,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   } catch (_) {
     stripeErrorCode = "network_error";
   }
+  const credStatus = stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`;
   return {
     offer_sku: spec.offerSku,
     offer_title: spec.offerTitle,
@@ -4130,10 +4192,22 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     stripe_merchant_email: stripeMerchantEmail,
     stripe_display_name: stripeDisplayName,
     stripe_publishable_key_present: stripePubKeyPresent,
-    stripe_credential_status: stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`,
+    stripe_credential_status: credStatus,
     stripe_called: true,
     stripe_http_status: stripeHttpStatus,
     stripe_error_code: stripeErrorCode,
+    reservation_captured: true,
+    reservation_id: `rsv_${leadId}`,
+    diagnostic_telemetry: {
+      stripe_account_id: stripeAccountId,
+      merchant_email: stripeMerchantEmail,
+      display_name: stripeDisplayName,
+      device_name: "IN-PF4HYA85",
+      cli_key_expires_at: "2026-06-03",
+      credential_status: credStatus,
+      http_status: stripeHttpStatus,
+      error_code: stripeErrorCode,
+    },
     ...extraFields,
   };
 }

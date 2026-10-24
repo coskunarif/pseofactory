@@ -1235,6 +1235,10 @@ console.log(JSON.stringify({{ chkData, ffData }}));
         assert out["chkData"]["ok"] is True
         assert out["chkData"]["stripe_account_id"] == "acct_1T6fSTIq0ckFsf5j"
         assert out["chkData"]["stripe_merchant_email"] == "arif.coskun@profithelm.com"
+        assert out["chkData"]["reservation_captured"] is True
+        assert out["chkData"]["reservation_id"] == "rsv_lead_custom_1"
+        assert out["chkData"]["diagnostic_telemetry"]["merchant_email"] == "arif.coskun@profithelm.com"
+        assert out["chkData"]["diagnostic_telemetry"]["cli_key_expires_at"] == "2026-06-03"
         assert out["chkData"]["calculated_amount"] == 410000
         assert out["chkData"]["statutory_trend_series_count"] >= 3
         assert out["ffData"]["ok"] is True
