@@ -517,6 +517,16 @@ def _build_prexvo_profile() -> TenantTruthProfile:
     )
 
 
+STAGED_RESERVE_TENANT_DOMAINS: Tuple[str, ...] = ("gainhelm.com",)
+DECOMMISSIONED_TENANT_DOMAINS: Tuple[str, ...] = (
+    "adspendguardian.com",
+    "heyjunto.com",
+    "thecoachloop.com",
+    "viraljacker.com",
+)
+PERSONAL_INFRASTRUCTURE_DOMAINS: Tuple[str, ...] = ("arifcoskun.com",)
+
+
 class TenantFactStore:
     """
     Centralized singleton store for tenant truth profiles.
@@ -531,6 +541,27 @@ class TenantFactStore:
             "profithelm": _build_profithelm_profile(),
             "prexvo": _build_prexvo_profile(),
         }
+
+    @staticmethod
+    def classify_domain_lifecycle(tenant_or_domain: str) -> str:
+        """
+        Classifies a tenant ID or domain into its canonical lifecycle tier:
+        ACTIVE_TENANT, STAGED_RESERVE, PERSONAL_INFRA, DECOMMISSIONED, or UNMAPPED.
+        Zero em-dashes. Zero en-dashes.
+        """
+        raw = (tenant_or_domain or "").strip().lower()
+        if not raw:
+            return "UNMAPPED"
+        norm = raw if "." in raw else f"{raw}.com"
+        if norm in ("profithelm.com", "prexvo.com"):
+            return "ACTIVE_TENANT"
+        if norm in STAGED_RESERVE_TENANT_DOMAINS:
+            return "STAGED_RESERVE"
+        if norm in PERSONAL_INFRASTRUCTURE_DOMAINS:
+            return "PERSONAL_INFRA"
+        if norm in DECOMMISSIONED_TENANT_DOMAINS:
+            return "DECOMMISSIONED"
+        return "UNMAPPED"
 
     @classmethod
     def get_instance(cls) -> "TenantFactStore":

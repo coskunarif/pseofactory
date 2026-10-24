@@ -15,13 +15,21 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from pseofactory.infra_audit import (
-    audit_cloudflare_and_multi_cloud,
-    audit_gcp_billing_summary,
-    audit_host_hygiene,
-    audit_live_edge_endpoints,
-    run_consolidated_infra_audit,
+    ACTIVE_TENANT_DOMAINS,
+    DECOMMISSIONED_DOMAINS,
     DEFAULT_ENDPOINTS,
     DEFAULT_PROFITHELM_REPO,
+    HIBERNATED_RESERVE_DOMAINS,
+    KEPT_DOMAINS,
+    NON_ROUTABLE_ZONE_IDS,
+    PERSONAL_INFRA_DOMAINS,
+    audit_cloudflare_and_multi_cloud,
+    audit_gcp_billing_summary,
+    audit_hibernated_and_retired_dns_isolation,
+    audit_host_hygiene,
+    audit_live_edge_endpoints,
+    audit_registrar_renewal_posture,
+    run_consolidated_infra_audit,
 )
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
 
@@ -120,4 +128,97 @@ def test_default_endpoints_excludes_decommissioned_gainhelm():
     """Asserts decommissioned Cloud Run gainhelm.com is not probed by default."""
     assert "https://gainhelm.com" not in DEFAULT_ENDPOINTS
     assert "https://profithelm.com" in DEFAULT_ENDPOINTS
+
+
+def test_audit_hibernated_and_retired_dns_isolation_live():
+    """
+    Verifies live Cloudflare DNS isolation across gainhelm.com (hibernated reserve)
+    and all 4 retired domains (adspendguardian.com, heyjunto.com, thecoachloop.com, viraljacker.com):
+    - 0 A, AAAA, CNAME, or MX routing records on all 5 non-routable zones.
+    - google-site-verification TXT record preserved on gainhelm.com.
+    - Graceful handling of HTTP 403/401 Registrar API token scope restrictions.
+    """
+    ok, msg = audit_hibernated_and_retired_dns_isolation()
+    assert ok is True, f"Live DNS isolation check failed: {msg}"
+    assert "Zero routing records verified across 5 hibernated/retired zones" in msg
+
+
+def test_audit_registrar_renewal_posture_mocked():
+    """
+    Verifies audit_registrar_renewal_posture handles:
+    1. HTTP 200 OK with compliant auto_renew states (kept=True, retired=False).
+    2. HTTP 200 OK with violation (retired domain still has auto_renew=True).
+    3. HTTP 403 Forbidden token scope restriction (graceful pass in unattended CLI runs).
+    """
+    import urllib.error
+
+    compliant_domains = [
+        {"name": d, "auto_renew": True} for d in KEPT_DOMAINS
+    ] + [
+        {"name": d, "auto_renew": False} for d in DECOMMISSIONED_DOMAINS
+    ]
+    mock_resp_ok = MagicMock()
+    mock_resp_ok.read.return_value = json.dumps({"success": True, "result": compliant_domains}).encode("utf-8")
+    mock_resp_ok.__enter__.return_value = mock_resp_ok
+
+    with patch("urllib.request.urlopen", return_value=mock_resp_ok):
+        ok, msg, details = audit_registrar_renewal_posture(api_token="mock-token")
+        assert ok is True
+        assert details["status"] == "VERIFIED"
+
+    violating_domains = [
+        {"name": d, "auto_renew": True} for d in KEPT_DOMAINS
+    ] + [
+        {"name": d, "auto_renew": (d == "viraljacker.com")} for d in DECOMMISSIONED_DOMAINS
+    ]
+    mock_resp_fail = MagicMock()
+    mock_resp_fail.read.return_value = json.dumps({"success": True, "result": violating_domains}).encode("utf-8")
+    mock_resp_fail.__enter__.return_value = mock_resp_fail
+
+    with patch("urllib.request.urlopen", return_value=mock_resp_fail):
+        ok, msg, details = audit_registrar_renewal_posture(api_token="mock-token")
+        assert ok is False
+        assert "viraljacker.com" in msg
+
+    http_403 = urllib.error.HTTPError(
+        url="https://api.cloudflare.com/client/v4/accounts/mock/registrar/domains",
+        code=403,
+        msg="Forbidden",
+        hdrs=None,
+        fp=None,
+    )
+    with patch("urllib.request.urlopen", side_effect=http_403):
+        ok, msg, details = audit_registrar_renewal_posture(api_token="mock-token")
+        assert ok is True
+        assert details["status"] == "TOKEN_SCOPE_RESTRICTED"
+        assert details["http_code"] == 403
+
+
+def test_audit_hibernated_and_retired_dns_isolation_catches_dangling_records():
+    """Verifies DNS isolation audit catches dangling A/CNAME records or missing GSC TXT on gainhelm.com."""
+    def _fake_urlopen(req, timeout=15):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        resp = MagicMock()
+        resp.__enter__.return_value = resp
+        if NON_ROUTABLE_ZONE_IDS["gainhelm.com"] in url:
+            payload = {
+                "success": True,
+                "result": [
+                    {"type": "CNAME", "name": "www.gainhelm.com", "content": "ghs.googlehosted.com"}
+                ],
+            }
+        else:
+            payload = {"success": True, "result": []}
+        resp.read.return_value = json.dumps(payload).encode("utf-8")
+        return resp
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen), patch(
+        "pseofactory.infra_audit.audit_registrar_renewal_posture",
+        return_value=(True, "Registrar verified", {"status": "VERIFIED"}),
+    ):
+        ok, msg = audit_hibernated_and_retired_dns_isolation(api_token="mock-token")
+        assert ok is False
+        assert "gainhelm.com has 1 dangling routing record(s)" in msg
+
+
 

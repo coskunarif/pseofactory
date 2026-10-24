@@ -254,6 +254,80 @@ class TenantCandidateEvaluation:
 
 
 # ============================================================================
+# CLOUDFLARE ACCOUNT 8789c54bef2d281d4a8afb4df34f9878 DOMAIN LIFECYCLE BOUNDARY
+# ============================================================================
+
+CLOUDFLARE_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
+
+ACTIVE_REVENUE_TENANT_DOMAINS: Tuple[str, ...] = (
+    "profithelm.com",
+    "prexvo.com",
+)
+
+STAGED_RESERVE_DOMAINS: Tuple[str, ...] = (
+    "gainhelm.com",
+)
+
+PERSONAL_INFRASTRUCTURE_DOMAINS: Tuple[str, ...] = (
+    "arifcoskun.com",
+)
+
+DECOMMISSIONED_RETIRED_DOMAINS: Tuple[str, ...] = (
+    "adspendguardian.com",
+    "heyjunto.com",
+    "thecoachloop.com",
+    "viraljacker.com",
+)
+
+NON_DEPLOYABLE_CANDIDATE_DOMAINS: Tuple[str, ...] = (
+    PERSONAL_INFRASTRUCTURE_DOMAINS + DECOMMISSIONED_RETIRED_DOMAINS
+)
+
+STAGED_RESERVE_DOMAIN_METADATA: Dict[str, Dict[str, Any]] = {
+    "gainhelm.com": {
+        "domain": "gainhelm.com",
+        "tenant_id_candidate": "gainhelm",
+        "brand_name": "GainHelm",
+        "zone_id": "0a03264e19beb2cb17ba01860b701701",
+        "registry_object_id": "3041507860_DOMAIN_COM-VRSN",
+        "auto_renew": True,
+        "lifecycle_state": "HIBERNATED_RESERVE",
+        "active_tenant_profile_wired": False,
+        "routing_records_count": 0,
+        "gsc_property": "sc-domain:gainhelm.com",
+        "search_ownership_txt_preserved": True,
+        "eligible_for_third_tenant_promotion": True,
+        "architectural_boundary_note": (
+            "Registered in market-intelligence reserve metadata rather than active TenantFactStore "
+            "profiles while hibernated so empty-zone GSC sitemaps and unprovisioned Pages/KV edges "
+            "never trigger false infrastructure failures."
+        ),
+    }
+}
+
+
+def assert_candidate_domain_eligible(domain: str) -> str:
+    """
+    Enforces that decommissioned retired domains and personal infrastructure domains
+    can never be selected or proposed as programmatic SEO tenant candidates.
+    Zero em-dashes. Zero en-dashes.
+    """
+    clean = (domain or "").strip().lower()
+    if not clean:
+        raise ValueError("Candidate domain must be non-empty")
+    if clean in DECOMMISSIONED_RETIRED_DOMAINS:
+        raise ValueError(
+            f"Decommissioned domain '{clean}' has auto_renew=False and 0 routing records; "
+            "strictly blocked from candidate selection and deployment"
+        )
+    if clean in PERSONAL_INFRASTRUCTURE_DOMAINS:
+        raise ValueError(
+            f"Personal infrastructure domain '{clean}' is strictly isolated from commercial pSEO tenants"
+        )
+    return clean
+
+
+# ============================================================================
 # VERIFIED GREENFIELD VERTICAL & ACTIVE COMMISSION OFFER CATALOG
 # ============================================================================
 
@@ -1825,13 +1899,20 @@ class MarketIntelligenceEngine:
             ranking_assessment.estimated_days_to_top_10 + 7,
         )
 
+        raw_rec_domain = v_match["recommended_domain"] if v_match else f"{slug.split('-')[0]}.com"
+        if raw_rec_domain.strip().lower() in NON_DEPLOYABLE_CANDIDATE_DOMAINS:
+            rec_domain = "gainhelm.com"
+        else:
+            rec_domain = assert_candidate_domain_eligible(raw_rec_domain)
+
         return {
             "query": q_clean,
             "slug": slug,
             "vertical_id": v_match["vertical_id"] if v_match else "unmapped_prospective_vertical",
             "recommended_tenant_id": v_match["tenant_id"] if v_match else f"tenant-{slug[:16]}",
             "recommended_brand_name": v_match["brand_name"] if v_match else slug.split("-")[0].capitalize(),
-            "recommended_domain": v_match["recommended_domain"] if v_match else f"{slug.split('-')[0]}.com",
+            "recommended_domain": rec_domain,
+            "staged_reserve_domain": "gainhelm.com",
             "search_volume": vol,
             "cpc_usd": round(cpc, 2),
             "keyword_difficulty": round(kd, 2),
@@ -1922,6 +2003,7 @@ class MarketIntelligenceEngine:
                 "tenant_id": q_eval["recommended_tenant_id"],
                 "brand_name": q_eval["recommended_brand_name"],
                 "recommended_domain": q_eval["recommended_domain"],
+                "staged_reserve_domain": "gainhelm.com",
                 "vertical_id": q_eval["vertical_id"],
                 "scaffold_recommended": True,
                 "proposed_at": now_iso,
@@ -2244,6 +2326,11 @@ class MarketIntelligenceEngine:
                     "scope": "Federal Title IV (34 CFR Part 685) Student Loan Repayment, PSLF & Refinance Calculators",
                 },
             ],
+            "staged_reserve_domains": [
+                dict(STAGED_RESERVE_DOMAIN_METADATA["gainhelm.com"]),
+            ],
+            "decommissioned_domains": list(DECOMMISSIONED_RETIRED_DOMAINS),
+            "personal_infrastructure_domains": list(PERSONAL_INFRASTRUCTURE_DOMAINS),
             "total_new_tenant_candidates_evaluated": len(candidates),
             "persisted_to_db_count": persisted_count,
             "confirmed_niche_proposals_in_db": proposals_in_db,
@@ -2266,8 +2353,9 @@ class MarketIntelligenceEngine:
         return report
 
 
-# Module-level self-attestation: enforce zero forbidden dashes across all catalog entries
+# Module-level self-attestation: enforce zero forbidden dashes and domain eligibility across all catalog entries
 for _v_id, _v_spec in GREENFIELD_VERTICAL_CATALOG.items():
+    assert_candidate_domain_eligible(_v_spec["recommended_domain"])
     assert_no_forbidden_dashes(_v_spec["brand_name"], f"catalog.{_v_id}.brand_name")
     assert_no_forbidden_dashes(_v_spec["vertical_name"], f"catalog.{_v_id}.vertical_name")
     assert_no_forbidden_dashes(_v_spec["why_it_wins_fastest"], f"catalog.{_v_id}.why_it_wins_fastest")
