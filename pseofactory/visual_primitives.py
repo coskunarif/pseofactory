@@ -1844,19 +1844,53 @@ def _render_runtime_sync_events_js() -> str:
     }
 
     function collectWorkbenchBlueprintState() {
-      var state = { slug: resolveCurrentToolSlug(), ts: new Date().toISOString(), inputs: {}, outputs: {} };
+      var state = {
+        slug: resolveCurrentToolSlug(),
+        ts: new Date().toISOString(),
+        calculated_amount: 0,
+        inputs: {},
+        outputs: {},
+        comparator: {}
+      };
       var inps = document.querySelectorAll('input[type="number"], input[type="range"], select');
+      var maxInputVal = 0;
       for (var i = 0; i < inps.length; i++) {
         var el = inps[i];
         var key = el.id || el.name || "";
         if (key && !/^retro-range-/.test(key)) {
           state.inputs[key] = el.value;
+          if (el.type === "number" || el.type === "range") {
+            var numV = parseFloat(String(el.value || "0").replace(/,/g, ""));
+            if (!isNaN(numV) && numV > maxInputVal) {
+              maxInputVal = numV;
+            }
+          }
         }
       }
+      var quoteDrawer = document.getElementById("partner-quote-intake-step");
+      var drawerAmt = quoteDrawer ? (parseFloat(quoteDrawer.getAttribute("data-calculated-amount") || "0") || 0) : 0;
+      state.calculated_amount = Math.max(maxInputVal, drawerAmt);
       var p1 = document.getElementById("serp-out-primary");
       var p2 = document.getElementById("serp-out-secondary");
+      var p3 = document.getElementById("serp-out-tertiary");
+      var p4 = document.getElementById("serp-out-quaternary");
       if (p1) state.outputs.primary = (p1.textContent || "").trim();
       if (p2) state.outputs.secondary = (p2.textContent || "").trim();
+      if (p3) state.outputs.tertiary = (p3.textContent || "").trim();
+      if (p4) state.outputs.quaternary = (p4.textContent || "").trim();
+      var compRoot = document.getElementById("stateful-scenario-comparator");
+      if (compRoot) {
+        state.comparator = {
+          pinned_a: compRoot.getAttribute("data-pinned-a") || "",
+          scn_a_input: compRoot.getAttribute("data-scn-a-input") || "",
+          scn_a_primary: compRoot.getAttribute("data-scn-a-primary") || "",
+          scn_a_secondary: compRoot.getAttribute("data-scn-a-secondary") || "",
+          pinned_b: compRoot.getAttribute("data-pinned-b") || "",
+          scn_b_input: compRoot.getAttribute("data-scn-b-input") || "",
+          scn_b_primary: compRoot.getAttribute("data-scn-b-primary") || "",
+          scn_b_secondary: compRoot.getAttribute("data-scn-b-secondary") || ""
+        };
+      }
       return state;
     }
 
@@ -1872,7 +1906,26 @@ def _render_runtime_sync_events_js() -> str:
           var el = document.getElementById(k) || document.querySelector('[name="' + k + '"]');
           if (el && saved.inputs[k] !== undefined) {
             el.value = String(saved.inputs[k]);
+            var pr = findPairedRangeInput(el);
+            if (pr && !/^retro-range-/.test(pr.id || "")) {
+              pr.value = String(saved.inputs[k]);
+            }
             restoredCount++;
+          }
+        }
+        var compRoot = document.getElementById("stateful-scenario-comparator");
+        if (compRoot && saved.comparator && typeof saved.comparator === "object") {
+          if (saved.comparator.pinned_a === "1") {
+            compRoot.setAttribute("data-pinned-a", "1");
+            if (saved.comparator.scn_a_input) compRoot.setAttribute("data-scn-a-input", String(saved.comparator.scn_a_input));
+            if (saved.comparator.scn_a_primary) compRoot.setAttribute("data-scn-a-primary", String(saved.comparator.scn_a_primary));
+            if (saved.comparator.scn_a_secondary) compRoot.setAttribute("data-scn-a-secondary", String(saved.comparator.scn_a_secondary));
+          }
+          if (saved.comparator.pinned_b === "1") {
+            compRoot.setAttribute("data-pinned-b", "1");
+            if (saved.comparator.scn_b_input) compRoot.setAttribute("data-scn-b-input", String(saved.comparator.scn_b_input));
+            if (saved.comparator.scn_b_primary) compRoot.setAttribute("data-scn-b-primary", String(saved.comparator.scn_b_primary));
+            if (saved.comparator.scn_b_secondary) compRoot.setAttribute("data-scn-b-secondary", String(saved.comparator.scn_b_secondary));
           }
         }
         if (restoredCount > 0) {
@@ -1885,6 +1938,82 @@ def _render_runtime_sync_events_js() -> str:
           updateOutputsSynchronously();
         }
       } catch (err) {}
+    }
+
+    function renderPlaybookAndFulfillmentDrawer(parentContainer, data, mode) {
+      try {
+        if (!parentContainer || !data) return;
+        var existingId = mode === "checkout_fulfill" ? "checkout-fulfillment-panel" : "playbook-inline-workpaper-summary";
+        var oldEl = document.getElementById(existingId);
+        if (oldEl && oldEl.parentNode) oldEl.parentNode.removeChild(oldEl);
+        var panel = document.createElement("div");
+        panel.id = existingId;
+        panel.setAttribute("data-workpaper-mode", mode || "playbook");
+        panel.style.cssText = "margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--bg-inset,#f8fafc);border:1px solid var(--border,#cbd5e1);font-size:12px;line-height:1.5;";
+        var sched = Array.isArray(data.reconciliation_schedule) ? data.reconciliation_schedule : [];
+        if (sched.length > 0) {
+          var summaryLine = sched.slice(0, 2).map(function(r) {
+            return (r.line_code || "LINE") + ": " + (r.optimized_value || r.baseline_value || "");
+          }).join(" | ");
+          var summaryDiv = document.createElement("div");
+          summaryDiv.style.cssText = "margin-bottom:6px;font-weight:600;color:var(--text-primary,#0f172a);";
+          summaryDiv.textContent = "Personalized Workpaper Preview (" + summaryLine + ")";
+          panel.appendChild(summaryDiv);
+        }
+        var linksRow = document.createElement("div");
+        linksRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;";
+        var pbUrl = data.playbook_url ? (String(data.playbook_url) + "&format=html") : "";
+        var ffUrl = data.fulfillment_url ? (String(data.fulfillment_url) + "&format=html") : "";
+        var csvUrl = data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "";
+        if (mode === "checkout_fulfill" && ffUrl) {
+          var ffLink = document.createElement("a");
+          ffLink.id = "checkout-fulfillment-html-link";
+          ffLink.href = ffUrl;
+          ffLink.target = "_blank";
+          ffLink.rel = "noopener";
+          ffLink.style.cssText = "font-weight:700;color:#0f766e;text-decoration:underline;";
+          ffLink.textContent = "Open Instant Audit Workpaper (HTML/PDF)";
+          linksRow.appendChild(ffLink);
+        } else if (pbUrl) {
+          var pbLink = document.createElement("a");
+          pbLink.id = "playbook-download-link";
+          pbLink.href = pbUrl;
+          pbLink.target = "_blank";
+          pbLink.rel = "noopener";
+          pbLink.style.cssText = "font-weight:700;color:#0f766e;text-decoration:underline;";
+          pbLink.textContent = "Open Personalized Playbook Worksheet";
+          linksRow.appendChild(pbLink);
+        }
+        if (csvUrl) {
+          var csvLink = document.createElement("a");
+          csvLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-csv-link" : "playbook-csv-link";
+          csvLink.href = csvUrl;
+          csvLink.style.cssText = "font-weight:700;color:#1d4ed8;text-decoration:underline;";
+          csvLink.textContent = "Download CSV Reconciliation Schedule";
+          linksRow.appendChild(csvLink);
+        }
+        panel.appendChild(linksRow);
+        parentContainer.appendChild(panel);
+      } catch (e) {}
+    }
+
+    function hydrateCheckoutFulfillmentFromUrl() {
+      try {
+        var rawSearch = (window.location && window.location.search) ? window.location.search : "";
+        if (!rawSearch || rawSearch.indexOf("checkout_status=success") === -1) return;
+        var qs = new URLSearchParams(rawSearch);
+        var leadId = qs.get("lead_id") || "lead_verified";
+        var sku = qs.get("sku") || "";
+        var slug = resolveCurrentToolSlug();
+        var hostTarget = document.getElementById("partner-quote-intake-step") || document.getElementById("lead-capture-form") || document.querySelector("main");
+        if (!hostTarget) return;
+        var fulfillBase = "/api/lead-capture?fulfill=1&lead_id=" + encodeURIComponent(leadId) + "&sku=" + encodeURIComponent(sku) + "&tool_slug=" + encodeURIComponent(slug);
+        renderPlaybookAndFulfillmentDrawer(hostTarget, {
+          fulfillment_url: fulfillBase,
+          csv_fulfillment_url: fulfillBase + "&format=csv",
+          reconciliation_schedule: []
+        }, "checkout_fulfill");
+      } catch (e) {}
     }
 
     function hydrateInputsFromLocationSearch() {
@@ -1967,6 +2096,7 @@ def _render_runtime_sync_events_js() -> str:
       }
       restoreSavedBlueprintIfPresent();
       hydrateInputsFromLocationSearch();
+      hydrateCheckoutFulfillmentFromUrl();
       syncOutboundAffiliateLinks();
     }
 
@@ -2067,6 +2197,7 @@ def _render_runtime_sync_events_js() -> str:
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                   parentStep.setAttribute("data-checkout-session-id", sessId);
+                  renderPlaybookAndFulfillmentDrawer(parentStep, data, "checkout_fulfill");
                 }
                 if (cMode.indexOf("live_session") !== -1 && data.checkout_url && String(data.checkout_url).indexOf("https://checkout.") === 0 && !window.__PSEO_SYNTHETIC_TEST__) {
                   window.location.assign(data.checkout_url);
@@ -2117,6 +2248,12 @@ def _render_runtime_sync_events_js() -> str:
               }
             }
             updateInteractiveCliffAndComparator(liveP, liveS);
+            try {
+              if (window.localStorage) {
+                var pinnedState = collectWorkbenchBlueprintState();
+                window.localStorage.setItem("pseo_blueprint_" + pinnedState.slug, JSON.stringify(pinnedState));
+              }
+            } catch (pErr) {}
             syncOutboundAffiliateLinks();
             emitWorkbenchEngagementBeacon("scenario_pin_" + pinMode.toLowerCase(), "comparison_table_cta", { pin_mode: pinMode, primary_val: liveP, secondary_val: liveS });
           }
@@ -2388,10 +2525,15 @@ def _render_runtime_sync_events_js() -> str:
           }
           var currentPath = (window.location && window.location.pathname) ? window.location.pathname : "/";
           var ts = new Date().toISOString();
+          var bpSnapshot = collectWorkbenchBlueprintState();
           var leadPayload = {
             email: rawEmail,
             source: currentPath,
             tool_slug: resolveCurrentToolSlug(),
+            scenario_amount: bpSnapshot.calculated_amount || 0,
+            scenario_inputs: bpSnapshot.inputs || {},
+            scenario_outputs: bpSnapshot.outputs || {},
+            blueprint_state: bpSnapshot,
             timestamp: ts
           };
           if (window.__PSEO_SYNTHETIC_TEST__) {
@@ -2401,8 +2543,9 @@ def _render_runtime_sync_events_js() -> str:
             if (window.localStorage) {
               var storageKey = "pseo_captured_leads";
               var existing = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
-              existing.push({ email: rawEmail, source: currentPath, timestamp: ts });
+              existing.push({ email: rawEmail, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0, timestamp: ts });
               window.localStorage.setItem(storageKey, JSON.stringify(existing));
+              window.localStorage.setItem("pseo_blueprint_" + bpSnapshot.slug, JSON.stringify(bpSnapshot));
             }
           } catch (sErr) {}
           if (pbBtn) {
@@ -2416,7 +2559,7 @@ def _render_runtime_sync_events_js() -> str:
           pbForm.setAttribute("data-lead-captured", "true");
           statusBox.textContent = "Briefing subscription confirmed. Preparing custom worksheet...";
           statusBox.setAttribute("data-status", "submitting");
-          emitWorkbenchEngagementBeacon("playbook_subscription_submit", "lead_capture_form", { has_email: true, source: currentPath });
+          emitWorkbenchEngagementBeacon("playbook_subscription_submit", "lead_capture_form", { has_email: true, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0 });
           if (typeof window.fetch === "function") {
             var pbHeaders = { "Content-Type": "application/json" };
             if (window.__PSEO_SYNTHETIC_TEST__) {
@@ -2434,17 +2577,20 @@ def _render_runtime_sync_events_js() -> str:
                 pbForm.setAttribute("data-submission-state", "success");
                 pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
                 if (data.checkout_url) pbForm.setAttribute("data-checkout-url", data.checkout_url);
+                if (data.playbook_url) pbForm.setAttribute("data-playbook-url", data.playbook_url);
+                if (data.fulfillment_url) pbForm.setAttribute("data-fulfillment-url", data.fulfillment_url);
                 if (data.redirect_url) pbForm.setAttribute("data-redirect-url", data.redirect_url);
                 statusBox.setAttribute("data-status", data.status || "playbook_subscribed");
                 statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
                 statusBox.textContent = "Playbook queued (" + (data.lead_id || "verified") + "). ";
                 if (data.checkout_url) {
-                  var defTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49;
+                  var defTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
                   appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || defTierPrice) + ")", true);
                 }
                 if (data.redirect_url) {
                   appendActionLink(statusBox, "playbook-partner-link", data.redirect_url, "Matched Partner Desk", false);
                 }
+                renderPlaybookAndFulfillmentDrawer(statusBox, data, "playbook");
               }
             }).catch(function() {});
           }
@@ -2479,6 +2625,7 @@ def _render_runtime_sync_events_js() -> str:
         var toolSlug = drawer ? (drawer.getAttribute("data-tool-slug") || resolveCurrentToolSlug()) : resolveCurrentToolSlug();
         var partnerKey = drawer ? (drawer.getAttribute("data-partner-key") || "") : "";
         var vertical = drawer ? (drawer.getAttribute("data-vertical") || "") : "";
+        var qBpSnapshot = collectWorkbenchBlueprintState();
         var reqPayload = {
           email: emailVal,
           state: stateVal,
@@ -2488,6 +2635,9 @@ def _render_runtime_sync_events_js() -> str:
           tool_slug: toolSlug,
           partner_key: partnerKey,
           vertical: vertical,
+          scenario_inputs: qBpSnapshot.inputs || {},
+          scenario_outputs: qBpSnapshot.outputs || {},
+          blueprint_state: qBpSnapshot,
           traffic_source: resolveTrafficSourceAttribution()
         };
         if (window.__PSEO_SYNTHETIC_TEST__) {
@@ -2519,15 +2669,18 @@ def _render_runtime_sync_events_js() -> str:
                 if (data.lead_id) drawer.setAttribute("data-lead-id", data.lead_id);
                 drawer.setAttribute("data-redirect-url", data.redirect_url);
                 if (data.checkout_url) drawer.setAttribute("data-checkout-url", data.checkout_url);
+                if (data.playbook_url) drawer.setAttribute("data-playbook-url", data.playbook_url);
+                if (data.fulfillment_url) drawer.setAttribute("data-fulfillment-url", data.fulfillment_url);
                 if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
               }
               if (statusNode) {
                 statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal... ";
                 appendActionLink(statusNode, "quote-matched-partner-link", data.redirect_url, "Continue to Matched Partner Desk", false);
                 if (data.checkout_url) {
-                  var qDefTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49;
+                  var qDefTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
                   appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || qDefTierPrice) + ")", true);
                 }
+                renderPlaybookAndFulfillmentDrawer(statusNode, data, "playbook");
               }
             }
           }).catch(function() {});
@@ -3853,6 +4006,7 @@ def normalize_html_visual_primitives(
                 or "hydrateInputsFromLocationSearch" not in sync_body
                 or "resolveBlueprintStatusNode" not in sync_body
                 or "appendActionLink" not in sync_body
+                or "renderPlaybookAndFulfillmentDrawer" not in sync_body
                 or "data-checkout-trigger" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body

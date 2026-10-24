@@ -7041,6 +7041,7 @@ class RetroReflectionEngine:
             or "hydrateInputsFromLocationSearch" not in html_content
             or "resolveBlueprintStatusNode" not in html_content
             or "appendActionLink" not in html_content
+            or "renderPlaybookAndFulfillmentDrawer" not in html_content
             or "data-checkout-trigger" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))

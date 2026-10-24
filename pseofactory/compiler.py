@@ -1422,6 +1422,21 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
                 f'      </p>'
             )
 
+    from pseofactory.affiliates import is_restricted_public_service_slug
+    is_restricted_asset = bool(is_prexvo and is_restricted_public_service_slug(slug, title))
+    playbook_footer_html = (
+        ""
+        if is_restricted_asset
+        else (
+            '      <div class="playbook-capture-card" style="margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated);">\n'
+            '        <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">Personalized Calculation Playbook &amp; Statutory Workpaper</div>\n'
+            '        <form id="lead-capture-form" class="lead-capture-form" action="/api/lead-capture" method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">\n'
+            '          <input type="email" name="email" placeholder="Work email for personalized playbook" aria-label="Work email for personalized playbook" required class="touch-target" style="padding:10px 14px;border-radius:6px;border:1px solid var(--border);min-height:44px;flex:1;min-width:220px;" />\n'
+            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary,#1d4ed8);color:#fff;font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
+            '        </form>\n'
+            '      </div>\n'
+        )
+    )
     disclosures_html_block = ("\n" + "\n".join(regulatory_disclosures_html)) if regulatory_disclosures_html else ""
     gsc_token = (
         str(candidate_spec.get("gsc_verification_token") or "").strip()
@@ -1872,7 +1887,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     </nav>
 
     <footer class="card" style="text-align: center;">
-      <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
+{playbook_footer_html}      <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
         Launch Full {title} Engine
       </a>
       <div class="disclosures" style="margin-top: 16px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">

@@ -203,30 +203,74 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_affiliate_redirect(is_head=False)
             return
         if clean_path == "/api/lead-capture":
+            from pseofactory.partner_tracker import (
+                resolve_lead_monetization_offer,
+                synthesize_personalized_audit_workpaper,
+            )
             qs = urllib.parse.parse_qs(parsed_url.query)
             prop_id = self._detect_property_id()
             dist_srv = getattr(self, "dist_server", None)
+            if qs.get("playbook", [""])[0] == "1" or qs.get("fulfill", [""])[0] == "1":
+                is_fulfill = qs.get("fulfill", [""])[0] == "1"
+                lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
+                tool_slug = qs.get("tool_slug", ["section-1031-calculator" if prop_id == "profithelm" else "student-loan-refinance-break-even-calculator"])[0]
+                stored_rec = None
+                if dist_srv is not None:
+                    for item in dist_srv.captured_leads:
+                        if item.get("lead_id") == lead_id:
+                            stored_rec = item
+                            break
+                wp = synthesize_personalized_audit_workpaper(
+                    property_id=prop_id,
+                    tool_slug=tool_slug,
+                    lead_record=stored_rec or {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug},
+                    mode="paid_toolkit" if is_fulfill else "free_playbook",
+                )
+                fmt = qs.get("format", ["json"])[0].lower()
+                if fmt == "csv":
+                    payload = wp["csv_content"].encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                if fmt == "html":
+                    payload = wp["html_report"].encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                self._send_json(200, {
+                    "ok": True,
+                    "success": True,
+                    "status": "toolkit_fulfilled" if is_fulfill else "playbook_ready",
+                    **wp,
+                })
+                return
             if qs.get("checkout", [""])[0] == "1":
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
-                sku = qs.get("sku", ["prexvo_student_loan_audit_toolkit" if prop_id == "prexvo" else "ph_statutory_audit_toolkit"])[0]
-                title = (
-                    "Prexvo Student Loan Refinance & Forgiveness Audit Toolkit"
-                    if prop_id == "prexvo"
-                    else "ProfitHelm Statutory Tax & Capital Audit Workpapers"
-                )
-                price_usd = 19 if prop_id == "prexvo" else 29
-                session_id = f"cs_edge_{lead_id}"
+                tool_slug = qs.get("tool_slug", ["section-1031-calculator" if prop_id == "profithelm" else "student-loan-refinance-break-even-calculator"])[0]
+                offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id)
                 chk_record = {
                     "ok": True,
                     "success": True,
                     "status": "checkout_session_ready",
                     "property_id": prop_id,
                     "lead_id": lead_id,
-                    "offer_sku": sku,
-                    "offer_title": title,
-                    "offer_price_usd": price_usd,
-                    "checkout_url": f"/api/lead-capture?checkout=1&lead_id={urllib.parse.quote(lead_id)}&sku={urllib.parse.quote(sku)}",
-                    "checkout_session_id": session_id,
+                    "tool_slug": tool_slug,
+                    "offer_sku": offer["offer_sku"],
+                    "offer_title": offer["offer_title"],
+                    "offer_price_usd": offer["offer_price_usd"],
+                    "statutory_authority": offer["statutory_authority"],
+                    "deliverables": offer["deliverables"],
+                    "checkout_url": offer["checkout_url"],
+                    "playbook_url": offer["playbook_url"],
+                    "fulfillment_url": offer["fulfillment_url"],
+                    "csv_fulfillment_url": offer["csv_fulfillment_url"],
+                    "checkout_session_id": offer["checkout_session_id"],
                     "checkout_mode": "edge_checkout_rail",
                 }
                 if dist_srv is not None:
@@ -294,6 +338,10 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if clean_path == "/api/lead-capture":
+            from pseofactory.partner_tracker import (
+                resolve_lead_monetization_offer,
+                synthesize_personalized_audit_workpaper,
+            )
             email = str(body.get("email") or "").strip().lower()
             if not email or "@" not in email:
                 self._send_json(400, {"ok": False, "success": False, "error": "Please enter a valid email address."})
@@ -307,16 +355,17 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 k in body for k in ("calculated_amount", "loan_balance", "state", "capital_band", "partner_sharing_consent")
             )
             lead_id = f"lead_{prop_id}_{int(time.time() * 1000)}"
-            sku = "prexvo_student_loan_audit_toolkit" if prop_id == "prexvo" else "ph_statutory_audit_toolkit"
-            offer_title = (
-                "Prexvo Student Loan Refinance & Forgiveness Audit Toolkit"
-                if prop_id == "prexvo"
-                else "ProfitHelm Statutory Tax & Capital Audit Workpapers"
+            offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id)
+            bp_state = body.get("blueprint_state") if isinstance(body.get("blueprint_state"), dict) else {}
+            scen_inputs = body.get("scenario_inputs") if isinstance(body.get("scenario_inputs"), dict) else (
+                bp_state.get("inputs") if isinstance(bp_state.get("inputs"), dict) else {}
             )
-            offer_price = 19 if prop_id == "prexvo" else 29
-            checkout_url = f"/api/lead-capture?checkout=1&lead_id={urllib.parse.quote(lead_id)}&sku={urllib.parse.quote(sku)}"
+            scen_outputs = body.get("scenario_outputs") if isinstance(body.get("scenario_outputs"), dict) else (
+                bp_state.get("outputs") if isinstance(bp_state.get("outputs"), dict) else {}
+            )
 
             if not has_quote_fields:
+                scen_amt = float(body.get("scenario_amount") or bp_state.get("calculated_amount") or 0.0)
                 redirect_url = f"/r/{partner_key}?source={urllib.parse.quote(tool_slug)}&slot=playbook_subscription&lead_id={urllib.parse.quote(lead_id)}"
                 record = {
                     "ok": True,
@@ -327,15 +376,26 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "lead_type": "playbook_subscription",
                     "tool_slug": tool_slug,
                     "email": email,
+                    "calculated_amount": scen_amt,
                     "partner_key": partner_key,
                     "redirect_url": redirect_url,
-                    "checkout_url": checkout_url,
-                    "checkout_session_id": f"cs_edge_{lead_id}",
+                    "checkout_url": offer["checkout_url"],
+                    "playbook_url": offer["playbook_url"],
+                    "fulfillment_url": offer["fulfillment_url"],
+                    "csv_fulfillment_url": offer["csv_fulfillment_url"],
+                    "checkout_session_id": offer["checkout_session_id"],
                     "checkout_mode": "edge_checkout_rail",
-                    "offer_sku": sku,
-                    "offer_title": offer_title,
-                    "offer_price_usd": offer_price,
+                    "offer_sku": offer["offer_sku"],
+                    "offer_title": offer["offer_title"],
+                    "offer_price_usd": offer["offer_price_usd"],
+                    "deliverables": offer["deliverables"],
+                    "scenario_inputs": scen_inputs,
+                    "scenario_outputs": scen_outputs,
+                    "blueprint_state": bp_state,
                 }
+                wp = synthesize_personalized_audit_workpaper(prop_id, tool_slug, lead_record=record, mode="free_playbook")
+                record["reconciliation_schedule"] = wp["reconciliation_schedule"]
+                record["sensitivity_matrix"] = wp["sensitivity_matrix"]
                 if dist_srv is not None:
                     dist_srv.captured_leads.append(record)
                 self._send_json(200, record)
@@ -368,14 +428,24 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "partner_sharing_consent": True,
                 "partner_key": partner_key,
                 "redirect_url": redirect_url,
-                "checkout_url": checkout_url,
-                "checkout_session_id": f"cs_edge_{lead_id}",
+                "checkout_url": offer["checkout_url"],
+                "playbook_url": offer["playbook_url"],
+                "fulfillment_url": offer["fulfillment_url"],
+                "csv_fulfillment_url": offer["csv_fulfillment_url"],
+                "checkout_session_id": offer["checkout_session_id"],
                 "checkout_mode": "edge_checkout_rail",
-                "offer_sku": sku,
-                "offer_title": offer_title,
-                "offer_price_usd": offer_price,
+                "offer_sku": offer["offer_sku"],
+                "offer_title": offer["offer_title"],
+                "offer_price_usd": offer["offer_price_usd"],
+                "deliverables": offer["deliverables"],
+                "scenario_inputs": scen_inputs,
+                "scenario_outputs": scen_outputs,
+                "blueprint_state": bp_state,
                 "zeptomail_status": "synthetic_test_suppressed",
             }
+            wp = synthesize_personalized_audit_workpaper(prop_id, tool_slug, lead_record=record, mode="paid_toolkit")
+            record["reconciliation_schedule"] = wp["reconciliation_schedule"]
+            record["sensitivity_matrix"] = wp["sensitivity_matrix"]
             if dist_srv is not None:
                 dist_srv.captured_leads.append(record)
             self._send_json(200, record)

@@ -951,3 +951,185 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             assert len(server.redirect_events) >= 1
 
 
+def test_personalized_audit_workpaper_synthesis_across_all_skus():
+    from pseofactory.partner_tracker import (
+        assert_no_forbidden_dashes,
+        synthesize_personalized_audit_workpaper,
+    )
+
+    cases = [
+        (
+            "profithelm",
+            "section-1031-calculator",
+            {
+                "lead_id": "lead_profithelm_1031_wp",
+                "calculated_amount": 420000.0,
+                "state": "CA",
+                "email": "investor@pacific-industrial.com",
+                "scenario_inputs": {"relinquished_price": 420000, "replacement_price": 480000},
+                "scenario_outputs": {"primary": "$319,200"},
+            },
+            "ph_1031_boot_replacement_workpapers",
+            79.0,
+        ),
+        (
+            "profithelm",
+            "freight-invoice-factoring-cost-calculator",
+            {
+                "lead_id": "lead_profithelm_cap_wp",
+                "calculated_amount": 180000.0,
+                "state": "TX",
+                "email": "fleet@freightfleet-logistics.com",
+                "scenario_inputs": {"invoice_volume": 180000, "advance_rate": 90},
+                "scenario_outputs": {"primary": "$162,000"},
+            },
+            "ph_commercial_capital_audit_toolkit",
+            49.0,
+        ),
+        (
+            "profithelm",
+            "california-s-corp-reasonable-compensation-tax-calculator",
+            {
+                "lead_id": "lead_profithelm_tax_wp",
+                "calculated_amount": 260000.0,
+                "state": "CA",
+                "email": "cpa@pacific-industrial.com",
+                "scenario_inputs": {"net_business_income": 260000},
+                "scenario_outputs": {"primary": "$198,000"},
+            },
+            "ph_statutory_tax_audit_workpapers",
+            49.0,
+        ),
+        (
+            "prexvo",
+            "student-loan-refinance-break-even-calculator",
+            {
+                "lead_id": "lead_prexvo_refi_wp",
+                "calculated_amount": 115000.0,
+                "state": "NY",
+                "email": "resident@metro-health.org",
+                "scenario_inputs": {"loan_balance": 115000, "current_rate": 7.2, "refi_rate": 4.8, "term_years": 10},
+                "scenario_outputs": {"primary": "$18,420"},
+            },
+            "px_refi_amortization_decision_audit",
+            39.0,
+        ),
+    ]
+
+    for prop_id, slug, rec, expected_sku, expected_price in cases:
+        for mode in ("free_playbook", "paid_toolkit"):
+            wp = synthesize_personalized_audit_workpaper(
+                property_id=prop_id,
+                tool_slug=slug,
+                lead_record=rec,
+                mode=mode,
+            )
+            assert wp["offer_sku"] == expected_sku
+            assert wp["offer_price_usd"] == expected_price
+            assert wp["calculated_amount"] == rec["calculated_amount"]
+            assert len(wp["reconciliation_schedule"]) >= 4
+            assert len(wp["sensitivity_matrix"]) >= 3
+            assert len(wp["deliverables"]) >= 4
+            assert wp["playbook_url"].startswith("/api/lead-capture?playbook=1")
+            assert wp["fulfillment_url"].startswith("/api/lead-capture?fulfill=1")
+            assert wp["csv_fulfillment_url"].endswith("&format=csv")
+            assert "Line Code,Statutory Line Item" in wp["csv_content"]
+            assert "<!DOCTYPE html>" in wp["html_report"]
+            assert rec["lead_id"] in wp["html_report"]
+            assert_no_forbidden_dashes(wp["html_report"], context=f"{prop_id}:{slug}:{mode}:html")
+            assert_no_forbidden_dashes(wp["csv_content"], context=f"{prop_id}:{slug}:{mode}:csv")
+
+
+def test_edge_lead_capture_playbook_and_fulfillment_value_ladder(tmp_path):
+    import json
+    import subprocess
+
+    for prop_id, slug in [
+        ("profithelm", "section-1031-calculator"),
+        ("prexvo", "student-loan-refinance-break-even-calculator"),
+    ]:
+        js_code = generate_edge_lead_capture_function(prop_id)
+        mod_path = tmp_path / f"lead_ladder_{prop_id}.mjs"
+        mod_path.write_text(js_code, encoding="utf-8")
+
+        runner = f"""
+import {{ onRequestPost, onRequestGet }} from {json.dumps(str(mod_path))};
+
+const env = {{}};
+const pbReq = new Request("https://{prop_id}.com/api/lead-capture", {{
+  method: "POST",
+  headers: {{ "Content-Type": "application/json", "X-Pseofactory-Test": "1" }},
+  body: JSON.stringify({{
+    email: "ladder-probe@synthetic.pseofactory.test",
+    tool_slug: {json.dumps(slug)},
+    scenario_amount: 175000,
+    scenario_inputs: {{ gross_amount: 175000, rate: 6.5 }},
+    scenario_outputs: {{ primary: "$142,500" }},
+    blueprint_state: {{
+      slug: {json.dumps(slug)},
+      calculated_amount: 175000,
+      inputs: {{ gross_amount: 175000, rate: 6.5 }},
+      outputs: {{ primary: "$142,500" }}
+    }},
+    synthetic_test: true
+  }})
+}});
+const pbRes = await onRequestPost({{ request: pbReq, env }});
+const pbData = await pbRes.json();
+
+const playJsonReq = new Request("https://{prop_id}.com" + pbData.playbook_url + "&synthetic_test=1", {{
+  method: "GET",
+  headers: {{ "X-Pseofactory-Test": "1" }}
+}});
+const playJsonRes = await onRequestGet({{ request: playJsonReq, env }});
+const playJsonData = await playJsonRes.json();
+
+const fulfillHtmlReq = new Request("https://{prop_id}.com" + pbData.fulfillment_url + "&format=html&synthetic_test=1", {{
+  method: "GET",
+  headers: {{ "X-Pseofactory-Test": "1" }}
+}});
+const fulfillHtmlRes = await onRequestGet({{ request: fulfillHtmlReq, env }});
+const fulfillHtmlText = await fulfillHtmlRes.text();
+
+const fulfillCsvReq = new Request("https://{prop_id}.com" + pbData.csv_fulfillment_url + "&synthetic_test=1", {{
+  method: "GET",
+  headers: {{ "X-Pseofactory-Test": "1" }}
+}});
+const fulfillCsvRes = await onRequestGet({{ request: fulfillCsvReq, env }});
+const fulfillCsvText = await fulfillCsvRes.text();
+
+console.log(JSON.stringify({{
+  pbData,
+  playJsonData,
+  fulfillHtmlStatus: fulfillHtmlRes.status,
+  fulfillHtmlType: fulfillHtmlRes.headers.get("content-type"),
+  fulfillHtmlHasTable: fulfillHtmlText.includes("<table") && fulfillHtmlText.includes(pbData.lead_id),
+  fulfillCsvStatus: fulfillCsvRes.status,
+  fulfillCsvType: fulfillCsvRes.headers.get("content-type"),
+  fulfillCsvHasHeader: fulfillCsvText.includes("Line Code,Statutory Line Item"),
+}}));
+"""
+        runner_path = tmp_path / f"run_ladder_{prop_id}.mjs"
+        runner_path.write_text(runner, encoding="utf-8")
+        proc = subprocess.run(["node", str(runner_path)], capture_output=True, text=True, check=True)
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+
+        assert out["pbData"]["ok"] is True
+        assert out["pbData"]["status"] == "playbook_subscribed"
+        assert out["pbData"]["calculated_amount"] == 175000
+        assert out["pbData"]["capital_band"] == "100k_250k"
+        assert out["pbData"]["playbook_url"].startswith("/api/lead-capture?playbook=1")
+        assert out["pbData"]["fulfillment_url"].startswith("/api/lead-capture?fulfill=1")
+        assert out["pbData"]["csv_fulfillment_url"].endswith("&format=csv")
+        assert len(out["pbData"]["reconciliation_schedule"]) >= 4
+        assert out["playJsonData"]["ok"] is True
+        assert out["playJsonData"]["status"] == "playbook_ready"
+        assert out["fulfillHtmlStatus"] == 200
+        assert "text/html" in out["fulfillHtmlType"]
+        assert out["fulfillHtmlHasTable"] is True
+        assert out["fulfillCsvStatus"] == 200
+        assert "text/csv" in out["fulfillCsvType"]
+        assert out["fulfillCsvHasHeader"] is True
+
+
+

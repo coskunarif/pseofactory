@@ -2269,6 +2269,13 @@ const PREXVO_TOOLKIT_OFFER = {
   price_cents: 3900,
   currency: "usd",
   billing_mode: "payment",
+  statutory_authority: "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219",
+  deliverables: [
+    "Weighted-Average Loan Tranche Amortization Reconciliation Schedule",
+    "Federal IDR & PSLF Forfeiture Present-Value Stress-Test Matrix",
+    "Cosigner Release & State Consumer Protection Verification Checklist",
+    "Lender Rate-Match Underwriting Intake Sheet (CSV & Print-Ready Audit HTML)",
+  ],
 };
 
 function getLeadsKv(env) {
@@ -2289,6 +2296,215 @@ function deriveCapitalBand(amount) {
   if (amount >= 100000) return "100k_250k";
   if (amount >= 50000) return "50k_100k";
   return "under_50k";
+}
+
+function extractScenarioAmount(body, scenarioInputs, blueprintState) {
+  if (body && body.scenario_amount !== undefined) {
+    const v = Number(body.scenario_amount);
+    if (Number.isFinite(v) && v >= 0) return v;
+  }
+  if (blueprintState && blueprintState.calculated_amount !== undefined) {
+    const v = Number(blueprintState.calculated_amount);
+    if (Number.isFinite(v) && v >= 0) return v;
+  }
+  let maxVal = 0;
+  if (scenarioInputs && typeof scenarioInputs === "object") {
+    for (const raw of Object.values(scenarioInputs)) {
+      const cleaned = Number(String(raw || "").replace(/[$,%\\s,]/g, ""));
+      if (Number.isFinite(cleaned) && cleaned > maxVal) {
+        maxVal = cleaned;
+      }
+    }
+  }
+  return maxVal;
+}
+
+function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
+  const leadId = String((record && record.lead_id) || "lead_prexvo_direct");
+  const toolSlug = String((record && record.tool_slug) || "student-loan-refinance-break-even-calculator");
+  const stateCode = String((record && record.state) || "US").toUpperCase();
+  const email = String((record && record.email) || "borrower@prexvo.com");
+  const rawAmt = Number(record && record.calculated_amount ? record.calculated_amount : 0);
+  const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : 85000;
+  const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
+  const inputs = (record && record.scenario_inputs && typeof record.scenario_inputs === "object") ? record.scenario_inputs : {};
+  const outputs = (record && record.scenario_outputs && typeof record.scenario_outputs === "object") ? record.scenario_outputs : {};
+
+  let curRate = 0.068;
+  let refiRate = 0.049;
+  let termYears = 10;
+  for (const [k, v] of Object.entries(inputs)) {
+    const kl = String(k).toLowerCase();
+    const fv = Number(String(v || "").replace(/[$,%\\s,]/g, ""));
+    if (!Number.isFinite(fv)) continue;
+    if (kl.includes("rate") && fv >= 1 && fv <= 18) {
+      if (kl.includes("new") || kl.includes("refi") || kl.includes("target")) {
+        refiRate = fv / 100;
+      } else {
+        curRate = fv / 100;
+      }
+    } else if ((kl.includes("term") || kl.includes("year")) && fv >= 1 && fv <= 30) {
+      termYears = Math.round(fv);
+    }
+  }
+
+  const nMonths = Math.max(12, termYears * 12);
+  const rCur = curRate / 12;
+  const rRefi = refiRate / 12;
+  const pmtCur = baseAmount * (rCur * Math.pow(1 + rCur, nMonths)) / (Math.pow(1 + rCur, nMonths) - 1);
+  const pmtRefi = baseAmount * (rRefi * Math.pow(1 + rRefi, nMonths)) / (Math.pow(1 + rRefi, nMonths) - 1);
+  const interestCur = Math.max(0, pmtCur * nMonths - baseAmount);
+  const interestRefi = Math.max(0, pmtRefi * nMonths - baseAmount);
+  const lifetimeSavings = Math.max(0, interestCur - interestRefi);
+  const monthlyDelta = Math.max(0, pmtCur - pmtRefi);
+
+  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const reconciliationSchedule = [
+    {
+      line_code: "PX-100",
+      line_item: "Modeled Principal Loan Tranche Balance",
+      authority: "Promissory Note Principal",
+      baseline_value: fmtUsd(baseAmount),
+      optimized_value: fmtUsd(baseAmount),
+      delta_impact: "$0.00 (Unchanged Principal)",
+    },
+    {
+      line_code: "PX-200",
+      line_item: `Monthly Amortization Payment (${termYears}-Year Term)`,
+      authority: `${(curRate * 100).toFixed(2)}% Baseline vs ${(refiRate * 100).toFixed(2)}% Refi APR`,
+      baseline_value: `${fmtUsd(pmtCur)}/mo`,
+      optimized_value: `${fmtUsd(pmtRefi)}/mo`,
+      delta_impact: `-${fmtUsd(monthlyDelta)}/mo Cash-Flow Relief`,
+    },
+    {
+      line_code: "PX-300",
+      line_item: "Cumulative Lifetime Interest Expense",
+      authority: "Truth in Lending Act (12 CFR Part 1026)",
+      baseline_value: fmtUsd(interestCur),
+      optimized_value: fmtUsd(interestRefi),
+      delta_impact: `-${fmtUsd(lifetimeSavings)} Interest Saved`,
+    },
+    {
+      line_code: "PX-400",
+      line_item: "Federal IDR / PSLF Forgiveness Forfeiture Threshold",
+      authority: "34 CFR 685.209 / 685.219",
+      baseline_value: "Retained (Federal Direct)",
+      optimized_value: "Waived Upon Private Refi",
+      delta_impact: `Requires >${fmtUsd(lifetimeSavings * 0.35)} Net PV Advantage`,
+    },
+  ];
+  const sensitivityMatrix = [
+    {
+      scenario_label: "Conservative (-75 bps Rate Spread)",
+      modeled_principal: fmtUsd(baseAmount),
+      effective_rate: `${(Math.max(0.03, curRate - 0.0075) * 100).toFixed(2)}%`,
+      estimated_net_benefit: fmtUsd(lifetimeSavings * 0.42),
+    },
+    {
+      scenario_label: "Baseline Modeled Refinance Spread",
+      modeled_principal: fmtUsd(baseAmount),
+      effective_rate: `${(refiRate * 100).toFixed(2)}%`,
+      estimated_net_benefit: fmtUsd(lifetimeSavings),
+    },
+    {
+      scenario_label: "Accelerated 7-Year Payoff + Autopay (-25 bps)",
+      modeled_principal: fmtUsd(baseAmount),
+      effective_rate: `${(Math.max(0.025, refiRate - 0.0025) * 100).toFixed(2)}%`,
+      estimated_net_benefit: fmtUsd(lifetimeSavings * 1.28),
+    },
+  ];
+
+  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+
+  const csvLines = ["Line Code,Statutory Line Item,Authority,Baseline Scenario,Optimized Scenario,Delta Impact"];
+  for (const r of reconciliationSchedule) {
+    csvLines.push(`"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`);
+  }
+  for (const [k, v] of Object.entries(inputs)) {
+    csvLines.push(`"INPUT-${k}","Visitor Calculator Input (${k})","Live Workbench","${String(v).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}","Captured"`);
+  }
+  const csvContent = csvLines.join("\\n") + "\\n";
+
+  const rowsHtml = reconciliationSchedule.map((r) =>
+    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;">${r.line_code}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${r.line_item}<div style="font-size:11px;color:#64748b;">${r.authority}</div></td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${r.baseline_value}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${r.optimized_value}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#1d4ed8;">${r.delta_impact}</td></tr>`
+  ).join("");
+  const sensHtml = sensitivityMatrix.map((s) =>
+    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${s.scenario_label}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.modeled_principal}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.effective_rate}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#15803d;">${s.estimated_net_benefit}</td></tr>`
+  ).join("");
+  const delivHtml = PREXVO_TOOLKIT_OFFER.deliverables.map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
+  const badgeLabel = mode === "paid_toolkit" ? "PAID DECISION AUDIT WORKPAPER PACKAGE" : "PERSONALIZED REFINANCE PLAYBOOK & WORKSHEET";
+  const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${PREXVO_TOOLKIT_OFFER.title} (${leadId})</title>` +
+    `<style>body{font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px;}.sheet{max-width:920px;margin:0 auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:28px;}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;}th{text-align:left;padding:10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:11px;text-transform:uppercase;color:#334155;}@media print{body{background:#fff;padding:0;}.sheet{border:none;}.no-print{display:none!important;}}</style></head>` +
+    `<body><div class="sheet"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:18px;">` +
+    `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${PREXVO_TOOLKIT_OFFER.title}</h1>` +
+    `<div style="font-size:12px;color:#475569;">Authority: ${PREXVO_TOOLKIT_OFFER.statutory_authority} | Tool: ${toolSlug} | State: ${stateCode}</div></div>` +
+    `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
+    `<a href="${csvFulfillmentUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a></div></div>` +
+    `<div style="font-size:13px;color:#334155;margin-bottom:14px;">Reference ID: <strong>${leadId}</strong> | Borrower: <strong>${email}</strong> | Modeled Balance: <strong>${fmtUsd(baseAmount)}</strong> (Band: <strong>${capitalBand}</strong>)</div>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">1. Personalized Amortization &amp; Protection Reconciliation Schedule</h2>` +
+    `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">2. Rate-Spread &amp; Payoff Sensitivity Matrix</h2>` +
+    `<table><thead><tr><th>Scenario Case</th><th>Modeled Principal</th><th>Effective APR</th><th>Estimated Lifetime Savings</th></tr></thead><tbody>${sensHtml}</tbody></table>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Included Audit Deliverables &amp; Verification Checklist</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
+    `</div></body></html>`;
+
+  return {
+    workpaper_id: `wp_${leadId}`,
+    property_id: "prexvo",
+    tool_slug: toolSlug,
+    lead_id: leadId,
+    mode,
+    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
+    offer_title: PREXVO_TOOLKIT_OFFER.title,
+    offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+    calculated_amount: baseAmount,
+    capital_band: capitalBand,
+    state: stateCode,
+    scenario_inputs: inputs,
+    scenario_outputs: outputs,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
+    playbook_url: playbookUrl,
+    fulfillment_url: fulfillmentUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
+    checkout_url: checkoutUrl,
+    csv_content: csvContent,
+    html_report: htmlReport,
+  };
+}
+
+async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam) {
+  for (const item of getMemoryBuffer()) {
+    if (item && item.lead_id === leadId) return item;
+  }
+  const kv = getLeadsKv(env);
+  if (kv && typeof kv.get === "function" && leadId) {
+    try {
+      const stored = await kv.get(leadId, { type: "json" });
+      if (stored && typeof stored === "object") return stored;
+    } catch (_) {}
+  }
+  const parsedAmt = Number(amountParam || 0);
+  return {
+    lead_id: leadId || "lead_prexvo_direct",
+    property_id: "prexvo",
+    tool_slug: toolSlug || "student-loan-refinance-break-even-calculator",
+    calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 85000,
+    state: stateParam || "US",
+    email: emailParam || "borrower@prexvo.com",
+  };
 }
 
 function isSyntheticTestEmail(email) {
@@ -2322,7 +2538,10 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false) {
-  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
+  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
@@ -2331,11 +2550,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       offer_sku: PREXVO_TOOLKIT_OFFER.sku,
       offer_title: PREXVO_TOOLKIT_OFFER.title,
       offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+      statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+      deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
       checkout_url: fallbackUrl,
+      playbook_url: playbookUrl,
+      fulfillment_url: fulfillmentUrl,
+      csv_fulfillment_url: csvFulfillmentUrl,
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
       stripe_account_id: stripeAccountId,
       stripe_publishable_key_present: stripePubKeyPresent,
+      stripe_credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
       stripe_called: false,
       stripe_http_status: null,
       stripe_error_code: null,
@@ -2349,8 +2574,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "payment_method_types[0]": "card",
       customer_email: email,
       client_reference_id: leadId,
-      success_url: `https://prexvo.com/tools/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}`,
-      cancel_url: `https://prexvo.com/tools/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}`,
+      success_url: `https://prexvo.com/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`,
+      cancel_url: `https://prexvo.com/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`,
       "line_items[0][price_data][currency]": PREXVO_TOOLKIT_OFFER.currency,
       "line_items[0][price_data][unit_amount]": String(PREXVO_TOOLKIT_OFFER.price_cents),
       "line_items[0][price_data][product_data][name]": PREXVO_TOOLKIT_OFFER.title,
@@ -2359,6 +2584,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "metadata[property_id]": "prexvo",
       "metadata[tool_slug]": toolSlug,
       "metadata[offer_sku]": PREXVO_TOOLKIT_OFFER.sku,
+      "metadata[fulfillment_url]": fulfillmentUrl,
     });
     const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
@@ -2375,11 +2601,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         offer_sku: PREXVO_TOOLKIT_OFFER.sku,
         offer_title: PREXVO_TOOLKIT_OFFER.title,
         offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+        statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+        deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
         checkout_url: data.url,
+        playbook_url: playbookUrl,
+        fulfillment_url: fulfillmentUrl,
+        csv_fulfillment_url: csvFulfillmentUrl,
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
         stripe_publishable_key_present: stripePubKeyPresent,
+        stripe_credential_status: "active_ready",
         stripe_called: true,
         stripe_http_status: resp.status,
         stripe_error_code: null,
@@ -2394,11 +2626,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     offer_sku: PREXVO_TOOLKIT_OFFER.sku,
     offer_title: PREXVO_TOOLKIT_OFFER.title,
     offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+    deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
     checkout_url: fallbackUrl,
+    playbook_url: playbookUrl,
+    fulfillment_url: fulfillmentUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
     stripe_account_id: stripeAccountId,
     stripe_publishable_key_present: stripePubKeyPresent,
+    stripe_credential_status: stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`,
     stripe_called: true,
     stripe_http_status: stripeHttpStatus,
     stripe_error_code: stripeErrorCode,
@@ -2553,10 +2791,85 @@ export async function onRequestOptions() {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL(request.url);
+  if (reqUrl.searchParams.get("playbook") === "1" || reqUrl.searchParams.get("fulfill") === "1") {
+    const isFulfill = reqUrl.searchParams.get("fulfill") === "1";
+    const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
+    const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
+    const toolSlug = (reqUrl.searchParams.get("tool_slug") || "student-loan-refinance-break-even-calculator").toLowerCase();
+    if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          success: false,
+          error: "Restricted public-service asset cannot attach commercial refinance toolkits.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+    const isSynth = isSyntheticProbeRequest(request, null, email);
+    const storedRecord = await lookupEdgeLeadRecord(
+      env,
+      leadId,
+      toolSlug,
+      reqUrl.searchParams.get("amount"),
+      reqUrl.searchParams.get("state"),
+      email
+    );
+    const bundle = buildEdgePersonalizedWorkpaperBundle(storedRecord, isFulfill ? "paid_toolkit" : "free_playbook");
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (fmt === "csv") {
+      return new Response(bundle.csv_content, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="prexvo_${bundle.offer_sku}_${leadId}.csv"`,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    if (fmt === "html") {
+      return new Response(bundle.html_report, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        synthetic_test: isSynth,
+        status: isFulfill ? "toolkit_fulfilled" : "playbook_ready",
+        ...bundle,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  }
   if (reqUrl.searchParams.get("checkout") === "1") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
     const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
     const toolSlug = reqUrl.searchParams.get("tool_slug") || "student-loan-refinance-break-even-calculator";
+    if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.toLowerCase().includes(s))) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          success: false,
+          error: "Restricted public-service asset cannot attach commercial checkout offers.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth);
     return new Response(
@@ -2567,6 +2880,7 @@ export async function onRequestGet(context) {
         status: "checkout_session_ready",
         property_id: "prexvo",
         lead_id: leadId,
+        tool_slug: toolSlug,
         ...offer,
       }),
       {
@@ -2659,6 +2973,20 @@ export async function onRequestPost(context) {
       );
     }
 
+    const blueprintState = body.blueprint_state && typeof body.blueprint_state === "object" ? body.blueprint_state : {};
+    const scenarioInputs =
+      body.scenario_inputs && typeof body.scenario_inputs === "object"
+        ? body.scenario_inputs
+        : blueprintState.inputs && typeof blueprintState.inputs === "object"
+        ? blueprintState.inputs
+        : {};
+    const scenarioOutputs =
+      body.scenario_outputs && typeof body.scenario_outputs === "object"
+        ? body.scenario_outputs
+        : blueprintState.outputs && typeof blueprintState.outputs === "object"
+        ? blueprintState.outputs
+        : {};
+
     const hasQuoteFields =
       body.calculated_amount !== undefined ||
       body.loan_balance !== undefined ||
@@ -2678,6 +3006,7 @@ export async function onRequestPost(context) {
       const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
       const redirectUrl = `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
       const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe);
+      const modeledAmt = extractScenarioAmount(body, scenarioInputs, blueprintState);
       const playbookRecord = {
         lead_id: leadId,
         property_id: "prexvo",
@@ -2686,15 +3015,22 @@ export async function onRequestPost(context) {
         tool_slug: toolSlug,
         vertical: "student_loan_refinance",
         email,
-        calculated_amount: 0,
+        calculated_amount: modeledAmt,
+        capital_band: deriveCapitalBand(modeledAmt),
         threshold_usd: 50000,
         partner_key: partnerKey,
         partner_rep_desk: "Splash Financial Partner Desk",
         redirect_url: redirectUrl,
         monetization_strategy: "playbook_to_toolkit_checkout",
+        scenario_inputs: scenarioInputs,
+        scenario_outputs: scenarioOutputs,
+        blueprint_state: blueprintState,
         ...checkoutOffer,
         captured_at: ts,
       };
+      const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(playbookRecord, "free_playbook");
+      playbookRecord.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
+      playbookRecord.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
       const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord, isSyntheticProbe);
       Object.assign(playbookRecord, emailDispatch);
 
@@ -2819,9 +3155,15 @@ export async function onRequestPost(context) {
       live_destination_url: liveDestinationUrl,
       action_bus_dispatched: actionBusDispatched,
       monetization_strategy: "dual_partner_and_checkout",
+      scenario_inputs: scenarioInputs,
+      scenario_outputs: scenarioOutputs,
+      blueprint_state: blueprintState,
       ...checkoutOffer,
       captured_at: ts,
     };
+    const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, "paid_toolkit");
+    record.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
+    record.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
 
     const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
@@ -2916,6 +3258,13 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
       offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
       offerPriceUsd: 49,
       offerPriceCents: 4900,
+      statutoryAuthority: "IRC Section 179, Section 168(k) & Commercial APR Equivalency",
+      deliverables: [
+        "Effective Annualized APR & Factoring Reserve Holdback Reconciliation Schedule",
+        "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
+        "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
+        "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
+      ],
     };
   }
   if (
@@ -2938,6 +3287,13 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
       offerTitle: "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit",
       offerPriceUsd: 79,
       offerPriceCents: 7900,
+      statutoryAuthority: "IRC Section 1031, Treas. Reg. 1.1031(k)-1 & IRS Form 8824",
+      deliverables: [
+        "IRS Form 8824 Part III Realized Gain & Recognized Boot Reconciliation Schedule",
+        "45-Day Identification (Three-Property / 200% Rule) & 180-Day Closing Calendar",
+        "Mortgage Boot vs Cash Boot Offset & Replacement Debt Matrix",
+        "Qualified Intermediary (QI) Constructive Receipt Safe-Harbor Checklist (CSV & Print-Ready Audit HTML)",
+      ],
     };
   }
   if (
@@ -2960,6 +3316,13 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
       offerTitle: "ProfitHelm Commercial Capital & Section 179 Depreciation Workpapers",
       offerPriceUsd: 49,
       offerPriceCents: 4900,
+      statutoryAuthority: "IRC Section 179, Section 168(k) & IRS Form 4562",
+      deliverables: [
+        "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
+        "Effective Annualized APR & Commercial Equipment Financing Reconciliation Schedule",
+        "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
+        "Institutional Lender & CapEx Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
+      ],
     };
   }
   return {
@@ -2972,6 +3335,13 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
     offerTitle: "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite",
     offerPriceUsd: 49,
     offerPriceCents: 4900,
+    statutoryAuthority: "IRC Statutory Schedules, Rev. Proc. 2025-32 & State Conformity Rules",
+    deliverables: [
+      "Personalized Federal & State Statutory Tax Reconciliation Workpaper",
+      "Effective vs Marginal Bracket & Phase-Out Sensitivity Matrix",
+      "Quarterly Safe-Harbor Estimated Tax & Penalty Avoidance Schedule",
+      "CPA Substantiation & Audit Defense Documentation Checklist (CSV & Print-Ready Audit HTML)",
+    ],
   };
 }
 
@@ -2981,6 +3351,317 @@ function deriveCapitalBand(amount) {
   if (amount >= 100000) return "100k_250k";
   if (amount >= 50000) return "50k_100k";
   return "under_50k";
+}
+
+function extractScenarioAmount(body, scenarioInputs, blueprintState) {
+  if (body && body.scenario_amount !== undefined) {
+    const v = Number(body.scenario_amount);
+    if (Number.isFinite(v) && v >= 0) return v;
+  }
+  if (blueprintState && blueprintState.calculated_amount !== undefined) {
+    const v = Number(blueprintState.calculated_amount);
+    if (Number.isFinite(v) && v >= 0) return v;
+  }
+  let maxVal = 0;
+  if (scenarioInputs && typeof scenarioInputs === "object") {
+    for (const raw of Object.values(scenarioInputs)) {
+      const cleaned = Number(String(raw || "").replace(/[$,%\\s,]/g, ""));
+      if (Number.isFinite(cleaned) && cleaned > maxVal) {
+        maxVal = cleaned;
+      }
+    }
+  }
+  return maxVal;
+}
+
+function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit") {
+  const leadId = String((record && record.lead_id) || "lead_profithelm_direct");
+  const toolSlug = String((record && record.tool_slug) || "section-1031-calculator");
+  const stateCode = String((record && record.state) || "US").toUpperCase();
+  const email = String((record && record.email) || "cfo@profithelm.com");
+  const rawAmt = Number(record && record.calculated_amount ? record.calculated_amount : 0);
+  const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : 250000;
+  const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
+  const inputs = (record && record.scenario_inputs && typeof record.scenario_inputs === "object") ? record.scenario_inputs : {};
+  const outputs = (record && record.scenario_outputs && typeof record.scenario_outputs === "object") ? record.scenario_outputs : {};
+  const effSpec = spec || resolveVerticalAndThreshold(toolSlug, "");
+  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  let reconciliationSchedule = [];
+  let sensitivityMatrix = [];
+  if (effSpec.offerSku === "ph_1031_boot_replacement_workpapers") {
+    const adjustedBasis = baseAmount * 0.58;
+    const realizedGain = Math.max(0, baseAmount - adjustedBasis);
+    const deprRecapture = realizedGain * 0.28;
+    const capGainPortion = Math.max(0, realizedGain - deprRecapture);
+    const deferredShield = deprRecapture * 0.25 + capGainPortion * 0.238;
+    reconciliationSchedule = [
+      {
+        line_code: "8824-L15",
+        line_item: "Relinquished Property Contract Valuation",
+        authority: "IRC Section 1031(a) / Form 8824 Line 15",
+        baseline_value: fmtUsd(baseAmount),
+        optimized_value: fmtUsd(baseAmount),
+        delta_impact: "Minimum Replacement Target",
+      },
+      {
+        line_code: "8824-L18",
+        line_item: "Adjusted Basis & Realized Capital Gain",
+        authority: "IRC Section 1011 / Form 8824 Line 18-19",
+        baseline_value: `${fmtUsd(adjustedBasis)} Basis`,
+        optimized_value: `${fmtUsd(realizedGain)} Gain`,
+        delta_impact: "100% Deferrable via QI Safe Harbor",
+      },
+      {
+        line_code: "8824-L21",
+        line_item: "Section 1250 Unrecaptured Depreciation (25% Cap)",
+        authority: "IRC Section 1(h)(1)(E) & Section 1250",
+        baseline_value: `${fmtUsd(deprRecapture * 0.25)} Tax Due`,
+        optimized_value: "$0.00 Recognized",
+        delta_impact: `+${fmtUsd(deprRecapture * 0.25)} Recapture Shielded`,
+      },
+      {
+        line_code: "8824-L24",
+        line_item: "Combined Federal + NIIT (23.8%) & Boot Liability",
+        authority: "IRC Section 1031(b) & Section 1411",
+        baseline_value: `${fmtUsd(deferredShield)} Tax Due`,
+        optimized_value: "$0.00 Cash/Debt Boot",
+        delta_impact: `+${fmtUsd(deferredShield)} Equity Preserved`,
+      },
+    ];
+    sensitivityMatrix = [
+      {
+        scenario_label: "Full Equal-or-Greater Replacement (Zero Boot)",
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: "0.00% Recognized",
+        estimated_net_benefit: `${fmtUsd(deferredShield)} Deferred`,
+      },
+      {
+        scenario_label: "10% Partial Cash/Mortgage Boot Withdrawal",
+        modeled_principal: fmtUsd(baseAmount * 0.9),
+        effective_rate: "23.8% - 25.0% on Boot",
+        estimated_net_benefit: `${fmtUsd(Math.max(0, deferredShield - baseAmount * 0.1 * 0.244))} Deferred`,
+      },
+      {
+        scenario_label: "Taxable Sale Baseline (No QI Assignment)",
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: "24.4% Blended Tax",
+        estimated_net_benefit: `-${fmtUsd(deferredShield)} Immediate Tax`,
+      },
+    ];
+  } else if (effSpec.offerSku === "ph_commercial_capital_audit_toolkit") {
+    const sec179Ded = Math.min(baseAmount, 1250000);
+    const bonusDepr = Math.max(0, baseAmount - sec179Ded) * 0.4;
+    const yr1Writeoff = sec179Ded + bonusDepr;
+    const taxSavings = yr1Writeoff * 0.296;
+    const factoringFee = baseAmount * 0.025;
+    reconciliationSchedule = [
+      {
+        line_code: "4562-P1",
+        line_item: "Modeled Qualifying Equipment / Working Capital Basis",
+        authority: "IRC Section 179(d) / Commercial Invoice Ledger",
+        baseline_value: fmtUsd(baseAmount),
+        optimized_value: fmtUsd(baseAmount),
+        delta_impact: `Capital Band: ${capitalBand}`,
+      },
+      {
+        line_code: "4562-L12",
+        line_item: "Immediate IRC Section 179 Expense Election",
+        authority: "IRC Section 179(b)(1)-(2) Statutory Cap",
+        baseline_value: `${fmtUsd(baseAmount * 0.2)} (5-Yr MACRS Yr 1)`,
+        optimized_value: fmtUsd(sec179Ded),
+        delta_impact: `+${fmtUsd(Math.max(0, sec179Ded - baseAmount * 0.2))} Accelerated`,
+      },
+      {
+        line_code: "4562-L14",
+        line_item: "Section 168(k) Special Depreciation & Year-1 Tax Shield",
+        authority: "IRC Section 168(k)(6) Phase-Down Schedule",
+        baseline_value: `${fmtUsd(baseAmount * 0.2 * 0.296)} Cash Shield`,
+        optimized_value: `${fmtUsd(taxSavings)} Cash Shield`,
+        delta_impact: `+${fmtUsd(Math.max(0, taxSavings - baseAmount * 0.2 * 0.296))} Liquidity`,
+      },
+      {
+        line_code: "CAP-APR",
+        line_item: "30-Day Working Capital / Factoring Discount Benchmark",
+        authority: "2.50% 30-Day Discount vs Non-Recourse Line",
+        baseline_value: `${fmtUsd(factoringFee)} (30.4% Annualized)`,
+        optimized_value: `${fmtUsd(factoringFee * 0.68)} (1.70% Tiered)`,
+        delta_impact: `-${fmtUsd(factoringFee * 0.32)} Fee Reduction`,
+      },
+    ];
+    sensitivityMatrix = [
+      {
+        scenario_label: "100% Business-Use Section 179 + Section 168(k)",
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: "29.6% Combined Tax Rate",
+        estimated_net_benefit: `${fmtUsd(taxSavings)} Year-1 Shield`,
+      },
+      {
+        scenario_label: "75% Business-Use Listed Property Allocation",
+        modeled_principal: fmtUsd(baseAmount * 0.75),
+        effective_rate: "29.6% Combined Tax Rate",
+        estimated_net_benefit: `${fmtUsd(taxSavings * 0.75)} Year-1 Shield`,
+      },
+      {
+        scenario_label: "Standard 5-Year 200% DB MACRS (No Election)",
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: "20.0% Year-1 Recovery",
+        estimated_net_benefit: `${fmtUsd(baseAmount * 0.2 * 0.296)} Year-1 Shield`,
+      },
+    ];
+  } else {
+    const stdDed = baseAmount >= 150000 ? 30000 : 15000;
+    const qbiDed = Math.max(0, (baseAmount - stdDed) * 0.2);
+    const estBase = Math.max(0, baseAmount - stdDed) * 0.24;
+    const estOpt = Math.max(0, baseAmount - stdDed - qbiDed) * 0.22;
+    const taxDelta = Math.max(0, estBase - estOpt);
+    reconciliationSchedule = [
+      {
+        line_code: "1040-L11",
+        line_item: `Modeled Adjusted Gross Income / Statutory Base (${stateCode})`,
+        authority: "IRC Section 62 & Rev. Proc. 2025-32",
+        baseline_value: fmtUsd(baseAmount),
+        optimized_value: fmtUsd(baseAmount),
+        delta_impact: `Capital Band: ${capitalBand}`,
+      },
+      {
+        line_code: "1040-L13",
+        line_item: "Standard Deduction & IRC Section 199A QBI Pass-Through",
+        authority: "IRC Section 63(c) & Section 199A",
+        baseline_value: fmtUsd(stdDed),
+        optimized_value: fmtUsd(stdDed + qbiDed),
+        delta_impact: `+${fmtUsd(qbiDed)} Statutory Shield`,
+      },
+      {
+        line_code: "1040-L16",
+        line_item: "Estimated Federal Statutory Tax Liability",
+        authority: "IRC Section 1 Progressive Bracket Table",
+        baseline_value: fmtUsd(estBase),
+        optimized_value: fmtUsd(estOpt),
+        delta_impact: `-${fmtUsd(taxDelta)} Annual Tax Delta`,
+      },
+      {
+        line_code: "2210-SH",
+        line_item: "Quarterly Estimated Safe-Harbor Installment (25% / Qtr)",
+        authority: "IRC Section 6654(d)(1)(B) (100% / 110% Rule)",
+        baseline_value: `${fmtUsd(estBase / 4)}/qtr`,
+        optimized_value: `${fmtUsd(estOpt / 4)}/qtr`,
+        delta_impact: "Eliminates Underpayment Penalty",
+      },
+    ];
+    sensitivityMatrix = [
+      {
+        scenario_label: "Baseline Unoptimized Filing Posture",
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: `${((estBase / Math.max(1, baseAmount)) * 100).toFixed(2)}%`,
+        estimated_net_benefit: "$0.00 Baseline",
+      },
+      {
+        scenario_label: "Optimized Section 199A + Retirement Deferral",
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: `${((estOpt / Math.max(1, baseAmount)) * 100).toFixed(2)}%`,
+        estimated_net_benefit: `+${fmtUsd(taxDelta)} Tax Saved`,
+      },
+      {
+        scenario_label: "+15% Revenue / Income Expansion Stress-Test",
+        modeled_principal: fmtUsd(baseAmount * 1.15),
+        effective_rate: `${(((estOpt * 1.16) / Math.max(1, baseAmount * 1.15)) * 100).toFixed(2)}%`,
+        estimated_net_benefit: `+${fmtUsd(taxDelta * 1.15)} Tax Saved`,
+      },
+    ];
+  }
+
+  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+
+  const csvLines = ["Line Code,Statutory Line Item,Authority,Baseline Scenario,Optimized Scenario,Delta Impact"];
+  for (const r of reconciliationSchedule) {
+    csvLines.push(`"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`);
+  }
+  for (const [k, v] of Object.entries(inputs)) {
+    csvLines.push(`"INPUT-${k}","Visitor Calculator Input (${k})","Live Workbench","${String(v).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}","Captured"`);
+  }
+  const csvContent = csvLines.join("\\n") + "\\n";
+
+  const rowsHtml = reconciliationSchedule.map((r) =>
+    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;">${r.line_code}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${r.line_item}<div style="font-size:11px;color:#64748b;">${r.authority}</div></td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${r.baseline_value}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${r.optimized_value}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#1d4ed8;">${r.delta_impact}</td></tr>`
+  ).join("");
+  const sensHtml = sensitivityMatrix.map((s) =>
+    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${s.scenario_label}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.modeled_principal}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.effective_rate}</td>` +
+    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#15803d;">${s.estimated_net_benefit}</td></tr>`
+  ).join("");
+  const delivHtml = (effSpec.deliverables || []).map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
+  const badgeLabel = mode === "paid_toolkit" ? "PAID STATUTORY AUDIT WORKPAPER PACKAGE" : "PERSONALIZED SCENARIO PLAYBOOK & WORKSHEET";
+  const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${effSpec.offerTitle} (${leadId})</title>` +
+    `<style>body{font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px;}.sheet{max-width:920px;margin:0 auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:28px;}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;}th{text-align:left;padding:10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:11px;text-transform:uppercase;color:#334155;}@media print{body{background:#fff;padding:0;}.sheet{border:none;}.no-print{display:none!important;}}</style></head>` +
+    `<body><div class="sheet"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:18px;">` +
+    `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${effSpec.offerTitle}</h1>` +
+    `<div style="font-size:12px;color:#475569;">Authority: ${effSpec.statutoryAuthority} | Tool: ${toolSlug} | Jurisdiction: ${stateCode}</div></div>` +
+    `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
+    `<a href="${csvFulfillmentUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a></div></div>` +
+    `<div style="font-size:13px;color:#334155;margin-bottom:14px;">Reference ID: <strong>${leadId}</strong> | Prepared For: <strong>${email}</strong> | Modeled Principal: <strong>${fmtUsd(baseAmount)}</strong> (Band: <strong>${capitalBand}</strong>)</div>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">1. Personalized Statutory Reconciliation Schedule</h2>` +
+    `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">2. Multi-Scenario Stress-Test &amp; Sensitivity Matrix</h2>` +
+    `<table><thead><tr><th>Scenario Case</th><th>Modeled Principal</th><th>Effective Rate / Treatment</th><th>Estimated Net Benefit</th></tr></thead><tbody>${sensHtml}</tbody></table>` +
+    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Included Audit Workpaper Deliverables &amp; Next Actions</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
+    `</div></body></html>`;
+
+  return {
+    workpaper_id: `wp_${leadId}`,
+    property_id: "profithelm",
+    tool_slug: toolSlug,
+    lead_id: leadId,
+    mode,
+    offer_sku: effSpec.offerSku,
+    offer_title: effSpec.offerTitle,
+    offer_price_usd: effSpec.offerPriceUsd,
+    statutory_authority: effSpec.statutoryAuthority,
+    calculated_amount: baseAmount,
+    capital_band: capitalBand,
+    state: stateCode,
+    scenario_inputs: inputs,
+    scenario_outputs: outputs,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    deliverables: effSpec.deliverables,
+    playbook_url: playbookUrl,
+    fulfillment_url: fulfillmentUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
+    checkout_url: checkoutUrl,
+    csv_content: csvContent,
+    html_report: htmlReport,
+  };
+}
+
+async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam) {
+  for (const item of getMemoryBuffer()) {
+    if (item && item.lead_id === leadId) return item;
+  }
+  const kv = getLeadsKv(env);
+  if (kv && typeof kv.get === "function" && leadId) {
+    try {
+      const stored = await kv.get(leadId, { type: "json" });
+      if (stored && typeof stored === "object") return stored;
+    } catch (_) {}
+  }
+  const parsedAmt = Number(amountParam || 0);
+  return {
+    lead_id: leadId || "lead_profithelm_direct",
+    property_id: "profithelm",
+    tool_slug: toolSlug || "section-1031-calculator",
+    calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 250000,
+    state: stateParam || "US",
+    email: emailParam || "cfo@profithelm.com",
+  };
 }
 
 function isSyntheticTestEmail(email) {
@@ -3014,7 +3695,10 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false) {
-  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  const fallbackUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
@@ -3023,11 +3707,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       offer_sku: spec.offerSku,
       offer_title: spec.offerTitle,
       offer_price_usd: spec.offerPriceUsd,
+      statutory_authority: spec.statutoryAuthority,
+      deliverables: spec.deliverables,
       checkout_url: fallbackUrl,
+      playbook_url: playbookUrl,
+      fulfillment_url: fulfillmentUrl,
+      csv_fulfillment_url: csvFulfillmentUrl,
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
       stripe_account_id: stripeAccountId,
       stripe_publishable_key_present: stripePubKeyPresent,
+      stripe_credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
       stripe_called: false,
       stripe_http_status: null,
       stripe_error_code: null,
@@ -3041,8 +3731,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "payment_method_types[0]": "card",
       customer_email: email,
       client_reference_id: leadId,
-      success_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}`,
-      cancel_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}`,
+      success_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`,
+      cancel_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`,
       "line_items[0][price_data][currency]": "usd",
       "line_items[0][price_data][unit_amount]": String(spec.offerPriceCents),
       "line_items[0][price_data][product_data][name]": spec.offerTitle,
@@ -3051,6 +3741,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "metadata[property_id]": "profithelm",
       "metadata[tool_slug]": toolSlug,
       "metadata[offer_sku]": spec.offerSku,
+      "metadata[fulfillment_url]": fulfillmentUrl,
     });
     const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
@@ -3067,11 +3758,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         offer_sku: spec.offerSku,
         offer_title: spec.offerTitle,
         offer_price_usd: spec.offerPriceUsd,
+        statutory_authority: spec.statutoryAuthority,
+        deliverables: spec.deliverables,
         checkout_url: data.url,
+        playbook_url: playbookUrl,
+        fulfillment_url: fulfillmentUrl,
+        csv_fulfillment_url: csvFulfillmentUrl,
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
         stripe_publishable_key_present: stripePubKeyPresent,
+        stripe_credential_status: "active_ready",
         stripe_called: true,
         stripe_http_status: resp.status,
         stripe_error_code: null,
@@ -3086,11 +3783,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     offer_sku: spec.offerSku,
     offer_title: spec.offerTitle,
     offer_price_usd: spec.offerPriceUsd,
+    statutory_authority: spec.statutoryAuthority,
+    deliverables: spec.deliverables,
     checkout_url: fallbackUrl,
+    playbook_url: playbookUrl,
+    fulfillment_url: fulfillmentUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
     stripe_account_id: stripeAccountId,
     stripe_publishable_key_present: stripePubKeyPresent,
+    stripe_credential_status: stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`,
     stripe_called: true,
     stripe_http_status: stripeHttpStatus,
     stripe_error_code: stripeErrorCode,
@@ -3245,6 +3948,62 @@ export async function onRequestOptions() {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL(request.url);
+  if (reqUrl.searchParams.get("playbook") === "1" || reqUrl.searchParams.get("fulfill") === "1") {
+    const isFulfill = reqUrl.searchParams.get("fulfill") === "1";
+    const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
+    const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
+    const toolSlug = (reqUrl.searchParams.get("tool_slug") || "section-1031-calculator").toLowerCase();
+    const spec = resolveVerticalAndThreshold(toolSlug, "");
+    const isSynth = isSyntheticProbeRequest(request, null, email);
+    const storedRecord = await lookupEdgeLeadRecord(
+      env,
+      leadId,
+      toolSlug,
+      reqUrl.searchParams.get("amount"),
+      reqUrl.searchParams.get("state"),
+      email
+    );
+    const bundle = buildEdgePersonalizedWorkpaperBundle(storedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook");
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (fmt === "csv") {
+      return new Response(bundle.csv_content, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="profithelm_${bundle.offer_sku}_${leadId}.csv"`,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    if (fmt === "html") {
+      return new Response(bundle.html_report, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        synthetic_test: isSynth,
+        status: isFulfill ? "toolkit_fulfilled" : "playbook_ready",
+        ...bundle,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  }
   if (reqUrl.searchParams.get("checkout") === "1") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
@@ -3260,6 +4019,7 @@ export async function onRequestGet(context) {
         status: "checkout_session_ready",
         property_id: "profithelm",
         lead_id: leadId,
+        tool_slug: toolSlug,
         ...offer,
       }),
       {
@@ -3337,6 +4097,20 @@ export async function onRequestPost(context) {
     const spec = resolveVerticalAndThreshold(toolSlug, reqPartner);
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
+    const blueprintState = body.blueprint_state && typeof body.blueprint_state === "object" ? body.blueprint_state : {};
+    const scenarioInputs =
+      body.scenario_inputs && typeof body.scenario_inputs === "object"
+        ? body.scenario_inputs
+        : blueprintState.inputs && typeof blueprintState.inputs === "object"
+        ? blueprintState.inputs
+        : {};
+    const scenarioOutputs =
+      body.scenario_outputs && typeof body.scenario_outputs === "object"
+        ? body.scenario_outputs
+        : blueprintState.outputs && typeof blueprintState.outputs === "object"
+        ? blueprintState.outputs
+        : {};
+
     const hasQuoteFields =
       body.calculated_amount !== undefined ||
       body.state !== undefined ||
@@ -3355,6 +4129,7 @@ export async function onRequestPost(context) {
       const leadId = `lead_profithelm_${Date.now()}_${randSuffix}`;
       const redirectUrl = `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
       const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe);
+      const modeledAmt = extractScenarioAmount(body, scenarioInputs, blueprintState);
       const playbookRecord = {
         lead_id: leadId,
         property_id: "profithelm",
@@ -3363,15 +4138,22 @@ export async function onRequestPost(context) {
         tool_slug: toolSlug,
         vertical: spec.vertical,
         email,
-        calculated_amount: 0,
+        calculated_amount: modeledAmt,
+        capital_band: deriveCapitalBand(modeledAmt),
         threshold_usd: spec.thresholdUsd,
         partner_key: spec.partnerKey,
         partner_rep_desk: spec.partnerRepDesk,
         redirect_url: redirectUrl,
         monetization_strategy: "playbook_to_toolkit_checkout",
+        scenario_inputs: scenarioInputs,
+        scenario_outputs: scenarioOutputs,
+        blueprint_state: blueprintState,
         ...checkoutOffer,
         captured_at: ts,
       };
+      const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(playbookRecord, spec, "free_playbook");
+      playbookRecord.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
+      playbookRecord.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
       const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord, isSyntheticProbe);
       Object.assign(playbookRecord, emailDispatch);
 
@@ -3498,9 +4280,15 @@ export async function onRequestPost(context) {
       live_destination_url: liveDestinationUrl,
       action_bus_dispatched: actionBusDispatched,
       monetization_strategy: "dual_partner_and_checkout",
+      scenario_inputs: scenarioInputs,
+      scenario_outputs: scenarioOutputs,
+      blueprint_state: blueprintState,
       ...checkoutOffer,
       captured_at: ts,
     };
+    const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, spec, "paid_toolkit");
+    record.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
+    record.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
 
     const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
