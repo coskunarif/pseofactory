@@ -2218,6 +2218,7 @@ def discover_internal_linking_opportunities(
         "contextual_orphans": contextual_orphans,
         "contextual_orphans_count": len(contextual_orphans),
         "under_three_contextual_count": len(under_three_contextual_pages),
+        "under_three_contextual_pages": under_three_contextual_pages,
         "generic_anchor_instances_count": len(generic_anchor_instances),
         "generic_anchor_samples": generic_anchor_instances[:15],
         "max_distance_from_root": max(distances.values()) if distances else 0,
@@ -2234,6 +2235,7 @@ def discover_internal_linking_opportunities(
         "contextual_orphans_count": len(contextual_orphans),
         "contextual_orphans": contextual_orphans,
         "under_three_contextual_links_count": len(under_three_contextual_pages),
+        "under_three_contextual_pages": under_three_contextual_pages,
         "generic_anchor_instances_count": len(generic_anchor_instances),
         "underlinked_opportunities_count": len(opportunities),
         "injection_recommendations_count": len(opportunities),
@@ -3817,6 +3819,52 @@ def audit_gsc_cannibalization_splits(
     cross_device_splits.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
     dominant_winner_suppressed.sort(key=lambda x: (-int(x["total_impressions"]), x["query"]))
 
+    # Also scan dist/ for on-page metadata/heading cannibalization across indexable pages
+    d_dir = root / "dist"
+    titles_seen: Dict[str, List[str]] = {}
+    metas_seen: Dict[str, List[str]] = {}
+    h1s_seen: Dict[str, List[str]] = {}
+    if d_dir.is_dir():
+        for hf in sorted(d_dir.rglob("*.html")):
+            if "syndication" in hf.parts or hf.name.startswith(".") or hf.name == "404.html":
+                continue
+            rel_p = hf.relative_to(d_dir).as_posix()
+            if rel_p.startswith(("signal/", "static/")):
+                continue
+            try:
+                raw_h = hf.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            if re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', raw_h, re.IGNORECASE):
+                continue
+            t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", raw_h, re.IGNORECASE)
+            if t_m:
+                t_val = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", t_m.group(1))).strip()
+                if t_val:
+                    titles_seen.setdefault(t_val, []).append(rel_p)
+            m_m = re.search(
+                r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
+                raw_h,
+                re.IGNORECASE,
+            ) or re.search(
+                r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']description["\']',
+                raw_h,
+                re.IGNORECASE,
+            )
+            if m_m:
+                m_val = re.sub(r"\s+", " ", m_m.group(1)).strip()
+                if m_val:
+                    metas_seen.setdefault(m_val, []).append(rel_p)
+            h1_m = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", raw_h, re.IGNORECASE)
+            if h1_m:
+                h1_val = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", h1_m.group(1))).strip()
+                if h1_val:
+                    h1s_seen.setdefault(h1_val, []).append(rel_p)
+
+    dup_titles = {k: v for k, v in titles_seen.items() if len(v) > 1}
+    dup_metas = {k: v for k, v in metas_seen.items() if len(v) > 1}
+    dup_h1s = {k: v for k, v in h1s_seen.items() if len(v) > 1}
+
     return {
         "status": "PASS",
         "property_id": prop,
@@ -3824,6 +3872,10 @@ def audit_gsc_cannibalization_splits(
         "true_cannibalization_splits_count": len(true_splits),
         "cross_device_splits_count": len(cross_device_splits),
         "dominant_winner_noise_suppressed_count": len(dominant_winner_suppressed),
+        "on_page_metadata_overlap_count": len(dup_titles) + len(dup_metas) + len(dup_h1s),
+        "duplicate_title_clusters": dup_titles,
+        "duplicate_meta_description_clusters": dup_metas,
+        "duplicate_h1_clusters": dup_h1s,
         "true_cannibalization_splits": true_splits[:25],
         "cross_device_splits": cross_device_splits[:25],
         "dominant_winner_suppressed": dominant_winner_suppressed[:25],

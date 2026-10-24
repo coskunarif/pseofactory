@@ -2198,6 +2198,9 @@ def _resolve_vertical_competitor_content(
                 "Tier 2: Forgiveness, Buyback and Litigation Transition Matrices",
                 [
                     ("pslf-qualifying-payment-simulator", "PSLF 120 Qualifying Payments Verification Simulator"),
+                    ("pslf-buyback-months-reconsideration-student-loan-calculator", "PSLF Hold Harmless Buyback & Reconsideration Months Calculator"),
+                    ("student-loan-forgiveness-2026", "2026 Federal Student Loan Forgiveness Pathways & Discharge Estimator"),
+                    ("student-loan-forgiveness-tax-bomb-insolvency-calculator", "Student Loan Forgiveness Tax Bomb & IRS Form 982 Insolvency Calculator"),
                     ("save-plan-litigation-transition", "SAVE Plan Forbearance to IBR/RAP Transition Calculator"),
                     ("paye-sunset-calculator", "PAYE Sunset & Statutory Repayment Plan Transition Calculator"),
                     ("ibr-hardship-cap-calculator", "IBR Partial Financial Hardship Cap Calculator"),

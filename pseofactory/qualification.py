@@ -23,6 +23,8 @@ from pseofactory.contracts import (
     detect_ungrounded_synthetic_claims,
     safe_eval_mathematical_formula,
     assert_proprietary_model_integrity,
+    detect_thin_affiliate_listicle_issues,
+    THIN_AFFILIATE_LISTICLE_PATTERNS,
     ECONOMIC_DATASET_PATTERNS,
 )
 
@@ -220,9 +222,35 @@ class SearchIntentVerdict(dict):
     @property
     def status(self) -> str:
         act = str(self.get("action", "MONITOR"))
-        if act in ("PRUNE_PAGE", "PRUNE", "REJECT_SYNTHETIC"):
+        if act in ("PRUNE_PAGE", "PRUNE", "REJECT_SYNTHETIC", "REJECT_LISTICLE_ARCHETYPE"):
             return "PRUNE"
         return str(self.get("status") or act)
+
+
+def is_thin_affiliate_listicle_candidate(query_or_slug: str, spec: Optional[Dict[str, Any]] = None) -> bool:
+    """
+    Returns True if candidate query, slug, or spec represents a thin affiliate-style listicle
+    ('Top 10 Best...', '7 Best...', 'affiliate listicle/roundup') that trades first-party
+    statutory calculator authority for generic listicle bloat.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(spec, dict):
+        archetype = str(spec.get("archetype") or spec.get("content_type") or "").strip().lower()
+        if archetype in ("listicle", "affiliate_listicle", "roundup", "affiliate_roundup"):
+            return True
+    candidates = [str(query_or_slug or "").strip().lower()]
+    if isinstance(spec, dict):
+        for k in ("slug", "query", "primary_keyword", "title"):
+            val = str(spec.get(k) or "").strip().lower()
+            if val:
+                candidates.append(val)
+    for text in candidates:
+        if not text:
+            continue
+        unslug = text.replace("-", " ")
+        if detect_thin_affiliate_listicle_issues(text) or detect_thin_affiliate_listicle_issues(unslug):
+            return True
+    return False
 
 
 def is_synthetic_test_candidate(query_or_slug: str, spec: Optional[Dict[str, Any]] = None) -> bool:
@@ -1223,6 +1251,22 @@ def qualify_search_intent(
             "reason": f"Synthetic test fixture candidate '{q_text}' rejected from production build queue",
         })
 
+    # 0b. Reject thin affiliate-style listicles in favor of first-party statutory comparison calculators
+    if is_thin_affiliate_listicle_candidate(q_text, query_data):
+        return SearchIntentVerdict({
+            "action": "REJECT_LISTICLE_ARCHETYPE",
+            "status": "PRUNE",
+            "query": q_text,
+            "position": pos,
+            "impressions": impr,
+            "rejected_archetype": "thin_affiliate_listicle",
+            "recommended_alternative_archetype": "deterministic_statutory_comparison_calculator",
+            "reason": (
+                f"Rejected thin affiliate listicle archetype '{q_text}'; "
+                f"first-party financial authority requires deterministic statutory calculators and side-by-side comparison matrices"
+            ),
+        })
+
     # 1. Check competing pages (Consolidation with 10%-80% impression-share split triage)
     competing = query_data.get("competing_pages") or query_data.get("urls") or []
     if len(competing) > 1:
@@ -1669,6 +1713,12 @@ def assert_search_intent_qualified(
     if is_synthetic_test_candidate(str(query), candidate_spec):
         raise ValueError(
             f"Synthetic test fixture candidate '{query}' rejected from production build qualification."
+        )
+
+    if is_thin_affiliate_listicle_candidate(str(query), candidate_spec):
+        raise ValueError(
+            f"Thin affiliate listicle candidate '{query}' rejected from production build qualification; "
+            f"use a deterministic statutory calculator or side-by-side comparison matrix."
         )
 
     cannibal = check_search_intent_cannibalization(
@@ -2401,6 +2451,16 @@ def reconcile_void_candidates_queue(
                 rec_copy["status"] = "REJECTED"
                 rec_copy["action"] = "REJECT"
                 rec_copy["status_reason"] = "Rejected synthetic, scraper, or off-topic candidate"
+                updated_count += 1
+        elif is_thin_affiliate_listicle_candidate(eff_slug or raw_query, rec_copy):
+            if rec_copy.get("status") != "REJECTED" or rec_copy.get("action") != "REJECT_LISTICLE_ARCHETYPE":
+                rec_copy["status"] = "REJECTED"
+                rec_copy["action"] = "REJECT_LISTICLE_ARCHETYPE"
+                rec_copy["rejected_archetype"] = "thin_affiliate_listicle"
+                rec_copy["recommended_alternative_archetype"] = "deterministic_statutory_comparison_calculator"
+                rec_copy["status_reason"] = (
+                    "Rejected thin affiliate listicle archetype in favor of first-party statutory calculator or comparison matrix"
+                )
                 updated_count += 1
         elif eff_slug in all_clone_maps or slug_from_query in all_clone_maps:
             matched_key = eff_slug if eff_slug in all_clone_maps else slug_from_query

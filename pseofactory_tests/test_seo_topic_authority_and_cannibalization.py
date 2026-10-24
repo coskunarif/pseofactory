@@ -1164,3 +1164,127 @@ def test_striking_distance_4_15_duplicate_suppression_title_protection_and_subin
     assert b_179["best_striking_4_15_position"] == 8.5
     assert 'site:irs.gov' not in json.dumps(b_179)
 
+
+def test_seo_checklist_engine_gates_listicle_rejection_unique_meta_and_two_line_quick_answers(tmp_path: Path) -> None:
+    """
+    Verifies the self-driving SEO checklist engine upgrades:
+      1. Thin affiliate listicle rejection (REJECT_LISTICLE_ARCHETYPE) in qualify_search_intent,
+         assert_search_intent_qualified, and reconcile_void_candidates_queue.
+      2. Abbreviation-safe sentence counting (count_quick_answer_sentences) and strict 2-sentence
+         upfront query answers (assert_quick_answer_passage_relevance(..., max_sentences=2)).
+      3. Cross-page meta description uniqueness in MasterSEOVerifier.check_meta_descriptions_gate
+         and distinct non-truncated vehicle/PSLF descriptions in _normalize_meta_120_155.
+      4. Complete Prexvo 3-tier topic cluster routing including PSLF Buyback, 2026 Forgiveness,
+         and Tax Bomb Insolvency tools.
+    """
+    from pseofactory.competitor import _resolve_vertical_competitor_content
+    from pseofactory.contracts import (
+        assert_no_thin_affiliate_listicle_archetype,
+        assert_quick_answer_passage_relevance,
+        count_quick_answer_sentences,
+        detect_sentence_truncation_issues,
+    )
+    from pseofactory.gsc_remediation import (
+        _normalize_meta_120_155,
+        _normalize_quick_answer_40_60_words,
+    )
+    from pseofactory.qualification import (
+        assert_search_intent_qualified,
+        is_thin_affiliate_listicle_candidate,
+        qualify_search_intent,
+        reconcile_void_candidates_queue,
+    )
+    from pseofactory.verifier import MasterSEOVerifier
+
+    # 1. Reject thin affiliate listicles while preserving statutory comparison calculators
+    assert is_thin_affiliate_listicle_candidate("top 10 best crypto tax software in 2026") is True
+    assert is_thin_affiliate_listicle_candidate("7 best student loan refinance lenders listicle") is True
+    assert is_thin_affiliate_listicle_candidate("section 179 vs bonus depreciation calculator") is False
+
+    verdict_listicle = qualify_search_intent(
+        {"query": "10 best tax software apps in 2026", "impressions": 120, "position": 14.0}
+    )
+    assert verdict_listicle["action"] == "REJECT_LISTICLE_ARCHETYPE"
+    assert verdict_listicle.status == "PRUNE"
+    assert verdict_listicle["recommended_alternative_archetype"] == "deterministic_statutory_comparison_calculator"
+
+    with pytest.raises(ValueError, match="Thin affiliate listicle"):
+        assert_search_intent_qualified({"query": "top 5 student loan refinance companies roundup"})
+
+    with pytest.raises(ValueError, match="Thin affiliate listicle archetype detected"):
+        assert_no_thin_affiliate_listicle_archetype("<h1>Top 10 Best Tax Calculators Listicle</h1>")
+
+    vc_listicle = tmp_path / "void_listicle.jsonl"
+    vc_listicle.write_text(
+        json.dumps({"slug": "top-10-best-tax-software-2026", "query": "top 10 best tax software 2026", "status": "PENDING", "action": "BUILD_PAGE"}) + "\n",
+        encoding="utf-8",
+    )
+    assert reconcile_void_candidates_queue(vc_listicle) == 1
+    row_after = json.loads(vc_listicle.read_text(encoding="utf-8").strip())
+    assert row_after["status"] == "REJECTED"
+    assert row_after["action"] == "REJECT_LISTICLE_ARCHETYPE"
+
+    # 2. Abbreviation-safe sentence counting & 2-sentence upfront query answers
+    treasury_qa = _normalize_quick_answer_40_60_words("Treasury Yield Calculator", "profithelm", slug="treasury-yield-calculator")
+    assert count_quick_answer_sentences(treasury_qa) == 2
+    assert assert_quick_answer_passage_relevance(treasury_qa, max_sentences=2) is True
+
+    insolvency_qa = _normalize_quick_answer_40_60_words(
+        "Student Loan Forgiveness Tax Bomb Insolvency Calculator",
+        "prexvo",
+        slug="student-loan-forgiveness-tax-bomb-insolvency-calculator",
+    )
+    assert count_quick_answer_sentences(insolvency_qa) == 2
+    assert "108(a)(1)(B)" in insolvency_qa
+    assert assert_quick_answer_passage_relevance(insolvency_qa, max_sentences=2) is True
+
+    # 3. Distinct, non-truncated meta descriptions for long vehicle spokes and PSLF tools
+    meta_silv = _normalize_meta_120_155("", "profithelm", "Chevrolet Silverado 2500HD Section 179")
+    meta_espr = _normalize_meta_120_155("", "profithelm", "Mercedes-Benz eSprinter Section 179")
+    meta_spr = _normalize_meta_120_155("", "profithelm", "Mercedes-Benz Sprinter 2500 Section 179")
+    assert len({meta_silv, meta_espr, meta_spr}) == 3
+    for m_txt in (meta_silv, meta_espr, meta_spr):
+        assert 120 <= len(m_txt) <= 155
+        assert not detect_sentence_truncation_issues(m_txt)
+
+    meta_buyback = _normalize_meta_120_155("", "prexvo", "pslf buyback months reconsideration student loan calculator")
+    meta_sim = _normalize_meta_120_155("", "prexvo", "pslf qualifying payment simulator")
+    assert meta_buyback != meta_sim
+    assert "685.219(g)" in meta_buyback
+    assert "685.219(c)" in meta_sim
+
+    # Cross-page duplicate meta description detection in MasterSEOVerifier
+    dup_dist = tmp_path / "dup_dist"
+    (dup_dist / "page-a").mkdir(parents=True)
+    (dup_dist / "page-b").mkdir(parents=True)
+    shared_meta = "Calculate federal and state statutory tax obligations using deterministic Internal Revenue Code schedules and verified brackets."
+    (dup_dist / "page-a" / "index.html").write_text(
+        f'<!DOCTYPE html><html><head><meta name="description" content="{shared_meta}"></head><body></body></html>',
+        encoding="utf-8",
+    )
+    (dup_dist / "page-b" / "index.html").write_text(
+        f'<!DOCTYPE html><html><head><meta name="description" content="{shared_meta}"></head><body></body></html>',
+        encoding="utf-8",
+    )
+    v_dup = MasterSEOVerifier(dist_dir=dup_dist)
+    gate_dup = v_dup.check_meta_descriptions_gate(require_unique=True)
+    assert gate_dup["status"] == "FAIL"
+    assert gate_dup["duplicate_meta_descriptions_count"] == 1
+
+    # 4. Prexvo 3-tier topic cluster includes PSLF Buyback, Forgiveness 2026, and Tax Bomb Insolvency
+    prexvo_cluster = _resolve_vertical_competitor_content(
+        "rap-payment-calculator",
+        "prexvo",
+        "34 CFR Part 685",
+        "https://prexvo.com",
+    )
+    tier_slugs = {
+        s
+        for _, items in prexvo_cluster["tier_clusters"]
+        for s, _ in items
+    }
+    assert "pslf-buyback-months-reconsideration-student-loan-calculator" in tier_slugs
+    assert "student-loan-forgiveness-2026" in tier_slugs
+    assert "student-loan-forgiveness-tax-bomb-insolvency-calculator" in tier_slugs
+
+

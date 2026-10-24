@@ -1195,17 +1195,83 @@ def assert_headers_snippet_policy(
     return True
 
 
+QUICK_ANSWER_ABBREVIATION_RE = re.compile(
+    r"\b(?:U\.S\.C\.|U\.S\.|C\.F\.R\.|Pub\.\s*L\.|P\.L\.|Rev\.\s*Proc\.|Rev\.\s*Rul\.|Treas\.\s*Reg\.|Sec\.|No\.|vs\.|et\s+seq\.)",
+    re.IGNORECASE,
+)
+
+THIN_AFFILIATE_LISTICLE_PATTERNS: Tuple[str, ...] = (
+    r"\b(?:top|best)\s+\d+\s+[a-z0-9]",
+    r"\b\d+\s+best\s+[a-z0-9]",
+    r"\b(?:affiliate\s+)?listicle(?:s)?\b",
+    r"\baffiliate\s+roundup(?:s)?\b",
+    r"\bbest\s+(?:[a-z0-9-]+\s+){0,3}(?:software|apps|lenders|companies|platforms|services|websites)\s+(?:in\s+202\d|for\s+202\d|review(?:s)?|list|roundup)\b",
+)
+
+
+def count_quick_answer_sentences(quick_answer: str) -> int:
+    """
+    Counts sentences in a quick-answer passage after normalizing statutory abbreviations
+    (such as '31 U.S.C.', 'Pub. L.', 'Rev. Proc.', 'Treas. Reg.', 'C.F.R.') so periods inside
+    legal citations do not inflate sentence counts.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(quick_answer, str) or not quick_answer.strip():
+        return 0
+    normalized = QUICK_ANSWER_ABBREVIATION_RE.sub(
+        lambda m: m.group(0).replace(".", ""),
+        quick_answer.strip(),
+    )
+    parts = [s.strip() for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()]
+    return len(parts)
+
+
+def detect_thin_affiliate_listicle_issues(text_or_html: str) -> List[str]:
+    """
+    Detects thin affiliate-style listicle or roundup patterns ('Top 10 Best...', '7 Best...',
+    'affiliate listicle') that trade authoritative first-party financial tooling for shallow
+    affiliate listicles.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(text_or_html, str) or not text_or_html.strip():
+        return []
+    issues: List[str] = []
+    for pat in THIN_AFFILIATE_LISTICLE_PATTERNS:
+        m = re.search(pat, text_or_html, re.IGNORECASE)
+        if m:
+            issues.append(
+                f"Thin affiliate listicle archetype detected ('{m.group(0)}'); use deterministic statutory calculators or side-by-side comparison matrices instead."
+            )
+    return issues
+
+
+def assert_no_thin_affiliate_listicle_archetype(
+    text_or_html: str,
+    context: str = "",
+) -> bool:
+    """
+    Raises ValueError if text_or_html contains thin affiliate listicle patterns.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" in {context}" if context else ""
+    issues = detect_thin_affiliate_listicle_issues(text_or_html)
+    if issues:
+        raise ValueError(f"{issues[0]}{ctx}")
+    return True
+
+
 def assert_quick_answer_passage_relevance(
     quick_answer: str,
     target_query: Optional[str] = None,
     context: str = "",
+    max_sentences: int = 5,
 ) -> bool:
     """
     Mechanical contract validating passage-level answer relevance for Factor 2: Query-Answer Match (+2.15).
     1. Quick-answer must be a non-empty string.
     2. Strict anti-slop invariant: zero em-dashes and zero en-dashes.
     3. Strictly 40 to 60 words for concise passage relevance.
-    4. Sentence boundaries: 1 to 5 sentences with valid terminal punctuation.
+    4. Sentence boundaries: 1 to max_sentences sentences with valid terminal punctuation.
     5. Character density: 3.0 to 15.0 chars/word.
     6. Zero generic AI jargon (FORBIDDEN_JARGON).
     7. Zero evasive summary phrasing.
@@ -1237,9 +1303,11 @@ def assert_quick_answer_passage_relevance(
     if not re.search(r'[.!?]["\']?\s*$', quick_answer.strip()):
         raise ValueError(f"Quick-answer passage missing terminal sentence punctuation{ctx}")
 
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', quick_answer.strip()) if s.strip()]
-    if len(sentences) < 1 or len(sentences) > 5:
-        raise ValueError(f"Quick-answer sentence count ({len(sentences)}) outside valid 1-5 sentence bounds{ctx}")
+    sentence_count = count_quick_answer_sentences(quick_answer)
+    if sentence_count < 1 or sentence_count > max_sentences:
+        raise ValueError(
+            f"Quick-answer sentence count ({sentence_count}) outside valid 1-{max_sentences} sentence bounds{ctx}"
+        )
 
     for j_term in FORBIDDEN_JARGON:
         if re.search(r'\b' + re.escape(j_term) + r'\b', quick_answer, re.IGNORECASE):

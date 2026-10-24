@@ -2209,19 +2209,31 @@ class MasterSEOVerifier:
         }
 
     # 16. Meta Descriptions Gate
-    def check_meta_descriptions_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
+    def check_meta_descriptions_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+        require_unique: bool = False,
+    ) -> Dict[str, Any]:
         from pseofactory.contracts import detect_sentence_truncation_issues
 
         target = Path(dist_dir) if dist_dir else self.dist_dir
         issues = []
         pages_checked = 0
+        seen_descriptions: Dict[str, List[str]] = {}
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in sorted(target.glob("**/*.html")):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
+                is_noindex = bool(
+                    re.search(
+                        r'<meta[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex',
+                        content,
+                        re.IGNORECASE,
+                    )
+                )
                 m = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', content, re.IGNORECASE)
                 if not m:
                     m = re.search(r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']description["\']', content, re.IGNORECASE)
@@ -2233,11 +2245,24 @@ class MasterSEOVerifier:
                         issues.append(f"Meta description length {len(desc)} outside 50-165 range in {rel}")
                     for trunc_err in detect_sentence_truncation_issues(desc, context=rel):
                         issues.append(trunc_err)
+                    if not is_noindex:
+                        seen_descriptions.setdefault(desc, []).append(rel)
+
+        duplicate_descriptions = {
+            d: rels for d, rels in seen_descriptions.items() if len(rels) > 1
+        }
+        if require_unique or pages_checked >= 15:
+            for d_txt, rels in duplicate_descriptions.items():
+                issues.append(
+                    f"Duplicate meta description shared across {len(rels)} pages ({', '.join(rels[:3])}): '{d_txt[:90]}'"
+                )
 
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_meta_descriptions_gate",
             "pages_checked": pages_checked,
+            "duplicate_meta_descriptions_count": len(duplicate_descriptions),
+            "duplicate_meta_descriptions": duplicate_descriptions,
             "violations_count": len(issues),
             "issues": issues,
         }

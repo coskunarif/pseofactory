@@ -2101,6 +2101,15 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
             any(k in q_low for k in ("equipment lease", "equipment-lease"))
             and "$2,560,000" in clean.lower()
         )
+        or (
+            any(k in q_low for k in ("buyback", "reconsideration"))
+            and "hold harmless buyback eligibility under 34 cfr 685.219." in clean.lower()
+        )
+        or (
+            "calculate section 179 deductions under irc section 179" in clean.lower()
+            and short_label.lower() not in ("section 179", "section 179 calculator", "statutory tax liability")
+            and short_label.lower() not in clean.lower()
+        )
     )
     if (
         120 <= len(clean) <= 155
@@ -2184,11 +2193,29 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "and the 10-year Standard payment ceiling under HEA Section 493C.",
                     " Verified under 20 U.S.C. 1098e and 34 CFR 685.221 rules.",
                 )
-            if "pslf" in q_low or "public service" in q_low or "buyback" in q_low:
+            if "buyback" in q_low or "reconsideration" in q_low:
+                return (
+                    "Calculate PSLF Hold Harmless Buyback lump-sum payments under 34 CFR 685.219(g) "
+                    "to credit eligible deferment and forbearance months toward 120.",
+                    " Verified under Title IV 34 CFR 685.219(g) reconsideration rules.",
+                )
+            if "pslf" in q_low or "public service" in q_low:
                 return (
                     "Calculate PSLF 120 qualifying monthly payments, tax-free discharge timelines, "
-                    "and Hold Harmless Buyback eligibility under 34 CFR 685.219.",
+                    "and ECF certification progress under Title IV 34 CFR 685.219(c).",
                     " Verified under Title IV 34 CFR 685.219 public service rules.",
+                )
+            if "insolvency" in q_low or "tax bomb" in q_low or "tax-bomb" in q_low or "982" in q_low:
+                return (
+                    "Calculate IDR student loan forgiveness tax bomb liability and IRS Form 982 "
+                    "insolvency exclusion relief under IRC Section 108(a)(1)(B) in 2026.",
+                    " Verified under 26 U.S.C. 108(a)(1)(B) and Section 108(f)(5).",
+                )
+            if "forgiveness 2026" in q_low or "forgiveness-2026" in q_low:
+                return (
+                    "Compare 2026 federal student loan forgiveness timelines, PSLF 120-month "
+                    "tax-free discharge, and post-ARPA IDR taxability under 34 CFR Part 685.",
+                    " Verified under Title IV 34 CFR Part 685 and IRC Section 108(f).",
                 )
             if "rap vs ibr" in q_low or ("rap" in q_low and "ibr" in q_low):
                 return (
@@ -2274,6 +2301,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                 " Grounded in IRS reasonable compensation audit benchmarks.",
             )
         if "179" in q_low or "gvwr" in q_low or "heavy vehicle" in q_low or "equipment" in q_low:
+            if len(lbl) > 18:
+                return (
+                    f"Calculate {lbl} IRC Section 179 deductions ($2,560,000 cap), GVWR limits, "
+                    f"and Section 168(k) bonus depreciation on IRS Form 4562.",
+                    " Grounded in IRC Section 179 and IRS Form 4562 schedules.",
+                )
             return (
                 f"Calculate {lbl} deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) "
                 f"and Section 168(k) bonus depreciation on IRS Form 4562.",
@@ -2342,7 +2375,29 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
     if tenant_id == "prexvo":
-        if any(k in combined_low for k in ("pslf", "buyback", "public service")):
+        if "disclaimer" in combined_low:
+            base_words = (
+                "Prexvo provides deterministic Title IV student loan repayment and forgiveness calculators "
+                "grounded in 34 CFR Part 685, the Higher Education Act, and Internal Revenue Code Section "
+                "108(f) exclusively for educational modeling. These quantitative simulations do not constitute "
+                "personalized legal, tax, or financial planning advice, and borrowers must verify eligibility "
+                "with federal loan servicers."
+            ).split()
+        elif any(k in combined_low for k in ("insolvency", "tax-bomb", "tax bomb", "982")):
+            base_words = (
+                f"Under IRC Section 108(a)(1)(B) and post-ARPA Section 108(f)(5) sunset rules, {short_q} "
+                f"calculates taxable income-driven student loan discharge alongside the IRS Form 982 "
+                f"insolvency exclusion. Borrowers whose total liabilities exceed fair market assets "
+                f"immediately before forgiveness exclude discharged student debt from federal gross income."
+            ).split()
+        elif any(k in combined_low for k in ("forgiveness-2026", "forgiveness 2026")):
+            base_words = (
+                f"Under Title IV regulation 34 CFR Part 685 and IRC Section 108(f), {short_q} "
+                f"evaluates 2026 federal student loan discharge pathways across PSLF (120 months), "
+                f"IBR (240 to 300 months), and OBBBA RAP schedules. Public Service Loan Forgiveness "
+                f"remains permanently tax-free while 20-to-25-year IDR forgiveness reverts to taxable income."
+            ).split()
+        elif any(k in combined_low for k in ("pslf", "buyback", "public service")):
             base_words = (
                 f"Under Title IV regulation 34 CFR 685.219 and IRC Section 108(f)(1), {short_q} "
                 f"models 120 qualifying monthly payments for full-time government and 501(c)(3) nonprofit "
@@ -2565,6 +2620,54 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         filler_pool = [
             "Verified", "against", "IRS", "Publication", "946", "MACRS",
             "tables", "and", "Section", "280F", "recapture", "rules.",
+        ]
+    elif "disclaimer" in combined_low:
+        base_words = (
+            "ProfitHelm provides deterministic federal and state tax, depreciation, and corporate "
+            "treasury calculators grounded in the Internal Revenue Code, Treasury Regulations, and "
+            "FASB GAAP standards exclusively for educational modeling. Outputs do not constitute "
+            "personalized CPA, tax, or legal advice, and taxpayers should verify elections with a "
+            "qualified professional before filing IRS returns."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "published", "Internal", "Revenue", "Service",
+            "statutory", "compliance", "and", "regulatory", "standards.",
+        ]
+    elif "about" in combined_low and not any(k in combined_low for k in ("179", "1031", "crypto", "saas", "treasury", "s-corp")):
+        base_words = (
+            "ProfitHelm engineers deterministic corporate tax, capital expensing, and treasury yield "
+            "calculators verified directly against primary Internal Revenue Code statutes, IRS Revenue "
+            "Procedures, and Federal Reserve economic series. Every interactive model executes 100 "
+            "percent client-side in your browser to deliver audit-ready statutory schedules with zero "
+            "proprietary financial data transmission."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "published", "Internal", "Revenue", "Service",
+            "statutory", "compliance", "and", "regulatory", "standards.",
+        ]
+    elif "privacy" in combined_low and not any(k in combined_low for k in ("179", "1031", "crypto", "saas", "treasury", "s-corp")):
+        base_words = (
+            "ProfitHelm executes all tax, depreciation, and corporate treasury calculations locally "
+            "inside your browser using client-side JavaScript so sensitive financial inputs never "
+            "leave your device. We enforce a strict zero-PII financial modeling architecture with "
+            "transparent cookie controls and encrypted telemetry compliance under federal and state "
+            "data privacy standards."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "client-side", "browser", "security", "and",
+            "zero-PII", "financial", "data", "protection", "standards.",
+        ]
+    elif slug.lower().strip("/") in ("", "index", "root") and not any(k in combined_low for k in ("179", "1031", "crypto", "saas", "treasury", "s-corp", "bracket")):
+        base_words = (
+            "ProfitHelm delivers deterministic federal and 50-state tax, Section 179 depreciation, "
+            "Section 1031 exchange, S-Corp FICA, and corporate treasury calculators grounded in "
+            "primary 2026 Internal Revenue Code statutes. Select an interactive statutory model "
+            "below to compute audit-ready tax liabilities, cash runway horizons, and after-tax "
+            "yield spreads."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "published", "Internal", "Revenue", "Service",
+            "revenue", "procedures", "and", "statutory", "schedules.",
         ]
     else:
         base_words = (
@@ -6427,17 +6530,28 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
         if og_m_ov:
             og_val_ov = og_m_ov.group(1).strip()
-            if ("$" in og_val_ov or "GVWR" in og_val_ov) and 70 <= len(og_val_ov) <= 160:
+            if (
+                ("$" in og_val_ov or "GVWR" in og_val_ov)
+                and 70 <= len(og_val_ov) <= 160
+                and not og_val_ov.lower().startswith("calculate section 179 deductions under irc section 179")
+            ):
                 meta_desc = og_val_ov
                 used_spoke_og = True
     if meta_desc and not used_spoke_og:
+        from pseofactory.contracts import detect_sentence_truncation_issues
+
         ov_slug_q = f"{overlay_data.get('slug') or ''} {overlay_data.get('query') or ''} {canon_url_ov}".strip()
         if (
-            re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", meta_desc, re.IGNORECASE)
+            detect_sentence_truncation_issues(meta_desc)
+            or re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", meta_desc, re.IGNORECASE)
             or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", meta_desc, re.IGNORECASE)
             or (
                 any(k in ov_slug_q.lower() for k in ("refinance", "icr", "income-contingent", "ibr-hardship", "hardship-cap"))
                 and "225% hhs poverty" in meta_desc.lower()
+            )
+            or (
+                any(k in ov_slug_q.lower() for k in ("pslf-buyback", "pslf-qualifying"))
+                and "hold harmless buyback eligibility under 34 cfr 685.219." in meta_desc.lower()
             )
         ):
             q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
@@ -6450,6 +6564,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             html,
             flags=re.IGNORECASE,
         )
+        if is_spoke_page_ov and not used_spoke_og:
+            html = re.sub(
+                r'(<meta\s+property=["\']og:description["\']\s+content=["\'])([^"\']*)(["\'])',
+                rf"\g<1>{escaped_desc}\g<3>",
+                html,
+                flags=re.IGNORECASE,
+            )
 
     injected_sections: List[str] = []
 

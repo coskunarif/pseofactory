@@ -4910,7 +4910,12 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         if og_m and md_m:
             og_val = og_m.group(1).strip()
             md_val = md_m.group(1).strip()
-            if ("$" in og_val or "GVWR" in og_val) and md_val != og_val and 70 <= len(og_val) <= 160:
+            if (
+                ("$" in og_val or "GVWR" in og_val)
+                and md_val != og_val
+                and 70 <= len(og_val) <= 160
+                and not og_val.lower().startswith("calculate section 179 deductions under irc section 179")
+            ):
                 return True
         qa_m = re.search(
             r'<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
@@ -4998,6 +5003,7 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         return True
 
     from pseofactory.contracts import (
+        count_quick_answer_sentences,
         detect_placeholder_verification_token_issues,
         detect_sentence_truncation_issues,
         detect_title_year_conflict_issues,
@@ -5092,6 +5098,15 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
             )
             or ("equipment-lease" in canon_url and "$2,560,000" in md_val_chk)
             or (is_non_tool_inst and md_val_chk.lower().startswith("calculate "))
+            or (
+                any(k in canon_url for k in ("pslf-buyback", "pslf-qualifying"))
+                and "hold harmless buyback eligibility under 34 cfr 685.219." in md_val_chk.lower()
+            )
+            or (
+                "/tools/section-179-calculator/" in canon_url
+                and not canon_url.rstrip("/").endswith("/tools/section-179-calculator")
+                and md_val_chk.lower().startswith("calculate section 179 deductions under irc section 179")
+            )
         ):
             return True
 
@@ -5134,15 +5149,22 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         re.IGNORECASE,
     )
     if qa_chk:
-        qa_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_chk.group(1))).strip()
+        qa_inner_chk = re.sub(
+            r'<div[^>]*class=["\'][^"\']*quick-answer-title[^"\']*["\'][^>]*>[\s\S]*?</div>',
+            " ",
+            qa_chk.group(1),
+            flags=re.IGNORECASE,
+        )
+        qa_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_inner_chk)).strip()
         if (
             detect_sentence_truncation_issues(qa_plain)
+            or count_quick_answer_sentences(qa_plain) > 2
             or ("grad-plus" in canon_url and ("tiered standard" in qa_plain.lower() or "225 percent" in qa_plain.lower()))
             or ("equipment-lease" in canon_url and "$2,560,000" in qa_plain)
             or (
                 any(
                     k in canon_url
-                    for k in ("ibr-hardship", "paye-sunset", "icr-repayment", "tiered-standard", "refinance")
+                    for k in ("ibr-hardship", "paye-sunset", "icr-repayment", "tiered-standard", "refinance", "tax-bomb-insolvency", "forgiveness-2026")
                 )
                 and "225 percent" in qa_plain.lower()
             )
@@ -5402,7 +5424,12 @@ def _normalize_spoke_and_synthesized_body_bloat(
         if og_m and md_m:
             og_val = og_m.group(1).strip()
             md_val = md_m.group(1).strip()
-            if ("$" in og_val or "GVWR" in og_val) and md_val != og_val and 70 <= len(og_val) <= 160:
+            if (
+                ("$" in og_val or "GVWR" in og_val)
+                and md_val != og_val
+                and 70 <= len(og_val) <= 160
+                and not og_val.lower().startswith("calculate section 179 deductions under irc section 179")
+            ):
                 updated = re.sub(
                     r'(<meta\s+name=["\']description["\']\s+content=["\'])([^"\']*)(["\'])',
                     rf"\g<1>{og_val}\g<3>",
@@ -5929,6 +5956,7 @@ def _normalize_page_structure_and_geo_parity(
             changed = True
 
     from pseofactory.contracts import (
+        count_quick_answer_sentences,
         detect_placeholder_verification_token_issues,
         detect_sentence_truncation_issues,
         detect_title_year_conflict_issues,
@@ -6067,36 +6095,56 @@ def _normalize_page_structure_and_geo_parity(
         is_spoke_slug = "/" in slug and any(
             slug.startswith(p) for p in ("irs-2027-tax-brackets/", "section-1031-calculator/", "section-179-calculator/")
         )
-        if not is_spoke_slug and (
-            detect_sentence_truncation_issues(old_md_raw)
-            or len(old_md_raw) > 155
-            or bool(re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", old_md_raw, re.IGNORECASE))
-            or bool(re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", old_md_raw, re.IGNORECASE))
-            or (
-                any(
-                    k in slug.lower()
-                    for k in (
-                        "refinance",
-                        "icr",
-                        "ibr-hardship",
-                        "hardship-cap",
-                        "paye-sunset",
-                        "parent-plus",
-                        "tiered-standard",
-                        "grad-plus",
-                        "student-loan-repayment-calculator",
-                        "married-filing-separately",
-                    )
-                )
-                and "225% hhs poverty" in old_md_raw.lower()
+        spoke_generic_meta = (
+            is_spoke_slug
+            and slug.startswith("section-179-calculator/")
+            and (
+                old_md_raw.lower().startswith("calculate section 179 deductions under irc section 179")
+                or detect_sentence_truncation_issues(old_md_raw)
             )
-            or ("equipment-lease" in slug.lower() and "$2,560,000" in old_md_raw)
-            or (is_non_tool_slug and old_md_raw.lower().startswith("calculate "))
+        )
+        if spoke_generic_meta or (
+            not is_spoke_slug
+            and (
+                detect_sentence_truncation_issues(old_md_raw)
+                or len(old_md_raw) > 155
+                or bool(re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", old_md_raw, re.IGNORECASE))
+                or bool(re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", old_md_raw, re.IGNORECASE))
+                or (
+                    any(
+                        k in slug.lower()
+                        for k in (
+                            "refinance",
+                            "icr",
+                            "ibr-hardship",
+                            "hardship-cap",
+                            "paye-sunset",
+                            "parent-plus",
+                            "tiered-standard",
+                            "grad-plus",
+                            "student-loan-repayment-calculator",
+                            "married-filing-separately",
+                        )
+                    )
+                    and "225% hhs poverty" in old_md_raw.lower()
+                )
+                or ("equipment-lease" in slug.lower() and "$2,560,000" in old_md_raw)
+                or (is_non_tool_slug and old_md_raw.lower().startswith("calculate "))
+                or (
+                    any(k in slug.lower() for k in ("pslf-buyback", "pslf-qualifying"))
+                    and "hold harmless buyback eligibility under 34 cfr 685.219." in old_md_raw.lower()
+                )
+            )
         ):
+            meta_seed_label = (
+                f"{topic_label} Section 179"
+                if spoke_generic_meta and topic_label
+                else slug.replace("/", " ").replace("-", " ")
+            )
             healed_md = _normalize_meta_120_155(
                 "",
                 property_id,
-                slug.replace("-", " "),
+                meta_seed_label,
             )
             if healed_md and healed_md != old_md_raw:
                 updated = updated.replace(f'content="{old_md_raw}"', f'content="{healed_md}"')
@@ -6296,10 +6344,11 @@ def _normalize_page_structure_and_geo_parity(
         t_low = qa_txt.lower()
         return (
             detect_sentence_truncation_issues(qa_txt)
+            or count_quick_answer_sentences(qa_txt) > 2
             or ("grad-plus" in s_low and ("tiered standard" in t_low or "225 percent" in t_low))
             or ("equipment-lease" in s_low and "$2,560,000" in qa_txt)
             or (
-                any(k in s_low for k in ("ibr-hardship", "paye-sunset", "icr-repayment", "tiered-standard", "refinance"))
+                any(k in s_low for k in ("ibr-hardship", "paye-sunset", "icr-repayment", "tiered-standard", "refinance", "tax-bomb-insolvency", "forgiveness-2026"))
                 and "225 percent" in t_low
             )
             or (
@@ -6337,7 +6386,13 @@ def _normalize_page_structure_and_geo_parity(
             re.IGNORECASE,
         )
         if qa_aside_m:
-            qa_aside_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_aside_m.group(1))).strip()
+            qa_inner_body = re.sub(
+                r'<div[^>]*class=["\'][^"\']*quick-answer-title[^"\']*["\'][^>]*>[\s\S]*?</div>',
+                " ",
+                qa_aside_m.group(1),
+                flags=re.IGNORECASE,
+            )
+            qa_aside_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_inner_body)).strip()
             if _qa_needs_heal(qa_aside_plain):
                 qb_m = re.search(
                     r'(<div[^>]*class=["\'][^"\']*quick-answer-body[^"\']*["\'][^>]*>)([\s\S]*?)(</div>)',
@@ -6365,6 +6420,96 @@ def _normalize_page_structure_and_geo_parity(
                                 + updated[qa_aside_m.end() :]
                             )
                             changed = True
+        elif 'class="quick-answer' not in updated and slug.lower() not in ("404", "signal"):
+            h1_ins_m = re.search(r"<h1[^>]*>[\s\S]*?</h1>", updated, re.IGNORECASE)
+            if h1_ins_m:
+                healed_qa = _normalize_quick_answer_40_60_words(
+                    topic_label or slug.replace("-", " "),
+                    property_id,
+                    slug=slug,
+                )
+                if healed_qa:
+                    qa_block = (
+                        f'\n      <aside class="quick-answer" role="region" aria-label="Statutory Quick Answer">\n'
+                        f"        <p>{healed_qa}</p>\n"
+                        f"      </aside>"
+                    )
+                    updated = (
+                        updated[: h1_ins_m.end()]
+                        + qa_block
+                        + updated[h1_ins_m.end() :]
+                    )
+                    changed = True
+
+    if re.search(r"<th(?![^>]*\bscope=)\b[^>]*>", updated, re.IGNORECASE):
+        th_scoped = re.sub(
+            r"<th(?![^>]*\bscope=)(\b[^>]*>)",
+            r'<th scope="col"\1',
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if th_scoped != updated:
+            updated = th_scoped
+            changed = True
+
+    if '"@graph"' in updated and '"BreadcrumbList"' not in updated and slug.lower() not in ("404", "signal"):
+        def _inject_breadcrumb_graph(m_bc: re.Match) -> str:
+            o_tag, raw_j, c_tag = m_bc.group(1), m_bc.group(2), m_bc.group(3)
+            try:
+                parsed_j = json.loads(raw_j.strip())
+                if not isinstance(parsed_j, dict) or not isinstance(parsed_j.get("@graph"), list):
+                    return m_bc.group(0)
+                g_nodes = parsed_j["@graph"]
+                existing_types = {
+                    str(t)
+                    for n in g_nodes
+                    if isinstance(n, dict)
+                    for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
+                    if t
+                }
+                if "BreadcrumbList" in existing_types:
+                    return m_bc.group(0)
+                base_u = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+                page_u = (canonical_url or f"{base_u}/").split("#")[0].rstrip("/") + "/"
+                clean_lbl = topic_label or slug.replace("-", " ").title() or brand_label
+                items = [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": brand_label if slug.lower() in ("index", "root", "") else "Home",
+                        "item": f"{base_u}/",
+                    }
+                ]
+                if slug.lower() not in ("index", "root", "") and page_u.rstrip("/") != base_u.rstrip("/"):
+                    items.append(
+                        {
+                            "@type": "ListItem",
+                            "position": 2,
+                            "name": clean_lbl,
+                            "item": page_u,
+                        }
+                    )
+                g_nodes.append(
+                    {
+                        "@type": "BreadcrumbList",
+                        "@id": f"{page_u}#breadcrumb",
+                        "itemListElement": items,
+                    }
+                )
+                return f"{o_tag}\n{json.dumps(parsed_j, indent=2)}\n  {c_tag}"
+            except Exception:
+                return m_bc.group(0)
+
+        bc_updated = re.sub(
+            r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+            _inject_breadcrumb_graph,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if bc_updated != updated:
+            updated = bc_updated
+            changed = True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
     recon_html, recon_repairs = TruthReconciliationEngine.reconcile_html_truth(
@@ -6999,6 +7144,13 @@ class RetroReflectionEngine:
                 and (
                     "/tools/paye-sunset-calculator/" not in cluster_body
                     and "/tools/tiered-standard-calculator/" not in cluster_body
+                )
+            )
+            or (
+                "Income-Based" in cluster_body
+                and (
+                    "/tools/pslf-buyback-months-reconsideration-student-loan-calculator/" not in cluster_body
+                    and "/tools/student-loan-forgiveness-2026/" not in cluster_body
                 )
             )
             or (spoke_state and f"/{spoke_state}/" not in cluster_body)
@@ -7968,6 +8120,14 @@ class RetroReflectionEngine:
                 any(k in ov_s_low for k in ("refinance", "icr", "ibr-hardship", "hardship-cap"))
                 and "225% hhs poverty" in m_val.lower()
             )
+            or (
+                any(k in ov_s_low for k in ("pslf-buyback", "pslf-qualifying", "tax-bomb-insolvency", "forgiveness-2026"))
+                and (
+                    "hold harmless buyback eligibility under 34 cfr 685.219." in m_val.lower()
+                    or "225%" in qa_meta_dump
+                    or "225 percent" in qa_meta_dump
+                )
+            )
         ):
             return True
         return False
@@ -8906,9 +9066,27 @@ class RetroReflectionEngine:
                     or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
                 ).rstrip("/") + "/" + ("" if rel == "index.html" else rel.replace("index.html", ""))
                 from pseofactory.tenant_facts import TruthReconciliationEngine
-                nt_slug = "tools-directory" if rel == "tools/index.html" else (
-                    html_file.parent.name if html_file.name == "index.html" else html_file.stem
+                nt_slug = (
+                    "index"
+                    if rel == "index.html"
+                    else (
+                        "tools-directory"
+                        if rel == "tools/index.html"
+                        else (html_file.parent.name if html_file.name == "index.html" else html_file.stem)
+                    )
                 )
+                nt_label_map = {
+                    "index": (
+                        "Federal Student Loan Repayment, PSLF & Title IV Decision Engine"
+                        if property_id.lower() == "prexvo"
+                        else "Statutory Tax, Depreciation & Corporate Treasury Calculators"
+                    ),
+                    "disclaimers": "Legal Disclaimers & Statutory Compliance Notice",
+                    "methodology": "Quantitative Research Methodology & Verification Standards",
+                    "privacy": "Privacy Policy & Zero-Telemetry Data Governance",
+                    "about": "Corporate Background and Statutory Governance Standards",
+                    "tools-directory": "Statutory Financial Calculators and Decision Tools",
+                }
                 nt_recon_html, nt_recon_rep = TruthReconciliationEngine.reconcile_html_truth(
                     content,
                     tenant=property_id,
@@ -8935,13 +9113,6 @@ class RetroReflectionEngine:
                                 static_sig.write_text(rec_ss, encoding="utf-8")
                         except Exception:
                             pass
-                nt_label_map = {
-                    "disclaimers": "Legal Disclaimers & Statutory Compliance Notice",
-                    "methodology": "Quantitative Research Methodology & Verification Standards",
-                    "privacy": "Privacy Policy & Zero-Telemetry Data Governance",
-                    "about": "Corporate Background and Statutory Governance Standards",
-                    "tools-directory": "Statutory Financial Calculators and Decision Tools",
-                }
                 nt_geo_html, nt_geo_changed = _normalize_page_structure_and_geo_parity(
                     content,
                     property_id=property_id,
