@@ -1738,7 +1738,7 @@ def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: 
         property_id="profithelm",
         slug="irs-2027-tax-brackets/texas",
     )
-    assert "<title>Texas 2027 Tax Brackets (0% State &amp; IRS Pay) | ProfitHelm</title>" in tx_retro
+    assert "<title>Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm</title>" in tx_retro
     assert "0% state individual income tax ($0 state tax)" in tx_retro
     assert "$73,035 median wage benchmark" in tx_retro
 

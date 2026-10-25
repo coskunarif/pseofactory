@@ -3607,10 +3607,7 @@ def build_zero_tax_state_spoke_copy(
     if st_leaf.startswith("irs-2027-tax-brackets-"):
         st_leaf = st_leaf[len("irs-2027-tax-brackets-") :]
     st_name = st_leaf.replace("-", " ").title()
-    if len(st_name) <= 7:
-        title = f"{st_name} 2027 Tax Brackets (0% State & IRS Pay) | ProfitHelm"
-    else:
-        title = f"{st_name} 2027 Tax Brackets (0% State Tax) | ProfitHelm"
+    title = f"{st_name} 2027 Tax Calculator (0% State Tax) | ProfitHelm"
     meta_description = (
         f"Calculate {st_name} 2027 take-home pay with 0% state income tax and IRC Section 1(j) "
         f"federal brackets: {tot_val} tax ({eff_val} rate), {th_val} net pay."

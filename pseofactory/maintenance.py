@@ -4945,6 +4945,7 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
                             and (
                                 "0% state individual income tax" not in qa_inner
                                 or "0% State" not in html_content
+                                or "Tax Calculator (0% State Tax)" not in html_content
                             )
                         )
                         or qa_words > 60
