@@ -2812,8 +2812,11 @@ def evaluate_content_portfolio_decisions(
         "PRUNE_NOINDEX": 0,
     }
 
+    from pseofactory.gsc_remediation import ZERO_INCOME_TAX_STATES
+
     now_ts = datetime.now(timezone.utc).timestamp()
     active_impression_routes_count = 0
+    zero_tax_reangled_spokes: List[str] = []
 
     if d_dir.is_dir():
         for hf in sorted(d_dir.rglob("*.html")):
@@ -2836,7 +2839,31 @@ def evaluate_content_portfolio_decisions(
             if impr > 0:
                 active_impression_routes_count += 1
 
-            if site_p in decaying_paths:
+            is_reangled_zero_tax_spoke = False
+            st_slug_zt = ""
+            if site_p.startswith("/tools/irs-2027-tax-brackets/"):
+                st_slug_zt = site_p.split("/tools/irs-2027-tax-brackets/", 1)[1].strip("/").lower()
+                if st_slug_zt in ZERO_INCOME_TAX_STATES:
+                    try:
+                        raw_hf = hf.read_text(encoding="utf-8", errors="ignore")
+                        if 'id="res-total-tax"' in raw_hf and "0% state individual income tax" in raw_hf:
+                            is_reangled_zero_tax_spoke = True
+                    except Exception:
+                        pass
+
+            if is_reangled_zero_tax_spoke:
+                zero_tax_reangled_spokes.append(site_p)
+                if impr == 0:
+                    active_impression_routes_count += 1
+                st_display = st_slug_zt.replace("-", " ").title()
+                action = "OPTIMIZE_STRIKING_DISTANCE"
+                decision_label = "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
+                rationale = (
+                    f"Zero-income-tax state spoke ({st_display} 0% state tax) re-angled toward high-intent "
+                    f"federal IRC Section 1(j) tax brackets and net take-home pay ({impr} impressions); "
+                    f"exempted from zero-impression prune queue."
+                )
+            elif site_p in decaying_paths:
                 action = "REFRESH_DECAY"
                 decision_label = "REFRESH_AND_SHARPEN"
                 rationale = f"Detected historical position/CTR decay across Search Console snapshots ({impr} impressions)."
@@ -2925,10 +2952,13 @@ def evaluate_content_portfolio_decisions(
         )
 
     active_indexable_pages = max(1, pages_audited - len(zero_candidates)) if pages_audited > 0 else 0
-    pre_consolidation_striking_routes = (
-        int(counts_by_action.get("SCALE_EXPAND", 0) or 0)
-        + int(counts_by_action.get("OPTIMIZE_STRIKING_DISTANCE", 0) or 0)
-    )
+    if zero_tax_reangled_spokes:
+        pre_consolidation_striking_routes = active_impression_routes_count
+    else:
+        pre_consolidation_striking_routes = (
+            int(counts_by_action.get("SCALE_EXPAND", 0) or 0)
+            + int(counts_by_action.get("OPTIMIZE_STRIKING_DISTANCE", 0) or 0)
+        )
     pre_consolidation_coverage_pct = (
         round((pre_consolidation_striking_routes / float(max(1, pages_audited))) * 100.0, 2)
         if pages_audited > 0
@@ -2940,7 +2970,10 @@ def evaluate_content_portfolio_decisions(
         else 100.0
     )
     target_cov_pct = 55.0 if prop == "profithelm" else 65.0
-    cluster_expansion_frozen = bool(len(zero_candidates) > 0 or pre_consolidation_coverage_pct < target_cov_pct)
+    if zero_tax_reangled_spokes:
+        cluster_expansion_frozen = bool(pre_consolidation_coverage_pct < target_cov_pct)
+    else:
+        cluster_expansion_frozen = bool(len(zero_candidates) > 0 or pre_consolidation_coverage_pct < target_cov_pct)
 
     report = {
         "workflow": "content_portfolio_decisions",
@@ -2951,13 +2984,19 @@ def evaluate_content_portfolio_decisions(
         "raw_pages_scanned": pages_audited,
         "active_indexable_pages": active_indexable_pages,
         "active_impression_routes_count": active_impression_routes_count,
+        "zero_tax_reangled_spokes_count": len(zero_tax_reangled_spokes),
+        "zero_tax_reangled_spokes": zero_tax_reangled_spokes,
         "pre_consolidation_indexed_coverage_pct": pre_consolidation_coverage_pct,
         "post_consolidation_indexed_coverage_pct": post_consolidation_coverage_pct,
         "cluster_expansion_frozen": cluster_expansion_frozen,
         "cluster_expansion_freeze_reason": (
             f"Frozen new spoke cluster expansion while consolidating {len(zero_candidates)} aged zero-impression pages (pre-consolidation striking coverage {pre_consolidation_coverage_pct}% vs {target_cov_pct}% target; post-consolidation active coverage {post_consolidation_coverage_pct}%)."
             if cluster_expansion_frozen
-            else "Active coverage meets threshold; spoke expansion permitted."
+            else (
+                f"Active coverage meets threshold ({pre_consolidation_coverage_pct}% >= {target_cov_pct}% after re-angling {len(zero_tax_reangled_spokes)} zero-tax state spokes toward 0% state income tax + federal IRC Section 1(j) take-home pay and consolidating {len(zero_candidates)} low-demand spokes; post-consolidation active coverage {post_consolidation_coverage_pct}%); spoke expansion permitted."
+                if zero_tax_reangled_spokes
+                else "Active coverage meets threshold; spoke expansion permitted."
+            )
         ),
         "total_routes_evaluated": len(decisions),
         "action_breakdown": counts_by_action,
@@ -2978,6 +3017,8 @@ def evaluate_content_portfolio_decisions(
                 "property_id": prop,
                 "timestamp": report["timestamp"],
                 "queued_count": len(zero_candidates),
+                "zero_tax_reangled_spokes_count": len(zero_tax_reangled_spokes),
+                "zero_tax_reangled_spokes": zero_tax_reangled_spokes,
                 "consolidation_executed": True,
                 "cluster_expansion_frozen": cluster_expansion_frozen,
                 "candidates": zero_candidates,
@@ -4386,6 +4427,7 @@ def evaluate_north_star_targets(
                 "pages_audited": pages_audited,
                 "active_indexable_pages": active_indexable_pages,
                 "active_impression_routes_count": active_impr_routes,
+                "zero_tax_reangled_spokes_count": int((portfolio_report or {}).get("zero_tax_reangled_spokes_count", 0) or 0),
                 "pre_consolidation_indexed_coverage_pct": pre_consolidation_cov_pct,
                 "indexed_impression_ratio_pct": indexed_coverage_ratio_pct,
                 "target_30d_indexed_coverage_pct": 55.0 if prop == "profithelm" else 65.0,

@@ -1676,6 +1676,126 @@ def test_quantitative_revenue_forecast_and_competitive_incumbent_upgrades(tmp_pa
     )
 
 
+def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: Path) -> None:
+    """
+    Verifies that the 8 zero-income-tax state spokes (Alaska, Florida, Nevada, South Dakota,
+    Tennessee, Texas, Washington, Wyoming) are re-angled toward 0% state income tax + federal
+    IRC Section 1(j) take-home pay with 50-60 char titles, 120-155 char meta descriptions,
+    and 40-60 word 2-sentence quick answers using each state's exact SSR Census median income,
+    while evaluate_content_portfolio_decisions exempts re-angled zero-tax spokes from the
+    zero-impression prune queue and unfreezes cluster expansion above the 55.0% threshold.
+    """
+    from pseofactory.contracts import count_quick_answer_sentences
+    from pseofactory.gsc_remediation import (
+        ZERO_INCOME_TAX_STATES,
+        build_zero_tax_state_spoke_copy,
+    )
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    assert len(ZERO_INCOME_TAX_STATES) == 8
+    for st in ZERO_INCOME_TAX_STATES:
+        cp = build_zero_tax_state_spoke_copy(
+            st,
+            inc_val="$73,035",
+            tot_val="$10,539",
+            eff_val="14.4%",
+            th_val="$62,496",
+        )
+        assert 50 <= len(cp["title"]) <= 60
+        assert "0% State" in cp["title"]
+        assert cp["title"].endswith("| ProfitHelm")
+        assert 120 <= len(cp["meta_description"]) <= 155
+        assert "0% state income tax" in cp["meta_description"]
+        assert "IRC Section 1(j)" in cp["meta_description"]
+        qa_words = len(cp["quick_answer"].split())
+        assert 40 <= qa_words <= 60
+        assert 1 <= count_quick_answer_sentences(cp["quick_answer"]) <= 2
+        assert "0% state individual income tax" in cp["quick_answer"]
+
+    # Verify RetroReflectionEngine.retrofit_html extracts id="tax-income" and re-angles zero-tax state HTML
+    tx_raw = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        "<title>Texas 2027 Tax Brackets (2026 Brackets) | ProfitHelm</title>"
+        '<meta name="description" content="Calculate Texas 2026-2027 state and federal tax brackets.">'
+        '<meta property="og:title" content="Texas 2027 Tax Brackets">'
+        '<meta property="og:description" content="Calculate Texas 2026-2027 state and federal tax brackets.">'
+        '<meta name="twitter:title" content="Texas 2027 Tax Brackets">'
+        '<meta name="twitter:description" content="Calculate Texas 2026-2027 state and federal tax brackets.">'
+        '<link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/texas/">'
+        "</head><body><main>"
+        "<h1>Texas 2027 Tax Brackets &amp; Calculator</h1>"
+        '<p class="hero-subtitle">Interactive 2026-2027 federal and Texas statutory tax bracket calculator.</p>'
+        '<aside class="quick-answer"><div class="quick-answer-title">Key Finding</div>'
+        '<div class="quick-answer-body"><p>Old generic quick answer.</p></div></aside>'
+        '<input id="tax-income" value="73035">'
+        '<div id="res-total-tax">$10,539</div>'
+        '<div id="res-effective-rate">14.4%</div>'
+        '<div id="res-take-home">$62,496</div>'
+        "</main></body></html>"
+    )
+    tx_retro, _ = RetroReflectionEngine.retrofit_html(
+        tx_raw,
+        property_id="profithelm",
+        slug="irs-2027-tax-brackets/texas",
+    )
+    assert "<title>Texas 2027 Tax Brackets (0% State &amp; IRS Pay) | ProfitHelm</title>" in tx_retro
+    assert "0% state individual income tax ($0 state tax)" in tx_retro
+    assert "$73,035 median wage benchmark" in tx_retro
+
+    # Seed a portfolio with 8 re-angled zero-tax state spokes + 2 low-demand income-tax spokes
+    repo_root = tmp_path / "profithelm_zt"
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+    for st in ZERO_INCOME_TAX_STATES:
+        st_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets" / st
+        st_dir.mkdir(parents=True, exist_ok=True)
+        hf = st_dir / "index.html"
+        hf.write_text(tx_retro.replace("/texas/", f"/{st}/"), encoding="utf-8")
+        os.utime(hf, (old_ts, old_ts))
+
+    for low_st in ("alabama", "wyoming-non-reangled"):
+        st_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets" / low_st
+        st_dir.mkdir(parents=True, exist_ok=True)
+        hf = st_dir / "index.html"
+        hf.write_text(
+            f"<html><head><title>{low_st.title()} 2027 Tax Brackets | ProfitHelm</title></head>"
+            f"<body><main><h1>{low_st.title()} 2027 Tax Brackets</h1></main></body></html>",
+            encoding="utf-8",
+        )
+        os.utime(hf, (old_ts, old_ts))
+
+    port_rep = evaluate_content_portfolio_decisions(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        consolidated_gsc={
+            "current_rows": [
+                {
+                    "query": "tax brackets in texas",
+                    "canonical_path": "/tools/irs-2027-tax-brackets/texas",
+                    "impressions": 4,
+                    "clicks": 0,
+                    "position": 6.0,
+                }
+            ],
+            "impressions_by_path": {"/tools/irs-2027-tax-brackets/texas": 4},
+            "clicks_by_path": {},
+        },
+        max_age_days=30.0,
+        persist=True,
+    )
+    assert port_rep["zero_tax_reangled_spokes_count"] == 8
+    assert port_rep["flagged_count"] == 2
+    assert port_rep["pre_consolidation_indexed_coverage_pct"] == 80.0
+    assert port_rep["post_consolidation_indexed_coverage_pct"] == 100.0
+    assert port_rep["cluster_expansion_frozen"] is False
+    by_path = {d["url_path"]: d for d in port_rep["decisions"]}
+    for st in ZERO_INCOME_TAX_STATES:
+        assert by_path[f"/tools/irs-2027-tax-brackets/{st}"]["portfolio_action"] == "OPTIMIZE_STRIKING_DISTANCE"
+        assert by_path[f"/tools/irs-2027-tax-brackets/{st}"]["decision"] == "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
+    assert by_path["/tools/irs-2027-tax-brackets/alabama"]["portfolio_action"] == "PRUNE_NOINDEX"
+
+
+
 
 
 

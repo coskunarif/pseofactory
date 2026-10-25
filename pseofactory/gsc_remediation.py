@@ -3571,6 +3571,61 @@ def _build_vertical_profithelm_overlay_blocks(
     }
 
 
+ZERO_INCOME_TAX_STATES: Tuple[str, ...] = (
+    "alaska",
+    "florida",
+    "nevada",
+    "south-dakota",
+    "tennessee",
+    "texas",
+    "washington",
+    "wyoming",
+)
+
+
+def build_zero_tax_state_spoke_copy(
+    state_slug: str,
+    inc_val: str = "$75,000",
+    tot_val: str = "$10,539",
+    eff_val: str = "14.4%",
+    th_val: str = "$62,496",
+) -> Dict[str, str]:
+    """
+    Builds re-angled title (55-59 chars), meta_description (141-147 chars),
+    and 2-sentence quick_answer (51-52 words) for the 8 zero-income-tax states
+    (Alaska, Florida, Nevada, South Dakota, Tennessee, Texas, Washington, Wyoming),
+    targeting 0% state income tax + federal IRC Section 1(j) take-home pay.
+    Zero em-dashes. Zero en-dashes.
+    """
+    st_leaf = state_slug.strip("/").split("/")[-1].lower()
+    if st_leaf.startswith("irs-2027-tax-brackets-"):
+        st_leaf = st_leaf[len("irs-2027-tax-brackets-") :]
+    st_name = st_leaf.replace("-", " ").title()
+    if len(st_name) <= 7:
+        title = f"{st_name} 2027 Tax Brackets (0% State & IRS Pay) | ProfitHelm"
+    else:
+        title = f"{st_name} 2027 Tax Brackets (0% State Tax) | ProfitHelm"
+    meta_description = (
+        f"Calculate {st_name} 2027 take-home pay with 0% state income tax and IRC Section 1(j) "
+        f"federal brackets: {tot_val} tax ({eff_val} rate), {th_val} net pay."
+    )
+    quick_answer_title = f"Key Finding: {st_name} 0% State Income Tax & 2026-2027 Federal Take-Home Pay"
+    quick_answer = (
+        f"{st_name} levies a 0% state individual income tax ($0 state tax), so a single filer earning "
+        f"the {inc_val} median wage benchmark owes {tot_val} in 2026 federal tax ({eff_val} effective rate) "
+        f"and keeps {th_val} in net take-home pay. Under IRC Section 1(j), only federal brackets "
+        f"(10% to 37%) and standard deductions apply."
+    )
+    return {
+        "state_slug": st_leaf,
+        "state_name": st_name,
+        "title": title,
+        "meta_description": meta_description,
+        "quick_answer_title": quick_answer_title,
+        "quick_answer": quick_answer,
+    }
+
+
 def _build_tax_bracket_profithelm_overlay_blocks(
     heading_label: str,
     query_clean: str,
@@ -6522,7 +6577,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         )
     )
     used_spoke_og = False
-    if is_spoke_page_ov:
+    if is_spoke_page_ov and "0% state income tax" not in meta_desc.lower():
         og_m_ov = re.search(
             r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']',
             html,

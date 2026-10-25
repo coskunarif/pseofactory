@@ -4926,13 +4926,26 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
             qa_inner = qa_m.group(1)
             qa_words = len(re.sub(r"<[^>]+>", " ", qa_inner).split())
             if "/tools/irs-2027-tax-brackets/" in canon_url:
+                from pseofactory.gsc_remediation import ZERO_INCOME_TAX_STATES
+
                 tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', html_content)
                 eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', html_content)
                 th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', html_content)
+                inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', html_content)
                 if tot_m and eff_m and th_m:
+                    inc_val = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
+                    st_slug = canon_url.split("/tools/irs-2027-tax-brackets/", 1)[1].strip("/").lower()
                     if (
                         tot_m.group(1).strip() not in qa_inner
                         or th_m.group(1).strip() not in qa_inner
+                        or inc_val not in qa_inner
+                        or (
+                            st_slug in ZERO_INCOME_TAX_STATES
+                            and (
+                                "0% state individual income tax" not in qa_inner
+                                or "0% State" not in html_content
+                            )
+                        )
                         or qa_words > 60
                         or qa_words < 40
                     ):
@@ -5445,22 +5458,112 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 changed = True
 
         if slug.startswith("irs-2027-tax-brackets/"):
+            from pseofactory.gsc_remediation import (
+                ZERO_INCOME_TAX_STATES,
+                build_zero_tax_state_spoke_copy,
+            )
+
             tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', updated)
             eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', updated)
             th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', updated)
-            inc_m = re.search(r'id=["\']inp-income["\'][^>]*value=["\'](\d+)["\']', updated)
+            inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', updated)
             if tot_m and eff_m and th_m:
-                st_name = slug.split("/", 1)[1].replace("-", " ").title().replace("Of", "of")
+                st_slug = slug.split("/", 1)[1].strip("/").lower()
+                st_name = st_slug.replace("-", " ").title().replace("Of", "of")
                 inc_val = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
                 tot_val = tot_m.group(1).strip()
                 eff_val = eff_m.group(1).strip()
                 th_val = th_m.group(1).strip()
-                spoke_qa = (
-                    f"For a {st_name} single filer earning the {inc_val} median wage benchmark, combined 2026 "
-                    f"federal and {st_name} income tax totals {tot_val} ({eff_val} effective rate), leaving {th_val} "
-                    f"in net take-home pay. Under IRC Section 1(j), federal brackets span 10% to 37% alongside "
-                    f"{st_name} statutory brackets and standard deductions."
-                )
+                if st_slug in ZERO_INCOME_TAX_STATES:
+                    zt_copy = build_zero_tax_state_spoke_copy(
+                        st_slug,
+                        inc_val=inc_val,
+                        tot_val=tot_val,
+                        eff_val=eff_val,
+                        th_val=th_val,
+                    )
+                    zt_title = zt_copy["title"]
+                    zt_title_esc = zt_title.replace("&", "&amp;")
+                    zt_desc = zt_copy["meta_description"]
+                    qa_title_str = zt_copy["quick_answer_title"].replace("&", "&amp;")
+                    spoke_qa = zt_copy["quick_answer"]
+
+                    cur_t_m = re.search(r"<title>([\s\S]*?)</title>", updated, re.IGNORECASE)
+                    if not cur_t_m or cur_t_m.group(1).strip() != zt_title_esc:
+                        updated = re.sub(
+                            r"<title>[\s\S]*?</title>",
+                            f"<title>{zt_title_esc}</title>",
+                            updated,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                        updated = re.sub(
+                            r'(<meta\s+property=["\']og:title["\']\s+content=["\'])([^"\']*)(["\'])',
+                            rf"\g<1>{zt_title_esc}\g<3>",
+                            updated,
+                            flags=re.IGNORECASE,
+                        )
+                        updated = re.sub(
+                            r'(<meta\s+name=["\']twitter:title["\']\s+content=["\'])([^"\']*)(["\'])',
+                            rf"\g<1>{zt_title_esc}\g<3>",
+                            updated,
+                            flags=re.IGNORECASE,
+                        )
+                        changed = True
+
+                    cur_md_m = re.search(
+                        r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']',
+                        updated,
+                        re.IGNORECASE,
+                    )
+                    if not cur_md_m or cur_md_m.group(1).strip() != zt_desc:
+                        updated = re.sub(
+                            r'(<meta\s+name=["\']description["\']\s+content=["\'])([^"\']*)(["\'])',
+                            rf"\g<1>{zt_desc}\g<3>",
+                            updated,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                        updated = re.sub(
+                            r'(<meta\s+property=["\']og:description["\']\s+content=["\'])([^"\']*)(["\'])',
+                            rf"\g<1>{zt_desc}\g<3>",
+                            updated,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                        updated = re.sub(
+                            r'(<meta\s+name=["\']twitter:description["\']\s+content=["\'])([^"\']*)(["\'])',
+                            rf"\g<1>{zt_desc}\g<3>",
+                            updated,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                        updated = re.sub(
+                            r'("description":\s*")[^"]*?(")',
+                            rf"\g<1>{zt_desc}\g<2>",
+                            updated,
+                            count=1,
+                        )
+                        changed = True
+
+                    old_hero = f"Interactive 2026-2027 federal and {st_name} statutory tax bracket calculator."
+                    new_hero = f"Interactive 2026-2027 {st_name} 0% state income tax and federal IRC Section 1(j) take-home pay calculator."
+                    if old_hero in updated:
+                        updated = updated.replace(old_hero, new_hero)
+                        changed = True
+                    old_intro = f"combined federal and {st_name} marginal tax brackets"
+                    new_intro = f"{st_name} 0% state income tax and federal IRC Section 1(j) marginal tax brackets"
+                    if old_intro in updated:
+                        updated = updated.replace(old_intro, new_intro)
+                        changed = True
+                else:
+                    qa_title_str = f"Key Finding: {st_name} 2026-2027 Tax Liability"
+                    spoke_qa = (
+                        f"For a {st_name} single filer earning the {inc_val} median wage benchmark, combined 2026 "
+                        f"federal and {st_name} income tax totals {tot_val} ({eff_val} effective rate), leaving {th_val} "
+                        f"in net take-home pay. Under IRC Section 1(j), federal brackets span 10% to 37% alongside "
+                        f"{st_name} statutory brackets and standard deductions."
+                    )
                 qa_pat = re.compile(
                     r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
                     re.IGNORECASE,
@@ -5470,11 +5573,13 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 if qa_m and (
                     tot_val not in qa_m.group(2)
                     or th_val not in qa_m.group(2)
+                    or inc_val not in qa_m.group(2)
+                    or (st_slug in ZERO_INCOME_TAX_STATES and "0% state individual income tax" not in qa_m.group(2))
                     or qa_existing_words > 60
                     or qa_existing_words < 40
                 ):
                     updated = qa_pat.sub(
-                        rf'\g<1>\n  <div class="quick-answer-title">Key Finding: {st_name} 2026-2027 Tax Liability</div>\n  <div class="quick-answer-body"><p>{spoke_qa}</p></div>\n\g<3>',
+                        rf'\g<1>\n  <div class="quick-answer-title">{qa_title_str}</div>\n  <div class="quick-answer-body"><p>{spoke_qa}</p></div>\n\g<3>',
                         updated,
                         count=1,
                     )
@@ -8227,6 +8332,57 @@ class RetroReflectionEngine:
                                 )
                                 ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
 
+                            if property_id.lower() != "prexvo":
+                                from pseofactory.gsc_remediation import (
+                                    ZERO_INCOME_TAX_STATES,
+                                    build_zero_tax_state_spoke_copy,
+                                )
+
+                                zt_leaf = ""
+                                if ov_s.startswith("irs-2027-tax-brackets/"):
+                                    zt_leaf = ov_s.split("irs-2027-tax-brackets/", 1)[1].strip("/").lower()
+                                elif ov_s.startswith("irs-2027-tax-brackets-"):
+                                    zt_leaf = ov_s[len("irs-2027-tax-brackets-") :].strip("/").lower()
+                                if zt_leaf in ZERO_INCOME_TAX_STATES:
+                                    zt_html_f = dist_dir / "tools" / "irs-2027-tax-brackets" / zt_leaf / "index.html"
+                                    if zt_html_f.is_file():
+                                        try:
+                                            zt_raw_h = zt_html_f.read_text(encoding="utf-8", errors="ignore")
+                                            tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', zt_raw_h)
+                                            eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', zt_raw_h)
+                                            th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', zt_raw_h)
+                                            inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', zt_raw_h)
+                                            if tot_m and eff_m and th_m:
+                                                inc_v = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
+                                                zt_cp = build_zero_tax_state_spoke_copy(
+                                                    zt_leaf,
+                                                    inc_val=inc_v,
+                                                    tot_val=tot_m.group(1).strip(),
+                                                    eff_val=eff_m.group(1).strip(),
+                                                    th_val=th_m.group(1).strip(),
+                                                )
+                                                zt_dirty = False
+                                                if raw_ov.get("title_rewrite") != zt_cp["title"]:
+                                                    raw_ov["title_rewrite"] = zt_cp["title"]
+                                                    raw_ov["title"] = zt_cp["title"]
+                                                    zt_dirty = True
+                                                if raw_ov.get("meta_description") != zt_cp["meta_description"]:
+                                                    raw_ov["meta_description"] = zt_cp["meta_description"]
+                                                    raw_ov["description"] = zt_cp["meta_description"]
+                                                    zt_dirty = True
+                                                if raw_ov.get("quick_answer") != zt_cp["quick_answer"]:
+                                                    raw_ov["quick_answer"] = zt_cp["quick_answer"]
+                                                    zt_dirty = True
+                                                for ps_item in raw_ov.get("preset_scenarios") or []:
+                                                    if isinstance(ps_item, dict) and isinstance(ps_item.get("params"), dict):
+                                                        if ps_item["params"].get("state_rate") != 0.0:
+                                                            ps_item["params"]["state_rate"] = 0.0
+                                                            zt_dirty = True
+                                                if zt_dirty:
+                                                    ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+                                        except Exception:
+                                            pass
+
                             if isinstance(raw_ov.get("partner_offer"), dict) and not raw_ov.get("restricted_public_service"):
                                 from pseofactory.affiliates import bind_asset_partner_roster
                                 ov_low = ov_s.lower()
@@ -9414,7 +9570,11 @@ class RetroReflectionEngine:
                 pass
             try:
                 if str(d.parent).startswith("/home/ubuntuadmin/projects/") and "PYTEST_CURRENT_TEST" not in os.environ:
-                    from pseofactory.seo_growth_loops import compile_quantitative_revenue_forecast
+                    from pseofactory.seo_growth_loops import (
+                        compile_quantitative_revenue_forecast,
+                        evaluate_content_portfolio_decisions,
+                        evaluate_north_star_targets,
+                    )
                     qrf_file = agy_dir / "quantitative_revenue_forecast.json"
                     had_qrf = qrf_file.is_file()
                     compile_quantitative_revenue_forecast(
@@ -9426,6 +9586,45 @@ class RetroReflectionEngine:
                     )
                     if not had_qrf and qrf_file.is_file() and ".agy/quantitative_revenue_forecast.json" not in retrofitted_paths:
                         retrofitted_paths.append(".agy/quantitative_revenue_forecast.json")
+
+                    port_file = agy_dir / "content_portfolio_decisions.json"
+                    prev_port_txt = port_file.read_text(encoding="utf-8") if port_file.is_file() else ""
+                    port_rep = evaluate_content_portfolio_decisions(
+                        property_id=property_id,
+                        repo_root=d.parent,
+                        dist_dir=d,
+                        persist=True,
+                    )
+                    ns_rep = evaluate_north_star_targets(
+                        property_id=property_id,
+                        repo_root=d.parent,
+                        dist_dir=d,
+                        portfolio_report=port_rep,
+                        persist=True,
+                    )
+                    if port_file.is_file() and port_file.read_text(encoding="utf-8") != prev_port_txt:
+                        for p_rel in (
+                            ".agy/content_portfolio_decisions.json",
+                            ".agy/prune_noindex_queue.json",
+                            ".agy/north_star_scorecard.json",
+                        ):
+                            if p_rel not in retrofitted_paths:
+                                retrofitted_paths.append(p_rel)
+                        for wf_fname in ("seo_growth_workflows_summary.json", "seo_growth_workflows_report.json"):
+                            wf_f = agy_dir / wf_fname
+                            if wf_f.is_file():
+                                try:
+                                    wf_obj = json.loads(wf_f.read_text(encoding="utf-8"))
+                                    if isinstance(wf_obj, dict):
+                                        if "north_star_scorecard" in wf_obj and isinstance(wf_obj["north_star_scorecard"], dict):
+                                            wf_obj["north_star_scorecard"]["pillars"] = ns_rep["pillars"]
+                                        if "workflows" in wf_obj and isinstance(wf_obj["workflows"], dict):
+                                            w6 = wf_obj["workflows"].get("6_content_portfolio_decisions")
+                                            if isinstance(w6, dict):
+                                                w6["action_breakdown"] = port_rep["action_breakdown"]
+                                        wf_f.write_text(json.dumps(wf_obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                                except Exception:
+                                    pass
             except Exception:
                 pass
 
