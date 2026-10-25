@@ -2175,6 +2175,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "685.209(e) by excluding spousal AGI vs separate tax filing cost.",
                     " Verified under 34 CFR 685.209(e) and IRC Section 1(j).",
                 )
+            if "loophole" in q_low and ("parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low):
+                return (
+                    "Calculate 2026 Parent PLUS Double Consolidation Loophole sunset eligibility, "
+                    "two-step Direct Consolidation rules, and 10% IDR vs 20% ICR caps.",
+                    " Verified under Title IV 34 CFR 685.209(b) and 685.220.",
+                )
             if "parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low:
                 return (
                     "Calculate Parent PLUS Double Consolidation repayment options comparing 10% IDR "

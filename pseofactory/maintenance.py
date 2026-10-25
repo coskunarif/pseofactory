@@ -4867,16 +4867,17 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         html_content,
         re.IGNORECASE,
     )
+    canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+    if not canon_m:
+        canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
+    canon_url = canon_m.group(1).strip().lower() if canon_m else ""
     if desc_m:
         import html as _html_mod
         clean_desc_val = _html_mod.unescape(desc_m.group(1)).strip()
         if len(clean_desc_val) < 70 or len(clean_desc_val) > 160:
             return True
-
-    canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
-    if not canon_m:
-        canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
-    canon_url = canon_m.group(1).strip().lower() if canon_m else ""
+        if "loophole" in canon_url and "repayment options comparing 10% idr" in clean_desc_val.lower():
+            return True
     if re.search(r"/tools/(?:irs-2027-tax-brackets|section-1031-calculator|section-179-calculator)/[a-z0-9-]+/?", canon_url):
         if any(
             stale_spoke in html_content
@@ -6238,6 +6239,10 @@ def _normalize_page_structure_and_geo_parity(
                 or (
                     any(k in slug.lower() for k in ("pslf-buyback", "pslf-qualifying"))
                     and "hold harmless buyback eligibility under 34 cfr 685.219." in old_md_raw.lower()
+                )
+                or (
+                    "loophole" in slug.lower()
+                    and "repayment options comparing 10% idr" in old_md_raw.lower()
                 )
             )
         ):
@@ -8233,6 +8238,10 @@ class RetroReflectionEngine:
                     or "225 percent" in qa_meta_dump
                 )
             )
+            or (
+                "loophole" in ov_s_low
+                and "repayment options comparing 10% idr" in m_val.lower()
+            )
         ):
             return True
         return False
@@ -9493,7 +9502,7 @@ class RetroReflectionEngine:
 
         synd_dir = d.parent / "syndication"
         tools_dir = d / "tools"
-        if synd_dir.is_dir() and tools_dir.is_dir():
+        if tools_dir.is_dir():
             try:
                 from pseofactory.qualification import reconcile_tenant_topical_authority_and_cannibalization
                 from pseofactory.distributor import export_all_syndication_files
@@ -9506,7 +9515,7 @@ class RetroReflectionEngine:
                     str(d.parent).startswith("/home/ubuntuadmin/projects/")
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
-                if is_real_tenant_repo:
+                if is_real_tenant_repo and synd_dir.is_dir():
                     export_all_syndication_files(
                         output_dir=synd_dir,
                         dry_run=False,
