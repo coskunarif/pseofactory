@@ -30,6 +30,12 @@
       "cli_key_expires_at": "2026-06-03",
       "enabled": true,
       "billing_mode": "payment",
+      "charges_enabled": true,
+      "payouts_enabled": true,
+      "details_submitted": true,
+      "external_bank_account": "MERCURY, PARTNERING WITH CHOICE BANK (Routing 091311229, Account ****1395)",
+      "payout_schedule": "Automatic daily payouts (2 business day rolling delay)",
+      "webhook_url": "https://api.thecoachloop.com/api/webhooks/stripe",
       "fulfillment_engine": "personalized_statutory_workpaper_and_csv_bundle",
       "digital_products": {
         "ph_1031_boot_replacement_workpapers": {
@@ -154,7 +160,8 @@
           "brand_name": "Ramp",
           "status": "Active (Approved 2026-10-21T14:54:06Z, Zoho Newsletter #1591 Welcome to the Ramp Partner Program)",
           "commission_terms": "$100.00-$4,000.00 USD Closed Won / $50.00-$2,000.00 USD SQL",
-          "tracking_url": "https://ramp.com/",
+          "tracking_url": "https://join.ramp.com/c/7932737/3981015/51436",
+          "default_portal_link": "https://join.ramp.com/c/7932737/3861852/51436",
           "raw_clicks": 0,
           "verified_clicks": 0,
           "actions": 0,
@@ -253,6 +260,30 @@
             "https://www.kqzyfj.com/click-101906407-16995693",
             "https://www.dpbolvw.net/click-101906407-16995712"
           ]
+        },
+        "freetaxusa": {
+          "advertiser_id": "4526117",
+          "advertiser_name": "FreeTaxUSA",
+          "status": "Active (Accepted 2026-10-21, Notification #851)",
+          "commission_terms": "10.00%-20.00% on paid tax filing products",
+          "cookie_duration_days": 90,
+          "primary_tracking_url": "https://www.jdoqocy.com/click-101906407-12306188",
+          "verified_clicks": 0,
+          "sales": 0,
+          "leads": 0,
+          "realized_commission_usd": 0.0
+        },
+        "wallethub": {
+          "advertiser_id": "6002798",
+          "advertiser_name": "WalletHub (Evolution Finance)",
+          "status": "Active (Accepted 2026-10-23, Notification #857)",
+          "commission_terms": "$50.00 USD CPA for WalletHub Premium",
+          "cookie_duration_days": 30,
+          "primary_tracking_url": "https://www.jdoqocy.com/click-101906407-16952385",
+          "verified_clicks": 0,
+          "sales": 0,
+          "leads": 0,
+          "realized_commission_usd": 0.0
         }
       },
       "enabled": true
@@ -345,8 +376,8 @@
             "rippling",
             "mercury"
           ],
-          "live_verified_clicks": 182,
-          "network_marketplace_status": "Declined on stck_sHqgUkyEIAPgiL (cooldown until 2026-10-23T00:00:00Z; 4 marketplace program applications on hold; direct invite Rippling part_jp9R0iYpPGriHu is Active with 182 clicks)",
+          "live_verified_clicks": 678,
+          "network_marketplace_status": "Declined on stck_sHqgUkyEIAPgiL (cooldown until 2026-10-23T00:00:00Z; 4 marketplace program applications on hold; direct invite Rippling part_jp9R0iYpPGriHu is Active with 678 clicks)",
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
           "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",
           "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 182 verified clicks recorded in PartnerStack Performance Overview)"

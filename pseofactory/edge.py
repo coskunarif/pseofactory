@@ -2995,7 +2995,12 @@ export async function onRequestGet(context) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1";
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
     const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
-    const toolSlug = (reqUrl.searchParams.get("tool_slug") || "student-loan-refinance-break-even-calculator").toLowerCase();
+    const toolSlug = (
+      reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("source_tool") ||
+      reqUrl.searchParams.get("source") ||
+      "student-loan-refinance-break-even-calculator"
+    ).toLowerCase();
     if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
       return new Response(
         JSON.stringify({
@@ -3061,7 +3066,11 @@ export async function onRequestGet(context) {
   if (reqUrl.searchParams.get("checkout") === "1") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
     const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
-    const toolSlug = reqUrl.searchParams.get("tool_slug") || "student-loan-refinance-break-even-calculator";
+    const toolSlug =
+      reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("source_tool") ||
+      reqUrl.searchParams.get("source") ||
+      "student-loan-refinance-break-even-calculator";
     if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.toLowerCase().includes(s))) {
       return new Response(
         JSON.stringify({
@@ -3161,7 +3170,7 @@ export async function onRequestPost(context) {
     const body = await request.json();
     const email = (body.email || "").trim().toLowerCase();
     const state = String(body.state || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
-    const rawSlug = String(body.tool_slug || body.source || "student-loan-refinance-break-even-calculator")
+    const rawSlug = String(body.tool_slug || body.source_tool || body.source || "student-loan-refinance-break-even-calculator")
       .trim()
       .toLowerCase()
       .replace(/^\\/+|\\/+$/g, "")
@@ -4400,7 +4409,12 @@ export async function onRequestGet(context) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1";
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
-    const toolSlug = (reqUrl.searchParams.get("tool_slug") || "section-1031-calculator").toLowerCase();
+    const toolSlug = (
+      reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("source_tool") ||
+      reqUrl.searchParams.get("source") ||
+      "section-1031-calculator"
+    ).toLowerCase();
     const spec = resolveVerticalAndThreshold(toolSlug, "");
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const storedRecord = await lookupEdgeLeadRecord(
@@ -4457,7 +4471,11 @@ export async function onRequestGet(context) {
   if (reqUrl.searchParams.get("checkout") === "1") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
-    const toolSlug = reqUrl.searchParams.get("tool_slug") || "section-1031-calculator";
+    const toolSlug =
+      reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("source_tool") ||
+      reqUrl.searchParams.get("source") ||
+      "section-1031-calculator";
     const spec = resolveVerticalAndThreshold(toolSlug, "");
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const customRecord = await lookupEdgeLeadRecord(
@@ -4547,7 +4565,7 @@ export async function onRequestPost(context) {
     const { request, env } = context;
     const body = await request.json();
     const email = (body.email || "").trim().toLowerCase();
-    const rawSlug = String(body.tool_slug || body.source || "general")
+    const rawSlug = String(body.tool_slug || body.source_tool || body.source || "general")
       .trim()
       .toLowerCase()
       .replace(/^\\/+|\\/+$/g, "")

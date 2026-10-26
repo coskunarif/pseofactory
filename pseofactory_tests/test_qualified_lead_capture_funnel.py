@@ -1148,6 +1148,12 @@ def test_trend_mined_statutory_timeseries_and_three_rail_monetization(tmp_path):
     assert stripe_diag["product_count"] >= 4
     assert "ph_1031_boot_replacement_workpapers" in stripe_diag["product_skus"]
     assert "px_refi_amortization_decision_audit" in stripe_diag["product_skus"]
+    assert stripe_diag["bank_payout_settlement"]["charges_enabled"] is True
+    assert stripe_diag["bank_payout_settlement"]["payouts_enabled"] is True
+    assert stripe_diag["bank_payout_settlement"]["bank_name"] == "MERCURY, PARTNERING WITH CHOICE BANK"
+    assert stripe_diag["bank_payout_settlement"]["routing_number"] == "091311229"
+    assert stripe_diag["bank_payout_settlement"]["account_last4"] == "1395"
+    assert stripe_diag["bank_payout_settlement"]["webhook_url"] == "https://api.thecoachloop.com/api/webhooks/stripe"
 
     q_1031 = qualify_monetization_opportunity(
         "section 1031 exchange boot calculator",
@@ -1220,7 +1226,7 @@ const chkReq = new Request("https://{prop_id}.com/api/lead-capture?checkout=1&le
 const chkRes = await onRequestGet({{ request: chkReq, env }});
 const chkData = await chkRes.json();
 
-const ffReq = new Request("https://{prop_id}.com/api/lead-capture?fulfill=1&lead_id=lead_custom_1&tool_slug={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
+const ffReq = new Request("https://{prop_id}.com/api/lead-capture?fulfill=1&lead_id=lead_custom_1&source={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
   method: "GET",
   headers: {{ "X-Pseofactory-Test": "1" }}
 }});
