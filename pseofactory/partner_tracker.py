@@ -3532,8 +3532,13 @@ class PartnerTrackingEngine:
         dashboard = self.sync_and_evaluate(force_mail_poll=eff_force_poll)
         messages = self.email_engine.sync_all(force=False)
         classifications = self.email_engine.classify_partner_emails(messages)
+        new_approval_classifications = [
+            c for c in classifications
+            if c.partner_key not in self.hub.get_direct_contract_upgrades(c.property_id)
+            and getattr(AFFILIATE_REGISTRY.get(c.partner_key), "status", "") != "live"
+        ]
         promotion_report = self.auto_promote_approved_links(
-            classifications,
+            new_approval_classifications,
             persist=bool(persist and not is_pytest),
         )
 

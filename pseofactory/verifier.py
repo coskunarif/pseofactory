@@ -1571,7 +1571,6 @@ class MasterSEOVerifier:
             and self.dist_dir.is_dir()
             and (self.dist_dir / "index.html").is_file()
             and (self.dist_dir / "tools" / "index.html").is_file()
-            and not (self.dist_dir / "media-kit.json").is_file()
         ):
             try:
                 idx_raw = (self.dist_dir / "index.html").read_text(encoding="utf-8", errors="ignore")

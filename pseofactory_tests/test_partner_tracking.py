@@ -2408,10 +2408,22 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
                 f"<!DOCTYPE html><html><head></head><body>{gp}</body></html>",
                 encoding="utf-8",
             )
+        # Seed >105 legacy redirect lines so governance redirects must be prioritized at top of _redirects
+        (d_dir / "_redirects").write_text(
+            "\n".join(f"/legacy-route-{i}  /tools/  301" for i in range(110)) + "\n",
+            encoding="utf-8",
+        )
         updated_prereqs = RetroReflectionEngine.sync_tenant_publisher_prerequisites(d_dir, prop_id)
         assert "index.html" in updated_prereqs
         assert "_redirects" in updated_prereqs
         assert "media-kit.json" in updated_prereqs
+        red_top_lines = (d_dir / "_redirects").read_text(encoding="utf-8").splitlines()[:6]
+        if prop_id == "profithelm":
+            assert any(l.startswith("/methodology  /about/") for l in red_top_lines)
+            assert any(l.startswith("/disclaimers  /privacy/") for l in red_top_lines)
+        else:
+            assert any(l.startswith("/about  /methodology/") for l in red_top_lines)
+            assert any(l.startswith("/privacy  /disclaimers/") for l in red_top_lines)
 
     tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
     sync_rep = tracker.run_autonomous_partner_lifecycle_sync(

@@ -9057,17 +9057,11 @@ class RetroReflectionEngine:
             except Exception:
                 pass
 
-        # 2. Governance redirect parity in dist/_redirects
+        # 2. Governance redirect parity in dist/_redirects (placed at top of file within Cloudflare Pages 100-rule limit)
         redirects_file = d / "_redirects"
         if redirects_file.is_file() or ((d / "index.html").is_file() and (d / "tools" / "index.html").is_file()):
             try:
                 orig_red = redirects_file.read_text(encoding="utf-8") if redirects_file.is_file() else ""
-                existing_sources = set()
-                for line in orig_red.splitlines():
-                    parts = line.strip().split()
-                    if len(parts) >= 2 and parts[0].startswith("/"):
-                        existing_sources.add(parts[0])
-
                 desired_rules: List[Tuple[str, str]] = []
                 if is_prexvo:
                     if (d / "methodology" / "index.html").is_file() and not (d / "about" / "index.html").is_file():
@@ -9093,15 +9087,20 @@ class RetroReflectionEngine:
                             ("/terms/", "/privacy/"),
                         ])
 
-                appended_rules = [
-                    f"{src}  {dst}  301"
-                    for src, dst in desired_rules
-                    if src not in existing_sources
-                ]
-                if appended_rules:
-                    new_red = orig_red.rstrip() + ("\n" if orig_red.strip() else "") + "\n".join(appended_rules) + "\n"
-                    redirects_file.write_text(new_red, encoding="utf-8")
-                    updated_files.append("_redirects")
+                if desired_rules:
+                    desired_src_set = {src for src, _ in desired_rules}
+                    top_lines = [f"{src}  {dst}  301" for src, dst in desired_rules]
+                    remaining_lines = []
+                    for line in orig_red.splitlines():
+                        parts = line.strip().split()
+                        if len(parts) >= 2 and parts[0] in desired_src_set:
+                            continue
+                        if line.strip():
+                            remaining_lines.append(line)
+                    new_red = "\n".join(top_lines + remaining_lines) + "\n"
+                    if new_red != orig_red:
+                        redirects_file.write_text(new_red, encoding="utf-8")
+                        updated_files.append("_redirects")
             except Exception:
                 pass
 
