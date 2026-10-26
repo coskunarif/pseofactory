@@ -2022,3 +2022,90 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
     assert "ASC 842" in equip_spec["quick_answer"]
 
 
+def test_mid_rebuild_dom_parity_git_archive_fallback_and_aborted_run_manifest_synthesis(tmp_path):
+    """
+    Verifies:
+    1. PartnerTrackingEngine.audit_readiness_and_vault_parity() falls back to git archive HEAD:dist
+       when a concurrent tenant build_all() temporarily overwrites dist/ before overlay re-injection.
+    2. reconcile_workspace_tracking_state() synthesizes a reconciled release_manifest.json when a
+       run directory terminated at Stage 5 (ci_failure_incident.json) or Stage 7 (verification_proof.txt)
+       without writing a manifest.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import subprocess
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.gitops import reconcile_workspace_tracking_state
+    from pseofactory.partner_tracker import EmailIngestionEngine, PartnerTrackingEngine
+
+    # 1. Create a git repo whose committed HEAD dist/ has >= 671 network-tracked /r/ links,
+    #    then overwrite the working-tree dist/ with an incomplete mid-rebuild page (only 5 /r/ links).
+    ph_repo = tmp_path / "profithelm-platform"
+    ph_dist = ph_repo / "dist"
+    ph_dist.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(ph_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(ph_repo), "config", "user.email", "test@profithelm.com"], check=True)
+    subprocess.run(["git", "-C", str(ph_repo), "config", "user.name", "Test Runner"], check=True)
+
+    full_links_html = "<html><body>" + "".join(
+        '<a href="/r/mercury">Mercury</a>' for _ in range(700)
+    ) + "</body></html>"
+    (ph_dist / "index.html").write_text(full_links_html, encoding="utf-8")
+    subprocess.run(["git", "-C", str(ph_repo), "add", "-f", "dist/index.html"], check=True)
+    subprocess.run(["git", "-C", str(ph_repo), "commit", "-m", "chore: full compiled dist"], check=True, capture_output=True)
+
+    # Simulate mid-rebuild working tree with only 10 links (< 671 threshold)
+    (ph_dist / "index.html").write_text(
+        "<html><body>" + "".join('<a href="/r/mercury">Mercury</a>' for _ in range(10)) + "</body></html>",
+        encoding="utf-8",
+    )
+
+    px_dist = tmp_path / "prexvo" / "dist"
+    px_dist.mkdir(parents=True, exist_ok=True)
+    (px_dist / "index.html").write_text(
+        "<html><body>" + "".join('<a href="/r/sofi">SoFi</a>' for _ in range(80)) + "</body></html>",
+        encoding="utf-8",
+    )
+
+    tracker = PartnerTrackingEngine(
+        email_engine=EmailIngestionEngine(
+            cache_path=str(tmp_path / "mail_cache.json"),
+            state_path=str(tmp_path / "mail_state.json"),
+        ),
+        action_bus=HumanActionBus(bus_path=str(tmp_path / "bus.json")),
+    )
+    audit = tracker.audit_readiness_and_vault_parity(
+        profithelm_dist_dir=str(ph_dist),
+        prexvo_dist_dir=str(px_dist),
+    )
+    assert audit["properties"]["profithelm"]["compiled_dom_parity"]["total_outbound_r_links"] == 700
+    assert audit["properties"]["prexvo"]["compiled_dom_parity"]["total_outbound_r_links"] == 80
+
+    # 2. Verify reconcile_workspace_tracking_state synthesizes release_manifest.json for aborted runs
+    runs_dir = tmp_path / "runs"
+    aborted_ci_dir = runs_dir / "monetization-e2e-repair"
+    aborted_ci_dir.mkdir(parents=True, exist_ok=True)
+    (aborted_ci_dir / "ci_failure_incident.json").write_text(
+        json.dumps(
+            {
+                "run_id": "monetization-e2e-repair",
+                "project": "/home/ubuntuadmin/projects/pseofactory",
+                "failed_sha": "598b68b",
+                "status": "CI_FAILURE",
+            }
+        ),
+        encoding="utf-8",
+    )
+    rec = reconcile_workspace_tracking_state(
+        runs_dir=runs_dir,
+        queues_dir=tmp_path / "queues",
+        ledger_path=tmp_path / "ledger.json",
+        repo_heads={"pseofactory": "acbe3bb"},
+    )
+    assert rec["status"] == "PASS"
+    assert (aborted_ci_dir / "release_manifest.json").is_file()
+    synth_man = json.loads((aborted_ci_dir / "release_manifest.json").read_text(encoding="utf-8"))
+    assert synth_man["status"] == "RECONCILED_BY_SUBSEQUENT_RELEASE"
+    assert synth_man["reconciled_by_head_sha"] == "acbe3bb"
+
+
+

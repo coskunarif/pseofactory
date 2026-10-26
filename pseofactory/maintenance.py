@@ -1150,6 +1150,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
                 env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
                 res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
@@ -9513,7 +9514,10 @@ class RetroReflectionEngine:
                     str(d.parent).startswith("/home/ubuntuadmin/projects/")
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
-                if is_prod_repo:
+                if is_prod_repo and (
+                    bool(retrofitted_paths)
+                    or not (agy_dir / "gsc_affiliate_placement_ledger.json").is_file()
+                ):
                     run_gsc_affiliate_placement_feedback_pass(
                         property_id=property_id,
                         dist_dir=d,
@@ -9634,11 +9638,17 @@ class RetroReflectionEngine:
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
                 if is_real_tenant_repo and synd_dir.is_dir():
-                    export_all_syndication_files(
-                        output_dir=synd_dir,
-                        dry_run=False,
-                        property_id=property_id,
+                    needs_synd_export = bool(retrofitted_paths) or any(
+                        not (synd_dir / td.name / "syndication_pack.json").is_file()
+                        for td in tools_dir.iterdir()
+                        if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file()
                     )
+                    if needs_synd_export:
+                        export_all_syndication_files(
+                            output_dir=synd_dir,
+                            dry_run=False,
+                            property_id=property_id,
+                        )
             except Exception:
                 pass
 
@@ -9675,13 +9685,13 @@ class RetroReflectionEngine:
             try:
                 q_file = agy_dir / "indexing_quarantine_ledger.json"
                 if q_file.is_file() and "PYTEST_CURRENT_TEST" not in os.environ:
-                    from pseofactory.indexing.preflight import IndexingPreflightEngine
-                    dom_q = "prexvo.com" if property_id.lower() == "prexvo" else "profithelm.com"
-                    pf_eng = IndexingPreflightEngine(property_id=property_id, domain=dom_q, dist_dir=d)
-                    pf_rep = pf_eng.inspect_dist(d)
-                    eligible_set = {u.rstrip("/") + "/" for u in pf_rep.push_eligible_urls}
                     raw_q = json.loads(q_file.read_text(encoding="utf-8"))
                     if isinstance(raw_q, list) and raw_q:
+                        from pseofactory.indexing.preflight import IndexingPreflightEngine
+                        dom_q = "prexvo.com" if property_id.lower() == "prexvo" else "profithelm.com"
+                        pf_eng = IndexingPreflightEngine(property_id=property_id, domain=dom_q, dist_dir=d)
+                        pf_rep = pf_eng.inspect_dist(d)
+                        eligible_set = {u.rstrip("/") + "/" for u in pf_rep.push_eligible_urls}
                         kept_q = [
                             item
                             for item in raw_q
@@ -9704,54 +9714,71 @@ class RetroReflectionEngine:
                     )
                     qrf_file = agy_dir / "quantitative_revenue_forecast.json"
                     had_qrf = qrf_file.is_file()
-                    compile_quantitative_revenue_forecast(
-                        property_id=property_id,
-                        repo_root=d.parent,
-                        dist_dir=d,
-                        multidim_telemetry=gsc_lifecycle_data or None,
-                        persist=True,
-                    )
+                    if not had_qrf or bool(retrofitted_paths):
+                        compile_quantitative_revenue_forecast(
+                            property_id=property_id,
+                            repo_root=d.parent,
+                            dist_dir=d,
+                            multidim_telemetry=gsc_lifecycle_data or None,
+                            persist=True,
+                        )
                     if not had_qrf and qrf_file.is_file() and ".agy/quantitative_revenue_forecast.json" not in retrofitted_paths:
                         retrofitted_paths.append(".agy/quantitative_revenue_forecast.json")
 
                     port_file = agy_dir / "content_portfolio_decisions.json"
-                    prev_port_txt = port_file.read_text(encoding="utf-8") if port_file.is_file() else ""
-                    port_rep = evaluate_content_portfolio_decisions(
-                        property_id=property_id,
-                        repo_root=d.parent,
-                        dist_dir=d,
-                        persist=True,
-                    )
-                    ns_rep = evaluate_north_star_targets(
-                        property_id=property_id,
-                        repo_root=d.parent,
-                        dist_dir=d,
-                        portfolio_report=port_rep,
-                        persist=True,
-                    )
-                    if port_file.is_file() and port_file.read_text(encoding="utf-8") != prev_port_txt:
-                        for p_rel in (
-                            ".agy/content_portfolio_decisions.json",
-                            ".agy/prune_noindex_queue.json",
-                            ".agy/north_star_scorecard.json",
-                        ):
-                            if p_rel not in retrofitted_paths:
-                                retrofitted_paths.append(p_rel)
-                        for wf_fname in ("seo_growth_workflows_summary.json", "seo_growth_workflows_report.json"):
-                            wf_f = agy_dir / wf_fname
-                            if wf_f.is_file():
-                                try:
-                                    wf_obj = json.loads(wf_f.read_text(encoding="utf-8"))
-                                    if isinstance(wf_obj, dict):
-                                        if "north_star_scorecard" in wf_obj and isinstance(wf_obj["north_star_scorecard"], dict):
-                                            wf_obj["north_star_scorecard"]["pillars"] = ns_rep["pillars"]
-                                        if "workflows" in wf_obj and isinstance(wf_obj["workflows"], dict):
-                                            w6 = wf_obj["workflows"].get("6_content_portfolio_decisions")
-                                            if isinstance(w6, dict):
-                                                w6["action_breakdown"] = port_rep["action_breakdown"]
-                                        wf_f.write_text(json.dumps(wf_obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-                                except Exception:
-                                    pass
+                    ns_file = agy_dir / "north_star_scorecard.json"
+                    if not port_file.is_file() or not ns_file.is_file() or bool(retrofitted_paths):
+                        prev_port_obj = {}
+                        if port_file.is_file():
+                            try:
+                                prev_port_obj = {
+                                    k: v
+                                    for k, v in json.loads(port_file.read_text(encoding="utf-8")).items()
+                                    if k not in ("evaluated_at", "timestamp", "generated_at")
+                                }
+                            except Exception:
+                                prev_port_obj = {}
+                        port_rep = evaluate_content_portfolio_decisions(
+                            property_id=property_id,
+                            repo_root=d.parent,
+                            dist_dir=d,
+                            persist=True,
+                        )
+                        ns_rep = evaluate_north_star_targets(
+                            property_id=property_id,
+                            repo_root=d.parent,
+                            dist_dir=d,
+                            portfolio_report=port_rep,
+                            persist=True,
+                        )
+                        cur_port_obj = {
+                            k: v
+                            for k, v in (port_rep if isinstance(port_rep, dict) else {}).items()
+                            if k not in ("evaluated_at", "timestamp", "generated_at")
+                        }
+                        if cur_port_obj != prev_port_obj:
+                            for p_rel in (
+                                ".agy/content_portfolio_decisions.json",
+                                ".agy/prune_noindex_queue.json",
+                                ".agy/north_star_scorecard.json",
+                            ):
+                                if p_rel not in retrofitted_paths:
+                                    retrofitted_paths.append(p_rel)
+                            for wf_fname in ("seo_growth_workflows_summary.json", "seo_growth_workflows_report.json"):
+                                wf_f = agy_dir / wf_fname
+                                if wf_f.is_file():
+                                    try:
+                                        wf_obj = json.loads(wf_f.read_text(encoding="utf-8"))
+                                        if isinstance(wf_obj, dict):
+                                            if "north_star_scorecard" in wf_obj and isinstance(wf_obj["north_star_scorecard"], dict):
+                                                wf_obj["north_star_scorecard"]["pillars"] = ns_rep["pillars"]
+                                            if "workflows" in wf_obj and isinstance(wf_obj["workflows"], dict):
+                                                w6 = wf_obj["workflows"].get("6_content_portfolio_decisions")
+                                                if isinstance(w6, dict):
+                                                    w6["action_breakdown"] = port_rep["action_breakdown"]
+                                            wf_f.write_text(json.dumps(wf_obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                                    except Exception:
+                                        pass
             except Exception:
                 pass
 
@@ -10587,10 +10614,44 @@ def reflect_and_recompile_all_assets(
         except Exception:
             callout_mismatch_count = 0
 
+        pre_retrofitted_count = 0
+        if (
+            isinstance(adapter, SubprocessPropertyAdapter)
+            and (adapter.dist_dir / "index.html").is_file()
+            and not is_foreign_pytest
+            and not topical_reconciliation_changed
+            and (stale_mechanic_count > 0 or callout_mismatch_count > 0)
+        ):
+            try:
+                pre_retro_res = RetroReflectionEngine.retrofit_estate(
+                    dist_dir=adapter.dist_dir,
+                    property_id=adapter.property_id,
+                    canonical_base=adapter.canonical_base,
+                )
+                pre_retrofitted_count = int(pre_retro_res.get("pages_retrofitted", 0))
+                if callout_mismatch_count > 0:
+                    from pseofactory.affiliates import normalize_html_callout_message_match
+                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
+                        if html_f.name.startswith("."):
+                            continue
+                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
+                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
+                        if norm_c != raw_c:
+                            html_f.write_text(norm_c, encoding="utf-8")
+                            pre_retrofitted_count += 1
+                evaluator._audit_cache.clear()
+                evaluator._fingerprint_cache.clear()
+                try:
+                    Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         report = evaluator.audit_all(adapter)
         drifted_records = list(report.drifted_assets)
         recompiled_count = 0
-        retrofitted_count = 0
+        retrofitted_count = pre_retrofitted_count
         should_run_full_build = False
 
         has_structural_drift = any(
@@ -10724,15 +10785,18 @@ def reflect_and_recompile_all_assets(
                 except Exception:
                     pass
 
-            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, drift, or forced reflection is requested
-            if should_run_full_build or estate_needed_mutation or bool(drifted_records) or force:
+            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess reflection is requested
+            if should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter):
                 try:
                     retro_res = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
                         property_id=adapter.property_id,
                         canonical_base=adapter.canonical_base,
                     )
-                    retrofitted_count = int(retro_res.get("pages_retrofitted", 0))
+                    retrofitted_count = max(
+                        retrofitted_count,
+                        pre_retrofitted_count + int(retro_res.get("pages_retrofitted", 0)),
+                    )
                     if recompiled_count == 0:
                         recompiled_count = max(retrofitted_count, len(drifted_records), 1)
                 except Exception as r_err:
@@ -10740,7 +10804,7 @@ def reflect_and_recompile_all_assets(
                         print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
             # Final pass to ensure all HTML pages in dist_dir pass callout destination message match
-            if should_run_full_build or estate_needed_mutation or bool(drifted_records) or force or retrofitted_count > 0:
+            if should_run_full_build or estate_needed_mutation or retrofitted_count > 0 or not isinstance(adapter, SubprocessPropertyAdapter):
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     for html_f in sorted(adapter.dist_dir.rglob("*.html")):
@@ -10807,13 +10871,13 @@ def reflect_and_recompile_all_assets(
                         if not f.name.startswith(".")
                     )
                 ) if adapter.dist_dir.is_dir() else ()
-                if dist_html_sig_after != dist_html_sig_before or should_run_full_build or estate_needed_mutation:
+                if dist_html_sig_after != dist_html_sig_before:
                     ds_retro = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
                         property_id=adapter.property_id,
                         canonical_base=adapter.canonical_base,
                     )
-                    retrofitted_count += int(ds_retro.get("retrofitted_count", 0))
+                    retrofitted_count += int(ds_retro.get("pages_retrofitted", ds_retro.get("retrofitted_count", 0)))
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     for html_f in sorted(adapter.dist_dir.rglob("*.html")):
                         if html_f.name.startswith("."):

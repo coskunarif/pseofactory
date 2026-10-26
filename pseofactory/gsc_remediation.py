@@ -6658,9 +6658,16 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)(.*?)(</aside>)',
             re.DOTALL | re.IGNORECASE,
         )
-        if qa_pattern.search(html):
+        m_qa = qa_pattern.search(html)
+        if m_qa:
+            existing_gsc_attrs = " ".join(
+                re.findall(r'data-gsc-[a-z0-9-]+="[^"]*"', m_qa.group(2))
+            )
+            gsc_prefix = f" {existing_gsc_attrs}" if existing_gsc_attrs else ""
             html = qa_pattern.sub(
-                r'\g<1>\n  <div class="quick-answer-body" data-ai-citation-block="true" data-prominence="first-10-percent"><p>'
+                r'\g<1>\n  <div class="quick-answer-body"'
+                + gsc_prefix
+                + r' data-ai-citation-block="true" data-prominence="first-10-percent"><p>'
                 + escaped_qa
                 + r"</p></div>\n\g<3>",
                 html,

@@ -4463,10 +4463,23 @@ class MasterSEOVerifier:
         disk_cache_path = Path("/tmp/pseofactory_seo_audit_cache_v1.json")
         try:
             file_sigs = []
+            content_sigs = []
+            resolved_target_str = str(target.resolve())
+            allow_disk_cache = (
+                getattr(self.is_calculation_leaf, "__name__", None)
+                in (None, "_profithelm_calculation_leaf", "_prexvo_calculation_leaf")
+                and "/tmp/" not in resolved_target_str
+                and "/pytest-" not in resolved_target_str
+            )
             for fp in sorted(target.rglob("*")):
                 if fp.is_file():
                     st = fp.stat()
-                    file_sigs.append((fp.relative_to(target).as_posix(), st.st_mtime_ns, st.st_size))
+                    rel_fp = fp.relative_to(target).as_posix()
+                    file_sigs.append((rel_fp, st.st_mtime_ns, st.st_size))
+                    if allow_disk_cache:
+                        content_sigs.append(
+                            (rel_fp, st.st_size, hashlib.sha256(fp.read_bytes()).hexdigest()[:12])
+                        )
             parent_entries = tuple(sorted(p.name for p in target.parent.iterdir())) if target.parent and target.parent.exists() else ()
             pkg_root = Path(__file__).resolve().parent
             engine_sigs = []
@@ -4474,7 +4487,6 @@ class MasterSEOVerifier:
                 efp = pkg_root / rel_eng
                 if efp.is_file():
                     engine_sigs.append((rel_eng, hashlib.sha256(efp.read_bytes()).hexdigest()[:16]))
-            resolved_target_str = str(target.resolve())
             cache_sig = (
                 resolved_target_str,
                 self.domain,
@@ -4485,12 +4497,24 @@ class MasterSEOVerifier:
                 len(self.tools),
                 tuple(self.required_endpoints),
                 enforce_relevance,
+                getattr(self.is_calculation_leaf, "__name__", None),
                 parent_entries,
                 tuple(file_sigs),
                 tuple(engine_sigs),
             )
-            if self.is_calculation_leaf is None and "/tmp/" not in resolved_target_str and "/pytest-" not in resolved_target_str:
-                disk_cache_key = hashlib.sha256(repr(cache_sig).encode("utf-8")).hexdigest()
+            if allow_disk_cache:
+                disk_sig = (
+                    self.domain,
+                    self.canonical_base,
+                    self.brand_name,
+                    self.min_manifests,
+                    self.strict_robots,
+                    tuple(self.required_endpoints),
+                    enforce_relevance,
+                    tuple(content_sigs),
+                    tuple(engine_sigs),
+                )
+                disk_cache_key = hashlib.sha256(repr(disk_sig).encode("utf-8")).hexdigest()
                 if cache_sig not in MasterSEOVerifier._GLOBAL_AUDIT_CACHE and disk_cache_path.is_file():
                     try:
                         disk_store = json.loads(disk_cache_path.read_text(encoding="utf-8"))

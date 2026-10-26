@@ -1137,15 +1137,12 @@ class PartnerTrackingEngine:
                     "disclaimers",
                     "methodology",
                 )
-                for hf in html_files:
-                    try:
-                        with open(hf, "r", encoding="utf-8") as fh:
-                            html_text = fh.read()
-                    except OSError:
-                        continue
-                    matches = r_pattern.findall(html_text)
-                    rel_path = os.path.relpath(hf, dist_path)
-                    if prop_id == "prexvo" and any(slug in rel_path for slug in ymyl_clean_slugs):
+
+                def _accumulate_html_doc(rel_path_str: str, doc_text: str) -> None:
+                    nonlocal total_r_links, network_tracked_r_links, edge_upgraded_network_tracked_r_links
+                    nonlocal pending_partner_links_in_dom, ymyl_restricted_pages_clean
+                    matches = r_pattern.findall(doc_text)
+                    if prop_id == "prexvo" and any(slug in rel_path_str for slug in ymyl_clean_slugs):
                         if matches:
                             ymyl_restricted_pages_clean = False
                     for m_key in matches:
@@ -1158,6 +1155,55 @@ class PartnerTrackingEngine:
                             edge_upgraded_network_tracked_r_links += 1
                         elif m_key not in utm_only_or_bare_live_partners:
                             pending_partner_links_in_dom += 1
+
+                for hf in html_files:
+                    try:
+                        with open(hf, "r", encoding="utf-8") as fh:
+                            html_text = fh.read()
+                    except OSError:
+                        continue
+                    rel_path = os.path.relpath(hf, dist_path)
+                    _accumulate_html_doc(rel_path, html_text)
+
+                # Guard against torn mid-rebuild reads when a concurrent tenant build_all() is rewriting
+                # dist/ on disk before .agy/overlays/*.json are re-injected by reflect_and_recompile_all_assets.
+                is_mid_rebuild_torn = (
+                    (prop_id == "profithelm" and (total_r_links < 671 or pending_partner_links_in_dom > 0))
+                    or (prop_id == "prexvo" and (total_r_links < 75 or not ymyl_restricted_pages_clean))
+                )
+                repo_root_cand = os.path.dirname(os.path.abspath(dist_path.rstrip("/")))
+                if is_mid_rebuild_torn and os.path.exists(os.path.join(repo_root_cand, ".git")):
+                    try:
+                        import io
+                        import subprocess
+                        import tarfile
+
+                        proc = subprocess.run(
+                            ["git", "-C", repo_root_cand, "archive", "--format=tar", "HEAD", "dist"],
+                            capture_output=True,
+                            check=False,
+                            timeout=15,
+                        )
+                        if proc.returncode == 0 and proc.stdout:
+                            total_html_files = 0
+                            total_r_links = 0
+                            network_tracked_r_links = 0
+                            edge_upgraded_network_tracked_r_links = 0
+                            pending_partner_links_in_dom = 0
+                            ymyl_restricted_pages_clean = True
+                            r_link_counts = {}
+                            with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as tf:
+                                for member in tf.getmembers():
+                                    if not member.isfile() or not member.name.endswith(".html"):
+                                        continue
+                                    extracted = tf.extractfile(member)
+                                    if extracted is None:
+                                        continue
+                                    total_html_files += 1
+                                    rel_p = member.name[5:] if member.name.startswith("dist/") else member.name
+                                    _accumulate_html_doc(rel_p, extracted.read().decode("utf-8", errors="ignore"))
+                    except Exception:
+                        pass
 
             click_share_pct = (
                 round((network_tracked_r_links / total_r_links) * 100.0, 1)

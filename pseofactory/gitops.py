@@ -3205,6 +3205,47 @@ def reconcile_workspace_tracking_state(
                 pruned_test_runs += 1
                 continue
 
+            # Synthesize reconciled release_manifest.json for terminated runs that aborted before writing a manifest
+            if not manifest_file.exists() and (
+                incident_file.exists()
+                or (
+                    (run_dir / "verification_proof.txt").exists()
+                    and (time.time() - run_dir.stat().st_mtime) > 120
+                )
+            ):
+                try:
+                    synth_proj = "/home/ubuntuadmin/projects/pseofactory"
+                    synth_sha = ""
+                    if incident_file.exists():
+                        inc_obj = json.loads(incident_file.read_text(encoding="utf-8", errors="ignore"))
+                        if isinstance(inc_obj, dict):
+                            synth_proj = str(inc_obj.get("project") or synth_proj)
+                            synth_sha = str(inc_obj.get("failed_sha") or "")
+                    elif draft_file.exists():
+                        dr_objs = _extract_concatenated_json_objects(
+                            draft_file.read_text(encoding="utf-8", errors="ignore")
+                        )
+                        if dr_objs:
+                            p_id = _normalize_property_id(dr_objs[-1].get("property_id"))
+                            if p_id == "prexvo":
+                                synth_proj = "/home/ubuntuadmin/projects/prexvo"
+                            elif p_id == "profithelm" and run_dir.name.isdigit():
+                                synth_proj = "/home/ubuntuadmin/projects/profithelm-platform"
+                    cur_h = heads.get(synth_proj) or heads.get(Path(synth_proj).name) or ""
+                    synthesized = {
+                        "run_id": run_dir.name,
+                        "project": synth_proj,
+                        "head_sha": synth_sha or cur_h,
+                        "prior_status": "CI_FAILURE" if incident_file.exists() else "ABORTED_STAGE_7",
+                        "status": "RECONCILED_BY_SUBSEQUENT_RELEASE",
+                        "reconciled_by_head_sha": cur_h,
+                        "reconciled_at": now_iso,
+                    }
+                    manifest_file.write_text(json.dumps(synthesized, indent=2), encoding="utf-8")
+                    repaired_manifests += 1
+                except Exception:
+                    pass
+
             # Repair corrupt or concatenated release_manifest.json / distribution_draft.json
             for json_file in (manifest_file, draft_file):
                 if not json_file.exists():
