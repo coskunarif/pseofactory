@@ -6005,7 +6005,11 @@ def _normalize_page_structure_and_geo_parity(
         re.IGNORECASE,
     )
     if meth_m and ("<ul" not in meth_m.group(1) or "/tools/" not in meth_m.group(1)):
-        base_dom = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+        base_dom = (
+            "https://prexvo.com"
+            if property_id.lower() == "prexvo"
+            else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+        )
         if canonical_url and "/tools/" in canonical_url:
             base_dom = canonical_url.split("/tools/")[0].rstrip("/")
         if property_id.lower() == "prexvo":
@@ -6013,6 +6017,12 @@ def _normalize_page_structure_and_geo_parity(
                 ("student-loan-repayment-calculator", "Title IV Repayment Calculator"),
                 ("rap-vs-ibr-calculator", "RAP vs IBR Comparison Model"),
                 ("pslf-buyback-calculator", "PSLF Buyback Settlement Model"),
+            ]
+        elif property_id.lower() == "gainhelm":
+            m_peers = [
+                ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC ROI Calculator"),
+                ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Cost Calculator"),
+                ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
             ]
         else:
             m_peers = [
@@ -9469,7 +9479,7 @@ class RetroReflectionEngine:
             try:
                 raw_h = h_file.read_text(encoding="utf-8", errors="ignore")
                 new_h = raw_h
-                if is_prexvo and '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">' in new_h:
+                if (is_prexvo or is_gainhelm) and '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">' in new_h:
                     new_h = new_h.replace(
                         '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">',
                         f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',

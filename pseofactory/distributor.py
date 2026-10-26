@@ -1215,18 +1215,33 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
 
     tool = _resolve_tool(tool_or_slug)
     slug = str(tool.get("slug", "financial-calculator"))
-    norm_prop = "prexvo" if ("prexvo" in str(property_id).lower() or slug in PREXVO_TOOL_SCENARIOS) else "profithelm"
-    base_url = "https://prexvo.com" if norm_prop == "prexvo" else POST_URL_BASE
 
     ext_spec: Dict[str, Any] = {}
+    gainhelm_slugs: set[str] = set()
     try:
-        from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS, PROFITHELM_EXTENDED_TOOLS
-        for item in list(PROFITHELM_EXTENDED_TOOLS) + list(PREXVO_EXTENDED_TOOLS):
+        from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS, PROFITHELM_EXTENDED_TOOLS, GAINHELM_DEFAULT_TOOLS
+        gainhelm_slugs = {str(t.get("slug", "")) for t in GAINHELM_DEFAULT_TOOLS if isinstance(t, dict)}
+        for item in list(PROFITHELM_EXTENDED_TOOLS) + list(PREXVO_EXTENDED_TOOLS) + list(GAINHELM_DEFAULT_TOOLS):
             if isinstance(item, dict) and item.get("slug") == slug:
                 ext_spec = item
                 break
     except Exception:
         ext_spec = {}
+
+    norm_prop = (
+        "prexvo"
+        if ("prexvo" in str(property_id).lower() or slug in PREXVO_TOOL_SCENARIOS)
+        else (
+            "gainhelm"
+            if ("gainhelm" in str(property_id).lower() or slug in gainhelm_slugs)
+            else "profithelm"
+        )
+    )
+    base_url = (
+        "https://prexvo.com"
+        if norm_prop == "prexvo"
+        else ("https://gainhelm.com" if norm_prop == "gainhelm" else POST_URL_BASE)
+    )
 
     curated = CURATED_TOOL_CALCULATION_PROOFS.get(slug)
     if curated:
@@ -1242,16 +1257,16 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         inputs = {str(k): float(v) for k, v in tool["inputs"].items()}
         published_output = float(tool["published_output"])
         sample_calc = str(tool.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
-        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else "section_179_limit_2026"
-        claim_val = 2.25 if norm_prop == "prexvo" else 2560000
+        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else ("sprs_max_score" if norm_prop == "gainhelm" else "section_179_limit_2026")
+        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else 2560000)
         q_params = dict(inputs)
     elif ext_spec.get("formula") and isinstance(ext_spec.get("inputs"), dict) and ext_spec.get("published_output") is not None:
         formula = str(ext_spec["formula"])
         inputs = {str(k): float(v) for k, v in ext_spec["inputs"].items()}
         published_output = float(ext_spec["published_output"])
         sample_calc = str(ext_spec.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
-        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else "section_179_limit_2026"
-        claim_val = 2.25 if norm_prop == "prexvo" else 2560000
+        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else ("sprs_max_score" if norm_prop == "gainhelm" else "section_179_limit_2026")
+        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else 2560000)
         q_params = dict(inputs)
     elif norm_prop == "prexvo":
         formula = "round(monthly_interest - interest_subsidy, 2)"
@@ -1261,6 +1276,14 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         claim_key = "rap_fpl_multiplier"
         claim_val = 2.25
         q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1}
+    elif norm_prop == "gainhelm":
+        formula = "round(cpa_fee + grc_cost + (eng_hours * hourly_rate), 2)"
+        inputs = {"cpa_fee": 28000.0, "grc_cost": 12000.0, "eng_hours": 120.0, "hourly_rate": 95.0}
+        published_output = 51400.0
+        sample_calc = "$28,000 CPA attestation fee + $12,000 GRC automation + (120 hrs * $95/hr BLS SOC 15-1212 rate) = $51,400 total Year-1 audit cost"
+        claim_key = "sprs_max_score"
+        claim_val = 110
+        q_params = {"headcount": 45, "grc_tier": 1, "audit_type": 2}
     else:
         domain = _classify_tool_domain(slug)
         if domain == "capex":
@@ -1295,6 +1318,9 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
     if norm_prop == "prexvo":
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "Title IV Higher Education Act (34 CFR Part 685)")
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "HHS Poverty Guidelines and Department of Education Federal Student Aid")
+    elif norm_prop == "gainhelm":
+        stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "AICPA SSAE 18 (AT-C Section 205), 32 CFR Part 170 (CMMC 2.0), and NIST SP 800-171 Rev 2")
+        econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "BLS OEWS SOC 15-1212 Information Security Analysts and IBM Cost of a Data Breach Report")
     else:
         cites = get_dual_dataset_citations(slug)
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or cites["statutory_source"])
@@ -5369,7 +5395,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     Conforms strictly to zero forbidden dashes, zero personal attribution, and zero conversational filler.
     """
     from pseofactory.contracts import assert_youtube_transcript
-    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS
+    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
@@ -5379,14 +5405,19 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
     query = tool.get("primary_keyword", short_title.lower())
 
+    is_prexvo = False
+    is_gainhelm = False
     if str(property_id).lower() == "prexvo":
         is_prexvo = True
+    elif str(property_id).lower() == "gainhelm":
+        is_gainhelm = True
     elif str(property_id).lower() == "profithelm":
         is_prexvo = False
     else:
         is_prexvo = any(t.get("slug") == slug for t in PREXVO_DEFAULT_TOOLS)
+        is_gainhelm = any(t.get("slug") == slug for t in GAINHELM_DEFAULT_TOOLS)
 
-    effective_prop = "prexvo" if is_prexvo else "profithelm"
+    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
     proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
     out_fmt = proof["published_output_formatted"]
     param_url = proof["parameterized_url"]
@@ -5525,12 +5556,12 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
             },
         ]
     else:
-        brand_name = "ProfitHelm"
-        canonical_base = "https://profithelm.com"
+        brand_name = "GainHelm" if is_gainhelm else "ProfitHelm"
+        canonical_base = "https://gainhelm.com" if is_gainhelm else "https://profithelm.com"
         ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
         ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Core Mathematical Modeling & Rate Calculations"
         ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Tier Scenario Forecasting & Thresholds"
-        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on ProfitHelm"
+        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on {brand_name}"
         segments = [
             {
                 "timestamp": "00:00",
@@ -5541,9 +5572,9 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "spoken_script": (
                     f"The {short_title} model calculates quantitative financial metrics pursuant to official IRC statutory codes and 26 CFR regulations. "
                     f"Deterministic calculations verify a {out_fmt} benchmark outcome across statutory marginal rate thresholds. "
-                    f"ProfitHelm delivers verified mathematical projections with sub-100ms response times and zero account registration requirements."
+                    f"{brand_name} delivers verified mathematical projections with sub-100ms response times and zero account registration requirements."
                 ),
-                "entities": ["ProfitHelm", "IRC", "26 CFR", short_title],
+                "entities": [brand_name, "IRC", "26 CFR", short_title],
             },
             {
                 "timestamp": "00:30",
@@ -5554,9 +5585,9 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "spoken_script": (
                     f"Empirical economic benchmarks from FRED series and BLS dataset indices provide foundational baseline data for quantitative calculations. "
                     f"Evaluating inflation adjustments and statutory rate variations confirms the {out_fmt} mathematical projection across filing tiers. "
-                    f"ProfitHelm models multi-tier scenario interactions to identify optimal tax and capital allocation decisions."
+                    f"{brand_name} models multi-tier scenario interactions to identify optimal tax and capital allocation decisions."
                 ),
-                "entities": ["ProfitHelm", "FRED", "BLS"],
+                "entities": [brand_name, "FRED", "BLS"],
             },
             {
                 "timestamp": "01:00",
@@ -5567,22 +5598,22 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "spoken_script": (
                     "Corporate planning standards governed by GAAP ASC 205-40 mandate deterministic verification of cash flows and going-concern liquidity. "
                     "Dynamic sensitivity testing demonstrates how shifting economic assumptions impacts total capital liabilities under federal regulations. "
-                    "ProfitHelm stress-tests financial assumptions across variable horizons to ensure robust fiscal planning."
+                    f"{brand_name} stress-tests financial assumptions across variable horizons to ensure robust fiscal planning."
                 ),
-                "entities": ["ProfitHelm", "GAAP ASC 205-40", "Scenario Analysis"],
+                "entities": [brand_name, "GAAP ASC 205-40", "Scenario Analysis"],
             },
             {
                 "timestamp": "01:30",
                 "seconds": 90,
                 "speaker": "[Narrator]",
                 "section_title": ch3,
-                "target_query": f"profithelm {short_title.lower()}",
+                "target_query": f"{brand_name.lower()} {short_title.lower()}",
                 "spoken_script": (
                     f"Deterministic mathematical engines eliminate guesswork when navigating intricate statutory provisions and financial frameworks. "
-                    f"ProfitHelm delivers transparent analytical tools with real-time recalculation and zero login barriers. "
-                    f"Access the interactive {short_title} model on ProfitHelm today to verify your quantitative projections with precision."
+                    f"{brand_name} delivers transparent analytical tools with real-time recalculation and zero login barriers. "
+                    f"Access the interactive {short_title} model on {brand_name} today to verify your quantitative projections with precision."
                 ),
-                "entities": ["ProfitHelm", short_title],
+                "entities": [brand_name, short_title],
             },
         ]
 
@@ -5655,7 +5686,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         assert_no_forbidden_dashes,
         assert_no_personal_attribution,
     )
-    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS
+    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
@@ -5666,16 +5697,21 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
     qa = tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis.")
     query = tool.get("primary_keyword", short_title.lower())
 
+    is_prexvo = False
+    is_gainhelm = False
     if str(property_id).lower() == "prexvo":
         is_prexvo = True
+    elif str(property_id).lower() == "gainhelm":
+        is_gainhelm = True
     elif str(property_id).lower() == "profithelm":
         is_prexvo = False
     else:
         is_prexvo = any(t.get("slug") == slug for t in PREXVO_DEFAULT_TOOLS)
+        is_gainhelm = any(t.get("slug") == slug for t in GAINHELM_DEFAULT_TOOLS)
 
-    effective_prop = "prexvo" if is_prexvo else "profithelm"
-    brand_name = "Prexvo" if is_prexvo else "ProfitHelm"
-    canonical_base = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
+    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    brand_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else "ProfitHelm")
+    canonical_base = "https://prexvo.com" if is_prexvo else ("https://gainhelm.com" if is_gainhelm else "https://profithelm.com")
 
     proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
     out_fmt = proof["published_output_formatted"]
@@ -5828,13 +5864,13 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             f"1:30 - {ch3}",
             "",
             "RESOURCES & INTERACTIVE TOOLS:",
-            f"Model Your Scenario Live on ProfitHelm: {desc_cta_url}",
+            f"Model Your Scenario Live on {brand_name}: {desc_cta_url}",
             f"Master Financial Tools Directory: {canonical_base}/tools/",
             "",
-            "ABOUT PROFITHELM:",
-            "ProfitHelm delivers deterministic, sub-100ms financial modeling, tax intelligence, and statutory arbitrage calculators for founders, quants, and high-income households.",
+            f"ABOUT {brand_name.upper()}:",
+            f"{brand_name} delivers deterministic, sub-100ms financial modeling, tax intelligence, and statutory arbitrage calculators for founders, quants, and high-income households.",
             "",
-            f"#{slug.replace('-', '')} #QuantitativeFinance #TaxPlanning #Fintech #ProfitHelm",
+            f"#{slug.replace('-', '')} #QuantitativeFinance #TaxPlanning #Fintech #{brand_name}",
         ]
         clean_desc = _sanitize_youtube_text(nl.join(desc_lines))
 
@@ -5844,7 +5880,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
                 "CALCULATE YOUR NUMBERS:",
                 f"Verified Proof: {sample_calc} (Output: {out_fmt}).",
                 "",
-                "Run your exact numbers in sub-100ms on ProfitHelm (free, deterministic, zero login required):",
+                f"Run your exact numbers in sub-100ms on {brand_name} (free, deterministic, zero login required):",
                 f"{pinned_cta_url}",
                 "",
                 "Statutory Basis: Computed under official IRC regulations and FRED economic benchmarks.",
@@ -5865,8 +5901,8 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             f"{query} model",
             "financial model",
             "quantitative finance",
-            "profithelm",
-            "profithelm tools",
+            brand_name.lower(),
+            f"{brand_name.lower()} tools",
         ]
         tags = _dedupe_tags(curated.get("tags") or fallback_tags)
 
@@ -5936,7 +5972,7 @@ def generate_ghost_article(tool_or_slug: Any, property_id: str = "profithelm") -
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
-    brand_name = "Prexvo" if norm_prop == "prexvo" else "ProfitHelm"
+    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else "ProfitHelm")
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:32]))
     qa = _sanitize_distribution_text(
@@ -6019,7 +6055,7 @@ def generate_exact_match_github_gist(tool_or_slug: Any, property_id: str = "prof
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
-    brand_name = "Prexvo" if norm_prop == "prexvo" else "ProfitHelm"
+    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else "ProfitHelm")
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     out_fmt = proof["published_output_formatted"]
     sample_calc = proof["sample_calculation"]
@@ -6303,6 +6339,75 @@ All calculations are 100% deterministic, grounded in federal Title IV regulation
             "files": prexvo_files,
         }
 
+    if eff_tenant == "gainhelm":
+        gainhelm_base = "https://gainhelm.com"
+        soc2_cmmc_md = """# SOC 2 Type II, CMMC 2.0 & ISO 27001 Cyber Compliance Audit Benchmarks
+
+Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024, enterprise software and defense contractors evaluate external attestation fees, continuous GRC automation licensing, and internal security engineering labor valued at the BLS SOC 15-1212 fully burdened rate ($95/hr).
+
+| Compliance Framework | Primary Statutory / Standard Authority | Baseline Audit Fee Range | Key Threshold / Rule |
+| :--- | :--- | :--- | :--- |
+| SOC 2 Type II | AICPA SSAE 18 (AT-C Sec. 205) | $24,000 to $65,000 | 6 to 12 month observation period |
+| CMMC 2.0 Level 2 | DoD 32 CFR Part 170 & DFARS 252.204-7021 | $38,000 to $85,000 | 110 NIST SP 800-171 controls (88 SPRS floor) |
+| ISO/IEC 27001:2022 | ISO/IEC 27006-1:2024 Auditor-Day Tables | $22,000 to $58,000 | Stage 1 + Stage 2 + 2 surveillance audits |
+| HIPAA / HITECH | 45 CFR 160.404 & 42 U.S.C. 1320d-5 | $141 to $2,134,831 | 4 culpability tiers + 500-record breach rule |
+"""
+        soc2_cmmc_json = {
+            "topic": "SOC 2 Type II, CMMC 2.0 and ISO 27001 Audit Cost Benchmarks",
+            "audit_year": 2026,
+            "statutory_authority": [
+                "AICPA SSAE 18 (AT-C Section 205)",
+                "DoD 32 CFR Part 170",
+                "NIST SP 800-171 Rev 2",
+                "ISO/IEC 27006-1:2024",
+                "45 CFR 160.404",
+            ],
+            "bls_soc_15_1212_hourly_rate_usd": 95.0,
+            "sprs_score_range": [-203, 110],
+            "sprs_conditional_poam_floor": 88,
+        }
+        stats_hub_gh = compile_public_benchmark_citation_hubs(tenant="gainhelm")
+        reclaim_gh = compile_broken_calculator_link_reclamation_briefs(tenant="gainhelm")
+        ai_citations_gh_md = f"""# GainHelm Machine-Readable Enterprise Cyber Compliance & Audit Knowledge Base
+
+Canonical Root: {gainhelm_base}
+Machine Knowledge Endpoint: {gainhelm_base}/llms.txt
+Full Dataset Corpus: {gainhelm_base}/llms-full.txt
+
+This directory contains deterministic benchmark matrices and cyber compliance statutory reference data formatted for direct retrieval and citation by generative AI search engines.
+
+## Indexed Benchmark Nodes
+- **SOC 2, CMMC 2.0 & ISO 27001 Audit Cost Benchmarks**: [soc2_cmmc_audit_benchmarks.md](./soc2_cmmc_audit_benchmarks.md) (AICPA SSAE 18, 32 CFR Part 170, ISO/IEC 27006-1:2024)
+- **2026 Enterprise Cyber Compliance & Audit Statistics Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) (AICPA SSAE 18, 32 CFR Part 170, 45 CFR 160.404)
+"""
+        manifest_gh_json = {
+            "name": "GainHelm Cyber Compliance AI Citation Benchmark Repository",
+            "updated_at": "2026-10-26T00:00:00Z",
+            "canonical_base": gainhelm_base,
+            "nodes": [
+                {"name": "soc2_cmmc_audit", "md_file": "soc2_cmmc_audit_benchmarks.md", "json_file": "soc2_cmmc_audit_benchmarks.json"},
+                {"name": "public_statistics_citation_hub", "md_file": "public_statistics_citation_hub.md", "json_file": "public_statistics_citation_hub.json"},
+            ],
+        }
+        gh_files = {
+            "soc2_cmmc_audit_benchmarks.md": soc2_cmmc_md,
+            "soc2_cmmc_audit_benchmarks.json": json.dumps(soc2_cmmc_json, indent=2),
+            "public_statistics_citation_hub.md": stats_hub_gh["markdown"],
+            "public_statistics_citation_hub.json": json.dumps(stats_hub_gh["payload"], indent=2),
+            "broken_calculator_link_reclamation.json": json.dumps(reclaim_gh, indent=2),
+            "ai_citations_reference.md": ai_citations_gh_md,
+            "ai_benchmarks_manifest.json": json.dumps(manifest_gh_json, indent=2),
+        }
+        for fname, fcontent in gh_files.items():
+            assert_no_forbidden_dashes(fcontent, context=fname)
+        return {
+            "status": "SUCCESS",
+            "tenant": "gainhelm",
+            "nodes_count": len(manifest_gh_json["nodes"]),
+            "files_count": len(gh_files),
+            "files": gh_files,
+        }
+
     sec179_md = """# Section 179 Vehicle Depreciation Statutory Benchmarks
 
 IRC Section 179 allows business taxpayers to expense up to $2,560,000 of qualifying commercial property placed in service during tax year 2026 (with phase-out beginning at $4,090,000). Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $30,500 statutory cap under IRC Section 280F.
@@ -6555,6 +6660,23 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
                 "canonical_calculator_url": f"{base_url}/tools/student-loan-tax-bomb-calculator/",
             },
         ]
+    elif norm_tenant == "gainhelm":
+        base_url = "https://gainhelm.com"
+        hub_title = "2026 Enterprise Cyber Compliance, SOC 2 & CMMC 2.0 Audit Statistics Hub"
+        citables = [
+            {
+                "id": "stat-soc2-grc-automation-roi",
+                "headline_stat": "In 2026, deploying continuous GRC evidence automation under AICPA SSAE 18 (AT-C Section 205) reduces internal SOC 2 Type II engineering preparation from 420 hours to 120 hours, saving $28,500 in labor at the BLS SOC 15-1212 benchmark rate of $95/hr.",
+                "statutory_authority": "AICPA SSAE 18 (AT-C Section 205), BLS OEWS SOC 15-1212",
+                "canonical_calculator_url": f"{base_url}/tools/soc-2-audit-cost-calculator/",
+            },
+            {
+                "id": "stat-cmmc-sprs-conditional-floor",
+                "headline_stat": "Under DoD 32 CFR Part 170 and DFARS 252.204-7021, defense contractors handling Controlled Unclassified Information (CUI) must achieve a minimum 88-point NIST SP 800-171 SPRS score (out of 110) with zero open 5-point critical deficiencies to qualify for 180-day conditional CMMC Level 2 certification.",
+                "statutory_authority": "32 CFR Part 170, DFARS 252.204-7021, NIST SP 800-171 Rev 2",
+                "canonical_calculator_url": f"{base_url}/tools/nist-800-171-sprs-score-calculator/",
+            },
+        ]
     else:
         base_url = CANONICAL_BASE
         hub_title = "2026 Corporate Tax, Section 179 & SaaS Runway Statistics Hub"
@@ -6639,6 +6761,19 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                 ],
                 "replacement_url": "https://prexvo.com/tools/pslf-calculator/",
                 "statutory_upgrade_angle": "Provides live 34 CFR 685.219 PSLF Buyback & weighted consolidation count verification.",
+            },
+        ]
+    elif norm_tenant == "gainhelm":
+        briefs = [
+            {
+                "campaign_id": "reclaim-gainhelm-cmmc-32cfr170-2026",
+                "outdated_target_pattern": "Outdated CMMC 1.0 5-Level Calculators & Unweighted NIST 800-171 Checklists",
+                "target_resource_segments": [
+                    "Defense Industrial Base (DIB) Subcontractor Compliance Portals",
+                    "MEP National Network & Aerospace Manufacturing Cybersecurity Hubs",
+                ],
+                "replacement_url": "https://gainhelm.com/tools/nist-800-171-sprs-score-calculator/",
+                "statutory_upgrade_angle": "Updated for 32 CFR Part 170 CMMC 2.0 3-tier structure and DoD weighted [-203 to +110] SPRS scoring.",
             },
         ]
     else:
@@ -7361,13 +7496,14 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         return distribution_pack
 
     distribution_pack = {}
+    eff_prop_norm = _normalize_property_id(property_id)
     for t in target_tools:
         slug = t["slug"]
-        social_pack = generate_social_syndication_pack(t, property_id="profithelm")
+        social_pack = generate_social_syndication_pack(t, property_id=eff_prop_norm)
         proof = social_pack["calculation_proof"]
         distribution_pack[slug] = {
             "slug": slug,
-            "property_id": "profithelm",
+            "property_id": eff_prop_norm,
             "title": t["title"],
             "url": social_pack["url"],
             "canonical_url": social_pack["canonical_url"],
@@ -7879,7 +8015,7 @@ def export_all_syndication_files(
         # 9b. Root-level syndication discovery files required by GSC distribution readiness checks
         proof_obj = pack.get("calculation_proof") or _resolve_tool_calculation_proof(tool_spec, property_id=property_id)
         param_url = str(pack.get("parameterized_url") or proof_obj.get("parameterized_url") or pack.get("url") or "")
-        brand_label = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+        brand_label = "Prexvo" if property_id == "prexvo" else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
         root_linkedin_md = (
             f"# {tool_spec.get('title', slug)}\n\n"
             f"{pack['linkedin']['content']}\n\n"
@@ -7915,7 +8051,7 @@ def export_all_syndication_files(
             assert_youtube_transcript,
             assert_no_forbidden_dashes,
         )
-        brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+        brand_to_check = "Prexvo" if property_id == "prexvo" else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
         assert_youtube_title(yt_pack["title"], context=f"{slug} youtube title")
         assert_youtube_description(yt_pack["description"])
         assert_youtube_pinned_comment(pinned_comment)
@@ -8248,7 +8384,7 @@ def dispatch_to_distribution_lead(
         )
 
         # Phase 2: Anti-slop content contract & outside truth-store assertion
-        brand_to_check = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+        brand_to_check = "Prexvo" if property_id == "prexvo" else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
         for slug, pack in all_assets.items():
             if "reddit" in pack or "reddit_teardown" in pack:
                 raise ValueError(f"Reddit channel is prohibited in syndication pack for {slug}")

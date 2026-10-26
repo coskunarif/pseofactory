@@ -373,6 +373,20 @@ def _resolve_contextual_internal_links(
                 {"anchor": "ICR Income-Contingent Repayment Calculator", "href": "/tools/icr-repayment-calculator/"},
                 {"anchor": "PAYE Sunset & IBR Transition Calculator", "href": "/tools/paye-sunset-calculator/"},
             ]
+    elif eff_tenant == "gainhelm":
+        base_hub = {"anchor": "Enterprise Cyber Compliance & GRC Audit Cost Calculators Directory", "href": "/tools/"}
+        cluster = [
+            {"anchor": "SOC 2 Type I vs Type II Audit Cost & GRC ROI Calculator", "href": "/tools/soc-2-audit-cost-calculator/"},
+            {"anchor": "CMMC 2.0 Level 2 C3PAO Assessment & Remediation Cost Calculator", "href": "/tools/cmmc-2-0-compliance-cost-calculator/"},
+            {"anchor": "NIST SP 800-171 DoD SPRS Score & POA&M Eligibility Calculator", "href": "/tools/nist-800-171-sprs-score-calculator/"},
+            {"anchor": "ISO 27001:2022 Certification & Surveillance Audit Cost Calculator", "href": "/tools/iso-27001-certification-cost-calculator/"},
+            {"anchor": "HIPAA Violation Penalty Tier & Healthcare Breach Cost Calculator", "href": "/tools/hipaa-violation-penalty-breach-cost-calculator/"},
+            {"anchor": "PCI DSS v4.0.1 QSA ROC vs SAQ Compliance Cost Calculator", "href": "/tools/pci-dss-4-0-compliance-cost-calculator/"},
+            {"anchor": "FedRAMP LI-SaaS, Low, Moderate & High 3PAO Authorization Cost Calculator", "href": "/tools/fedramp-authorization-3pao-cost-calculator/"},
+            {"anchor": "HITRUST CSF v11 e1, i1 & r2 Validated Assessment Cost Calculator", "href": "/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/"},
+            {"anchor": "Penetration Testing Cost & Scope Estimator (Web App, API, Cloud & Network)", "href": "/tools/penetration-testing-scoping-cost-calculator/"},
+            {"anchor": "Cyber Liability Insurance Premium & Data Breach Exposure Calculator", "href": "/tools/cyber-liability-insurance-breach-exposure-calculator/"},
+        ]
     else:
         base_hub = {"anchor": "Statutory Tax & Financial Calculators Directory", "href": "/tools/"}
         if any(k in combined for k in ("tariff", "landed", "customs", "bond", "freight", "cbam", "hs-code", "301", "demurrage")):
@@ -476,6 +490,7 @@ def _resolve_partner_offer_and_manual_gate(
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.affiliates import (
+        GAINHELM_AFFILIATES,
         PREXVO_AFFILIATES,
         PROFITHELM_AFFILIATES,
         is_restricted_public_service_slug,
@@ -606,6 +621,20 @@ def _resolve_partner_offer_and_manual_gate(
         else:
             default_chosen_key = "sofi_refi"
             vertical_candidates = ["sofi_refi", "earnest", "laurel_road", "juno", "credible"]
+    elif eff_tenant == "gainhelm":
+        registry = GAINHELM_AFFILIATES
+        if any(k in combined for k in ("cmmc", "800-171", "sprs", "fedramp")):
+            default_chosen_key = "drata_compliance"
+            vertical_candidates = ["drata_compliance", "vanta_security", "thoropass_audit", "secureframe_grc", "sprinto_compliance"]
+        elif any(k in combined for k in ("pentest", "pci", "qsa", "roc")):
+            default_chosen_key = "thoropass_audit"
+            vertical_candidates = ["thoropass_audit", "vanta_security", "drata_compliance", "sprinto_compliance", "secureframe_grc"]
+        elif any(k in combined for k in ("iso-27001", "iso 27001", "gdpr", "eu-ai", "dora")):
+            default_chosen_key = "sprinto_compliance"
+            vertical_candidates = ["sprinto_compliance", "vanta_security", "drata_compliance", "secureframe_grc", "thoropass_audit"]
+        else:
+            default_chosen_key = "vanta_security"
+            vertical_candidates = ["vanta_security", "drata_compliance", "sprinto_compliance", "thoropass_audit", "secureframe_grc"]
     else:
         registry = PROFITHELM_AFFILIATES
         # Check if query hits a vertical with a known manual partner dependency while routing fallback live offer
@@ -956,6 +985,17 @@ def _resolve_partner_offer_and_manual_gate(
             str(
                 p_data.get("disclosure")
                 or "Editorial Note: Refinancing federal student loans with a private lender permanently waives Title IV income-driven repayment and PSLF eligibility."
+            )
+        )
+    elif eff_tenant == "gainhelm":
+        p_data = registry.get(chosen_key) or registry.get("vanta_security") or {}
+        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance"))
+        p_url = str(p_data.get("url") or "https://www.vanta.com/")
+        p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or "Automate Audit Readiness with Vanta"))
+        p_disc = _strip_forbidden_dashes(
+            str(
+                p_data.get("disclosure")
+                or "FTC Disclosure: GainHelm may earn a referral fee when you request a demo through verified GRC partner links at no additional cost to you."
             )
         )
     else:
@@ -1648,6 +1688,15 @@ def _resolve_secondary_title_modifier(
             return "IDR Plan"
         return "Title IV Rules"
 
+    if tenant_id == "gainhelm":
+        if "cmmc" in primary_low or "800-171" in primary_low or "sprs" in primary_low:
+            return "32 CFR 170"
+        if "iso" in primary_low or "27001" in primary_low:
+            return "ISO 27006"
+        if "hipaa" in primary_low:
+            return "45 CFR 160"
+        return "GRC Audit"
+
     if any(k in primary_low for k in ("tax-bracket", "tax bracket", "tax tables", "tax rate", "income tax rate")):
         if ("married" in grouped_low or "jointly" in grouped_low) and "married" not in query_clean.lower():
             return "Single & MFJ"
@@ -1910,6 +1959,8 @@ def _normalize_title_50_60(
         vertical_paren_mod = "IRS Table"
     elif tenant_id == "prexvo":
         vertical_paren_mod = "Title IV" if "rap" in base_low else "IDR & RAP"
+    elif tenant_id == "gainhelm":
+        vertical_paren_mod = "GRC Audit"
     else:
         vertical_paren_mod = "IRC Guide"
 
@@ -1930,7 +1981,11 @@ def _normalize_title_50_60(
                 short_mods = (
                     [mod_clean, "Title IV", "IDR Plan", "2026 RAP", "2026"]
                     if tenant_id == "prexvo"
-                    else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                    else (
+                        [mod_clean, "GRC Audit", "2026 Audit", "2026"]
+                        if tenant_id == "gainhelm"
+                        else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                    )
                 )
                 for sm in short_mods:
                     sm_clean = _strip_forbidden_dashes(sm).strip(" ()|-:")
@@ -1957,7 +2012,11 @@ def _normalize_title_50_60(
     pad_tokens = (
         [f"({vertical_paren_mod})", "(Title IV)", "(2026 Rules)", "2026", "Payment", "Federal", "Schedule", "Plan", "Estimator", "Rules"]
         if tenant_id == "prexvo"
-        else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+        else (
+            [f"({vertical_paren_mod})", "(2026 Audit)", "2026", "Audit", "Cost", "Schedule", "Estimator", "Rules"]
+            if tenant_id == "gainhelm"
+            else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+        )
     )
     for tok in pad_tokens:
         if len(cand) >= 50:
@@ -1977,7 +2036,11 @@ def _normalize_title_50_60(
         extra_pads = (
             ["& Title IV Simulator", "& Payment Schedule", "Simulator", "Schedule", "Estimator"]
             if tenant_id == "prexvo"
-            else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+            else (
+                ["& GRC Cost Estimator", "& Audit Schedule", "Simulator", "Schedule", "Estimator"]
+                if tenant_id == "gainhelm"
+                else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+            )
         )
         for ep in extra_pads:
             trial_base = f"{base} {ep}".strip()
@@ -1996,7 +2059,7 @@ def _normalize_title_50_60(
         elif "rules" not in base.lower():
             add_tok = "Rules"
         else:
-            add_tok = "Plan" if tenant_id == "prexvo" else "Tax"
+            add_tok = "Plan" if tenant_id == "prexvo" else ("Audit" if tenant_id == "gainhelm" else "Tax")
         if len(base) + 1 + len(add_tok) <= max_base and add_tok.lower() not in base.lower():
             base = f"{base} {add_tok}"
         else:
@@ -2416,7 +2479,17 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     short_q = " ".join(q_words) if q_words else ("repayment options" if tenant_id == "prexvo" else "tax deductions")
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
-    if tenant_id == "prexvo":
+    if tenant_id == "gainhelm":
+        base_words = (
+            f"Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024 "
+            f"auditor-day tables, {short_q} computes deterministic CPA and C3PAO attestation fees, "
+            f"continuous GRC evidence automation savings, and internal security engineering labor "
+            f"benchmarked against Bureau of Labor Statistics SOC 15-1212 wage percentiles."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "NIST", "SP", "800-171", "Rev", "2", "and", "45", "CFR", "160.404."
+        ]
+    elif tenant_id == "prexvo":
         if "disclaimer" in combined_low:
             base_words = (
                 "Prexvo provides deterministic Title IV student loan repayment and forgiveness calculators "
@@ -3775,7 +3848,17 @@ def _append_query_subintent_blocks(
         if clean_q and not any(clean_q.lower() == str(item.get("question", "")).lower() for item in faqs):
             faqs.append({"question": clean_q, "answer": clean_a})
 
-    if tenant_id == "prexvo":
+    if tenant_id == "gainhelm":
+        _add_h2(f"{heading_label}: 2026 AICPA SSAE 18, 32 CFR Part 170 & GRC Automation Cost Breakdown")
+        _add_faq(
+            f"How does GRC automation impact {heading_label} total audit cost and engineering hours?",
+            (
+                "Continuous control monitoring via API integrations (Vanta, Drata, Sprinto) compresses "
+                "manual evidence collection by 60 percent to 75 percent while standardizing auditor-ready "
+                "workpapers under AICPA SSAE 18, DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024."
+            ),
+        )
+    elif tenant_id == "prexvo":
         if any(k in joined_low for k in ("rap", "repayment assistance")):
             _add_h2(f"{heading_label}: 2026 RAP Tiered AGI Schedule (1% to 10%) & 100% Unpaid Interest Subsidy")
             _add_faq(
@@ -3878,8 +3961,8 @@ def compile_remediation_overlay_spec(
         or "profithelm"
     ).strip().lower()
 
-    brand = "Prexvo" if resolved_tenant == "prexvo" else "ProfitHelm"
-    domain = "prexvo.com" if resolved_tenant == "prexvo" else "profithelm.com"
+    brand = "Prexvo" if resolved_tenant == "prexvo" else ("GainHelm" if resolved_tenant == "gainhelm" else "ProfitHelm")
+    domain = "prexvo.com" if resolved_tenant == "prexvo" else ("gainhelm.com" if resolved_tenant == "gainhelm" else "profithelm.com")
     target_url = str(
         candidate.get("target_url")
         or candidate.get("page")
@@ -3941,10 +4024,13 @@ def compile_remediation_overlay_spec(
     # Scrub any accidental cross-tenant tokens from query label
     query_clean = _strip_forbidden_dashes(raw_query)
     if resolved_tenant == "prexvo":
-        for bad in ("profithelm", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs"):
+        for bad in ("profithelm", "gainhelm", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs"):
             query_clean = re.sub(re.escape(bad), "title iv repayment", query_clean, flags=re.IGNORECASE)
+    elif resolved_tenant == "gainhelm":
+        for bad in ("profithelm", "prexvo", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
+            query_clean = re.sub(re.escape(bad), "cyber compliance audit", query_clean, flags=re.IGNORECASE)
     else:
-        for bad in ("prexvo", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
+        for bad in ("prexvo", "gainhelm", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
             query_clean = re.sub(re.escape(bad), "statutory tax", query_clean, flags=re.IGNORECASE)
 
     query_clean = re.sub(r"\bs[\s-]+corp\b", "S-Corp", query_clean, flags=re.IGNORECASE)
@@ -4013,6 +4099,89 @@ def compile_remediation_overlay_spec(
             ctr=ctr,
             impr=impr,
         )
+        v_blocks = _append_query_subintent_blocks(
+            v_blocks,
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+            grouped_queries=grouped_queries_list,
+        )
+        h2_headings = v_blocks["h2_headings"]
+        preset_scenarios = v_blocks["preset_scenarios"]
+        comparison_rows = v_blocks["comparison_rows"]
+        faq_entries = v_blocks["faq_entries"]
+        hub_links = _resolve_contextual_internal_links(
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query=query_clean,
+        )
+    elif resolved_tenant == "gainhelm":
+        v_blocks = {
+            "h2_headings": [
+                f"{heading_label}: 2026 CPA & C3PAO Attestation Fee Schedule",
+                f"Audit-Ready {heading_label} GRC Automation vs Manual Evidence Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-gainhelm-series-a",
+                    "label": f"{heading_label} Series A SaaS Baseline (45 Employees)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"headcount": 45, "grc_tier": 1, "audit_type": 2},
+                    "description": "45-employee B2B SaaS modeling CPA or C3PAO attestation fees alongside continuous GRC automation.",
+                },
+                {
+                    "id": "preset-gainhelm-midmarket",
+                    "label": f"{heading_label} Mid-Market Multi-Cloud Scope (250 Employees)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"headcount": 250, "grc_tier": 2, "audit_type": 2},
+                    "description": "250-employee enterprise evaluating multi-criteria audit fees, pentest scope, and BLS SOC 15-1212 labor.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "Manual Spreadsheet Evidence vs Continuous GRC Automation",
+                    "baseline": "420 Engineering Hours ($39,900 Labor Cost)",
+                    "optimized": "120 Engineering Hours ($11,400 Labor + GRC Platform)",
+                    "delta": "-300 Engineering Hours Saved",
+                    "authority": "AICPA SSAE 18 (AT-C Sec. 205) & BLS SOC 15-1212",
+                },
+                {
+                    "scenario": "Unscoped Multi-Criteria Audit vs Scoped Trust Services Baseline",
+                    "baseline": "$64,500 Unbundled CPA / C3PAO Attestation",
+                    "optimized": "$38,500 Scoped Attestation + Automated Evidence Readiness",
+                    "delta": "-$26,000 Direct Audit Fee Reduction",
+                    "authority": "32 CFR Part 170 & ISO/IEC 27006-1:2024",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How is {query_clean} calculated under 2026 audit standards?",
+                    "answer": (
+                        f"Our deterministic {query_clean} model sums external CPA or C3PAO attestation fees, "
+                        f"GRC automation licensing, penetration testing, and internal security engineering hours "
+                        f"valued at the BLS SOC 15-1212 fully burdened rate ($95/hr)."
+                    ),
+                },
+                {
+                    "question": f"What statutory and accreditation standards govern {query_clean}?",
+                    "answer": (
+                        "Attestation and certification engagements are governed by AICPA SSAE 18 (AT-C Section 205), "
+                        "DoD 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024 auditor-day "
+                        "tables, and 45 CFR 160.404 civil monetary penalty tiers."
+                    ),
+                },
+            ],
+        }
         v_blocks = _append_query_subintent_blocks(
             v_blocks,
             tenant_id=resolved_tenant,
@@ -4213,7 +4382,40 @@ def _build_autonomous_citation_assertions_and_matrix(
     second-level AI Mode decision-branch matrix anticipating follow-up queries.
     """
     low = f"{slug} {query_clean} {heading_label}".lower()
-    if tenant_id == "prexvo":
+    if tenant_id == "gainhelm":
+        assertions = [
+            f"In 2026, {heading_label} evaluates external CPA and C3PAO attestation fees, GRC automation licensing, and internal engineering labor at $95/hr under BLS SOC 15-1212 wage benchmarks.",
+            "Under AICPA SSAE 18 (AT-C Section 205) and ISO/IEC 27006-1:2024, continuous GRC evidence collection reduces manual audit preparation labor by 60% to 75% across 6-to-12 month observation windows.",
+            "Under DoD 32 CFR Part 170 and DFARS 252.204-7021, defense contractors handling CUI require a minimum 88-point NIST SP 800-171 SPRS score for 180-day conditional POA&M eligibility toward the 110-point maximum.",
+        ]
+        matrix = [
+            {
+                "profile": "Series A B2B SaaS (45 Employees, Single Cloud)",
+                "statutory_threshold": "AICPA SSAE 18 AT-C Section 205 (SOC 2 Type II)",
+                "optimal_path": "Automated GRC Platform (Vanta / Drata) + Bundled CPA Attestation",
+                "net_dollar_impact": "$28,500 Engineering Labor Saved (300 Hours at $95/hr)",
+                "next_action": "Compare Automated vs Manual SOC 2 Total Cost",
+            },
+            {
+                "profile": "DoD Defense Contractor Handling CUI (120 Employees)",
+                "statutory_threshold": "32 CFR Part 170 Level 2 C3PAO & 88-Point SPRS Floor",
+                "optimal_path": "Remediate 5-Point NIST 800-171 Controls + CUI Enclave Scoping",
+                "net_dollar_impact": "$48,000 C3PAO Assessment Scope Reduction",
+                "next_action": "Calculate Weighted SPRS Score & POA&M Eligibility",
+            },
+            {
+                "profile": "Global Enterprise SaaS (250 Employees, EU & US Customers)",
+                "statutory_threshold": "ISO/IEC 27006-1:2024 Stage 1/2 + SOC 2 Cross-Mapping",
+                "optimal_path": "Unified GRC Control Framework (82% SOC 2 / ISO 27001 Overlap)",
+                "net_dollar_impact": "$34,200 Duplicate Audit Prep Eliminated",
+                "next_action": "Model Combined ISO 27001 & SOC 2 Surveillance TCO",
+            },
+        ]
+        return {
+            "autonomous_citation_assertions": assertions,
+            "ai_mode_decision_matrix": matrix,
+        }
+    elif tenant_id == "prexvo":
         if "pslf" in low or "public service" in low or "120" in low:
             assertions = [
                 f"In 2026, {heading_label} requires 120 qualifying monthly payments under an eligible Income-Driven Repayment plan while employed full-time (30+ hours per week) by a 501(c)(3) or government employer under 34 CFR 685.219.",

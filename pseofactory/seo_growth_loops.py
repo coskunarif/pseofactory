@@ -44,6 +44,8 @@ def _clean_dashes(text: str) -> str:
 
 def _resolve_property_id(property_id: str = "profithelm", repo_root: Optional[Union[str, Path]] = None) -> str:
     combined = f"{property_id or ''} {repo_root or ''}".lower()
+    if "gainhelm" in combined:
+        return "gainhelm"
     return "prexvo" if "prexvo" in combined else "profithelm"
 
 
@@ -53,6 +55,8 @@ def _resolve_tenant_repo_root(property_id: str = "profithelm", repo_root: Option
     prop = _resolve_property_id(property_id)
     if prop == "prexvo":
         return Path("/home/ubuntuadmin/projects/prexvo")
+    if prop == "gainhelm":
+        return Path("/home/ubuntuadmin/projects/gainhelm")
     return Path("/home/ubuntuadmin/projects/profithelm-platform")
 
 
@@ -582,7 +586,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     site_uri = f"sc-domain:{prop}.com"
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if live_gsc is None:
@@ -1928,7 +1932,7 @@ def discover_internal_linking_opportunities(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
 
     if not d_dir.is_dir():
         return {
@@ -2325,7 +2329,7 @@ def compile_search_opportunity_briefs(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
     ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
@@ -2778,7 +2782,7 @@ def evaluate_content_portfolio_decisions(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
     decay_data = decay_report or identify_content_decay(prop, repo_root=root, consolidated_gsc=gsc_bundle, persist=False)
@@ -3276,6 +3280,10 @@ def investigate_competitor_traffic_spikes(
                     k in q_clean.lower() for k in ("loan", "ibr", "rap", "pslf", "paye", "save", "icr", "student", "tuition", "borrow")
                 ):
                     continue
+                if prop == "gainhelm" and not any(
+                    k in q_clean.lower() for k in ("soc 2", "soc-2", "cmmc", "nist", "800-171", "sprs", "iso 27001", "iso-27001", "hipaa", "pci dss", "pci-dss", "fedramp", "cyber", "grc", "vanta", "drata", "audit")
+                ):
+                    continue
                 seen_queries.add(q_clean.lower())
                 spike_signals.append(
                     {
@@ -3339,6 +3347,16 @@ def investigate_competitor_traffic_spikes(
                     "interactive_features": ["repayment_comparison_matrix", "agi_discretionary_slider", "forgiveness_payoff_simulator"],
                     "click_magnets": ["Amortization Schedule PDF", "Title IV Eligibility Checklist"],
                     "conversion_hooks": ["Refinance Rate Alert"],
+                }
+            ]
+        elif prop == "gainhelm":
+            serp_competitors = [
+                {
+                    "title": f"{q_text.title()} - 2026 SOC 2, CMMC 2.0 & ISO 27001 Audit Cost & SPRS Score Simulator",
+                    "snippet": "Interactive auditor-day fee calculator, DoD 32 CFR Part 170 SPRS deduction matrix, and downloadable GRC audit readiness workpaper.",
+                    "interactive_features": ["audit_cost_sensitivity_matrix", "grc_automation_roi_slider", "sprs_control_deduction_simulator"],
+                    "click_magnets": ["GRC Audit Readiness Workpaper PDF", "NIST 800-171 SSP Control Checklist"],
+                    "conversion_hooks": ["C3PAO & CPA Audit Fee Quote Intake"],
                 }
             ]
         else:
@@ -3423,7 +3441,7 @@ def compile_ai_citation_digital_pr_queue(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
     ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
@@ -3494,7 +3512,15 @@ def compile_ai_citation_digital_pr_queue(
                     tok in f"{vc_slug} {vc_q}".lower()
                     for tok in ("student", "rap", "ibr", "pslf", "icr", "parent", "paye", "loan")
                 )
-                if (prop == "prexvo" and not is_prexvo_cand) or (prop == "profithelm" and is_prexvo_cand):
+                is_gainhelm_cand = any(
+                    tok in f"{vc_slug} {vc_q}".lower()
+                    for tok in ("soc-2", "soc 2", "cmmc", "sprs", "800-171", "iso-27001", "iso 27001", "hipaa", "pci-dss", "pci dss", "fedramp", "cyber-insurance", "vanta", "drata")
+                )
+                if (
+                    (prop == "prexvo" and not is_prexvo_cand)
+                    or (prop == "gainhelm" and not is_gainhelm_cand)
+                    or (prop == "profithelm" and (is_prexvo_cand or is_gainhelm_cand))
+                ):
                     continue
                 candidate_queue_evaluated += 1
                 c_p = f"/tools/{vc_slug}"
@@ -3631,6 +3657,14 @@ def compile_ai_citation_digital_pr_queue(
                 "University Financial Aid Resource Directories (.edu)",
                 "Student Loan Borrower Protection & Nonprofit Legal Aid Guides",
                 "Title IV Repayment Open Data & FinTech Research Indices",
+            ]
+        elif prop == "gainhelm":
+            statutory_hook = "AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170 (CMMC 2.0), and ISO/IEC 27006-1:2024 Auditor-Day Tables"
+            benchmark_node = "soc2_cmmc_audit_benchmarks.md"
+            target_publications = [
+                "Enterprise CISO & Defense Industrial Base (DIB) CMMC Resource Directories",
+                "AICPA Peer-Reviewed CPA Firm & ISO 27001 Certification Body Portals",
+                "AI Search Dataset Registries (Perplexity, ChatGPT Search, Google AI Overviews)",
             ]
         else:
             if "1031" in c_path or "1031" in q.lower():
@@ -4255,7 +4289,7 @@ def sync_real_gsc_baselines_to_recovery_ledger(
     """
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
     ledger_path = root / ".agy" / "metric_recovery_ledger.json"
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(
@@ -4700,8 +4734,8 @@ def evaluate_closed_loop_cohort_reflection(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
-    brand = "Prexvo" if prop == "prexvo" else "ProfitHelm"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    brand = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else "ProfitHelm")
     r_base = Path(runs_dir) if runs_dir else Path("/home/ubuntuadmin/projects/.agy/runs")
 
     # ------------------------------------------------------------------
@@ -5383,7 +5417,7 @@ def evaluate_closed_loop_cohort_reflection(
     top_modifier_family = (
         sorted_modifiers[0]["modifier"]
         if sorted_modifiers
-        else ("(2026 RAP vs IBR)" if prop == "prexvo" else "(2026 Brackets)")
+        else ("(2026 RAP vs IBR)" if prop == "prexvo" else ("(GRC Audit)" if prop == "gainhelm" else "(2026 Brackets)"))
     )
 
     # ------------------------------------------------------------------
@@ -6211,7 +6245,7 @@ def compile_quantitative_revenue_forecast(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
     canonical_base = f"https://{domain}"
     now_iso = datetime.now(timezone.utc).isoformat()
 

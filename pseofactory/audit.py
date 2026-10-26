@@ -1257,6 +1257,8 @@ def audit_syndication_asset_against_truth_store(
     resolved_prop = str(asset_pack.get("property_id") or property_id or "profithelm").lower()
     if "prexvo" in resolved_prop:
         resolved_prop = "prexvo"
+    elif "gainhelm" in resolved_prop:
+        resolved_prop = "gainhelm"
     else:
         resolved_prop = "profithelm"
 
