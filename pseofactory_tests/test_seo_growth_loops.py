@@ -1795,6 +1795,224 @@ def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: 
     assert by_path["/tools/irs-2027-tax-brackets/alabama"]["portfolio_action"] == "PRUNE_NOINDEX"
 
 
+def test_zero_click_crawl_budget_triage_404_noindex_and_schema_breadcrumb_hierarchy(tmp_path: Path) -> None:
+    """
+    Verifies the crawl-budget & zero-click indexed URL triage upgrades (x-like:2109684114173641151):
+      1. evaluate_content_portfolio_decisions excludes 404.html, /signal, and noindex utility pages,
+         triages aged zero-click deep-rank pages (impressions > 0, clicks == 0, pos > 30, age >= max_age)
+         into REANGLE_OR_CONSOLIDATE_HUB under zero_click_triage, and computes ctr_position_dilution_diagnostics.
+      2. RetroReflectionEngine.retrofit_html heals 404.html 'index, follow' to 'noindex, follow',
+         upgrades 3-item nested spoke BreadcrumbList to 4-item (Home -> Tools -> Parent Hub -> Spoke),
+         and injects /tools/parent-plus-double-consolidation-loophole-2026-calculator/ into Prexvo's
+         id='topic-cluster-hub'.
+      3. compile_high_effort_page emits unified @graph JSON-LD with Organization, WebPage, WebApplication,
+         Dataset, HowTo, FAQPage, and 4-item BreadcrumbList on nested spokes.
+      4. PushIndexer.prioritize_urls_for_indexing_allocation promotes high-impression zero-click striking-distance
+         rescue pages to Tier 1 and demotes aged zero-click deep-rank bleeders and prune-queued URLs to Tier 7.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.compiler import compile_high_effort_page
+    from pseofactory.indexer import PushIndexer
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    repo_root = tmp_path / "profithelm_cb"
+    dist_dir = repo_root / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=120)).timestamp()
+
+    # Non-indexable utility routes that must be excluded from pages_audited
+    (dist_dir / "404.html").write_text(
+        '<!DOCTYPE html><html><head><title>404 Not Found | ProfitHelm</title>'
+        '<meta name="robots" content="index, follow, max-snippet:-1">'
+        '<link rel="canonical" href="https://profithelm.com/404.html">'
+        '</head><body><main><h1>404</h1></main></body></html>',
+        encoding="utf-8",
+    )
+    sig_dir = dist_dir / "signal"
+    sig_dir.mkdir(parents=True, exist_ok=True)
+    (sig_dir / "index.html").write_text("<html><head><title>Signal</title></head><body></body></html>", encoding="utf-8")
+
+    # 1. Striking-distance zero-click CTR rescue page (pos 8.5, 25 impr, 0 clicks)
+    rescue_dir = dist_dir / "tools" / "section-1031-calculator"
+    rescue_dir.mkdir(parents=True, exist_ok=True)
+    rescue_hf = rescue_dir / "index.html"
+    rescue_hf.write_text(
+        "<html><head><title>Section 1031 Calculator | ProfitHelm</title></head>"
+        "<body><main><h1>Section 1031 Calculator</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    os.utime(rescue_hf, (old_ts, old_ts))
+
+    # 2. Aged deep-rank zero-click bleeder (pos 75.0, 3 impr, 0 clicks, age 120d)
+    bleeder_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "arizona"
+    bleeder_dir.mkdir(parents=True, exist_ok=True)
+    bleeder_hf = bleeder_dir / "index.html"
+    bleeder_hf.write_text(
+        '<!DOCTYPE html><html><head><title>Arizona 2027 Tax Brackets | ProfitHelm</title>'
+        '<link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/arizona/">'
+        '<script type="application/ld+json">{"@context":"https://schema.org","@graph":['
+        '{"@type":"WebPage","name":"Arizona"},'
+        '{"@type":"Dataset","name":"Arizona Dataset"},'
+        '{"@type":"HowTo","name":"Arizona HowTo"},'
+        '{"@type":"BreadcrumbList","itemListElement":['
+        '{"@type":"ListItem","position":1,"name":"Home","item":"https://profithelm.com/"},'
+        '{"@type":"ListItem","position":2,"name":"IRS 2027 Tax Brackets","item":"https://profithelm.com/tools/irs-2027-tax-brackets/"},'
+        '{"@type":"ListItem","position":3,"name":"Arizona","item":"https://profithelm.com/tools/irs-2027-tax-brackets/arizona/"}'
+        ']}]}</script>'
+        "</head><body><main><h1>Arizona 2027 Tax Brackets</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    os.utime(bleeder_hf, (old_ts, old_ts))
+
+    # 3. Aged zero-impression prune candidate (0 impr, 0 clicks, age 120d)
+    prune_dir = dist_dir / "tools" / "section-179-calculator" / "low-demand-spoke"
+    prune_dir.mkdir(parents=True, exist_ok=True)
+    prune_hf = prune_dir / "index.html"
+    prune_hf.write_text(
+        "<html><head><title>Low Demand Spoke | ProfitHelm</title></head>"
+        "<body><main><h1>Low Demand Spoke</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    os.utime(prune_hf, (old_ts, old_ts))
+
+    gsc_bundle = {
+        "current_rows": [
+            {
+                "query": "section 1031 exchange calculator",
+                "canonical_path": "/tools/section-1031-calculator",
+                "impressions": 25,
+                "clicks": 0,
+                "position": 8.5,
+            },
+            {
+                "query": "arizona 2027 tax brackets",
+                "canonical_path": "/tools/irs-2027-tax-brackets/arizona",
+                "impressions": 3,
+                "clicks": 0,
+                "position": 75.0,
+            },
+        ],
+        "baseline_rows": [
+            {
+                "query": "section 1031 exchange calculator",
+                "canonical_path": "/tools/section-1031-calculator",
+                "impressions": 15,
+                "clicks": 1,
+                "position": 7.0,
+            },
+        ],
+        "impressions_by_path": {
+            "/tools/section-1031-calculator": 25,
+            "/tools/irs-2027-tax-brackets/arizona": 3,
+        },
+        "clicks_by_path": {
+            "/tools/section-1031-calculator": 0,
+            "/tools/irs-2027-tax-brackets/arizona": 0,
+        },
+    }
+
+    port_rep = evaluate_content_portfolio_decisions(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=dist_dir,
+        consolidated_gsc=gsc_bundle,
+        max_age_days=90.0,
+        persist=True,
+    )
+    assert port_rep["pages_audited"] == 3
+    triage_sum = port_rep["zero_click_indexed_triage_summary"]
+    assert triage_sum["zero_click_indexed_routes_count"] == 2
+    assert triage_sum["striking_distance_ctr_rescue_count"] == 1
+    assert triage_sum["aged_deep_rank_bleeders_count"] == 1
+    assert triage_sum["aged_zero_impression_prune_count"] == 1
+    assert triage_sum["aged_deep_rank_bleeder_candidates"][0]["url_path"] == "/tools/irs-2027-tax-brackets/arizona"
+    assert (
+        triage_sum["aged_deep_rank_bleeder_candidates"][0]["recommended_consolidation_target"]
+        == "/tools/irs-2027-tax-brackets/"
+    )
+
+    dilution = port_rep["ctr_position_dilution_diagnostics"]
+    assert dilution["current_impressions"] == 28
+    assert dilution["baseline_impressions"] == 15
+    assert dilution["ctr_dilution_detected"] is True
+    assert dilution["position_dilution_detected"] is True
+
+    # Verify RetroReflectionEngine heals 404.html robots and upgrades 3-item spoke BreadcrumbList to 4-item
+    healed_404, changed_404 = RetroReflectionEngine.retrofit_html(
+        (dist_dir / "404.html").read_text(encoding="utf-8"),
+        property_id="profithelm",
+        slug="404",
+        dist_dir=dist_dir,
+    )
+    assert bool(changed_404)
+    assert '<meta name="robots" content="noindex, follow">' in healed_404
+
+    healed_az, changed_az = RetroReflectionEngine.retrofit_html(
+        bleeder_hf.read_text(encoding="utf-8"),
+        property_id="profithelm",
+        slug="irs-2027-tax-brackets/arizona",
+        dist_dir=dist_dir,
+    )
+    assert bool(changed_az)
+    assert '"https://profithelm.com/tools/"' in healed_az
+    assert '"position": 4' in healed_az
+
+    # Verify Prexvo topic-cluster-hub gets parent-plus-double-consolidation-loophole-2026-calculator injected
+    px_html_raw = (
+        '<!DOCTYPE html><html><head><title>SAVE Plan Forbearance Interest Calculator | Prexvo</title>'
+        '<link rel="canonical" href="https://prexvo.com/tools/save-plan-forbearance-interest-calculator/">'
+        '</head><body><main><h1>SAVE Plan Forbearance Interest Calculator</h1>'
+        '<section id="topic-cluster-hub"><ul>'
+        '<li><a href="https://prexvo.com/tools/pslf-qualifying-payment-simulator/">PSLF</a></li>'
+        '</ul></section></main></body></html>'
+    )
+    healed_px, changed_px = RetroReflectionEngine.retrofit_html(
+        px_html_raw,
+        property_id="prexvo",
+        slug="save-plan-forbearance-interest-calculator",
+    )
+    assert bool(changed_px)
+    assert "/tools/parent-plus-double-consolidation-loophole-2026-calculator/" in healed_px
+
+    # Verify compile_high_effort_page emits @graph with Dataset, HowTo, and 4-item BreadcrumbList on nested spokes
+    compiled_spoke_res = compile_high_effort_page(
+        {
+            "query": "arizona 2027 tax brackets calculator",
+            "slug": "irs-2027-tax-brackets/arizona",
+            "title": "Arizona 2027 Tax Brackets & Calculator",
+            "model_name": "Arizona Statutory Tax Bracket Model",
+            "formula": "gross_amount * effective_rate",
+            "inputs": {"gross_amount": 85000.0, "effective_rate": 0.165},
+            "sample_calculation": "85000.0 * 0.165 = 14025.00",
+            "statutory_authority": "26 U.S.C. Section 1(j); IRS Rev. Proc. 2025-32",
+            "economic_dataset": "BLS CPI-U CUUR0000SA0; FRED M2SL",
+        }
+    )
+    compiled_spoke = compiled_spoke_res["html"]
+    assert '"@graph"' in compiled_spoke
+    assert '"@type": "Dataset"' in compiled_spoke
+    assert '"@type": "HowTo"' in compiled_spoke
+    assert '"@type": "BreadcrumbList"' in compiled_spoke
+    assert '"https://profithelm.com/tools/irs-2027-tax-brackets/"' in compiled_spoke
+
+    # Verify PushIndexer promotes striking-distance rescue URL to Tier 1 and demotes bleeders/prune candidates to Tier 7
+    indexer = PushIndexer(domain="profithelm.com", dist_dir=dist_dir)
+    sorted_urls = indexer.prioritize_urls_for_indexing_allocation(
+        [
+            "https://profithelm.com/tools/irs-2027-tax-brackets/arizona/",
+            "https://profithelm.com/tools/section-179-calculator/low-demand-spoke/",
+            "https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/",
+            "https://profithelm.com/tools/section-1031-calculator/",
+        ]
+    )
+    assert sorted_urls[0] == "https://profithelm.com/tools/section-1031-calculator/"
+    assert sorted_urls[1] == "https://profithelm.com/tools/s-corp-reasonable-salary-tax-calculator/"
+    assert set(sorted_urls[2:]) == {
+        "https://profithelm.com/tools/irs-2027-tax-brackets/arizona/",
+        "https://profithelm.com/tools/section-179-calculator/low-demand-spoke/",
+    }
+
+
 
 
 

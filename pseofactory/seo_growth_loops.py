@@ -2817,10 +2817,19 @@ def evaluate_content_portfolio_decisions(
     now_ts = datetime.now(timezone.utc).timestamp()
     active_impression_routes_count = 0
     zero_tax_reangled_spokes: List[str] = []
+    aged_zero_click_bleeders: List[Dict[str, Any]] = []
+    zero_click_triage_counts: Dict[str, int] = {
+        "ACCRETIVE_CLICK_EARNING": 0,
+        "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME": 0,
+        "IMPROVE_CTR_STRIKING_DISTANCE": 0,
+        "REANGLE_OR_CONSOLIDATE_HUB": 0,
+        "INCUBATE_MONITOR": 0,
+        "PRUNE_NOINDEX": 0,
+    }
 
     if d_dir.is_dir():
         for hf in sorted(d_dir.rglob("*.html")):
-            if "syndication" in hf.parts or hf.name.startswith("."):
+            if "syndication" in hf.parts or hf.name.startswith(".") or hf.name.lower() == "404.html":
                 continue
             rel = hf.relative_to(d_dir)
             if rel.name == "index.html":
@@ -2828,7 +2837,22 @@ def evaluate_content_portfolio_decisions(
             else:
                 site_p = "/" + str(rel).replace(".html", "")
             site_p = site_p.rstrip("/") or "/"
-            if site_p in ("/", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology"):
+            if (
+                site_p in ("/", "/404", "/signal", "/static/signal", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology")
+                or site_p.startswith(("/signal/", "/static/"))
+            ):
+                continue
+
+            raw_hf = ""
+            try:
+                raw_hf = hf.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                pass
+            if raw_hf and re.search(
+                r'<meta\s+name=["\']robots["\']\s+content=["\'][^"\']*\bnoindex\b',
+                raw_hf,
+                re.IGNORECASE,
+            ):
                 continue
 
             pages_audited += 1
@@ -2844,12 +2868,16 @@ def evaluate_content_portfolio_decisions(
             if site_p.startswith("/tools/irs-2027-tax-brackets/"):
                 st_slug_zt = site_p.split("/tools/irs-2027-tax-brackets/", 1)[1].strip("/").lower()
                 if st_slug_zt in ZERO_INCOME_TAX_STATES:
-                    try:
-                        raw_hf = hf.read_text(encoding="utf-8", errors="ignore")
-                        if 'id="res-total-tax"' in raw_hf and "0% state individual income tax" in raw_hf:
-                            is_reangled_zero_tax_spoke = True
-                    except Exception:
-                        pass
+                    if 'id="res-total-tax"' in raw_hf and "0% state individual income tax" in raw_hf:
+                        is_reangled_zero_tax_spoke = True
+
+            path_parts = [seg for seg in site_p.strip("/").split("/") if seg]
+            if len(path_parts) >= 3 and path_parts[0] == "tools":
+                parent_hub = f"/tools/{path_parts[1]}/"
+            elif site_p.startswith("/tools/"):
+                parent_hub = "/tools/"
+            else:
+                parent_hub = "/"
 
             if is_reangled_zero_tax_spoke:
                 zero_tax_reangled_spokes.append(site_p)
@@ -2879,13 +2907,6 @@ def evaluate_content_portfolio_decisions(
                 action = "PRUNE_NOINDEX"
                 decision_label = "NOINDEX_OR_CONSOLIDATE"
                 rationale = f"Zero impressions after {age_days:.1f} days (>= {eff_max_age:.0f}d threshold); execute noindex/301 consolidation into parent hub."
-                path_parts = [seg for seg in site_p.strip("/").split("/") if seg]
-                if len(path_parts) >= 3 and path_parts[0] == "tools":
-                    parent_hub = f"/tools/{path_parts[1]}/"
-                elif site_p.startswith("/tools/"):
-                    parent_hub = "/tools/"
-                else:
-                    parent_hub = "/"
                 zero_candidates.append(
                     {
                         "file": str(rel),
@@ -2903,8 +2924,41 @@ def evaluate_content_portfolio_decisions(
             else:
                 action = "INCUBATE_MONITOR"
                 decision_label = "RETAIN_AND_MONITOR"
-                rationale = f"Active indexation incubation (age {age_days:.1f}d, {impr} impressions, best pos {best_pos:.1f})."
+                if impr > 0 and clicks == 0 and best_pos > 30.0 and age_days >= eff_max_age:
+                    rationale = (
+                        f"Aged zero-click indexed spoke (age {age_days:.1f}d >= {eff_max_age:.0f}d, {impr} impressions, "
+                        f"0 clicks, best pos {best_pos:.1f}); flagged for intent re-angling or consolidation into {parent_hub}."
+                    )
+                else:
+                    rationale = f"Active indexation incubation (age {age_days:.1f}d, {impr} impressions, best pos {best_pos:.1f})."
 
+            if is_reangled_zero_tax_spoke:
+                zero_click_triage = "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
+            elif clicks > 0:
+                zero_click_triage = "ACCRETIVE_CLICK_EARNING"
+            elif impr > 0 and best_pos <= 30.0:
+                zero_click_triage = "IMPROVE_CTR_STRIKING_DISTANCE"
+            elif impr > 0 and best_pos > 30.0 and age_days >= eff_max_age:
+                zero_click_triage = "REANGLE_OR_CONSOLIDATE_HUB"
+                aged_zero_click_bleeders.append(
+                    {
+                        "file": str(rel),
+                        "url_path": site_p,
+                        "target_url": f"https://{domain}{site_p}/",
+                        "age_days": round(age_days, 1),
+                        "impressions": impr,
+                        "clicks": 0,
+                        "best_position": round(best_pos, 2),
+                        "recommended_consolidation_target": parent_hub,
+                        "triage_action": "REANGLE_INTENT_OR_301_HUB_CONSOLIDATE",
+                    }
+                )
+            elif impr == 0 and age_days >= eff_max_age:
+                zero_click_triage = "PRUNE_NOINDEX"
+            else:
+                zero_click_triage = "INCUBATE_MONITOR"
+
+            zero_click_triage_counts[zero_click_triage] = zero_click_triage_counts.get(zero_click_triage, 0) + 1
             counts_by_action[action] = counts_by_action.get(action, 0) + 1
             decisions.append(
                 {
@@ -2918,6 +2972,7 @@ def evaluate_content_portfolio_decisions(
                     "best_position": round(best_pos, 2) if best_pos < 100.0 else None,
                     "portfolio_action": action,
                     "decision": decision_label,
+                    "zero_click_triage": zero_click_triage,
                     "rationale": rationale,
                 }
             )
@@ -2950,6 +3005,99 @@ def evaluate_content_portfolio_decisions(
                 "rationale": f"301-consolidated into canonical route {r_info.get('redirect_target')} with automatic GSC signal rollup.",
             }
         )
+
+    aged_zero_click_bleeders.sort(
+        key=lambda c: (-float(c.get("age_days", 0.0) or 0.0), -float(c.get("best_position", 0.0) or 0.0), c.get("url_path", ""))
+    )
+    zero_click_indexed_routes_count = (
+        int(zero_click_triage_counts.get("IMPROVE_CTR_STRIKING_DISTANCE", 0) or 0)
+        + int(zero_click_triage_counts.get("REANGLE_OR_CONSOLIDATE_HUB", 0) or 0)
+        + sum(
+            1
+            for d in decisions
+            if d.get("zero_click_triage") == "INCUBATE_MONITOR" and int(d.get("impressions", 0) or 0) > 0
+        )
+    )
+    zero_click_triage_summary = {
+        "zero_click_indexed_routes_count": zero_click_indexed_routes_count,
+        "striking_distance_ctr_rescue_count": int(zero_click_triage_counts.get("IMPROVE_CTR_STRIKING_DISTANCE", 0) or 0),
+        "aged_deep_rank_bleeders_count": len(aged_zero_click_bleeders),
+        "incubating_zero_click_count": sum(
+            1
+            for d in decisions
+            if d.get("zero_click_triage") == "INCUBATE_MONITOR" and int(d.get("impressions", 0) or 0) > 0
+        ),
+        "aged_zero_impression_prune_count": len(zero_candidates),
+        "triage_breakdown": zero_click_triage_counts,
+        "aged_deep_rank_bleeder_candidates": aged_zero_click_bleeders,
+    }
+
+    curr_rows_all = [r for r in (gsc_bundle.get("current_rows") or []) if isinstance(r, dict)]
+    base_rows_all = [r for r in (gsc_bundle.get("baseline_rows") or []) if isinstance(r, dict)]
+    curr_tot_impr = sum(max(0, int(float(r.get("impressions", 0) or 0))) for r in curr_rows_all)
+    curr_tot_clicks = sum(max(0, int(float(r.get("clicks", 0) or 0))) for r in curr_rows_all)
+    curr_avg_ctr_pct = round((curr_tot_clicks / float(max(1, curr_tot_impr))) * 100.0, 2) if curr_tot_impr > 0 else 0.0
+    curr_w_pos = (
+        round(
+            sum(
+                float(r.get("position", 50.0) or 50.0) * max(1, int(float(r.get("impressions", 0) or 0)))
+                for r in curr_rows_all
+            )
+            / float(max(1, curr_tot_impr)),
+            2,
+        )
+        if curr_tot_impr > 0
+        else 0.0
+    )
+    base_tot_impr = sum(max(0, int(float(r.get("impressions", 0) or 0))) for r in base_rows_all)
+    base_tot_clicks = sum(max(0, int(float(r.get("clicks", 0) or 0))) for r in base_rows_all)
+    base_avg_ctr_pct = round((base_tot_clicks / float(max(1, base_tot_impr))) * 100.0, 2) if base_tot_impr > 0 else 0.0
+    base_w_pos = (
+        round(
+            sum(
+                float(r.get("position", 50.0) or 50.0) * max(1, int(float(r.get("impressions", 0) or 0)))
+                for r in base_rows_all
+            )
+            / float(max(1, base_tot_impr)),
+            2,
+        )
+        if base_tot_impr > 0
+        else 0.0
+    )
+    impr_growth_pct = (
+        round(((curr_tot_impr - base_tot_impr) / float(max(1, base_tot_impr))) * 100.0, 2)
+        if base_tot_impr > 0
+        else 0.0
+    )
+    click_growth_pct = (
+        round(((curr_tot_clicks - base_tot_clicks) / float(max(1, base_tot_clicks))) * 100.0, 2)
+        if base_tot_clicks > 0
+        else 0.0
+    )
+    ctr_delta_pp = round(curr_avg_ctr_pct - base_avg_ctr_pct, 2) if base_tot_impr > 0 else 0.0
+    pos_delta = round(curr_w_pos - base_w_pos, 2) if base_tot_impr > 0 else 0.0
+    ctr_dilution_detected = bool(
+        base_tot_impr > 0 and curr_tot_impr > base_tot_impr and curr_avg_ctr_pct < base_avg_ctr_pct
+    )
+    pos_dilution_detected = bool(
+        base_tot_impr > 0 and curr_tot_impr > base_tot_impr and curr_w_pos > (base_w_pos + 0.25)
+    )
+    ctr_position_dilution_diagnostics = {
+        "current_clicks": curr_tot_clicks,
+        "current_impressions": curr_tot_impr,
+        "current_ctr_pct": curr_avg_ctr_pct,
+        "current_weighted_avg_position": curr_w_pos,
+        "baseline_clicks": base_tot_clicks,
+        "baseline_impressions": base_tot_impr,
+        "baseline_ctr_pct": base_avg_ctr_pct,
+        "baseline_weighted_avg_position": base_w_pos,
+        "impression_growth_pct": impr_growth_pct,
+        "click_growth_pct": click_growth_pct,
+        "ctr_delta_pct_points": ctr_delta_pp,
+        "position_delta": pos_delta,
+        "ctr_dilution_detected": ctr_dilution_detected,
+        "position_dilution_detected": pos_dilution_detected,
+    }
 
     active_indexable_pages = max(1, pages_audited - len(zero_candidates)) if pages_audited > 0 else 0
     if zero_tax_reangled_spokes:
@@ -3000,6 +3148,8 @@ def evaluate_content_portfolio_decisions(
         ),
         "total_routes_evaluated": len(decisions),
         "action_breakdown": counts_by_action,
+        "zero_click_indexed_triage_summary": zero_click_triage_summary,
+        "ctr_position_dilution_diagnostics": ctr_position_dilution_diagnostics,
         "zero_impression_candidates": zero_candidates,
         "zero_impression_prune_candidates": zero_candidates,
         "flagged_count": len(zero_candidates),
@@ -3017,6 +3167,8 @@ def evaluate_content_portfolio_decisions(
                 "property_id": prop,
                 "timestamp": report["timestamp"],
                 "queued_count": len(zero_candidates),
+                "aged_zero_click_bleeders_count": len(aged_zero_click_bleeders),
+                "aged_zero_click_bleeder_candidates": aged_zero_click_bleeders,
                 "zero_tax_reangled_spokes_count": len(zero_tax_reangled_spokes),
                 "zero_tax_reangled_spokes": zero_tax_reangled_spokes,
                 "consolidation_executed": True,
@@ -4040,6 +4192,20 @@ def compile_technical_seo_sprint(
                     "execution_state": "FLAGGED_FOR_PRUNE",
                 }
             )
+        triage_summary_sp = portfolio_report.get("zero_click_indexed_triage_summary") or {}
+        for bleeder in (triage_summary_sp.get("aged_deep_rank_bleeder_candidates") or [])[:5]:
+            sprint_tasks.append(
+                {
+                    "task_id": f"sprint_{prop}_bleeder_{len(sprint_tasks) + 1:02d}",
+                    "category": "PORTFOLIO_ZERO_CLICK_BLEEDER_TRIAGE",
+                    "priority": "P2",
+                    "roi_score": 52.0,
+                    "priority_score": 52.0,
+                    "target": str(bleeder.get("target_url") or bleeder.get("url_path") or ""),
+                    "action": f"REANGLE_INTENT_OR_CONSOLIDATE_INTO_{bleeder.get('recommended_consolidation_target', '/tools/')}",
+                    "execution_state": "QUEUED_FOR_INTENT_REANGLE_OR_HUB_CONSOLIDATION",
+                }
+            )
 
     sprint_tasks.sort(key=lambda x: (-float(x["priority_score"]), x["priority"], x["task_id"]))
 
@@ -4428,6 +4594,15 @@ def evaluate_north_star_targets(
                 "active_indexable_pages": active_indexable_pages,
                 "active_impression_routes_count": active_impr_routes,
                 "zero_tax_reangled_spokes_count": int((portfolio_report or {}).get("zero_tax_reangled_spokes_count", 0) or 0),
+                "zero_click_indexed_routes_count": int(
+                    ((portfolio_report or {}).get("zero_click_indexed_triage_summary") or {}).get("zero_click_indexed_routes_count", 0) or 0
+                ),
+                "aged_deep_rank_bleeders_count": int(
+                    ((portfolio_report or {}).get("zero_click_indexed_triage_summary") or {}).get("aged_deep_rank_bleeders_count", 0) or 0
+                ),
+                "ctr_dilution_detected": bool(
+                    ((portfolio_report or {}).get("ctr_position_dilution_diagnostics") or {}).get("ctr_dilution_detected", False)
+                ),
                 "pre_consolidation_indexed_coverage_pct": pre_consolidation_cov_pct,
                 "indexed_impression_ratio_pct": indexed_coverage_ratio_pct,
                 "target_30d_indexed_coverage_pct": 55.0 if prop == "profithelm" else 65.0,

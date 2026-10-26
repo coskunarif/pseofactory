@@ -2212,6 +2212,7 @@ def _resolve_vertical_competitor_content(
                     ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint Income-Driven Repayment Tax Model"),
                     ("icr-repayment-calculator", "Income-Contingent Repayment (ICR) & Parent PLUS Statutory Calculator"),
                     ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
+                    ("parent-plus-double-consolidation-loophole-2026-calculator", "Parent PLUS Double Consolidation Loophole 2026 Sunset & ICR vs IDR Calculator"),
                     ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
                 ],
             ),

@@ -5131,10 +5131,24 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         return True
 
     if (
+        canon_url.endswith("/404.html") or canon_url.rstrip("/").endswith("/404")
+    ) and re.search(r'<meta\s+name=["\']robots["\']\s+content=["\']index,', html_content, re.IGNORECASE):
+        return True
+
+    if (
         "/tools/" in canon_url
         and not canon_url.rstrip("/").endswith("/tools")
         and '"@graph"' in html_content
         and ('"@type": "Dataset"' not in html_content or '"@type": "HowTo"' not in html_content)
+    ):
+        return True
+
+    if (
+        "/tools/" in canon_url
+        and len([seg for seg in canon_url.split("/tools/", 1)[1].strip("/").split("/") if seg]) >= 2
+        and '"BreadcrumbList"' in html_content
+        and '"https://profithelm.com/tools/"' not in html_content
+        and '"https://prexvo.com/tools/"' not in html_content
     ):
         return True
 
@@ -5144,6 +5158,12 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
         if "icr-repayment-calculator" in canon_url and "Interactive ICR 20% Discretionary" not in html_content:
             return True
         if "ibr-hardship-cap-calculator" in canon_url and "Interactive IBR Partial Financial Hardship" not in html_content:
+            return True
+        if (
+            "parent-plus-double-consolidation-loophole-2026-calculator" not in canon_url
+            and 'id="topic-cluster-hub"' in html_content
+            and "/tools/parent-plus-double-consolidation-loophole-2026-calculator/" not in html_content
+        ):
             return True
         if (
             not any(k in canon_url for k in ("pslf", "save-plan", "ibr-hardship", "teacher-loan", "joint-consolidation", "student-loan-refinance-break-even-calculator"))
@@ -6417,6 +6437,27 @@ def _normalize_page_structure_and_geo_parity(
                     updated = wb_replaced
                     changed = True
         if (
+            slug != "parent-plus-double-consolidation-loophole-2026-calculator"
+            and 'id="topic-cluster-hub"' in updated
+            and "/tools/parent-plus-double-consolidation-loophole-2026-calculator/" not in updated
+        ):
+            pp_li = (
+                '          <li><a href="https://prexvo.com/tools/parent-plus-double-consolidation-loophole-2026-calculator/" '
+                'class="touch-target cluster-link" style="display: inline-flex; align-items: center; min-height: 44px; '
+                'padding: 8px 12px; text-decoration: none; font-weight: 600;">'
+                'Parent PLUS Double Consolidation Loophole 2026 Sunset &amp; ICR vs IDR Calculator</a></li>\n'
+            )
+            pp_updated = re.sub(
+                r'(id=["\']topic-cluster-hub["\'][\s\S]*?<ul[^>]*>\s*)',
+                rf"\g<1>{pp_li}",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if pp_updated != updated:
+                updated = pp_updated
+                changed = True
+        if (
             not is_restricted_public_service_slug(slug)
             and slug != "student-loan-refinance-break-even-calculator"
             and 'id="topic-cluster-hub"' in updated
@@ -6448,6 +6489,17 @@ def _normalize_page_structure_and_geo_parity(
                 'Student Loan Refinance Break-Even vs Title IV Protection Calculator</a> '
                 '<span style="font-size: 13px; color: var(--text-muted, #475569);">(Refinancing federal student loans permanently waives federal protections.)</span></li>',
             )
+            changed = True
+
+    if slug.lower() == "404" or (canonical_url or "").endswith("/404.html") or (canonical_url or "").rstrip("/").endswith("/404"):
+        robots_404 = re.sub(
+            r'<meta\s+name=["\']robots["\']\s+content=["\']index,[^"\']*["\']\s*/?>',
+            '<meta name="robots" content="noindex, follow">',
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if robots_404 != updated:
+            updated = robots_404
             changed = True
 
     def _qa_needs_heal(qa_txt: str) -> bool:
@@ -6563,7 +6615,15 @@ def _normalize_page_structure_and_geo_parity(
             updated = th_scoped
             changed = True
 
-    if '"@graph"' in updated and '"BreadcrumbList"' not in updated and slug.lower() not in ("404", "signal"):
+    if '"@graph"' in updated and slug.lower() not in ("404", "signal") and (
+        '"BreadcrumbList"' not in updated
+        or (
+            "/tools/" in (canonical_url or "")
+            and len([seg for seg in (canonical_url or "").split("/tools/", 1)[1].strip("/").split("/") if seg]) >= 2
+            and '"https://profithelm.com/tools/"' not in updated
+            and '"https://prexvo.com/tools/"' not in updated
+        )
+    ):
         def _inject_breadcrumb_graph(m_bc: re.Match) -> str:
             o_tag, raw_j, c_tag = m_bc.group(1), m_bc.group(2), m_bc.group(3)
             try:
@@ -6571,15 +6631,6 @@ def _normalize_page_structure_and_geo_parity(
                 if not isinstance(parsed_j, dict) or not isinstance(parsed_j.get("@graph"), list):
                     return m_bc.group(0)
                 g_nodes = parsed_j["@graph"]
-                existing_types = {
-                    str(t)
-                    for n in g_nodes
-                    if isinstance(n, dict)
-                    for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
-                    if t
-                }
-                if "BreadcrumbList" in existing_types:
-                    return m_bc.group(0)
                 base_u = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
                 page_u = (canonical_url or f"{base_u}/").split("#")[0].rstrip("/") + "/"
                 clean_lbl = topic_label or slug.replace("-", " ").title() or brand_label
@@ -6591,7 +6642,52 @@ def _normalize_page_structure_and_geo_parity(
                         "item": f"{base_u}/",
                     }
                 ]
-                if slug.lower() not in ("index", "root", "") and page_u.rstrip("/") != base_u.rstrip("/"):
+                if "/tools/" in page_u:
+                    t_segs = [seg for seg in page_u.split("/tools/", 1)[1].strip("/").split("/") if seg]
+                    items.append(
+                        {
+                            "@type": "ListItem",
+                            "position": 2,
+                            "name": "Tools",
+                            "item": f"{base_u}/tools/",
+                        }
+                    )
+                    if len(t_segs) >= 2:
+                        hub_s = t_segs[0]
+                        hub_lbl = (
+                            hub_s.replace("-", " ")
+                            .title()
+                            .replace("Irs ", "IRS ")
+                            .replace("1031 ", "Section 1031 ")
+                            .replace("179 ", "Section 179 ")
+                            .replace("SCorp", "S-Corp")
+                        )
+                        items.append(
+                            {
+                                "@type": "ListItem",
+                                "position": 3,
+                                "name": hub_lbl,
+                                "item": f"{base_u}/tools/{hub_s}/",
+                            }
+                        )
+                        items.append(
+                            {
+                                "@type": "ListItem",
+                                "position": 4,
+                                "name": clean_lbl,
+                                "item": page_u,
+                            }
+                        )
+                    elif len(t_segs) == 1:
+                        items.append(
+                            {
+                                "@type": "ListItem",
+                                "position": 3,
+                                "name": clean_lbl,
+                                "item": page_u,
+                            }
+                        )
+                elif slug.lower() not in ("index", "root", "") and page_u.rstrip("/") != base_u.rstrip("/"):
                     items.append(
                         {
                             "@type": "ListItem",
@@ -6600,13 +6696,23 @@ def _normalize_page_structure_and_geo_parity(
                             "item": page_u,
                         }
                     )
-                g_nodes.append(
-                    {
-                        "@type": "BreadcrumbList",
-                        "@id": f"{page_u}#breadcrumb",
-                        "itemListElement": items,
-                    }
-                )
+                bc_found = False
+                for n in g_nodes:
+                    if isinstance(n, dict):
+                        n_types = n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")]
+                        if "BreadcrumbList" in [str(t) for t in n_types if t]:
+                            n["@id"] = f"{page_u}#breadcrumb"
+                            n["itemListElement"] = items
+                            bc_found = True
+                            break
+                if not bc_found:
+                    g_nodes.append(
+                        {
+                            "@type": "BreadcrumbList",
+                            "@id": f"{page_u}#breadcrumb",
+                            "itemListElement": items,
+                        }
+                    )
                 return f"{o_tag}\n{json.dumps(parsed_j, indent=2)}\n  {c_tag}"
             except Exception:
                 return m_bc.group(0)
@@ -9037,12 +9143,23 @@ class RetroReflectionEngine:
                         or "/static/signal" in in_deg_map
                         or (
                             property_id.lower() == "prexvo"
-                            and int(in_deg_map.get("/tools/student-loan-refinance-break-even-calculator", 99) or 0) <= 1
+                            and (
+                                int(in_deg_map.get("/tools/student-loan-refinance-break-even-calculator", 99) or 0) <= 1
+                                or int(in_deg_map.get("/tools/parent-plus-double-consolidation-loophole-2026-calculator", 99) or 0) <= 1
+                            )
                         )
                     ):
                         stale_pages[".agy/internal_linking_opportunities.json"] = ["internal_linking_ledger_integrity"]
                 except Exception:
                     stale_pages[".agy/internal_linking_opportunities.json"] = ["internal_linking_ledger_integrity"]
+            cp_file = agy_dir / "content_portfolio_decisions.json"
+            if cp_file.is_file():
+                try:
+                    cp_data = json.loads(cp_file.read_text(encoding="utf-8"))
+                    if not isinstance(cp_data, dict) or "zero_click_indexed_triage_summary" not in cp_data:
+                        stale_pages[".agy/content_portfolio_decisions.json"] = ["content_portfolio_zero_click_triage_missing"]
+                except Exception:
+                    stale_pages[".agy/content_portfolio_decisions.json"] = ["content_portfolio_zero_click_triage_missing"]
             cr_file = agy_dir / "cohort_reflection_ledger.json"
             if cr_file.is_file():
                 try:

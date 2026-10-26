@@ -1024,6 +1024,152 @@ def _build_compiler_faq_entities(
     return faq_entities
 
 
+def _build_compiled_json_ld_graph(
+    canonical_base: str,
+    slug: str,
+    title: str,
+    raw_meta_desc: str,
+    application_category: str,
+    statutory_authority: str,
+    economic_dataset: str,
+    is_prexvo: bool,
+    faq_entities: List[Dict[str, Any]],
+) -> str:
+    """Builds the unified Schema.org @graph JSON-LD string for compiled programmatic pages."""
+    brand_org_name = "Prexvo" if is_prexvo else "ProfitHelm"
+    if "/" in slug:
+        spoke_parts = [sp for sp in slug.split("/") if sp]
+        hub_slug_part = spoke_parts[0]
+        hub_name_map = {
+            "irs-2027-tax-brackets": "IRS 2027 Tax Brackets Calculator",
+            "section-1031-calculator": "Section 1031 Exchange Calculator",
+            "section-179-calculator": "Section 179 Deduction Calculator",
+        }
+        hub_display_name = hub_name_map.get(hub_slug_part, hub_slug_part.replace("-", " ").title())
+        breadcrumb_items_list = [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{canonical_base}/"},
+            {"@type": "ListItem", "position": 2, "name": "Tools", "item": f"{canonical_base}/tools/"},
+            {"@type": "ListItem", "position": 3, "name": hub_display_name, "item": f"{canonical_base}/tools/{hub_slug_part}/"},
+            {"@type": "ListItem", "position": 4, "name": title, "item": f"{canonical_base}/tools/{slug}/"},
+        ]
+    else:
+        breadcrumb_items_list = [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{canonical_base}/"},
+            {"@type": "ListItem", "position": 2, "name": "Tools", "item": f"{canonical_base}/tools/"},
+            {"@type": "ListItem", "position": 3, "name": title, "item": f"{canonical_base}/tools/{slug}/"},
+        ]
+    howto_clean_label = re.sub(r"\s+Calculator\b", "", title.split("|")[0].strip(), flags=re.IGNORECASE).strip() or title
+    graph_payload = {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": f"{canonical_base}/#organization",
+                "name": brand_org_name,
+                "url": canonical_base,
+            },
+            {
+                "@type": "WebPage",
+                "@id": f"{canonical_base}/tools/{slug}/#webpage",
+                "url": f"{canonical_base}/tools/{slug}/",
+                "name": title,
+                "description": raw_meta_desc,
+                "breadcrumb": {"@id": f"{canonical_base}/tools/{slug}/#breadcrumb"},
+            },
+            {
+                "@type": ["WebApplication", "SoftwareApplication"],
+                "@id": f"{canonical_base}/tools/{slug}/#app",
+                "name": title,
+                "applicationCategory": application_category,
+                "operatingSystem": "All",
+                "url": f"{canonical_base}/tools/{slug}/",
+                "featureList": [
+                    f"Deterministic Statutory Formula Evaluation ({statutory_authority})",
+                    f"Empirical Benchmark Corroboration ({economic_dataset})",
+                    "Interactive 5-Point Scenario Comparison Matrix",
+                ],
+                "offers": {"@type": "Offer", "price": "0.00", "priceCurrency": "USD"},
+            },
+            {
+                "@type": "Dataset",
+                "@id": f"{canonical_base}/tools/{slug}/#dataset",
+                "name": f"{title} Empirical Statutory Calculation Dataset",
+                "description": f"Deterministic statutory calculation schedule and sensitivity matrix for {title} under {statutory_authority}.",
+                "url": f"{canonical_base}/tools/{slug}/",
+                "creator": {
+                    "@type": "Organization",
+                    "@id": f"{canonical_base}/#organization",
+                    "name": brand_org_name,
+                    "url": canonical_base,
+                },
+                "publisher": {"@type": "Organization", "name": brand_org_name, "url": canonical_base},
+                "temporalCoverage": "2026/2027",
+                "isAccessibleForFree": True,
+                "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+                "distribution": [
+                    {
+                        "@type": "DataDownload",
+                        "encodingFormat": "text/html",
+                        "contentUrl": f"{canonical_base}/tools/{slug}/",
+                    }
+                ],
+                "spatialCoverage": "United States",
+                "mainEntityOfPage": {"@id": f"{canonical_base}/tools/{slug}/#webpage"},
+                "includedInDataCatalog": {
+                    "@type": "DataCatalog",
+                    "@id": f"{canonical_base}/#datacatalog",
+                    "name": f"{brand_org_name} Statutory Data Catalog",
+                    "url": canonical_base,
+                },
+            },
+            {
+                "@type": "HowTo",
+                "@id": f"{canonical_base}/tools/{slug}/#howto",
+                "name": f"How to Calculate {howto_clean_label}",
+                "description": f"Step-by-step statutory procedure for computing {howto_clean_label} under {statutory_authority}.",
+                "url": f"{canonical_base}/tools/{slug}/",
+                "totalTime": "PT1M",
+                "step": [
+                    {
+                        "@type": "HowToStep",
+                        "position": 1,
+                        "name": "Enter Financial Baseline Parameters",
+                        "text": f"Input baseline dollar figures and rate assumptions into the {title} form.",
+                        "url": f"{canonical_base}/tools/{slug}/#step-1",
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "position": 2,
+                        "name": "Select Statutory Tier or Jurisdiction",
+                        "text": f"Choose the applicable statutory classification or filing tier under {statutory_authority}.",
+                        "url": f"{canonical_base}/tools/{slug}/#step-2",
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "position": 3,
+                        "name": "Review Deterministic Output & Sensitivity Matrix",
+                        "text": "Inspect the computed dollar output, 5-point sensitivity schedule, and compliance checklist.",
+                        "url": f"{canonical_base}/tools/{slug}/#step-3",
+                    },
+                ],
+                "isPartOf": {"@id": f"{canonical_base}/tools/{slug}/#webpage"},
+            },
+            {
+                "@type": "BreadcrumbList",
+                "@id": f"{canonical_base}/tools/{slug}/#breadcrumb",
+                "itemListElement": breadcrumb_items_list,
+            },
+            {
+                "@type": "FAQPage",
+                "@id": f"{canonical_base}/tools/{slug}/#faq",
+                "about": {"@id": f"{canonical_base}/tools/{slug}/#app"},
+                "mainEntity": faq_entities,
+            },
+        ],
+    }
+    return json.dumps(graph_payload, indent=2)
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -1461,6 +1607,18 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             words_m.pop()
         raw_meta_desc = " ".join(words_m).rstrip(".,;:") + "."
 
+    json_ld_graph_str = _build_compiled_json_ld_graph(
+        canonical_base=canonical_base,
+        slug=slug,
+        title=title,
+        raw_meta_desc=raw_meta_desc,
+        application_category=application_category,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+        is_prexvo=is_prexvo,
+        faq_entities=faq_entities,
+    )
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1715,63 +1873,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   </style>
   <!-- Schema.org Application Type: "@type": "SoftwareApplication" -->
   <script type="application/ld+json">
-  {{
-    "@context": "https://schema.org",
-    "@type": ["WebApplication", "SoftwareApplication"],
-    "@id": "{canonical_base}/tools/{slug}/#app",
-    "name": "{title}",
-    "applicationCategory": "{application_category}",
-    "operatingSystem": "All",
-    "url": "{canonical_base}/tools/{slug}/",
-    "featureList": [
-      "Deterministic Statutory Formula Evaluation ({statutory_authority})",
-      "Empirical Benchmark Corroboration ({economic_dataset})",
-      "Interactive 5-Point Scenario Comparison Matrix"
-    ],
-    "offers": {{
-      "@type": "Offer",
-      "price": "0.00",
-      "priceCurrency": "USD"
-    }}
-  }}
-  </script>
-  <script type="application/ld+json">
-  {{
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "@id": "{canonical_base}/tools/{slug}/#breadcrumb",
-    "itemListElement": [
-      {{
-        "@type": "ListItem",
-        "position": 1,
-        "name": "Home",
-        "item": "{canonical_base}/"
-      }},
-      {{
-        "@type": "ListItem",
-        "position": 2,
-        "name": "Tools",
-        "item": "{canonical_base}/tools/"
-      }},
-      {{
-        "@type": "ListItem",
-        "position": 3,
-        "name": "{title}",
-        "item": "{canonical_base}/tools/{slug}/"
-      }}
-    ]
-  }}
-  </script>
-  <script type="application/ld+json">
-  {{
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "@id": "{canonical_base}/tools/{slug}/#faq",
-    "about": {{
-      "@id": "{canonical_base}/tools/{slug}/#app"
-    }},
-    "mainEntity": {faq_json_str}
-  }}
+  {json_ld_graph_str}
   </script>
 </head>
 <body>

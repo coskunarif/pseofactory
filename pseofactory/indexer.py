@@ -2519,9 +2519,11 @@ class PushIndexer:
         relative order within each tier.
         """
         effective_boosts = list(priority_boost_urls or [])
-        if not effective_boosts:
-            try:
-                repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent))
+        demoted_bleeder_paths: Set[str] = set()
+        striking_rescue_paths: Set[str] = set()
+        try:
+            repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent))
+            if not effective_boosts:
                 cr_path = repo_root / ".agy" / "cohort_reflection_ledger.json"
                 if cr_path.is_file():
                     cr_data = json.loads(cr_path.read_text(encoding="utf-8"))
@@ -2539,8 +2541,48 @@ class PushIndexer:
                                 u_cand = r_item.get("url") or r_item.get("target_url")
                                 if u_cand:
                                     effective_boosts.append(str(u_cand))
-            except Exception:
-                pass
+            pq_path = repo_root / ".agy" / "prune_noindex_queue.json"
+            if pq_path.is_file():
+                pq_data = json.loads(pq_path.read_text(encoding="utf-8"))
+                if isinstance(pq_data, dict):
+                    for item_list_key in ("candidates", "aged_zero_click_bleeder_candidates"):
+                        for c_item in pq_data.get(item_list_key) or []:
+                            if isinstance(c_item, dict):
+                                for k_u in ("url_path", "target_url"):
+                                    v_u = str(c_item.get(k_u) or "").strip().rstrip("/")
+                                    if v_u:
+                                        demoted_bleeder_paths.add(v_u)
+                                        p_only = urllib.parse.urlparse(v_u).path.rstrip("/")
+                                        if p_only:
+                                            demoted_bleeder_paths.add(p_only)
+            cp_path = repo_root / ".agy" / "content_portfolio_decisions.json"
+            if cp_path.is_file():
+                cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+                if isinstance(cp_data, dict):
+                    triage_blk = cp_data.get("zero_click_indexed_triage_summary") or {}
+                    for b_item in (triage_blk.get("aged_deep_rank_bleeder_candidates") or []):
+                        if isinstance(b_item, dict):
+                            for k_u in ("url_path", "target_url"):
+                                v_u = str(b_item.get(k_u) or "").strip().rstrip("/")
+                                if v_u:
+                                    demoted_bleeder_paths.add(v_u)
+                                    p_only = urllib.parse.urlparse(v_u).path.rstrip("/")
+                                    if p_only:
+                                        demoted_bleeder_paths.add(p_only)
+                    for d_item in cp_data.get("decisions") or []:
+                        if isinstance(d_item, dict) and d_item.get("zero_click_triage") == "IMPROVE_CTR_STRIKING_DISTANCE":
+                            impr_v = int(d_item.get("impressions", 0) or 0)
+                            pos_v = float(d_item.get("best_position", 100.0) or 100.0)
+                            if impr_v >= 10 and pos_v <= 20.0:
+                                for k_u in ("url_path", "target_url"):
+                                    v_u = str(d_item.get(k_u) or "").strip().rstrip("/")
+                                    if v_u:
+                                        striking_rescue_paths.add(v_u)
+                                        p_only = urllib.parse.urlparse(v_u).path.rstrip("/")
+                                        if p_only:
+                                            striking_rescue_paths.add(p_only)
+        except Exception:
+            pass
         boost_set = {str(b).strip().rstrip("/") for b in effective_boosts if b}
 
         def _priority_tier(u: str) -> int:
@@ -2552,6 +2594,10 @@ class PushIndexer:
                 return 1
             if boost_set and (raw.rstrip("/") in boost_set or path in boost_set):
                 return 1
+            if striking_rescue_paths and (raw.rstrip("/") in striking_rescue_paths or path in striking_rescue_paths):
+                return 1
+            if demoted_bleeder_paths and (raw.rstrip("/") in demoted_bleeder_paths or path in demoted_bleeder_paths):
+                return 7
             if path.startswith("/tools/"):
                 return 2 if len(path.strip("/").split("/")) <= 2 else 3
             if path.startswith("/comparisons/") or "-vs-" in path:
