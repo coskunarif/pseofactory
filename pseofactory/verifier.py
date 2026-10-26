@@ -1576,17 +1576,20 @@ class MasterSEOVerifier:
                 idx_raw = (self.dist_dir / "index.html").read_text(encoding="utf-8", errors="ignore")
                 if "/media-kit.json" in idx_raw:
                     from pseofactory.maintenance import RetroReflectionEngine
-                    prop_id = (
-                        "prexvo"
-                        if "prexvo" in str(self.domain).lower()
-                        or "prexvo" in str(self.brand_name).lower()
-                        or "prexvo" in str(self.dist_dir).lower()
-                        else "profithelm"
-                    )
+                    dist_low = str(self.dist_dir.resolve()).lower()
+                    if "profithelm" in dist_low:
+                        prop_id = "profithelm"
+                    elif "prexvo" in dist_low:
+                        prop_id = "prexvo"
+                    elif "prexvo" in str(self.domain).lower() or "prexvo" in str(self.brand_name).lower():
+                        prop_id = "prexvo"
+                    else:
+                        prop_id = "profithelm"
+                    safe_canon = "https://prexvo.com" if prop_id == "prexvo" else "https://profithelm.com"
                     RetroReflectionEngine.sync_tenant_publisher_prerequisites(
                         self.dist_dir,
                         property_id=prop_id,
-                        canonical_base=self.canonical_base,
+                        canonical_base=safe_canon,
                     )
             except Exception:
                 pass

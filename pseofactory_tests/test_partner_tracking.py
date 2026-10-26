@@ -2488,4 +2488,57 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
     assert_no_forbidden_dashes(json.dumps(sync_rep), context="autonomous_partner_lifecycle_report")
 
 
+def test_sync_tenant_publisher_prerequisites_rejects_cross_tenant_thread_bleed(tmp_path):
+    """Verifies sync_tenant_publisher_prerequisites and MasterSEOVerifier reject foreign canonical_base/domain under concurrent execution."""
+    from pseofactory.maintenance import RetroReflectionEngine, CrossPropertyContaminationScanner
+    from pseofactory.verifier import MasterSEOVerifier
+
+    ph_dist = tmp_path / "profithelm-platform" / "dist"
+    (ph_dist / "tools").mkdir(parents=True, exist_ok=True)
+    (ph_dist / "index.html").write_text(
+        '<!doctype html><html><head><meta name="partnerstack-publisher-entity" content="Prexvo Statutory Research Group">'
+        '<link rel="publisher-media-kit" href="/media-kit.json"></head><body><h1>ProfitHelm</h1></body></html>',
+        encoding="utf-8",
+    )
+    (ph_dist / "tools" / "index.html").write_text(
+        "<!doctype html><html><head></head><body><h1>Tools</h1></body></html>",
+        encoding="utf-8",
+    )
+
+    px_dist = tmp_path / "prexvo" / "dist"
+    (px_dist / "tools").mkdir(parents=True, exist_ok=True)
+    (px_dist / "index.html").write_text(
+        '<!doctype html><html><head><meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">'
+        '<link rel="publisher-media-kit" href="/media-kit.json"></head><body><h1>Prexvo</h1></body></html>',
+        encoding="utf-8",
+    )
+    (px_dist / "tools" / "index.html").write_text(
+        "<!doctype html><html><head></head><body><h1>Tools</h1></body></html>",
+        encoding="utf-8",
+    )
+
+    # Simulate thread-race bleed: passing prexvo canonical_base to profithelm dist and profithelm canonical_base to prexvo dist
+    RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+        ph_dist,
+        property_id="prexvo",
+        canonical_base="https://prexvo.com",
+    )
+    RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+        px_dist,
+        property_id="profithelm",
+        canonical_base="https://profithelm.com",
+    )
+
+    scanner = CrossPropertyContaminationScanner()
+    assert scanner.scan_directory(ph_dist, "profithelm") == {}
+    assert scanner.scan_directory(px_dist, "prexvo") == {}
+
+    # Also verify MasterSEOVerifier init with mismatched canonical_base/domain does not pollute dist
+    MasterSEOVerifier(dist_dir=ph_dist, canonical_base="https://prexvo.com", domain="prexvo.com")
+    MasterSEOVerifier(dist_dir=px_dist, canonical_base="https://profithelm.com", domain="profithelm.com")
+    assert scanner.scan_directory(ph_dist, "profithelm") == {}
+    assert scanner.scan_directory(px_dist, "prexvo") == {}
+
+
+
 

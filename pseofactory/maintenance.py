@@ -2304,6 +2304,7 @@ class AssetIntegrityEvaluator:
         self._asset_audit_cache = self._audit_cache
         self._fingerprint_cache: Dict[Tuple[str, float, int], str] = self._GLOBAL_FINGERPRINT_CACHE
         self._seo_verifier: Optional[Any] = None
+        self._seo_verifiers: Dict[str, Any] = {}
 
 
     def extract_slug(self, asset_path: Path, dist_dir: Path) -> Optional[str]:
@@ -2671,15 +2672,20 @@ class AssetIntegrityEvaluator:
         if self.enforce_master_seo and adapter.dist_dir.exists() and (adapter.dist_dir / "sitemap.xml").is_file():
             try:
                 from pseofactory.verifier import MasterSEOVerifier
-                if self._seo_verifier is None or getattr(self._seo_verifier, "dist_dir", None) != adapter.dist_dir:
-                    self._seo_verifier = MasterSEOVerifier(
+                dist_key = str(adapter.dist_dir.resolve())
+                if not hasattr(self, "_seo_verifiers") or not isinstance(self._seo_verifiers, dict):
+                    self._seo_verifiers = {}
+                v = self._seo_verifiers.get(dist_key)
+                if v is None or getattr(v, "dist_dir", None) != adapter.dist_dir:
+                    v = MasterSEOVerifier(
                         dist_dir=adapter.dist_dir,
                         canonical_base=adapter.canonical_base,
                         domain=adapter.domain,
                         brand_name=adapter.brand_name,
                         tools=getattr(adapter, "tools", None),
                     )
-                v = self._seo_verifier
+                    self._seo_verifiers[dist_key] = v
+                self._seo_verifier = v
                 seo_report = v.audit_seo_checklist(
                     dist_dir=adapter.dist_dir,
                     raise_on_error=False,
@@ -9000,11 +9006,20 @@ class RetroReflectionEngine:
             return []
 
         updated_files: List[str] = []
-        is_prexvo = property_id.lower() == "prexvo"
-        canon = (
-            canonical_base
-            or ("https://prexvo.com" if is_prexvo else "https://profithelm.com")
-        ).rstrip("/")
+        d_str_low = d.as_posix().lower()
+        if "profithelm" in d_str_low:
+            is_prexvo = False
+        elif "prexvo" in d_str_low:
+            is_prexvo = True
+        else:
+            is_prexvo = property_id.lower() == "prexvo"
+
+        default_canon = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
+        raw_canon = (canonical_base or "").strip().rstrip("/")
+        if not raw_canon or (is_prexvo and "profithelm" in raw_canon.lower()) or (not is_prexvo and "prexvo" in raw_canon.lower()):
+            canon = default_canon
+        else:
+            canon = raw_canon
 
         entity_label = "Prexvo Statutory Research Group" if is_prexvo else "ProfitHelm LLC"
         meta_block_lines = [
@@ -9034,6 +9049,11 @@ class RetroReflectionEngine:
                 if is_prexvo and '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">' in new_h:
                     new_h = new_h.replace(
                         '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">',
+                        f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',
+                    )
+                elif not is_prexvo and '<meta name="partnerstack-publisher-entity" content="Prexvo Statutory Research Group">' in new_h:
+                    new_h = new_h.replace(
+                        '<meta name="partnerstack-publisher-entity" content="Prexvo Statutory Research Group">',
                         f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',
                     )
                 missing_lines = [
