@@ -2434,12 +2434,20 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
     assert prereq_rep["status"] == "PASS"
     assert prereq_rep["all_prerequisites_met"] is True
     assert prereq_rep["all_network_payouts_and_tax_forms_verified"] is True
-    for prop_id in ("profithelm", "prexvo"):
+    for prop_id, d_dir in (("profithelm", ph_dist), ("prexvo", px_dist)):
         p_aud = prereq_rep["properties"][prop_id]
         assert p_aud["status"] == "PASS"
         assert p_aud["missing_meta_tags"] == []
         assert p_aud["missing_governance_endpoints"] == []
         assert p_aud["media_kit_manifest_valid"] is True
+
+        # Verify strict cross-tenant boundary isolation on generated HTML and media-kit.json
+        from pseofactory.tenant_facts import TenantFactStore
+        t_reg = TenantFactStore()
+        for f_name in ("index.html", "media-kit.json"):
+            ok, violations = t_reg.verify_claim(prop_id, (d_dir / f_name).read_text(encoding="utf-8"))
+            assert ok is True, f"Cross-tenant violation in {prop_id}/{f_name}: {violations}"
+            assert violations == []
 
     stalled_rep = sync_rep["stalled_applications_monitor"]
     assert stalled_rep["total_tracked_partners"] == 27

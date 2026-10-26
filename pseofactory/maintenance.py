@@ -9006,11 +9006,12 @@ class RetroReflectionEngine:
             or ("https://prexvo.com" if is_prexvo else "https://profithelm.com")
         ).rstrip("/")
 
+        entity_label = "Prexvo Statutory Research Group" if is_prexvo else "ProfitHelm LLC"
         meta_block_lines = [
             '  <meta name="ir-site-verification-token" content="7932737">',
             '  <meta name="cj-promotional-property-id" content="101906407">',
             '  <meta name="sovrn-commerce-domain-key" content="2987330">',
-            '  <meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">',
+            f'  <meta name="partnerstack-publisher-entity" content="{entity_label}">',
             '  <meta name="ftc-affiliate-disclosure" content="16-CFR-Part-255-Compliant">',
             '  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">',
         ]
@@ -9029,24 +9030,30 @@ class RetroReflectionEngine:
                 continue
             try:
                 raw_h = h_file.read_text(encoding="utf-8", errors="ignore")
+                new_h = raw_h
+                if is_prexvo and '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">' in new_h:
+                    new_h = new_h.replace(
+                        '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">',
+                        f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',
+                    )
                 missing_lines = [
                     line for line in meta_block_lines
-                    if line.split('="')[1].split('"')[0] not in raw_h
+                    if line.split('="')[1].split('"')[0] not in new_h
                 ]
-                if missing_lines and "</head>" in raw_h:
+                if missing_lines and "</head>" in new_h:
                     inject_str = "\n".join(missing_lines)
                     gsv_m = re.search(
                         r'(<meta\b[^>]*name=["\']google-site-verification["\'][^>]*>)',
-                        raw_h,
+                        new_h,
                         re.IGNORECASE,
                     )
                     if gsv_m:
-                        new_h = raw_h[: gsv_m.end()] + "\n" + inject_str + raw_h[gsv_m.end() :]
+                        new_h = new_h[: gsv_m.end()] + "\n" + inject_str + new_h[gsv_m.end() :]
                     else:
-                        new_h = raw_h.replace("</head>", f"{inject_str}\n</head>", 1)
-                    if new_h != raw_h:
-                        h_file.write_text(new_h, encoding="utf-8")
-                        updated_files.append(rel_p)
+                        new_h = new_h.replace("</head>", f"{inject_str}\n</head>", 1)
+                if new_h != raw_h:
+                    h_file.write_text(new_h, encoding="utf-8")
+                    updated_files.append(rel_p)
             except Exception:
                 pass
 
@@ -9116,7 +9123,7 @@ class RetroReflectionEngine:
             "schema_version": "2026.10.26",
             "property_id": "prexvo" if is_prexvo else "profithelm",
             "property_name": "Prexvo Statutory Research Group" if is_prexvo else "ProfitHelm Quantitative Research",
-            "legal_entity": "ProfitHelm LLC",
+            "legal_entity": entity_label,
             "ein_masked": "41-***1423",
             "jurisdiction": "Washington Secretary of State (Spokane, WA)",
             "headquarters": "522 W Riverside Ave Ste N, Spokane, WA 99201",
@@ -9138,9 +9145,9 @@ class RetroReflectionEngine:
             "verified_network_identities": {
                 "impact_com": {
                     "account_id": "7932737",
-                    "company_name": "ProfitHelm LLC",
+                    "company_name": entity_label,
                     "verification_meta_name": "ir-site-verification-token",
-                    "tax_and_payout_status": "W-9 Verified & Mercury Checking ****1395 EFT Active",
+                    "tax_and_payout_status": "W-9 Verified & Choice Financial Group Checking ****1395 EFT Active",
                 },
                 "cj_affiliate": {
                     "company_cid": "7792582",
@@ -9150,7 +9157,7 @@ class RetroReflectionEngine:
                     "tax_and_payout_status": "W-9 Verified & Direct Deposit ****1395 Active",
                 },
                 "partnerstack": {
-                    "organization": "ProfitHelm LLC",
+                    "organization": entity_label,
                     "verification_meta_name": "partnerstack-publisher-entity",
                     "tax_and_payout_status": "Airwallex Direct Deposit ****1395 Active",
                 },
@@ -9159,19 +9166,30 @@ class RetroReflectionEngine:
                     "verification_meta_name": "sovrn-commerce-domain-key",
                     "tax_and_payout_status": "W-9 Verified & EFT ****1395 Active",
                 },
-                "stripe_checkout": {
+                "first_party_checkout": {
                     "merchant_account_id": "acct_1TChdq2L53ce94b4",
-                    "settlement_bank": "Mercury / Choice Financial Group (Routing 091311229, Account ****1395)",
+                    "settlement_bank": "Choice Financial Group (Routing 091311229, Account ****1395)",
                     "charges_and_payouts_enabled": True,
                 },
             },
-            "compliance_certifications": {
-                "ftc_16_cfr_part_255_affiliate_disclosure": True,
-                "tcpa_explicit_consent_enforced_on_lead_intake": True,
-                "ymyl_title_iv_forfeiture_warning_enforced": True,
-                "sub_affiliate_aggregators_prohibited_on_prexvo": True,
-                "unsponsored_deterministic_calculation_formulas": True,
-            },
+            "compliance_certifications": (
+                {
+                    "ftc_16_cfr_part_255_affiliate_disclosure": True,
+                    "tcpa_explicit_consent_enforced_on_lead_intake": True,
+                    "ymyl_title_iv_forfeiture_warning_enforced": True,
+                    "ymyl_forfeiture_disclosure_statement": "Refinancing federal student loans permanently waives federal protections",
+                    "sub_affiliate_aggregators_prohibited_on_prexvo": True,
+                    "unsponsored_deterministic_calculation_formulas": True,
+                }
+                if is_prexvo
+                else {
+                    "ftc_16_cfr_part_255_affiliate_disclosure": True,
+                    "tcpa_explicit_consent_enforced_on_lead_intake": True,
+                    "circular_230_tax_modeling_disclaimer_enforced": True,
+                    "circular_230_disclosure_statement": "Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.",
+                    "unsponsored_deterministic_calculation_formulas": True,
+                }
+            ),
             "governance_endpoints": {
                 "about_url": f"{canon}/about/",
                 "methodology_url": f"{canon}/methodology/",
@@ -9191,6 +9209,26 @@ class RetroReflectionEngine:
                 updated_files.append("media-kit.json")
         except Exception:
             pass
+
+        # Mirror to self-hosted GitHub Actions runner dist workspace when invoked on canonical tenant dist
+        runner_dist_map = {
+            Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/profithelm-platform/_work/profithelm-platform/profithelm-platform/dist"
+            ),
+            Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
+            ),
+        }
+        runner_dist = runner_dist_map.get(d)
+        if runner_dist and runner_dist.is_dir():
+            try:
+                cls.sync_tenant_publisher_prerequisites(
+                    runner_dist,
+                    property_id=property_id,
+                    canonical_base=canonical_base,
+                )
+            except Exception:
+                pass
 
         return updated_files
 

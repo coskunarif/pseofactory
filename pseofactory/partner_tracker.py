@@ -2928,6 +2928,14 @@ class PartnerTrackingEngine:
 
         for prop_id in ("profithelm", "prexvo"):
             d_dir = dist_map[prop_id]
+            expected_entity = "Prexvo Statutory Research Group" if prop_id == "prexvo" else "ProfitHelm LLC"
+            required_meta_tokens = {
+                "ir-site-verification-token": "7932737",
+                "cj-promotional-property-id": "101906407",
+                "sovrn-commerce-domain-key": "2987330",
+                "partnerstack-publisher-entity": expected_entity,
+                "ftc-affiliate-disclosure": "16-CFR-Part-255-Compliant",
+            }
             index_html = d_dir / "index.html"
             raw_index = ""
             if index_html.is_file():
@@ -2994,7 +3002,7 @@ class PartnerTrackingEngine:
                     mk_data = json.loads(mk_raw)
                     if (
                         isinstance(mk_data, dict)
-                        and mk_data.get("legal_entity") == "ProfitHelm LLC"
+                        and mk_data.get("legal_entity") == expected_entity
                         and isinstance(mk_data.get("verified_network_identities"), dict)
                         and isinstance(mk_data.get("compliance_certifications"), dict)
                     ):
