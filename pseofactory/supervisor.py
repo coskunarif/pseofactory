@@ -982,9 +982,15 @@ class AutonomousLifecycleSupervisor:
                     try:
                         from pseofactory.partner_tracker import (
                             audit_end_to_end_monetization_and_fulfillment,
+                            run_autonomous_partner_lifecycle_sync,
                             sync_edge_leads_to_ledger,
                         )
                         sync_edge_leads_to_ledger(auto_fulfill_unfulfilled=True)
+                        run_autonomous_partner_lifecycle_sync(
+                            force_mail_poll=True,
+                            execute_live_probes=False,
+                            persist=True,
+                        )
                         audit_end_to_end_monetization_and_fulfillment(execute_live=False)
                     except Exception:
                         pass
@@ -1105,6 +1111,22 @@ class AutonomousLifecycleSupervisor:
                             asset_hashes=all_asset_hashes,
                             engine_hash=current_engine_hash,
                         )
+                    if "PYTEST_CURRENT_TEST" not in os.environ:
+                        try:
+                            from pseofactory.partner_tracker import (
+                                audit_end_to_end_monetization_and_fulfillment,
+                                run_autonomous_partner_lifecycle_sync,
+                                sync_edge_leads_to_ledger,
+                            )
+                            sync_edge_leads_to_ledger(auto_fulfill_unfulfilled=True)
+                            run_autonomous_partner_lifecycle_sync(
+                                force_mail_poll=True,
+                                execute_live_probes=False,
+                                persist=True,
+                            )
+                            audit_end_to_end_monetization_and_fulfillment(execute_live=False)
+                        except Exception:
+                            pass
 
                 self.heartbeat_tracker.emit(
                     status="HEALTHY",

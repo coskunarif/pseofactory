@@ -2298,3 +2298,163 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
     assert proc.returncode == 0, f"Node otr_solutions_factoring edge test failed (exit {proc.returncode}): {proc.stderr}"
 
 
+def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lifecycle(
+    tmp_path, temp_bus_path, temp_email_paths
+):
+    """
+    Verifies:
+    1. Inbox #1031 ('Sorry, your partnership request was declined' from The SoFi Partner Team)
+       classifies as APPLICATION_DECLINED for sofi on prexvo (requires_operator_decision=False).
+    2. Inbox #1030 ('Re: OTR Solutions Follow Up' from Wade Fenton confirming internal review)
+       classifies as APPLICATION_SUBMITTED for otr_solutions_factoring (requires_operator_decision=False)
+       and auto-resolves stale ONBOARDING_ACTION_REQUIRED items on HumanActionBus.
+    3. RetroReflectionEngine.sync_tenant_publisher_prerequisites injects verification meta tags,
+       governance redirects (/methodology, /disclaimers, /terms), and media-kit.json.
+    4. PartnerTrackingEngine.audit_publisher_prerequisites_and_compliance,
+       detect_stalled_partner_applications, analyze_cluster_monetization_gaps, and
+       run_autonomous_partner_lifecycle_sync pass with zero uncovered commercial clusters.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+
+    # Seed an older ONBOARDING_ACTION_REQUIRED item for otr_solutions_factoring (#984)
+    old_otr_msg = EmailMessage(
+        id="984",
+        message_id="<984@otrsolutions.com>",
+        account="zoho",
+        mailbox="Inbox",
+        date="2026-10-15T15:09:49Z",
+        subject="OTR Solutions Follow Up",
+        sender_name="Wade Fenton",
+        sender_email="wade.fenton@otrsolutions.com",
+        body_snippet="Complete our Become A Partner form (https://otrsolutions.com/become-a-partner/).",
+    )
+    new_oct26_msgs = [
+        old_otr_msg,
+        EmailMessage(
+            id="1030",
+            message_id="<1030@otrsolutions.com>",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-26T11:10:52Z",
+            subject="Re: OTR Solutions Follow Up",
+            sender_name="Wade Fenton",
+            sender_email="wade.fenton@otrsolutions.com",
+            body_snippet="Thank you for sharing that information, Arif. We will review internally and see if this is something we are interested in and will follow up with you if so.",
+        ),
+        EmailMessage(
+            id="1031",
+            message_id="<1031@app.impact.com>",
+            account="zoho",
+            mailbox="Inbox",
+            date="2026-10-26T13:11:59Z",
+            subject="Sorry, your partnership request was declined",
+            sender_name="The SoFi Partner Team",
+            sender_email="notifications@app.impact.com",
+            body_snippet="You are receiving this SoFi Alert in reference to your account, Arif COSKUN (7932737). SoFi Promotion Request Declined. SoFi has declined your request to work with the campaign, SoFi.",
+        ),
+    ]
+    with open(cache_path, "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "messages": {m.id: m.to_dict() for m in new_oct26_msgs},
+                "classifications": [],
+            },
+            fh,
+        )
+
+    classified = email_engine.classify_partner_emails(new_oct26_msgs)
+    by_id = {c.email_id: c for c in classified}
+    assert by_id["984"].classification_type == "ONBOARDING_ACTION_REQUIRED"
+    assert by_id["984"].requires_operator_decision is True
+
+    assert by_id["1030"].partner_key == "otr_solutions_factoring"
+    assert by_id["1030"].property_id == "profithelm"
+    assert by_id["1030"].classification_type == "APPLICATION_SUBMITTED"
+    assert by_id["1030"].requires_operator_decision is False
+
+    assert by_id["1031"].partner_key == "sofi"
+    assert by_id["1031"].property_id == "prexvo"
+    assert by_id["1031"].classification_type == "APPLICATION_DECLINED"
+    assert by_id["1031"].requires_operator_decision is False
+
+    # Prepare synthetic ProfitHelm and Prexvo dist directories and run sync_tenant_publisher_prerequisites
+    ph_dist = tmp_path / "profithelm_dist"
+    px_dist = tmp_path / "prexvo_dist"
+    for d_dir, prop_id, gov_pages in (
+        (ph_dist, "profithelm", ("about", "privacy")),
+        (px_dist, "prexvo", ("methodology", "disclaimers")),
+    ):
+        (d_dir / "tools" / "sample-tool").mkdir(parents=True, exist_ok=True)
+        (d_dir / "index.html").write_text(
+            '<!DOCTYPE html><html><head><meta name="google-site-verification" content="test"></head>'
+            '<body><p>FTC Disclosure: Affiliate Disclosure.</p></body></html>',
+            encoding="utf-8",
+        )
+        (d_dir / "tools" / "index.html").write_text(
+            "<!DOCTYPE html><html><head></head><body>Tools</body></html>",
+            encoding="utf-8",
+        )
+        (d_dir / "tools" / "sample-tool" / "index.html").write_text(
+            "<!DOCTYPE html><html><head></head><body>Sample Tool</body></html>",
+            encoding="utf-8",
+        )
+        for gp in gov_pages:
+            (d_dir / gp).mkdir(parents=True, exist_ok=True)
+            (d_dir / gp / "index.html").write_text(
+                f"<!DOCTYPE html><html><head></head><body>{gp}</body></html>",
+                encoding="utf-8",
+            )
+        updated_prereqs = RetroReflectionEngine.sync_tenant_publisher_prerequisites(d_dir, prop_id)
+        assert "index.html" in updated_prereqs
+        assert "_redirects" in updated_prereqs
+        assert "media-kit.json" in updated_prereqs
+
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    sync_rep = tracker.run_autonomous_partner_lifecycle_sync(
+        force_mail_poll=False,
+        execute_live_probes=False,
+        persist=True,
+        profithelm_dist_dir=str(ph_dist),
+        prexvo_dist_dir=str(px_dist),
+        persist_path=str(tmp_path / "partner_lifecycle_autonomous_report.json"),
+    )
+    assert sync_rep["status"] == "PASS"
+    assert (tmp_path / "partner_lifecycle_autonomous_report.json").is_file()
+
+    # Verify stale OTR onboarding action was auto-resolved by Inbox #1030
+    otr_act = action_bus.items.get("act-profithelm-otr-solutions-factoring-onboarding-action-required")
+    assert otr_act is not None
+    assert otr_act.status == "RESOLVED"
+
+    prereq_rep = sync_rep["publisher_prerequisites_and_compliance"]
+    assert prereq_rep["status"] == "PASS"
+    assert prereq_rep["all_prerequisites_met"] is True
+    assert prereq_rep["all_network_payouts_and_tax_forms_verified"] is True
+    for prop_id in ("profithelm", "prexvo"):
+        p_aud = prereq_rep["properties"][prop_id]
+        assert p_aud["status"] == "PASS"
+        assert p_aud["missing_meta_tags"] == []
+        assert p_aud["missing_governance_endpoints"] == []
+        assert p_aud["media_kit_manifest_valid"] is True
+
+    stalled_rep = sync_rep["stalled_applications_monitor"]
+    assert stalled_rep["total_tracked_partners"] == 27
+    by_partner = {r["partner_key"]: r for r in stalled_rep["applications"]}
+    assert by_partner["otr_solutions_factoring"]["lifecycle_state"] == "COUNTERPARTY_INTERNAL_REVIEW_CONFIRMED"
+    assert by_partner["otr_solutions_factoring"]["is_stalled"] is False
+    assert by_partner["sofi"]["lifecycle_state"] == "DECLINED_COVERED_BY_FIRST_PARTY_SKU_AND_FALLBACK"
+    assert by_partner["next_insurance_b2b"]["lifecycle_state"] == "DECLINED_COVERED_BY_FIRST_PARTY_SKU_AND_FALLBACK"
+    assert by_partner["ramp"]["lifecycle_state"] == "APPROVED_EDGE_UPGRADED_LIVE"
+
+    gaps_rep = sync_rep["cluster_monetization_gaps"]
+    assert gaps_rep["uncovered_commercial_clusters_count"] == 0
+    assert gaps_rep["properties"]["profithelm"]["clusters_count"] == 8
+    assert gaps_rep["properties"]["prexvo"]["clusters_count"] == 3
+    assert_no_forbidden_dashes(json.dumps(sync_rep), context="autonomous_partner_lifecycle_report")
+
+
+

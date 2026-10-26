@@ -974,8 +974,15 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
             force_mail_poll=getattr(args, "force", False),
             personal_fixture=getattr(args, "personal_fixture", None),
         )
+        lifecycle_sync = engine.run_autonomous_partner_lifecycle_sync(
+            force_mail_poll=False,
+            execute_live_probes=False,
+            persist=("PYTEST_CURRENT_TEST" not in os.environ),
+        )
         if getattr(args, "json", False):
-            print(json.dumps(dashboard.to_dict(), indent=2))
+            out_dict = dashboard.to_dict()
+            out_dict["autonomous_partner_lifecycle"] = lifecycle_sync
+            print(json.dumps(out_dict, indent=2))
         else:
             print(f"Partner Correspondence Sync Complete [Updated: {dashboard.updated_at}]")
             ph = dashboard.profithelm
@@ -984,6 +991,10 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
             print(f"  Prexvo Active Partners:     {px.active_partners_count} / {px.total_registered_partners} (Readiness: {px.monetization_readiness_score}%)")
             pending_count = sum(1 for it in dashboard.all_action_items if it.status == "PENDING_OPERATOR")
             print(f"  Human Action Bus Items:     {pending_count} pending operator confirmation")
+            prereq_st = (lifecycle_sync.get("publisher_prerequisites_and_compliance") or {}).get("status", "PASS")
+            stalled_cnt = (lifecycle_sync.get("stalled_applications_monitor") or {}).get("stalled_applications_count", 0)
+            uncov_cnt = (lifecycle_sync.get("cluster_monetization_gaps") or {}).get("uncovered_commercial_clusters_count", 0)
+            print(f"  Autonomous Lifecycle:       prereqs={prereq_st} | stalled_apps={stalled_cnt} | uncovered_clusters={uncov_cnt}")
         return 0
     except Exception as exc:
         if getattr(args, "json", False):

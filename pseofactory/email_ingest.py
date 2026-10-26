@@ -1245,6 +1245,10 @@ class EmailIngestionEngine:
             if msg.mailbox != "Sent" and (
                 "otrsolutions.com" in sender_lower or "otr solutions" in combined_text
             ):
+                is_otr_internal_review = (
+                    "we will review internally" in body_lower
+                    or "thank you for sharing that information" in body_lower
+                )
                 classifications.append(
                     PartnerEmailClassification(
                         email_id=msg.id,
@@ -1253,14 +1257,22 @@ class EmailIngestionEngine:
                         partner_key="otr_solutions_factoring",
                         partner_name="OTR Solutions Freight Factoring",
                         category="LOGISTICS_TRADE",
-                        classification_type="ONBOARDING_ACTION_REQUIRED",
-                        requires_operator_decision=True,
-                        summary="OTR Solutions Partnerships Team Lead (Wade Fenton) responded to follow up and invited ProfitHelm to complete partner onboarding via https://otrsolutions.com/become-a-partner/.",
-                        urgency="HIGH",
+                        classification_type="APPLICATION_SUBMITTED" if is_otr_internal_review else "ONBOARDING_ACTION_REQUIRED",
+                        requires_operator_decision=False if is_otr_internal_review else True,
+                        summary=(
+                            "OTR Solutions Partnerships Team Lead (Wade Fenton, Inbox #1030) confirmed receipt of ProfitHelm's 7 qualification answers and stated the team is reviewing internally."
+                            if is_otr_internal_review
+                            else "OTR Solutions Partnerships Team Lead (Wade Fenton) responded to follow up and invited ProfitHelm to complete partner onboarding via https://otrsolutions.com/become-a-partner/."
+                        ),
+                        urgency="LOW" if is_otr_internal_review else "HIGH",
                         deadline=None,
-                        missing_requirements=[
-                            "Complete partner onboarding form at https://otrsolutions.com/become-a-partner/ or schedule alignment call with Wade Fenton (wade.fenton@otrsolutions.com)"
-                        ],
+                        missing_requirements=(
+                            ["Awaiting OTR Solutions Partnerships Team internal review response"]
+                            if is_otr_internal_review
+                            else [
+                                "Complete partner onboarding form at https://otrsolutions.com/become-a-partner/ or schedule alignment call with Wade Fenton (wade.fenton@otrsolutions.com)"
+                            ]
+                        ),
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
@@ -1382,7 +1394,25 @@ class EmailIngestionEngine:
                 )
                 continue
 
-            if msg.mailbox != "Sent" and "partner of sofi" in body_lower:
+            if msg.mailbox != "Sent" and (
+                "partner of sofi" in body_lower
+                or (
+                    "sofi" in combined_text
+                    and any(
+                        tok in combined_text
+                        for tok in (
+                            "partnership request was declined",
+                            "promotion request declined",
+                            "declined your request to work with the campaign",
+                        )
+                    )
+                )
+            ):
+                is_declined_sofi = (
+                    "declined" in subj_lower
+                    or "promotion request declined" in body_lower
+                    or "declined your request" in body_lower
+                )
                 classifications.append(
                     PartnerEmailClassification(
                         email_id=msg.id,
@@ -1391,12 +1421,20 @@ class EmailIngestionEngine:
                         partner_key="sofi",
                         partner_name="SoFi",
                         category="STUDENT_LOAN_REFINANCE",
-                        classification_type="APPLICATION_SUBMITTED",
+                        classification_type="APPLICATION_DECLINED" if is_declined_sofi else "APPLICATION_SUBMITTED",
                         requires_operator_decision=False,
-                        summary="Application submitted to SoFi via Impact.com (#11190, Inbox #988). Awaiting partner review and tracking link issuance.",
+                        summary=(
+                            "SoFi Partner Team declined Impact.com promotion request (Inbox #1031, Account #7932737). Slot covered on Prexvo by first-party $39 Refinance & Amortization Decision Audit Stripe checkout plus Splash Financial (#9516) and LendKey (#3276) applications."
+                            if is_declined_sofi
+                            else "Application submitted to SoFi via Impact.com (#11190, Inbox #988). Awaiting partner review and tracking link issuance."
+                        ),
                         urgency="LOW",
                         deadline=None,
-                        missing_requirements=["Pending Impact.com vendor review for SoFi (#11190)"],
+                        missing_requirements=(
+                            ["Covered by Prexvo $39 first-party Stripe checkout and pending Splash Financial (#9516) / LendKey (#3276) contracts"]
+                            if is_declined_sofi
+                            else ["Pending Impact.com vendor review for SoFi (#11190)"]
+                        ),
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,

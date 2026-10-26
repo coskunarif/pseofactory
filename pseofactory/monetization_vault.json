@@ -198,7 +198,7 @@
       "is_authenticated_and_syncing": false,
       "pending_advertiser_applications": 28,
       "live_pending_advertiser_applications": 23,
-      "active_joined_advertisers_count": 3,
+      "active_joined_advertisers_count": 5,
       "verified_clicks": 31,
       "qualified_leads": 0,
       "conversions": 0,
@@ -734,7 +734,7 @@
           "campaign_id": "14516",
           "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Next-Insurance.brand",
           "bounty": "$25-$150",
-          "correspondence_status": "Impact Marketplace Application Confirmed by Email (Inbox #982 on 2026-10-14T23:02Z from notifications@app.impact.com confirming application to ERGO NEXT Insurance; Campaign #14516 verified Insertion Order payout: $25.00 USD per Quote; active Sovrn Commerce fallback via /r/next_insurance_b2b)",
+          "correspondence_status": "Impact Marketplace Application Confirmed by Email in Inbox #982 on 2026-10-14T23:02Z and Declined in Inbox #1009 on 2026-10-22T21:54Z (ERGO NEXT Insurance Campaign #14516 / #15709 declined due to Impact site-size filter; covered at edge by first-party $49 Commercial Capital Audit Stripe checkout SKU plus active Sovrn Commerce fallback via /r/next_insurance_b2b)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/next_insurance_b2b"
@@ -762,7 +762,7 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted & Qualification Questionnaire Answered in Full (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor [tfa_dbFormId=23, tfa_dbVersionId=37] on 2026-10-16T22:50Z and re-verified on 2026-10-23 + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z + answered all 7 qualification questions from Inbox #1005 via Sent #278 on 2026-10-20T17:34:43Z confirming zero OTR Solutions brand references on live pages; awaiting partnership agreement review)",
+          "correspondence_status": "Application Submitted, Qualification Questionnaire Answered in Full & Confirmed Under Internal Review (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor [tfa_dbFormId=23, tfa_dbVersionId=37] on 2026-10-16T22:50Z and re-verified on 2026-10-23 + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z + answered all 7 qualification questions from Inbox #1005 via Sent #278 on 2026-10-20T17:34:43Z + Wade Fenton confirmed in Inbox #1030 on 2026-10-26T11:10:52Z that OTR Solutions is reviewing internally; Invoice Simple #24994 declined in Inbox #1025 on 2026-10-23; edge route /r/otr_solutions_factoring actively upgrades to approved Ramp Impact #51436 contract https://join.ramp.com/c/7932737/3981015/51436)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
           "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"
@@ -838,7 +838,7 @@
           "network": "Impact.com",
           "bounty": "$120",
           "gate_1_verified_payout": "$120.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Lending Destination & Impact Application Confirmed by Email (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737 + publisher intro Sent #273 to cfels@lqdigital.com; passes Gate 1 >= $45; active outbound route /r/sofi)",
+          "correspondence_status": "Live Lending Destination & Impact Correspondence Reconciled (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737 + publisher intro Sent #273 to cfels@lqdigital.com & Sent #275 to affiliates@sofi.com + Impact campaign request declined in Inbox #1031 on 2026-10-26T13:11:59Z; covered on Prexvo by first-party $39 Refinance & Amortization Decision Audit Stripe checkout plus pending Splash Financial #9516 and LendKey #3276 contracts; passes Gate 1 >= $45; active outbound route /r/sofi)",
           "campaign_id": "11190",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/SoFi.brand"
         },
