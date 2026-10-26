@@ -41,6 +41,17 @@ STATUTORY_PROVENANCE_PATTERNS: List[str] = [
     r"\bSEC\s+Rule\b",
     r"\bCommodity\s+Exchange\s+Act\b",
     r"\bSecurities\s+Exchange\s+Act\b",
+    r"\bAICPA\b",
+    r"\bSSAE\s*18\b",
+    r"\bAT-C\s+Section\s+205\b",
+    r"\bDFARS\b",
+    r"\bNIST\s+SP\s+800\b",
+    r"\bISO/IEC\s+2700[16]\b",
+    r"\bPCI\s+DSS\b",
+    r"\bHITRUST\b",
+    r"\bFedRAMP\b",
+    r"\bHITECH\b",
+    r"\bNAIC\b",
 ]
 
 US_STATE_NAME_TO_SLUG: Dict[str, str] = {

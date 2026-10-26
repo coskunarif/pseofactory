@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.affiliates import (
+    GAINHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
     PROFITHELM_DISCLOSURES,
     is_restricted_public_service_slug,
@@ -277,6 +278,26 @@ class CompetitorGapEngine:
                 ]
             )
             canonical_base = "https://prexvo.com"
+        elif self.tenant_id == "gainhelm":
+            default_category = "Cyber Compliance & GRC Audit"
+            affiliates = ["vanta_security", "drata_compliance"]
+            statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
+            economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
+            model_name = "SOC 2 Type II Audit & Readiness TCO Model"
+            formula = "cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate)"
+            inputs = {
+                "cpa_audit_fee": 28000,
+                "grc_platform_annual_cost": 15000,
+                "readiness_hours": 160,
+                "eng_hourly_rate": 95,
+            }
+            published_output = 58200.0
+            sample_calculation = "CPA audit fee $28,000 plus $15,000 GRC platform plus 160 hours at $95/hr yields $58,200 total SOC 2 Type II TCO"
+            disclosures = [
+                GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
+                GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
+            ]
+            canonical_base = "https://gainhelm.com"
         else:
             default_category = "Tax Intelligence"
             affiliates = ["crest_capital", "mercury"]
@@ -474,6 +495,41 @@ class CompetitorGapEngine:
                     PREXVO_DISCLOSURES.get("ftc_disclosure", ""),
                 ])
                 spec.setdefault("ymyl_warning", PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""))
+        elif tenant_id == "gainhelm":
+            spec.setdefault("tenant", "gainhelm")
+            spec.setdefault("property_id", "gainhelm")
+            spec.setdefault("domain", "gainhelm.com")
+            spec.setdefault("canonical_base", "https://gainhelm.com")
+            spec.setdefault("statutory_authority", "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100")
+            spec.setdefault("economic_dataset", "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report")
+            spec.setdefault("category", "Cyber Compliance & GRC Audit")
+            spec.setdefault(
+                "affiliates",
+                monetization.get("recommended_partners") or ["vanta_security", "drata_compliance"],
+            )
+            spec.setdefault("model_name", "SOC 2 Type II Audit & Readiness TCO Model")
+            spec.setdefault("formula", "cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate)")
+            spec.setdefault(
+                "inputs",
+                {
+                    "cpa_audit_fee": 28000,
+                    "grc_platform_annual_cost": 15000,
+                    "readiness_hours": 160,
+                    "eng_hourly_rate": 95,
+                },
+            )
+            spec.setdefault("published_output", 58200.0)
+            spec.setdefault(
+                "sample_calculation",
+                "CPA audit fee $28,000 plus $15,000 GRC platform plus 160 hours at $95/hr yields $58,200 total SOC 2 Type II TCO",
+            )
+            spec.setdefault(
+                "mandatory_disclosures",
+                [
+                    GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
+                    GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
+                ],
+            )
         else:
             spec.setdefault("tenant", "profithelm")
             spec.setdefault("property_id", "profithelm")
@@ -716,7 +772,11 @@ class CompetitorGapEngine:
         base_query = (
             "student loan repayment calculator"
             if self.tenant_id == "prexvo"
-            else "section 179 tax deduction calculator"
+            else (
+                "soc 2 audit cost calculator"
+                if self.tenant_id == "gainhelm"
+                else "section 179 tax deduction calculator"
+            )
         )
         for idx, feat in enumerate(seed_features):
             authority_override = (
@@ -1310,6 +1370,194 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
             "recommended_affiliates": ["splash_financial", "sofi"],
         },
     ],
+    "gainhelm": [
+        {
+            "query": "soc 2 audit cost calculator",
+            "slug": "soc-2-audit-cost-calculator",
+            "target_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+            "intent_tier": "tier_1_grc_audit_compliance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 14, "duckduckgo": 11},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "vanta.com",
+                    "url": "https://www.vanta.com/resources/soc-2-cost",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "Direct GRC vendor authority + Type I vs Type II cost tables.",
+                },
+                {
+                    "domain": "sprinto.com",
+                    "url": "https://sprinto.com/blog/soc-2-compliance-cost/",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "Employee headcount and TSC criteria cost breakdown tables.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Vanta and Sprinto rank #1-#2 with static prose cost ranges, leaving an interactive "
+                "deterministic calculator void combining CPA audit fees, GRC licensing, and engineering hours."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["vanta_security", "drata_compliance"],
+        },
+        {
+            "query": "cmmc 2.0 compliance cost calculator",
+            "slug": "cmmc-2-0-compliance-cost-calculator",
+            "target_url": "https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/",
+            "intent_tier": "tier_1_federal_defense_cyber",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 12, "duckduckgo": 9},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "summit7.us",
+                    "url": "https://www.summit7.us/blog/cmmc-cost",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "DoD 32 CFR Part 170 C3PAO assessment fee schedules.",
+                },
+                {
+                    "domain": "preveil.com",
+                    "url": "https://www.preveil.com/blog/cmmc-compliance-cost/",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "CUI enclave cost tables for defense subcontractors.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Defense cyber consultancies publish static DoD 32 CFR Part 170 fee estimates without "
+                "interactive CUI enclave scoping and NIST SP 800-171 control remediation calculators."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["vanta_security", "drata_compliance"],
+        },
+        {
+            "query": "nist 800-171 sprs score calculator",
+            "slug": "nist-800-171-sprs-score-calculator",
+            "target_url": "https://gainhelm.com/tools/nist-800-171-sprs-score-calculator/",
+            "intent_tier": "tier_1_federal_defense_cyber",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 11, "duckduckgo": 8},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "acquisition.gov",
+                    "url": "https://www.acquisition.gov/dfars/252.204-7019",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Official DFARS 252.204-7019 statutory authority.",
+                },
+                {
+                    "domain": "summit7.us",
+                    "url": "https://www.summit7.us/blog/sprs-score",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "DoD 110-control 5/3/1 point deduction breakdown.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Official DFARS pages lack an interactive 110-control DoD SPRS [-203, +110] scoring "
+                "and 32 CFR 170.21 POA&M conditional eligibility calculator."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["vanta_security", "drata_compliance"],
+        },
+        {
+            "query": "iso 27001 certification cost calculator",
+            "slug": "iso-27001-certification-cost-calculator",
+            "target_url": "https://gainhelm.com/tools/iso-27001-certification-cost-calculator/",
+            "intent_tier": "tier_1_grc_audit_compliance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 13, "duckduckgo": 10},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "sprinto.com",
+                    "url": "https://sprinto.com/blog/iso-27001-certification-cost/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "ISO/IEC 27006-1 auditor-day tables by employee headcount.",
+                },
+                {
+                    "domain": "vanta.com",
+                    "url": "https://www.vanta.com/resources/iso-27001-certification-cost",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Stage 1 and Stage 2 registrar fee benchmarks.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Competitors publish static blog tables rather than an interactive ISO/IEC 27006-1:2024 "
+                "Stage 1 and Stage 2 registrar auditor-day and surveillance cost calculator."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["sprinto_compliance", "vanta_security"],
+        },
+        {
+            "query": "hipaa violation fines calculator",
+            "slug": "hipaa-violation-penalty-breach-cost-calculator",
+            "target_url": "https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/",
+            "intent_tier": "tier_1_healthcare_cyber_compliance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 10, "duckduckgo": 9},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "hipaajournal.com",
+                    "url": "https://www.hipaajournal.com/what-are-the-penalties-for-hipaa-violations-7096/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "45 CFR 160.404 4-tier civil monetary penalty schedules.",
+                },
+                {
+                    "domain": "hhs.gov",
+                    "url": "https://www.hhs.gov/hipaa/for-professionals/compliance-enforcement/index.html",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Official HHS Office for Civil Rights enforcement authority.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "HIPAA Journal ranks #1 with static prose tables, leaving an interactive calculator gap "
+                "for 45 CFR 160.404 inflation-adjusted OCR penalty tiers and ePHI breach notification costs."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["vanta_security", "coalition_cyber_insurance"],
+        },
+    ],
 }
 
 
@@ -1552,13 +1800,14 @@ def benchmark_multi_engine_rankings(
 
 def benchmark_all_properties() -> Dict[str, Dict[str, Any]]:
     """
-    Benchmarks multi-engine search rankings and higher-ranked competitors across both
-    profithelm and prexvo, returning a domain-isolated comparison dictionary.
+    Benchmarks multi-engine search rankings and higher-ranked competitors across
+    profithelm, prexvo, and gainhelm, returning a domain-isolated comparison dictionary.
     Zero em-dashes. Zero en-dashes.
     """
     return {
         "profithelm": benchmark_multi_engine_rankings("profithelm"),
         "prexvo": benchmark_multi_engine_rankings("prexvo"),
+        "gainhelm": benchmark_multi_engine_rankings("gainhelm"),
     }
 
 
@@ -2068,6 +2317,7 @@ def _resolve_vertical_competitor_content(
     """
     s_low = slug.lower()
     is_prexvo = property_id.strip().lower() == "prexvo"
+    is_gainhelm = property_id.strip().lower() == "gainhelm"
     base_url = canonical_base.rstrip("/")
 
     if is_prexvo:
@@ -2214,6 +2464,70 @@ def _resolve_vertical_competitor_content(
                     ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
                     ("parent-plus-double-consolidation-loophole-2026-calculator", "Parent PLUS Double Consolidation Loophole 2026 Sunset & ICR vs IDR Calculator"),
                     ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
+                ],
+            ),
+        ]
+    elif is_gainhelm:
+        trap_title = "Immediate Audit Observation Window and Control Scoping Trap Alert (AICPA AT-C 205 & 32 CFR Part 170)"
+        trap_body = (
+            "Under AICPA AT-C Section 205 (SOC 2 Type II), ISO/IEC 27006-1:2024 auditor-day tables, and DoD 32 CFR "
+            "Part 170 (CMMC 2.0 Level 2), failing to isolate production in-scope boundaries or allowing continuous "
+            "control evidence gaps during a 3-to-12-month observation window triggers qualified audit opinions, "
+            "mandatory re-testing surcharges, or SPRS score deductions below the 110-point NIST SP 800-171 threshold."
+        )
+        checklist_items = [
+            "Define an explicit System Description and Network Boundary Diagram isolating in-scope production assets or CUI enclaves prior to auditor readiness kick-off.",
+            "Automate continuous control evidence collection across identity (SSO/MFA), cloud infrastructure (AWS/GCP/Azure), endpoint MDM, and SDLC pull-request approvals.",
+            "Conduct an internal readiness gap assessment and remediate high-severity findings before opening the Type II observation window or C3PAO Stage 2 assessment.",
+            "Execute an independent CREST or OSCP penetration test and track critical/high CVE remediation SLAs prior to final auditor sign-off.",
+        ]
+        pitfalls = [
+            (
+                "Scoping the entire corporate IT network instead of a segmented production or CUI enclave boundary",
+                "Inflates ISO 27006 auditor-days, endpoint licensing, and C3PAO assessment fees by 150% to 300%",
+                "Deploy a zero-trust segmented enclave isolating regulated customer data or CUI before readiness scoping",
+            ),
+            (
+                "Relying on manual screenshot spreadsheets during a 6-to-12-month SOC 2 Type II observation window",
+                "Causes population sampling failures on access reviews, employee offboarding, and change management tickets",
+                "Connect automated GRC API integrations (Vanta, Drata, Sprinto) to collect timestamped control evidence daily",
+            ),
+            (
+                "Submitting an unverified DoD SPRS self-assessment score without a documented System Security Plan (SSP)",
+                "Exposes defense primes and subcontractors to False Claims Act liability and DFARS 252.204-7020 contract withholding",
+                "Substantiate all 110 NIST SP 800-171 Rev 2 controls in a live SSP and track open POA&M items with strict 180-day closeout rules",
+            ),
+        ]
+        handoff_title = "GRC Automation, CPA Audit & Assessor Vetting Checklist"
+        handoff_items = [
+            "Verify peer-reviewed AICPA CPA firm registration, ISO/IEC 17021 accreditation, or Cyber-AB C3PAO authorization status.",
+            "Confirm automated API evidence coverage across your cloud provider, identity provider, source control, and HRIS.",
+            "Audit multi-framework control cross-mapping (SOC 2 + ISO 27001 + HIPAA + NIST 800-171) to eliminate duplicate audit workpapers.",
+        ]
+        tier_clusters = [
+            (
+                "Tier 1: Core Commercial GRC & Attestation Pillar Models",
+                [
+                    ("soc-2-audit-cost-calculator", "SOC 2 Type I and Type II Audit Cost & Engineering TCO Calculator"),
+                    ("iso-27001-certification-cost-calculator", "ISO/IEC 27001:2022 Certification & Auditor-Day Cost Calculator"),
+                    ("pci-dss-4-0-compliance-cost-calculator", "PCI DSS v4.0.1 QSA ROC and SAQ Compliance Cost Calculator"),
+                    ("penetration-testing-scoping-cost-calculator", "CREST & OSCP Penetration Testing Scoping Cost Calculator"),
+                ],
+            ),
+            (
+                "Tier 2: Federal Defense & Cloud Authorization Matrices",
+                [
+                    ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 C3PAO Assessment & Enclave Cost Calculator"),
+                    ("nist-800-171-sprs-score-calculator", "NIST SP 800-171 DoD SPRS Weighted Score & POA&M Calculator"),
+                    ("fedramp-authorization-3pao-cost-calculator", "FedRAMP 20x & Rev 5 3PAO Authorization Cost Calculator"),
+                ],
+            ),
+            (
+                "Tier 3: Healthcare Statutory Penalty & Cyber Risk Spokes",
+                [
+                    ("hipaa-violation-penalty-breach-cost-calculator", "HIPAA Civil Monetary Penalty & HITECH Breach Cost Calculator"),
+                    ("hitrust-csf-e1-i1-r2-certification-cost-calculator", "HITRUST CSF e1, i1, and r2 Certification Cost Calculator"),
+                    ("cyber-liability-insurance-breach-exposure-calculator", "Cyber Liability Insurance Premium & Breach Exposure Calculator"),
                 ],
             ),
         ]
@@ -3276,11 +3590,124 @@ def _build_b2b_depth_spec(
     }
 
 
+def _build_gainhelm_depth_spec(
+    topic_label: str, statutory_authority: str, economic_dataset: str
+) -> Dict[str, Any]:
+    return {
+        "workbench_mode": "cyber_grc",
+        "workbench_h2": f"Interactive Audit Scoping Sub-Ledger &amp; Automated GRC Savings Matrix: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, security and GRC "
+            f"operators compress external CPA/C3PAO assessment fees and internal engineering hours by pairing "
+            f"segmented enclave boundaries with automated API control evidence collection:"
+        ),
+        "presets": [
+            (
+                "Seed / Series A SaaS (35 Headcount / Segmented Enclave)",
+                '{"serp-b2b-gross":58200,"serp-b2b-deduction":18400,"serp-b2b-rate":24.0,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "Growth Enterprise (150 Headcount / Multi-Framework GRC)",
+                '{"serp-b2b-gross":112000,"serp-b2b-deduction":38500,"serp-b2b-rate":26.0,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "Manual Unsegmented Audit Scope (150 Headcount / Full Drag)",
+                '{"serp-b2b-gross":148000,"serp-b2b-deduction":0,"serp-b2b-rate":32.0,"serp-b2b-regime":"unoptimized_baseline"}',
+            ),
+            (
+                "Defense / Healthcare High-Assurance (400 Headcount / CMMC + HITRUST)",
+                '{"serp-b2b-gross":245000,"serp-b2b-deduction":74000,"serp-b2b-rate":30.0,"serp-b2b-regime":"stress_case"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-gross" class="serp-field-label">Gross Unoptimized Audit &amp; Engineering TCO ($)</label>\n'
+            '          <input type="number" id="serp-b2b-gross" name="serp-b2b-gross" class="touch-target serp-sub-input" min="0" max="5000000" step="1000" value="84000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-deduction" class="serp-field-label">GRC Automation &amp; Enclave Scoping Savings ($)</label>\n'
+            '          <input type="number" id="serp-b2b-deduction" name="serp-b2b-deduction" class="touch-target serp-sub-input" min="0" max="2500000" step="1000" value="25800" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-rate" class="serp-field-label">Assessor &amp; Remediation Overhead Factor (%)</label>\n'
+            '          <input type="number" id="serp-b2b-rate" name="serp-b2b-rate" class="touch-target serp-sub-input" min="0" max="100" step="0.5" value="22.0" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-regime" class="serp-field-label">Control Evidence &amp; Boundary Architecture</label>\n'
+            '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
+            '            <option value="optimal_election" selected="selected">Automated Continuous GRC + Segmented Enclave Scope</option>\n'
+            '            <option value="unoptimized_baseline">Manual Spreadsheet Evidence + Unsegmented Network</option>\n'
+            '            <option value="stress_case">Multi-Region / High-Assurance Audit Expansion (+20% Scope)</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Net Automated Audit &amp; GRC TCO", "$58,200"),
+            ("serp-out-secondary", "Manual Unsegmented Audit TCO", "$84,000"),
+            ("serp-out-tertiary", "Annual GRC Automation Hours Saved", "$25,800"),
+            ("serp-out-quaternary", "Avoided Breach &amp; Penalty Exposure", "$488,000"),
+        ],
+        "svg_left_label": "Automated Readiness Efficiency: $58,200 (69.3%)",
+        "svg_right_label": "Eliminated Manual Audit Drag: $25,800 (30.7%)",
+        "svg_left_width": "416",
+        "svg_right_x": "416",
+        "svg_right_width": "184",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing Audit Standards &amp; Assessor Benchmarks",
+        "table_headers": [
+            "Compliance Framework / Audit Tier",
+            "Governing Statutory &amp; Technical Citation",
+            "2026 Auditor-Day or Penalty Schedule",
+            "Continuous Evidence &amp; Assessor Standard",
+        ],
+        "table_rows": [
+            (
+                "SOC 2 Type I &amp; Type II Attestation",
+                "AICPA SSAE 18 / AT-C Section 205 &amp; TSP Section 100",
+                "$18,000 to $65,000 CPA fee + 120 to 320 engineering readiness hours",
+                "Peer-reviewed CPA examination over 3-to-12-month Type II observation window",
+            ),
+            (
+                "CMMC 2.0 Level 2 &amp; NIST SP 800-171 Rev 2",
+                "32 CFR Part 170, DFARS 252.204-7012 / 7019 / 7020 / 7021",
+                "110 controls; SPRS range -203 to +110; $35,000 to $85,000 C3PAO fee",
+                "Cyber-AB authorized C3PAO triennial assessment and live System Security Plan",
+            ),
+            (
+                "ISO/IEC 27001:2022 ISMS Certification",
+                "ISO/IEC 27001:2022 Annex A (93 Controls) &amp; ISO/IEC 27006-1:2024",
+                "9 to 28 accredited Stage 1 + Stage 2 auditor-days ($1,600 to $2,200/day)",
+                "Accredited Certification Body Stage 1/2 audit plus Years 2-3 surveillance",
+            ),
+            (
+                "HIPAA Civil Monetary Penalties &amp; HITECH Breach",
+                "45 CFR 160.404, 45 CFR Part 164 &amp; 42 U.S.C. 1320d-5",
+                "4 penalty tiers ($141 to $2,134,831 annual cap per identical provision)",
+                "60-day OCR &amp; media breach notification (>500 records) + BAA encryption",
+            ),
+            (
+                "PCI DSS v4.0.1 ROC, FedRAMP 3PAO &amp; HITRUST CSF",
+                "PCI DSS v4.0.1, 44 U.S.C. 3607 FedRAMP &amp; HITRUST CSF v11",
+                "QSA ROC (>6M Visa tx/yr), 3PAO SAR ($95k to $220k), HITRUST e1/i1/r2",
+                "Continuous automated vulnerability scanning, CREST pentest, and 3PAO ConMon",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="cyber_grc">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live GRC &amp; Assessor Readiness Signal:</strong> Deploying continuous API control collection and enclave segmentation compresses net audit TCO to <span id="serp-banner-metric-primary">$58,200</span> and saves <span id="serp-banner-metric-secondary">$25,800</span> in manual engineering preparation. Compare vetted GRC and CPA/C3PAO partners below.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted GRC Automation, CPA Audit &amp; Pentest Partners</a>\n'
+            '      </div>'
+        ),
+    }
+
+
 def _render_multi_year_cliff_visualizer_html(
     topic_label: str,
     is_prexvo: bool,
     statutory_authority: str,
     economic_dataset: str,
+    is_gainhelm: bool = False,
 ) -> str:
     """Renders the longitudinal 2024 to 2030 statutory and repayment cliff visualizer and SVG trajectory."""
     if is_prexvo:
@@ -3292,6 +3719,16 @@ def _render_multi_year_cliff_visualizer_html(
             ("2026 Statutory Cliff Year", "34 CFR 685.209 RAP / Old-New IBR Transition", "Federal Tax Bomb Resumes on Forgiven Debt", "cliff-exposure-2026", "$3,420 / yr"),
             ("2027 Post-Sunset Regime", "150% HHS FPL Exemption / 10% to 15% Levy", "Ordinary Income Inclusion + Insolvency Form 982", "cliff-exposure-2027", "$3,690 / yr"),
             ("2028-2030 Forward Projection", "CPI-Indexed HHS Poverty Guideline Escalation", "PSLF 26 U.S.C. 108(f)(1) Remains Tax-Exempt", "cliff-exposure-2028", "$3,980 / yr"),
+        ]
+    elif is_gainhelm:
+        h3_title = f"Multi-Year Statutory Compliance &amp; Enforcement Cliff Visualizer (2024 to 2030): {topic_label}"
+        summary_default = "2026 Enforcement Alert: DoD 32 CFR Part 170 CMMC 2.0 contract phase-in, PCI DSS v4.0.1 mandatory future-dated controls, and ISO/IEC 27001:2022 transition enforcement escalate uncertified audit and breach exposure."
+        rows = [
+            ("2024 Baseline Window", "AICPA AT-C 205 / NIST 800-171 Self-Attest", "ISO 27001:2022 Transition / SEC 8-K Item 1.05", "cliff-exposure-2024", "$44,500"),
+            ("2025 Enforcement Ramp", "PCI DSS v4.0.1 Mandatory Controls Active", "32 CFR Part 170 Final Rule Effective", "cliff-exposure-2025", "$52,400"),
+            ("2026 Statutory Cliff Year", "DFARS 252.204-7021 C3PAO Solicitation Gate", "HHS OCR 45 CFR 160.404 Inflation Multiplier", "cliff-exposure-2026", "$58,200"),
+            ("2027 Full Mandate Phase", "Mandatory CMMC Level 2 on All CUI Contracts", "FedRAMP 20x Continuous Automated Reporting", "cliff-exposure-2027", "$68,900"),
+            ("2028-2030 Triennial Cycle", "Triennial C3PAO &amp; ISO Recertification", "NIST SP 800-171 Rev 3 Control Expansion", "cliff-exposure-2028", "$74,500"),
         ]
     else:
         h3_title = f"Multi-Year Statutory Phaseout &amp; TCJA Sunset Cliff Visualizer (2024 to 2030): {topic_label}"
@@ -3448,6 +3885,8 @@ def render_partner_quote_intake_html(
     if default_amt is None:
         if prop_clean == "prexvo":
             default_amt = 68500.0
+        elif prop_clean == "gainhelm":
+            default_amt = 58200.0
         elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
             default_amt = 85000.0
         elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
@@ -3550,6 +3989,23 @@ def render_partner_quote_intake_html(
                 "to generate a pre-filled rate-table quote."
             )
             btn_text = "Unlock Matched Rate-Table Quote & Continue"
+    elif prop_clean == "gainhelm":
+        heading_text = f"Enterprise GRC Automation & Audit Readiness Quote Intake ({threshold_fmt}+ TCO Threshold)"
+        sub_text = (
+            f"Compliance and audit readiness budgets at or above {threshold_fmt} qualify for direct GRC automation "
+            f"platform fee quotes, AICPA CPA / C3PAO assessor matching, and multi-framework control scoping. "
+            f"Sub-threshold calculations stay 100% frictionless."
+        )
+        email_label = "Work or Security Operations Email Address"
+        state_label = "Corporate Headquarters State"
+        band_label = "Annual Compliance & Audit Budget Band"
+        consent_copy = (
+            "I provide explicit TCPA partner_sharing_consent authorizing GainHelm to share my work email, "
+            "headquarters state, and compliance budget band with matched GRC automation, CPA audit, penetration testing, "
+            "or cyber insurance partners (including Vanta, Drata, Sprinto, Thoropass, Coalition, and Cobalt) to prepare "
+            "a customized readiness quote."
+        )
+        btn_text = "Request Matched GRC & Audit Quote"
     else:
         if vertical == "1031_exchange":
             heading_text = f"Qualified Intermediary & Tax Advisory Quote Intake ({threshold_fmt}+ Exchange Threshold)"
@@ -3693,11 +4149,14 @@ def render_serp_incumbent_depth_upgrade_block(
     """
     s_low = str(slug or "").strip().lower()
     is_prexvo = property_id.strip().lower() == "prexvo"
+    is_gainhelm = property_id.strip().lower() == "gainhelm"
     topic_label = _format_safe_heading_topic(title, slug)
     veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
     if is_prexvo:
         spec = _build_repayment_loan_depth_spec(slug, topic_label, statutory_authority)
+    elif is_gainhelm:
+        spec = _build_gainhelm_depth_spec(topic_label, statutory_authority, economic_dataset)
     elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash")):
         spec = _build_crypto_depth_spec(topic_label, statutory_authority)
     elif (
@@ -3776,6 +4235,7 @@ def render_serp_incumbent_depth_upgrade_block(
         is_prexvo=is_prexvo,
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
+        is_gainhelm=is_gainhelm,
     )
     comparator_html = _render_stateful_scenario_comparator_html(
         topic_label=topic_label,

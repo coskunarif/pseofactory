@@ -23,6 +23,8 @@ from typing import Dict, Any, List, Optional
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.affiliates import (
     B2B_PARTNER_KEYS,
+    GAINHELM_AFFILIATES,
+    GAINHELM_PARTNER_KEYS,
     STUDENT_LOAN_PARTNER_KEYS,
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
@@ -269,14 +271,34 @@ class HumanActionBus:
 
         # Strict Property Isolation
         if prop_clean == "prexvo":
-            if key_clean in B2B_PARTNER_KEYS or key_clean in PROFITHELM_AFFILIATES:
+            if (
+                key_clean in B2B_PARTNER_KEYS
+                or key_clean in PROFITHELM_AFFILIATES
+                or key_clean in GAINHELM_PARTNER_KEYS
+                or key_clean in GAINHELM_AFFILIATES
+            ):
                 raise ValueError(
-                    f"Strict isolation violation: B2B partner '{key_clean}' cannot be routed to Prexvo action bus."
+                    f"Strict isolation violation: Foreign partner '{key_clean}' cannot be routed to Prexvo action bus."
                 )
         elif prop_clean in ("profithelm", "exchange1031"):
-            if key_clean in STUDENT_LOAN_PARTNER_KEYS or key_clean in PREXVO_AFFILIATES:
+            if (
+                key_clean in STUDENT_LOAN_PARTNER_KEYS
+                or key_clean in PREXVO_AFFILIATES
+                or key_clean in GAINHELM_PARTNER_KEYS
+                or key_clean in GAINHELM_AFFILIATES
+            ):
                 raise ValueError(
-                    f"Strict isolation violation: Student loan partner '{key_clean}' cannot be routed to ProfitHelm action bus."
+                    f"Strict isolation violation: Foreign partner '{key_clean}' cannot be routed to ProfitHelm action bus."
+                )
+        elif prop_clean == "gainhelm":
+            if (
+                key_clean in B2B_PARTNER_KEYS
+                or key_clean in PROFITHELM_AFFILIATES
+                or key_clean in STUDENT_LOAN_PARTNER_KEYS
+                or key_clean in PREXVO_AFFILIATES
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Foreign partner '{key_clean}' cannot be routed to GainHelm action bus."
                 )
 
     def route_classification(
@@ -446,6 +468,7 @@ class HumanActionBus:
         elif (
             eff_key not in PROFITHELM_AFFILIATES
             and eff_key not in PREXVO_AFFILIATES
+            and eff_key not in GAINHELM_AFFILIATES
             and not eff_key.startswith(f"{prop_clean}_")
         ):
             eff_key = f"{prop_clean}_{eff_key}"
@@ -512,6 +535,7 @@ class HumanActionBus:
         elif (
             eff_key not in PROFITHELM_AFFILIATES
             and eff_key not in PREXVO_AFFILIATES
+            and eff_key not in GAINHELM_AFFILIATES
             and eff_key not in EXTENDED_PARTNER_BOUNTY_ESTIMATES
             and not eff_key.startswith(f"{prop_clean}_")
         ):
@@ -668,8 +692,13 @@ class HumanActionBus:
             url_to_sync = approved_url or item.candidate_url
             prop_target = (item.property_id or "").strip().lower()
             p_key = (item.partner_key or "").strip().lower()
-            if url_to_sync and prop_target in ("profithelm", "prexvo"):
-                registry = PROFITHELM_AFFILIATES if prop_target == "profithelm" else PREXVO_AFFILIATES
+            if url_to_sync and prop_target in ("profithelm", "prexvo", "gainhelm"):
+                if prop_target == "profithelm":
+                    registry = PROFITHELM_AFFILIATES
+                elif prop_target == "gainhelm":
+                    registry = GAINHELM_AFFILIATES
+                else:
+                    registry = PREXVO_AFFILIATES
                 if p_key in registry and validate_affiliate_url(url_to_sync):
                     from pseofactory.affiliates_hub import MonetizationHub
                     hub = self.hub or MonetizationHub()
@@ -772,7 +801,7 @@ class HumanActionBus:
             return None
 
         prop_clean = (property_id or "profithelm").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo"):
+        if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
             raise ValueError(f"Unsupported property_id '{property_id}' for lead dispatch.")
 
         slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
@@ -782,17 +811,40 @@ class HumanActionBus:
         req_key = (partner_key or "").strip().lower()
 
         if prop_clean == "prexvo":
-            if req_key in B2B_PARTNER_KEYS or req_key in PROFITHELM_AFFILIATES:
+            if (
+                req_key in B2B_PARTNER_KEYS
+                or req_key in PROFITHELM_AFFILIATES
+                or req_key in GAINHELM_PARTNER_KEYS
+                or req_key in GAINHELM_AFFILIATES
+            ):
                 raise ValueError(
                     f"Strict isolation violation: B2B partner '{req_key}' cannot be dispatched on Prexvo."
                 )
             eff_key = req_key if req_key in PREXVO_AFFILIATES else "splash_financial"
             eff_name = "Splash Financial"
             rep_target = "Splash Financial Partner Desk"
-        else:
-            if req_key in STUDENT_LOAN_PARTNER_KEYS or req_key in PREXVO_AFFILIATES:
+        elif prop_clean == "gainhelm":
+            if (
+                req_key in B2B_PARTNER_KEYS
+                or req_key in PROFITHELM_AFFILIATES
+                or req_key in STUDENT_LOAN_PARTNER_KEYS
+                or req_key in PREXVO_AFFILIATES
+            ):
                 raise ValueError(
-                    f"Strict isolation violation: Student loan partner '{req_key}' cannot be dispatched on ProfitHelm."
+                    f"Strict isolation violation: Foreign partner '{req_key}' cannot be dispatched on GainHelm."
+                )
+            eff_key = req_key if req_key in GAINHELM_AFFILIATES else "vanta_security"
+            eff_name = GAINHELM_AFFILIATES[eff_key].name.replace("\u2014", ": ").replace("\u2013", "-")
+            rep_target = "Vanta & Thoropass Enterprise GRC Partner Desk"
+        else:
+            if (
+                req_key in STUDENT_LOAN_PARTNER_KEYS
+                or req_key in PREXVO_AFFILIATES
+                or req_key in GAINHELM_PARTNER_KEYS
+                or req_key in GAINHELM_AFFILIATES
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Foreign partner '{req_key}' cannot be dispatched on ProfitHelm."
                 )
             if vert_clean == "invoice_factoring" or req_key == "otr_solutions_factoring" or "factoring" in slug_clean:
                 eff_key = "otr_solutions_factoring"

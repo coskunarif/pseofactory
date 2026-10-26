@@ -2240,6 +2240,42 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                 f"Guidelines, discretionary income caps, and forgiveness rules.",
                 " Verified under Title IV 34 CFR Part 685 statutory rules.",
             )
+        if tenant_id == "gainhelm":
+            if "disclaimer" in q_low:
+                return (
+                    "Review GainHelm enterprise cyber compliance statutory disclaimers, CPA and C3PAO "
+                    "non-attestation notices, and FTC publisher disclosures.",
+                    " Grounded in AICPA SSAE 18 and 32 CFR Part 170 rules.",
+                )
+            if "methodology" in q_low:
+                return (
+                    "Explore GainHelm deterministic cyber compliance calculation methodology under "
+                    "AICPA SSAE 18, 32 CFR Part 170, ISO 27006, and BLS wage series.",
+                    " Grounded in federal statutory and accreditation standards.",
+                )
+            if "privacy" in q_low:
+                return (
+                    "Review GainHelm zero-PII client-side compliance modeling privacy standards, "
+                    "browser execution rules, and enterprise security commitments.",
+                    " Grounded in zero-PII client-side browser architecture.",
+                )
+            if "about" in q_low:
+                return (
+                    "Learn how GainHelm engineers deterministic SOC 2, CMMC 2.0, NIST 800-171 SPRS, "
+                    "ISO 27001, and HIPAA audit cost models.",
+                    " Grounded in federal and accreditation standards.",
+                )
+            if "tools directory" in q_low or "tools-directory" in q_low or q_low.strip() in ("tools", "tools tools"):
+                return (
+                    "Browse GainHelm deterministic cyber compliance calculators for SOC 2 Type II, "
+                    "CMMC 2.0 C3PAO, NIST 800-171 SPRS, ISO 27001, and HIPAA penalties.",
+                    " Grounded in AICPA SSAE 18 and 32 CFR Part 170 standards.",
+                )
+            return (
+                f"Calculate {lbl} audit fees, GRC automation savings, and engineering labor under "
+                f"AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212 wage benchmarks.",
+                " Verified under AICPA SSAE 18 and 32 CFR Part 170 rules.",
+            )
         if "disclaimer" in q_low:
             return (
                 "Review ProfitHelm statutory tax and financial modeling disclaimers, CPA/attorney "

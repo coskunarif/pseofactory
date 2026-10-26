@@ -465,11 +465,11 @@ def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
     store = TenantFactStore.get_instance()
     assert store.get_profile("profithelm") is not None
     assert store.get_profile("prexvo") is not None
-    assert store.get_profile("gainhelm") is None
+    assert store.get_profile("gainhelm") is not None
 
     assert TenantFactStore.classify_domain_lifecycle("profithelm.com") == "ACTIVE_TENANT"
     assert TenantFactStore.classify_domain_lifecycle("prexvo.com") == "ACTIVE_TENANT"
-    assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "STAGED_RESERVE"
+    assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "ACTIVE_TENANT"
     assert TenantFactStore.classify_domain_lifecycle("arifcoskun.com") == "PERSONAL_INFRA"
     for retired in DECOMMISSIONED_RETIRED_DOMAINS:
         assert TenantFactStore.classify_domain_lifecycle(retired) == "DECOMMISSIONED"

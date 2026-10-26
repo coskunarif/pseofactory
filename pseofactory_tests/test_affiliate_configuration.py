@@ -73,7 +73,7 @@ def test_registry_schema_validity():
                 assert isinstance(val, str), f"Field '{field}' in '{key}' must be a string"
                 assert len(val.strip()) > 0, f"Field '{field}' in '{key}' cannot be empty"
 
-        assert partner.property_id in ("profithelm", "prexvo"), (
+        assert partner.property_id in ("profithelm", "prexvo", "gainhelm"), (
             f"Partner '{key}' has invalid property_id: '{partner.property_id}'"
         )
         assert partner.status in ("live", "pending", "pending_expansion", "pending_p2"), (

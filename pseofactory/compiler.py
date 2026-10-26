@@ -22,6 +22,7 @@ import ast
 from typing import Dict, Any, Optional, List
 
 from pseofactory.affiliates import (
+    GAINHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
     PROFITHELM_DISCLOSURES,
     get_affiliate_route,
@@ -208,6 +209,19 @@ PREXVO_STUDENT_LOAN_CLUSTER = [
     ("student-loan-forgiveness-calculator", "Student Loan Forgiveness Timeline Calculator"),
     ("pslf-qualifying-payment-calculator", "PSLF 120 Qualifying Payments Verification Calculator"),
     ("student-loan-interest-subsidy-calculator", "Title IV Unpaid Interest Subsidy Benefit Calculator"),
+]
+
+GAINHELM_CYBER_COMPLIANCE_CLUSTER = [
+    ("soc-2-audit-cost-calculator", "SOC 2 Type I and Type II Audit Cost Calculator"),
+    ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 C3PAO Assessment Cost Calculator"),
+    ("nist-800-171-sprs-score-calculator", "NIST SP 800-171 DoD SPRS Weighted Score Calculator"),
+    ("iso-27001-certification-cost-calculator", "ISO/IEC 27001:2022 Auditor-Day Certification Cost Calculator"),
+    ("hipaa-violation-penalty-breach-cost-calculator", "HIPAA Civil Monetary Penalty and HITECH Breach Cost Calculator"),
+    ("pci-dss-4-0-compliance-cost-calculator", "PCI DSS v4.0.1 QSA ROC and SAQ Compliance Cost Calculator"),
+    ("fedramp-authorization-3pao-cost-calculator", "FedRAMP 20x and Rev 5 3PAO Authorization Cost Calculator"),
+    ("hitrust-csf-e1-i1-r2-certification-cost-calculator", "HITRUST CSF e1, i1, and r2 Certification Cost Calculator"),
+    ("penetration-testing-scoping-cost-calculator", "CREST and OSCP Penetration Testing Scoping Cost Calculator"),
+    ("cyber-liability-insurance-breach-exposure-calculator", "Cyber Liability Insurance Premium and Breach Exposure Calculator"),
 ]
 
 
@@ -548,17 +562,18 @@ def _render_compiler_monetization_and_guardrail_html(
     query: str,
     is_prexvo: bool,
     candidate_spec: Dict[str, Any],
+    is_gainhelm: bool = False,
 ) -> Dict[str, Any]:
     """
     Renders domain-isolated multi-company affiliate partner rosters and deterministic
-    conversion slots on profithelm and enforces YMYL statutory guardrails on prexvo
+    conversion slots on profithelm and gainhelm, and enforces YMYL statutory guardrails on prexvo
     (suppressing commercial offers on restricted public-service pages).
     Zero em-dashes. Zero en-dashes.
     """
     import html as html_lib
     from pseofactory.affiliates import bind_asset_partner_roster
 
-    prop_id = "prexvo" if is_prexvo else "profithelm"
+    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
     gsc_metrics_raw: Dict[str, Any] = {}
     if isinstance(candidate_spec.get("gsc_telemetry"), dict):
         gsc_metrics_raw.update(candidate_spec["gsc_telemetry"])
@@ -700,10 +715,12 @@ def _render_compiler_monetization_and_guardrail_html(
         )
 
     if not is_prexvo:
+        default_slug = "soc-2-audit-cost-calculator" if is_gainhelm else "section-179-deduction-calculator"
+        default_pk = "vanta_security" if is_gainhelm else "crest_capital"
         try:
-            route = get_affiliate_route("profithelm", slug)
+            route = get_affiliate_route(prop_id, slug)
         except ValueError:
-            route = get_affiliate_route("profithelm", "section-179-deduction-calculator", partner_key="crest_capital")
+            route = get_affiliate_route(prop_id, default_slug, partner_key=default_pk)
 
         primary_offer = roster_info.get("primary_offer") or {}
         is_greenfield_vertical_mismatch = (
@@ -716,17 +733,17 @@ def _render_compiler_monetization_and_guardrail_html(
         ):
             partner_key = str(primary_offer["partner_key"])
             try:
-                route = get_affiliate_route("profithelm", slug, partner_key=partner_key)
+                route = get_affiliate_route(prop_id, slug, partner_key=partner_key)
             except ValueError:
                 pass
-            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Xendoo"))
+            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Vanta" if is_gainhelm else "Xendoo"))
             cta_text = str(primary_offer.get("cta_text") or route.get("cta_text", "Explore Partner"))
-            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.xendoo.com/"))
+            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.vanta.com/" if is_gainhelm else "https://www.xendoo.com/"))
         else:
-            partner_key = route.get("partner_key", "crest_capital")
-            partner_name = route.get("partner_name", "Xendoo Section 179 & Business Tax Accounting")
-            cta_text = route.get("cta_text", "Optimize Section 179 Accounting with Xendoo")
-            raw_url = route.get("url", "https://www.xendoo.com/")
+            partner_key = route.get("partner_key", default_pk)
+            partner_name = route.get("partner_name", "Vanta Automated GRC" if is_gainhelm else "Xendoo Section 179 & Business Tax Accounting")
+            cta_text = route.get("cta_text", "Automate Audit Readiness with Vanta" if is_gainhelm else "Optimize Section 179 Accounting with Xendoo")
+            raw_url = route.get("url", "https://www.vanta.com/" if is_gainhelm else "https://www.xendoo.com/")
         url = (
             raw_url
             if route.get("status") in ("live", "active_direct") and not str(raw_url).startswith("/r/")
@@ -735,22 +752,28 @@ def _render_compiler_monetization_and_guardrail_html(
         if str(url).startswith("/r/") and "?" not in str(url):
             url = f"{url}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
         rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
-        ftc_disc = PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+        disc_dict = GAINHELM_DISCLOSURES if is_gainhelm else PROFITHELM_DISCLOSURES
+        ftc_disc = disc_dict.get("ftc_disclosure", "")
         roster_keys_csv = html_lib.escape(",".join(roster_info.get("roster_keys") or []))
         companies_csv = html_lib.escape(",".join(roster_info.get("distinct_companies") or []))
         models_csv = html_lib.escape(",".join(roster_info.get("partnership_models_represented") or []))
         primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
+        partner_lead_copy = (
+            "Execute your modeled compliance or audit readiness scenario with a vetted GRC automation, CPA audit, or security assurance partner matched to this calculation:"
+            if is_gainhelm
+            else "Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:"
+        )
 
         block_html = (
-            f'    <section class="affiliate-cta-section affiliates-section card pseo-card" data-property="profithelm" '
+            f'    <section class="affiliate-cta-section affiliates-section card pseo-card" data-property="{prop_id}" '
             f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" '
             f'data-partner-models="{models_csv}" data-partner-roster="{roster_keys_csv}" '
             f'data-partner-companies="{companies_csv}" data-conversion-slot="{html_lib.escape(str(slot_plan.get("primary_slot") or "calculator_result_inline"))}" '
             f'data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Verified Commercial Execution Partner: {partner_name}</h2>\n'
-            f'      <p>Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:</p>\n'
+            f'      <p>{partner_lead_copy}</p>\n'
             f'      <p style="margin-top: 12px;">\n'
             f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
             f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" data-cta-slot="standalone_primary_cta" '
@@ -928,6 +951,7 @@ def _build_compiler_faq_entities(
     economic_dataset: str,
     is_prediction_tool: bool,
     is_prexvo: bool,
+    is_gainhelm: bool = False,
 ) -> List[Dict[str, Any]]:
     """Builds conversational FAQPage entities tailored to tenant and tool cluster."""
     faq_entities: List[Dict[str, Any]] = [
@@ -1002,6 +1026,25 @@ def _build_compiler_faq_entities(
                 },
             },
         ])
+    elif is_gainhelm:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": f"What audit evidence is required to satisfy {statutory_authority}?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Organizations must maintain continuous control monitoring logs, system boundary diagrams, access review attestations, and third-party assessor or CPA workpapers across the observation window.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "How do GRC automation platforms reduce independent assessor and internal engineering hours?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"Automated evidence collection across cloud, identity, and code repositories compresses manual readiness preparation while grounding auditor day tables in {economic_dataset}.",
+                },
+            },
+        ])
     else:
         faq_entities.extend([
             {
@@ -1034,9 +1077,10 @@ def _build_compiled_json_ld_graph(
     economic_dataset: str,
     is_prexvo: bool,
     faq_entities: List[Dict[str, Any]],
+    is_gainhelm: bool = False,
 ) -> str:
     """Builds the unified Schema.org @graph JSON-LD string for compiled programmatic pages."""
-    brand_org_name = "Prexvo" if is_prexvo else "ProfitHelm"
+    brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else "ProfitHelm")
     if "/" in slug:
         spoke_parts = [sp for sp in slug.split("/") if sp]
         hub_slug_part = spoke_parts[0]
@@ -1389,25 +1433,41 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         str(candidate_spec.get(k) or "")
         for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
     ).lower()
-    if "profithelm" in spec_tenant_signals and "prexvo" not in spec_tenant_signals:
+    is_gainhelm = False
+    if "gainhelm" in spec_tenant_signals:
+        is_prexvo = False
+        is_gainhelm = True
+    elif "profithelm" in spec_tenant_signals and "prexvo" not in spec_tenant_signals:
         is_prexvo = False
     elif "prexvo" in spec_tenant_signals:
         is_prexvo = True
     else:
-        is_prexvo = (
-            "prexvo" in os.environ.get("FACTORY_PROPERTY_ID", "").lower()
-            or "prexvo" in os.environ.get("FACTORY_BRAND_NAME", "").lower()
-            or "prexvo" in os.environ.get("FACTORY_DOMAIN", "").lower()
-            or any(
-                t in str(candidate_spec.get("statutory_authority") or "").lower()
-                for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
+        env_signals = " ".join([
+            os.environ.get("FACTORY_PROPERTY_ID", "").lower(),
+            os.environ.get("FACTORY_BRAND_NAME", "").lower(),
+            os.environ.get("FACTORY_DOMAIN", "").lower(),
+        ])
+        if "gainhelm" in env_signals or any(
+            t in str(candidate_spec.get("statutory_authority") or "").lower()
+            for t in ("aicpa ssae 18", "32 cfr part 170", "dfars 252.204", "iso/iec 27006", "45 cfr 160.404", "pci dss v4", "fedramp", "hitrust csf")
+        ):
+            is_prexvo = False
+            is_gainhelm = True
+        else:
+            is_prexvo = (
+                "prexvo" in env_signals
+                or any(
+                    t in str(candidate_spec.get("statutory_authority") or "").lower()
+                    for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
+                )
             )
-        )
-    default_base = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
+    default_base = "https://prexvo.com" if is_prexvo else ("https://gainhelm.com" if is_gainhelm else "https://profithelm.com")
     env_base = os.environ.get("FACTORY_CANONICAL_BASE", "").strip()
-    if is_prexvo and "profithelm.com" in env_base.lower():
+    if is_prexvo and ("profithelm.com" in env_base.lower() or "gainhelm.com" in env_base.lower()):
         env_base = ""
-    elif not is_prexvo and "prexvo.com" in env_base.lower():
+    elif is_gainhelm and ("profithelm.com" in env_base.lower() or "prexvo.com" in env_base.lower()):
+        env_base = ""
+    elif not is_prexvo and not is_gainhelm and ("prexvo.com" in env_base.lower() or "gainhelm.com" in env_base.lower()):
         env_base = ""
     canonical_base = (
         str(candidate_spec.get("canonical_base") or "").strip()
@@ -1425,6 +1485,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         query=query,
         is_prexvo=is_prexvo,
         candidate_spec=candidate_spec,
+        is_gainhelm=is_gainhelm,
     )
     monetization_section_html = monetization_block["html"]
     inline_calc_cta_html = monetization_block.get("inline_calc_cta_html", "")
@@ -1432,11 +1493,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     if comparison_table_cta_html:
         scenario_table_html = f"{scenario_table_html}\n{comparison_table_cta_html}"
 
+    resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
     from pseofactory.competitor import render_competitor_winning_pattern_blocks
     winning_blocks = render_competitor_winning_pattern_blocks(
         slug=slug,
         title=title,
-        property_id="prexvo" if is_prexvo else "profithelm",
+        property_id=resolved_tenant,
         canonical_base=canonical_base,
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
@@ -1450,7 +1512,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     is_prexvo_js = "true" if is_prexvo else "false"
 
-    is_prediction_tool = (not is_prexvo) and any(
+    is_prediction_tool = (not is_prexvo and not is_gainhelm) and any(
         tok in slug.lower()
         for tok in (
             "prediction",
@@ -1467,11 +1529,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         )
     )
 
-    application_category = "FinanceApplication"
+    application_category = "BusinessApplication" if is_gainhelm else "FinanceApplication"
 
     if is_prexvo:
         cluster = PREXVO_STUDENT_LOAN_CLUSTER
         cluster_title = "Related Title IV Student Loan Repayment Tools"
+    elif is_gainhelm:
+        cluster = GAINHELM_CYBER_COMPLIANCE_CLUSTER
+        cluster_title = "Related Cyber Compliance and GRC Audit Cost Tools"
     elif is_prediction_tool:
         cluster = PROFITHELM_PREDICTION_CLUSTER
         cluster_title = "Related Prediction Market Quantitative Tools"
@@ -1505,6 +1570,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         economic_dataset=economic_dataset,
         is_prediction_tool=is_prediction_tool,
         is_prexvo=is_prexvo,
+        is_gainhelm=is_gainhelm,
     )
 
     faq_json_str = json.dumps(faq_entities, ensure_ascii=False, indent=6)
@@ -1544,7 +1610,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     calc_js_body = f"""      {dynamic_return_js}"""
 
     regulatory_disclosures_html = []
-    if not is_prexvo:
+    if is_gainhelm:
+        regulatory_disclosures_html.append(
+            '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+            f'        {GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", "")}\n'
+            '      </p>'
+        )
+    elif not is_prexvo:
         if cluster == PROFITHELM_TAX_CLUSTER or "tax" in slug.lower() or "tax" in query.lower() or "179" in slug:
             regulatory_disclosures_html.append(
                 '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
@@ -1617,6 +1689,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         economic_dataset=economic_dataset,
         is_prexvo=is_prexvo,
         faq_entities=faq_entities,
+        is_gainhelm=is_gainhelm,
     )
 
     html_content = f"""<!DOCTYPE html>
@@ -2118,7 +2191,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     )
     from pseofactory.tenant_facts import TruthReconciliationEngine
 
-    resolved_tenant = "prexvo" if is_prexvo else "profithelm"
+    resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
     html_content, _ = TruthReconciliationEngine.reconcile_html_truth(
         html_content,
         tenant=resolved_tenant,
@@ -2155,7 +2228,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "slug": slug,
         "title": title,
-        "tenant": "prexvo" if is_prexvo else "profithelm",
+        "tenant": resolved_tenant,
         "html": html_content,
         "manifest": manifest,
         "published_output": published_output,

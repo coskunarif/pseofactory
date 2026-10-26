@@ -30,13 +30,12 @@ CLOUDFLARE_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
 ACTIVE_TENANT_DOMAINS = (
     "profithelm.com",
     "prexvo.com",
+    "gainhelm.com",
 )
 PERSONAL_INFRA_DOMAINS = (
     "arifcoskun.com",
 )
-HIBERNATED_RESERVE_DOMAINS = (
-    "gainhelm.com",
-)
+HIBERNATED_RESERVE_DOMAINS: Tuple[str, ...] = ()
 DECOMMISSIONED_DOMAINS = (
     "adspendguardian.com",
     "heyjunto.com",
@@ -48,17 +47,18 @@ KEPT_DOMAINS = ACTIVE_TENANT_DOMAINS + PERSONAL_INFRA_DOMAINS + HIBERNATED_RESER
 ACTIVE_ROUTABLE_ZONE_IDS: Dict[str, str] = {
     "profithelm.com": "e0d591326d8e26365edd7867453b604f",
     "prexvo.com": "fdc412697a55e721ddd3ec7d9070daff",
+    "gainhelm.com": "0a03264e19beb2cb17ba01860b701701",
     "arifcoskun.com": "23c4be6bf04fcde33b938b8f94907457",
 }
 
 EXPECTED_ACTIVE_CNAME_TARGETS: Dict[str, str] = {
     "profithelm.com": "profithelm.pages.dev",
     "prexvo.com": "prexvo.pages.dev",
+    "gainhelm.com": "gainhelm.pages.dev",
     "arifcoskun.com": "arif-coskun-platform.pages.dev",
 }
 
 NON_ROUTABLE_ZONE_IDS: Dict[str, str] = {
-    "gainhelm.com": "0a03264e19beb2cb17ba01860b701701",
     "adspendguardian.com": "f1191fa18536b4620154ddfa9bc22243",
     "heyjunto.com": "29e937133a62c4c27dba08eae5e2ab98",
     "thecoachloop.com": "208830e96c6fec20b0191675ead01282",
@@ -75,6 +75,7 @@ FORBIDDEN_ROUTING_RECORD_TYPES = ("A", "AAAA", "CNAME", "MX")
 DEFAULT_ENDPOINTS = [
     "https://profithelm.com",
     "https://prexvo.com",
+    "https://gainhelm.com",
     "https://arifcoskun.com",
 ]
 

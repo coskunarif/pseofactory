@@ -283,6 +283,12 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         "credible",
         "earnest",
         "lendkey",
+        # GainHelm cyber compliance & GRC isolation tokens
+        "gainhelm.com",
+        "gainhelm",
+        "106482195",
+        "gh_soc2_cmmc_audit_workpapers",
+        "gh_hipaa_iso27001_governance_kit",
     }
 
     return TenantTruthProfile(
@@ -504,6 +510,12 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "taxslayer",
         "kalshi",
         "interactive_brokers",
+        # GainHelm cyber compliance & GRC isolation tokens
+        "gainhelm.com",
+        "gainhelm",
+        "106482195",
+        "gh_soc2_cmmc_audit_workpapers",
+        "gh_hipaa_iso27001_governance_kit",
     }
 
     return TenantTruthProfile(
@@ -520,7 +532,220 @@ def _build_prexvo_profile() -> TenantTruthProfile:
     )
 
 
-STAGED_RESERVE_TENANT_DOMAINS: Tuple[str, ...] = ("gainhelm.com",)
+def _build_gainhelm_profile() -> TenantTruthProfile:
+    """Builds the canonical truth profile for GainHelm (Enterprise Cyber Compliance & GRC Governance)."""
+    pricing = {
+        "free": PricingTier(
+            name="Free",
+            price_usd=0.0,
+            billing_period="month",
+            features=[
+                "SOC 2 Audit Cost & CPA Scoping",
+                "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+                "HHS OCR HIPAA Penalty Tier Modeling",
+            ],
+        ),
+        "pro": PricingTier(
+            name="Pro",
+            price_usd=49.0,
+            billing_period="month",
+            features=[
+                "SOC 2 Audit Cost & CPA Scoping",
+                "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+                "ISO 27001 Auditor-Day Calculation",
+                "HHS OCR HIPAA Penalty Tier Modeling",
+                "PCI DSS 4.0 QSA & ROC Scoping",
+                "Audit Workpaper Export",
+            ],
+        ),
+        "enterprise": PricingTier(
+            name="Enterprise",
+            price_usd=199.0,
+            billing_period="month",
+            features=[
+                "SOC 2 Audit Cost & CPA Scoping",
+                "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+                "ISO 27001 Auditor-Day Calculation",
+                "HHS OCR HIPAA Penalty Tier Modeling",
+                "PCI DSS 4.0 QSA & ROC Scoping",
+                "Multi-Framework Governance Consolidation",
+                "Priority GRC API",
+            ],
+        ),
+    }
+
+    features = {
+        "SOC 2 Audit Cost & CPA Scoping": FeatureContract(
+            name="SOC 2 Audit Cost & CPA Scoping",
+            enabled=True,
+            tier_availability=["free", "pro", "enterprise"],
+            description="AICPA SSAE 18 (AT-C Section 205) Trust Services Criteria Type I and Type II CPA audit cost and readiness modeling.",
+        ),
+        "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring": FeatureContract(
+            name="DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+            enabled=True,
+            tier_availability=["free", "pro", "enterprise"],
+            description="32 CFR Part 170 and DFARS 252.204-7012 / 7019 / 7020 NIST SP 800-171 Rev 2 110-control SPRS score and C3PAO budget modeling.",
+        ),
+        "ISO 27001 Auditor-Day Calculation": FeatureContract(
+            name="ISO 27001 Auditor-Day Calculation",
+            enabled=True,
+            tier_availability=["pro", "enterprise"],
+            description="ISO/IEC 27006-1:2024 mandatory Stage 1, Stage 2, and 3-year surveillance auditor-day calculation for ISO/IEC 27001:2022 ISMS.",
+        ),
+        "HHS OCR HIPAA Penalty Tier Modeling": FeatureContract(
+            name="HHS OCR HIPAA Penalty Tier Modeling",
+            enabled=True,
+            tier_availability=["free", "pro", "enterprise"],
+            description="45 CFR 160.404 and 42 U.S.C. 1320d-5 inflation-adjusted 4-Tier civil money penalty exposure and HITECH breach notification cost modeling.",
+        ),
+        "PCI DSS 4.0 QSA & ROC Scoping": FeatureContract(
+            name="PCI DSS 4.0 QSA & ROC Scoping",
+            enabled=True,
+            tier_availability=["pro", "enterprise"],
+            description="PCI SSC PCI DSS v4.0.1 Merchant Level 1-4 SAQ vs QSA Report on Compliance (ROC) and ASV scan cost modeling.",
+        ),
+    }
+
+    statutory = TenantStatutoryTruth(
+        tenant_id="gainhelm",
+        statutory_citations={
+            "aicpa_ssae_18_atc_205": "AICPA SSAE 18 (AT-C Section 205) & TSP Section 100",
+            "dod_32_cfr_part_170": "32 CFR Part 170 (DoD CMMC 2.0 Final Rule)",
+            "dfars_252_204_7012": "DFARS 252.204-7012 / 252.204-7019 / 252.204-7020",
+            "nist_sp_800_171_rev2": "NIST SP 800-171 Rev 2 (110 Security Requirements)",
+            "iso_iec_27006_1_2024": "ISO/IEC 27006-1:2024 & ISO/IEC 27001:2022",
+            "hipaa_45_cfr_160_404": "45 CFR 160.404 & 42 U.S.C. 1320d-5 (HITECH Act)",
+            "pci_dss_v4_0_1": "PCI DSS v4.0.1 Merchant & Service Provider Scoping",
+            "fedramp_44_usc_3607": "44 U.S.C. 3607 (FedRAMP Authorization Act) & NIST SP 800-53 Rev 5",
+            "gdpr_art_83_eu_ai_act_art_99": "GDPR Article 83 (EU 2016/679) & EU AI Act Article 99 (EU 2024/1689)",
+        },
+        limits_and_thresholds={
+            "sprs_max_score": 110,
+            "sprs_min_score": -203,
+            "sprs_total_controls": 110,
+            "cmmc_conditional_min_sprs": 88,
+            "cmmc_poam_closeout_days": 180,
+            "hipaa_tier1_min_per_violation": 141.0,
+            "hipaa_tier4_min_per_violation": 71162.0,
+            "hipaa_statutory_annual_cap_tier4": 2134831.0,
+            "hipaa_ocr_enforcement_discretion_tier1_cap": 25000.0,
+            "hipaa_ocr_enforcement_discretion_tier2_cap": 100000.0,
+            "hipaa_ocr_enforcement_discretion_tier3_cap": 250000.0,
+            "hipaa_ocr_enforcement_discretion_tier4_cap": 1500000.0,
+            "hipaa_ocr_breach_portal_threshold_records": 500,
+            "hipaa_breach_notification_deadline_days": 60,
+            "pci_level1_visa_mastercard_tx_threshold": 6000000,
+            "pci_level2_min_tx_threshold": 1000000,
+            "pci_level3_min_tx_threshold": 20000,
+            "gdpr_tier1_fine_cap_eur": 10000000.0,
+            "gdpr_tier1_turnover_pct": 0.02,
+            "gdpr_tier2_fine_cap_eur": 20000000.0,
+            "gdpr_tier2_turnover_pct": 0.04,
+            "eu_ai_act_prohibited_fine_cap_eur": 35000000.0,
+            "eu_ai_act_prohibited_turnover_pct": 0.07,
+            "eu_ai_act_high_risk_fine_cap_eur": 15000000.0,
+            "eu_ai_act_high_risk_turnover_pct": 0.03,
+            "sec_form_8k_item_1_05_disclosure_business_days": 4,
+            "soc2_baseline_type2_75emp_total_cost": 48500.0,
+            "cmmc_level2_baseline_85emp_total_cost": 94200.0,
+            "iso27001_baseline_120emp_3yr_tco": 68400.0,
+        },
+    )
+
+    claims_allowlist = [
+        "SOC 2 Audit Cost & CPA Scoping",
+        "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+        "ISO 27001 Auditor-Day Calculation",
+        "HHS OCR HIPAA Penalty Tier Modeling",
+        "PCI DSS 4.0 QSA & ROC Scoping",
+    ]
+
+    claims_banned = [
+        "official aicpa licensed cpa firm",
+        "accredited c3pao certification body",
+        "guaranteed audit pass without remediation",
+        "guaranteed immunity from hhs ocr enforcement",
+        "official federal loan servicer",
+        "automated irs tax filing",
+        "section 1031",
+        "section 179",
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
+        "mercury",
+        "turbotax",
+        "coinledger",
+        "crest_capital",
+    ]
+
+    mandatory_disclosures = [
+        "Statutory Compliance & Audit Scoping Disclaimer (Non-CPA / Non-C3PAO / Non-Legal Attestation)",
+        "FTC Partner Compensation Disclosure",
+        "Independent Publisher Disclaimer",
+    ]
+
+    cross_tenant_forbidden_tokens = {
+        "section 1031",
+        "1031 exchange",
+        "exchange 1031",
+        "exchange1031",
+        "section 179",
+        "qsbs",
+        "section 1202",
+        "pass-through entity",
+        "tcja",
+        "profithelm.com",
+        "profithelm",
+        "143884102",
+        "coinledger",
+        "koinly",
+        "mercury",
+        "gusto",
+        "rippling",
+        "crest_capital",
+        "ipx1031",
+        "exeter1031",
+        "first_american",
+        "turbotax",
+        "taxslayer",
+        "kalshi",
+        "interactive_brokers",
+        "title iv",
+        "34 cfr",
+        "pslf",
+        "paye sunset",
+        "student loan",
+        "repayment assistance plan",
+        "income-contingent repayment",
+        "direct consolidation",
+        "prexvo.com",
+        "prexvo",
+        "106482194",
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
+    }
+
+    return TenantTruthProfile(
+        tenant_id="gainhelm",
+        brand_name="GainHelm",
+        canonical_domain="https://gainhelm.com",
+        pricing_tiers=pricing,
+        features=features,
+        statutory_truth=statutory,
+        claims_allowlist=claims_allowlist,
+        claims_banned=claims_banned,
+        mandatory_disclosures=mandatory_disclosures,
+        cross_tenant_forbidden_tokens=cross_tenant_forbidden_tokens,
+    )
+
+
+STAGED_RESERVE_TENANT_DOMAINS: Tuple[str, ...] = ()
 DECOMMISSIONED_TENANT_DOMAINS: Tuple[str, ...] = (
     "adspendguardian.com",
     "heyjunto.com",
@@ -572,7 +797,7 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
     },
     "gainhelm.com": {
         "domain": "gainhelm.com",
-        "lifecycle_tier": "STAGED_RESERVE",
+        "lifecycle_tier": "ACTIVE_TENANT",
         "zone_id": "0a03264e19beb2cb17ba01860b701701",
         "registry_object_id": "3041507860_DOMAIN_COM-VRSN",
         "auto_renew": True,
@@ -585,8 +810,8 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
         "payment_expires_at": "2026-11-24T00:24:57.000Z",
         "renewal_fee_usd": 10.46,
         "effective_annual_exposure_usd": 10.46,
-        "expected_cname_target": None,
-        "routing_records_allowed": False,
+        "expected_cname_target": "gainhelm.pages.dev",
+        "routing_records_allowed": True,
     },
     "arifcoskun.com": {
         "domain": "arifcoskun.com",
@@ -706,6 +931,7 @@ class TenantFactStore:
         self._profiles: Dict[str, TenantTruthProfile] = {
             "profithelm": _build_profithelm_profile(),
             "prexvo": _build_prexvo_profile(),
+            "gainhelm": _build_gainhelm_profile(),
         }
 
     @staticmethod
@@ -719,7 +945,7 @@ class TenantFactStore:
         if not raw:
             return "UNMAPPED"
         norm = raw if "." in raw else f"{raw}.com"
-        if norm in ("profithelm.com", "prexvo.com"):
+        if norm in ("profithelm.com", "prexvo.com", "gainhelm.com"):
             return "ACTIVE_TENANT"
         if norm in STAGED_RESERVE_TENANT_DOMAINS:
             return "STAGED_RESERVE"
@@ -917,7 +1143,8 @@ class TenantFactStore:
 
         # 3. Cross-tenant boundary isolation
         for token in profile.cross_tenant_forbidden_tokens:
-            if token.lower() in text_lower:
+            tok_l = token.lower()
+            if re.search(rf"(?<![a-z0-9]){re.escape(tok_l)}(?![a-z0-9])", text_lower):
                 violations.append(
                     f"Cross-tenant contamination on {profile.brand_name}: found forbidden boundary token '{token}'"
                 )
@@ -1521,7 +1748,8 @@ class TruthReconciliationEngine:
 
         updated = html_content
         repairs: List[str] = []
-        tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
+        raw_t = (tenant or "").lower()
+        tenant_norm = "prexvo" if "prexvo" in raw_t else ("gainhelm" if "gainhelm" in raw_t else "profithelm")
         combined_slug = f"{rel_path.lower()} {slug.lower()}"
 
         # 1. Strip speculative filler phrases across prose
@@ -1538,7 +1766,7 @@ class TruthReconciliationEngine:
                     updated = updated.replace(old_str, new_str)
                     if "profithelm_statutory_truth_reconciled" not in repairs:
                         repairs.append("profithelm_statutory_truth_reconciled")
-        else:
+        elif tenant_norm == "prexvo":
             for old_str, new_str in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                 if old_str in updated:
                     updated = updated.replace(old_str, new_str)
@@ -1692,7 +1920,8 @@ class TruthReconciliationEngine:
         if not isinstance(raw_ov, dict):
             return raw_ov, False
         ov_slug = str(raw_ov.get("slug") or slug or "").lower()
-        tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
+        raw_t = (tenant or "").lower()
+        tenant_norm = "prexvo" if "prexvo" in raw_t else ("gainhelm" if "gainhelm" in raw_t else "profithelm")
         serialized = _json_lib.dumps(raw_ov, ensure_ascii=False)
         updated_str = serialized
 
@@ -1718,7 +1947,7 @@ class TruthReconciliationEngine:
             ):
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)
-        else:
+        elif tenant_norm == "prexvo":
             for old_s, new_s in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)
@@ -1756,7 +1985,8 @@ class TruthReconciliationEngine:
             if filler_old in html_content:
                 violations.append(f"Speculative filler phrase detected: '{filler_old.strip()}'")
 
-        tenant_norm = "prexvo" if "prexvo" in (tenant or "").lower() else "profithelm"
+        raw_t = (tenant or "").lower()
+        tenant_norm = "prexvo" if "prexvo" in raw_t else ("gainhelm" if "gainhelm" in raw_t else "profithelm")
         if tenant_norm == "profithelm":
             for old_str, _ in cls.PROFITHELM_HTML_REPLACEMENTS:
                 if old_str in html_content:
@@ -1767,7 +1997,7 @@ class TruthReconciliationEngine:
                 violations.append("Inline calculator JS uses stale 31300 Heavy SUV cap instead of 2026 statutory 30500 cap")
             if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
                 violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
-        else:
+        elif tenant_norm == "prexvo":
             for old_str, _ in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                 if old_str in html_content:
                     msg = f"Unreconciled Prexvo statutory figure or plan claim: '{old_str[:60]}'"

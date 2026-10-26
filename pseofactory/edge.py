@@ -999,17 +999,226 @@ def generate_edge_redirect_function(
     from pseofactory.affiliates import (
         PROFITHELM_AFFILIATES,
         PREXVO_AFFILIATES,
+        GAINHELM_AFFILIATES,
         SOVRN_VERIFIED_PAYING_MERCHANTS,
     )
     from pseofactory.affiliates_hub import MonetizationHub
 
     prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo"):
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
         raise ValueError(
-            f"Edge redirect function generation is only supported for profithelm or prexvo (got '{property_id}')."
+            f"Edge redirect function generation is only supported for profithelm, prexvo, or gainhelm (got '{property_id}')."
         )
 
     active_hub = hub if hub is not None else MonetizationHub()
+
+    if prop_clean == "gainhelm":
+        gainhelm_catalog_entries: List[str] = []
+        for k, p_obj in GAINHELM_AFFILIATES.items():
+            status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
+            status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
+            gainhelm_catalog_entries.append(
+                f'  {k}: {{\n'
+                f'    defaultUrl: "{p_obj.default_url}",\n'
+                f'    envVar: "{p_obj.env_var}",\n'
+                f'    statusEnvVar: "{status_env}",\n'
+                f'    status: "{status_val}",\n'
+                f'  }},'
+            )
+        gainhelm_catalog_block = "\n".join(gainhelm_catalog_entries)
+        gainhelm_js = f"""/**
+ * Cloudflare Pages Function: GainHelm Outbound Enterprise GRC & Security Audit Redirect Handler
+ * Intercepts /r/:partner requests and executes low-latency server-side 302 redirects (<15ms TTFB).
+ * Enforces strict GainHelm partner whitelist, SSRF protection, and durable KV click telemetry.
+ * Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
+ */
+
+const PARTNER_CATALOG = {{
+{gainhelm_catalog_block}
+}};
+
+const EDUCATIONAL_CALCULATOR_URL = "https://gainhelm.com/tools/soc-2-audit-cost-calculator/";
+
+const TRACKING_PARAMS = [
+  "subid",
+  "click_id",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "gclid",
+  "source_tool",
+  "source",
+  "cta_slot",
+  "slot",
+  "ph_tier",
+  "tier",
+];
+
+function extractNormalizedParams(reqUrl) {{
+  const map = new Map();
+  for (const [rawKey, val] of reqUrl.searchParams.entries()) {{
+    const cleanKey = rawKey.replace(/^(?:amp;)+/i, "");
+    if (val !== null && val !== "" && !map.has(cleanKey)) {{
+      map.set(cleanKey, val);
+    }}
+  }}
+  return map;
+}}
+
+async function persistEdgeRedirectTelemetry(context, eventPayload) {{
+  try {{
+    if (!globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+    }}
+    globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.unshift(eventPayload);
+    if (globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length > 250) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length = 250;
+    }}
+    const env = context && context.env ? context.env : null;
+    const kv =
+      env &&
+      (env.GAINHELM_TELEMETRY_KV ||
+        env.GAINHELM_LEADS ||
+        env.TELEMETRY_KV ||
+        null);
+    if (kv && typeof kv.put === "function") {{
+      const putPromise = kv
+        .put(eventPayload.event_id, JSON.stringify(eventPayload), {{
+          expirationTtl: 60 * 86400,
+        }})
+        .catch(() => {{}});
+      if (context && typeof context.waitUntil === "function") {{
+        context.waitUntil(putPromise);
+      }} else {{
+        await putPromise;
+      }}
+    }}
+  }} catch (_) {{}}
+}}
+
+function isSafeAndCompliantUrl(urlStr) {{
+  try {{
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
+      return false;
+    }}
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "169.254.169.254" ||
+      hostname === "metadata.google.internal" ||
+      hostname === "instance-data"
+    ) {{
+      return false;
+    }}
+    return true;
+  }} catch {{
+    return false;
+  }}
+}}
+
+export async function onRequest(context) {{
+  const {{ request, env, params }} = context;
+  const rawPartner = (params.partner || "").trim().toLowerCase();
+  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  if (!partnerConfig) {{
+    return new Response("Partner not found", {{
+      status: 404,
+      headers: {{
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
+  const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
+  const rawTargetUrl = (hasDirectConfig ? envUrl : partnerConfig.defaultUrl).trim();
+  if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  const reqUrl = new URL(request.url);
+  const normParams = extractNormalizedParams(reqUrl);
+  const targetObj = new URL(rawTargetUrl);
+  for (const param of TRACKING_PARAMS) {{
+    const val = normParams.get(param);
+    if (val !== undefined && val !== "") {{
+      targetObj.searchParams.set(param, val);
+    }}
+  }}
+  const sourceTool = normParams.get("source_tool") || normParams.get("source") || "";
+  const ctaSlot = normParams.get("cta_slot") || normParams.get("slot") || "";
+  const phTier = normParams.get("ph_tier") || "";
+  const effectiveSubid =
+    normParams.get("subid") ||
+    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || "");
+  if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
+    targetObj.searchParams.set("subid", effectiveSubid);
+  }}
+  if (!targetObj.searchParams.has("utm_source")) {{
+    targetObj.searchParams.set("utm_source", "gainhelm");
+  }}
+  if (!targetObj.searchParams.has("utm_medium")) {{
+    targetObj.searchParams.set("utm_medium", "affiliate");
+  }}
+  if (sourceTool && !targetObj.searchParams.has("utm_campaign")) {{
+    targetObj.searchParams.set("utm_campaign", sourceTool);
+  }}
+  if ((effectiveSubid || ctaSlot) && !targetObj.searchParams.has("utm_content")) {{
+    targetObj.searchParams.set("utm_content", effectiveSubid || ctaSlot);
+  }}
+  const finalRedirectUrl = targetObj.toString();
+  const isSyntheticProbe =
+    request.headers.get("x-pseofactory-test") === "1" ||
+    reqUrl.searchParams.get("synthetic_test") === "1";
+  const eventId =
+    "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now();
+  if (!isSyntheticProbe) {{
+    await persistEdgeRedirectTelemetry(context, {{
+      event_id: eventId,
+      event: "affiliate_click",
+      event_type: "affiliate_click",
+      property_id: "gainhelm",
+      partner_key: rawPartner,
+      tool_slug: sourceTool || "direct",
+      source_tool: sourceTool || "direct",
+      cta_slot: ctaSlot || "edge_redirect",
+      subid: effectiveSubid || `${{rawPartner}}_edge`,
+      value_tier: phTier || "standard",
+      ph_tier: phTier || "standard",
+      path: reqUrl.pathname,
+      destination_url: finalRedirectUrl,
+      timestamp: new Date().toISOString(),
+    }});
+  }}
+  return new Response(null, {{
+    status: 302,
+    headers: {{
+      Location: finalRedirectUrl,
+      "Cache-Control": "private, no-cache, no-store, must-revalidate",
+      "X-Robots-Tag": "noindex, nofollow",
+      "X-Edge-Partner": rawPartner,
+      "X-Edge-Subid": effectiveSubid || "default",
+      "X-Edge-Contract-Tier": hasDirectConfig ? "direct_env_override" : "direct_grc_partner",
+      "X-Edge-Telemetry": isSyntheticProbe ? "synthetic_suppressed" : "recorded",
+      ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
+    }},
+  }});
+}}
+"""
+        assert_no_forbidden_dashes(gainhelm_js, "generate_edge_redirect_function(gainhelm)")
+        return gainhelm_js
 
     if prop_clean == "prexvo":
         prexvo_catalog_entries: List[str] = []
@@ -1899,9 +2108,9 @@ def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
     Zero em-dashes. Zero en-dashes.
     """
     prop_clean = (property_id or "profithelm").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo"):
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
         raise ValueError(
-            f"Edge telemetry function generation is only supported for profithelm or prexvo (got '{property_id}')."
+            f"Edge telemetry function generation is only supported for profithelm, prexvo, or gainhelm (got '{property_id}')."
         )
     prop_upper = prop_clean.upper()
 
@@ -2258,10 +2467,425 @@ def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
     prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo"):
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
         raise ValueError(
-            f"Edge lead capture function generation is only supported for profithelm or prexvo (got '{property_id}')."
+            f"Edge lead capture function generation is only supported for profithelm, prexvo, or gainhelm (got '{property_id}')."
         )
+
+    if prop_clean == "gainhelm":
+        lead_js = """/**
+ * Cloudflare Pages Function: GainHelm Enterprise Cyber Compliance & Audit Quote Intake (/api/lead-capture)
+ * Captures TCPA-consented CISO/CFO audit readiness quote requests ($25,000+ audit budget threshold)
+ * and digital workpaper kit checkouts ($79 SOC 2/CMMC Workpapers, $49 ISO 27001/HIPAA Kit),
+ * keeps sub-threshold calculations frictionless, persists CPL records in GAINHELM_LEADS KV,
+ * and routes to verified GRC / C3PAO / CPA partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt).
+ * Zero AI slop. Zero em-dashes. Zero en-dashes.
+ */
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
+  "Cache-Control": "private, no-cache, no-store, must-revalidate",
+  "X-Robots-Tag": "noindex, nofollow",
+};
+
+const PARTNER_ROUTES = {
+  vanta_security: "https://www.vanta.com/",
+  drata_compliance: "https://drata.com/",
+  sprinto_compliance: "https://sprinto.com/",
+  thoropass_audit: "https://thoropass.com/",
+  coalition_cyber_insurance: "https://www.coalitioninc.com/",
+  cobalt_pentest: "https://www.cobalt.io/",
+};
+
+const GAINHELM_TOOLKIT_OFFERS = {
+  gh_soc2_cmmc_audit_workpapers: {
+    sku: "gh_soc2_cmmc_audit_workpapers",
+    title: "GainHelm SOC 2 & DoD CMMC 2.0 Audit Readiness Workpaper & SPRS Control Kit",
+    price_usd: 79,
+    price_cents: 7900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, and NIST SP 800-171 Rev 2",
+    deliverables: [
+      "Personalized SOC 2 Trust Services Criteria & DoD CMMC 2.0 Level 2 Audit Budget Workpaper (HTML/PDF)",
+      "110-Control NIST SP 800-171 Rev 2 SPRS Scoring & 180-Day POA&M Remediation Schedule (CSV)",
+      "Signed CISO/CFO Audit Scope Manifest & C3PAO / CPA RFP Checklist (JSON)",
+    ],
+  },
+  gh_hipaa_iso27001_governance_kit: {
+    sku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm ISO 27001:2022 & HHS OCR HIPAA Civil Penalty Governance Workpaper Suite",
+    price_usd: 49,
+    price_cents: 4900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "ISO/IEC 27006-1:2024, 45 CFR 160.404 (HITECH Act), and PCI DSS v4.0.1",
+    deliverables: [
+      "Personalized ISO/IEC 27006-1:2024 Auditor-Day & 45 CFR 160.404 Penalty Exposure Workpaper (HTML/PDF)",
+      "5-Point Breach Notification, Forensics & Multi-Framework Control Overlap Schedule (CSV)",
+      "Signed Enterprise Security Governance Audit Manifest (JSON)",
+    ],
+  },
+};
+
+function getLeadsKv(env) {
+  if (!env) return null;
+  return env.GAINHELM_LEADS || env.GAINHELM_TELEMETRY_KV || env.TELEMETRY_KV || null;
+}
+
+function getMemoryBuffer() {
+  if (!globalThis.__PSEOFACTORY_LEADS_BUFFER__) {
+    globalThis.__PSEOFACTORY_LEADS_BUFFER__ = [];
+  }
+  return globalThis.__PSEOFACTORY_LEADS_BUFFER__;
+}
+
+function deriveCapitalBand(amount) {
+  if (amount >= 250000) return "250k_plus";
+  if (amount >= 100000) return "100k_250k";
+  if (amount >= 50000) return "50k_100k";
+  if (amount >= 25000) return "25k_50k";
+  return "under_25k";
+}
+
+function selectOfferForSlug(toolSlug, reqSku) {
+  if (reqSku && GAINHELM_TOOLKIT_OFFERS[reqSku]) {
+    return GAINHELM_TOOLKIT_OFFERS[reqSku];
+  }
+  const s = String(toolSlug || "").toLowerCase();
+  if (s.includes("hipaa") || s.includes("iso-27001") || s.includes("pci-dss") || s.includes("cyber-liability")) {
+    return GAINHELM_TOOLKIT_OFFERS.gh_hipaa_iso27001_governance_kit;
+  }
+  return GAINHELM_TOOLKIT_OFFERS.gh_soc2_cmmc_audit_workpapers;
+}
+
+function buildGainHelmWorkpaperBundle(record, offer) {
+  const leadId = String((record && record.lead_id) || "lead_gainhelm_direct");
+  const toolSlug = String((record && record.tool_slug) || "soc-2-audit-cost-calculator");
+  const stateCode = String((record && record.state) || "DE").toUpperCase();
+  const baseAmount = Math.max(25000, Number((record && record.calculated_amount) || 48500));
+  const autoSavings = Math.round(baseAmount * 0.34);
+  const netOptimized = Math.max(12000, baseAmount - autoSavings);
+  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const reconciliationSchedule = [
+    {
+      line_code: "GH-100",
+      line_item: "Baseline Unautomated CPA / C3PAO / QSA Audit & Readiness Cost",
+      authority: offer.statutory_authority,
+      baseline_value: fmtUsd(baseAmount),
+      optimized_value: fmtUsd(netOptimized),
+      delta_impact: `-${fmtUsd(autoSavings)} GRC Automation Savings`,
+    },
+    {
+      line_code: "GH-200",
+      line_item: "Internal Engineering Evidence Collection Hours (At $145/hr Fully Burdened)",
+      authority: "AICPA AT-C 205 / NIST SP 800-171A Assessment Procedures",
+      baseline_value: "320 hrs ($46,400)",
+      optimized_value: "75 hrs ($10,875)",
+      delta_impact: "-245 Engineering Hours Saved",
+    },
+    {
+      line_code: "GH-300",
+      line_item: "Statutory Penalty / Contract Holdback Risk Exposure",
+      authority: "32 CFR Part 170 / 45 CFR 160.404 / SEC Item 1.05 Form 8-K",
+      baseline_value: fmtUsd(baseAmount * 4.5),
+      optimized_value: fmtUsd(baseAmount * 0.5),
+      delta_impact: "Continuous Control Attestation Active",
+    },
+  ];
+  const sensitivityMatrix = [
+    {
+      scenario_label: "Lean Cloud-Native Scope (Single AWS/GCP Prod Enclave, <=50 Staff)",
+      modeled_principal: fmtUsd(baseAmount * 0.72),
+      effective_rate: "82% Automated Evidence Coverage",
+      estimated_net_benefit: fmtUsd(autoSavings * 0.8),
+    },
+    {
+      scenario_label: "Baseline Enterprise Multi-Criteria Scope (75-150 Staff)",
+      modeled_principal: fmtUsd(baseAmount),
+      effective_rate: "76% Automated Evidence Coverage",
+      estimated_net_benefit: fmtUsd(autoSavings),
+    },
+    {
+      scenario_label: "High-Complexity Multi-Cloud + CUI / ePHI Enclave (250+ Staff)",
+      modeled_principal: fmtUsd(baseAmount * 1.65),
+      effective_rate: "68% Automated Evidence Coverage",
+      estimated_net_benefit: fmtUsd(autoSavings * 1.55),
+    },
+  ];
+  const fulfillQs = new URLSearchParams({
+    fulfill: "1",
+    lead_id: leadId,
+    sku: offer.sku,
+    tool_slug: toolSlug,
+    amount: String(baseAmount),
+    state: stateCode,
+  });
+  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
+  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
+  return {
+    lead_id: leadId,
+    property_id: "gainhelm",
+    tool_slug: toolSlug,
+    offer_sku: offer.sku,
+    offer_title: offer.title,
+    offer_price_usd: offer.price_usd,
+    statutory_authority: offer.statutory_authority,
+    modeled_amount_usd: baseAmount,
+    estimated_automation_savings_usd: autoSavings,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    fulfillment_url: fulfillmentUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
+    checkout_url: checkoutUrl,
+  };
+}
+
+export async function onRequestOptions() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+export async function onRequestGet(context) {
+  const { request, env } = context;
+  const reqUrl = new URL(request.url);
+  const isSynth =
+    request.headers.get("x-pseofactory-test") === "1" ||
+    reqUrl.searchParams.get("synthetic_test") === "1";
+  const toolSlug =
+    reqUrl.searchParams.get("tool_slug") ||
+    reqUrl.searchParams.get("source_tool") ||
+    "soc-2-audit-cost-calculator";
+  const reqSku = reqUrl.searchParams.get("sku") || "";
+  const offer = selectOfferForSlug(toolSlug, reqSku);
+  const leadId = reqUrl.searchParams.get("lead_id") || "lead_gainhelm_direct";
+  const amount = Number(reqUrl.searchParams.get("amount") || 48500);
+  const state = reqUrl.searchParams.get("state") || "DE";
+  const record = { lead_id: leadId, tool_slug: toolSlug, calculated_amount: amount, state };
+  const bundle = buildGainHelmWorkpaperBundle(record, offer);
+
+  if (reqUrl.searchParams.get("fulfill") === "1" || reqUrl.searchParams.get("playbook") === "1") {
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (fmt === "csv") {
+      const csvRows = [
+        "line_code,line_item,authority,baseline_value,optimized_value,delta_impact",
+        ...bundle.reconciliation_schedule.map(
+          (r) => `"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`
+        ),
+      ];
+      return new Response(csvRows.join("\\n") + "\\n", {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${offer.sku}_${leadId}.csv"`,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        synthetic_test: isSynth,
+        status: reqUrl.searchParams.get("fulfill") === "1" ? "toolkit_fulfilled" : "playbook_ready",
+        ...bundle,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  }
+
+  if (reqUrl.searchParams.get("checkout") === "1") {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        synthetic_test: isSynth,
+        status: "checkout_session_ready",
+        property_id: "gainhelm",
+        lead_id: leadId,
+        tool_slug: toolSlug,
+        offer_sku: offer.sku,
+        offer_title: offer.title,
+        offer_price_usd: offer.price_usd,
+        billing_mode: "payment",
+        checkout_url: bundle.checkout_url,
+        fulfillment_url: bundle.fulfillment_url,
+        csv_fulfillment_url: bundle.csv_fulfillment_url,
+        deliverables: offer.deliverables,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  }
+
+  const leads = getMemoryBuffer();
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      success: true,
+      property_id: "gainhelm",
+      count: leads.length,
+      leads,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+  );
+}
+
+export async function onRequestPost(context) {
+  try {
+    const { request, env } = context;
+    const body = await request.json();
+    const email = String(body.email || "").trim().toLowerCase();
+    const state = String(body.state || "DE").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "DE";
+    const toolSlug = String(body.tool_slug || body.source_tool || "soc-2-audit-cost-calculator")
+      .trim()
+      .toLowerCase()
+      .replace(/^\\/+|\\/+$/g, "")
+      .replace(/^tools\\//, "");
+    const reqPartner = String(body.partner_key || "vanta_security").trim().toLowerCase();
+    const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, reqPartner)
+      ? reqPartner
+      : "vanta_security";
+    const isSynth =
+      request.headers.get("x-pseofactory-test") === "1" ||
+      Boolean(body.synthetic_test === true) ||
+      email.endsWith("@example.com");
+
+    const rawAmount = Number(body.calculated_amount !== undefined ? body.calculated_amount : 48500);
+    const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 48500;
+    const thresholdUsd = 25000;
+
+    if (body.calculated_amount !== undefined && calculatedAmount < thresholdUsd) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          status: "frictionless_sub_threshold",
+          persisted: false,
+          frictionless_mode: true,
+          property_id: "gainhelm",
+          tool_slug: toolSlug,
+          vertical: "b2b_cyber_compliance",
+          calculated_amount: calculatedAmount,
+          threshold_usd: thresholdUsd,
+          partner_key: partnerKey,
+          redirect_url: `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=frictionless_direct`,
+          action_bus_dispatched: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      return new Response(
+        JSON.stringify({ ok: false, success: false, error: "Please enter a valid work email address." }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const hasQuoteFields =
+      body.calculated_amount !== undefined ||
+      body.partner_sharing_consent !== undefined;
+
+    if (hasQuoteFields && body.partner_sharing_consent !== true) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          success: false,
+          error: "Explicit TCPA partner_sharing_consent is required to dispatch your GRC / CPA audit quote.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const offer = selectOfferForSlug(toolSlug, body.sku || body.offer_sku || "");
+    const leadId = `lead_gainhelm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount));
+    const redirectUrl = `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=partner_quote_intake&lead_id=${encodeURIComponent(leadId)}`;
+    const record = {
+      lead_id: leadId,
+      property_id: "gainhelm",
+      lead_type: hasQuoteFields ? "qualified_quote" : "playbook_subscription",
+      lifecycle_stage: hasQuoteFields ? "captured" : "playbook_subscribed",
+      tool_slug: toolSlug,
+      vertical: "b2b_cyber_compliance",
+      email,
+      state,
+      capital_band: capitalBand,
+      calculated_amount: calculatedAmount,
+      threshold_usd: thresholdUsd,
+      partner_sharing_consent: Boolean(body.partner_sharing_consent),
+      partner_key: partnerKey,
+      partner_rep_desk: "Enterprise GRC & C3PAO / CPA Audit Desk",
+      redirect_url: redirectUrl,
+      action_bus_dispatched: calculatedAmount >= 50000,
+      offer_sku: offer.sku,
+      offer_title: offer.title,
+      offer_price_usd: offer.price_usd,
+      captured_at: new Date().toISOString(),
+    };
+    const bundle = buildGainHelmWorkpaperBundle(record, offer);
+    record.reconciliation_schedule = bundle.reconciliation_schedule;
+    record.sensitivity_matrix = bundle.sensitivity_matrix;
+    record.checkout_url = bundle.checkout_url;
+    record.fulfillment_url = bundle.fulfillment_url;
+    record.csv_fulfillment_url = bundle.csv_fulfillment_url;
+
+    if (!isSynth) {
+      const buf = getMemoryBuffer();
+      buf.unshift(record);
+      if (buf.length > 250) buf.length = 250;
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.put === "function") {
+        await kv.put(leadId, JSON.stringify(record), { expirationTtl: 90 * 86400 });
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        status: hasQuoteFields ? "captured" : "playbook_subscribed",
+        persisted: !isSynth,
+        synthetic_test: isSynth,
+        ...record,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ ok: false, success: false, error: "Unable to process GRC audit quote request." }),
+      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+}
+"""
+        assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(gainhelm)")
+        return lead_js
 
     if prop_clean == "prexvo":
         lead_js = """/**
@@ -4867,7 +5491,7 @@ def sync_tenant_edge_redirect_function(
     directory and property_id is profithelm or prexvo.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES, GAINHELM_AFFILIATES
     from pseofactory.affiliates_hub import MonetizationHub
 
     prop_clean = (property_id or "").strip().lower()
@@ -4875,7 +5499,7 @@ def sync_tenant_edge_redirect_function(
     r_dir = repo / "functions" / "r"
     target_file = r_dir / "[partner].js"
 
-    if prop_clean not in ("profithelm", "prexvo") or not r_dir.is_dir():
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm") or not r_dir.is_dir():
         return {
             "status": "SKIPPED",
             "path": str(target_file),
@@ -4888,7 +5512,11 @@ def sync_tenant_edge_redirect_function(
     lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
 
     prop_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {})
-    registry_map = PREXVO_AFFILIATES if prop_clean == "prexvo" else PROFITHELM_AFFILIATES
+    registry_map = (
+        PREXVO_AFFILIATES
+        if prop_clean == "prexvo"
+        else (GAINHELM_AFFILIATES if prop_clean == "gainhelm" else PROFITHELM_AFFILIATES)
+    )
     live_direct_partners: List[str] = []
     for k, p_obj in registry_map.items():
         if k != p_obj.key:
@@ -4980,6 +5608,23 @@ def sync_tenant_edge_redirect_function(
                         + "[[kv_namespaces]]\n"
                         + 'binding = "PROFITHELM_TELEMETRY_KV"\n'
                         + 'id = "8c56efedd6214424b83e0e298c33ba27"\n'
+                    )
+            elif prop_clean == "gainhelm":
+                if 'binding = "GAINHELM_TELEMETRY_KV"' not in w_new:
+                    w_new = (
+                        w_new.rstrip()
+                        + "\n\n# Cloudflare KV Binding for Durable GainHelm Click & Calculation Telemetry\n"
+                        + "[[kv_namespaces]]\n"
+                        + 'binding = "GAINHELM_TELEMETRY_KV"\n'
+                        + 'id = "d7e2021ef7cf47eea4ae382742481e75"\n'
+                    )
+                if 'binding = "GAINHELM_LEADS"' not in w_new:
+                    w_new = (
+                        w_new.rstrip()
+                        + "\n\n# Cloudflare KV Binding for GainHelm Consented GRC Audit Quote Leads\n"
+                        + "[[kv_namespaces]]\n"
+                        + 'binding = "GAINHELM_LEADS"\n'
+                        + 'id = "d7e2021ef7cf47eea4ae382742481e75"\n'
                     )
             if w_new != w_content:
                 wrangler_file.write_text(w_new, encoding="utf-8")

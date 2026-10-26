@@ -32,6 +32,7 @@ DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/di
 _CANONICAL_PRODUCTION_PROPERTIES = {
     "profithelm",
     "prexvo",
+    "gainhelm",
     "pseofactory",
     "profithelm-platform",
     "factory",
@@ -87,21 +88,23 @@ def _is_test_context(
 TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = {
     "profithelm": "143884102",
     "prexvo": "106482194",
+    "gainhelm": "106482195",
 }
 
 
 def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[str, str]:
     """
     Resolves tenant-scoped distribution configuration backed by TenantFactStore
-    so Prexvo callers never inherit ProfitHelm module-level defaults.
+    so Prexvo and GainHelm callers never inherit ProfitHelm module-level defaults.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.tenant_facts import TenantFactStore
 
+    f_dom = os.environ.get("FACTORY_DOMAIN", "").lower()
     eff_tenant = (
         tenant_id
         or os.environ.get("FACTORY_TENANT_ID")
-        or ("prexvo" if "prexvo" in os.environ.get("FACTORY_DOMAIN", "").lower() else "profithelm")
+        or ("gainhelm" if "gainhelm" in f_dom else ("prexvo" if "prexvo" in f_dom else "profithelm"))
     ).strip().lower()
 
     store = TenantFactStore.get_instance()
@@ -111,7 +114,11 @@ def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[
         brand_name = profile.brand_name
         raw_domain = str(profile.canonical_domain or f"{eff_tenant}.com").strip()
     else:
-        brand_name = "Prexvo" if eff_tenant == "prexvo" else ("ProfitHelm" if eff_tenant == "profithelm" else eff_tenant.capitalize())
+        brand_name = (
+            "GainHelm"
+            if eff_tenant == "gainhelm"
+            else ("Prexvo" if eff_tenant == "prexvo" else ("ProfitHelm" if eff_tenant == "profithelm" else eff_tenant.capitalize()))
+        )
         raw_domain = f"{eff_tenant}.com"
 
     domain = re.sub(r"^https?://", "", raw_domain, flags=re.IGNORECASE).rstrip("/")

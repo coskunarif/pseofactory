@@ -211,6 +211,56 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         "click_to_conversion_rate": 0.045,
         "ltv_bounty_equivalent_usd": 285.75,
     },
+    "vanta_security": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 350.00,
+        "cpl_lead_bounty_usd": 350.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.072,
+        "ltv_bounty_equivalent_usd": 350.00,
+    },
+    "drata_compliance": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 300.00,
+        "cpl_lead_bounty_usd": 300.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.070,
+        "ltv_bounty_equivalent_usd": 300.00,
+    },
+    "thoropass_audit": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 325.00,
+        "cpl_lead_bounty_usd": 325.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.068,
+        "ltv_bounty_equivalent_usd": 325.00,
+    },
+    "coalition_cyber_insurance": {
+        "partnership_model": "QUALIFIED_LEAD_CPL",
+        "cpa_bounty_usd": 250.00,
+        "cpl_lead_bounty_usd": 250.00,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.075,
+        "ltv_bounty_equivalent_usd": 250.00,
+    },
+    "cobalt_pentest": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 275.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.052,
+        "ltv_bounty_equivalent_usd": 275.00,
+    },
     # 3. Flat CPA Bounties (CPA_BOUNTY)
     "mercury": {
         "partnership_model": "CPA_BOUNTY",
@@ -782,6 +832,8 @@ def get_contextual_ftc_disclosure(
     prop = (property_id or "profithelm").strip().lower()
     if prop == "prexvo":
         return PREXVO_DISCLOSURES.get("ftc_disclosure", "")
+    if prop == "gainhelm":
+        return GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
     s_lower = (slug or "").strip().lower()
     if any(k in s_lower for k in ("1031", "like-kind", "exchange", "real-estate")):
         vertical_partners = "IPX1031, Xendoo, Mercury, DLP Capital, GROUNDFLOOR, and verified Qualified Intermediary or real estate capital partners"
@@ -1415,10 +1467,156 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
 }
 
+GAINHELM_DISCLOSURES: Dict[str, str] = {
+    "statutory_compliance_disclaimer": (
+        "Statutory Compliance & Audit Scoping Disclaimer (Non-CPA / Non-C3PAO / Non-Legal Attestation): "
+        "GainHelm provides deterministic statutory security governance, audit budget, and regulatory penalty "
+        "modeling pursuant to AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171, "
+        "ISO/IEC 27006-1:2024, 45 CFR 160.404 (HIPAA), and PCI DSS v4.0.1. GainHelm is not a licensed CPA firm, "
+        "Cyber-AB C3PAO, PCI SSC QSA, or legal counsel."
+    ),
+    "ftc_disclosure": (
+        "FTC Partner Compensation Disclosure: GainHelm is an independent enterprise security governance and "
+        "GRC financial research publisher. We may receive referral compensation when you request GRC automation "
+        "demos, CPA/C3PAO audit quotes, penetration test scoping, or cyber liability insurance evaluations "
+        "through verified partner links (such as Vanta, Drata, Sprinto, Thoropass, Coalition, or Cobalt) at no "
+        "additional cost to you."
+    ),
+    "independent_publisher_disclaimer": (
+        "Independent Publisher Disclaimer: GainHelm is an independent enterprise security governance calculation "
+        "publisher and is not affiliated with AICPA, the U.S. Department of Defense, Cyber-AB, HHS OCR, or PCI SSC."
+    ),
+}
+
+GAINHELM_MONETIZED_CALCULATOR_SLUGS: List[str] = [
+    "soc-2-audit-cost-calculator",
+    "cmmc-2-0-compliance-cost-calculator",
+    "nist-800-171-sprs-score-calculator",
+    "iso-27001-certification-cost-calculator",
+    "hipaa-violation-penalty-breach-cost-calculator",
+    "pci-dss-4-0-compliance-cost-calculator",
+    "fedramp-authorization-3pao-cost-calculator",
+    "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+    "penetration-testing-scoping-cost-calculator",
+    "cyber-liability-insurance-breach-exposure-calculator",
+]
+
+GAINHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
+    "vanta_security": AffiliatePartner(
+        key="vanta_security",
+        name="Vanta Automated Trust & GRC Platform",
+        category="Enterprise GRC Automation",
+        property_id="gainhelm",
+        status="live",
+        env_var="AFFILIATE_VANTA_SECURITY_URL",
+        default_url="https://www.vanta.com/",
+        badge="Automated SOC 2, ISO 27001 & HIPAA",
+        commission_est="$300-$400/qualified demo",
+        bounty_est="$350",
+        network="PartnerStack",
+        description="Automated continuous control monitoring across AWS, GCP, Azure, GitHub, and Okta to cut SOC 2, ISO 27001, HIPAA, and CMMC audit readiness hours by up to 82%.",
+        target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Automate Audit Evidence Collection with Vanta",
+        partnership_model="QUALIFIED_LEAD_CPL",
+    ),
+    "drata_compliance": AffiliatePartner(
+        key="drata_compliance",
+        name="Drata Continuous GRC & Audit Automation",
+        category="Enterprise GRC Automation",
+        property_id="gainhelm",
+        status="live",
+        env_var="AFFILIATE_DRATA_COMPLIANCE_URL",
+        default_url="https://drata.com/",
+        badge="Continuous NIST, CMMC & SOC 2 Controls",
+        commission_est="$250-$350/qualified demo",
+        bounty_est="$300",
+        network="PartnerStack",
+        description="Continuous control monitoring, automated NIST SP 800-171 POA&M tracking, and Audit Hub workspace for SOC 2 Type II, CMMC 2.0 Level 2, ISO 27001:2022, and PCI DSS v4.0.1.",
+        target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Benchmark GRC Automation ROI with Drata",
+        partnership_model="QUALIFIED_LEAD_CPL",
+    ),
+    "sprinto_compliance": AffiliatePartner(
+        key="sprinto_compliance",
+        name="Sprinto Cloud Security & Compliance",
+        category="Enterprise GRC Automation",
+        property_id="gainhelm",
+        status="live",
+        env_var="AFFILIATE_SPRINTO_COMPLIANCE_URL",
+        default_url="https://sprinto.com/",
+        badge="Fast-Track Cloud SaaS Audit Readiness",
+        commission_est="$225/demo + 15% revshare",
+        bounty_est="$225-$350",
+        network="PartnerStack",
+        description="Turnkey security compliance automation for B2B SaaS teams pursuing rapid SOC 2 Type I/II, ISO 27001, HIPAA, GDPR, and PCI DSS 4.0 certification.",
+        target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Accelerate Multi-Framework Readiness with Sprinto",
+        partnership_model="HYBRID_CPA_REVSHARE",
+    ),
+    "thoropass_audit": AffiliatePartner(
+        key="thoropass_audit",
+        name="Thoropass Integrated GRC + CPA Audit",
+        category="Bundled GRC + Attestation",
+        property_id="gainhelm",
+        status="live",
+        env_var="AFFILIATE_THOROPASS_AUDIT_URL",
+        default_url="https://thoropass.com/",
+        badge="Bundled GRC Software + Licensed CPA/QSA Audit",
+        commission_est="$300-$350/qualified demo",
+        bounty_est="$325",
+        network="PartnerStack",
+        description="Unified compliance automation and in-house AICPA CPA, HITRUST CSF Assessor, and PCI QSA audit execution eliminating third-party auditor coordination friction.",
+        target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Scope Bundled GRC + CPA Audit with Thoropass",
+        partnership_model="QUALIFIED_LEAD_CPL",
+    ),
+    "coalition_cyber_insurance": AffiliatePartner(
+        key="coalition_cyber_insurance",
+        name="Coalition Active Cyber Liability Insurance",
+        category="Cyber Liability & Breach Coverage",
+        property_id="gainhelm",
+        status="live",
+        env_var="AFFILIATE_COALITION_CYBER_INSURANCE_URL",
+        default_url="https://www.coalitioninc.com/",
+        badge="Active Cyber Risk & Breach Response",
+        commission_est="$200-$300/qualified quote",
+        bounty_est="$250",
+        network="Impact.com",
+        description="Active cyber liability insurance combining continuous external attack surface monitoring with first-party HITECH/SEC breach response, forensics, and regulatory defense coverage.",
+        target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Model Active Cyber Liability Coverage with Coalition",
+        partnership_model="QUALIFIED_LEAD_CPL",
+    ),
+    "cobalt_pentest": AffiliatePartner(
+        key="cobalt_pentest",
+        name="Cobalt Offensive Security & Pentest as a Service",
+        category="Offensive Security & Penetration Testing",
+        property_id="gainhelm",
+        status="live",
+        env_var="AFFILIATE_COBALT_PENTEST_URL",
+        default_url="https://www.cobalt.io/",
+        badge="CREST & OSCP Certified PtaaS",
+        commission_est="$250-$300/scoped pentest",
+        bounty_est="$275",
+        network="PartnerStack",
+        description="On-demand CREST, OSCP, and GPEN certified Penetration Testing as a Service (PtaaS) with real-time Jira/GitHub remediation workflows and free retesting for SOC 2, PCI DSS 11.4, and ISO 27001.",
+        target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Scope Certified PtaaS Engagement with Cobalt",
+        partnership_model="CPA_BOUNTY",
+    ),
+}
+
 # Unified Master Registry
 AFFILIATE_REGISTRY: Dict[str, AffiliatePartner] = {
     **PROFITHELM_AFFILIATES,
     **PREXVO_AFFILIATES,
+    **GAINHELM_AFFILIATES,
 }
 AFFILIATE_REGISTRY["equipment_macrs"] = PROFITHELM_AFFILIATES["crest_capital"]
 AFFILIATE_REGISTRY["first_american_1031"] = PROFITHELM_AFFILIATES["first_american"]
@@ -1456,6 +1654,31 @@ STUDENT_LOAN_PARTNER_KEYS: Set[str] = {
     "earnest",
     "lendkey",
 }
+
+GAINHELM_PARTNER_KEYS: Set[str] = {
+    "vanta_security",
+    "drata_compliance",
+    "sprinto_compliance",
+    "thoropass_audit",
+    "coalition_cyber_insurance",
+    "cobalt_pentest",
+}
+
+GAINHELM_TOOL_PATTERNS: List[str] = [
+    "soc-2",
+    "soc2",
+    "cmmc",
+    "nist-800-171",
+    "sprs",
+    "iso-27001",
+    "hipaa",
+    "pci-dss",
+    "fedramp",
+    "hitrust",
+    "penetration-testing",
+    "pentest",
+    "cyber-liability",
+]
 
 PROFITHELM_TOOL_PATTERNS: List[str] = [
     "section-179",
@@ -1634,6 +1857,9 @@ INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
     "prediction-market-tax": ["coinledger", "kalshi", "turbotax"],
     "prediction": ["kalshi", "interactive_brokers", "turbotax"],
     "student-loan": ["splash_financial", "sofi_refi", "earnest", "credible", "laurel_road", "juno"],
+    "cyber-compliance": ["vanta_security", "drata_compliance", "thoropass_audit", "sprinto_compliance", "coalition_cyber_insurance", "cobalt_pentest"],
+    "pentest": ["cobalt_pentest", "vanta_security", "drata_compliance", "thoropass_audit", "sprinto_compliance"],
+    "cyber-insurance": ["coalition_cyber_insurance", "vanta_security", "drata_compliance", "sprinto_compliance", "cobalt_pentest"],
 }
 
 
@@ -1790,6 +2016,8 @@ def get_affiliates_for_property(property_id: str) -> Dict[str, AffiliatePartner]
         return dict(PROFITHELM_AFFILIATES)
     elif prop_clean == "prexvo":
         return dict(PREXVO_AFFILIATES)
+    elif prop_clean == "gainhelm":
+        return dict(GAINHELM_AFFILIATES)
     raise ValueError(f"Unknown property_id: '{property_id}'")
 
 
@@ -2188,6 +2416,23 @@ def resolve_optimal_partner_for_slug(
             return best_pending
         return PREXVO_AFFILIATES.get("splash_financial")
 
+    if prop == "gainhelm":
+        if "pentest" in s or "penetration" in s:
+            bucket_keys = INTENT_ROUTING_TABLE["pentest"]
+        elif "insurance" in s or "breach" in s or "hipaa" in s:
+            bucket_keys = INTENT_ROUTING_TABLE["cyber-insurance"]
+        else:
+            bucket_keys = INTENT_ROUTING_TABLE["cyber-compliance"]
+        candidates = [GAINHELM_AFFILIATES[k] for k in bucket_keys if k in GAINHELM_AFFILIATES]
+        if not candidates:
+            candidates = list(GAINHELM_AFFILIATES.values())
+        if engagement_metrics:
+            return max(
+                candidates,
+                key=lambda p: score_partner_yield(p, p.status, engagement_metrics=engagement_metrics, slug=s),
+            )
+        return candidates[0]
+
     if prop in ("profithelm", "exchange1031"):
         matched_bucket_name = _resolve_profithelm_bucket(s)
         raw_keys = INTENT_ROUTING_TABLE.get(matched_bucket_name, ["turbotax", "taxslayer", "freetaxusa"])
@@ -2345,13 +2590,17 @@ def record_outbound_partner_engagement(
         or "starter"
     ).strip().lower()
 
-    if prop_clean == "prexvo" and partner_key in B2B_PARTNER_KEYS:
+    if prop_clean == "prexvo" and (partner_key in B2B_PARTNER_KEYS or partner_key in GAINHELM_PARTNER_KEYS):
         raise ValueError(
             f"Strict isolation violation: B2B partner '{partner_key}' engagement cannot be recorded on Prexvo."
         )
-    if prop_clean in ("profithelm", "exchange1031") and partner_key in STUDENT_LOAN_PARTNER_KEYS:
+    if prop_clean in ("profithelm", "exchange1031") and (partner_key in STUDENT_LOAN_PARTNER_KEYS or partner_key in GAINHELM_PARTNER_KEYS):
         raise ValueError(
-            f"Strict isolation violation: Student loan partner '{partner_key}' engagement cannot be recorded on ProfitHelm."
+            f"Strict isolation violation: Foreign tenant partner '{partner_key}' engagement cannot be recorded on ProfitHelm."
+        )
+    if prop_clean == "gainhelm" and (partner_key in STUDENT_LOAN_PARTNER_KEYS or partner_key in B2B_PARTNER_KEYS):
+        raise ValueError(
+            f"Strict isolation violation: Foreign tenant partner '{partner_key}' engagement cannot be recorded on GainHelm."
         )
 
     raw_payout = (
@@ -2940,6 +3189,8 @@ def rank_partner_offers_by_revenue_yield(
     if candidate_keys is None:
         if prop == "prexvo":
             candidate_keys = list(PREXVO_AFFILIATES.keys())
+        elif prop == "gainhelm":
+            candidate_keys = list(GAINHELM_AFFILIATES.keys())
         else:
             bucket = _resolve_profithelm_bucket(s_clean)
             candidate_keys = list(INTENT_ROUTING_TABLE.get(bucket, ["mercury", "ramp", "coinledger"]))
@@ -2950,13 +3201,15 @@ def rank_partner_offers_by_revenue_yield(
         k = str(raw_k or "").strip().lower()
         if not k or k in seen:
             continue
-        if prop == "prexvo" and (k in B2B_PARTNER_KEYS or k in PROFITHELM_AFFILIATES):
+        if prop == "prexvo" and (k in B2B_PARTNER_KEYS or k in PROFITHELM_AFFILIATES or k in GAINHELM_AFFILIATES):
             continue
-        if prop in ("profithelm", "exchange1031") and (k in STUDENT_LOAN_PARTNER_KEYS or k in PREXVO_AFFILIATES):
+        if prop in ("profithelm", "exchange1031") and (k in STUDENT_LOAN_PARTNER_KEYS or k in PREXVO_AFFILIATES or k in GAINHELM_AFFILIATES):
+            continue
+        if prop == "gainhelm" and (k in STUDENT_LOAN_PARTNER_KEYS or k in PREXVO_AFFILIATES or k in B2B_PARTNER_KEYS):
             continue
         seen.add(k)
 
-        registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+        registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
         p_obj = registry.get(k) or (PREXVO_AFFILIATES.get("sofi") if k == "sofi_refi" else None)
         bounty_mid = get_partner_bounty_midpoint(p_obj if p_obj is not None else k)
         ov_status = _extract_partner_vault_status(k, vault_overrides)
@@ -3080,7 +3333,7 @@ def estimate_partner_approval_revenue_impact(
     prop = (property_id or "profithelm").strip().lower()
     pk = (partner_key or "").strip().lower()
 
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
     p_obj = registry.get(pk)
     bounty_mid = get_partner_bounty_midpoint(p_obj if p_obj is not None else pk)
 
@@ -3197,7 +3450,7 @@ def get_affiliate_route(
     - Guarantees rel='noopener sponsored nofollow' and target='_blank'.
     """
     prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "exchange1031"):
+    if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm"):
         raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
     selected_key = (partner_key or "").strip().lower()
@@ -3211,7 +3464,7 @@ def get_affiliate_route(
     # Property boundary checks when partner_key is provided
     if selected_key:
         if prop_clean == "prexvo":
-            if selected_key in B2B_PARTNER_KEYS or selected_key in PROFITHELM_AFFILIATES:
+            if selected_key in B2B_PARTNER_KEYS or selected_key in PROFITHELM_AFFILIATES or selected_key in GAINHELM_AFFILIATES:
                 raise ValueError(
                     f"Strict isolation violation: B2B partner '{selected_key}' is prohibited on Prexvo."
                 )
@@ -3220,29 +3473,44 @@ def get_affiliate_route(
                     f"Partner '{selected_key}' not found in Prexvo affiliate registry."
                 )
         elif prop_clean in ("profithelm", "exchange1031"):
-            if selected_key in STUDENT_LOAN_PARTNER_KEYS or selected_key in PREXVO_AFFILIATES:
+            if selected_key in STUDENT_LOAN_PARTNER_KEYS or selected_key in PREXVO_AFFILIATES or selected_key in GAINHELM_AFFILIATES:
                 raise ValueError(
-                    f"Strict isolation violation: Student loan partner '{selected_key}' is prohibited on ProfitHelm."
+                    f"Strict isolation violation: Foreign tenant partner '{selected_key}' is prohibited on ProfitHelm."
                 )
             if selected_key not in PROFITHELM_AFFILIATES:
                 raise ValueError(
                     f"Partner '{selected_key}' not found in ProfitHelm affiliate registry."
                 )
+        elif prop_clean == "gainhelm":
+            if selected_key in STUDENT_LOAN_PARTNER_KEYS or selected_key in PREXVO_AFFILIATES or selected_key in B2B_PARTNER_KEYS:
+                raise ValueError(
+                    f"Strict isolation violation: Foreign tenant partner '{selected_key}' is prohibited on GainHelm."
+                )
+            if selected_key not in GAINHELM_AFFILIATES:
+                raise ValueError(
+                    f"Partner '{selected_key}' not found in GainHelm affiliate registry."
+                )
     else:
         # Slug boundary validation and auto-selection
         if prop_clean == "prexvo":
-            if slug_clean in COMMERCIAL_B2B_SLUGS or any(
+            if slug_clean in COMMERCIAL_B2B_SLUGS or slug_clean in GAINHELM_MONETIZED_CALCULATOR_SLUGS or any(
                 b2b_token in slug_clean
-                for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202")
+                for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202", "soc-2", "cmmc", "hipaa")
             ):
                 raise ValueError(
                     f"Strict isolation violation: Commercial tool '{tool_slug}' is prohibited on Prexvo."
                 )
         elif prop_clean in ("profithelm", "exchange1031"):
-            for sl_token in ("student-loan", "rap-vs-ibr", "pslf"):
+            for sl_token in ("student-loan", "rap-vs-ibr", "pslf", "cmmc-2-0", "sprs-score"):
                 if sl_token in slug_clean:
                     raise ValueError(
-                        f"Strict isolation violation: Student loan tool '{tool_slug}' is prohibited on ProfitHelm."
+                        f"Strict isolation violation: Foreign tenant tool '{tool_slug}' is prohibited on ProfitHelm."
+                    )
+        elif prop_clean == "gainhelm":
+            for foreign_tok in ("student-loan", "rap-vs-ibr", "pslf", "section-179", "section-1031", "qsbs-section-1202"):
+                if foreign_tok in slug_clean:
+                    raise ValueError(
+                        f"Strict isolation violation: Foreign tenant tool '{tool_slug}' is prohibited on GainHelm."
                     )
         selected_key = _select_partner_for_slug(prop_clean, slug_clean)
 
@@ -3314,12 +3582,20 @@ def get_affiliate_route(
     disclosure_text = (
         PREXVO_DISCLOSURES.get("ftc_disclosure", "")
         if prop_clean == "prexvo"
-        else PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+        else (
+            GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
+            if prop_clean == "gainhelm"
+            else PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+        )
     )
     ymyl_warning = (
         PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
         if prop_clean == "prexvo"
-        else ""
+        else (
+            GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer", "")
+            if prop_clean == "gainhelm"
+            else ""
+        )
     )
 
     return {
@@ -3547,7 +3823,7 @@ def verify_partner_domain_alignment(
                 f"Prexvo YMYL public-service guardrail violation: commercial partners {clean_partners} are prohibited on restricted public-service slug '{s_clean}'."
             )
         for pk in clean_partners:
-            if pk in B2B_PARTNER_KEYS or pk in PROFITHELM_AFFILIATES or pk == "sovrn_commerce":
+            if pk in B2B_PARTNER_KEYS or pk in PROFITHELM_AFFILIATES or pk in GAINHELM_AFFILIATES or pk == "sovrn_commerce":
                 violations.append(
                     f"Prexvo isolation violation: prohibited commercial/aggregator partner '{pk}' on '{s_clean}'."
                 )
@@ -3555,15 +3831,25 @@ def verify_partner_domain_alignment(
                 violations.append(
                     f"Prexvo registry violation: unapproved partner '{pk}' on '{s_clean}'."
                 )
+    elif prop == "gainhelm":
+        for pk in clean_partners:
+            if pk in STUDENT_LOAN_PARTNER_KEYS or pk in PREXVO_AFFILIATES or pk in B2B_PARTNER_KEYS or pk in PROFITHELM_AFFILIATES:
+                violations.append(
+                    f"GainHelm isolation violation: foreign tenant partner '{pk}' prohibited on '{s_clean}'."
+                )
+            elif pk not in GAINHELM_AFFILIATES and pk not in GAINHELM_PARTNER_KEYS:
+                violations.append(
+                    f"GainHelm registry violation: unapproved partner '{pk}' on '{s_clean}'."
+                )
     elif prop in ("profithelm", "exchange1031"):
         is_b2b = is_commercial_b2b_slug(s_clean)
         is_retail = (s_clean in RETAIL_TAX_SLUGS) or (not is_b2b and any(
             t in s_clean for t in ("tax-bracket", "capital-gains", "crypto-tax", "tcja", "prediction-market-tax")
         ))
         for pk in clean_partners:
-            if pk in STUDENT_LOAN_PARTNER_KEYS or pk in PREXVO_AFFILIATES:
+            if pk in STUDENT_LOAN_PARTNER_KEYS or pk in PREXVO_AFFILIATES or pk in GAINHELM_AFFILIATES:
                 violations.append(
-                    f"ProfitHelm isolation violation: student loan partner '{pk}' prohibited on '{s_clean}'."
+                    f"ProfitHelm isolation violation: foreign tenant partner '{pk}' prohibited on '{s_clean}'."
                 )
             if is_b2b and pk in RETAIL_TAX_PARTNERS:
                 violations.append(
@@ -3697,12 +3983,46 @@ def qualify_monetization_opportunity(
             "disclosures_required": dict(PROFITHELM_DISCLOSURES),
         }
 
+    if prop_explicit == "gainhelm" and (is_student_loan or any(k in combined for k in ("section 179", "section-179", "section 1031", "1031 exchange", "qsbs"))):
+        return {
+            "query": q_clean,
+            "slug": s_clean,
+            "property_id": "gainhelm",
+            "intent_tier": "cross_tenant_contamination",
+            "monetization_qualified": False,
+            "rejection_reason": "Strict isolation violation: Foreign tenant tax or student loan intent is prohibited on GainHelm.",
+            "primary_partner": "",
+            "recommended_partners": [],
+            "expected_bounty_usd": 0.0,
+            "effective_partner_yield": 0.0,
+            "intent_weight": 0.0,
+            "y_asset": 0.0,
+            "estimated_monthly_revenue_usd": 0.0,
+            "partner_alignment_verified": False,
+            "disclosures_required": dict(GAINHELM_DISCLOSURES),
+        }
+
     is_restricted_ps = False
     commercial_offers_allowed = True
     greenfield_meta: Dict[str, Any] = {}
 
     # 3. Route to canonical intent tier and property
-    if is_student_loan or prop_explicit == "prexvo":
+    if prop_explicit == "gainhelm":
+        resolved_prop = "gainhelm"
+        intent_tier = "enterprise_cyber_compliance_grc"
+        primary_obj = resolve_optimal_partner_for_slug("gainhelm", s_clean, vault_overrides=vault_overrides)
+        rec_partners = [k for k in GAINHELM_AFFILIATES.keys()]
+        if primary_obj and primary_obj.key in rec_partners:
+            rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
+        bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 325.0)) if primary_obj else 325.0
+        eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 325.0
+        intent_weight = 1.40
+        y_asset = round(min(1.85, max(0.95, (bounty_usd / 250.0) * 0.65 + (cpc / 5.0) * 0.35)), 4)
+        disclosures = dict(GAINHELM_DISCLOSURES)
+        alignment = verify_partner_domain_alignment("gainhelm", s_clean, rec_partners)
+        qualified = bool(alignment["aligned"] and len(rec_partners) > 0)
+        rejection_reason = "" if qualified else "Failed GainHelm partner alignment or monetization threshold"
+    elif is_student_loan or prop_explicit == "prexvo":
         resolved_prop = "prexvo"
         intent_tier = "student_loan_ymyl"
         is_restricted_ps = is_restricted_public_service_slug(s_clean, q_lower)
@@ -3911,7 +4231,7 @@ def qualify_monetization_opportunity(
                 evaluate_lead_quote_threshold,
                 resolve_lead_monetization_offer,
             )
-            eff_prop_for_offer = "prexvo" if resolved_prop == "prexvo" else "profithelm"
+            eff_prop_for_offer = "prexvo" if resolved_prop == "prexvo" else ("gainhelm" if resolved_prop == "gainhelm" else "profithelm")
             quote_eval = evaluate_lead_quote_threshold(eff_prop_for_offer, s_clean or "general", 250000.0)
             b2b_quote_meta = {
                 "eligible": bool(quote_eval.get("eligible")),
@@ -3927,12 +4247,16 @@ def qualify_monetization_opportunity(
                 ["ed_direct_undergrad_rate", "ed_idr_discretionary_levy", "ed_idr_fpl_multiplier", "hhs_fpl_single_base", "irs_sec108f_tax_free_forgiveness"]
                 if eff_prop_for_offer == "prexvo"
                 else (
-                    ["fred_dgs10_yield", "fred_cpilfesl_inflation", "irs_sec199a_qbi"]
-                    if offer_eval["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+                    ["dod_32cfr170_cmmc_controls", "nist_800_171_sprs_max", "hhs_ocr_hipaa_tier4_cap", "iso_27006_stage2_days"]
+                    if eff_prop_for_offer == "gainhelm"
                     else (
-                        ["irs_sec179_cap", "irs_sec179_phaseout", "irs_sec168k_bonus", "cbp_sec301_tariff", "fred_dgs10_yield"]
-                        if offer_eval["offer_sku"] == "ph_commercial_capital_audit_toolkit"
-                        else ["irs_sec199a_qbi", "ssa_fica_wage_base", "irs_sec168k_bonus", "fred_cpilfesl_inflation"]
+                        ["fred_dgs10_yield", "fred_cpilfesl_inflation", "irs_sec199a_qbi"]
+                        if offer_eval["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+                        else (
+                            ["irs_sec179_cap", "irs_sec179_phaseout", "irs_sec168k_bonus", "cbp_sec301_tariff", "fred_dgs10_yield"]
+                            if offer_eval["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+                            else ["irs_sec199a_qbi", "ssa_fica_wage_base", "irs_sec168k_bonus", "fred_cpilfesl_inflation"]
+                        )
                     )
                 )
             )
@@ -5800,6 +6124,12 @@ COMPANY_BRAND_BY_PARTNER_KEY: Dict[str, str] = {
     "credible": "ELFI",
     "laurel_road": "Laurel Road",
     "lendkey": "LendKey",
+    "vanta_security": "Vanta",
+    "drata_compliance": "Drata",
+    "sprinto_compliance": "Sprinto",
+    "thoropass_audit": "Thoropass",
+    "coalition_cyber_insurance": "Coalition",
+    "cobalt_pentest": "Cobalt",
 }
 
 VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
@@ -5819,7 +6149,7 @@ VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
     "sales_tax_1099_nexus": ["crest_capital", "rippling", "gusto", "mercury"],
     "federal_state_tax_brackets": ["crest_capital", "rippling", "mercury", "gusto"],
     "saas_unit_economics_spend": ["mercury", "rippling", "gusto", "crest_capital"],
-    "b2b_cyber_compliance": ["rippling", "crest_capital", "mercury", "gusto"],
+    "b2b_cyber_compliance": ["vanta_security", "drata_compliance", "thoropass_audit", "sprinto_compliance", "coalition_cyber_insurance", "cobalt_pentest", "rippling", "crest_capital", "mercury", "gusto"],
     "commercial_solar_energy": ["crest_capital", "mercury", "rippling", "gusto"],
     "construction_contractor_finance": ["suretybonds_direct", "crest_capital", "rippling", "mercury"],
     "medical_practice_capex": ["crest_capital", "mercury", "rippling", "gusto"],
@@ -5852,6 +6182,8 @@ def classify_asset_archetype_and_intent(
 
     if prop == "prexvo":
         vertical_family = "public_service_title_iv_ymyl" if restricted_ps else "student_loan_refinancing"
+    elif prop == "gainhelm":
+        vertical_family = "b2b_cyber_compliance"
     elif any(k in comb for k in ("1031", "like-kind", "like kind", "8824", "boot", "qi-fee", "ftb-3840", "3840", "exchange-property")):
         vertical_family = "1031_like_kind_exchange"
     elif any(k in comb for k in ("prediction-market-tax", "section-1256", "section 1256", "6781", "event-contract-tax")):
@@ -6440,7 +6772,7 @@ def bind_asset_partner_roster(
             "slot_plan": slot_plan,
         }
 
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
 
     # 1. Start with ranked tool affiliates from existing catalog + vertical diversified roster
     ranked_initial = rank_partner_offers_by_revenue_yield(
@@ -6474,7 +6806,11 @@ def bind_asset_partner_roster(
     supplement_pool = (
         ["splash_financial", "sofi", "earnest", "credible", "laurel_road"]
         if prop == "prexvo"
-        else ["crest_capital", "gusto", "rippling", "mercury", "taxslayer", "coinledger", "kalshi", "lawdepot"]
+        else (
+            ["vanta_security", "drata_compliance", "thoropass_audit", "sprinto_compliance", "coalition_cyber_insurance", "cobalt_pentest"]
+            if prop == "gainhelm"
+            else ["crest_capital", "gusto", "rippling", "mercury", "taxslayer", "coinledger", "kalshi", "lawdepot"]
+        )
     )
     for sk in supplement_pool:
         if sk in registry and sk not in candidate_keys_ordered:
@@ -7169,10 +7505,16 @@ def audit_partnership_model_coverage(
     prop_filter = (property_id or "").strip().lower()
     if prop_filter == "prexvo":
         target_registries = [("prexvo", PREXVO_AFFILIATES)]
+    elif prop_filter == "gainhelm":
+        target_registries = [("gainhelm", GAINHELM_AFFILIATES)]
     elif prop_filter in ("profithelm", "exchange1031"):
         target_registries = [("profithelm", PROFITHELM_AFFILIATES)]
     else:
-        target_registries = [("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)]
+        target_registries = [
+            ("profithelm", PROFITHELM_AFFILIATES),
+            ("prexvo", PREXVO_AFFILIATES),
+            ("gainhelm", GAINHELM_AFFILIATES),
+        ]
 
     models_to_partners: Dict[str, List[str]] = {m: [] for m in CANONICAL_PARTNERSHIP_MODELS}
     partner_model_map: Dict[str, str] = {}
@@ -7252,7 +7594,7 @@ def audit_partnership_model_coverage(
 
 
 # Self-attestation on module import
-for _p_dict in (PROFITHELM_AFFILIATES, PREXVO_AFFILIATES):
+for _p_dict in (PROFITHELM_AFFILIATES, PREXVO_AFFILIATES, GAINHELM_AFFILIATES):
     for _p_key, _p_val in _p_dict.items():
         assert_no_forbidden_dashes(_p_val.name, context=f"Affiliate name {_p_key}")
         assert_no_forbidden_dashes(_p_val.description, context=f"Affiliate description {_p_key}")
@@ -7263,7 +7605,7 @@ for _p_dict in (PROFITHELM_AFFILIATES, PREXVO_AFFILIATES):
         if not validate_affiliate_url(_p_val.default_url):
             raise ValueError(f"Default URL invalid for partner {_p_key}: {_p_val.default_url}")
 
-for _d_dict in (PROFITHELM_DISCLOSURES, PREXVO_DISCLOSURES):
+for _d_dict in (PROFITHELM_DISCLOSURES, PREXVO_DISCLOSURES, GAINHELM_DISCLOSURES):
     for _d_key, _d_text in _d_dict.items():
         assert_no_forbidden_dashes(_d_text, context=f"Disclosure {_d_key}")
 

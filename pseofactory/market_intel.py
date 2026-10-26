@@ -262,6 +262,7 @@ CLOUDFLARE_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
 ACTIVE_REVENUE_TENANT_DOMAINS: Tuple[str, ...] = (
     "profithelm.com",
     "prexvo.com",
+    "gainhelm.com",
 )
 
 STAGED_RESERVE_DOMAINS: Tuple[str, ...] = (

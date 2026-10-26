@@ -176,6 +176,56 @@ class PrexvoBrowserAdapter(TenantBrowserAdapter):
         ]
 
 
+class GainHelmBrowserAdapter(TenantBrowserAdapter):
+    """Browser verification adapter for GainHelm cyber compliance platform distribution."""
+
+    @property
+    def tenant_id(self) -> str:
+        return "gainhelm"
+
+    @property
+    def dist_dir(self) -> Path:
+        return Path("/home/ubuntuadmin/projects/gainhelm/dist")
+
+    @property
+    def canonical_domain(self) -> str:
+        return "https://gainhelm.com"
+
+    def get_widget_specs(self) -> List[InteractiveWidgetSpec]:
+        return [
+            InteractiveWidgetSpec(
+                route="/tools/soc-2-audit-cost-calculator/",
+                widget_id="soc-2-audit-cost-calculator",
+                precondition_selector="#field-cpa_audit_fee, [data-calc-input]",
+                input_selector="#field-cpa_audit_fee, [data-calc-input]",
+                input_value="40000",
+                output_selector="#metric-total_compliance_tco, .output-value",
+                trigger_event="input",
+                verify_popstate=True,
+            ),
+            InteractiveWidgetSpec(
+                route="/tools/cmmc-2-0-compliance-cost-calculator/",
+                widget_id="cmmc-2-0-compliance-cost-calculator",
+                precondition_selector="#field-c3pao_assessment_fee, [data-calc-input]",
+                input_selector="#field-c3pao_assessment_fee, [data-calc-input]",
+                input_value="65000",
+                output_selector="#metric-total_compliance_tco, .output-value",
+                trigger_event="input",
+                verify_popstate=False,
+            ),
+            InteractiveWidgetSpec(
+                route="/tools/nist-800-171-sprs-score-calculator/",
+                widget_id="nist-800-171-sprs-score-calculator",
+                precondition_selector="#field-unmet_5pt_controls, [data-calc-input]",
+                input_selector="#field-unmet_5pt_controls, [data-calc-input]",
+                input_value="4",
+                output_selector="#metric-sprs_score, .output-value",
+                trigger_event="input",
+                verify_popstate=False,
+            ),
+        ]
+
+
 class RouteManifestExtractor:
     """
     Extracts complete route manifests from sitemap.xml and dist HTML filesystem tree.

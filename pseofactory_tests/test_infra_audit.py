@@ -133,23 +133,23 @@ def test_audit_infra_script_exists_and_executable():
     assert os.access(script_path, os.X_OK), f"Script not executable: {script_path}"
 
 
-def test_default_endpoints_excludes_decommissioned_gainhelm():
-    """Asserts decommissioned Cloud Run gainhelm.com is not probed by default."""
-    assert "https://gainhelm.com" not in DEFAULT_ENDPOINTS
+def test_default_endpoints_includes_active_gainhelm():
+    """Asserts active Cloudflare Pages tenant gainhelm.com is probed by default."""
+    assert "https://gainhelm.com" in DEFAULT_ENDPOINTS
     assert "https://profithelm.com" in DEFAULT_ENDPOINTS
+    assert "https://prexvo.com" in DEFAULT_ENDPOINTS
 
 
 def test_audit_hibernated_and_retired_dns_isolation_live():
     """
-    Verifies live Cloudflare DNS isolation across gainhelm.com (hibernated reserve)
-    and all 4 retired domains (adspendguardian.com, heyjunto.com, thecoachloop.com, viraljacker.com):
-    - 0 A, AAAA, CNAME, or MX routing records on all 5 non-routable zones.
-    - google-site-verification TXT record preserved on gainhelm.com.
+    Verifies live Cloudflare DNS isolation across all 4 retired domains
+    (adspendguardian.com, heyjunto.com, thecoachloop.com, viraljacker.com):
+    - 0 A, AAAA, CNAME, or MX routing records on all 4 non-routable zones.
     - Graceful handling of HTTP 403/401 Registrar API token scope restrictions.
     """
     ok, msg = audit_hibernated_and_retired_dns_isolation()
     assert ok is True, f"Live DNS isolation check failed: {msg}"
-    assert "Zero routing records verified across 5 hibernated/retired zones" in msg
+    assert "Zero routing records verified across 4 hibernated/retired zones" in msg
 
 
 def test_audit_registrar_renewal_posture_mocked():
@@ -204,16 +204,16 @@ def test_audit_registrar_renewal_posture_mocked():
 
 
 def test_audit_hibernated_and_retired_dns_isolation_catches_dangling_records():
-    """Verifies DNS isolation audit catches dangling A/CNAME records or missing GSC TXT on gainhelm.com."""
+    """Verifies DNS isolation audit catches dangling A/CNAME records on retired domains."""
     def _fake_urlopen(req, timeout=15):
         url = req.full_url if hasattr(req, "full_url") else str(req)
         resp = MagicMock()
         resp.__enter__.return_value = resp
-        if NON_ROUTABLE_ZONE_IDS["gainhelm.com"] in url:
+        if NON_ROUTABLE_ZONE_IDS["adspendguardian.com"] in url:
             payload = {
                 "success": True,
                 "result": [
-                    {"type": "CNAME", "name": "www.gainhelm.com", "content": "ghs.googlehosted.com"}
+                    {"type": "CNAME", "name": "www.adspendguardian.com", "content": "ghs.googlehosted.com"}
                 ],
             }
         else:
@@ -227,7 +227,7 @@ def test_audit_hibernated_and_retired_dns_isolation_catches_dangling_records():
     ):
         ok, msg = audit_hibernated_and_retired_dns_isolation(api_token="mock-token")
         assert ok is False
-        assert "gainhelm.com has 1 dangling routing record(s)" in msg
+        assert "adspendguardian.com has 1 dangling routing record(s)" in msg
 
 
 def test_active_zone_dns_hygiene_live_and_registrar_attestation_ledger():

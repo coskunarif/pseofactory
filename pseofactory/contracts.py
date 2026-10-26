@@ -370,11 +370,17 @@ def assert_youtube_transcript(
     10. 40-60 word extractable passage constraints for structured segment data.
     """
     if property_id and not brand_name:
-        brand_name = "Prexvo" if property_id.lower() == "prexvo" else "ProfitHelm"
+        brand_name = (
+            "Prexvo"
+            if property_id.lower() == "prexvo"
+            else ("GainHelm" if property_id.lower() == "gainhelm" else "ProfitHelm")
+        )
     if not brand_name:
         brand_name = "ProfitHelm"
     elif brand_name.lower() == "prexvo":
         brand_name = "Prexvo"
+    elif brand_name.lower() == "gainhelm":
+        brand_name = "GainHelm"
     elif brand_name.lower() == "profithelm":
         brand_name = "ProfitHelm"
 
@@ -8793,6 +8799,7 @@ def detect_asset_partner_roster_and_slot_issues(
     """
     from pseofactory.affiliates import (
         COMPANY_BRAND_BY_PARTNER_KEY,
+        GAINHELM_AFFILIATES,
         PREXVO_AFFILIATES,
         PROFITHELM_AFFILIATES,
         classify_asset_archetype_and_intent,
@@ -8845,8 +8852,15 @@ def detect_asset_partner_roster_and_slot_issues(
             )
         return issues
 
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
-    foreign_registry = PROFITHELM_AFFILIATES if prop == "prexvo" else PREXVO_AFFILIATES
+    if prop == "prexvo":
+        registry = PREXVO_AFFILIATES
+        foreign_registry = {**PROFITHELM_AFFILIATES, **GAINHELM_AFFILIATES}
+    elif prop == "gainhelm":
+        registry = GAINHELM_AFFILIATES
+        foreign_registry = {**PROFITHELM_AFFILIATES, **PREXVO_AFFILIATES}
+    else:
+        registry = PROFITHELM_AFFILIATES
+        foreign_registry = {**PREXVO_AFFILIATES, **GAINHELM_AFFILIATES}
 
     # Extract all bound partner keys across /r/ links and data-partner attributes
     found_partner_keys: List[str] = []

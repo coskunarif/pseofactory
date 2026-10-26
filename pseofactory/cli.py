@@ -51,6 +51,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             UnifiedBrowserAuditor,
             ProfitHelmBrowserAdapter,
             PrexvoBrowserAdapter,
+            GainHelmBrowserAdapter,
         )
         browser_adapter = None
         prop = (args.property or "").lower()
@@ -58,6 +59,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
             browser_adapter = ProfitHelmBrowserAdapter()
         elif prop == "prexvo":
             browser_adapter = PrexvoBrowserAdapter()
+        elif prop == "gainhelm":
+            browser_adapter = GainHelmBrowserAdapter()
 
         auditor = UnifiedBrowserAuditor(
             adapter=browser_adapter,
@@ -987,8 +990,11 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
             print(f"Partner Correspondence Sync Complete [Updated: {dashboard.updated_at}]")
             ph = dashboard.profithelm
             px = dashboard.prexvo
+            gh = getattr(dashboard, "gainhelm", None)
             print(f"  ProfitHelm Active Partners: {ph.active_partners_count} / {ph.total_registered_partners} (Readiness: {ph.monetization_readiness_score}%)")
             print(f"  Prexvo Active Partners:     {px.active_partners_count} / {px.total_registered_partners} (Readiness: {px.monetization_readiness_score}%)")
+            if gh is not None:
+                print(f"  GainHelm Active Partners:   {gh.active_partners_count} / {gh.total_registered_partners} (Readiness: {gh.monetization_readiness_score}%)")
             pending_count = sum(1 for it in dashboard.all_action_items if it.status == "PENDING_OPERATOR")
             print(f"  Human Action Bus Items:     {pending_count} pending operator confirmation")
             prereq_st = (lifecycle_sync.get("publisher_prerequisites_and_compliance") or {}).get("status", "PASS")
@@ -1041,6 +1047,8 @@ def cmd_partner_status(args: argparse.Namespace) -> int:
             reports.append(dashboard.profithelm)
         if not prop_filter or prop_filter.lower() in ("all", "prexvo"):
             reports.append(dashboard.prexvo)
+        if (not prop_filter or prop_filter.lower() in ("all", "gainhelm")) and getattr(dashboard, "gainhelm", None) is not None:
+            reports.append(dashboard.gainhelm)
 
         for r in reports:
             print(f"=== {r.property_name} Monetization Readiness: {r.monetization_readiness_score}% ===")

@@ -4511,7 +4511,7 @@ class MasterSEOVerifier:
             parent_entries = tuple(sorted(p.name for p in target.parent.iterdir())) if target.parent and target.parent.exists() else ()
             pkg_root = Path(__file__).resolve().parent
             engine_sigs = []
-            for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py", "visual_primitives.py"):
+            for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py", "visual_primitives.py", "tenant_facts.py"):
                 efp = pkg_root / rel_eng
                 if efp.is_file():
                     engine_sigs.append((rel_eng, hashlib.sha256(efp.read_bytes()).hexdigest()[:16]))
@@ -5842,9 +5842,14 @@ def verify_html_cross_web_consensus_and_corroboration(
     issues.extend(detected)
 
     lower_doc = html_content.lower()
-    if "<html" in lower_doc and ("profithelm" in lower_doc or "prexvo" in lower_doc):
+    if "<html" in lower_doc and ("profithelm" in lower_doc or "prexvo" in lower_doc or "gainhelm" in lower_doc):
         from pseofactory.tenant_facts import TruthReconciliationEngine
-        inferred_tenant = "prexvo" if "prexvo" in lower_doc else "profithelm"
+        if "gainhelm" in lower_doc:
+            inferred_tenant = "gainhelm"
+        elif "prexvo" in lower_doc:
+            inferred_tenant = "prexvo"
+        else:
+            inferred_tenant = "profithelm"
         for recon_issue in TruthReconciliationEngine.audit_html_truth_reconciliation(
             html_content,
             tenant=inferred_tenant,
@@ -6427,7 +6432,7 @@ def verify_html_source_keyword_inflation_ratio(
     h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw, flags=re.IGNORECASE | re.DOTALL)
     title_m = re.search(r"<title[^>]*>(.*?)</title>", raw, flags=re.IGNORECASE | re.DOTALL)
     heading_text = re.sub(r"<[^>]+>", " ", (h1_m.group(1) if h1_m else (title_m.group(1) if title_m else "")))
-    stop = {"calculator", "calculators", "profithelm", "prexvo", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027", "title", "about", "signal"}
+    stop = {"calculator", "calculators", "profithelm", "prexvo", "gainhelm", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027", "title", "about", "signal"}
     tokens = [
         t.lower()
         for t in re.findall(r"[a-zA-Z0-9]{4,}", heading_text)

@@ -1376,7 +1376,7 @@ console.log(JSON.stringify({{ capChk, taxChk, capFf, pxChk }}));
     assert audit_rep["status"] == "PASS"
     assert audit_rep["stripe_and_mercury_settlement"]["bank_routing_number"] == "091311229"
     assert audit_rep["stripe_and_mercury_settlement"]["bank_account_last4"] == "1395"
-    assert len(audit_rep["catalog_skus"]) == 4
+    assert len(audit_rep["catalog_skus"]) == 6
     assert all(item["checkout_ready"] and item["fulfillment_ready"] for item in audit_rep["catalog_skus"].values())
     assert audit_rep["ymyl_public_service_isolation"]["isolated"] is True
     assert audit_rep["outbound_affiliate_attribution"]["profithelm"]["total_routes"] == 22

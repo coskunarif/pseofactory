@@ -279,6 +279,15 @@ class CrossPropertyContaminationScanner:
             "taxslayer",
             "kalshi",
             "interactive_brokers",
+            # GainHelm cyber compliance & GRC tokens
+            "gainhelm.com",
+            "gainhelm",
+            "vanta_security",
+            "drata_compliance",
+            "sprinto_compliance",
+            "thoropass_audit",
+            "coalition_cyber_insurance",
+            "cobalt_pentest",
         },
         "profithelm": {
             "title iv",
@@ -298,6 +307,45 @@ class CrossPropertyContaminationScanner:
             "credible",
             "earnest",
             "lendkey",
+            # GainHelm cyber compliance & GRC tokens
+            "gainhelm.com",
+            "gainhelm",
+            "106482195",
+            "gh_soc2_cmmc_audit_workpapers",
+            "gh_hipaa_iso27001_governance_kit",
+        },
+        "gainhelm": {
+            "section 1031",
+            "1031 exchange",
+            "section 179",
+            "tcja",
+            "profithelm.com",
+            "profithelm",
+            "title iv",
+            "34 cfr",
+            "pslf",
+            "paye sunset",
+            "student loan",
+            "repayment assistance plan",
+            "income-contingent repayment",
+            "direct consolidation",
+            "prexvo.com",
+            "prexvo",
+            "106482194",
+            "splash_financial",
+            "sofi",
+            "credible",
+            "earnest",
+            "lendkey",
+            "coinledger",
+            "koinly",
+            "ipx1031",
+            "exeter1031",
+            "first_american",
+            "turbotax",
+            "taxslayer",
+            "kalshi",
+            "interactive_brokers",
         },
     }
 
@@ -306,7 +354,7 @@ class CrossPropertyContaminationScanner:
         try:
             from pseofactory.tenant_facts import TenantFactStore
             fact_store = TenantFactStore.get_instance()
-            for prop in ["profithelm", "prexvo"]:
+            for prop in ["profithelm", "prexvo", "gainhelm"]:
                 prof = fact_store.get_profile(prop)
                 if prof and prof.cross_tenant_forbidden_tokens:
                     self._tokens[prop] = {t.lower() for t in prof.cross_tenant_forbidden_tokens}
@@ -337,8 +385,8 @@ class CrossPropertyContaminationScanner:
         text_lower = text.lower()
         matched: List[str] = []
         for token in sorted(foreign_set):
-            # Check for exact token presence
-            if token in text_lower:
+            # Check for word-bounded token presence
+            if re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text_lower):
                 matched.append(token)
         return matched
 
@@ -411,6 +459,7 @@ class CrossPropertyContaminationScanner:
 DEFAULT_TENANT_LINKEDIN_IDS: Dict[str, str] = {
     "profithelm": "143884102",
     "prexvo": "106482194",
+    "gainhelm": "106482195",
 }
 
 
@@ -677,7 +726,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 
     def _enforce_sys_modules_isolation(self) -> None:
         """Purges any tenant modules from host sys.modules to guarantee strict memory isolation."""
-        tenant_prefixes = ("profithelm", "prexvo", self._property_id)
+        tenant_prefixes = ("profithelm", "prexvo", "gainhelm", self._property_id)
         for mod_name in list(sys.modules.keys()):
             if any(mod_name == p or mod_name.startswith(f"{p}.") for p in tenant_prefixes):
                 sys.modules.pop(mod_name, None)
@@ -1776,6 +1825,101 @@ PROFITHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = [
     },
 ]
 
+GAINHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
+    {
+        "slug": "soc-2-audit-cost-calculator",
+        "title": "SOC 2 Type I & Type II Audit Cost & GRC TCO Calculator",
+        "short_title": "SOC 2 Audit Cost",
+        "description": "Calculate total SOC 2 Type I and Type II compliance costs including CPA firm attestation fees, GRC automation subscriptions, penetration testing, and internal engineering remediation hours under AICPA SSAE 18.",
+        "primary_keyword": "soc 2 audit cost calculator",
+        "quick_answer": "Under AICPA SSAE 18 (AT-C Section 205) and TSP Section 100 Trust Services Criteria, total SOC 2 compliance TCO equals CPA firm audit fees ($15,000-$65,000+) plus GRC automation platform licensing ($10,000-$35,000), penetration testing ($8,000-$25,000), and burdened engineering remediation hours.",
+        "category": "SOC 2 & Attestation",
+    },
+    {
+        "slug": "cmmc-2-0-compliance-cost-calculator",
+        "title": "CMMC 2.0 Level 1 & Level 2 C3PAO Assessment Cost Calculator",
+        "short_title": "CMMC 2.0 Compliance Cost",
+        "description": "Model Defense Industrial Base (DIB) CMMC 2.0 Level 1 self-assessment and Level 2 C3PAO triennial certification costs, FedRAMP Moderate VDI enclave expenses, and NIST SP 800-171 remediation budgets under 32 CFR Part 170.",
+        "primary_keyword": "cmmc compliance cost calculator",
+        "quick_answer": "Under 32 CFR Part 170 and DFARS 252.204-7021, CMMC 2.0 Level 2 compliance costs combine C3PAO 4-phase assessment fees ($35,000-$115,000), CUI enclave boundary infrastructure, and NIST SP 800-171 Rev 2 control implementation.",
+        "category": "Defense & Federal GRC",
+    },
+    {
+        "slug": "nist-800-171-sprs-score-calculator",
+        "title": "NIST SP 800-171 DoD SPRS Score & POA&M Remediation Calculator",
+        "short_title": "NIST 800-171 SPRS Score",
+        "description": "Calculate exact DoD Supplier Performance Risk System (SPRS) scores across all 110 NIST SP 800-171 Rev 2 controls (-203 to +110 scale), weighted 1/3/5 point deductions, and 180-day conditional POA&M eligibility.",
+        "primary_keyword": "sprs score calculator",
+        "quick_answer": "Under the DoD NIST SP 800-171 Assessment Methodology v1.2.1 and DFARS 252.204-7019, your SPRS score starts at 110 and subtracts 1, 3, or 5 points per unimplemented security requirement down to a minimum of -203, with conditional CMMC Level 2 POA&M closeout requiring a minimum score of 88.",
+        "category": "Defense & Federal GRC",
+    },
+    {
+        "slug": "iso-27001-certification-cost-calculator",
+        "title": "ISO/IEC 27001:2022 Certification & Surveillance Audit Cost Calculator",
+        "short_title": "ISO 27001 Certification Cost",
+        "description": "Estimate 3-year ISO/IEC 27001:2022 ISMS certification costs using mandatory ISO/IEC 27006-1:2024 auditor-day tables, Stage 1 and Stage 2 accredited registrar fees, Annex A control implementation, and annual surveillance audits.",
+        "primary_keyword": "iso 27001 certification cost",
+        "quick_answer": "Under ISO/IEC 27006-1:2024 mandatory auditor-day tables and ISO/IEC 27001:2022 Annex A, 3-year ISMS certification cost combines Stage 1 and Stage 2 registrar audit days, Year 1 and Year 2 surveillance audits (1/3 of initial audit days each), internal ISMS audit fees, and GRC tooling.",
+        "category": "ISO & Global Privacy",
+    },
+    {
+        "slug": "hipaa-violation-penalty-breach-cost-calculator",
+        "title": "HIPAA Civil Monetary Penalty & Healthcare Breach Cost Calculator",
+        "short_title": "HIPAA Penalty & Breach Cost",
+        "description": "Calculate statutory HHS OCR HIPAA Civil Monetary Penalty tiers under 45 CFR 160.404 and HITECH Act culpability caps alongside per-record ePHI breach forensics, notification, credit monitoring, and business associate exposure.",
+        "primary_keyword": "hipaa violation fines calculator",
+        "quick_answer": "Under 45 CFR 160.404 and the HITECH Act (42 U.S.C. 1320d-5), HIPAA civil monetary penalties scale across four culpability tiers from inflation-adjusted minimums per violation up to $2,134,831 per identical violation category per year, compounded by forensic and notification costs when 500+ records trigger 45 CFR 164.408 media notice.",
+        "category": "Healthcare & Payment Security",
+    },
+    {
+        "slug": "pci-dss-4-0-compliance-cost-calculator",
+        "title": "PCI DSS v4.0.1 SAQ vs QSA Report on Compliance (ROC) Cost Calculator",
+        "short_title": "PCI DSS 4.0 Compliance Cost",
+        "description": "Model PCI DSS v4.0.1 compliance costs across Merchant Levels 1-4, comparing SAQ A / SAQ D self-assessment against Qualified Security Assessor (QSA) Report on Compliance (ROC) fees, ASV quarterly scans, and CDE tokenization scope reduction.",
+        "primary_keyword": "pci dss compliance cost",
+        "quick_answer": "Under PCI DSS v4.0.1 scoping rules, Level 1 merchants (>6M annual transactions) require an annual QSA Report on Compliance ($45,000-$150,000+), quarterly Approved Scanning Vendor (ASV) network scans, and Requirement 11.4 segmentation penetration testing.",
+        "category": "Healthcare & Payment Security",
+    },
+    {
+        "slug": "fedramp-authorization-3pao-cost-calculator",
+        "title": "FedRAMP LI-SaaS, Low, Moderate & High 3PAO Authorization Cost Calculator",
+        "short_title": "FedRAMP 3PAO Cost",
+        "description": "Estimate total FedRAMP Authorization to Operate (ATO) investment across LI-SaaS, Low, Moderate, and High baselines under 44 U.S.C. 3607 and NIST SP 800-53 Rev 5, including 3PAO SAR assessment, FIPS 140-3 boundary engineering, and ConMon.",
+        "primary_keyword": "fedramp certification cost",
+        "quick_answer": "Under the FedRAMP Authorization Act (44 U.S.C. 3607) and NIST SP 800-53 Rev 5 baselines (325 controls for Moderate, 421 for High), total FedRAMP ATO cost combines SSP engineering, 3PAO Readiness Assessment Report (RAR) and Security Assessment Report (SAR) fees, and annual Continuous Monitoring (ConMon).",
+        "category": "Defense & Federal GRC",
+    },
+    {
+        "slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+        "title": "HITRUST CSF v11 e1, i1 & r2 Validated Assessment Cost Calculator",
+        "short_title": "HITRUST e1/i1/r2 Cost",
+        "description": "Compare HITRUST CSF v11 Essentials (e1), Implemented (i1), and Risk-Based (r2) validated certification costs including MyCSF subscription licensing, External Assessor fees, and dynamic r2 scoping factor surcharges.",
+        "primary_keyword": "hitrust certification cost",
+        "quick_answer": "Under HITRUST CSF v11, validated certification requires a HITRUST MyCSF portal subscription, External Assessor validation across 44 (e1), 182 (i1), or 200 to 1,000+ risk-tailored controls (r2), and HITRUST central quality assurance review fees.",
+        "category": "Healthcare & Payment Security",
+    },
+    {
+        "slug": "penetration-testing-scoping-cost-calculator",
+        "title": "Penetration Testing Cost & Scope Estimator (Web App, API, Cloud & Network)",
+        "short_title": "Penetration Testing Cost",
+        "description": "Calculate manual CREST/OSCP penetration testing engagement fees and tester-day requirements across web applications, REST/GraphQL APIs, external/internal IP ranges, cloud IAM environments, and compliance retesting under NIST SP 800-115.",
+        "primary_keyword": "penetration testing cost calculator",
+        "quick_answer": "Under NIST SP 800-115 and PCI DSS Requirement 11.4, manual penetration testing costs scale by attack surface complexity (authenticated roles, API endpoints, active IPs, and cloud accounts) multiplied by senior OSCP/CREST consultant day rates ($1,800-$3,200/day) plus remediation retesting.",
+        "category": "Offensive Security & Cyber Risk",
+    },
+    {
+        "slug": "cyber-liability-insurance-breach-exposure-calculator",
+        "title": "Cyber Liability Insurance Premium & Data Breach Exposure Calculator",
+        "short_title": "Cyber Insurance & Breach Exposure",
+        "description": "Model commercial cyber liability insurance premiums, self-insured retention (SIR) deductibles, control credits (EDR, MFA, immutable backups), and first-party/third-party data breach tail exposure under NAIC and SEC Item 1.05 rules.",
+        "primary_keyword": "cyber insurance cost calculator",
+        "quick_answer": "Under NAIC Cyber Insurance Supplement underwriting models and SEC Form 8-K Item 1.05 materiality frameworks, commercial cyber premiums scale by revenue band, PII/PHI/PCI record count, policy limit ($1M-$10M+), and technical control posture modifiers (MFA, EDR, and immutable offline backups).",
+        "category": "Offensive Security & Cyber Risk",
+    },
+]
+
+GAINHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = list(GAINHELM_DEFAULT_TOOLS)
+
 
 def _discover_tenant_tools(
     adapter: PropertyAdapter,
@@ -1791,9 +1935,15 @@ def _discover_tenant_tools(
 
     merged: Dict[str, Dict[str, Any]] = {}
     ordered_slugs: List[str] = []
+    if adapter.property_id == "prexvo":
+        ext_source = PREXVO_EXTENDED_TOOLS
+    elif adapter.property_id == "gainhelm":
+        ext_source = GAINHELM_EXTENDED_TOOLS
+    else:
+        ext_source = PROFITHELM_EXTENDED_TOOLS
     extended_catalog = {
         t["slug"]: t
-        for t in (PREXVO_EXTENDED_TOOLS if adapter.property_id == "prexvo" else PROFITHELM_EXTENDED_TOOLS)
+        for t in ext_source
         if isinstance(t, dict) and t.get("slug")
     }
 
@@ -1983,6 +2133,21 @@ class TenantRegistry:
                     ph_adapter._tools = list(ph_tools)
                 elif hasattr(ph_adapter, "tools") and isinstance(ph_adapter.tools, list):
                     ph_adapter.tools.extend(ph_tools)
+        except KeyError:
+            pass
+
+        try:
+            gh_adapter = reg.get_adapter("gainhelm")
+            if not gh_adapter.tools:
+                gh_tools = (
+                    list(GAINHELM_DEFAULT_TOOLS)
+                    if in_pytest
+                    else _discover_tenant_tools(gh_adapter, GAINHELM_DEFAULT_TOOLS)
+                )
+                if hasattr(gh_adapter, "_tools"):
+                    gh_adapter._tools = list(gh_tools)
+                elif hasattr(gh_adapter, "tools") and isinstance(gh_adapter.tools, list):
+                    gh_adapter.tools.extend(gh_tools)
         except KeyError:
             pass
 
@@ -4161,7 +4326,7 @@ class MaintenanceLifecycle:
             substrate_lock_existed = False
             if not dry_run and getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
-                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                     try:
                         substrate_lock_path = t_repo / "substrate_lock.json"
                         if substrate_lock_path.is_file():
@@ -4313,7 +4478,7 @@ class MaintenanceLifecycle:
 
             # Stage 11: Non-Blocking Partner Monetization Telemetry & Portal Click Reconciliation
             partner_readiness_status_val: Optional[str] = None
-            if adapter.property_id in ("profithelm", "prexvo"):
+            if adapter.property_id in ("profithelm", "prexvo", "gainhelm"):
                 try:
                     from pseofactory.partner_tracker import (
                         PartnerTrackingEngine,
@@ -6114,7 +6279,11 @@ def _normalize_page_structure_and_geo_parity(
         _normalize_title_50_60,
     )
 
-    brand_label = "Prexvo" if property_id.lower() == "prexvo" else "ProfitHelm"
+    brand_label = (
+        "Prexvo"
+        if property_id.lower() == "prexvo"
+        else ("GainHelm" if property_id.lower() == "gainhelm" else "ProfitHelm")
+    )
 
     if detect_placeholder_verification_token_issues(updated):
         repaired_tok = updated.replace(
@@ -6315,7 +6484,7 @@ def _normalize_page_structure_and_geo_parity(
     if (
         slug
         and slug not in ("index", "tools-directory", "tools")
-        and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo"))
+        and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo", "gainhelm"))
         and '"@graph"' in updated
         and ('"@type": "Dataset"' not in updated or '"@type": "HowTo"' not in updated)
     ):
@@ -6334,7 +6503,15 @@ def _normalize_page_structure_and_geo_parity(
                     if t
                 }
                 page_u = canonical_url.split("#")[0].rstrip("/") + "/"
-                base_u = page_u.split("/tools/")[0] if "/tools/" in page_u else ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+                base_u = (
+                    page_u.split("/tools/")[0]
+                    if "/tools/" in page_u
+                    else (
+                        "https://prexvo.com"
+                        if property_id.lower() == "prexvo"
+                        else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                    )
+                )
                 clean_lbl = topic_label or slug.replace("-", " ").title()
                 modified_g = False
                 if "Dataset" not in existing_types:
@@ -6650,7 +6827,11 @@ def _normalize_page_structure_and_geo_parity(
                 if not isinstance(parsed_j, dict) or not isinstance(parsed_j.get("@graph"), list):
                     return m_bc.group(0)
                 g_nodes = parsed_j["@graph"]
-                base_u = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+                base_u = (
+                    "https://prexvo.com"
+                    if property_id.lower() == "prexvo"
+                    else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                )
                 page_u = (canonical_url or f"{base_u}/").split("#")[0].rstrip("/") + "/"
                 clean_lbl = topic_label or slug.replace("-", " ").title() or brand_label
                 items = [
@@ -7064,6 +7245,157 @@ class RetroReflectionEngine:
         },
     }
 
+    GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
+        "soc-2-audit-cost-calculator": {
+            "model_name": "SOC 2 Type I and Type II Audit Cost and GRC TCO Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(cpa_audit_fee + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "cpa_audit_fee": 28000.0,
+                "grc_platform_annual": 15000.0,
+                "pentest_fee": 12000.0,
+                "remediation_hours": 140.0,
+                "engineering_hourly_rate": 165.0,
+            },
+            "published_output": 78100.0,
+            "statutory_authority": "AICPA SSAE 18 (AT-C Section 205); AICPA TSP Section 100 (2017 Trust Services Criteria)",
+            "economic_dataset": "AICPA Assurance Services Executive Committee (ASEC) Benchmarks and BLS OEWS Information Security Analyst Wage Series",
+            "sample_calculation": "For a 75-employee SaaS company pursuing SOC 2 Type II across Security, Availability, and Confidentiality ($28,000 CPA audit fee, $15,000 GRC platform, $12,000 penetration test, and 140 engineering hours at $165/hr), total first-year compliance TCO is $78,100.00.",
+        },
+        "cmmc-2-0-compliance-cost-calculator": {
+            "model_name": "CMMC 2.0 Level 1 and Level 2 C3PAO Assessment Cost Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(c3pao_assessment_fee + enclave_annual_cost + ssp_remediation_cost + continuous_monitoring_cost, 2)",
+            "inputs": {
+                "c3pao_assessment_fee": 52000.0,
+                "enclave_annual_cost": 24000.0,
+                "ssp_remediation_cost": 38000.0,
+                "continuous_monitoring_cost": 18000.0,
+            },
+            "published_output": 132000.0,
+            "statutory_authority": "32 CFR Part 170 (CMMC 2.0 Final Rule); DFARS 252.204-7012 and 252.204-7021; NIST SP 800-171 Rev 2",
+            "economic_dataset": "DoD CMMC 2.0 Regulatory Impact Analysis (32 CFR Part 170) Cost Tables and Cyber-AB C3PAO Market Survey",
+            "sample_calculation": "For a Defense Industrial Base contractor pursuing CMMC 2.0 Level 2 C3PAO certification ($52,000 C3PAO assessment, $24,000 FedRAMP Moderate enclave, $38,000 NIST 800-171 control remediation, and $18,000 continuous monitoring), total program cost is $132,000.00.",
+        },
+        "nist-800-171-sprs-score-calculator": {
+            "model_name": "NIST SP 800-171 DoD SPRS Score and POA&M Remediation Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(110.0 - (unmet_5pt_controls * 5.0) - (unmet_3pt_controls * 3.0) - (unmet_1pt_controls * 1.0), 2)",
+            "inputs": {
+                "unmet_5pt_controls": 2.0,
+                "unmet_3pt_controls": 3.0,
+                "unmet_1pt_controls": 4.0,
+            },
+            "published_output": 87.0,
+            "statutory_authority": "DFARS 252.204-7019 and 252.204-7020; DoD NIST SP 800-171 Assessment Methodology Version 1.2.1; 32 CFR 170.21",
+            "economic_dataset": "DCMA DIBCAC Assessment Findings Distribution and DoD SPRS Compliance Telemetry",
+            "sample_calculation": "Starting from the 110 maximum DoD SPRS baseline, subtracting 2 unmet 5-point controls (-10), 3 unmet 3-point controls (-9), and 4 unmet 1-point controls (-4) yields a net SPRS score of 87.00.",
+        },
+        "iso-27001-certification-cost-calculator": {
+            "model_name": "ISO/IEC 27001:2022 Certification and Surveillance Audit Cost Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(stage1_stage2_registrar_fee + (annual_surveillance_fee * 2.0) + internal_audit_fee + isms_tooling_cost, 2)",
+            "inputs": {
+                "stage1_stage2_registrar_fee": 22000.0,
+                "annual_surveillance_fee": 9500.0,
+                "internal_audit_fee": 12000.0,
+                "isms_tooling_cost": 14000.0,
+            },
+            "published_output": 67000.0,
+            "statutory_authority": "ISO/IEC 27001:2022 Information Security Management Systems; ISO/IEC 27006-1:2024 Mandatory Auditor-Day Tables",
+            "economic_dataset": "IAF Mandatory Document MD 5 Auditor-Time Tables and ANAB/UKAS Registrar Fee Benchmarks",
+            "sample_calculation": "Under ISO/IEC 27006-1:2024 auditor-day tables, combining a $22,000 Stage 1 and Stage 2 certification audit, two annual surveillance audits at $9,500 each ($19,000), $12,000 Clause 9.2 internal audit, and $14,000 ISMS tooling yields $67,000.00.",
+        },
+        "hipaa-violation-penalty-breach-cost-calculator": {
+            "model_name": "HIPAA Civil Monetary Penalty and Healthcare Breach Cost Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round((exposed_ephi_records * per_record_forensic_notification_cost) + ocr_tier_penalty_estimate + legal_and_credit_monitoring_cost, 2)",
+            "inputs": {
+                "exposed_ephi_records": 2500.0,
+                "per_record_forensic_notification_cost": 165.0,
+                "ocr_tier_penalty_estimate": 125000.0,
+                "legal_and_credit_monitoring_cost": 85000.0,
+            },
+            "published_output": 622500.0,
+            "statutory_authority": "45 CFR 160.404 (HHS Civil Monetary Penalty Inflation Adjustments); 42 U.S.C. 1320d-5 (HITECH Act); 45 CFR Part 164 Subpart D",
+            "economic_dataset": "HHS Office for Civil Rights (OCR) Breach Portal Archive (500+ Record Incidents) and Federal Register CMP Inflation Tables",
+            "sample_calculation": "For a 2,500-record healthcare ePHI breach ($165/record forensics and notification = $412,500) plus $125,000 HHS OCR CMP settlement exposure and $85,000 legal/credit monitoring, total breach liability is $622,500.00.",
+        },
+        "pci-dss-4-0-compliance-cost-calculator": {
+            "model_name": "PCI DSS v4.0.1 SAQ vs QSA Report on Compliance Cost Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(qsa_assessment_fee + (quarterly_asv_scan_fee * 4.0) + cde_pentest_fee + remediation_and_tokenization_cost, 2)",
+            "inputs": {
+                "qsa_assessment_fee": 48000.0,
+                "quarterly_asv_scan_fee": 2200.0,
+                "cde_pentest_fee": 16000.0,
+                "remediation_and_tokenization_cost": 22000.0,
+            },
+            "published_output": 94800.0,
+            "statutory_authority": "PCI Security Standards Council PCI DSS Version 4.0.1; Requirement 11.3 and 11.4 ASV and Segmentation Testing Standards",
+            "economic_dataset": "PCI SSC Qualified Security Assessor (QSA) Market Fee Benchmarks and Card Brand Compliance Schedules",
+            "sample_calculation": "Combining a $48,000 QSA Report on Compliance engagement, 4 quarterly ASV scans at $2,200 ($8,800), $16,000 CDE segmentation penetration testing, and $22,000 v4.0.1 control remediation yields $94,800.00.",
+        },
+        "fedramp-authorization-3pao-cost-calculator": {
+            "model_name": "FedRAMP LI-SaaS, Low, Moderate and High 3PAO Authorization Cost Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(ssp_boundary_engineering_cost + threepao_readiness_and_sar_fee + fips_crypto_remediation_cost + annual_conmon_cost, 2)",
+            "inputs": {
+                "ssp_boundary_engineering_cost": 185000.0,
+                "threepao_readiness_and_sar_fee": 145000.0,
+                "fips_crypto_remediation_cost": 95000.0,
+                "annual_conmon_cost": 75000.0,
+            },
+            "published_output": 500000.0,
+            "statutory_authority": "44 U.S.C. 3607 et seq. (FedRAMP Authorization Act); OMB Circular A-130; NIST SP 800-53 Rev 5",
+            "economic_dataset": "GSA FedRAMP Marketplace Authorization Telemetry and 3PAO Assessment Cost Benchmarks",
+            "sample_calculation": "For a FedRAMP Moderate cloud service offering ($185,000 SSP and boundary engineering, $145,000 3PAO RAR and SAR assessment, $95,000 FIPS 140-3 remediation, and $75,000 Year-1 ConMon), total ATO investment is $500,000.00.",
+        },
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+            "model_name": "HITRUST CSF v11 e1, i1 and r2 Validated Assessment Cost Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round(mycsf_subscription_and_report_fee + external_assessor_validation_fee + internal_readiness_remediation_cost, 2)",
+            "inputs": {
+                "mycsf_subscription_and_report_fee": 27500.0,
+                "external_assessor_validation_fee": 55000.0,
+                "internal_readiness_remediation_cost": 32500.0,
+            },
+            "published_output": 115000.0,
+            "statutory_authority": "HITRUST CSF Version 11.x Assessment Handbook (e1, i1, r2 Tiers); HIPAA Security Rule 45 CFR Part 164; NIST SP 800-53 Harmonization",
+            "economic_dataset": "HITRUST Authorized External Assessor Market Benchmarks and Healthcare Vendor Risk Tier Schedules",
+            "sample_calculation": "Combining a $27,500 HITRUST MyCSF portal and validation report fee, $55,000 External Assessor validation engagement, and $32,500 readiness remediation yields $115,000.00.",
+        },
+        "penetration-testing-scoping-cost-calculator": {
+            "model_name": "Penetration Testing Cost and Scope Estimator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round((tester_days * daily_consultant_rate) + retesting_and_attestation_fee, 2)",
+            "inputs": {
+                "tester_days": 9.0,
+                "daily_consultant_rate": 2200.0,
+                "retesting_and_attestation_fee": 3500.0,
+            },
+            "published_output": 23300.0,
+            "statutory_authority": "NIST SP 800-115 Technical Guide to Information Security Testing; PCI DSS v4.0.1 Requirement 11.4; AICPA SOC 2 CC4.1 & CC7.1",
+            "economic_dataset": "CREST/OSCP Senior Offensive Security Consultant Billing Rates and PTaaS Market Benchmarks",
+            "sample_calculation": "For a 9 tester-day manual web application, API, and cloud IAM penetration test at $2,200/day ($19,800) plus $3,500 remediation retesting and attestation letter, total engagement fee is $23,300.00.",
+        },
+        "cyber-liability-insurance-breach-exposure-calculator": {
+            "model_name": "Cyber Liability Insurance Premium and Data Breach Exposure Calculator Model",
+            "entity_type": "AuditRiskRule",
+            "formula": "round((policy_limit_millions * base_rate_per_million * control_posture_modifier) + annual_retention_reserve_allocation, 2)",
+            "inputs": {
+                "policy_limit_millions": 5.0,
+                "base_rate_per_million": 6800.0,
+                "control_posture_modifier": 0.85,
+                "annual_retention_reserve_allocation": 10000.0,
+            },
+            "published_output": 38900.0,
+            "statutory_authority": "NAIC Cyber Insurance Supplement Statutory Reporting Framework; SEC 17 CFR Parts 229 and 249 (Item 1.05 Form 8-K); FTC Safeguards Rule 16 CFR Part 314",
+            "economic_dataset": "NAIC Report on the Cyber Insurance Market Loss Ratios and Surplus Lines Underwriting Schedules",
+            "sample_calculation": "For a $5M commercial cyber liability policy at $6,800/M base rate with a 0.85 control posture credit (EDR, MFA, immutable backups = $28,900 annual premium) plus $10,000 annualized self-insured retention reserve, total annual risk transfer cost is $38,900.00.",
+        },
+    }
+
     @classmethod
     def _extract_spoke_manifest_from_html(
         cls,
@@ -7229,7 +7561,11 @@ class RetroReflectionEngine:
         canon_clean = canon_href.split("?")[0].lower()
 
         if has_manifest and canon_clean:
-            inferred_prop = "prexvo" if "prexvo.com" in canon_clean else "profithelm"
+            inferred_prop = (
+                "prexvo"
+                if "prexvo.com" in canon_clean
+                else ("gainhelm" if "gainhelm.com" in canon_clean else "profithelm")
+            )
             inferred_slug = ""
             if "/tools/" in canon_clean:
                 inferred_slug = canon_clean.split("/tools/", 1)[1].strip("/")
@@ -7237,9 +7573,12 @@ class RetroReflectionEngine:
                 inferred_slug = "tax-bracket-capital-allocation-hub"
             elif canon_clean.rstrip("/") == "https://prexvo.com":
                 inferred_slug = "rap-payment-calculator"
+            elif canon_clean.rstrip("/") == "https://gainhelm.com":
+                inferred_slug = "soc-2-audit-cost-calculator"
             if inferred_slug and (
                 inferred_slug in cls.PREXVO_FALLBACK_MANIFESTS
                 or inferred_slug in cls.PROFITHELM_FALLBACK_MANIFESTS
+                or inferred_slug in cls.GAINHELM_FALLBACK_MANIFESTS
                 or "/" in inferred_slug
             ):
                 expected_m = cls._resolve_manifest_for_page(
@@ -7360,6 +7699,8 @@ class RetroReflectionEngine:
             or (
                 "/tools/irs-2027-tax-brackets/" not in cluster_body
                 and "Income-Based" not in cluster_body
+                and "/tools/soc-2-audit-cost-calculator/" not in cluster_body
+                and "/tools/cmmc-2-0-compliance-cost-calculator/" not in cluster_body
             )
             or (
                 "/tools/irs-2027-tax-brackets/" in cluster_body
@@ -7518,14 +7859,18 @@ class RetroReflectionEngine:
         prior_entity_type = str((raw.get("entity_type") if isinstance(raw, dict) else "") or sidecar_entity_type)
 
         is_prexvo = property_id.lower() == "prexvo"
-        default_stat, default_econ = (
-            (
+        is_gainhelm = property_id.lower() == "gainhelm"
+        if is_prexvo:
+            default_stat, default_econ = (
                 "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
                 "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
             )
-            if is_prexvo
-            else _resolve_profithelm_statutory_provenance(slug, html_content)
-        )
+        elif is_gainhelm:
+            gh_preset_0 = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
+            default_stat = str(gh_preset_0["statutory_authority"])
+            default_econ = str(gh_preset_0["economic_dataset"])
+        else:
+            default_stat, default_econ = _resolve_profithelm_statutory_provenance(slug, html_content)
         slug_title = _format_safe_heading_topic("", slug)
         if manifest_override is None:
             if is_prexvo and slug in cls.PREXVO_FALLBACK_MANIFESTS:
@@ -7533,7 +7878,12 @@ class RetroReflectionEngine:
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                 if not raw or not raw.get("formula") or round(raw_pub, 2) != round(float(preset["published_output"]), 2):
                     raw = dict(preset)
-            elif not is_prexvo and slug in cls.PROFITHELM_FALLBACK_MANIFESTS:
+            elif is_gainhelm and slug in cls.GAINHELM_FALLBACK_MANIFESTS:
+                preset = cls.GAINHELM_FALLBACK_MANIFESTS[slug]
+                raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
+                if not raw or not raw.get("formula") or round(raw_pub, 2) != round(float(preset["published_output"]), 2):
+                    raw = dict(preset)
+            elif not is_prexvo and not is_gainhelm and slug in cls.PROFITHELM_FALLBACK_MANIFESTS:
                 preset = cls.PROFITHELM_FALLBACK_MANIFESTS[slug]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                 if (
@@ -7543,7 +7893,7 @@ class RetroReflectionEngine:
                     or round(raw_pub, 4) != round(float(preset["published_output"]), 4)
                 ):
                     raw = dict(preset)
-            elif not is_prexvo and "/" in slug:
+            elif not is_prexvo and not is_gainhelm and "/" in slug:
                 spoke_m = cls._extract_spoke_manifest_from_html(html_content, slug, default_stat, default_econ)
                 if spoke_m is not None:
                     raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
@@ -7559,6 +7909,9 @@ class RetroReflectionEngine:
             if is_prexvo:
                 preset = cls.PREXVO_FALLBACK_MANIFESTS.get(slug) or cls.PREXVO_FALLBACK_MANIFESTS["rap-payment-calculator"]
                 raw = dict(preset)
+            elif is_gainhelm:
+                preset = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
+                raw = dict(preset)
             else:
                 raw = {
                     "model_name": f"{slug_title} Model",
@@ -7569,7 +7922,7 @@ class RetroReflectionEngine:
                     "economic_dataset": default_econ,
                     "sample_calculation": "Deterministic baseline evaluation at $100,000 gross input and 24% effective rate yields $76,000.00.",
                 }
-        elif not is_prexvo and (
+        elif not is_prexvo and not is_gainhelm and (
             (not _is_179_or_equipment_slug(slug) and "Section 179" in str(raw.get("statutory_authority") or ""))
             or (
                 "CFTC 17 CFR Part 40" in str(raw.get("statutory_authority") or "")
@@ -7632,7 +7985,11 @@ class RetroReflectionEngine:
 
         candidate_entity_type = str(raw.get("entity_type") or prior_entity_type or "")
         if candidate_entity_type not in AI_MODE_ENTITY_TAXONOMY:
-            candidate_entity_type = "RepaymentPlanSpecification" if is_prexvo else "StatutoryDeduction"
+            candidate_entity_type = (
+                "RepaymentPlanSpecification"
+                if is_prexvo
+                else ("AuditRiskRule" if is_gainhelm else "StatutoryDeduction")
+            )
 
         return {
             "manifest_id": resolved_manifest_id,
@@ -7711,15 +8068,25 @@ class RetroReflectionEngine:
             if can_m:
                 canonical_url = can_m.group(1).strip()
             else:
-                base_dom = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+                base_dom = (
+                    "https://prexvo.com"
+                    if property_id.lower() == "prexvo"
+                    else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                )
                 canonical_url = f"{base_dom}/tools/{slug}/"
 
         if (
-            property_id.lower() != "prexvo"
+            property_id.lower() not in ("prexvo", "gainhelm")
             and canonical_url.split("?")[0].rstrip("/").lower() == "https://profithelm.com"
             and slug in ("section-179-deduction-calculator", "index", "tool")
         ):
             slug = "tax-bracket-capital-allocation-hub"
+        elif (
+            property_id.lower() == "gainhelm"
+            and canonical_url.split("?")[0].rstrip("/").lower() == "https://gainhelm.com"
+            and slug in ("index", "tool")
+        ):
+            slug = "soc-2-audit-cost-calculator"
 
         manifest = cls._resolve_manifest_for_page(
             updated,
@@ -7825,7 +8192,7 @@ class RetroReflectionEngine:
                     slug=slug,
                     query=slug.replace("-", " "),
                     is_prexvo=(property_id.lower() == "prexvo"),
-                    candidate_spec={"slug": slug, "statutory_authority": stat_auth},
+                    candidate_spec={"slug": slug, "statutory_authority": stat_auth, "property_id": property_id},
                 )
                 monetization_block_html = m_block["html"]
                 repaired.append("compliant_intent_monetization")
@@ -7997,7 +8364,11 @@ class RetroReflectionEngine:
             )
         ):
             from pseofactory.competitor import render_competitor_winning_pattern_blocks
-            base_dom = "https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com"
+            base_dom = (
+                "https://prexvo.com"
+                if property_id.lower() == "prexvo"
+                else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+            )
             if canonical_url and "/tools/" in canonical_url:
                 base_dom = canonical_url.split("/tools/")[0]
             winning_blocks = render_competitor_winning_pattern_blocks(
@@ -8389,7 +8760,11 @@ class RetroReflectionEngine:
         repo_root = dist_dir.parent
         canon = (
             canonical_base
-            or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+            or (
+                "https://prexvo.com"
+                if property_id.lower() == "prexvo"
+                else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+            )
         ).rstrip("/")
         non_tool_slugs = {"disclaimers", "methodology", "tools", "tools-directory", "privacy", "about", "terms", "contact"}
         if heal_legacy:
@@ -8541,6 +8916,11 @@ class RetroReflectionEngine:
                                     t_name = str(primary_off.get("name") or "Splash Financial Student Loan Refinancing")
                                     t_url = str(primary_off.get("default_url") or "https://www.splashfinancial.com/")
                                     t_cta = str(primary_off.get("cta_text") or "Compare Rates with Splash Financial")
+                                elif property_id.lower() == "gainhelm":
+                                    t_pk = str(primary_off.get("partner_key") or "vanta_security")
+                                    t_name = str(primary_off.get("name") or "Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance")
+                                    t_url = str(primary_off.get("default_url") or "https://www.vanta.com/")
+                                    t_cta = str(primary_off.get("cta_text") or "Automate Audit Readiness with Vanta")
                                 else:
                                     if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
                                         t_pk = "kalshi"
@@ -8772,7 +9152,11 @@ class RetroReflectionEngine:
 
         canon = (
             canonical_base
-            or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+            or (
+                "https://prexvo.com"
+                if property_id.lower() == "prexvo"
+                else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+            )
         ).rstrip("/")
 
         # Extract metadata from every root tool HTML page in dist_dir / "tools"
@@ -8898,6 +9282,7 @@ class RetroReflectionEngine:
             try:
                 orig_full = llms_full_path.read_text(encoding="utf-8", errors="ignore")
                 is_prexvo = property_id.lower() == "prexvo"
+                is_gainhelm = property_id.lower() == "gainhelm"
                 if is_prexvo:
                     header_block = (
                         "# Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest\n"
@@ -8905,6 +9290,15 @@ class RetroReflectionEngine:
                         f"Base URL: {canon}\n"
                         "Research Entity: Prexvo Statutory Research Group\n"
                         "Legal Entity: Prexvo LLC\n"
+                        "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
+                    )
+                elif is_gainhelm:
+                    header_block = (
+                        "# GainHelm: Complete Machine Knowledge Base & Cyber Compliance Statutory Manifest\n"
+                        "Domain: gainhelm.com\n"
+                        f"Base URL: {canon}\n"
+                        "Research Entity: GainHelm Cyber Compliance & Audit Economics Research\n"
+                        "Legal Entity: GainHelm LLC\n"
                         "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
                     )
                 else:
@@ -8964,6 +9358,15 @@ class RetroReflectionEngine:
                         "- Tiered Standard Repayment: Governed by 34 CFR 685.208. Fixed amortization terms based on total debt: $7,500-$9,999 (12 years), $10,000-$19,999 (15 years), $20,000-$39,999 (20 years), $40,000-$59,999 (25 years), $60,000+ (30 years).\n"
                         "- PSLF Buyback (34 CFR 685.219(g)): Allows borrowers with 120 months of qualifying public service employment to buy back eligible months of deferment or forbearance at the lower historical IDR payment amount.\n"
                     )
+                elif is_gainhelm:
+                    sections_out.append(
+                        "## Key Cyber Compliance & Audit Statutory Authorities\n"
+                        "- SOC 2 Type I & Type II: Governed by AICPA SSAE 18 (AT-C Section 205) and 2017 Trust Services Criteria (TSP Section 100).\n"
+                        "- CMMC 2.0 & NIST SP 800-171: Governed by 32 CFR Part 170, DFARS 252.204-7012 / 7019 / 7020 / 7021, and DoD SPRS scoring [-203 to +110] with 88-point conditional POA&M floor.\n"
+                        "- ISO/IEC 27001:2022: Governed by ISO/IEC 27006-1:2024 mandatory Stage 1 and Stage 2 auditor-day tables and 93 Annex A controls.\n"
+                        "- HIPAA & HITECH Civil Monetary Penalties: Governed by 45 CFR 160.404 and 42 U.S.C. 1320d-5 four-tier culpability schedules and 500-record media notification triggers.\n"
+                        "- FedRAMP & PCI DSS v4.0.1: Governed by 44 U.S.C. 3607 (NIST SP 800-53 Rev 5 3PAO baselines) and PCI DSS v4.0.1 Merchant Levels 1-4 QSA ROC standards.\n"
+                    )
                 else:
                     sections_out.append(
                         "## Key Statutory Authorities\n"
@@ -9007,21 +9410,41 @@ class RetroReflectionEngine:
 
         updated_files: List[str] = []
         d_str_low = d.as_posix().lower()
-        if "profithelm" in d_str_low:
+        is_gainhelm = "gainhelm" in d_str_low or property_id.lower() == "gainhelm"
+        if is_gainhelm:
+            is_prexvo = False
+        elif "profithelm" in d_str_low:
             is_prexvo = False
         elif "prexvo" in d_str_low:
             is_prexvo = True
         else:
             is_prexvo = property_id.lower() == "prexvo"
 
-        default_canon = "https://prexvo.com" if is_prexvo else "https://profithelm.com"
+        default_canon = (
+            "https://prexvo.com"
+            if is_prexvo
+            else ("https://gainhelm.com" if is_gainhelm else "https://profithelm.com")
+        )
         raw_canon = (canonical_base or "").strip().rstrip("/")
-        if not raw_canon or (is_prexvo and "profithelm" in raw_canon.lower()) or (not is_prexvo and "prexvo" in raw_canon.lower()):
+        if (
+            not raw_canon
+            or (is_prexvo and "profithelm" in raw_canon.lower())
+            or (not is_prexvo and "prexvo" in raw_canon.lower())
+            or (is_gainhelm and ("profithelm" in raw_canon.lower() or "prexvo" in raw_canon.lower()))
+        ):
             canon = default_canon
         else:
             canon = raw_canon
 
-        entity_label = "Prexvo Statutory Research Group" if is_prexvo else "ProfitHelm LLC"
+        entity_label = (
+            "Prexvo Statutory Research Group"
+            if is_prexvo
+            else (
+                "GainHelm Cyber Compliance & Audit Economics Research"
+                if is_gainhelm
+                else "ProfitHelm LLC"
+            )
+        )
         meta_block_lines = [
             '  <meta name="ir-site-verification-token" content="7932737">',
             '  <meta name="cj-promotional-property-id" content="101906407">',
@@ -9140,24 +9563,36 @@ class RetroReflectionEngine:
 
         media_kit_payload = {
             "schema_version": "2026.10.26",
-            "property_id": "prexvo" if is_prexvo else "profithelm",
-            "property_name": "Prexvo Statutory Research Group" if is_prexvo else "ProfitHelm Quantitative Research",
+            "property_id": "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm"),
+            "property_name": (
+                "Prexvo Statutory Research Group"
+                if is_prexvo
+                else (
+                    "GainHelm Cyber Compliance & Audit Economics Research"
+                    if is_gainhelm
+                    else "ProfitHelm Quantitative Research"
+                )
+            ),
             "legal_entity": entity_label,
             "ein_masked": "41-***1423",
             "jurisdiction": "Washington Secretary of State (Spokane, WA)",
             "headquarters": "522 W Riverside Ave Ste N, Spokane, WA 99201",
-            "domain": "prexvo.com" if is_prexvo else "profithelm.com",
+            "domain": "prexvo.com" if is_prexvo else ("gainhelm.com" if is_gainhelm else "profithelm.com"),
             "canonical_url": canon,
             "editorial_classification": (
                 "Deterministic Title IV Federal Student Loan & Private Refinance Decision Engine"
                 if is_prexvo
-                else "Deterministic B2B Corporate Tax, Section 179 Depreciation, Section 1031 Exchange & Treasury Modeling Engine"
+                else (
+                    "Deterministic Enterprise Cyber Compliance, GRC Audit Cost & Statutory Security Governance Engine"
+                    if is_gainhelm
+                    else "Deterministic B2B Corporate Tax, Section 179 Depreciation, Section 1031 Exchange & Treasury Modeling Engine"
+                )
             ),
             "inventory_profile": {
                 "publisher_size_tier": "MID_MARKET_SPECIALIST_FINANCIAL_PUBLISHER",
-                "root_calculators_count": root_tools_count or (17 if is_prexvo else 22),
-                "total_deployed_routes_count": total_html_count or (21 if is_prexvo else 177),
-                "50_state_statutory_spokes_count": 0 if is_prexvo else 150,
+                "root_calculators_count": root_tools_count or (17 if is_prexvo else (10 if is_gainhelm else 22)),
+                "total_deployed_routes_count": total_html_count or (21 if is_prexvo else (18 if is_gainhelm else 177)),
+                "50_state_statutory_spokes_count": 0 if (is_prexvo or is_gainhelm) else 150,
                 "interactive_client_side_execution": True,
                 "zero_ai_hallucination_statutory_formulas": True,
             },
@@ -9201,13 +9636,23 @@ class RetroReflectionEngine:
                     "unsponsored_deterministic_calculation_formulas": True,
                 }
                 if is_prexvo
-                else {
-                    "ftc_16_cfr_part_255_affiliate_disclosure": True,
-                    "tcpa_explicit_consent_enforced_on_lead_intake": True,
-                    "circular_230_tax_modeling_disclaimer_enforced": True,
-                    "circular_230_disclosure_statement": "Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.",
-                    "unsponsored_deterministic_calculation_formulas": True,
-                }
+                else (
+                    {
+                        "ftc_16_cfr_part_255_affiliate_disclosure": True,
+                        "tcpa_explicit_consent_enforced_on_lead_intake": True,
+                        "statutory_disclaimer_enforced": True,
+                        "sub_affiliate_aggregators_prohibited": True,
+                        "unsponsored_deterministic_calculation_formulas": True,
+                    }
+                    if is_gainhelm
+                    else {
+                        "ftc_16_cfr_part_255_affiliate_disclosure": True,
+                        "tcpa_explicit_consent_enforced_on_lead_intake": True,
+                        "circular_230_tax_modeling_disclaimer_enforced": True,
+                        "circular_230_disclosure_statement": "Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.",
+                        "unsponsored_deterministic_calculation_formulas": True,
+                    }
+                )
             ),
             "governance_endpoints": {
                 "about_url": f"{canon}/about/",
@@ -9386,7 +9831,11 @@ class RetroReflectionEngine:
                 for td in tools_dir.iterdir()
                 if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file()
             }
-            brand_chk = "Prexvo" if str(property_id).lower() == "prexvo" else "ProfitHelm"
+            brand_chk = (
+                "Prexvo"
+                if str(property_id).lower() == "prexvo"
+                else ("GainHelm" if str(property_id).lower() == "gainhelm" else "ProfitHelm")
+            )
             for s_item in sorted(synd_dir.iterdir()):
                 if s_item.name.startswith("."):
                     continue
@@ -9610,6 +10059,13 @@ class RetroReflectionEngine:
                             '      <a href="/r/splash_financial">Splash Financial</a>\n'
                             '    </section>\n  '
                         )
+                    elif property_id.lower() == "gainhelm":
+                        seed_sec = (
+                            '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                            '        <h2>Verified Enterprise GRC &amp; Security Execution Partners</h2>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/vanta_security">Vanta</a></div>\n'
+                            '      </section>\n    '
+                        )
                     else:
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
@@ -9634,7 +10090,11 @@ class RetroReflectionEngine:
                         pass
                 canon_nt = (
                     canonical_base
-                    or ("https://prexvo.com" if property_id.lower() == "prexvo" else "https://profithelm.com")
+                    or (
+                        "https://prexvo.com"
+                        if property_id.lower() == "prexvo"
+                        else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                    )
                 ).rstrip("/") + "/" + ("" if rel == "index.html" else rel.replace("index.html", ""))
                 from pseofactory.tenant_facts import TruthReconciliationEngine
                 nt_slug = (
@@ -9650,13 +10110,21 @@ class RetroReflectionEngine:
                     "index": (
                         "Federal Student Loan Repayment, PSLF & Title IV Decision Engine"
                         if property_id.lower() == "prexvo"
-                        else "Statutory Tax, Depreciation & Corporate Treasury Calculators"
+                        else (
+                            "Enterprise Cyber Compliance, GRC Audit Cost & Statutory Security Governance Calculators"
+                            if property_id.lower() == "gainhelm"
+                            else "Statutory Tax, Depreciation & Corporate Treasury Calculators"
+                        )
                     ),
                     "disclaimers": "Legal Disclaimers & Statutory Compliance Notice",
                     "methodology": "Quantitative Research Methodology & Verification Standards",
                     "privacy": "Privacy Policy & Zero-Telemetry Data Governance",
                     "about": "Corporate Background and Statutory Governance Standards",
-                    "tools-directory": "Statutory Financial Calculators and Decision Tools",
+                    "tools-directory": (
+                        "Enterprise Cyber Compliance and GRC Audit Cost Calculators"
+                        if property_id.lower() == "gainhelm"
+                        else "Statutory Financial Calculators and Decision Tools"
+                    ),
                 }
                 nt_recon_html, nt_recon_rep = TruthReconciliationEngine.reconcile_html_truth(
                     content,
@@ -9693,12 +10161,20 @@ class RetroReflectionEngine:
                     stat_auth=(
                         "Title IV of the Higher Education Act; 34 CFR Part 685"
                         if property_id.lower() == "prexvo"
-                        else "IRC Section 1(j); IRC Section 179; IRC Section 1031"
+                        else (
+                            "AICPA SSAE 18 (AT-C Section 205); 32 CFR Part 170 (CMMC 2.0); 45 CFR 160.404"
+                            if property_id.lower() == "gainhelm"
+                            else "IRC Section 1(j); IRC Section 179; IRC Section 1031"
+                        )
                     ),
                     econ_ds=(
                         "Federal Student Aid Portfolio Summary and HHS Poverty Guidelines"
                         if property_id.lower() == "prexvo"
-                        else "IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series"
+                        else (
+                            "AICPA Assurance Services Benchmarks, DoD 32 CFR Part 170 Cost Tables, and HHS OCR Breach Archive"
+                            if property_id.lower() == "gainhelm"
+                            else "IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series"
+                        )
                     ),
                 )
                 if nt_geo_changed and nt_geo_html != content:
@@ -9719,7 +10195,15 @@ class RetroReflectionEngine:
             elif html_file.stem != "index":
                 slug = html_file.stem
             else:
-                slug = "rap-payment-calculator" if property_id.lower() == "prexvo" else "tax-bracket-capital-allocation-hub"
+                slug = (
+                    "rap-payment-calculator"
+                    if property_id.lower() == "prexvo"
+                    else (
+                        "soc-2-audit-cost-calculator"
+                        if property_id.lower() == "gainhelm"
+                        else "tax-bracket-capital-allocation-hub"
+                    )
+                )
 
             working_content = content
             overlay_injected = False
@@ -9981,7 +10465,11 @@ class RetroReflectionEngine:
                     raw_q = json.loads(q_file.read_text(encoding="utf-8"))
                     if isinstance(raw_q, list) and raw_q:
                         from pseofactory.indexing.preflight import IndexingPreflightEngine
-                        dom_q = "prexvo.com" if property_id.lower() == "prexvo" else "profithelm.com"
+                        dom_q = (
+                            "prexvo.com"
+                            if property_id.lower() == "prexvo"
+                            else ("gainhelm.com" if property_id.lower() == "gainhelm" else "profithelm.com")
+                        )
                         pf_eng = IndexingPreflightEngine(property_id=property_id, domain=dom_q, dist_dir=d)
                         pf_rep = pf_eng.inspect_dist(d)
                         eligible_set = {u.rstrip("/") + "/" for u in pf_rep.push_eligible_urls}
@@ -10129,8 +10617,9 @@ def _has_pending_downstream_work(
     # 1. Check syndication packs (must have ghost.json + github_gist.json and zero reddit.md)
     synd_dir = repo_root / "syndication"
     central_synd = (
-        Path("/home/ubuntuadmin/projects/pseofactory/syndication") / ("prexvo" if adapter.property_id == "prexvo" else "profithelm")
-        if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo")
+        Path("/home/ubuntuadmin/projects/pseofactory/syndication")
+        / ("prexvo" if adapter.property_id == "prexvo" else ("gainhelm" if adapter.property_id == "gainhelm" else "profithelm"))
+        if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
         else None
     )
     for s in built_slugs:
@@ -10193,7 +10682,7 @@ def _has_pending_downstream_work(
     if (
         not ignore_git_dirty
         and str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
-        and repo_root.name in ("profithelm-platform", "prexvo")
+        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm")
         and (repo_root / ".git").exists()
     ):
         try:
@@ -10250,7 +10739,12 @@ def _execute_autonomous_downstream_chain(
     }
 
     # Ensure adapter tools include all dynamic and built tools
-    default_tools = PREXVO_DEFAULT_TOOLS if adapter.property_id == "prexvo" else PROFITHELM_DEFAULT_TOOLS
+    if adapter.property_id == "prexvo":
+        default_tools = PREXVO_DEFAULT_TOOLS
+    elif adapter.property_id == "gainhelm":
+        default_tools = GAINHELM_DEFAULT_TOOLS
+    else:
+        default_tools = PROFITHELM_DEFAULT_TOOLS
     discovered_tools = _discover_tenant_tools(adapter, default_tools)
     if hasattr(adapter, "_tools"):
         adapter._tools = list(discovered_tools)
@@ -10574,7 +11068,7 @@ def _execute_autonomous_downstream_chain(
         recon_rep = tracker.reconcile_edge_clicks_with_portals(
             engagement_by_property={
                 p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                for p_id in ("profithelm", "prexvo")
+                for p_id in ("profithelm", "prexvo", "gainhelm")
             }
         )
         if not dry_run:
@@ -10726,6 +11220,8 @@ def reflect_and_recompile_all_assets(
                 _adp._tools = _discover_tenant_tools(_adp, PREXVO_DEFAULT_TOOLS)
             elif _pid == "profithelm":
                 _adp._tools = _discover_tenant_tools(_adp, PROFITHELM_DEFAULT_TOOLS)
+            elif _pid == "gainhelm":
+                _adp._tools = _discover_tenant_tools(_adp, GAINHELM_DEFAULT_TOOLS)
 
     target_ids = (
         [p.lower() for p in properties]
@@ -10763,7 +11259,7 @@ def reflect_and_recompile_all_assets(
 
         if (
             getattr(adapter, "repo_path", None)
-            and adapter.property_id in ("profithelm", "prexvo")
+            and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
             and (Path(adapter.repo_path) / "functions" / "r").is_dir()
             and not is_foreign_pytest
         ):
@@ -10776,7 +11272,7 @@ def reflect_and_recompile_all_assets(
 
         if (
             getattr(adapter, "repo_path", None)
-            and adapter.property_id in ("profithelm", "prexvo")
+            and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
             and not is_foreign_pytest
         ):
             try:
@@ -11214,7 +11710,7 @@ def reflect_and_recompile_all_assets(
         substrate_lock_stale = False
         if getattr(adapter, "repo_path", None) and not is_unmerged_worktree:
             t_repo = Path(adapter.repo_path)
-            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                 lock_file = t_repo / "substrate_lock.json"
                 if not lock_file.is_file():
                     substrate_lock_stale = True
@@ -11237,7 +11733,7 @@ def reflect_and_recompile_all_assets(
         ):
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
-                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                     try:
                         cur_sub_hash = compute_engine_hash()
                         dist_fp_hasher = hashlib.sha256()
@@ -11259,7 +11755,7 @@ def reflect_and_recompile_all_assets(
                         pass
 
         freshness_needs_refresh = False
-        if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo"):
+        if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm"):
             try:
                 f_rep_path = adapter.dist_dir.parent / "freshness_audit_report.json"
                 if not f_rep_path.is_file():
@@ -11293,7 +11789,7 @@ def reflect_and_recompile_all_assets(
                 }
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
 
-                if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo"):
+                if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm"):
                     try:
                         from pseofactory.qualification import (
                             reconcile_factory_execution_log,
@@ -11393,6 +11889,16 @@ def reflect_and_recompile_all_assets(
                             px_rep_file = adapter.dist_dir.parent / "freshness_audit_report.json"
                             if not px_rep_file.is_file() or px_rep_file.read_text(encoding="utf-8") != px_rep_text:
                                 px_rep_file.write_text(px_rep_text, encoding="utf-8")
+                        except Exception:
+                            pass
+                    elif adapter.property_id == "gainhelm" and not is_unmerged_worktree:
+                        try:
+                            from gainhelm.freshness import run_freshness_audit as run_gainhelm_freshness_audit
+                            gh_rep = run_gainhelm_freshness_audit(dist_dir=adapter.dist_dir)
+                            gh_rep_text = json.dumps(gh_rep, indent=2) + "\n"
+                            gh_rep_file = adapter.dist_dir.parent / "freshness_audit_report.json"
+                            if not gh_rep_file.is_file() or gh_rep_file.read_text(encoding="utf-8") != gh_rep_text:
+                                gh_rep_file.write_text(gh_rep_text, encoding="utf-8")
                         except Exception:
                             pass
 

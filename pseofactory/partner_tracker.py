@@ -32,11 +32,14 @@ from pseofactory.affiliates import (
     AFFILIATE_REGISTRY,
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
+    GAINHELM_AFFILIATES,
     B2B_PARTNER_KEYS,
     STUDENT_LOAN_PARTNER_KEYS,
+    GAINHELM_PARTNER_KEYS,
     PREXVO_STANDING_RESTRICTION,
     PROFITHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
+    GAINHELM_DISCLOSURES,
     resolve_partner_url,
     validate_affiliate_url,
     score_partner_yield,
@@ -128,9 +131,10 @@ class FleetMonetizationDashboardData:
     all_action_items: List[ActionItem] = field(default_factory=list)
     recent_emails: List[Dict[str, Any]] = field(default_factory=list)
     mail_sync_status: Dict[str, Any] = field(default_factory=dict)
+    gainhelm: Optional[PropertyReadinessReport] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out = {
             "updated_at": self.updated_at,
             "profithelm": self.profithelm.to_dict(),
             "prexvo": self.prexvo.to_dict(),
@@ -138,6 +142,9 @@ class FleetMonetizationDashboardData:
             "recent_emails": self.recent_emails,
             "mail_sync_status": self.mail_sync_status,
         }
+        if self.gainhelm is not None:
+            out["gainhelm"] = self.gainhelm.to_dict()
+        return out
 
 
 class PartnerTrackingEngine:
@@ -219,9 +226,10 @@ class PartnerTrackingEngine:
         # 3. Evaluate property statuses
         ph_report = self._evaluate_property("profithelm", classifications, engagement_metrics=engagement_metrics)
         px_report = self._evaluate_property("prexvo", classifications, engagement_metrics=engagement_metrics)
+        gh_report = self._evaluate_property("gainhelm", classifications, engagement_metrics=engagement_metrics)
 
         # 4. Enforce strict property isolation
-        self._assert_fleet_isolation(ph_report, px_report)
+        self._assert_fleet_isolation(ph_report, px_report, gh_report)
 
         # 5. Build recent emails summary
         recent_email_dicts = []
@@ -244,6 +252,7 @@ class PartnerTrackingEngine:
             all_action_items=all_actions,
             recent_emails=recent_email_dicts,
             mail_sync_status=self.email_engine.load_state(),
+            gainhelm=gh_report,
         )
 
         return dashboard
@@ -414,6 +423,11 @@ class PartnerTrackingEngine:
             prop_name = "Prexvo"
             standing_restriction = PREXVO_STANDING_RESTRICTION
             disclosure_text = PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
+        elif prop_clean == "gainhelm":
+            affiliates_dict = GAINHELM_AFFILIATES
+            prop_name = "GainHelm"
+            standing_restriction = "Independent enterprise cyber compliance and GRC research publisher. FTC disclosure required."
+            disclosure_text = GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
         else:
             raise ValueError(f"Unknown property_id '{property_id}'")
 
@@ -704,26 +718,33 @@ class PartnerTrackingEngine:
 
         # Strict isolation check
         if prop_clean == "prexvo":
-            if key_clean in B2B_PARTNER_KEYS:
+            if key_clean in B2B_PARTNER_KEYS or key_clean in GAINHELM_PARTNER_KEYS:
                 raise ValueError(
-                    f"Strict isolation violation: B2B partner '{key_clean}' cannot exist on Prexvo."
+                    f"Strict isolation violation: B2B or GRC partner '{key_clean}' cannot exist on Prexvo."
                 )
         elif prop_clean == "profithelm":
-            if key_clean in STUDENT_LOAN_PARTNER_KEYS:
+            if key_clean in STUDENT_LOAN_PARTNER_KEYS or key_clean in GAINHELM_PARTNER_KEYS:
                 raise ValueError(
-                    f"Strict isolation violation: Student loan partner '{key_clean}' cannot exist on ProfitHelm."
+                    f"Strict isolation violation: Student loan or GRC partner '{key_clean}' cannot exist on ProfitHelm."
+                )
+        elif prop_clean == "gainhelm":
+            if key_clean in B2B_PARTNER_KEYS or key_clean in STUDENT_LOAN_PARTNER_KEYS:
+                raise ValueError(
+                    f"Strict isolation violation: ProfitHelm or Prexvo partner '{key_clean}' cannot exist on GainHelm."
                 )
 
     def _assert_fleet_isolation(
         self,
         ph: PropertyReadinessReport,
         px: PropertyReadinessReport,
+        gh: Optional[PropertyReadinessReport] = None,
     ) -> None:
         """Asserts strict property boundaries and bans cross-property partner mixing."""
         ph_keys = {p.key for p in ph.partners}
         px_keys = {p.key for p in px.partners}
+        gh_keys = {p.key for p in gh.partners} if gh is not None else set()
 
-        overlap = ph_keys.intersection(px_keys)
+        overlap = ph_keys.intersection(px_keys) | ph_keys.intersection(gh_keys) | px_keys.intersection(gh_keys)
         if overlap:
             raise ValueError(
                 f"Strict isolation violation: Cross-property partner mixing detected! Overlapping keys: {overlap}"
@@ -732,17 +753,28 @@ class PartnerTrackingEngine:
         # Prexvo must have zero B2B partners and zero sub-affiliate redirects
         sub_affiliate_tokens = ("sovrn", "viglink", "skimlinks", "monetizer", "subaffiliate", "redirect.viglink")
         for p in px.partners:
-            if p.key in B2B_PARTNER_KEYS:
-                raise ValueError(f"Prexvo contains B2B partner '{p.key}'")
+            if p.key in B2B_PARTNER_KEYS or p.key in GAINHELM_PARTNER_KEYS:
+                raise ValueError(f"Prexvo contains B2B/GRC partner '{p.key}'")
             dest_lower = p.destination_url.lower()
             for token in sub_affiliate_tokens:
                 if token in dest_lower:
                     raise ValueError(f"Prexvo contains prohibited sub-affiliate redirect token '{token}': '{p.destination_url}'")
 
-        # ProfitHelm must have zero student loan partners
+        # ProfitHelm must have zero student loan or GRC partners
         for p in ph.partners:
-            if p.key in STUDENT_LOAN_PARTNER_KEYS:
-                raise ValueError(f"ProfitHelm contains student loan partner '{p.key}'")
+            if p.key in STUDENT_LOAN_PARTNER_KEYS or p.key in GAINHELM_PARTNER_KEYS:
+                raise ValueError(f"ProfitHelm contains non-ProfitHelm partner '{p.key}'")
+
+        if gh is not None:
+            for p in gh.partners:
+                if p.key in B2B_PARTNER_KEYS or p.key in STUDENT_LOAN_PARTNER_KEYS:
+                    raise ValueError(f"GainHelm contains non-GainHelm partner '{p.key}'")
+                dest_lower = p.destination_url.lower()
+                for token in sub_affiliate_tokens:
+                    if token in dest_lower:
+                        raise ValueError(
+                            f"GainHelm contains prohibited sub-affiliate redirect token '{token}': '{p.destination_url}'"
+                        )
 
     @staticmethod
     def _is_network_tracked_affiliate_url(url: str) -> bool:
@@ -2491,7 +2523,7 @@ class PartnerTrackingEngine:
         from pseofactory.affiliates import is_restricted_public_service_slug
 
         prop_clean = (property_id or "profithelm").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo"):
+        if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
             raise ValueError(f"Unsupported property_id '{property_id}'.")
 
         slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
@@ -2516,16 +2548,38 @@ class PartnerTrackingEngine:
         eff_partner_key = (partner_key or eval_info["primary_partner_key"]).strip().lower()
 
         if prop_clean == "prexvo":
-            if eff_partner_key in B2B_PARTNER_KEYS or eff_partner_key in PROFITHELM_AFFILIATES:
+            if (
+                eff_partner_key in B2B_PARTNER_KEYS
+                or eff_partner_key in PROFITHELM_AFFILIATES
+                or eff_partner_key in GAINHELM_PARTNER_KEYS
+                or eff_partner_key in GAINHELM_AFFILIATES
+            ):
                 raise ValueError(
-                    f"Strict isolation violation: B2B partner '{eff_partner_key}' cannot be used on Prexvo."
+                    f"Strict isolation violation: B2B or GRC partner '{eff_partner_key}' cannot be used on Prexvo."
                 )
             if eff_partner_key not in PREXVO_AFFILIATES:
                 eff_partner_key = "splash_financial"
-        else:
-            if eff_partner_key in STUDENT_LOAN_PARTNER_KEYS or eff_partner_key in PREXVO_AFFILIATES:
+        elif prop_clean == "gainhelm":
+            if (
+                eff_partner_key in B2B_PARTNER_KEYS
+                or eff_partner_key in PROFITHELM_AFFILIATES
+                or eff_partner_key in STUDENT_LOAN_PARTNER_KEYS
+                or eff_partner_key in PREXVO_AFFILIATES
+            ):
                 raise ValueError(
-                    f"Strict isolation violation: Student loan partner '{eff_partner_key}' cannot be used on ProfitHelm."
+                    f"Strict isolation violation: ProfitHelm or Prexvo partner '{eff_partner_key}' cannot be used on GainHelm."
+                )
+            if eff_partner_key not in GAINHELM_AFFILIATES:
+                eff_partner_key = eval_info["primary_partner_key"] or "vanta_security"
+        else:
+            if (
+                eff_partner_key in STUDENT_LOAN_PARTNER_KEYS
+                or eff_partner_key in PREXVO_AFFILIATES
+                or eff_partner_key in GAINHELM_PARTNER_KEYS
+                or eff_partner_key in GAINHELM_AFFILIATES
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Student loan or GRC partner '{eff_partner_key}' cannot be used on ProfitHelm."
                 )
             if eff_partner_key not in PROFITHELM_AFFILIATES:
                 eff_partner_key = eval_info["primary_partner_key"]
@@ -2730,7 +2784,7 @@ class PartnerTrackingEngine:
         from pseofactory.affiliates import is_restricted_public_service_slug
 
         prop_clean = (property_id or "profithelm").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo"):
+        if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
             raise ValueError(f"Unsupported property_id '{property_id}'.")
         slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
         if slug_clean.startswith("tools/"):
@@ -2754,16 +2808,19 @@ class PartnerTrackingEngine:
         bp_amt = float(blueprint_state.get("calculated_amount") or 0.0) if isinstance(blueprint_state, dict) else 0.0
         raw_calc_amt = float(calculated_amount or 0.0) if calculated_amount else bp_amt
 
+        default_eval_slug = (
+            "student-loan-refinance-break-even-calculator"
+            if prop_clean == "prexvo"
+            else ("soc-2-audit-cost-calculator" if prop_clean == "gainhelm" else "section-1031-calculator")
+        )
         eval_info = evaluate_lead_quote_threshold(
             property_id=prop_clean,
-            tool_slug=slug_clean if slug_clean not in {"general", "index", "about", "privacy"} else (
-                "student-loan-refinance-break-even-calculator" if prop_clean == "prexvo" else "section-1031-calculator"
-            ),
+            tool_slug=slug_clean if slug_clean not in {"general", "index", "about", "privacy"} else default_eval_slug,
             calculated_amount=raw_calc_amt,
         )
         eff_vertical = eval_info["vertical"]
         eff_partner_key = eval_info["primary_partner_key"] or (
-            "splash_financial" if prop_clean == "prexvo" else "turbotax"
+            "splash_financial" if prop_clean == "prexvo" else ("vanta_security" if prop_clean == "gainhelm" else "turbotax")
         )
         amount_val = max(0.0, float(raw_calc_amt or 0.0))
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -3658,6 +3715,50 @@ def resolve_lead_monetization_offer(
             else ("student-loan-refinance-break-even-calculator" if sku_clean else "")
         )
         tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+    elif prop_clean == "gainhelm" or sku_clean in (
+        "gh_soc2_cmmc_audit_workpapers",
+        "gh_hipaa_iso27001_governance_kit",
+    ):
+        prop_clean = "gainhelm"
+        if sku_clean == "gh_hipaa_iso27001_governance_kit" or (
+            not sku_clean
+            and any(
+                t in slug_clean or t in vert_clean
+                for t in ("hipaa", "iso-27001", "hitrust", "pci-dss", "cyber-liability", "insurance", "breach")
+            )
+        ):
+            offer_sku = "gh_hipaa_iso27001_governance_kit"
+            offer_title = "GainHelm HIPAA Penalty, ISO 27001 & Cyber Breach Audit Workpaper Kit"
+            offer_price_usd = 49.0
+            offer_price_cents = 4900
+            statutory_authority = "45 CFR 160.404, ISO/IEC 27006-1:2024 & SEC Item 1.05 Form 8-K"
+            deliverables = [
+                "ISO/IEC 27006-1 Stage 1 & Stage 2 Auditor-Day Calculation & Annex A Control Matrix",
+                "45 CFR 160.404 Tier 1-4 Civil Monetary Penalty Cap & Breach Notification Schedule",
+                "SEC Item 1.05 Materiality & Cyber Liability Retention Stress-Test Workpaper",
+                "Accredited Certification Body & QSA Scoping Checklist (CSV & Print-Ready Audit HTML)",
+            ]
+            default_sku_slug = "iso-27001-certification-cost-calculator"
+        else:
+            offer_sku = "gh_soc2_cmmc_audit_workpapers"
+            offer_title = "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite"
+            offer_price_usd = 79.0
+            offer_price_cents = 7900
+            statutory_authority = "AICPA SSAE 18 AT-C 205, 32 CFR Part 170 & DFARS 252.204-7012 / 7019"
+            deliverables = [
+                "AICPA Trust Services Criteria (CC1-CC9) CPA Auditor Fee & Readiness Workpaper",
+                "NIST SP 800-171 Rev 2 110-Control Weighted SPRS Deduction & POA&M Remediation Ledger",
+                "CMMC 2.0 Level 2 C3PAO Assessment Cost & Enclave Boundary Scoping Matrix",
+                "Enterprise GRC Automation vs Manual Evidence Labor ROI Schedule (CSV & Print-Ready Audit HTML)",
+            ]
+            default_sku_slug = "soc-2-audit-cost-calculator"
+        canonical_domain = "https://gainhelm.com"
+        eff_slug_for_path = (
+            slug_clean
+            if slug_clean not in ("index", "general")
+            else (default_sku_slug if sku_clean else "")
+        )
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
     else:
         if sku_clean == "ph_1031_boot_replacement_workpapers" or (
             not sku_clean
@@ -3916,6 +4017,46 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
         "source_agency": "BLS-FRED",
         "points": {"2024": 3.4, "2025": 3.1, "2026": 2.8, "2027": 2.5, "2028": 2.3, "2029": 2.2, "2030": 2.1},
     },
+    {
+        "series_id": "aicpa_soc2_cpa_day_rate",
+        "property_id": "gainhelm",
+        "statutory_citation": "AICPA SSAE 18 AT-C 205",
+        "metric_key": "soc2_type2_median_cpa_audit_fee_usd",
+        "metric_label": "AICPA SOC 2 Type II Median Licensed CPA Firm Examination Fee",
+        "unit": "USD",
+        "source_agency": "AICPA",
+        "points": {"2024": 28500.0, "2025": 31000.0, "2026": 33500.0, "2027": 35500.0, "2028": 37200.0, "2029": 39000.0, "2030": 41000.0},
+    },
+    {
+        "series_id": "dod_cmmc_c3pao_assessment_base",
+        "property_id": "gainhelm",
+        "statutory_citation": "32 CFR Part 170 / DFARS 252.204-7021",
+        "metric_key": "cmmc_level2_c3pao_fee_usd",
+        "metric_label": "DoD CMMC 2.0 Level 2 Accredited C3PAO Triennial Assessment Benchmark",
+        "unit": "USD",
+        "source_agency": "DOD-CIO",
+        "points": {"2024": 42000.0, "2025": 48500.0, "2026": 54000.0, "2027": 58000.0, "2028": 61500.0, "2029": 65000.0, "2030": 68500.0},
+    },
+    {
+        "series_id": "hhs_hipaa_tier4_annual_cap",
+        "property_id": "gainhelm",
+        "statutory_citation": "45 CFR 160.404 / 45 CFR Part 102",
+        "metric_key": "hipaa_tier4_willful_neglect_cap_usd",
+        "metric_label": "HHS OCR Tier 4 Willful Neglect Annual Statutory Penalty Cap",
+        "unit": "USD",
+        "source_agency": "HHS-OCR",
+        "points": {"2024": 2067813.0, "2025": 2134831.0, "2026": 2198876.0, "2027": 2253848.0, "2028": 2310194.0, "2029": 2367949.0, "2030": 2427148.0},
+    },
+    {
+        "series_id": "iso_27006_stage2_auditor_days",
+        "property_id": "gainhelm",
+        "statutory_citation": "ISO/IEC 27006-1:2024 Annex B",
+        "metric_key": "iso27001_stage2_baseline_auditor_days",
+        "metric_label": "ISO/IEC 27006-1 Mandatory Stage 1 + Stage 2 Baseline Auditor Days (100 FTE)",
+        "unit": "DAYS",
+        "source_agency": "ISO-IAF",
+        "points": {"2024": 11.0, "2025": 11.0, "2026": 11.5, "2027": 11.5, "2028": 12.0, "2029": 12.0, "2030": 12.0},
+    },
 ]
 
 
@@ -3968,6 +4109,18 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
             "ed_idr_fpl_multiplier",
             "hhs_fpl_single_base",
             "irs_sec108f_tax_free_forgiveness",
+            "fred_dgs10_yield",
+        ]
+    elif prop_clean == "gainhelm" or sku_clean in (
+        "gh_soc2_cmmc_audit_workpapers",
+        "gh_hipaa_iso27001_governance_kit",
+    ):
+        preferred_ids = [
+            "aicpa_soc2_cpa_day_rate",
+            "dod_cmmc_c3pao_assessment_base",
+            "hhs_hipaa_tier4_annual_cap",
+            "iso_27006_stage2_auditor_days",
+            "fred_cpilfesl_inflation",
             "fred_dgs10_yield",
         ]
     elif sku_clean == "ph_1031_boot_replacement_workpapers" or "1031" in slug_clean:
@@ -4048,7 +4201,7 @@ def synthesize_personalized_audit_workpaper(
             except Exception:
                 continue
     if base_amount <= 0.0:
-        base_amount = 85000.0 if prop_clean == "prexvo" else 250000.0
+        base_amount = 85000.0 if prop_clean == "prexvo" else (65000.0 if prop_clean == "gainhelm" else 250000.0)
 
     eval_meta = evaluate_lead_quote_threshold(prop_clean, slug_clean, base_amount)
     capital_band = str(rec.get("capital_band") or eval_meta["capital_band"])
@@ -4061,7 +4214,73 @@ def synthesize_personalized_audit_workpaper(
         sku=req_sku,
     )
 
-    if prop_clean == "prexvo":
+    if prop_clean == "gainhelm" or offer["offer_sku"] in (
+        "gh_soc2_cmmc_audit_workpapers",
+        "gh_hipaa_iso27001_governance_kit",
+    ):
+        auditor_fee = round(base_amount * 0.44, 2)
+        manual_prep_cost = round(base_amount * 0.38, 2)
+        grc_automation_fee = round(base_amount * 0.18, 2)
+        pentest_remediation = round(base_amount * 0.18, 2)
+        optimized_prep_cost = round(manual_prep_cost * 0.35, 2)
+        optimized_total = round(auditor_fee * 0.88 + grc_automation_fee + optimized_prep_cost + pentest_remediation * 0.85, 2)
+        net_audit_savings = max(0.0, round(base_amount - optimized_total, 2))
+
+        reconciliation_schedule = [
+            {
+                "line_code": "GH-100",
+                "line_item": "Accredited External Auditor / C3PAO / QSA Assessment Fee",
+                "authority": "AICPA SSAE 18 AT-C 205 / ISO 27006-1 / 32 CFR Part 170",
+                "baseline_value": f"${auditor_fee:,.2f}",
+                "optimized_value": f"${auditor_fee * 0.88:,.2f}",
+                "delta_impact": f"-${auditor_fee * 0.12:,.2f} Structured Evidence Discount",
+            },
+            {
+                "line_code": "GH-200",
+                "line_item": "Internal Engineering Evidence Collection & Control Mapping Labor",
+                "authority": "NIST SP 800-53 Rev 5 / NIST SP 800-171 Rev 2 (110 Controls)",
+                "baseline_value": f"${manual_prep_cost:,.2f} (Manual Spreadsheets)",
+                "optimized_value": f"${optimized_prep_cost:,.2f} (Automated Agentic Collectors)",
+                "delta_impact": f"-${manual_prep_cost - optimized_prep_cost:,.2f} Engineering Labor Saved",
+            },
+            {
+                "line_code": "GH-300",
+                "line_item": "Continuous GRC Compliance Platform & Automated Control Monitoring",
+                "authority": "AICPA Trust Services Criteria CC1.1 - CC9.2",
+                "baseline_value": "$0.00 (Unmonitored Posture)",
+                "optimized_value": f"${grc_automation_fee:,.2f}/yr",
+                "delta_impact": "Eliminates Sampling Failure & Audit Delay",
+            },
+            {
+                "line_code": "GH-400",
+                "line_item": "Grey-Box Penetration Testing, Vulnerability Triage & Total Program Cost",
+                "authority": "NIST SP 800-115 / PCI DSS v4.0.1 Req 11.4",
+                "baseline_value": f"${base_amount:,.2f} Total Baseline",
+                "optimized_value": f"${optimized_total:,.2f} Total Optimized",
+                "delta_impact": f"-${net_audit_savings:,.2f} Net Program Cost Reduction",
+            },
+        ]
+        sensitivity_matrix = [
+            {
+                "scenario_label": "Manual Spreadsheet Evidence & Ad-Hoc Auditor Scoping",
+                "modeled_principal": f"${base_amount:,.2f}",
+                "effective_rate": "100.0% Baseline Burn",
+                "estimated_net_benefit": "$0.00 Baseline",
+            },
+            {
+                "scenario_label": "Automated GRC Platform + Pre-Mapped Control Enclave",
+                "modeled_principal": f"${optimized_total:,.2f}",
+                "effective_rate": f"{(optimized_total / max(1.0, base_amount)) * 100:.1f}% Optimized Burn",
+                "estimated_net_benefit": f"+${net_audit_savings:,.2f} Audit Budget Saved",
+            },
+            {
+                "scenario_label": "Multi-Framework Cross-Walk (SOC 2 + ISO 27001 / HIPAA)",
+                "modeled_principal": f"${base_amount * 1.45:,.2f}",
+                "effective_rate": "68.0% Shared Control Reuse",
+                "estimated_net_benefit": f"+${net_audit_savings * 1.65:,.2f} Dual-Audit Savings",
+            },
+        ]
+    elif prop_clean == "prexvo":
         cur_rate = 0.068
         refi_rate = 0.049
         term_years = 10
@@ -4918,6 +5137,18 @@ def render_transactional_playbook_email(lead_record: Dict[str, Any]) -> Dict[str
             "Compare private refinance APR savings against federal IDR and PSLF forgiveness trade-offs.",
             "Review state-specific borrower protections and cosigner release milestones before locking rates.",
         ]
+    elif prop_clean == "gainhelm":
+        brand_name = "GainHelm GRC & Statutory Audit Research Desk"
+        domain_base = "https://gainhelm.com"
+        partner_desk = str(lead_record.get("partner_rep_desk") or "GainHelm Enterprise GRC Partner Desk")
+        redirect_path = str(lead_record.get("redirect_url") or f"/r/vanta_security?source={tool_slug}")
+        partner_url = f"{domain_base}{redirect_path}" if redirect_path.startswith("/") else redirect_path
+        subject = f"[GainHelm Playbook] Your Enterprise Audit Scoping & Compliance Worksheet ({tool_slug})"
+        checklist_items = [
+            "Lock system boundary, production data enclave scope, and in-scope employee headcount before engaging auditors.",
+            "Verify statutory control mappings across AICPA Trust Services Criteria, NIST SP 800-171, ISO 27001, and HIPAA.",
+            "Compare automated GRC evidence collection against manual spreadsheet labor before signing multi-year CPA or C3PAO letters.",
+        ]
     else:
         brand_name = "ProfitHelm Statutory Research Desk"
         domain_base = "https://profithelm.com"
@@ -5165,6 +5396,7 @@ CF_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
 CF_LEADS_KV_NAMESPACES: Dict[str, str] = {
     "profithelm": "983a21b6fcd54fbb884740017b7d96f1",
     "prexvo": "153917b16871453a9f07bfb39ff3fd98",
+    "gainhelm": "d7e2021ef7cf47eea4ae382742481e75",
 }
 
 
@@ -5706,6 +5938,33 @@ def evaluate_lead_quote_threshold(
         primary_partner_key = "splash_financial"
         partner_rep_desk = "Splash Financial Partner Desk"
         live_destination_url = "https://www.splashfinancial.com/student-loan-refinance"
+    elif prop_clean == "gainhelm":
+        threshold_usd = 25000.0
+        if any(tok in slug_clean for tok in ("penetration", "pentest", "pci-dss")):
+            vertical = "offensive_security_pentest"
+            primary_partner_key = "cobalt_pentest"
+            partner_rep_desk = "Cobalt Offensive Security PtaaS Desk"
+            live_destination_url = "https://www.cobalt.io/services/penetration-testing-services"
+        elif any(tok in slug_clean for tok in ("cyber-liability", "insurance", "breach", "hipaa")):
+            vertical = "cyber_liability_underwriting"
+            primary_partner_key = "coalition_cyber_insurance"
+            partner_rep_desk = "Coalition Active Cyber Insurance Underwriting Desk"
+            live_destination_url = "https://www.coalitioninc.com/cyber-insurance"
+        elif any(tok in slug_clean for tok in ("cmmc", "nist-800-171", "sprs", "fedramp")):
+            vertical = "federal_defense_grc"
+            primary_partner_key = "drata_compliance"
+            partner_rep_desk = "Drata Federal & CMMC GRC Automation Desk"
+            live_destination_url = "https://drata.com/product"
+        elif any(tok in slug_clean for tok in ("hitrust", "iso-27001")):
+            vertical = "enterprise_certification_audit"
+            primary_partner_key = "thoropass_audit"
+            partner_rep_desk = "Thoropass Integrated Audit & Compliance Desk"
+            live_destination_url = "https://thoropass.com/platform/"
+        else:
+            vertical = "soc2_grc_automation"
+            primary_partner_key = "vanta_security"
+            partner_rep_desk = "Vanta Trust Management & SOC 2 Audit Desk"
+            live_destination_url = "https://www.vanta.com/products/soc-2"
     else:
         if any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
             threshold_usd = 50000.0
@@ -5906,6 +6165,18 @@ def audit_end_to_end_monetization_and_fulfillment(
             "student-loan-refinance-break-even-calculator",
             39.0,
         ),
+        (
+            "gh_soc2_cmmc_audit_workpapers",
+            "gainhelm",
+            "soc-2-audit-cost-calculator",
+            79.0,
+        ),
+        (
+            "gh_hipaa_iso27001_governance_kit",
+            "gainhelm",
+            "iso-27001-certification-cost-calculator",
+            49.0,
+        ),
     ]
 
     catalog_skus: Dict[str, Any] = {}
@@ -6004,7 +6275,11 @@ def audit_end_to_end_monetization_and_fulfillment(
     hub = MonetizationHub()
     vault_data = getattr(hub, "_vault", {}) or {}
     outbound_summary: Dict[str, Any] = {}
-    for prop_id, reg_map in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+    for prop_id, reg_map in (
+        ("profithelm", PROFITHELM_AFFILIATES),
+        ("prexvo", PREXVO_AFFILIATES),
+        ("gainhelm", GAINHELM_AFFILIATES),
+    ):
         prop_vault = vault_data.get(prop_id, {}) if isinstance(vault_data, dict) else {}
         canonical_keys = [k for k, p_obj in reg_map.items() if k == p_obj.key]
         live_direct: List[str] = []

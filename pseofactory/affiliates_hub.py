@@ -24,13 +24,18 @@ from pseofactory.affiliates import (
     AFFILIATE_REGISTRY,
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
+    GAINHELM_AFFILIATES,
     PROFITHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
+    GAINHELM_DISCLOSURES,
     PREXVO_STANDING_RESTRICTION,
     B2B_PARTNER_KEYS,
     STUDENT_LOAN_PARTNER_KEYS,
+    GAINHELM_PARTNER_KEYS,
     PROFITHELM_TOOL_PATTERNS,
     PREXVO_TOOL_PATTERNS,
+    GAINHELM_TOOL_PATTERNS,
+    GAINHELM_MONETIZED_CALCULATOR_SLUGS,
     ENTERPRISE_B2B_PARTNERS,
     RETAIL_TAX_PARTNERS,
     RETAIL_TAX_SLUGS,
@@ -138,7 +143,7 @@ class MonetizationHub:
         self._init_sovrn_api_key = sovrn_api_key
         self._init_partnerstack_api_key = partnerstack_api_key
         self._init_stripe_account_id = stripe_account_id
-        self._vault: Dict[str, Dict[str, Any]] = {"profithelm": {}, "prexvo": {}}
+        self._vault: Dict[str, Dict[str, Any]] = {"profithelm": {}, "prexvo": {}, "gainhelm": {}}
 
         self.vault_data = self._load_vault()
         self._rebuild_partner_vault_index()
@@ -146,7 +151,7 @@ class MonetizationHub:
     def _rebuild_partner_vault_index(self) -> None:
         """Populates self._vault[property_id][partner_key] from self.vault_data."""
         props = self.vault_data.get("properties", {}) if isinstance(self.vault_data, dict) else {}
-        for prop_id in ("profithelm", "prexvo"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm"):
             prop_map = self._vault.setdefault(prop_id, {})
             prop_data = props.get(prop_id, {})
             if not isinstance(prop_data, dict):
@@ -363,6 +368,10 @@ class MonetizationHub:
                     "fallback_enabled": False,
                     "standing_restriction": PREXVO_STANDING_RESTRICTION,
                 },
+                "gainhelm": {
+                    "fallback_enabled": False,
+                    "default_fallback_url": "https://gainhelm.com",
+                },
             },
             "vault_version": self.vault_data.get("hub_metadata", {}).get("version", "1.0.0"),
         }
@@ -429,7 +438,7 @@ class MonetizationHub:
         URL safety (SSRF rejection), and typography invariants.
         """
         prop_clean = (property_id or "").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo", "exchange1031"):
+        if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm"):
             raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
         if program_data is None and partner_key is not None:
@@ -804,7 +813,7 @@ class MonetizationHub:
         for ProfitHelm long-tail tools; strictly rejects sub-affiliate fallback on Prexvo.
         """
         prop_clean = (property_id or "").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo", "exchange1031"):
+        if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm"):
             raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
         key_clean = (partner_key or "").strip().lower()
@@ -883,6 +892,24 @@ class MonetizationHub:
 
             assert_no_forbidden_dashes(route["cta_text"], context="CTA text for Prexvo route")
             assert_no_forbidden_dashes(route["name"], context="Name for Prexvo route")
+            return route
+
+        # GainHelm routing
+        if prop_clean == "gainhelm":
+            if key_clean in STUDENT_LOAN_PARTNER_KEYS or key_clean in B2B_PARTNER_KEYS:
+                raise ValueError(
+                    f"Strict isolation violation: Foreign tenant partner '{key_clean}' is prohibited on GainHelm."
+                )
+            route = get_affiliate_route(
+                "gainhelm",
+                tool_slug=slug_clean,
+                partner_key=key_clean or None,
+                value_tier=value_tier,
+            )
+            route["is_live"] = route.get("status") in ("live", "active_direct")
+            route["calculator_slug"] = slug_clean
+            route["partner_name"] = route["name"]
+            route["is_fallback"] = False
             return route
 
         # ProfitHelm / Exchange1031 routing
