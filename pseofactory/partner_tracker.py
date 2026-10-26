@@ -2819,6 +2819,7 @@ def resolve_lead_monetization_offer(
     tool_slug: str,
     vertical: str = "",
     lead_id: str = "",
+    sku: str = "",
 ) -> Dict[str, Any]:
     """
     Resolves the tenant-isolated first-party Stripe Checkout monetization offer for a given
@@ -2832,9 +2833,11 @@ def resolve_lead_monetization_offer(
     prop_clean = (property_id or "profithelm").strip().lower()
     slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
     vert_clean = (vertical or "").strip().lower()
+    sku_clean = (sku or "").strip().lower()
     eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
 
-    if prop_clean == "prexvo":
+    if prop_clean == "prexvo" or sku_clean == "px_refi_amortization_decision_audit":
+        prop_clean = "prexvo"
         if is_restricted_public_service_slug(slug_clean, slug_clean):
             raise ValueError(
                 f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
@@ -2851,9 +2854,17 @@ def resolve_lead_monetization_offer(
             "Lender Rate-Match Underwriting Intake Sheet (CSV & Print-Ready Audit HTML)",
         ]
         canonical_domain = "https://prexvo.com"
-        tool_path = f"/{slug_clean}/" if slug_clean != "index" else "/"
+        eff_slug_for_path = (
+            slug_clean
+            if slug_clean not in ("index", "general")
+            else ("student-loan-refinance-break-even-calculator" if sku_clean else "")
+        )
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
     else:
-        if "1031" in slug_clean or "1031" in vert_clean or "exchange" in slug_clean:
+        if sku_clean == "ph_1031_boot_replacement_workpapers" or (
+            not sku_clean
+            and ("1031" in slug_clean or "1031" in vert_clean or "exchange" in slug_clean)
+        ):
             offer_sku = "ph_1031_boot_replacement_workpapers"
             offer_title = "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit"
             offer_price_usd = 79.0
@@ -2865,7 +2876,14 @@ def resolve_lead_monetization_offer(
                 "Mortgage Boot vs Cash Boot Offset & Replacement Debt Matrix",
                 "Qualified Intermediary (QI) Constructive Receipt Safe-Harbor Checklist (CSV & Print-Ready Audit HTML)",
             ]
-        elif any(t in slug_clean or t in vert_clean for t in ("factoring", "invoice", "179", "equipment", "capex")):
+            default_sku_slug = "section-1031-calculator"
+        elif sku_clean == "ph_commercial_capital_audit_toolkit" or (
+            not sku_clean
+            and any(
+                t in slug_clean or t in vert_clean
+                for t in ("factoring", "invoice", "179", "equipment", "capex", "tariff", "301", "landed-cost")
+            )
+        ):
             offer_sku = "ph_commercial_capital_audit_toolkit"
             offer_title = "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers"
             offer_price_usd = 49.0
@@ -2877,6 +2895,7 @@ def resolve_lead_monetization_offer(
                 "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
                 "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
             ]
+            default_sku_slug = "section-179-calculator"
         else:
             offer_sku = "ph_statutory_tax_audit_workpapers"
             offer_title = "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite"
@@ -2889,8 +2908,14 @@ def resolve_lead_monetization_offer(
                 "Quarterly Safe-Harbor Estimated Tax & Penalty Avoidance Schedule",
                 "CPA Substantiation & Audit Defense Documentation Checklist (CSV & Print-Ready Audit HTML)",
             ]
+            default_sku_slug = "s-corp-reasonable-salary-tax-calculator"
         canonical_domain = "https://profithelm.com"
-        tool_path = f"/tools/{slug_clean}/" if slug_clean not in ("index", "general") else "/"
+        eff_slug_for_path = (
+            slug_clean
+            if slug_clean not in ("index", "general")
+            else (default_sku_slug if sku_clean else "")
+        )
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
 
     assert_no_forbidden_dashes(offer_title, context="offer_title")
     for item in deliverables:
@@ -3229,11 +3254,13 @@ def synthesize_personalized_audit_workpaper(
 
     eval_meta = evaluate_lead_quote_threshold(prop_clean, slug_clean, base_amount)
     capital_band = str(rec.get("capital_band") or eval_meta["capital_band"])
+    req_sku = str(rec.get("offer_sku") or rec.get("sku") or "").strip().lower()
     offer = resolve_lead_monetization_offer(
         property_id=prop_clean,
         tool_slug=slug_clean,
         vertical=vert_clean or eval_meta["vertical"],
         lead_id=lead_id,
+        sku=req_sku,
     )
 
     if prop_clean == "prexvo":
@@ -4761,6 +4788,9 @@ def get_lead_monitoring_summary(
         "transactional_fulfilled_count": fulfilled_count,
         "total_pipeline_calculated_usd": round(total_calc_usd, 2),
         "total_checkout_offer_pipeline_usd": round(total_offer_usd, 2),
+        "monetization_e2e_audit": audit_end_to_end_monetization_and_fulfillment(
+            execute_live=verify_live_providers
+        ),
         "leads": leads,
     }
 
@@ -5027,3 +5057,230 @@ def ingest_playbook_subscription(
         scenario_outputs=scenario_outputs,
         blueprint_state=blueprint_state,
     )
+
+
+def audit_end_to_end_monetization_and_fulfillment(
+    execute_live: bool = False,
+    persist_path: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Executes an autonomous end-to-end self-audit across:
+    1. Stripe live merchant & Mercury bank payout settlement readiness (`acct_1T6fSTIq0ckFsf5j`),
+    2. All 4 sellable catalog SKUs (`ph_1031_boot_replacement_workpapers`,
+       `ph_commercial_capital_audit_toolkit`, `ph_statutory_tax_audit_workpapers`,
+       `px_refi_amortization_decision_audit`) across both checkout initiation and post-purchase
+       deliverable fulfillment (`JSON`, print-ready `HTML`, `CSV` schedule, and `/tools/<slug>/`
+       return URL resolution),
+    3. Strict YMYL public-service isolation on Prexvo (`pslf`, `ibr`, `save`, `default-rehabilitation`),
+    4. Outbound `/r/<partner>` affiliate attribution and fail-closed fallback protection across
+       all 24 ProfitHelm and 5 Prexvo routes.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.request
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
+    from pseofactory.affiliates_hub import MonetizationHub
+
+    diag = diagnose_stripe_merchant_readiness(execute_live=execute_live)
+    settlement = diag.get("bank_payout_settlement") or {}
+
+    sku_matrix = [
+        (
+            "ph_1031_boot_replacement_workpapers",
+            "profithelm",
+            "section-1031-calculator",
+            79.0,
+        ),
+        (
+            "ph_commercial_capital_audit_toolkit",
+            "profithelm",
+            "section-179-calculator",
+            49.0,
+        ),
+        (
+            "ph_statutory_tax_audit_workpapers",
+            "profithelm",
+            "s-corp-reasonable-salary-tax-calculator",
+            49.0,
+        ),
+        (
+            "px_refi_amortization_decision_audit",
+            "prexvo",
+            "student-loan-refinance-break-even-calculator",
+            39.0,
+        ),
+    ]
+
+    catalog_skus: Dict[str, Any] = {}
+    all_skus_ok = True
+    for sku_id, prop_id, canon_slug, expected_price in sku_matrix:
+        offer = resolve_lead_monetization_offer(
+            property_id=prop_id,
+            tool_slug=canon_slug,
+            lead_id=f"lead_{prop_id}_e2e_{sku_id[:8]}",
+            sku=sku_id,
+        )
+        direct_sku_offer = resolve_lead_monetization_offer(
+            property_id=prop_id,
+            tool_slug="general",
+            lead_id=f"lead_{prop_id}_direct_{sku_id[:8]}",
+            sku=sku_id,
+        )
+        wp = synthesize_personalized_audit_workpaper(
+            property_id=prop_id,
+            tool_slug=canon_slug,
+            lead_record={"lead_id": f"lead_{prop_id}_wp_{sku_id[:8]}", "offer_sku": sku_id},
+            mode="paid_toolkit",
+        )
+        checkout_ok = (
+            offer["offer_sku"] == sku_id
+            and direct_sku_offer["offer_sku"] == sku_id
+            and float(offer["offer_price_usd"]) == expected_price
+            and "/tools/" in offer["success_url"]
+            and "/tools/" in direct_sku_offer["success_url"]
+        )
+        fulfillment_ok = (
+            wp["offer_sku"] == sku_id
+            and len(wp.get("reconciliation_schedule") or []) >= 4
+            and len(wp.get("sensitivity_matrix") or []) >= 3
+            and len(wp.get("statutory_trend_timeseries") or []) >= 3
+            and "<!DOCTYPE html>" in str(wp.get("html_report") or "")
+            and "window.print()" in str(wp.get("html_report") or "")
+            and "Line Code,Statutory Line Item,Authority" in str(wp.get("csv_content") or "")
+        )
+        live_edge_probe: Optional[Dict[str, Any]] = None
+        if execute_live:
+            domain = "https://prexvo.com" if prop_id == "prexvo" else "https://profithelm.com"
+            chk_url = f"{domain}/api/lead-capture?checkout=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
+            ff_url = f"{domain}/api/lead-capture?fulfill=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
+            try:
+                req_c = urllib.request.Request(chk_url, headers={"User-Agent": "PseoFactoryAutonomousAudit/1.0"})
+                with urllib.request.urlopen(req_c, timeout=12) as rc:
+                    c_json = json.loads(rc.read().decode("utf-8"))
+                req_f = urllib.request.Request(ff_url, headers={"User-Agent": "PseoFactoryAutonomousAudit/1.0"})
+                with urllib.request.urlopen(req_f, timeout=12) as rf:
+                    f_json = json.loads(rf.read().decode("utf-8"))
+                live_edge_probe = {
+                    "checkout_http_status": rc.status,
+                    "checkout_mode": c_json.get("checkout_mode"),
+                    "checkout_session_id": c_json.get("checkout_session_id"),
+                    "fulfill_http_status": rf.status,
+                    "fulfill_status": f_json.get("status"),
+                }
+            except Exception as exc:
+                live_edge_probe = {"error": str(exc)}
+
+        if not (checkout_ok and fulfillment_ok):
+            all_skus_ok = False
+        catalog_skus[sku_id] = {
+            "property_id": prop_id,
+            "canonical_tool_slug": canon_slug,
+            "price_usd": expected_price,
+            "checkout_ready": checkout_ok,
+            "fulfillment_ready": fulfillment_ok,
+            "success_url": offer["success_url"],
+            "fulfillment_url": offer["fulfillment_url"],
+            "csv_fulfillment_url": offer["csv_fulfillment_url"],
+            "reconciliation_rows": len(wp.get("reconciliation_schedule") or []),
+            "trend_series_count": len(wp.get("statutory_trend_timeseries") or []),
+            "live_edge_probe": live_edge_probe,
+        }
+
+    ymyl_slugs = [
+        "pslf-qualifying-payment-simulator",
+        "ibr-hardship-cap-calculator",
+        "save-plan-litigation-forbearance-estimator",
+        "student-loan-default-rehabilitation-calculator",
+    ]
+    ymyl_blocked: List[str] = []
+    for y_slug in ymyl_slugs:
+        blocked = False
+        try:
+            resolve_lead_monetization_offer("prexvo", y_slug)
+        except ValueError:
+            blocked = True
+        eval_y = evaluate_lead_quote_threshold("prexvo", y_slug, 95000.0)
+        if blocked and not eval_y["eligible"]:
+            ymyl_blocked.append(y_slug)
+    ymyl_isolated = len(ymyl_blocked) == len(ymyl_slugs)
+
+    hub = MonetizationHub()
+    vault_data = getattr(hub, "_vault", {}) or {}
+    outbound_summary: Dict[str, Any] = {}
+    for prop_id, reg_map in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+        prop_vault = vault_data.get(prop_id, {}) if isinstance(vault_data, dict) else {}
+        canonical_keys = [k for k, p_obj in reg_map.items() if k == p_obj.key]
+        live_direct: List[str] = []
+        fail_closed_fallback: List[str] = []
+        for k in canonical_keys:
+            p_obj = reg_map[k]
+            v_entry = prop_vault.get(k, {}) if isinstance(prop_vault, dict) else {}
+            v_status = str(v_entry.get("status") or "").strip().lower()
+            if p_obj.status == "live" or v_status in ("live", "active_direct"):
+                live_direct.append(k)
+            else:
+                fail_closed_fallback.append(k)
+        outbound_summary[prop_id] = {
+            "total_routes": len(canonical_keys),
+            "live_direct_count": len(live_direct),
+            "live_direct_keys": sorted(live_direct),
+            "fail_closed_fallback_count": len(fail_closed_fallback),
+            "fail_closed_fallback_keys": sorted(fail_closed_fallback),
+        }
+
+    overall_ok = (
+        all_skus_ok
+        and ymyl_isolated
+        and bool(settlement.get("charges_enabled"))
+        and bool(settlement.get("payouts_enabled"))
+    )
+    report: Dict[str, Any] = {
+        "status": "PASS" if overall_ok else "FAIL",
+        "audited_at": datetime.now(timezone.utc).isoformat(),
+        "execute_live": execute_live,
+        "stripe_and_mercury_settlement": {
+            "stripe_account_id": diag.get("stripe_account_id"),
+            "merchant_email": diag.get("merchant_email"),
+            "charges_enabled": bool(settlement.get("charges_enabled")),
+            "payouts_enabled": bool(settlement.get("payouts_enabled")),
+            "bank_name": settlement.get("bank_name"),
+            "bank_routing_number": settlement.get("routing_number"),
+            "bank_account_last4": settlement.get("account_last4"),
+            "payout_schedule_interval": settlement.get("payout_schedule_interval"),
+            "payout_delay_days": settlement.get("payout_delay_days"),
+            "webhook_url": settlement.get("webhook_url"),
+            "webhook_status": settlement.get("webhook_status"),
+        },
+        "catalog_skus": catalog_skus,
+        "ymyl_public_service_isolation": {
+            "isolated": ymyl_isolated,
+            "verified_restricted_slugs": ymyl_blocked,
+        },
+        "outbound_affiliate_attribution": outbound_summary,
+        "monetization_architecture_policy": {
+            "unapproved_partner_strategy": "fail_closed_to_approved_partner_plus_first_party_stripe_sku",
+            "sub_affiliate_wrappers_prohibited": True,
+            "rationale": (
+                "Unapproved partner slots fail closed onto verified direct partner contracts "
+                "(Impact, CJ, PartnerStack, OTR Solutions) paired with 100%-margin first-party "
+                "Stripe workpaper SKUs ($39, $49, $79), avoiding 20%-30% sub-affiliate wrapper "
+                "revenue haircuts and preserving full attribution telemetry."
+            ),
+        },
+    }
+
+    if persist_path or "PYTEST_CURRENT_TEST" not in os.environ:
+        target_p = (
+            str(persist_path)
+            if persist_path
+            else os.path.join(os.path.dirname(__file__), "..", ".agy", "monetization_e2e_audit.json")
+        )
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(target_p)), exist_ok=True)
+            with open(target_p, "w", encoding="utf-8") as fh:
+                json.dump(report, fh, indent=2)
+                fh.write("\n")
+        except Exception:
+            pass
+
+    return report
+

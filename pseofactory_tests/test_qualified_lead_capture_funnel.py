@@ -1265,5 +1265,124 @@ console.log(JSON.stringify({{ chkData, ffData }}));
         assert f"TREND-{expected_series_id}" in out["ffData"]["csv_content"]
 
 
+def test_post_purchase_return_urls_direct_sku_routing_and_autonomous_audit(tmp_path):
+    """
+    Verifies:
+    1. Prexvo and ProfitHelm post-purchase return URLs (success_url / cancel_url) resolve to
+       canonical /tools/<slug>/ routes (not 404 root /<slug>/ routes on Prexvo).
+    2. Direct ?sku=<sku> requests on /api/lead-capture?checkout=1 and ?fulfill=1 resolve the
+       exact requested SKU ($79 1031, $49 commercial capital, $49 statutory tax, $39 Prexvo refi)
+       even when tool_slug is omitted, and section-301-tariff-landed-cost-calculator maps to
+       ph_commercial_capital_audit_toolkit.
+    3. Autonomous end-to-end monetization and fulfillment self-audit verifies all 4 sellable SKUs,
+       Mercury bank settlement, YMYL public-service isolation, and outbound affiliate attribution.
+    """
+    import subprocess
+    import json
+    from pseofactory.partner_tracker import (
+        resolve_lead_monetization_offer,
+        synthesize_personalized_audit_workpaper,
+    )
+
+    px_offer = resolve_lead_monetization_offer(
+        property_id="prexvo",
+        tool_slug="student-loan-refinance-break-even-calculator",
+        lead_id="lead_prexvo_return_test",
+    )
+    assert px_offer["success_url"].startswith(
+        "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/?checkout_status=success"
+    )
+    assert px_offer["cancel_url"].startswith(
+        "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/?checkout_status=cancelled"
+    )
+
+    tariff_offer = resolve_lead_monetization_offer(
+        property_id="profithelm",
+        tool_slug="section-301-tariff-landed-cost-calculator",
+        lead_id="lead_ph_tariff",
+    )
+    assert tariff_offer["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+    assert tariff_offer["offer_price_usd"] == 49.0
+
+    for sku, expected_price in [
+        ("ph_1031_boot_replacement_workpapers", 79.0),
+        ("ph_commercial_capital_audit_toolkit", 49.0),
+        ("ph_statutory_tax_audit_workpapers", 49.0),
+    ]:
+        direct_offer = resolve_lead_monetization_offer(
+            property_id="profithelm",
+            tool_slug="general",
+            sku=sku,
+            lead_id=f"lead_sku_{sku[:10]}",
+        )
+        assert direct_offer["offer_sku"] == sku
+        assert direct_offer["offer_price_usd"] == expected_price
+        assert "/tools/" in direct_offer["success_url"]
+
+        wp_direct = synthesize_personalized_audit_workpaper(
+            property_id="profithelm",
+            tool_slug="general",
+            lead_record={"lead_id": f"lead_wp_{sku[:10]}", "offer_sku": sku},
+            mode="paid_toolkit",
+        )
+        assert wp_direct["offer_sku"] == sku
+        assert wp_direct["offer_price_usd"] == expected_price
+
+    ph_js = generate_edge_lead_capture_function("profithelm")
+    px_js = generate_edge_lead_capture_function("prexvo")
+    ph_mod = tmp_path / "ph_lead_capture.mjs"
+    px_mod = tmp_path / "px_lead_capture.mjs"
+    ph_mod.write_text(ph_js, encoding="utf-8")
+    px_mod.write_text(px_js, encoding="utf-8")
+
+    runner = f"""
+import * as phMod from {json.dumps(str(ph_mod))};
+import * as pxMod from {json.dumps(str(px_mod))};
+
+const env = {{}};
+const capChk = await (await phMod.onRequestGet({{
+  request: new Request("https://profithelm.com/api/lead-capture?checkout=1&sku=ph_commercial_capital_audit_toolkit&synthetic_test=1"),
+  env
+}})).json();
+const taxChk = await (await phMod.onRequestGet({{
+  request: new Request("https://profithelm.com/api/lead-capture?checkout=1&sku=ph_statutory_tax_audit_workpapers&synthetic_test=1"),
+  env
+}})).json();
+const capFf = await (await phMod.onRequestGet({{
+  request: new Request("https://profithelm.com/api/lead-capture?fulfill=1&sku=ph_commercial_capital_audit_toolkit&synthetic_test=1"),
+  env
+}})).json();
+const pxChk = await (await pxMod.onRequestGet({{
+  request: new Request("https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&synthetic_test=1"),
+  env
+}})).json();
+console.log(JSON.stringify({{ capChk, taxChk, capFf, pxChk }}));
+"""
+    runner_path = tmp_path / "run_sku_routing.mjs"
+    runner_path.write_text(runner, encoding="utf-8")
+    proc = subprocess.run(["node", str(runner_path)], capture_output=True, text=True, check=True)
+    res = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert res["capChk"]["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+    assert res["capChk"]["offer_price_usd"] == 49
+    assert res["capChk"]["success_url"].startswith("https://profithelm.com/tools/")
+    assert res["taxChk"]["offer_sku"] == "ph_statutory_tax_audit_workpapers"
+    assert res["taxChk"]["offer_price_usd"] == 49
+    assert res["capFf"]["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+    assert res["pxChk"]["offer_sku"] == "px_refi_amortization_decision_audit"
+    assert res["pxChk"]["success_url"].startswith("https://prexvo.com/tools/")
+
+    from pseofactory.partner_tracker import audit_end_to_end_monetization_and_fulfillment
+    audit_rep = audit_end_to_end_monetization_and_fulfillment(execute_live=False)
+    assert audit_rep["status"] == "PASS"
+    assert audit_rep["stripe_and_mercury_settlement"]["bank_routing_number"] == "091311229"
+    assert audit_rep["stripe_and_mercury_settlement"]["bank_account_last4"] == "1395"
+    assert len(audit_rep["catalog_skus"]) == 4
+    assert all(item["checkout_ready"] and item["fulfillment_ready"] for item in audit_rep["catalog_skus"].values())
+    assert audit_rep["ymyl_public_service_isolation"]["isolated"] is True
+    assert audit_rep["outbound_affiliate_attribution"]["profithelm"]["total_routes"] == 22
+    assert audit_rep["outbound_affiliate_attribution"]["prexvo"]["total_routes"] == 5
+
+
+
 
 

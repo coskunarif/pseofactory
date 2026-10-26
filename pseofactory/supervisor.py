@@ -978,6 +978,16 @@ class AutonomousLifecycleSupervisor:
             if not any_drift:
                 if not dry_run and not property_ids:
                     cascade_engine.replay_quarantine()
+                if not dry_run and "PYTEST_CURRENT_TEST" not in os.environ:
+                    try:
+                        from pseofactory.partner_tracker import (
+                            audit_end_to_end_monetization_and_fulfillment,
+                            sync_edge_leads_to_ledger,
+                        )
+                        sync_edge_leads_to_ledger(auto_fulfill_unfulfilled=True)
+                        audit_end_to_end_monetization_and_fulfillment(execute_live=False)
+                    except Exception:
+                        pass
                 duration = time.time() - start_time
                 self.consecutive_failures = 0
                 self._record_failure_streak(True, {}, cycle_id, dry_run, scoped=bool(property_ids))

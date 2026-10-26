@@ -2689,6 +2689,9 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/student-loan-refinance-break-even-calculator/";
+  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
+  const cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
     calculated_amount: customBundle.calculated_amount,
@@ -2707,6 +2710,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       playbook_url: playbookUrl,
       fulfillment_url: fulfillmentUrl,
       csv_fulfillment_url: csvFulfillmentUrl,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
       stripe_account_id: stripeAccountId,
@@ -2740,8 +2745,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "payment_method_types[0]": "card",
       customer_email: email,
       client_reference_id: leadId,
-      success_url: `https://prexvo.com/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`,
-      cancel_url: `https://prexvo.com/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       "line_items[0][price_data][currency]": PREXVO_TOOLKIT_OFFER.currency,
       "line_items[0][price_data][unit_amount]": String(PREXVO_TOOLKIT_OFFER.price_cents),
       "line_items[0][price_data][product_data][name]": PREXVO_TOOLKIT_OFFER.title,
@@ -2776,6 +2781,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         playbook_url: playbookUrl,
         fulfillment_url: fulfillmentUrl,
         csv_fulfillment_url: csvFulfillmentUrl,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
@@ -2817,6 +2824,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
     stripe_account_id: stripeAccountId,
@@ -3460,43 +3469,20 @@ function getMemoryBuffer() {
   return globalThis.__PSEOFACTORY_LEADS_BUFFER__;
 }
 
-function resolveVerticalAndThreshold(toolSlug, reqPartner) {
+function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   const s = (toolSlug || "").toLowerCase();
+  const skuClean = String(reqSku || "").trim().toLowerCase();
   if (
-    s.includes("factoring") ||
-    s.includes("invoice") ||
-    s.includes("line-of-credit") ||
-    s.includes("working-capital") ||
-    reqPartner === "otr_solutions_factoring"
-  ) {
-    return {
-      vertical: "invoice_factoring",
-      thresholdUsd: 50000,
-      partnerKey: "otr_solutions_factoring",
-      partnerRepDesk: "Wade Fenton at OTR Solutions",
-      liveBase: "https://www.otrsolutions.com/freight-factoring/",
-      offerSku: "ph_commercial_capital_audit_toolkit",
-      offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
-      offerPriceUsd: 49,
-      offerPriceCents: 4900,
-      statutoryAuthority: "IRC Section 179, Section 168(k) & Commercial APR Equivalency",
-      deliverables: [
-        "Effective Annualized APR & Factoring Reserve Holdback Reconciliation Schedule",
-        "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
-        "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
-        "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
-      ],
-    };
-  }
-  if (
-    s.includes("1031") ||
-    s.includes("like-kind") ||
-    s.includes("exchange") ||
-    s.includes("8824") ||
-    s.includes("3840") ||
-    s.includes("boot") ||
-    s.includes("dst") ||
-    reqPartner === "ipx1031"
+    skuClean === "ph_1031_boot_replacement_workpapers" ||
+    (skuClean === "" &&
+      (s.includes("1031") ||
+        s.includes("like-kind") ||
+        s.includes("exchange") ||
+        s.includes("8824") ||
+        s.includes("3840") ||
+        s.includes("boot") ||
+        s.includes("dst") ||
+        reqPartner === "ipx1031"))
   ) {
     return {
       vertical: "1031_exchange",
@@ -3518,14 +3504,46 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner) {
     };
   }
   if (
-    s.includes("179") ||
-    s.includes("equipment") ||
-    s.includes("lease") ||
-    s.includes("macrs") ||
-    s.includes("depreciation") ||
-    s.includes("vehicle") ||
-    s.includes("gvwr") ||
-    reqPartner === "crest_capital"
+    skuClean !== "ph_statutory_tax_audit_workpapers" &&
+    (s.includes("factoring") ||
+      s.includes("invoice") ||
+      s.includes("line-of-credit") ||
+      s.includes("working-capital") ||
+      s.includes("tariff") ||
+      s.includes("301") ||
+      s.includes("landed-cost") ||
+      reqPartner === "otr_solutions_factoring")
+  ) {
+    return {
+      vertical: "invoice_factoring",
+      thresholdUsd: 50000,
+      partnerKey: "otr_solutions_factoring",
+      partnerRepDesk: "Wade Fenton at OTR Solutions",
+      liveBase: "https://www.otrsolutions.com/freight-factoring/",
+      offerSku: "ph_commercial_capital_audit_toolkit",
+      offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
+      offerPriceUsd: 49,
+      offerPriceCents: 4900,
+      statutoryAuthority: "IRC Section 179, Section 168(k) & Commercial APR Equivalency",
+      deliverables: [
+        "Effective Annualized APR & Factoring Reserve Holdback Reconciliation Schedule",
+        "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
+        "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
+        "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
+      ],
+    };
+  }
+  if (
+    skuClean === "ph_commercial_capital_audit_toolkit" ||
+    (skuClean === "" &&
+      (s.includes("179") ||
+        s.includes("equipment") ||
+        s.includes("lease") ||
+        s.includes("macrs") ||
+        s.includes("depreciation") ||
+        s.includes("vehicle") ||
+        s.includes("gvwr") ||
+        reqPartner === "crest_capital"))
   ) {
     return {
       vertical: "capex_section_179",
@@ -4103,6 +4121,9 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/section-1031-calculator/";
+  const successUrl = `https://profithelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  const cancelUrl = `https://profithelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
     calculated_amount: customBundle.calculated_amount,
@@ -4121,6 +4142,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       playbook_url: playbookUrl,
       fulfillment_url: fulfillmentUrl,
       csv_fulfillment_url: csvFulfillmentUrl,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       checkout_session_id: `cs_edge_${leadId}`,
       checkout_mode: "edge_checkout_rail",
       stripe_account_id: stripeAccountId,
@@ -4154,8 +4177,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "payment_method_types[0]": "card",
       customer_email: email,
       client_reference_id: leadId,
-      success_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`,
-      cancel_url: `https://profithelm.com/tools/${toolSlug}/?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       "line_items[0][price_data][currency]": "usd",
       "line_items[0][price_data][unit_amount]": String(spec.offerPriceCents),
       "line_items[0][price_data][product_data][name]": spec.offerTitle,
@@ -4190,6 +4213,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         playbook_url: playbookUrl,
         fulfillment_url: fulfillmentUrl,
         csv_fulfillment_url: csvFulfillmentUrl,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
         checkout_session_id: data.id || `cs_live_${leadId}`,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
@@ -4231,6 +4256,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
     checkout_session_id: `cs_edge_${leadId}`,
     checkout_mode: "edge_checkout_rail",
     stripe_account_id: stripeAccountId,
@@ -4409,13 +4436,20 @@ export async function onRequestGet(context) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1";
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
+    const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const defaultSlugForSku =
+      reqSku === "ph_commercial_capital_audit_toolkit"
+        ? "section-179-calculator"
+        : reqSku === "ph_statutory_tax_audit_workpapers"
+        ? "s-corp-reasonable-salary-tax-calculator"
+        : "section-1031-calculator";
     const toolSlug = (
       reqUrl.searchParams.get("tool_slug") ||
       reqUrl.searchParams.get("source_tool") ||
       reqUrl.searchParams.get("source") ||
-      "section-1031-calculator"
+      defaultSlugForSku
     ).toLowerCase();
-    const spec = resolveVerticalAndThreshold(toolSlug, "");
+    const spec = resolveVerticalAndThreshold(toolSlug, "", reqSku);
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const storedRecord = await lookupEdgeLeadRecord(
       env,
@@ -4471,12 +4505,19 @@ export async function onRequestGet(context) {
   if (reqUrl.searchParams.get("checkout") === "1") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
+    const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const defaultSlugForSku =
+      reqSku === "ph_commercial_capital_audit_toolkit"
+        ? "section-179-calculator"
+        : reqSku === "ph_statutory_tax_audit_workpapers"
+        ? "s-corp-reasonable-salary-tax-calculator"
+        : "section-1031-calculator";
     const toolSlug =
       reqUrl.searchParams.get("tool_slug") ||
       reqUrl.searchParams.get("source_tool") ||
       reqUrl.searchParams.get("source") ||
-      "section-1031-calculator";
-    const spec = resolveVerticalAndThreshold(toolSlug, "");
+      defaultSlugForSku;
+    const spec = resolveVerticalAndThreshold(toolSlug, "", reqSku);
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const customRecord = await lookupEdgeLeadRecord(
       env,
@@ -4572,7 +4613,8 @@ export async function onRequestPost(context) {
       .replace(/^tools\\//, "");
     const toolSlug = rawSlug || "general";
     const reqPartner = String(body.partner_key || "").trim().toLowerCase();
-    const spec = resolveVerticalAndThreshold(toolSlug, reqPartner);
+    const reqSku = String(body.sku || body.offer_sku || "").trim().toLowerCase();
+    const spec = resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku);
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
     const blueprintState = body.blueprint_state && typeof body.blueprint_state === "object" ? body.blueprint_state : {};

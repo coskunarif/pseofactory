@@ -4309,7 +4309,12 @@ class MaintenanceLifecycle:
             partner_readiness_status_val: Optional[str] = None
             if adapter.property_id in ("profithelm", "prexvo"):
                 try:
-                    from pseofactory.partner_tracker import PartnerTrackingEngine
+                    from pseofactory.partner_tracker import (
+                        PartnerTrackingEngine,
+                        audit_end_to_end_monetization_and_fulfillment,
+                        sync_cloudflare_pages_lead_credentials,
+                        sync_edge_leads_to_ledger,
+                    )
                     partner_engine = PartnerTrackingEngine()
                     in_pytest = "PYTEST_CURRENT_TEST" in os.environ
                     telemetry_sync = partner_engine.sync_edge_click_telemetry(
@@ -4323,6 +4328,13 @@ class MaintenanceLifecycle:
                             for p_id in ("profithelm", "prexvo")
                         }
                     )
+                    if not dry_run and not in_pytest:
+                        try:
+                            sync_cloudflare_pages_lead_credentials(execute_live=True)
+                            sync_edge_leads_to_ledger(auto_fulfill_unfulfilled=True)
+                            audit_end_to_end_monetization_and_fulfillment(execute_live=False)
+                        except Exception:
+                            pass
                     if not dry_run and getattr(adapter, "repo_path", None):
                         try:
                             recon_path = Path(adapter.repo_path) / ".agy" / "portal_click_reconciliation.json"

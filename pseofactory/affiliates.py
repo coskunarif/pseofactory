@@ -1568,6 +1568,7 @@ PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS: Set[str] = {
     "teacher-loan-forgiveness-calculator",
     "closed-school-discharge-calculator",
     "federal-poverty-guideline-discretionary-income-calculator",
+    "student-loan-default-rehabilitation-calculator",
 }
 
 PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS: Tuple[str, ...] = (
@@ -1595,6 +1596,8 @@ PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS: Tuple[str, ...] = (
     "poverty-guideline",
     "poverty guideline",
     "hardship",
+    "default-rehabilitation",
+    "default rehabilitation",
 )
 
 INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
