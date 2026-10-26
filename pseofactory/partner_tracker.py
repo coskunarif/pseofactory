@@ -4367,36 +4367,6 @@ def _sync_record_to_cloudflare_kv(prop_id: str, lead_id: str, record: Dict[str, 
         return False
 
 
-def _read_stripe_cli_credentials() -> Dict[str, str]:
-    """Backward-compatible alias for _load_stripe_credentials()."""
-    return _load_stripe_credentials()
-
-
-def _fetch_zoho_access_token_from_nango() -> str:
-    """Fetches a fresh Zoho Mail OAuth access token via Nango connection credentials."""
-    import urllib.request
-
-    env_creds = _load_email_engine_credentials()
-    if not all(
-        env_creds.get(k) for k in ("NANGO_BASE_URL", "NANGO_CONNECTION_ID", "NANGO_INTEGRATION_ID", "NANGO_SECRET_KEY")
-    ):
-        return ""
-    nango_url = (
-        f"{env_creds['NANGO_BASE_URL'].rstrip('/')}/connection/{env_creds['NANGO_CONNECTION_ID']}"
-        f"?provider_config_key={env_creds['NANGO_INTEGRATION_ID']}&refresh_token=true"
-    )
-    req = urllib.request.Request(
-        nango_url,
-        headers={"Authorization": f"Bearer {env_creds['NANGO_SECRET_KEY']}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return str(data.get("credentials", {}).get("access_token") or "")
-    except Exception:
-        return ""
-
-
 def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[str, Any]:
     """
     Binds live ZeptoMail v1.1, Nango/Zoho Mail OAuth failover, and Stripe Checkout credentials
@@ -4448,11 +4418,7 @@ def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[s
     }
 
     for proj_name, kv_vars in projects_spec.items():
-        non_empty_vars = {
-            k: ({"value": v} if k in ("CANONICAL_BASE", "DOMAIN") else {"type": "secret_text", "value": v})
-            for k, v in kv_vars.items()
-            if v
-        }
+        non_empty_vars = {k: {"value": v} for k, v in kv_vars.items() if v}
         if not execute_live or not cf_token:
             report["projects"][proj_name] = {
                 "updated": False,
