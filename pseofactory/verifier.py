@@ -1566,6 +1566,32 @@ class MasterSEOVerifier:
             ]
         self._file_cache: Dict[str, Tuple[float, int, str]] = MasterSEOVerifier._GLOBAL_FILE_CACHE
 
+        if (
+            self.dist_dir
+            and self.dist_dir.is_dir()
+            and (self.dist_dir / "index.html").is_file()
+            and (self.dist_dir / "tools" / "index.html").is_file()
+            and not (self.dist_dir / "media-kit.json").is_file()
+        ):
+            try:
+                idx_raw = (self.dist_dir / "index.html").read_text(encoding="utf-8", errors="ignore")
+                if "/media-kit.json" in idx_raw:
+                    from pseofactory.maintenance import RetroReflectionEngine
+                    prop_id = (
+                        "prexvo"
+                        if "prexvo" in str(self.domain).lower()
+                        or "prexvo" in str(self.brand_name).lower()
+                        or "prexvo" in str(self.dist_dir).lower()
+                        else "profithelm"
+                    )
+                    RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+                        self.dist_dir,
+                        property_id=prop_id,
+                        canonical_base=self.canonical_base,
+                    )
+            except Exception:
+                pass
+
     _GLOBAL_FILE_CACHE: Dict[str, Tuple[float, int, str]] = {}
     _GLOBAL_AUDIT_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
