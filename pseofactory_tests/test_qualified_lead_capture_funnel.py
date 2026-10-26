@@ -1137,9 +1137,19 @@ def test_trend_mined_statutory_timeseries_and_three_rail_monetization(tmp_path):
     import subprocess
     from pseofactory.affiliates import qualify_monetization_opportunity
     from pseofactory.partner_tracker import (
+        _fetch_zoho_access_token_from_nango,
+        _read_stripe_cli_credentials,
         diagnose_stripe_merchant_readiness,
+        sync_cloudflare_pages_lead_credentials,
         synthesize_personalized_audit_workpaper,
     )
+
+    cli_creds = _read_stripe_cli_credentials()
+    assert cli_creds["account_id"] == "acct_1T6fSTIq0ckFsf5j"
+    assert callable(_fetch_zoho_access_token_from_nango)
+    cf_dry = sync_cloudflare_pages_lead_credentials(execute_live=False)
+    assert "STRIPE_SECRET_KEY" in cf_dry["projects"]["profithelm"]["bound_keys"]
+    assert "STRIPE_SECRET_KEY" in cf_dry["projects"]["prexvo"]["bound_keys"]
 
     stripe_diag = diagnose_stripe_merchant_readiness(execute_live=False)
     assert stripe_diag["stripe_account_id"] == "acct_1T6fSTIq0ckFsf5j"
