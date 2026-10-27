@@ -7,11 +7,14 @@
   "master_networks": {
     "sovrn_commerce": {
       "name": "Sovrn Commerce",
+      "account_id": "2987330",
       "domain_key": "0a5ac1bfe04034bff021b394f5e71d90",
       "api_key": "039f430e9e7cad0bd9ff3e6c8d1c54769d5847c3",
       "site_domain": "profithelm.com",
       "site_url": "https://profithelm.com",
       "redirect_base": "https://redirect.viglink.com",
+      "payout_method_status": "COMPLETE - Direct Deposit / ACH via Tipalti Suppliers Portal APPROVED (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, onboarded 2026-10-20, Suppliers Portal application approved 2026-10-26T21:52:28Z in Zoho Inbox #1032 from accounting@sovrn.com)",
+      "tax_form_status": "Electronic IRS Form W-9 SUBMITTED & Suppliers Portal APPROVED via Tipalti (ProfitHelm LLC, EIN 41-2311423, Zoho Inbox #1032)",
       "enabled": true
     },
     "partnerstack": {

@@ -2540,5 +2540,156 @@ def test_sync_tenant_publisher_prerequisites_rejects_cross_tenant_thread_bleed(t
     assert scanner.scan_directory(px_dist, "prexvo") == {}
 
 
+def test_sovrn_inbox_1032_gainhelm_prerequisites_and_department_pipeline_handoff(
+    temp_email_paths, temp_bus_path, tmp_path
+):
+    """
+    Verifies:
+    1. Zoho Inbox #1032 (accounting@sovrn.com 'Your Suppliers Portal application has been approved')
+       is classified as APPLICATION_APPROVED for sovrn_commerce with requires_operator_decision=False
+       and does not pollute awaiting_portal_link_extraction.
+    2. GainHelm publisher prerequisites (media-kit.json, verification meta tags, governance redirects)
+       are self-healed and pass audit_publisher_prerequisites_and_compliance across all 3 tenants.
+    3. detect_stalled_partner_applications tracks 27 core partners + 6 GainHelm partners (33 fleet total).
+    4. analyze_cluster_monetization_gaps includes 3 GainHelm cyber-compliance clusters with 0 uncovered.
+    5. DepartmentPipelineStateMachine persists deterministic 6-stage handoff state.
+    6. CLI sync-monetization --auto --dry-run --json executes cleanly.
+    """
+    from pseofactory.cli import main as cli_main
+    from pseofactory.maintenance import CrossPropertyContaminationScanner, RetroReflectionEngine
+    import pseofactory.supervisor as sup_mod
+    from pseofactory.verifier import MasterSEOVerifier
+
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+
+    msg_1032 = EmailMessage(
+        id="1032",
+        message_id="<1032@sovrn.com>",
+        account="zoho",
+        mailbox="Inbox",
+        date="2026-10-26T21:52:28Z",
+        subject="Your Suppliers Portal application has been approved",
+        sender_name="accounting",
+        sender_email="accounting@sovrn.com",
+        body_snippet=(
+            "Hello ProfitHelm LLC, Your Suppliers Portal application has been approved "
+            "by accounting@sovrn.com for Sovrn Commerce Account #2987330."
+        ),
+    )
+    with open(cache_path, "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "messages": {msg_1032.id: msg_1032.to_dict()},
+                "classifications": [],
+            },
+            fh,
+        )
+
+    classifications = email_engine.classify_partner_emails([msg_1032])
+    by_id = {c.email_id: c for c in classifications}
+    assert "1032" in by_id
+    assert by_id["1032"].partner_key == "sovrn_commerce"
+    assert by_id["1032"].classification_type == "APPLICATION_APPROVED"
+    assert by_id["1032"].requires_operator_decision is False
+
+    # Prepare synthetic profithelm, prexvo, and gainhelm dist directories
+    ph_dist = tmp_path / "profithelm_dist"
+    px_dist = tmp_path / "prexvo_dist"
+    gh_dist = tmp_path / "gainhelm_dist"
+    for d_dir, prop_id, gov_pages in (
+        (ph_dist, "profithelm", ("about", "privacy")),
+        (px_dist, "prexvo", ("methodology", "disclaimers")),
+        (gh_dist, "gainhelm", ("methodology", "disclaimers")),
+    ):
+        (d_dir / "tools" / "sample-tool").mkdir(parents=True, exist_ok=True)
+        (d_dir / "index.html").write_text(
+            '<!DOCTYPE html><html><head><meta name="google-site-verification" content="test"></head>'
+            '<body><p>FTC Disclosure: Affiliate Disclosure.</p></body></html>',
+            encoding="utf-8",
+        )
+        (d_dir / "tools" / "index.html").write_text(
+            "<!DOCTYPE html><html><head></head><body>Tools</body></html>",
+            encoding="utf-8",
+        )
+        (d_dir / "tools" / "sample-tool" / "index.html").write_text(
+            "<!DOCTYPE html><html><head></head><body>Sample Tool</body></html>",
+            encoding="utf-8",
+        )
+        for gp in gov_pages:
+            (d_dir / gp).mkdir(parents=True, exist_ok=True)
+            (d_dir / gp / "index.html").write_text(
+                f"<!DOCTYPE html><html><head></head><body>{gp}</body></html>",
+                encoding="utf-8",
+            )
+        (d_dir / "_redirects").write_text("/legacy  /tools/  301\n", encoding="utf-8")
+        if prop_id != "gainhelm":
+            RetroReflectionEngine.sync_tenant_publisher_prerequisites(d_dir, prop_id)
+
+    # Leave gainhelm_dist without media-kit.json initially so run_autonomous_partner_lifecycle_sync self-heals it
+    assert not (gh_dist / "media-kit.json").is_file()
+
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    sync_rep = tracker.run_autonomous_partner_lifecycle_sync(
+        force_mail_poll=False,
+        execute_live_probes=False,
+        persist=True,
+        profithelm_dist_dir=str(ph_dist),
+        prexvo_dist_dir=str(px_dist),
+        gainhelm_dist_dir=str(gh_dist),
+        persist_path=str(tmp_path / "partner_lifecycle_autonomous_report.json"),
+    )
+    assert sync_rep["status"] == "PASS"
+    assert (gh_dist / "media-kit.json").is_file()
+    assert "gainhelm" in sync_rep["prerequisite_healed_files"]
+    assert sync_rep["correspondence_delta_detected"] is True
+    assert sync_rep["auto_link_promotion"]["awaiting_portal_link_extraction_count"] == 0
+
+    prereq_rep = sync_rep["publisher_prerequisites_and_compliance"]
+    assert prereq_rep["status"] == "PASS"
+    assert prereq_rep["properties"]["gainhelm"]["status"] == "PASS"
+    assert (
+        prereq_rep["properties"]["gainhelm"]["media_kit_summary"]["legal_entity"]
+        == "GainHelm Cyber Compliance & Audit Economics Research"
+    )
+
+    scanner = CrossPropertyContaminationScanner()
+    assert scanner.scan_directory(gh_dist, "gainhelm") == {}
+
+    # Verify MasterSEOVerifier restores deleted gainhelm media-kit.json with zero contamination
+    (gh_dist / "media-kit.json").unlink()
+    MasterSEOVerifier(dist_dir=gh_dist, domain="gainhelm.com", brand_name="GainHelm")
+    assert (gh_dist / "media-kit.json").is_file()
+    assert scanner.scan_directory(gh_dist, "gainhelm") == {}
+
+    stalled_rep = sync_rep["stalled_applications_monitor"]
+    assert stalled_rep["total_tracked_partners"] == 27
+    assert stalled_rep["gainhelm_tracked_partners"] == 6
+    assert stalled_rep["fleet_total_tracked_partners"] == 33
+
+    gaps_rep = sync_rep["cluster_monetization_gaps"]
+    assert gaps_rep["properties"]["gainhelm"]["clusters_count"] == 3
+    assert gaps_rep["uncovered_commercial_clusters_count"] == 0
+
+    assert hasattr(sup_mod, "DepartmentPipelineStateMachine")
+    sm = sup_mod.DepartmentPipelineStateMachine(state_path=tmp_path / "department_pipeline_state.json")
+    for stg in sup_mod.DEPARTMENT_STAGES:
+        sm.record_stage(stage=stg, status="COMPLETED", trigger_mode="IMMEDIATE_DELTA", delta_detected=True)
+    sm_payload = sm.finalize_and_persist(
+        cycle_id="cycle_test_1032",
+        overall_status="SUCCESS",
+        trigger_mode="IMMEDIATE_DELTA",
+        engine_hash="deadbeef1234",
+        persist=True,
+    )
+    assert sm_payload["stage_order"] == list(sup_mod.DEPARTMENT_STAGES)
+    assert (tmp_path / "department_pipeline_state.json").is_file()
+
+    rc = cli_main(["sync-monetization", "--auto", "--dry-run", "--json"])
+    assert rc == 0
+
+
+
 
 

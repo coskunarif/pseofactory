@@ -373,6 +373,8 @@ class EmailIngestionEngine:
             "partner", "affiliate", "startups", "prexvo", "ecosystem-governance@shopify.com",
             "otrsolutions", "otr solutions", "next insurance", "ergo next", "rho.co",
             "suretybonds", "interactivebrokers", "cj.com", "8101803", "firstpromoter", "xendoo",
+            "sovrn", "accounting@sovrn.com", "suppliers portal", "vanta", "drata", "sprinto",
+            "thoropass", "coalition", "cobalt",
         ]
 
         for env in envelopes:
@@ -1116,6 +1118,39 @@ class EmailIngestionEngine:
                         date=msg.date,
                         candidate_url=cand_url or "https://wallethub.com/",
                         network="CJ Affiliate",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and (
+                "accounting@sovrn.com" in sender_lower
+                or (
+                    "sovrn" in combined_text
+                    and (
+                        "suppliers portal application has been approved" in combined_text
+                        or "application for the sovrn suppliers portal has been approved" in combined_text
+                    )
+                )
+            ):
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="sovrn_commerce",
+                        partner_name="Sovrn Commerce Suppliers Portal (Tipalti ACH)",
+                        category="SUB_AFFILIATE_NETWORK",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="Sovrn Commerce Suppliers Portal application approved by accounting@sovrn.com (Inbox #1032, 2026-10-26T21:52:28Z), confirming Tipalti ACH payout and W-9 settlement readiness for Account #2987330.",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url="https://platform.sovrn.com/commerce",
+                        network="Sovrn Commerce",
                     )
                 )
                 continue

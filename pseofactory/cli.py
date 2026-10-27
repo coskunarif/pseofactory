@@ -927,6 +927,55 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                     print(f"Error: Invalid JSON payload: {exc}", file=sys.stderr)
                 return 1
     else:
+        is_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        if getattr(args, "auto", False) or not is_pytest:
+            try:
+                from pathlib import Path
+                from pseofactory.edge import sync_tenant_edge_redirect_function
+                from pseofactory.partner_tracker import PartnerTrackingEngine
+
+                engine = PartnerTrackingEngine()
+                lifecycle_rep = engine.run_autonomous_partner_lifecycle_sync(
+                    force_mail_poll=not is_pytest,
+                    execute_live_probes=False,
+                    persist=not args.dry_run and not is_pytest,
+                )
+                edge_sync: dict = {}
+                if not args.dry_run and not is_pytest:
+                    for prop_id, repo_p in (
+                        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
+                        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+                        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
+                    ):
+                        if repo_p.is_dir():
+                            try:
+                                edge_sync[prop_id] = sync_tenant_edge_redirect_function(
+                                    repo_p, property_id=prop_id, hub=hub
+                                )
+                            except Exception as exc:
+                                edge_sync[prop_id] = {"status": "ERROR", "error": str(exc)}
+                auto_report = {
+                    "ok": True,
+                    "mode": "autonomous_lifecycle_sync",
+                    "dry_run": bool(args.dry_run),
+                    "partner_lifecycle": lifecycle_rep,
+                    "edge_redirect_sync": edge_sync,
+                }
+                if args.json:
+                    print(json.dumps(auto_report, indent=2))
+                else:
+                    print("Autonomous Monetization Sync Complete [profithelm, prexvo, gainhelm]")
+                    print(f"  Status:           {lifecycle_rep.get('status')}")
+                    print(f"  Messages Polled:  {lifecycle_rep.get('ingested_messages_count')}")
+                    print(f"  Classifications:  {lifecycle_rep.get('classifications_count')}")
+                    print(f"  Readiness Scores: {lifecycle_rep.get('readiness_scores')}")
+                return 0
+            except Exception as exc:
+                if args.json:
+                    print(json.dumps({"ok": False, "error": str(exc)}))
+                else:
+                    print(f"Autonomous sync failed: {exc}", file=sys.stderr)
+                return 1
         if args.json:
             print(json.dumps({"ok": False, "error": "Missing --payload argument"}))
         else:
@@ -1741,6 +1790,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Evaluate synchronization and print summary without writing to disk",
+    )
+    p_sync.add_argument(
+        "--auto",
+        action="store_true",
+        help="Execute zero-touch autonomous partner lifecycle and edge redirect sync across all tenants",
     )
     p_sync.add_argument(
         "--json",

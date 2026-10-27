@@ -3840,7 +3840,7 @@ class MaintenanceLifecycle:
             if (
                 not dry_run
                 and getattr(adapter, "repo_path", None)
-                and adapter.property_id in ("profithelm", "prexvo")
+                and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
                 and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
                 and "PYTEST_CURRENT_TEST" not in os.environ
             ):
@@ -3871,7 +3871,7 @@ class MaintenanceLifecycle:
             if (
                 not dry_run
                 and getattr(adapter, "repo_path", None)
-                and adapter.property_id in ("profithelm", "prexvo")
+                and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
                 and not (
                     "PYTEST_CURRENT_TEST" in os.environ
                     and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
@@ -9419,15 +9419,18 @@ class RetroReflectionEngine:
             return []
 
         updated_files: List[str] = []
-        d_str_low = d.as_posix().lower()
-        is_gainhelm = "gainhelm" in d_str_low or property_id.lower() == "gainhelm"
-        if is_gainhelm:
+        tenant_seg = d.parent.name.lower() if d.name.lower() == "dist" else d.name.lower()
+        if "gainhelm" in tenant_seg:
+            is_gainhelm = True
             is_prexvo = False
-        elif "profithelm" in d_str_low:
+        elif "profithelm" in tenant_seg:
+            is_gainhelm = False
             is_prexvo = False
-        elif "prexvo" in d_str_low:
+        elif "prexvo" in tenant_seg:
+            is_gainhelm = False
             is_prexvo = True
         else:
+            is_gainhelm = property_id.lower() == "gainhelm"
             is_prexvo = property_id.lower() == "prexvo"
 
         default_canon = (
@@ -9479,16 +9482,16 @@ class RetroReflectionEngine:
             try:
                 raw_h = h_file.read_text(encoding="utf-8", errors="ignore")
                 new_h = raw_h
-                if (is_prexvo or is_gainhelm) and '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">' in new_h:
-                    new_h = new_h.replace(
-                        '<meta name="partnerstack-publisher-entity" content="ProfitHelm LLC">',
-                        f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',
-                    )
-                elif not is_prexvo and '<meta name="partnerstack-publisher-entity" content="Prexvo Statutory Research Group">' in new_h:
-                    new_h = new_h.replace(
-                        '<meta name="partnerstack-publisher-entity" content="Prexvo Statutory Research Group">',
-                        f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',
-                    )
+                for foreign_entity in (
+                    "ProfitHelm LLC",
+                    "Prexvo Statutory Research Group",
+                    "GainHelm Cyber Compliance & Audit Economics Research",
+                ):
+                    if foreign_entity != entity_label and f'<meta name="partnerstack-publisher-entity" content="{foreign_entity}">' in new_h:
+                        new_h = new_h.replace(
+                            f'<meta name="partnerstack-publisher-entity" content="{foreign_entity}">',
+                            f'<meta name="partnerstack-publisher-entity" content="{entity_label}">',
+                        )
                 missing_lines = [
                     line for line in meta_block_lines
                     if line.split('="')[1].split('"')[0] not in new_h
@@ -9516,7 +9519,7 @@ class RetroReflectionEngine:
             try:
                 orig_red = redirects_file.read_text(encoding="utf-8") if redirects_file.is_file() else ""
                 desired_rules: List[Tuple[str, str]] = []
-                if is_prexvo:
+                if is_prexvo or is_gainhelm:
                     if (d / "methodology" / "index.html").is_file() and not (d / "about" / "index.html").is_file():
                         desired_rules.extend([("/about", "/methodology/"), ("/about/", "/methodology/")])
                     if (d / "disclaimers" / "index.html").is_file() and not (d / "privacy" / "index.html").is_file():

@@ -95,7 +95,7 @@ class DailyIndexingInspector:
         if netloc:
             return self.tenant_id in netloc
         return self.tenant_id in url_str or not any(
-            other in url_str for other in ("profithelm", "prexvo") if other != self.tenant_id
+            other in url_str for other in ("profithelm", "prexvo", "gainhelm") if other != self.tenant_id
         )
 
     def audit_gsc_rollover_queue(self) -> Dict[str, Any]:
@@ -637,7 +637,11 @@ class DailyIndexingInspector:
 
         eff_now = float(now_ts) if now_ts is not None else datetime.now(timezone.utc).timestamp()
         d_dir = Path(dist_dir).resolve() if dist_dir else (self.base_dir / "dist")
-        domain = "prexvo.com" if self.tenant_id == "prexvo" else "profithelm.com"
+        domain = (
+            "prexvo.com"
+            if self.tenant_id == "prexvo"
+            else ("gainhelm.com" if self.tenant_id == "gainhelm" else "profithelm.com")
+        )
 
         # 1. Audit 90d stale crawl & 130d index drop risk across push and velocity ledgers
         stale_90d_urls: List[Dict[str, Any]] = []
