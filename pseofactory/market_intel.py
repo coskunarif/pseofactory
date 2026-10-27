@@ -2099,8 +2099,12 @@ class MarketIntelligenceEngine:
                 dur_val = float(tool.get("durable_prob", 0.92))
                 stab_val = float(tool.get("historical_stability", 0.90))
 
-                # Verify zero cross-tenant contamination against both ProfitHelm and Prexvo
-                if scanner.scan_text(q, "profithelm") or scanner.scan_text(q, "prexvo"):
+                # Verify zero cross-tenant contamination against ProfitHelm, Prexvo, and GainHelm
+                if (
+                    scanner.scan_text(q, "profithelm")
+                    or scanner.scan_text(q, "prexvo")
+                    or (tenant_id != "gainhelm" and scanner.scan_text(q, "gainhelm"))
+                ):
                     isolation_ok = False
 
                 if q.lower() in observed_queries:
@@ -2340,6 +2344,12 @@ class MarketIntelligenceEngine:
                     "brand_name": "Prexvo",
                     "domain": "prexvo.com",
                     "scope": "Federal Title IV (34 CFR Part 685) Student Loan Repayment, PSLF & Refinance Calculators",
+                },
+                {
+                    "tenant_id": "gainhelm",
+                    "brand_name": "GainHelm",
+                    "domain": "gainhelm.com",
+                    "scope": "Enterprise Cyber Compliance & Audit Scoping Calculators (SOC 2, CMMC 2.0, NIST 800-171 SPRS, ISO 27001, HIPAA, PCI DSS)",
                 },
             ],
             "staged_reserve_domains": [

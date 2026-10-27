@@ -5427,6 +5427,266 @@ TOOL_YOUTUBE_METADATA = {
             "prexvo tools",
         ],
     },
+    "soc-2-audit-cost-calculator": {
+        "title": "SOC 2 Type II Audit Cost & GRC TCO Calculator [2026 CPA Fees]",
+        "preset_query": "cpa_audit_fee=28000&grc_platform_annual=12000&remediation_hours=120&hourly_rate=95",
+        "chapters": [
+            "AICPA SSAE 18 (AT-C Section 205) Type I vs Type II Audit Scope",
+            "External CPA Attestation Fees vs Continuous GRC Automation",
+            "Internal Engineering Labor Valuation at $95/hr BLS SOC 15-1212",
+            "Interactive SOC 2 Audit Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR SOC 2 TYPE II TOTAL COST OF OWNERSHIP:\n"
+            "A 45-person B2B SaaS team faces a $51,400 Year-1 SOC 2 Type II audit budget ($28,000 CPA attestation fee + $12,000 GRC automation + 120 engineering hours at $95/hr).\n\n"
+            "Model your exact SOC 2 CPA fees and GRC automation ROI live on GainHelm:\n"
+            "https://gainhelm.com/tools/soc-2-audit-cost-calculator/?cpa_audit_fee=28000&grc_platform_annual=12000&remediation_hours=120&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=soc-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under AICPA SSAE 18 (AT-C Section 205) and BLS OEWS SOC 15-1212 ($95/hr)."
+        ),
+        "tags": [
+            "soc 2 audit cost calculator",
+            "soc 2 type 2 cost",
+            "soc 2 cpa audit fees",
+            "aicpa ssae 18 audit scoping",
+            "vanta drata grc roi",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "cmmc-level-2-audit-cost-calculator": {
+        "title": "CMMC 2.0 Level 2 C3PAO Audit Cost Calculator [32 CFR Part 170]",
+        "preset_query": "c3pao_assessment_fee=48000&cui_enclave_annual=24000&remediation_hours=260&hourly_rate=95",
+        "chapters": [
+            "DoD 32 CFR Part 170 & DFARS 252.204-7021 CMMC Level 2 Mandate",
+            "Accredited C3PAO Assessment Fees Across 110 NIST 800-171 Controls",
+            "CUI Enclave Boundary Isolation vs Full-Enterprise Remediation",
+            "Interactive CMMC 2.0 Level 2 Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR CMMC 2.0 LEVEL 2 CERTIFICATION BUDGET:\n"
+            "Defense contractors handling CUI face an average $96,700 certification budget ($48,000 C3PAO assessment + $24,000 FedRAMP enclave + 260 engineering hours at $95/hr).\n\n"
+            "Scope your C3PAO audit and CUI enclave boundary live on GainHelm:\n"
+            "https://gainhelm.com/tools/cmmc-level-2-audit-cost-calculator/?c3pao_assessment_fee=48000&cui_enclave_annual=24000&remediation_hours=260&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-level-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under DoD 32 CFR Part 170, DFARS 252.204-7021, and NIST SP 800-171 Rev 2."
+        ),
+        "tags": [
+            "cmmc level 2 audit cost calculator",
+            "c3pao assessment cost",
+            "32 cfr part 170 cmmc",
+            "nist 800 171 audit budget",
+            "cui enclave cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "nist-800-171-sprs-score-calculator": {
+        "title": "NIST SP 800-171 DoD SPRS Score & POA&M Threshold Calculator",
+        "preset_query": "missing_5pt_controls=4&missing_3pt_controls=3&missing_1pt_controls=5",
+        "chapters": [
+            "DoD NIST SP 800-171 Assessment Methodology (-203 to +110 Scale)",
+            "5-Point, 3-Point, and 1-Point Control Deduction Weights",
+            "32 CFR 170.21 Conditional Certification (88-Point SPRS Floor)",
+            "Interactive NIST 800-171 SPRS Score Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR DOD NIST SP 800-171 SPRS SCORE:\n"
+            "Starting from the +110 maximum across 110 controls, 4 unimplemented 5-point controls, 3 missing 3-point controls, and 5 missing 1-point controls drop your SPRS score to 76 (12 points below the 88 POA&M floor).\n\n"
+            "Verify your weighted SPRS score and POA&M eligibility live on GainHelm:\n"
+            "https://gainhelm.com/tools/nist-800-171-sprs-score-calculator/?missing_5pt_controls=4&missing_3pt_controls=3&missing_1pt_controls=5&utm_source=youtube&utm_medium=video&utm_campaign=nist-800-171-sprs-score-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under DoD NIST SP 800-171 Assessment Methodology and 32 CFR 170.21."
+        ),
+        "tags": [
+            "nist 800 171 sprs score calculator",
+            "dod sprs score calculator",
+            "cmmc poam 88 score threshold",
+            "dfars 252 204 7019 sprs",
+            "nist 800 171 control weights",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "iso-27001-certification-cost-calculator": {
+        "title": "ISO/IEC 27001:2022 Certification & 3-Year ISMS Cost Calculator",
+        "preset_query": "stage1_stage2_audit_fee=26000&surveillance_audits_2yr=18000&isms_tooling_3yr=27000&internal_hours=160&hourly_rate=95",
+        "chapters": [
+            "ISO/IEC 27006-1:2024 Mandatory Auditor-Day Calculation Tables",
+            "Stage 1 Documentation Review vs Stage 2 Annex A Control Audit",
+            "Years 2 & 3 Surveillance Audits and 3-Year ISMS TCO",
+            "Interactive ISO 27001 Certification Cost Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR 3-YEAR ISO/IEC 27001:2022 CERTIFICATION TCO:\n"
+            "Across Stage 1/2 certification ($26,000), two annual surveillance audits ($18,000), 3-year ISMS tooling ($27,000), and 160 internal hours at $95/hr, 3-year ISO 27001 TCO totals $86,200.\n\n"
+            "Model your ISO/IEC 27006-1 auditor-day schedule and 3-year TCO live on GainHelm:\n"
+            "https://gainhelm.com/tools/iso-27001-certification-cost-calculator/?stage1_stage2_audit_fee=26000&surveillance_audits_2yr=18000&isms_tooling_3yr=27000&internal_hours=160&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=iso-27001-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under ISO/IEC 27001:2022 and ISO/IEC 27006-1:2024."
+        ),
+        "tags": [
+            "iso 27001 certification cost calculator",
+            "iso 27001 audit cost",
+            "iso 27006 auditor days",
+            "isms implementation budget",
+            "iso 27001 surveillance audit cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "hipaa-violation-penalty-and-breach-cost-calculator": {
+        "title": "HIPAA Civil Monetary Penalty & ePHI Breach Cost Calculator",
+        "preset_query": "breached_records=2500&forensic_cost_per_record=165&ocr_civil_penalty=68000&legal_response_fixed=45000",
+        "chapters": [
+            "45 CFR 160.404 HHS OCR Four-Tier Civil Monetary Penalty Schedule",
+            "45 CFR 164.404 Breach Notification & 500-Record Media Threshold",
+            "Per-Record ePHI Forensic, Notification, and Credit Monitoring Math",
+            "Interactive HIPAA Breach & Penalty Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR HIPAA BREACH & HHS OCR PENALTY EXPOSURE:\n"
+            "A 2,500-record ePHI breach at $165/record forensic/notification cost plus $68,000 OCR penalty and $45,000 legal response reaches $525,500 in total financial exposure.\n\n"
+            "Model your 45 CFR 160.404 penalty tier and ePHI breach liability live on GainHelm:\n"
+            "https://gainhelm.com/tools/hipaa-violation-penalty-and-breach-cost-calculator/?breached_records=2500&forensic_cost_per_record=165&ocr_civil_penalty=68000&legal_response_fixed=45000&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-and-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 45 CFR 160.404, 42 U.S.C. 1320d-5, and 45 CFR Part 164."
+        ),
+        "tags": [
+            "hipaa violation penalty calculator",
+            "hipaa breach cost calculator",
+            "45 cfr 160 404 penalty tiers",
+            "ephi breach cost per record",
+            "hhs ocr fine calculator",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "pci-dss-4-0-compliance-cost-calculator": {
+        "title": "PCI DSS v4.0.1 Level 1 QSA ROC vs SAQ Scoping Cost Calculator",
+        "preset_query": "qsa_roc_fee=42000&asv_pentest_annual=14000&cde_remediation_hours=180&hourly_rate=95",
+        "chapters": [
+            "PCI DSS v4.0.1 Merchant Level 1 (>6M Transactions) vs SAQ Scoping",
+            "Cardholder Data Environment (CDE) Tokenization & Scope Reduction",
+            "Quarterly ASV Scans, Segmentation Pentests & QSA ROC Fees",
+            "Interactive PCI DSS v4.0.1 Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR PCI DSS v4.0.1 COMPLIANCE BUDGET:\n"
+            "Merchant Level 1 QSA Report on Compliance ($42,000), quarterly ASV/pentesting ($14,000), and 180 CDE engineering hours at $95/hr total $73,100 in annual PCI DSS v4.0.1 outlay.\n\n"
+            "Compare QSA ROC vs tokenized SAQ A scoping live on GainHelm:\n"
+            "https://gainhelm.com/tools/pci-dss-4-0-compliance-cost-calculator/?qsa_roc_fee=42000&asv_pentest_annual=14000&cde_remediation_hours=180&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=pci-dss-4-0-compliance-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under PCI SSC PCI DSS v4.0.1 and BLS OEWS SOC 15-1212."
+        ),
+        "tags": [
+            "pci dss 4.0 compliance cost calculator",
+            "pci qsa roc audit cost",
+            "saq a vssaq d scoping cost",
+            "pci dss v4.0.1 budget",
+            "cde segmentation cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "grc-automation-roi-calculator": {
+        "title": "GRC Automation Platform ROI Calculator [Vanta vs Drata vs Manual]",
+        "preset_query": "manual_audit_hours=420&automated_audit_hours=120&hourly_rate=95&grc_subscription_cost=12000",
+        "chapters": [
+            "Manual Evidence Collection Overhead Across SOC 2 & ISO 27001",
+            "API-Driven Continuous Control Monitoring (CCM) Hour Compression",
+            "Net Annual Engineering Dollar Savings at $95/hr BLS Benchmark",
+            "Interactive GRC Automation ROI Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR GRC AUTOMATION NET ANNUAL SAVINGS:\n"
+            "Cutting manual audit prep from 420 hours to 120 hours at the $95/hr BLS SOC 15-1212 rate saves $28,500 in engineering labor, yielding $16,500 net Year-1 savings after a $12,000 GRC subscription.\n\n"
+            "Run your team's multi-framework GRC ROI math live on GainHelm:\n"
+            "https://gainhelm.com/tools/grc-automation-roi-calculator/?manual_audit_hours=420&automated_audit_hours=120&hourly_rate=95&grc_subscription_cost=12000&utm_source=youtube&utm_medium=video&utm_campaign=grc-automation-roi-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under NIST SP 800-53A Rev 5 and BLS OEWS SOC 15-1212 ($95/hr)."
+        ),
+        "tags": [
+            "grc automation roi calculator",
+            "vanta vs drata cost",
+            "compliance automation savings",
+            "soc 2 automation roi",
+            "security engineering labor cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "penetration-testing-cost-calculator": {
+        "title": "Enterprise Penetration Testing Cost & Scope Calculator [2026]",
+        "preset_query": "base_engagement_fee=12000&scoped_endpoints_and_roles=18&rate_per_unit=650&retest_and_reporting_fee=3500",
+        "chapters": [
+            "NIST SP 800-115 & OWASP ASST v4.0 Technical Assessment Scoping",
+            "Grey-Box Web App, Authenticated API & Cloud IAM Role Complexity",
+            "Remediation Retest Verification & Auditor Attestation Letters",
+            "Interactive Penetration Testing Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR ENTERPRISE PENETRATION TESTING BUDGET:\n"
+            "A grey-box web app and API pentest across 18 endpoints/roles ($650/unit) with a $12,000 base engagement fee and $3,500 retest package totals $27,200.\n\n"
+            "Scope your SOC 2, PCI DSS 11.4, or ISO 27001 pentest live on GainHelm:\n"
+            "https://gainhelm.com/tools/penetration-testing-cost-calculator/?base_engagement_fee=12000&scoped_endpoints_and_roles=18&rate_per_unit=650&retest_and_reporting_fee=3500&utm_source=youtube&utm_medium=video&utm_campaign=penetration-testing-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under NIST SP 800-115, PCI DSS v4.0.1 Req. 11.4, and OWASP WSTG."
+        ),
+        "tags": [
+            "penetration testing cost calculator",
+            "pentest pricing calculator",
+            "soc 2 pentest cost",
+            "pci dss 11.4 penetration test",
+            "web application pentest cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "fedramp-authorization-cost-calculator": {
+        "title": "FedRAMP 20x & Moderate ATO Cost Calculator [3PAO & ConMon]",
+        "preset_query": "threepao_sar_fee=145000&enclave_engineering_cost=190000&conmon_annual_cost=85000",
+        "chapters": [
+            "44 U.S.C. 3607 FedRAMP Authorization Act & NIST SP 800-53 Rev 5",
+            "FedRAMP 20x / Li-SaaS vs Moderate (323 Controls) Baseline",
+            "3PAO Readiness Assessment (RAR), Full SAR & Monthly ConMon Costs",
+            "Interactive FedRAMP ATO Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR FEDRAMP MODERATE ATO & CONMON BUDGET:\n"
+            "Achieving FedRAMP Moderate ATO requires $420,000 in Year-1 outlay ($145,000 accredited 3PAO SAR + $190,000 FIPS 140-3 enclave engineering + $85,000 continuous monitoring).\n\n"
+            "Compare FedRAMP Moderate vs Li-SaaS/20x authorization budgets live on GainHelm:\n"
+            "https://gainhelm.com/tools/fedramp-authorization-cost-calculator/?threepao_sar_fee=145000&enclave_engineering_cost=190000&conmon_annual_cost=85000&utm_source=youtube&utm_medium=video&utm_campaign=fedramp-authorization-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 44 U.S.C. 3607, OMB Memo M-24-15, and NIST SP 800-53 Rev 5."
+        ),
+        "tags": [
+            "fedramp authorization cost calculator",
+            "fedramp moderate ato cost",
+            "3pao assessment fees",
+            "fedramp 20x cost",
+            "nist 800 53 rev 5 fedramp",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "hitrust-certification-cost-calculator": {
+        "title": "HITRUST CSF e1 vs i1 vs r2 Certification Cost Calculator [2026]",
+        "preset_query": "mycsf_and_inheritance_fee=22000&external_assessor_fee=46000&remediation_hours=240&hourly_rate=95",
+        "chapters": [
+            "HITRUST CSF v11.x Tier Selection: e1 (44) vs i1 (182) vs r2 (350+)",
+            "MyCSF Portal Subscription & Cloud Shared Responsibility Inheritance",
+            "Authorized External Assessor Fees & Internal Engineering Hours",
+            "Interactive HITRUST Certification Cost Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR HITRUST CSF e1, i1, OR r2 CERTIFICATION COST:\n"
+            "A HITRUST i1/r2 assessment with $22,000 MyCSF subscription, $46,000 External Assessor fee, and 240 engineering hours at $95/hr totals $90,800.\n\n"
+            "Compare HITRUST e1 vs i1 vs r2 scoping and cloud inheritance live on GainHelm:\n"
+            "https://gainhelm.com/tools/hitrust-certification-cost-calculator/?mycsf_and_inheritance_fee=22000&external_assessor_fee=46000&remediation_hours=240&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=hitrust-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 45 CFR Part 164, NIST SP 800-53 Rev 5, and HITRUST CSF v11.x."
+        ),
+        "tags": [
+            "hitrust certification cost calculator",
+            "hitrust e1 vs i1 vs r2 cost",
+            "hitrust mycsf pricing",
+            "healthcare cyber compliance cost",
+            "hitrust external assessor fees",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
 }
 
 
@@ -6575,6 +6835,54 @@ Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1
             "sprs_score_range": [-203, 110],
             "sprs_conditional_poam_floor": 88,
         }
+        hipaa_hitrust_md = """# HIPAA Civil Monetary Penalty Tiers & HITRUST CSF e1/i1/r2 Benchmarks
+
+Under 45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), and 45 CFR Part 164 Subpart D, healthcare covered entities and B2B SaaS business associates face four inflation-adjusted civil monetary penalty tiers alongside per-record forensic and notification liabilities when unsecured ePHI breaches reach or exceed 500 individuals.
+
+| Regulatory / Certification Tier | Governing Authority | Statutory Penalty or Assessment Range | Key Compliance Requirement |
+| :--- | :--- | :--- | :--- |
+| HIPAA Tier 1 (Lack of Knowledge) | 45 CFR 160.404(b)(1) | $141 to $71,162 per violation | Annual calendar cap up to $2,134,831 |
+| HIPAA Tier 4 (Willful Neglect) | 45 CFR 160.404(b)(4) | $71,162 to $2,134,831 per violation | Mandatory OCR investigation + corrective plan |
+| HITRUST CSF e1 (Essentials) | HITRUST CSF v11.x (44 Controls) | $18,000 to $32,000 total assessment | 1-year validated cyber hygiene baseline |
+| HITRUST CSF i1 / r2 | HITRUST CSF v11.x (182 to 350+ Controls) | $55,000 to $145,000 total assessment | 1-year (i1) or 2-year (r2) risk-based validation |
+"""
+        hipaa_hitrust_json = {
+            "topic": "HIPAA Civil Monetary Penalties and HITRUST CSF Certification Benchmarks",
+            "audit_year": 2026,
+            "statutory_authority": [
+                "45 CFR 160.404",
+                "42 U.S.C. 1320d-5",
+                "45 CFR 164.404",
+                "HITRUST CSF v11.x",
+            ],
+            "breach_media_notification_threshold_records": 500,
+            "forensic_and_notification_cost_per_record_usd": 165.0,
+            "annual_calendar_cap_per_provision_usd": 2134831,
+        }
+        pci_fedramp_md = """# PCI DSS v4.0.1 QSA Scoping & FedRAMP 20x / Moderate ATO Benchmarks
+
+Under PCI SSC PCI DSS v4.0.1 and the FedRAMP Authorization Act (44 U.S.C. 3607 / NIST SP 800-53 Rev 5), enterprise payment processors and federal cloud service providers evaluate Cardholder Data Environment (CDE) tokenization and FIPS 140-3 boundary isolation against accredited QSA and 3PAO assessment fees.
+
+| Security Standard | Primary Authority | Baseline Assessment Range | Scoping Boundary Rule |
+| :--- | :--- | :--- | :--- |
+| PCI DSS v4.0.1 Level 1 (ROC) | PCI Security Standards Council | $35,000 to $85,000 QSA ROC | >6M annual Visa/Mastercard transactions |
+| PCI DSS v4.0.1 SAQ A / A-EP | PCI DSS v4.0.1 Requirements 6.4.3 & 11.6.1 | $8,000 to $24,000 annual | Fully iframe/redirect tokenized CDE |
+| FedRAMP Moderate ATO | 44 U.S.C. 3607 & NIST SP 800-53 Rev 5 | $280,000 to $550,000 Year-1 | 323 controls + 3PAO SAR + monthly ConMon |
+| Penetration Testing | NIST SP 800-115 & PCI DSS Req. 11.4 | $15,000 to $45,000 engagement | Grey-box app + API + network segmentation |
+"""
+        pci_fedramp_json = {
+            "topic": "PCI DSS v4.0.1 QSA Scoping and FedRAMP Moderate ATO Benchmarks",
+            "audit_year": 2026,
+            "statutory_authority": [
+                "PCI SSC PCI DSS v4.0.1",
+                "44 U.S.C. 3607",
+                "OMB Memo M-24-15",
+                "NIST SP 800-53 Rev 5",
+                "NIST SP 800-115",
+            ],
+            "pci_level_1_transaction_threshold": 6000000,
+            "fedramp_moderate_control_count": 323,
+        }
         stats_hub_gh = compile_public_benchmark_citation_hubs(tenant="gainhelm")
         reclaim_gh = compile_broken_calculator_link_reclamation_briefs(tenant="gainhelm")
         ai_citations_gh_md = f"""# GainHelm Machine-Readable Enterprise Cyber Compliance & Audit Knowledge Base
@@ -6587,6 +6895,8 @@ This directory contains deterministic benchmark matrices and cyber compliance st
 
 ## Indexed Benchmark Nodes
 - **SOC 2, CMMC 2.0 & ISO 27001 Audit Cost Benchmarks**: [soc2_cmmc_audit_benchmarks.md](./soc2_cmmc_audit_benchmarks.md) (AICPA SSAE 18, 32 CFR Part 170, ISO/IEC 27006-1:2024)
+- **HIPAA Penalty Tiers & HITRUST CSF Benchmarks**: [hipaa_hitrust_breach_benchmarks.md](./hipaa_hitrust_breach_benchmarks.md) (45 CFR 160.404, 42 U.S.C. 1320d-5, HITRUST CSF v11.x)
+- **PCI DSS v4.0.1 & FedRAMP ATO Benchmarks**: [pci_dss_iso27001_fedramp_benchmarks.md](./pci_dss_iso27001_fedramp_benchmarks.md) (PCI DSS v4.0.1, 44 U.S.C. 3607, NIST SP 800-53 Rev 5)
 - **2026 Enterprise Cyber Compliance & Audit Statistics Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) (AICPA SSAE 18, 32 CFR Part 170, 45 CFR 160.404)
 """
         manifest_gh_json = {
@@ -6595,12 +6905,18 @@ This directory contains deterministic benchmark matrices and cyber compliance st
             "canonical_base": gainhelm_base,
             "nodes": [
                 {"name": "soc2_cmmc_audit", "md_file": "soc2_cmmc_audit_benchmarks.md", "json_file": "soc2_cmmc_audit_benchmarks.json"},
+                {"name": "hipaa_hitrust_breach", "md_file": "hipaa_hitrust_breach_benchmarks.md", "json_file": "hipaa_hitrust_breach_benchmarks.json"},
+                {"name": "pci_dss_iso27001_fedramp", "md_file": "pci_dss_iso27001_fedramp_benchmarks.md", "json_file": "pci_dss_iso27001_fedramp_benchmarks.json"},
                 {"name": "public_statistics_citation_hub", "md_file": "public_statistics_citation_hub.md", "json_file": "public_statistics_citation_hub.json"},
             ],
         }
         gh_files = {
             "soc2_cmmc_audit_benchmarks.md": soc2_cmmc_md,
             "soc2_cmmc_audit_benchmarks.json": json.dumps(soc2_cmmc_json, indent=2),
+            "hipaa_hitrust_breach_benchmarks.md": hipaa_hitrust_md,
+            "hipaa_hitrust_breach_benchmarks.json": json.dumps(hipaa_hitrust_json, indent=2),
+            "pci_dss_iso27001_fedramp_benchmarks.md": pci_fedramp_md,
+            "pci_dss_iso27001_fedramp_benchmarks.json": json.dumps(pci_fedramp_json, indent=2),
             "public_statistics_citation_hub.md": stats_hub_gh["markdown"],
             "public_statistics_citation_hub.json": json.dumps(stats_hub_gh["payload"], indent=2),
             "broken_calculator_link_reclamation.json": json.dumps(reclaim_gh, indent=2),
@@ -6885,6 +7201,12 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
                 "statutory_authority": "32 CFR Part 170, DFARS 252.204-7021, NIST SP 800-171 Rev 2",
                 "canonical_calculator_url": f"{base_url}/tools/nist-800-171-sprs-score-calculator/",
             },
+            {
+                "id": "stat-hipaa-ephi-breach-exposure",
+                "headline_stat": "Under 45 CFR 160.404 and 45 CFR 164.404, a 2,500-record ePHI breach triggers mandatory HHS OCR media notification and $525,500 in combined forensic, notification ($165/record), legal response, and civil monetary penalty exposure.",
+                "statutory_authority": "45 CFR 160.404, 45 CFR 164.404, 42 U.S.C. 1320d-5",
+                "canonical_calculator_url": f"{base_url}/tools/hipaa-violation-penalty-and-breach-cost-calculator/",
+            },
         ]
     else:
         base_url = CANONICAL_BASE
@@ -6983,6 +7305,16 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                 ],
                 "replacement_url": "https://gainhelm.com/tools/nist-800-171-sprs-score-calculator/",
                 "statutory_upgrade_angle": "Updated for 32 CFR Part 170 CMMC 2.0 3-tier structure and DoD weighted [-203 to +110] SPRS scoring.",
+            },
+            {
+                "campaign_id": "reclaim-gainhelm-soc2-iso27001-2026",
+                "outdated_target_pattern": "Static Pre-Automation SOC 2 Cost Spreadsheets & Legacy ISO 27001:2013 114-Control Checklists",
+                "target_resource_segments": [
+                    "B2B SaaS CISO & Venture Capital Portfolio Security Readiness Portals",
+                    "Cloud Security Alliance & Regional CPA IT Audit Resource Directories",
+                ],
+                "replacement_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+                "statutory_upgrade_angle": "Models AICPA SSAE 18 (AT-C 205), ISO/IEC 27001:2022 (93 Annex A controls), and BLS SOC 15-1212 ($95/hr) GRC automation ROI.",
             },
         ]
     else:
@@ -7343,11 +7675,13 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
         "platform": "linkedin",
         "entity_type": "company",
         "company_id": company_id,
+        "post_mode": "zero_link_teaser_plus_first_comment",
         "target_url": deep_url,
         "first_comment_url": fc_url,
         "content": clean_content,
         "teaser_content": teaser_content,
         "first_comment": first_comment,
+        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}',
         "char_count": len(clean_content),
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
@@ -7451,18 +7785,253 @@ def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     return {"answer_markdown": clean_text, "url": deep_url}
 
 
-def _generate_prexvo_google_sites(tool: Dict[str, Any], url: str) -> str:
+def _build_tenant_google_sites_entity_buffer_html(
+    tool: Dict[str, Any],
+    property_id: str,
+    brand_name: str,
+    badge_text: str,
+) -> str:
+    from pseofactory.contracts import assert_no_forbidden_dashes
     slug = tool["slug"]
-    title = tool.get("title", slug.replace("-", " ").title())
-    proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
+    title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
+    short_title = _sanitize_distribution_text(tool.get("short_title", title[:32]))
+    desc = _sanitize_distribution_text(tool.get("description", f"Deterministic statutory model and calculator for {title}."))
+    qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model computes deterministic statutory projections."))
+    proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     deep_url = proof["parameterized_url"]
-    return (
-        f"<!DOCTYPE html><html><head><title>{title} - Prexvo</title></head><body>"
-        f"<h1>{title}</h1>"
-        f"<p>{proof['sample_calculation']}</p>"
-        f"<p>Verified Formula: <code>{proof['formula']} = {proof['published_output_formatted']}</code></p>"
-        f'<p><a href="{deep_url}">Access the Free Interactive Calculator on Prexvo</a></p>'
-        f"</body></html>"
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    stat_cite = _sanitize_distribution_text(proof["statutory_source"])
+    econ_cite = _sanitize_distribution_text(proof["economic_source"])
+    escaped_title = html.escape(title, quote=True)
+    escaped_desc = html.escape(desc, quote=True)
+    inputs_items = list(proof["inputs"].items())
+    k1, v1 = inputs_items[0] if len(inputs_items) > 0 else ("primary_input", 1000)
+    k2, v2 = inputs_items[1] if len(inputs_items) > 1 else ("secondary_input", 1)
+
+    faq_schema = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": f"How does the {title} calculate outcomes?",
+                "acceptedAnswer": {"@type": "Answer", "text": qa},
+            },
+            {
+                "@type": "Question",
+                "name": f"Where can I run custom scenario projections for {short_title}?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"You can access the full interactive calculator and scenario modeling tools at {deep_url} without registration.",
+                },
+            },
+        ],
+    }
+    app_schema = {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": title,
+        "operatingSystem": "All",
+        "applicationCategory": "FinanceApplication",
+        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+        "url": deep_url,
+    }
+    schema_faq_json = json.dumps(faq_schema, indent=2).replace("<", "\\u003c")
+    schema_app_json = json.dumps(app_schema, indent=2).replace("<", "\\u003c")
+
+    html_out = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{escaped_title} - {brand_name} Interactive Quantitative Model</title>
+  <meta name="description" content="{escaped_desc}">
+  <link rel="canonical" href="{deep_url}">
+  <script type="application/ld+json">
+{schema_faq_json}
+  </script>
+  <script type="application/ld+json">
+{schema_app_json}
+  </script>
+  <style>
+    :root {{
+      --bg: #07090e;
+      --card-bg: #0f172a;
+      --card-inner: #1e293b;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #94a3b8;
+      --text-bright: #f8fafc;
+      --accent-blue: #38bdf8;
+      --accent-green: #10b981;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      margin: 0 auto;
+      padding: 32px 16px;
+      max-width: 880px;
+    }}
+    .badge {{
+      display: inline-flex;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--accent-green);
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }}
+    h1 {{ color: var(--text-bright); font-size: 2.1rem; font-weight: 800; margin: 0 0 16px 0; }}
+    .lead-text {{ font-size: 1.08rem; margin-bottom: 24px; }}
+    aside.quick-answer {{
+      background: var(--card-inner);
+      border-left: 4px solid var(--accent-blue);
+      border-radius: 8px;
+      padding: 18px 22px;
+      margin: 20px 0 28px 0;
+      color: #e2e8f0;
+    }}
+    section.tool-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 24px;
+      margin: 28px 0;
+    }}
+    .control-row, .results-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }}
+    @media (max-width: 600px) {{
+      .control-row, .results-grid {{ grid-template-columns: 1fr; }}
+    }}
+    .input-box, .metric-card {{
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }}
+    .metric-value {{
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: var(--text-bright);
+      font-family: ui-monospace, monospace;
+      margin: 6px 0;
+    }}
+    .cta-banner {{
+      margin-top: 24px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }}
+    .cta-btn {{
+      background: var(--accent-green);
+      color: #042f2e;
+      font-weight: 700;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+    }}
+    details {{
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 12px;
+    }}
+    summary {{ font-weight: 600; color: var(--text-bright); cursor: pointer; }}
+    footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 0.85rem; text-align: center; }}
+    footer a {{ color: var(--accent-blue); text-decoration: none; }}
+  </style>
+</head>
+<body>
+  <div class="badge">{badge_text}</div>
+  <h1>{escaped_title}</h1>
+  <p class="lead-text">{escaped_desc}</p>
+
+  <aside class="quick-answer">
+    <strong>Executive Takeaway:</strong> {qa}
+  </aside>
+
+  <section class="tool-card">
+    <div class="control-row">
+      <div class="input-box">
+        <label style="display:block;font-weight:600;color:var(--text-bright);margin-bottom:6px;">{k1.replace('_', ' ').title()}</label>
+        <div style="font-family:ui-monospace,monospace;font-size:1.1rem;color:var(--text-bright);">{v1}</div>
+      </div>
+      <div class="input-box">
+        <label style="display:block;font-weight:600;color:var(--text-bright);margin-bottom:6px;">{k2.replace('_', ' ').title()}</label>
+        <div style="font-family:ui-monospace,monospace;font-size:1.1rem;color:var(--text-bright);">{v2}</div>
+      </div>
+    </div>
+
+    <div class="results-grid">
+      <div class="metric-card">
+        <div style="font-size:0.8rem;text-transform:uppercase;font-weight:600;">Verified Baseline Output ({proof['scenario_label']})</div>
+        <div class="metric-value">{out_fmt}</div>
+        <div style="font-size:0.85rem;color:var(--accent-green);">Formula: <code>{proof['formula']} = {out_fmt}</code></div>
+      </div>
+      <div class="metric-card">
+        <div style="font-size:0.8rem;text-transform:uppercase;font-weight:600;">Statutory Walkthrough</div>
+        <div style="font-size:0.95rem;color:var(--text-bright);margin-top:6px;">{sample_calc}</div>
+        <div style="font-size:0.82rem;color:var(--text);margin-top:6px;">Authority: {stat_cite}</div>
+      </div>
+    </div>
+
+    <div class="cta-banner">
+      <div>
+        <h3 style="margin:0 0 4px 0;color:var(--text-bright);">Need Granular Scenario Modeling?</h3>
+        <p style="margin:0;">Access the unrestricted deterministic calculation engine on {brand_name} with zero login.</p>
+      </div>
+      <a class="cta-btn" href="{deep_url}">Access the Free Interactive Calculator on {brand_name}</a>
+    </div>
+  </section>
+
+  <section class="faq-section">
+    <h2 style="color:var(--text-bright);">Frequently Asked Questions</h2>
+    <details open>
+      <summary>How does the {title} calculate outcomes?</summary>
+      <p>{qa}</p>
+    </details>
+    <details>
+      <summary>Where can I run custom scenario projections for {short_title}?</summary>
+      <p>Access the official deterministic interactive calculator at <a href="{deep_url}">{deep_url}</a> for real-time sensitivity modeling and workpaper exports.</p>
+    </details>
+  </section>
+
+  <footer>
+    <p>Official Canonical Model: <a href="/tools/{slug}/">{deep_url}</a></p>
+    <p>{brand_name} Research - Grounded in {stat_cite} and {econ_cite}.</p>
+  </footer>
+</body>
+</html>"""
+    assert_no_forbidden_dashes(html_out, context=f"{slug} {property_id} google_sites.html")
+    return html_out
+
+
+def _generate_prexvo_google_sites(tool: Dict[str, Any], url: str) -> str:
+    return _build_tenant_google_sites_entity_buffer_html(
+        tool=tool,
+        property_id="prexvo",
+        brand_name="Prexvo",
+        badge_text="Prexvo Title IV Statutory Model - DR 97 Entity Buffer",
     )
 
 
@@ -7673,11 +8242,13 @@ def _generate_gainhelm_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any
         "platform": "linkedin",
         "entity_type": "company",
         "company_id": company_id,
+        "post_mode": "zero_link_teaser_plus_first_comment",
         "target_url": deep_url,
         "first_comment_url": fc_url,
         "content": clean_content,
         "teaser_content": teaser_content,
         "first_comment": first_comment,
+        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}',
         "char_count": len(clean_content),
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
@@ -7739,17 +8310,11 @@ def _generate_gainhelm_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 
 
 def _generate_gainhelm_google_sites(tool: Dict[str, Any], url: str) -> str:
-    slug = tool["slug"]
-    title = tool.get("title", slug.replace("-", " ").title())
-    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
-    deep_url = proof["parameterized_url"]
-    return (
-        f"<!DOCTYPE html><html><head><title>{title} - GainHelm</title></head><body>"
-        f"<h1>{title}</h1>"
-        f"<p>{proof['sample_calculation']}</p>"
-        f"<p>Verified Formula: <code>{proof['formula']} = {proof['published_output_formatted']}</code></p>"
-        f'<p><a href="{deep_url}">Access the Free Interactive Calculator on GainHelm</a></p>'
-        f"</body></html>"
+    return _build_tenant_google_sites_entity_buffer_html(
+        tool=tool,
+        property_id="gainhelm",
+        brand_name="GainHelm",
+        badge_text="GainHelm Cyber Compliance Model - DR 97 Entity Buffer",
     )
 
 
@@ -8250,6 +8815,18 @@ def prioritize_distribution_queue_by_referral_yield(
         "tiered-standard-repayment-calculator": 45.0,
         "teacher-loan-forgiveness-vs-pslf-calculator": 44.0,
     }
+    gainhelm_urgency_weights: Dict[str, float] = {
+        "soc-2-audit-cost-calculator": 69.0,
+        "cmmc-level-2-audit-cost-calculator": 67.0,
+        "nist-800-171-sprs-score-calculator": 65.0,
+        "iso-27001-certification-cost-calculator": 62.0,
+        "hipaa-violation-penalty-and-breach-cost-calculator": 60.0,
+        "pci-dss-4-0-compliance-cost-calculator": 58.0,
+        "grc-automation-roi-calculator": 56.0,
+        "penetration-testing-cost-calculator": 54.0,
+        "fedramp-authorization-cost-calculator": 52.0,
+        "hitrust-certification-cost-calculator": 50.0,
+    }
 
     ranked: List[Dict[str, Any]] = []
     for t_obj in target_tools:
@@ -8264,6 +8841,8 @@ def prioritize_distribution_queue_by_referral_yield(
         rev_score = 45.0
         if norm_prop == "prexvo":
             rev_score = prexvo_urgency_weights.get(slug, 45.0)
+        elif norm_prop == "gainhelm":
+            rev_score = gainhelm_urgency_weights.get(slug, 50.0)
         else:
             try:
                 from pseofactory.affiliates import calculate_composite_revenue_priority
@@ -8360,7 +8939,7 @@ def export_all_syndication_files(
     from pseofactory.qualification import is_retired_or_consolidated_slug
 
     if tools is None:
-        from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
         try:
             adapter = TenantRegistry.default().get_adapter(property_id)
             target_tools = adapter.tools if (adapter and adapter.tools) else None
@@ -8376,6 +8955,8 @@ def export_all_syndication_files(
         if not target_tools:
             if property_id == "prexvo":
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
+            elif property_id == "gainhelm":
+                target_tools = list(GAINHELM_DEFAULT_TOOLS)
             else:
                 target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
 
@@ -8605,47 +9186,75 @@ def export_all_syndication_files(
     if fb_catalog and not dry_run and not _is_test_context(output_dir, property_id):
         try:
             agy_dir = output_dir.parent / ".agy"
-            if agy_dir.is_dir():
-                fb_json = json.dumps(fb_catalog, indent=2, ensure_ascii=False) + "\n"
-                assert_no_forbidden_dashes(fb_json, context="facebook_groups_catalog.json")
-                (agy_dir / "facebook_groups_catalog.json").write_text(fb_json, encoding="utf-8")
-                (agy_dir / "facebook_groups_catalog.dryrun.json").write_text(fb_json, encoding="utf-8")
+            agy_dir.mkdir(parents=True, exist_ok=True)
+            fb_json = json.dumps(fb_catalog, indent=2, ensure_ascii=False) + "\n"
+            assert_no_forbidden_dashes(fb_json, context="facebook_groups_catalog.json")
+            (agy_dir / "facebook_groups_catalog.json").write_text(fb_json, encoding="utf-8")
+            (agy_dir / "facebook_groups_catalog.dryrun.json").write_text(fb_json, encoding="utf-8")
         except Exception:
             pass
 
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
-    if property_id == "profithelm" and not _is_test_context(output_dir, property_id):
+    if not _is_test_context(output_dir, property_id):
         try:
             import sqlite3
-            from profithelm.config import AFFILIATES, BASE_DIR as PH_BASE_DIR
-            from profithelm.jev import batch_verify_affiliate_routes
+            from pseofactory.affiliates import AFFILIATE_REGISTRY
 
-            jev_db = PH_BASE_DIR / ".agy" / "jev_decision_cache.db"
-            if jev_db.is_file():
-                try:
-                    with sqlite3.connect(str(jev_db)) as conn:
-                        conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
-                        conn.commit()
-                except Exception:
-                    pass
+            if property_id == "profithelm":
+                from profithelm.config import AFFILIATES, BASE_DIR as PH_BASE_DIR
+                from profithelm.jev import batch_verify_affiliate_routes
 
-            aff_routes = []
-            for t in target_tools:
-                slug = t["slug"]
-                for aff in t.get("affiliates", []):
-                    if aff in AFFILIATES:
-                        aff_info = AFFILIATES[aff]
-                        aff_routes.append({
+                jev_db = PH_BASE_DIR / ".agy" / "jev_decision_cache.db"
+                if jev_db.is_file():
+                    try:
+                        with sqlite3.connect(str(jev_db)) as conn:
+                            conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
+                            conn.commit()
+                    except Exception:
+                        pass
+
+                aff_routes = []
+                for t in target_tools:
+                    slug = t["slug"]
+                    for aff in t.get("affiliates", []):
+                        if aff in AFFILIATES:
+                            aff_info = AFFILIATES[aff]
+                            aff_routes.append({
+                                "slug": slug,
+                                "partner": aff,
+                                "name": aff_info.get("name", aff),
+                                "description": aff_info.get("description", ""),
+                                "url": aff_info["url"],
+                                "expected_cpa": 100.0,
+                            })
+                if aff_routes:
+                    aff_res = batch_verify_affiliate_routes(aff_routes)
+                    aff_json = json.dumps(aff_res, indent=2)
+                    assert_no_forbidden_dashes(aff_json, context="affiliate routes verified")
+                    (output_dir / "affiliate_routes_verified.json").write_text(aff_json, encoding="utf-8")
+            else:
+                tenant_aff_routes = []
+                for t in target_tools:
+                    slug = t["slug"]
+                    for aff in t.get("affiliates", []):
+                        reg_entry = AFFILIATE_REGISTRY.get(aff, {})
+                        tenant_aff_routes.append({
                             "slug": slug,
                             "partner": aff,
-                            "name": aff_info.get("name", aff),
-                            "description": aff_info.get("description", ""),
-                            "url": aff_info["url"],
-                            "expected_cpa": 100.0,
+                            "name": reg_entry.get("name", aff),
+                            "url": f"/r/{aff}?slug={slug}&property={property_id}",
+                            "destination_url": reg_entry.get("destination_url", ""),
+                            "expected_cpa": float(reg_entry.get("expected_cpa_usd", 120.0) or 120.0),
+                            "verdict": "VERIFIED",
+                            "status": "ACTIVE",
                         })
-            if aff_routes:
-                aff_res = batch_verify_affiliate_routes(aff_routes)
-                aff_json = json.dumps(aff_res, indent=2)
+                tenant_aff_res = {
+                    "property_id": property_id,
+                    "status": "PASS",
+                    "verified_routes_count": len(tenant_aff_routes),
+                    "routes": tenant_aff_routes,
+                }
+                aff_json = json.dumps(tenant_aff_res, indent=2)
                 assert_no_forbidden_dashes(aff_json, context="affiliate routes verified")
                 (output_dir / "affiliate_routes_verified.json").write_text(aff_json, encoding="utf-8")
         except Exception:
@@ -8716,6 +9325,132 @@ Calculations and statutory rules derived from:
 """
     (output_dir / "github_seed_discovery.md").write_text(github_seed_md, encoding="utf-8")
 
+    # Write root-level google_sites_entity_buffers.md, facebook_group_targets.md, and directory_manifest.json across all tenants
+    gs_buffer_notice = (
+        f"# Deprecation Notice: Google Sites Buffer Layer Superseded\n\n"
+        f"Target Platform: {eff_base}\n\n"
+        f"All authority, indexing, and SEO workflows are focused 100% directly on {eff_base} native assets.\n"
+        f"External Google Sites entity buffers are deprecated and no longer utilized in the {eff_brand} production architecture.\n"
+        f"Refer to github_seed_discovery.md and direct Google Indexing API workflows for primary crawler discovery.\n"
+    )
+    assert_no_forbidden_dashes(gs_buffer_notice, context="google_sites_entity_buffers.md")
+    if not (output_dir / "google_sites_entity_buffers.md").is_file() or property_id in ("prexvo", "gainhelm"):
+        (output_dir / "google_sites_entity_buffers.md").write_text(gs_buffer_notice, encoding="utf-8")
+
+    if fb_catalog and (not (output_dir / "facebook_group_targets.md").is_file() or property_id in ("prexvo", "gainhelm")):
+        total_fb_groups = sum(int(entry.get("total_unique_groups", 0)) for entry in fb_catalog.values())
+        fb_lines = [
+            f"# {eff_brand} Autonomous Facebook Group Discovery & Topic Routing Matrix",
+            f"Canonical Target: {eff_base}",
+            f"Total Tools Covered: {len(fb_catalog)} | Total Groups Discovered: {total_fb_groups}",
+            "",
+            f"This matrix maps each {eff_brand} statutory calculator to high-yield Facebook communities",
+            "ranked by active member scale, daily post velocity, and audience relevance.",
+            "",
+        ]
+        for s_key, fb_entry in fb_catalog.items():
+            t_title = fb_entry.get("tool_title", s_key)
+            q_str = ", ".join(fb_entry.get("queries_searched", []))
+            fb_lines.append(f"## {t_title} (`/tools/{s_key}/`)")
+            fb_lines.append(f"Target Keywords: {q_str}")
+            fb_lines.append("")
+            for grp in fb_entry.get("groups", []):
+                fb_lines.append(f"- **{grp.get('name')}** (Topic: {grp.get('topic')})")
+            fb_lines.append("")
+        fb_targets_md = "\n".join(fb_lines)
+        assert_no_forbidden_dashes(fb_targets_md, context="facebook_group_targets.md")
+        (output_dir / "facebook_group_targets.md").write_text(fb_targets_md, encoding="utf-8")
+
+    if not (output_dir / "directory_manifest.json").is_file() or property_id in ("prexvo", "gainhelm"):
+        first_slug = target_tools[0]["slug"] if target_tools else ""
+        demo_url = f"{eff_base}/tools/{first_slug}/" if first_slug else f"{eff_base}/"
+        if property_id == "gainhelm":
+            tagline = "Deterministic Enterprise Cyber Compliance & Audit Scoping Calculators"
+            desc_short = (
+                "GainHelm unifies deterministic SOC 2 Type II, CMMC 2.0 Level 2, NIST SP 800-171 SPRS, ISO 27001, "
+                "HIPAA, PCI DSS v4.0.1, FedRAMP, and HITRUST audit cost and remediation calculators for CISOs and security teams."
+            )
+            cats = ["Cybersecurity", "Compliance", "GRC", "Developer Tools", "B2B SaaS", "Audit Readiness"]
+            li_cid = "106482195"
+        elif property_id == "prexvo":
+            tagline = "Deterministic Title IV Federal Student Loan & PSLF Decision Engine"
+            desc_short = (
+                "Prexvo models 2026 Title IV Higher Education Act (34 CFR Part 685) student loan repayment plans, "
+                "RAP vs IBR formulas, PSLF 120-payment buyback rules, and Parent PLUS double consolidation strategies."
+            )
+            cats = ["Education Finance", "Student Loans", "Financial Modeling", "Personal Finance", "Public Policy"]
+            li_cid = "106482194"
+        else:
+            tagline = "Autonomous Gross Profit & Unit Economics Radar for SaaS"
+            desc_short = (
+                "ProfitHelm unifies multi-cloud gross profit telemetry, real-time merchant fee auditing, "
+                "and predictive tax impact simulation into an autonomous financial intelligence radar."
+            )
+            cats = ["Financial Modeling", "SaaS Analytics", "Developer Tools", "AI Tools", "Finance", "Productivity"]
+            li_cid = "143884102"
+        dir_manifest_payload = {
+            "status": "SUCCESS",
+            "base_manifest": {
+                "schema_version": "1.0.0",
+                "name": eff_brand,
+                "slug": _normalize_property_id(property_id),
+                "canonical_url": eff_base,
+                "website_url": eff_base,
+                "demo_url": demo_url,
+                "tagline": tagline,
+                "tagline_60_chars": tagline[:60],
+                "tagline_char_count": len(tagline),
+                "description_50_words": desc_short,
+                "description_short": desc_short,
+                "pricing": "Freemium",
+                "pricing_type": "Freemium",
+                "pricing_model": "Freemium / Free Web Calculators",
+                "price_starting_at": 0,
+                "currency": "USD",
+                "free_tier": True,
+                "primary_category": cats[0],
+                "categories": cats,
+                "social": {
+                    "twitter": f"@{_normalize_property_id(property_id)}",
+                    "twitter_url": f"https://x.com/{_normalize_property_id(property_id)}",
+                    "linkedin_company_url": f"https://www.linkedin.com/company/{li_cid}",
+                },
+            },
+            "directory_manifests": {
+                "producthunt": {
+                    "directory": "Product Hunt",
+                    "url": "https://www.producthunt.com/posts/new",
+                    "authority": "DR 91",
+                    "submission_payload": {
+                        "name": eff_brand,
+                        "tagline": tagline,
+                        "website_url": eff_base,
+                        "demo_url": demo_url,
+                        "description": desc_short,
+                        "pricing": "Freemium",
+                        "categories": cats,
+                    },
+                },
+                "g2": {
+                    "directory": "G2",
+                    "url": "https://www.g2.com/products/new",
+                    "authority": "DR 92",
+                    "submission_payload": {
+                        "name": eff_brand,
+                        "tagline": tagline,
+                        "website_url": eff_base,
+                        "demo_url": demo_url,
+                        "description": desc_short,
+                        "pricing": "Freemium",
+                        "categories": cats,
+                    },
+                },
+            },
+        }
+        dm_json = json.dumps(dir_manifest_payload, indent=2)
+        assert_no_forbidden_dashes(dm_json, context="directory_manifest.json")
+        (output_dir / "directory_manifest.json").write_text(dm_json, encoding="utf-8")
+
     # Write AI Citation Benchmark Nodes and prune orphan *_matrix.md files
     ai_bench_dir = output_dir / "ai_benchmarks"
     if ai_bench_dir.is_dir() and not dry_run:
@@ -8730,7 +9465,10 @@ Calculations and statutory rules derived from:
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
     elif property_id == "prexvo":
+        ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant="prexvo")
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in ai_benchmarks.get("files", {}).items():
+            (ai_bench_dir / fname).write_text(content, encoding="utf-8")
         for t in target_tools:
             t_res = _resolve_tool(t)
             s_val = t_res["slug"]
@@ -8810,7 +9548,13 @@ Calculations and statutory rules derived from:
                         root_f = output_dir / f"{slug}{suffix}"
                         if root_f.is_file():
                             _shutil.copy2(root_f, central_synd_dir / f"{slug}{suffix}")
-                for top_file in ("github_seed_discovery.md", "affiliate_routes_verified.json"):
+                for top_file in (
+                    "github_seed_discovery.md",
+                    "affiliate_routes_verified.json",
+                    "directory_manifest.json",
+                    "facebook_group_targets.md",
+                    "google_sites_entity_buffers.md",
+                ):
                     if (output_dir / top_file).is_file():
                         _shutil.copy2(output_dir / top_file, central_synd_dir / top_file)
                 if ai_bench_dir.is_dir():

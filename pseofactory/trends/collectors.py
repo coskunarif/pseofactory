@@ -714,6 +714,54 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                     "current_position": 9.2,
                 },
             ),
+            (
+                "soc 2 type 2 audit cost calculator",
+                "gainhelm",
+                "AICPA SSAE 18 (AT-C Section 205)",
+                96.5,
+                22.5,
+                4.4,
+                {
+                    "matching_tool": "soc-2-audit-cost-calculator",
+                    "current_position": 7.8,
+                },
+            ),
+            (
+                "cmmc level 2 c3pao audit cost calculator",
+                "gainhelm",
+                "32 CFR Part 170 / DFARS 252.204-7021",
+                95.0,
+                21.5,
+                4.3,
+                {
+                    "matching_tool": "cmmc-level-2-audit-cost-calculator",
+                    "current_position": 8.1,
+                },
+            ),
+            (
+                "nist 800 171 sprs score calculator",
+                "gainhelm",
+                "DoD NIST SP 800-171 Assessment Methodology",
+                93.5,
+                20.5,
+                4.2,
+                {
+                    "matching_tool": "nist-800-171-sprs-score-calculator",
+                    "current_position": 6.9,
+                },
+            ),
+            (
+                "iso 27001 certification cost calculator",
+                "gainhelm",
+                "ISO/IEC 27001:2022 / ISO/IEC 27006-1:2024",
+                90.5,
+                19.0,
+                4.1,
+                {
+                    "matching_tool": "iso-27001-certification-cost-calculator",
+                    "current_position": 8.6,
+                },
+            ),
         ]
         results: List[FeedSpike] = []
         for q_text, prop_id, citation, vel, acc, z_val, extra_meta in statutory_voids:

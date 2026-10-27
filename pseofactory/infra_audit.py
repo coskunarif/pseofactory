@@ -704,14 +704,14 @@ def main() -> int:
     else:
         print(f"      FAIL: {msg_hygiene}")
 
-    print("[4/5] Probing live edge endpoints (profithelm, prexvo, arifcoskun)...")
+    print("[4/5] Probing live edge endpoints (profithelm, prexvo, gainhelm, arifcoskun)...")
     ok_edge, msg_edge = audit_live_edge_endpoints()
     if ok_edge:
         print("      PASS: All active production endpoints returned HTTP 200")
     else:
         print(f"      FAIL: {msg_edge}")
 
-    print("[5/5] Verifying hibernated reserve (gainhelm.com) & retired domain DNS isolation...")
+    print("[5/5] Verifying active tenant (gainhelm.com) & retired domain DNS isolation...")
     ok_dns, msg_dns = audit_hibernated_and_retired_dns_isolation()
     if ok_dns:
         print(f"      PASS: {msg_dns}")

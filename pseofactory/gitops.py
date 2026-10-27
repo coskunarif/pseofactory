@@ -1537,7 +1537,11 @@ class CICDWatcher:
                                         timeout=15,
                                     )
                                     if "recent account payments have failed or your spending limit needs to be increased" in (view_res.stdout or ""):
-                                        proj_name = "prexvo" if "prexvo" in rp.name else ("profithelm" if "profithelm" in rp.name else "")
+                                        proj_name = (
+                                            "prexvo"
+                                            if "prexvo" in rp.name
+                                            else ("gainhelm" if "gainhelm" in rp.name else ("profithelm" if "profithelm" in rp.name else ""))
+                                        )
                                         if proj_name and (rp / "dist").is_dir():
                                             try:
                                                 from pseofactory.maintenance import AssetIntegrityEvaluator, TenantRegistry
@@ -2485,7 +2489,7 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             pass
 
     # 3. Ensure tenant factory Stage 6 never commits .agy/runs into git and pytest runs never mutate tracked workspace files
-    for factory_rel in ("profithelm/factory.py", "prexvo/factory.py"):
+    for factory_rel in ("profithelm/factory.py", "prexvo/factory.py", "gainhelm/factory.py"):
         factory_py = repo / factory_rel
         if not factory_py.is_file():
             continue

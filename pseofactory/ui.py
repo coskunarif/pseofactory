@@ -590,6 +590,9 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         .action-card[data-property="prexvo"] {{
             border-left-color: var(--info);
         }}
+        .action-card[data-property="gainhelm"] {{
+            border-left-color: var(--success);
+        }}
         .action-card-header {{
             display: flex;
             justify-content: space-between;

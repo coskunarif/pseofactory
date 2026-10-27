@@ -2303,6 +2303,60 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     ).fetchone()
     assert pa_row is not None and pa_row["property_id"] == "gainhelm"
 
+    # 7. Deep syndication, AI benchmarks, GSC math domain, and statutory spike parity
+    from pseofactory.distributor import (
+        TOOL_YOUTUBE_METADATA,
+        generate_ai_benchmark_nodes,
+        compile_public_benchmark_citation_hubs,
+        compile_broken_calculator_link_reclamation_briefs,
+        prioritize_distribution_queue_by_referral_yield,
+        export_all_syndication_files,
+    )
+    from pseofactory.gsc_remediation import classify_deterministic_math_opportunity
+    from pseofactory.seo_growth_loops import SEEDED_LIVE_GSC_URL_INSPECTIONS
+    from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+
+    assert "soc-2-audit-cost-calculator" in TOOL_YOUTUBE_METADATA
+    assert "cmmc-level-2-audit-cost-calculator" in TOOL_YOUTUBE_METADATA
+    assert "hitrust-certification-cost-calculator" in TOOL_YOUTUBE_METADATA
+
+    gh_bm = generate_ai_benchmark_nodes(tenant="gainhelm")
+    px_bm = generate_ai_benchmark_nodes(tenant="prexvo")
+    assert gh_bm["nodes_count"] == px_bm["nodes_count"] == 4
+    assert gh_bm["files_count"] == px_bm["files_count"] == 11
+    assert compile_public_benchmark_citation_hubs("gainhelm")["payload"]["citable_statistics_count"] == 3
+    assert compile_broken_calculator_link_reclamation_briefs("gainhelm")["briefs_count"] == 2
+
+    gh_queue = prioritize_distribution_queue_by_referral_yield(property_id="gainhelm")
+    assert len(gh_queue) >= 10
+    assert gh_queue[0]["company_id"] == "106482195"
+    assert gh_queue[0]["revenue_priority_score"] == 69.0
+
+    gh_synd_dir = tmp_path / "gh_syndication"
+    export_all_syndication_files(output_dir=gh_synd_dir, property_id="gainhelm")
+    soc2_gs = (gh_synd_dir / "soc-2-audit-cost-calculator" / "google_sites.html").read_text(encoding="utf-8")
+    assert len(soc2_gs) > 3500
+    assert "application/ld+json" in soc2_gs
+    soc2_pack = json.loads((gh_synd_dir / "soc-2-audit-cost-calculator" / "syndication_pack.json").read_text(encoding="utf-8"))
+    assert soc2_pack["linkedin"]["post_mode"] == "zero_link_teaser_plus_first_comment"
+    assert "--company-id 106482195" in soc2_pack["linkedin"]["command_hint"]
+
+    gsc_math = classify_deterministic_math_opportunity(
+        slug="soc-2-audit-cost-calculator",
+        query="soc 2 type 2 audit cost",
+        tenant_id="gainhelm",
+    )
+    assert gsc_math["math_domain"] == "CYBER_COMPLIANCE_STATUTORY_MATH"
+    assert "AICPA SSAE 18" in gsc_math["statutory_citation"]
+    assert "gainhelm" in SEEDED_LIVE_GSC_URL_INSPECTIONS
+    assert len(SEEDED_LIVE_GSC_URL_INSPECTIONS["gainhelm"]) >= 4
+
+    stat_collector = StatutoryEconomicDatasetCollector(db_path=legacy_db_path)
+    spikes = stat_collector.harvest_statutory_spikes()
+    spike_props = {s.raw_payload.get("property_id") for s in spikes}
+    assert {"profithelm", "prexvo", "gainhelm"}.issubset(spike_props)
+
+
 
 
 

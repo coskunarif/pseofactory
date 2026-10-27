@@ -300,6 +300,46 @@ def classify_deterministic_math_opportunity(
             "statutory_citation": stat_ref,
         }
 
+    cyber_grc_tokens = (
+        "soc-2",
+        "soc 2",
+        "cmmc",
+        "sprs",
+        "800-171",
+        "800 171",
+        "iso-27001",
+        "iso 27001",
+        "hipaa",
+        "pci-dss",
+        "pci dss",
+        "fedramp",
+        "hitrust",
+        "grc",
+        "penetration",
+        "pentest",
+    )
+    if prop == "gainhelm" or any(tok in comb for tok in cyber_grc_tokens):
+        is_cyber_math = any(tok in comb for tok in cyber_grc_tokens) or "calculator" in comb or "simulator" in comb
+        if "cmmc" in comb or "sprs" in comb or "800-171" in comb or "800 171" in comb:
+            stat_ref = "DoD 32 CFR Part 170, DFARS 252.204-7021 & NIST SP 800-171 Rev 2"
+        elif "hipaa" in comb or "hitrust" in comb:
+            stat_ref = "45 CFR 160.404, 42 U.S.C. 1320d-5 & 45 CFR Part 164"
+        elif "iso-27001" in comb or "iso 27001" in comb:
+            stat_ref = "ISO/IEC 27001:2022 & ISO/IEC 27006-1:2024"
+        elif "pci" in comb:
+            stat_ref = "PCI SSC PCI DSS v4.0.1 & BLS OEWS SOC 15-1212"
+        elif "fedramp" in comb:
+            stat_ref = "44 U.S.C. 3607 (FedRAMP Authorization Act) & NIST SP 800-53 Rev 5"
+        elif "penetration" in comb or "pentest" in comb:
+            stat_ref = "NIST SP 800-115, PCI DSS v4.0.1 Req. 11.4 & OWASP WSTG"
+        else:
+            stat_ref = "AICPA SSAE 18 (AT-C Section 205) & BLS OEWS SOC 15-1212"
+        return {
+            "needs_deterministic_math": bool(is_cyber_math),
+            "math_domain": "CYBER_COMPLIANCE_STATUTORY_MATH",
+            "statutory_citation": stat_ref,
+        }
+
     is_tax_math = any(tok in comb for tok in tax_math_tokens) or "calculator" in comb or "simulator" in comb
     if "1031" in comb:
         stat_ref = "IRC Section 1031(a)(3) & Section 1250"
