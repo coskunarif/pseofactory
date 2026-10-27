@@ -224,3 +224,33 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
 
     slop_rep = audit_mod.audit_code_slop_ratchet()
     assert slop_rep["passed"] is True, slop_rep
+
+
+def test_retro_reflection_detects_unqualified_commercial_links_in_dist(tmp_path):
+    """
+    Verifies RetroReflectionEngine.audit_estate flags calculator pages whose /r/ links
+    already have source_tool= query params but lack rel='noopener sponsored'.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    dist_dir = tmp_path / "dist"
+    tool_dir = dist_dir / "tools" / "soc-2-audit-cost-calculator"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    # Build a synthetic tool page that satisfies all mechanics in audit_html_mechanics
+    # except that its /r/ link with source_tool= lacks rel="noopener sponsored".
+    base_html = "/home/ubuntuadmin/projects/gainhelm/dist/tools/soc-2-audit-cost-calculator/index.html"
+    import pathlib, re
+
+    raw = pathlib.Path(base_html).read_text(encoding="utf-8")
+    degraded = re.sub(
+        r'(<a\b[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)\s+rel=["\'][^"\']*["\']',
+        r"\1",
+        raw,
+        flags=re.I,
+    )
+    (tool_dir / "index.html").write_text(degraded, encoding="utf-8")
+
+    rep = RetroReflectionEngine.audit_estate(dist_dir, "gainhelm")
+    assert "tools/soc-2-audit-cost-calculator/index.html" in rep["stale_pages"]
+    assert "callout_message_match" in rep["stale_pages"]["tools/soc-2-audit-cost-calculator/index.html"]
+

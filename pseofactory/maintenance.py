@@ -9784,6 +9784,10 @@ class RetroReflectionEngine:
                     or 'data-status="pending"' in content
                     or "Calculate & File Taxes Online with TaxAct" in content
                     or ('href="/r/' in content and "source_tool=" not in content)
+                    or any(
+                        "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
+                        for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)
+                    )
                     or ('id="pseo-runtime-sync"' in content and ("resolveBlueprintStatusNode" not in content or "appendActionLink" not in content))
                 ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
@@ -9795,6 +9799,10 @@ class RetroReflectionEngine:
                 or 'data-partner="sofi_refi"' in content
                 or ("1031" in rel and 'data-partner="ipx1031"' not in content and 'data-partner="lawdepot"' not in content)
                 or ('href="/r/' in content and "source_tool=" not in content)
+                or any(
+                    "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
+                    for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)
+                )
             ):
                 if "callout_message_match" not in missing:
                     missing.append("callout_message_match")
@@ -10108,21 +10116,21 @@ class RetroReflectionEngine:
                     if property_id.lower() == "prexvo":
                         seed_sec = (
                             '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-                            '      <a href="/r/splash_financial">Splash Financial</a>\n'
+                            '      <a href="/r/splash_financial" target="_blank" rel="noopener sponsored nofollow">Splash Financial</a>\n'
                             '    </section>\n  '
                         )
                     elif property_id.lower() == "gainhelm":
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Verified Enterprise GRC &amp; Security Execution Partners</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/vanta_security">Vanta</a></div>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>\n'
                             '      </section>\n    '
                         )
                     else:
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Verified Commercial Execution Partners</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/crest_capital">Xendoo</a></div>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/crest_capital" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
                             '      </section>\n    '
                         )
                     content = content.replace("</main>", f"{seed_sec}</main>", 1)
