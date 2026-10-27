@@ -259,10 +259,18 @@ class TrendHistoryDB:
                     volume_delta_pct REAL NOT NULL DEFAULT 0.0,
                     cpc_delta_pct REAL NOT NULL DEFAULT 0.0,
                     volatility_score REAL NOT NULL DEFAULT 0.0,
+                    serp_weaknesses TEXT NOT NULL DEFAULT '[]',
                     checked_at TEXT NOT NULL
                 );
                 """
             )
+            treg_cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(treg_metric_snapshots);").fetchall()
+            }
+            if "serp_weaknesses" not in treg_cols:
+                conn.execute(
+                    "ALTER TABLE treg_metric_snapshots ADD COLUMN serp_weaknesses TEXT NOT NULL DEFAULT '[]';"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_checked ON treg_metric_snapshots(query_slug, checked_at DESC);"
             )
@@ -548,6 +556,92 @@ class TrendHistoryDB:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stat_econ_metric_key ON statutory_economic_timeseries(metric_key, effective_year ASC);"
             )
+
+            # Idempotent CHECK constraint migration for existing pre-GainHelm databases
+            for tbl_name, new_ddl, idx_ddls in (
+                (
+                    "property_assignments",
+                    """
+                    CREATE TABLE property_assignments_new (
+                        assignment_id TEXT PRIMARY KEY,
+                        query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
+                        cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
+                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
+                        assignment_basis TEXT NOT NULL,
+                        matched_existing_slug TEXT,
+                        cannibalization_score REAL NOT NULL DEFAULT 0.0,
+                        current_position REAL NOT NULL DEFAULT 100.0,
+                        contamination_scan_passed INTEGER NOT NULL DEFAULT 1 CHECK(contamination_scan_passed IN (0, 1)),
+                        assigned_at TEXT NOT NULL
+                    );
+                    """,
+                    [
+                        "CREATE INDEX IF NOT EXISTS idx_property_assignments_property ON property_assignments(property_id);",
+                        "CREATE INDEX IF NOT EXISTS idx_property_assignments_slug ON property_assignments(query_slug);",
+                    ],
+                ),
+                (
+                    "jev_evaluations",
+                    """
+                    CREATE TABLE jev_evaluations_new (
+                        evaluation_id TEXT PRIMARY KEY,
+                        query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
+                        cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
+                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
+                        jev_score REAL NOT NULL,
+                        durable_prob REAL NOT NULL,
+                        composite_profit_yield REAL NOT NULL,
+                        cannibalization_risk REAL NOT NULL,
+                        action TEXT NOT NULL CHECK(action IN ('BUILD_PAGE', 'REFACTOR_PAGE', 'MONITOR', 'REJECT', 'PROPOSE_NEW_APP')),
+                        target_asset_type TEXT NOT NULL,
+                        passed_thresholds INTEGER NOT NULL CHECK(passed_thresholds IN (0, 1)),
+                        decision_reason TEXT NOT NULL,
+                        spec_payload TEXT,
+                        evaluated_at TEXT NOT NULL
+                    );
+                    """,
+                    [
+                        "CREATE INDEX IF NOT EXISTS idx_jev_eval_cycle_action ON jev_evaluations(cycle_id, action);",
+                        "CREATE INDEX IF NOT EXISTS idx_jev_eval_property_action ON jev_evaluations(property_id, action);",
+                    ],
+                ),
+                (
+                    "statutory_economic_timeseries",
+                    """
+                    CREATE TABLE statutory_economic_timeseries_new (
+                        series_id TEXT NOT NULL,
+                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'shared', 'unassigned')),
+                        jurisdiction TEXT NOT NULL DEFAULT 'US-FED',
+                        statutory_citation TEXT NOT NULL,
+                        metric_key TEXT NOT NULL,
+                        metric_label TEXT NOT NULL,
+                        effective_year INTEGER NOT NULL,
+                        metric_value REAL NOT NULL,
+                        unit TEXT NOT NULL DEFAULT 'USD',
+                        source_agency TEXT NOT NULL DEFAULT 'IRS',
+                        recorded_at TEXT NOT NULL,
+                        metadata TEXT,
+                        PRIMARY KEY (series_id, effective_year)
+                    );
+                    """,
+                    [
+                        "CREATE INDEX IF NOT EXISTS idx_stat_econ_prop_year ON statutory_economic_timeseries(property_id, effective_year ASC);",
+                        "CREATE INDEX IF NOT EXISTS idx_stat_econ_metric_key ON statutory_economic_timeseries(metric_key, effective_year ASC);",
+                    ],
+                ),
+            ):
+                row_ddl = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;",
+                    (tbl_name,),
+                ).fetchone()
+                if row_ddl and row_ddl[0] and "'gainhelm'" not in str(row_ddl[0]):
+                    conn.execute(f"DROP TABLE IF EXISTS {tbl_name}_new;")
+                    conn.execute(new_ddl)
+                    conn.execute(f"INSERT INTO {tbl_name}_new SELECT * FROM {tbl_name};")
+                    conn.execute(f"DROP TABLE {tbl_name};")
+                    conn.execute(f"ALTER TABLE {tbl_name}_new RENAME TO {tbl_name};")
+                    for idx_sql in idx_ddls:
+                        conn.execute(idx_sql)
 
     # -------------------------------------------------------------------------
     # Crawl Cycle Operations
@@ -1006,8 +1100,8 @@ class TrendHistoryDB:
                 snapshot_id, query_slug, cycle_id, search_volume, cpc_usd,
                 competition_index, keyword_difficulty, position_zero_vacant,
                 historical_stability, volume_delta_pct, cpc_delta_pct,
-                volatility_score, checked_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                volatility_score, serp_weaknesses, checked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 snapshot.snapshot_id,
@@ -1022,6 +1116,7 @@ class TrendHistoryDB:
                 snapshot.volume_delta_pct,
                 snapshot.cpc_delta_pct,
                 snapshot.volatility_score,
+                getattr(snapshot, "serp_weaknesses", "[]") or "[]",
                 snapshot.checked_at,
             ),
         )
@@ -1088,6 +1183,7 @@ class TrendHistoryDB:
             volume_delta_pct=row["volume_delta_pct"],
             cpc_delta_pct=row["cpc_delta_pct"],
             volatility_score=row["volatility_score"],
+            serp_weaknesses=str(row["serp_weaknesses"] if "serp_weaknesses" in row.keys() else "[]"),
             checked_at=row["checked_at"],
         )
 

@@ -206,23 +206,27 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if clean_path.startswith("/r/"):
             self._handle_affiliate_redirect(is_head=False)
             return
-        if clean_path == "/api/lead-capture":
+        if clean_path in ("/api/lead-capture", "/api/checkout", "/api/lead-fulfillment"):
             from pseofactory.partner_tracker import (
                 resolve_lead_monetization_offer,
                 synthesize_personalized_audit_workpaper,
             )
             qs = urllib.parse.parse_qs(parsed_url.query)
+            if clean_path == "/api/checkout" and "checkout" not in qs:
+                qs["checkout"] = ["1"]
+            elif clean_path == "/api/lead-fulfillment" and "fulfill" not in qs:
+                qs["fulfill"] = ["1"]
             prop_id = self._detect_property_id()
             dist_srv = getattr(self, "dist_server", None)
-            if qs.get("playbook", [""])[0] == "1" or qs.get("fulfill", [""])[0] == "1":
-                is_fulfill = qs.get("fulfill", [""])[0] == "1"
+            if qs.get("playbook", [""])[0] == "1" or qs.get("fulfill", [""])[0] == "1" or qs.get("mode", [""])[0] in ("playbook", "fulfill"):
+                is_fulfill = qs.get("fulfill", [""])[0] == "1" or qs.get("mode", [""])[0] == "fulfill"
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
                 default_slug = (
                     "section-1031-calculator"
                     if prop_id == "profithelm"
                     else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
                 )
-                tool_slug = qs.get("tool_slug", [default_slug])[0]
+                tool_slug = qs.get("tool_slug", qs.get("slug", [default_slug]))[0]
                 stored_rec = None
                 if dist_srv is not None:
                     for item in dist_srv.captured_leads:
@@ -288,14 +292,14 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     **wp,
                 })
                 return
-            if qs.get("checkout", [""])[0] == "1":
+            if qs.get("checkout", [""])[0] == "1" or qs.get("mode", [""])[0] == "checkout":
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
                 default_slug = (
                     "section-1031-calculator"
                     if prop_id == "profithelm"
                     else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
                 )
-                tool_slug = qs.get("tool_slug", [default_slug])[0]
+                tool_slug = qs.get("tool_slug", qs.get("slug", [default_slug]))[0]
                 offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id)
                 eff_rec_chk: Dict[str, Any] = {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug}
                 amt_raw = qs.get("amount", [""])[0]

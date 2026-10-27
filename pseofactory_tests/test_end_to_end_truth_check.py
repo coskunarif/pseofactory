@@ -2204,6 +2204,107 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     fb = IndexingFeedbackLoop(property_id="gainhelm", base_dir=tmp_path)
     assert fb.domain == "gainhelm.com"
 
+    # 5. Edge function parity (lead-capture.js, checkout.js, lead-fulfillment.js, telemetry.js)
+    from pseofactory.edge import generate_edge_lead_capture_function, sync_tenant_edge_redirect_function
+
+    gh_lead_js = generate_edge_lead_capture_function("gainhelm")
+    assert "resolveEdgeStripeCheckoutOffer" in gh_lead_js
+    assert "stripe_live_session" in gh_lead_js
+    assert "html_report" in gh_lead_js
+    assert "csv_content" in gh_lead_js
+    assert "lead_gainhelm_" in gh_lead_js
+
+    gh_repo = tmp_path / "gainhelm_repo"
+    (gh_repo / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    sync_res = sync_tenant_edge_redirect_function(gh_repo, "gainhelm")
+    assert sync_res["status"] == "UPDATED"
+    assert (gh_repo / "functions" / "api" / "lead-capture.js").is_file()
+    assert (gh_repo / "functions" / "api" / "telemetry.js").is_file()
+    assert (gh_repo / "functions" / "api" / "checkout.js").is_file()
+    assert (gh_repo / "functions" / "api" / "lead-fulfillment.js").is_file()
+    assert "withCheckoutFlag" in (gh_repo / "functions" / "api" / "checkout.js").read_text(encoding="utf-8")
+    assert "withFulfillFlag" in (gh_repo / "functions" / "api" / "lead-fulfillment.js").read_text(encoding="utf-8")
+
+    # 6. Legacy SQLite schema migration parity (serp_weaknesses + 'gainhelm' CHECK constraint)
+    import sqlite3
+    from pseofactory.trends.models import PropertyAssignmentRecord, TregSnapshotRecord
+
+    legacy_db_path = tmp_path / "legacy_trends.db"
+    conn = sqlite3.connect(str(legacy_db_path))
+    conn.executescript(
+        """
+        CREATE TABLE treg_metric_snapshots (
+            snapshot_id TEXT PRIMARY KEY,
+            query_slug TEXT NOT NULL,
+            cycle_id TEXT NOT NULL,
+            search_volume INTEGER NOT NULL DEFAULT 0,
+            cpc_usd REAL NOT NULL DEFAULT 0.0,
+            competition_index REAL NOT NULL DEFAULT 0.0,
+            keyword_difficulty REAL NOT NULL DEFAULT 0.0,
+            position_zero_vacant INTEGER NOT NULL DEFAULT 0,
+            historical_stability REAL NOT NULL DEFAULT 0.85,
+            volume_delta_pct REAL NOT NULL DEFAULT 0.0,
+            cpc_delta_pct REAL NOT NULL DEFAULT 0.0,
+            volatility_score REAL NOT NULL DEFAULT 0.0,
+            checked_at TEXT NOT NULL
+        );
+        CREATE TABLE property_assignments (
+            assignment_id TEXT PRIMARY KEY,
+            query_slug TEXT NOT NULL,
+            cycle_id TEXT NOT NULL,
+            property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'unassigned')),
+            assignment_basis TEXT NOT NULL,
+            matched_existing_slug TEXT,
+            cannibalization_score REAL NOT NULL DEFAULT 0.0,
+            current_position REAL NOT NULL DEFAULT 100.0,
+            contamination_scan_passed INTEGER NOT NULL DEFAULT 1,
+            assigned_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    migrated_db = TrendHistoryDB(db_path=legacy_db_path)
+    migrated_db.record_treg_snapshot(
+        TregSnapshotRecord(
+            snapshot_id="snap_gh_1",
+            query_slug="soc-2-type-2-audit-cost-calculator",
+            cycle_id="cycle_gh_1",
+            search_volume=2400,
+            cpc_usd=38.5,
+            competition_index=0.72,
+            keyword_difficulty=42.0,
+            position_zero_vacant=1,
+            historical_stability=0.9,
+            volume_delta_pct=12.0,
+            cpc_delta_pct=5.0,
+            volatility_score=0.1,
+            checked_at="2026-10-26T21:00:00Z",
+            serp_weaknesses='["thin_blog"]',
+        )
+    )
+    migrated_db.record_property_assignment(
+        PropertyAssignmentRecord(
+            assignment_id="assign_gh_1",
+            query_slug="soc-2-type-2-audit-cost-calculator",
+            cycle_id="cycle_gh_1",
+            property_id="gainhelm",
+            assignment_basis="Direct GRC match",
+            matched_existing_slug="soc-2-audit-cost-calculator",
+            cannibalization_score=0.05,
+            current_position=100.0,
+            contamination_scan_passed=1,
+            assigned_at="2026-10-26T21:00:00Z",
+        )
+    )
+    pa_row = migrated_db.get_connection().execute(
+        "SELECT property_id FROM property_assignments WHERE assignment_id = 'assign_gh_1'"
+    ).fetchone()
+    assert pa_row is not None and pa_row["property_id"] == "gainhelm"
+
+
+
 
 
 

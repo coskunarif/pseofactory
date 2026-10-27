@@ -368,6 +368,7 @@ class TregSnapshotRecord:
     volume_delta_pct: float = 0.0
     cpc_delta_pct: float = 0.0
     volatility_score: float = 0.0
+    serp_weaknesses: str = "[]"
     checked_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def __post_init__(self):
@@ -381,6 +382,8 @@ class TregSnapshotRecord:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TregSnapshotRecord":
+        raw_sw = data.get("serp_weaknesses", "[]")
+        sw_str = json.dumps(raw_sw) if isinstance(raw_sw, (list, dict)) else str(raw_sw or "[]")
         return cls(
             snapshot_id=str(data.get("snapshot_id", "")),
             query_slug=str(data.get("query_slug", "")),
@@ -394,6 +397,7 @@ class TregSnapshotRecord:
             volume_delta_pct=float(data.get("volume_delta_pct", 0.0)),
             cpc_delta_pct=float(data.get("cpc_delta_pct", 0.0)),
             volatility_score=float(data.get("volatility_score", 0.0)),
+            serp_weaknesses=sw_str,
             checked_at=str(data.get("checked_at", datetime.now(timezone.utc).isoformat())),
         )
 
