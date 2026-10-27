@@ -7806,6 +7806,13 @@ class RetroReflectionEngine:
             or ('id="partner-quote-intake-step"' in html_content and 'id="lead-capture-form"' not in html_content)
             or "data-checkout-trigger" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
+            or "window.location.protocol === 'file:'" in html_content
+            or (
+                "data-calc-preset" in html_content
+                and 'data-above-fold-presets="true"' not in html_content
+                and '<section class="hero-section">' in html_content
+                and (html_content.find("data-calc-preset") - max(0, html_content.find("<main"))) > 2500
+            )
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(html_content)
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
