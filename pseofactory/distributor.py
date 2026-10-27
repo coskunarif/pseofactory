@@ -8114,8 +8114,16 @@ def export_all_syndication_files(
             pass
 
     # Write Master GitHub Seed Discovery Node Matrix (DR 96+)
-    eff_base = "https://prexvo.com" if property_id == "prexvo" else CANONICAL_BASE
-    eff_brand = "Prexvo" if property_id == "prexvo" else "ProfitHelm"
+    eff_base = (
+        "https://prexvo.com"
+        if property_id == "prexvo"
+        else ("https://gainhelm.com" if property_id == "gainhelm" else CANONICAL_BASE)
+    )
+    eff_brand = (
+        "Prexvo"
+        if property_id == "prexvo"
+        else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
+    )
     badge_items = [
         f"[![{eff_brand} Research](https://img.shields.io/badge/{eff_brand}-Statutory_Models-090d16?style=flat-square)]({eff_base}/)"
     ]
@@ -8540,7 +8548,11 @@ def dispatch_to_distribution_lead(
                     except Exception:
                         existing_entries = []
                         seen_slugs = set()
-                canon_base = "https://prexvo.com" if property_id == "prexvo" else "https://profithelm.com"
+                canon_base = (
+                    "https://prexvo.com"
+                    if property_id == "prexvo"
+                    else ("https://gainhelm.com" if property_id == "gainhelm" else "https://profithelm.com")
+                )
                 for slug, pack_obj in all_assets.items():
                     if slug not in seen_slugs:
                         existing_entries.append({

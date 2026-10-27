@@ -2690,6 +2690,20 @@ def test_sovrn_inbox_1032_gainhelm_prerequisites_and_department_pipeline_handoff
     assert rc == 0
 
 
+def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand():
+    """Verifies AssetIntegrityEvaluator audits GainHelm syndication youtube_metadata.json against brand 'GainHelm'."""
+    from pseofactory.maintenance import AssetIntegrityEvaluator, WorkspacePropertyScanner
+
+    scanner = WorkspacePropertyScanner()
+    by_id = {p.property_id: p for p in scanner.discover_properties()}
+    assert "gainhelm" in by_id
+    evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
+    rep = evaluator.audit_all(by_id["gainhelm"], check_engine_drift=False, check_ledger=False)
+    assert rep.status == "PASS", f"GainHelm audit_all failed: {[d.details for d in rep.drifted_assets]}"
+    assert rep.drifted_assets_count == 0
+
+
+
 
 
 

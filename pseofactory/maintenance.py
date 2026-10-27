@@ -2948,7 +2948,12 @@ class AssetIntegrityEvaluator:
                 if d.is_dir() and not d.name.startswith(".") and (d / "index.html").is_file()
             }
             synd_issues: List[str] = []
-            brand_chk = "Prexvo" if str(adapter.property_id).lower() == "prexvo" else "ProfitHelm"
+            prop_low = str(adapter.property_id).lower()
+            brand_chk = (
+                "Prexvo"
+                if prop_low == "prexvo"
+                else ("GainHelm" if prop_low == "gainhelm" else "ProfitHelm")
+            )
             for s_item in sorted(synd_dir_cand.iterdir()):
                 if s_item.name.startswith("."):
                     continue
