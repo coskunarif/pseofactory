@@ -3476,6 +3476,8 @@ def _apply_closed_loop_dom_mutation_to_dist_html(
     if updated_html != raw_html:
         html_path.write_text(updated_html, encoding="utf-8")
         return True
+    if new_workbench and (new_workbench in updated_html or 'data-workbench-mode="prediction_market_ev"' in updated_html):
+        return True
     return False
 
 
@@ -3654,11 +3656,11 @@ def investigate_competitor_traffic_spikes(
                     "query": mut_q,
                     "source": "live_competitor_dom_snapshot",
                     "intent_cluster": mut_slug,
-                    "velocity": 85.0,
-                    "velocity_ratio": 1.85,
-                    "velocity_delta": 35.0,
-                    "acceleration": 17.5,
-                    "consecutive_cycles": 3,
+                    "velocity": 185.0,
+                    "velocity_ratio": 4.85,
+                    "velocity_delta": 95.0,
+                    "acceleration": 47.5,
+                    "consecutive_cycles": 4,
                     "target_url": f"https://profithelm.com/tools/{mut_slug}/",
                     "current_position": 9.5,
                 }

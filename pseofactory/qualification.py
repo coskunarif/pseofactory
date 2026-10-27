@@ -3234,6 +3234,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         elif "/" not in clean_off and clean_off:
             slugs_to_purge.add(clean_off)
 
+    import sys
     for mod_name in (f"{prop}.config", "profithelm.config", "prexvo.config", "gainhelm.config"):
         cfg_mod = sys.modules.get(mod_name)
         if cfg_mod is not None:
@@ -3676,6 +3677,74 @@ def load_property_redirect_map(
     return resolved_map
 
 
+_GAINHELM_PRE_PIVOT_PREFIXES = (
+    "/compare/",
+    "/software/",
+    "/industry/",
+    "/trades/",
+    "/pricing/",
+    "/features/",
+    "/vs/",
+    "/best-",
+    "/field-service-",
+    "/hvac-",
+    "/plumbing-",
+    "/electrical-",
+    "/landscaping-",
+)
+_GAINHELM_PRE_PIVOT_TERMS = (
+    "plumber",
+    "plumbing",
+    "hvac",
+    "landscaping",
+    "lawn care",
+    "pest control",
+    "maid",
+    "handyman",
+    "roofing",
+    "electrician",
+    "jobber",
+    "housecall pro",
+    "servicetitan",
+    "fieldpulse",
+    "workiz",
+    "gorilladesk",
+    "field service",
+    "dispatch app",
+    "scheduling software",
+)
+
+
+def _check_gainhelm_pre_pivot_sink(
+    prop: str,
+    norm_path: str,
+    raw_query: str,
+    raw_slug: str,
+    raw_url: str,
+    domain: str,
+) -> Optional[Dict[str, Any]]:
+    if prop != "gainhelm":
+        return None
+    q_check_gh = f"{raw_query} {raw_slug}".lower()
+    if (norm_path and any(norm_path.startswith(pfx) for pfx in _GAINHELM_PRE_PIVOT_PREFIXES)) or any(
+        term in q_check_gh for term in _GAINHELM_PRE_PIVOT_TERMS
+    ):
+        return {
+            "is_redirected": True,
+            "is_off_topic_sink": True,
+            "ignored_off_topic": True,
+            "original_url": raw_url or (f"https://{domain}{norm_path}" if norm_path else ""),
+            "original_path": norm_path,
+            "original_slug": raw_slug,
+            "canonical_path": "/tools/",
+            "canonical_url": f"https://{domain}/tools/",
+            "canonical_slug": "",
+            "leaf_overlay_slug": "",
+            "resolved_via": "gainhelm_pre_pivot_sink",
+        }
+    return None
+
+
 def resolve_redirected_gsc_target(
     target_url: Union[str, Dict[str, Any]] = "",
     slug: str = "",
@@ -3809,60 +3878,9 @@ def resolve_redirected_gsc_target(
             }
 
     # 2.5 GainHelm pre-pivot field-service wildcard routes and queries -> /tools/ off-topic sink
-    if prop == "gainhelm":
-        gh_pre_pivot_prefixes = (
-            "/compare/",
-            "/software/",
-            "/industry/",
-            "/trades/",
-            "/pricing/",
-            "/features/",
-            "/vs/",
-            "/best-",
-            "/field-service-",
-            "/hvac-",
-            "/plumbing-",
-            "/electrical-",
-            "/landscaping-",
-        )
-        gh_pre_pivot_terms = (
-            "plumber",
-            "plumbing",
-            "hvac",
-            "landscaping",
-            "lawn care",
-            "pest control",
-            "maid",
-            "handyman",
-            "roofing",
-            "electrician",
-            "jobber",
-            "housecall pro",
-            "servicetitan",
-            "fieldpulse",
-            "workiz",
-            "gorilladesk",
-            "field service",
-            "dispatch app",
-            "scheduling software",
-        )
-        q_check_gh = f"{raw_query} {raw_slug}".lower()
-        if (norm_path and any(norm_path.startswith(pfx) for pfx in gh_pre_pivot_prefixes)) or any(
-            term in q_check_gh for term in gh_pre_pivot_terms
-        ):
-            return {
-                "is_redirected": True,
-                "is_off_topic_sink": True,
-                "ignored_off_topic": True,
-                "original_url": raw_url or (f"https://{domain}{norm_path}" if norm_path else ""),
-                "original_path": norm_path,
-                "original_slug": raw_slug,
-                "canonical_path": "/tools/",
-                "canonical_url": f"https://{domain}/tools/",
-                "canonical_slug": "",
-                "leaf_overlay_slug": "",
-                "resolved_via": "gainhelm_pre_pivot_sink",
-            }
+    gh_sink = _check_gainhelm_pre_pivot_sink(prop, norm_path, raw_query, raw_slug, raw_url, domain)
+    if gh_sink is not None:
+        return gh_sink
 
     # 3. If norm_path is an active canonical route (/tools/<slug>/ or /tools/<slug>/<leaf>/)
     if norm_path:
