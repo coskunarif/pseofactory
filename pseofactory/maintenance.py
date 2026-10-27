@@ -5232,7 +5232,6 @@ def _needs_page_structure_geo_normalization(
     if check_aeo_geo_graph and '"@graph"' in html_content and (
         '"inLanguage"' not in html_content
         or '"dateModified"' not in html_content
-        or ('</head>' in html_content and 'rel="tool-catalog"' not in html_content)
         or ('class="quick-answer"' in html_content and '"SpeakableSpecification"' not in html_content)
         or (
             canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com")
@@ -9427,6 +9426,21 @@ class RetroReflectionEngine:
                     return True
             except Exception:
                 return True
+            sample_t = tools_dir / root_tool_slugs[0] / "index.html"
+            if sample_t.is_file():
+                try:
+                    st_raw = sample_t.read_text(encoding="utf-8", errors="ignore")
+                    if 'rel="tool-catalog"' not in st_raw:
+                        return True
+                except Exception:
+                    return True
+            hdr_f = dist_dir / "_headers"
+            if hdr_f.is_file():
+                try:
+                    if "/catalog.json" not in hdr_f.read_text(encoding="utf-8", errors="ignore"):
+                        return True
+                except Exception:
+                    return True
         return False
 
     @classmethod
