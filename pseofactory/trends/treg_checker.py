@@ -501,6 +501,44 @@ class TregChecker:
                     ]
                 }
             }
+        is_grc_compliance = any(
+            tok in q_key
+            for tok in (
+                "soc 2",
+                "soc-2",
+                "cmmc",
+                "sprs",
+                "800-171",
+                "800 171",
+                "iso 27001",
+                "iso-27001",
+                "hipaa",
+                "hitech",
+                "pci dss",
+                "pci-dss",
+                "fedramp",
+                "hitrust",
+                "penetration testing",
+                "pentest",
+                "cyber liability",
+                "c3pao",
+            )
+        )
+        if is_grc_compliance:
+            return {
+                "result": {
+                    "sources": [
+                        {
+                            "domain": "nist.gov",
+                            "url": "https://csrc.nist.gov/publications/detail/sp/800-171/rev-3/final",
+                        },
+                        {
+                            "domain": "reddit.com",
+                            "url": "https://www.reddit.com/r/cybersecurity/",
+                        },
+                    ]
+                }
+            }
         return {
             "result": {
                 "sources": [

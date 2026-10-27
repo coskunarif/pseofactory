@@ -3695,6 +3695,11 @@ _GAINHELM_PRE_PIVOT_PREFIXES = (
     "/plumbing-",
     "/electrical-",
     "/landscaping-",
+    "/commercial-facilities-",
+    "/tree-service-",
+    "/how-hvac-",
+    "/buildops-",
+    "/jobber-",
 )
 _GAINHELM_PRE_PIVOT_TERMS = (
     "plumber",
@@ -3708,12 +3713,19 @@ _GAINHELM_PRE_PIVOT_TERMS = (
     "roofing",
     "electrician",
     "jobber",
+    "buildops",
+    "simpro",
+    "servicemax",
+    "servicefusion",
     "housecall pro",
     "servicetitan",
     "fieldpulse",
     "workiz",
     "gorilladesk",
     "field service",
+    "tree service",
+    "tree-service",
+    "dispatch",
     "dispatch app",
     "scheduling software",
 )
@@ -3729,7 +3741,7 @@ def _check_gainhelm_pre_pivot_sink(
 ) -> Optional[Dict[str, Any]]:
     if prop != "gainhelm":
         return None
-    q_check_gh = f"{raw_query} {raw_slug}".lower()
+    q_check_gh = f"{raw_query} {raw_slug} {norm_path}".lower()
     if (norm_path and any(norm_path.startswith(pfx) for pfx in _GAINHELM_PRE_PIVOT_PREFIXES)) or any(
         term in q_check_gh for term in _GAINHELM_PRE_PIVOT_TERMS
     ):

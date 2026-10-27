@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Dict
 
@@ -343,3 +344,199 @@ def test_workflows_1_2_3_4_6_8_enriched_mechanisms(tmp_path: Path) -> None:
     for t in sprint_rep["tickets"]:
         assert t["fix_type"] in ("template", "page", "configuration", "infrastructure", "investigative")
         assert "acceptance_criteria" in t
+
+
+def test_live_donor_injection_and_queue_hygiene_across_tenants(tmp_path: Path) -> None:
+    # 1. ProfitHelm: parent hub already links to target spoke; verify no section-179 / crypto-tax misrouting and verify live HTML injection
+    ph_root = tmp_path / "profithelm_live_sim"
+    ph_dist = ph_root / "dist"
+    _write_html(
+        ph_dist / "index.html",
+        "ProfitHelm",
+        "ProfitHelm",
+        '<a href="/tools/">Tools</a>',
+    )
+    _write_html(
+        ph_dist / "tools" / "index.html",
+        "Tools Directory",
+        "Tools Directory",
+        (
+            '<a href="/tools/section-1031-calculator/">1031</a>'
+            '<a href="/tools/section-179-calculator/">179</a>'
+            '<a href="/tools/crypto-tax-calculator/">Crypto</a>'
+            '<a href="/tools/tcja-sunset-capital-gains/">Capital Gains</a>'
+            '<a href="/tools/section-1031-calculator/florida/">Florida 1031</a>'
+        ),
+    )
+    _write_html(
+        ph_dist / "tools" / "section-1031-calculator" / "index.html",
+        "Section 1031 Exchange Calculator",
+        "Section 1031 Exchange Calculator",
+        (
+            '<a href="/tools/section-1031-calculator/florida/">Florida 1031</a>'
+            '<a href="/tools/section-1031-calculator/california/">California 1031</a>'
+        ),
+    )
+    _write_html(
+        ph_dist / "tools" / "section-1031-calculator" / "california" / "index.html",
+        "California 1031 Exchange Calculator",
+        "California 1031 Exchange Calculator",
+        '<a href="/tools/section-1031-calculator/">1031 Hub</a>',
+    )
+    _write_html(
+        ph_dist / "tools" / "tcja-sunset-capital-gains" / "index.html",
+        "Capital Gains & TCJA Sunset Calculator",
+        "Capital Gains Calculator",
+        '<a href="/tools/section-1031-calculator/">1031 Hub</a>',
+    )
+    _write_html(
+        ph_dist / "tools" / "section-179-calculator" / "index.html",
+        "Section 179 Equipment Deduction Calculator",
+        "Section 179 Calculator",
+        '<a href="/tools/">Tools</a>',
+    )
+    _write_html(
+        ph_dist / "tools" / "crypto-tax-calculator" / "index.html",
+        "Crypto Tax Calculator",
+        "Crypto Tax Calculator",
+        '<a href="/tools/">Tools</a>',
+    )
+    _write_html(
+        ph_dist / "tools" / "section-1031-calculator" / "florida" / "index.html",
+        "Florida 1031 Exchange Calculator",
+        "Florida 1031 Exchange Calculator",
+        '<a href="/tools/section-1031-calculator/">1031 Hub</a>',
+    )
+    gsc_ph = {
+        "current_rows": [
+            {
+                "query": "1031 exchange florida",
+                "canonical_path": "/tools/section-1031-calculator/florida",
+                "canonical_url": "https://profithelm.com/tools/section-1031-calculator/florida/",
+                "impressions": 12,
+                "clicks": 0,
+                "position": 11.0,
+            }
+        ],
+        "impressions_by_path": {"/tools/section-1031-calculator/florida": 12},
+        "clicks_by_path": {"/tools/section-1031-calculator/florida": 0},
+    }
+    il_rep = discover_internal_linking_opportunities(
+        property_id="profithelm",
+        repo_root=ph_root,
+        dist_dir=ph_dist,
+        consolidated_gsc=gsc_ph,
+        persist=True,
+    )
+    fl_opp = next(o for o in il_rep["opportunities"] if o["target_path"] == "/tools/section-1031-calculator/florida/")
+    donors = fl_opp["recommended_source_hubs"]
+    assert "/tools/section-179-calculator/" not in donors
+    assert "/tools/crypto-tax-calculator/" not in donors
+    assert "/tools/tcja-sunset-capital-gains/" in donors
+    assert "/tools/section-1031-calculator/california/" in donors
+    assert il_rep["injected_contextual_links_count"] >= 2
+    assert fl_opp["post_injection_contextual_in_degree"] > fl_opp["contextual_in_degree"]
+    tcja_html = (ph_dist / "tools" / "tcja-sunset-capital-gains" / "index.html").read_text(encoding="utf-8")
+    assert 'href="/tools/section-1031-calculator/florida/"' in tcja_html
+
+    # 2. GainHelm: GRC AI citations return nist.gov (not irs.gov) and pre-pivot dispatch queries are filtered out
+    gh_root = tmp_path / "gainhelm_live_sim"
+    gh_dist = gh_root / "dist"
+    _write_html(
+        gh_dist / "tools" / "soc-2-audit-cost-calculator" / "index.html",
+        "SOC 2 Audit Cost Calculator",
+        "SOC 2 Audit Cost Calculator",
+        '<a href="/tools/">Tools</a>',
+    )
+    (gh_dist / "llms.txt").write_text("# GainHelm\n", encoding="utf-8")
+    (gh_dist / "llms-full.txt").write_text("# GainHelm Full\n", encoding="utf-8")
+    gh_gsc = {
+        "baseline_rows": [
+            {
+                "query": "job dispatch software",
+                "canonical_path": "/tree-service-dispatch-software",
+                "canonical_url": "https://gainhelm.com/tree-service-dispatch-software/",
+                "impressions": 20,
+                "clicks": 0,
+                "position": 8.0,
+            }
+        ],
+        "current_rows": [
+            {
+                "query": "job dispatch software",
+                "canonical_path": "/tree-service-dispatch-software",
+                "canonical_url": "https://gainhelm.com/tree-service-dispatch-software/",
+                "impressions": 25,
+                "clicks": 0,
+                "position": 18.0,
+            },
+            {
+                "query": "soc 2 audit cost calculator",
+                "canonical_path": "/tools/soc-2-audit-cost-calculator",
+                "canonical_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+                "impressions": 45,
+                "clicks": 0,
+                "position": 9.5,
+            },
+        ],
+    }
+    gh_decay = identify_content_decay(
+        property_id="gainhelm",
+        repo_root=gh_root,
+        consolidated_gsc=gh_gsc,
+        persist=False,
+    )
+    decay_paths = {d["canonical_path"] for d in gh_decay["decay_candidates"]}
+    assert "/tree-service-dispatch-software" not in decay_paths
+
+    gh_pr = compile_ai_citation_digital_pr_queue(
+        property_id="gainhelm",
+        repo_root=gh_root,
+        dist_dir=gh_dist,
+        consolidated_gsc=gh_gsc,
+        persist=False,
+    )
+    assert gh_pr["queue"][0]["slug"] == "soc-2-audit-cost-calculator"
+    assert "nist.gov" in gh_pr["queue"][0]["no_outreach_domains"]
+    assert "irs.gov" not in gh_pr["queue"][0]["no_outreach_domains"]
+
+    # 3. Prexvo: PR queue filters out car-loan / headline noise from void_candidates.jsonl and prioritizes published dist/ tools
+    px_root = tmp_path / "prexvo_live_sim"
+    px_dist = px_root / "dist"
+    _write_html(
+        px_dist / "tools" / "rap-payment-calculator" / "index.html",
+        "2026 RAP Student Loan Calculator",
+        "RAP Student Loan Calculator",
+        '<a href="/tools/">Tools</a>',
+    )
+    (px_root / "void_candidates.jsonl").write_text(
+        json.dumps({"slug": "a-well-known-expert-on-student-loans-is-not-real", "query": "A Well-Known Expert on Student Loans Is Not Real", "search_volume": 500})
+        + "\n"
+        + json.dumps({"slug": "amortization-calculator-car-loan", "query": "amortization calculator car loan", "search_volume": 500})
+        + "\n",
+        encoding="utf-8",
+    )
+    px_gsc = {
+        "current_rows": [
+            {
+                "query": "rap student loan repayment calculator",
+                "canonical_path": "/tools/rap-payment-calculator",
+                "canonical_url": "https://prexvo.com/tools/rap-payment-calculator/",
+                "impressions": 28,
+                "clicks": 0,
+                "position": 8.2,
+            }
+        ],
+    }
+    px_pr = compile_ai_citation_digital_pr_queue(
+        property_id="prexvo",
+        repo_root=px_root,
+        dist_dir=px_dist,
+        consolidated_gsc=px_gsc,
+        persist=False,
+    )
+    px_slugs = [item["slug"] for item in px_pr["queue"]]
+    assert "a-well-known-expert-on-student-loans-is-not-real" not in px_slugs
+    assert "amortization-calculator-car-loan" not in px_slugs
+    assert px_slugs[0] == "rap-payment-calculator"
+

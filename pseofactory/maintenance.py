@@ -11669,6 +11669,24 @@ def reflect_and_recompile_all_assets(
                 except Exception:
                     pass
 
+            # Execute 8-workflow agentic SEO growth loops & live contextual donor HTML link injection on forced/mutated reflection
+            if (should_run_full_build or estate_needed_mutation or force) and "PYTEST_CURRENT_TEST" not in os.environ:
+                try:
+                    repo_root_wf = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
+                    from pseofactory.seo_growth_loops import run_all_seo_growth_workflows
+                    wf_res_pre = run_all_seo_growth_workflows(
+                        property_id=adapter.property_id,
+                        repo_root=repo_root_wf,
+                        dist_dir=adapter.dist_dir,
+                        apply_overlays=True,
+                        persist=True,
+                    )
+                    mut_donors = (wf_res_pre.get("internal_links") or {}).get("mutated_donor_pages") or []
+                    if mut_donors:
+                        estate_needed_mutation = True
+                except Exception:
+                    pass
+
             # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess reflection is requested
             if should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter):
                 try:

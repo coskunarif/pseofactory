@@ -1879,6 +1879,8 @@ def identify_content_decay(
         c_url = str(row.get("canonical_url") or row.get("page") or "").strip()
         if not q_low or not c_path:
             continue
+        if any(leg in f"{q_low} {c_path.lower()}" for leg in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
+            continue
         qp_key = (c_path, q_low)
         if qp_key in seen_qp:
             continue
@@ -2347,15 +2349,17 @@ def discover_internal_linking_opportunities(
     cluster_buckets: Dict[str, Set[str]] = {
         "real_estate_1031": {
             "1031", "boot", "dst", "depreciation", "recapture", "exchange", "cost",
-            "segregation", "cap", "rate", "rental", "property", "real", "estate", "capital", "gains",
+            "segregation", "cap", "rate", "rental", "property", "real", "estate",
+            "capital", "gains", "tcja", "sunset",
         },
         "business_deductions_179": {
-            "179", "174", "bonus", "qbi", "199a", "scorp", "llc", "macrs", "amortization",
+            "179", "174", "bonus", "qbi", "199a", "scorp", "corp", "llc", "macrs", "amortization",
             "equipment", "suv", "vehicle", "freelance", "self", "employment", "deduction",
         },
         "tax_brackets_yield": {
-            "irs", "2027", "brackets", "marginal", "effective", "amt", "niit", "treasury",
+            "brackets", "marginal", "effective", "amt", "niit", "treasury",
             "munis", "yield", "withholding", "w4", "paycheck", "salary", "income",
+            "tcja", "sunset", "capital", "gains", "reasonable",
         },
         "crypto_prediction": {
             "crypto", "1099", "da", "fifo", "hifo", "prediction", "market", "kalshi",
@@ -2370,7 +2374,12 @@ def discover_internal_linking_opportunities(
             "pci", "dss", "fedramp", "vanta", "drata", "audit", "c3pao",
         },
     }
-    slug_stopwords = {"tools", "calculator", "calculators", "estimator", "planner", "guide", "vs", "and", "for", "the", "in", "to", "of"}
+    slug_stopwords = {
+        "tools", "calculator", "calculators", "estimator", "planner", "guide",
+        "vs", "and", "for", "the", "in", "to", "of", "section", "tax", "taxes",
+        "rate", "rates", "cost", "costs", "business", "form", "irs", "2025",
+        "2026", "2027", "rule", "rules", "act", "model", "schedule",
+    }
 
     def _extract_topic_tokens(p_str: str) -> Set[str]:
         return {
@@ -2390,10 +2399,12 @@ def discover_internal_linking_opportunities(
         d_toks = _extract_topic_tokens(donor_p)
         shared_direct = t_toks.intersection(d_toks)
         if shared_direct:
-            return (85.0 + min(14.0, len(shared_direct) * 5.0), "Strong", "Contextual Formula & Related Scenario Section")
+            return (94.0 + min(5.0, len(shared_direct) * 2.0), "Strong", "Contextual Formula & Related Scenario Section")
         for c_tokens in cluster_buckets.values():
             if (t_toks & c_tokens) and (d_toks & c_tokens):
-                return (75.0, "Strong", "Related Statutory Cluster Workbench Section")
+                return (88.0, "Strong", "Related Statutory Cluster Workbench Section")
+        if len(t_parts) >= 3 and len(d_parts) >= 3 and t_parts[0] == "tools" and d_parts[0] == "tools" and t_parts[1] == d_parts[1]:
+            return (82.0, "Strong", "Sibling Jurisdiction Spoke Comparison Matrix")
         return (10.0, "Weak", "General Related Calculators Section")
 
     opportunities: List[Dict[str, Any]] = []
@@ -2437,8 +2448,22 @@ def discover_internal_linking_opportunities(
         if is_orphan or is_underlinked_demand:
             existing_ctx_sources = contextual_in_links.get(site_p, set())
             existing_sources = existing_ctx_sources if existing_ctx_sources else in_links.get(site_p, set())
+            t_parts_cur = [x for x in site_p.strip("/").split("/") if x]
+            candidate_donor_pool = list(hub_donors)
+            if len(t_parts_cur) >= 3 and t_parts_cur[0] == "tools":
+                parent_prefix = f"/tools/{t_parts_cur[1]}/"
+                sibling_spokes = sorted(
+                    [
+                        p for p in path_to_file
+                        if p.startswith(parent_prefix) and p != site_p and p not in candidate_donor_pool
+                    ],
+                    key=lambda p: (len(in_links.get(p, set())), int(impressions_by_path.get(p, 0)), p),
+                    reverse=True,
+                )[:5]
+                candidate_donor_pool.extend(sibling_spokes)
+
             candidate_donors_scored = []
-            for d in hub_donors:
+            for d in candidate_donor_pool:
                 if d == site_p or d in existing_sources:
                     continue
                 aff_score, fit_str, place_sec = _score_donor_topical_affinity(d, site_p)
@@ -2533,6 +2558,80 @@ def discover_internal_linking_opportunities(
 
     opportunities.sort(key=lambda x: (-float(x["priority_score"]), -int(x["impressions"]), x["target_path"]))
 
+    injected_contextual_links_count = 0
+    mutated_donor_pages: Set[str] = set()
+    if persist:
+        for opp in opportunities:
+            opp_impr = int(opp.get("impressions", 0) or 0)
+            opp_ctx_deg = int(opp.get("contextual_in_degree", 0) or 0)
+            opp_pos = float(opp.get("best_position", 50.0) or 50.0)
+            if not (opp_impr > 0 and opp_ctx_deg < 10 and opp_pos <= 35.0):
+                continue
+            target_href = str(opp.get("target_path") or "")
+            target_key = target_href.rstrip("/") or "/"
+            if not target_href or target_key not in path_to_file:
+                continue
+            injected_for_target: List[str] = []
+            for d_det in opp.get("recommended_donor_details") or []:
+                if not isinstance(d_det, dict) or d_det.get("fit_strength") == "Weak":
+                    continue
+                donor_src_path = str(d_det.get("source_path") or "")
+                donor_key = donor_src_path.rstrip("/") or "/"
+                donor_file = path_to_file.get(donor_key)
+                if not donor_file or not donor_file.is_file():
+                    continue
+                try:
+                    raw_donor_html = donor_file.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                if f'href="{target_href}"' in raw_donor_html or f"href='{target_href}'" in raw_donor_html:
+                    continue
+                if raw_donor_html.count("contextual-cluster-link") >= 6:
+                    continue
+                anchor_lbl = _clean_dashes(str(d_det.get("suggested_anchor") or opp.get("recommended_anchor") or "Related Statutory Calculator"))
+                li_snippet = (
+                    f'<li style="margin:4px 0;"><a href="{target_href}" '
+                    f'class="touch-target contextual-cluster-link" '
+                    f'style="display:inline-flex;align-items:center;min-height:48px;min-width:48px;padding:8px 12px;text-decoration:underline;font-weight:600;">'
+                    f'{anchor_lbl}</a></li>'
+                )
+                sec_marker = 'id="agentic-contextual-cluster-links"'
+                if sec_marker in raw_donor_html:
+                    sec_start = raw_donor_html.find(sec_marker)
+                    ul_close = raw_donor_html.find("</ul>", sec_start)
+                    if ul_close != -1:
+                        upd_donor_html = raw_donor_html[:ul_close] + li_snippet + "\n" + raw_donor_html[ul_close:]
+                    else:
+                        continue
+                elif "</main>" in raw_donor_html:
+                    block_html = (
+                        '\n<section id="agentic-contextual-cluster-links" aria-label="Related Statutory Cluster Calculators" '
+                        'style="margin-top:24px;padding:16px;border:1px solid rgba(148,163,184,0.25);border-radius:8px;">\n'
+                        '<h2 style="font-size:1.1rem;margin:0 0 8px 0;">Related Statutory Jurisdiction &amp; Cluster Models</h2>\n'
+                        '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px;">\n'
+                        f'{li_snippet}\n'
+                        '</ul>\n'
+                        '</section>\n'
+                    )
+                    upd_donor_html = raw_donor_html.replace("</main>", block_html + "</main>", 1)
+                else:
+                    continue
+                try:
+                    donor_file.write_text(upd_donor_html, encoding="utf-8")
+                    out_links.setdefault(donor_key, set()).add(target_key)
+                    in_links.setdefault(target_key, set()).add(donor_key)
+                    contextual_out_links.setdefault(donor_key, set()).add(target_key)
+                    contextual_in_links.setdefault(target_key, set()).add(donor_key)
+                    injected_contextual_links_count += 1
+                    mutated_donor_pages.add(donor_src_path)
+                    injected_for_target.append(donor_src_path)
+                except Exception:
+                    continue
+            if injected_for_target:
+                opp["injected_donor_hubs"] = injected_for_target
+                opp["post_injection_in_degree"] = len(in_links.get(target_key, set()))
+                opp["post_injection_contextual_in_degree"] = len(contextual_in_links.get(target_key, set()))
+
     link_graph_summary = {
         "status": "PASS",
         "total_pages": len(path_to_file),
@@ -2545,6 +2644,8 @@ def discover_internal_linking_opportunities(
         "generic_anchor_instances_count": len(generic_anchor_instances),
         "generic_anchor_samples": generic_anchor_instances[:15],
         "max_distance_from_root": max(distances.values()) if distances else 0,
+        "injected_contextual_links_count": injected_contextual_links_count,
+        "mutated_donor_pages": sorted(mutated_donor_pages),
     }
 
     report = {
@@ -2562,6 +2663,8 @@ def discover_internal_linking_opportunities(
         "generic_anchor_instances_count": len(generic_anchor_instances),
         "underlinked_opportunities_count": len(opportunities),
         "injection_recommendations_count": len(opportunities),
+        "injected_contextual_links_count": injected_contextual_links_count,
+        "mutated_donor_pages": sorted(mutated_donor_pages),
         "internal_link_graph": link_graph_summary,
         "contextual_in_degree_by_path": {
             p: len(contextual_in_links.get(p, set())) for p in sorted(path_to_file.keys())
@@ -2724,6 +2827,8 @@ def compile_search_opportunity_briefs(
         q = str(r.get("query") or "").strip()
         c_path = (str(r.get("canonical_path") or "").strip().rstrip("/")) or "/"
         if not q or not c_path or c_path in ("/", "/tools", "/privacy", "/terms", "/about", "/contact"):
+            continue
+        if any(leg in f"{q.lower()} {c_path.lower()}" for leg in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
             continue
         by_path.setdefault(c_path, []).append(r)
 
@@ -3656,12 +3761,19 @@ _GAINHELM_PRE_PIVOT_LEGACY_TERMS: Tuple[str, ...] = (
     "roofing",
     "electrician",
     "jobber",
+    "buildops",
+    "simpro",
+    "servicemax",
+    "servicefusion",
     "housecall pro",
     "servicetitan",
     "fieldpulse",
     "workiz",
     "gorilladesk",
     "field service",
+    "tree service",
+    "tree-service",
+    "dispatch",
     "dispatch app",
     "scheduling software",
     "pool service",
@@ -4268,6 +4380,12 @@ def compile_ai_citation_digital_pr_queue(
             if central_void not in void_paths:
                 void_paths.append(central_void)
 
+    from pseofactory.qualification import (
+        is_retired_or_consolidated_slug,
+        is_synthetic_test_candidate,
+        resolve_redirected_gsc_target,
+    )
+
     for vp in void_paths:
         if not vp.is_file():
             continue
@@ -4278,17 +4396,42 @@ def compile_ai_citation_digital_pr_queue(
                 vc = json.loads(line)
                 if not isinstance(vc, dict):
                     continue
+                vc_status = str(vc.get("status") or "").strip().upper()
+                vc_action = str(vc.get("action") or "").strip().upper()
+                if vc_status == "REJECTED" or vc_action in ("REJECT", "REJECT_SYNTHETIC", "REJECT_LISTICLE_ARCHETYPE"):
+                    continue
                 vc_q = str(vc.get("query") or vc.get("primary_keyword") or vc.get("topic") or "").strip()
                 vc_slug = str(vc.get("slug") or _slug_from_url_or_query(query=vc_q)).strip()
                 if not vc_q or not vc_slug:
                     continue
+                if is_synthetic_test_candidate(vc_slug, vc) or is_retired_or_consolidated_slug(vc_slug, prop):
+                    continue
+                comb_low = f"{vc_slug} {vc_q}".lower()
+                if any(
+                    noise in comb_low
+                    for noise in (
+                        "is not real",
+                        "is-not-real",
+                        "car loan",
+                        "car-loan",
+                        "auto loan",
+                        "auto-loan",
+                        "mortgage",
+                        "boat loan",
+                        "rv loan",
+                        "payday loan",
+                    )
+                ):
+                    continue
+                if not _is_query_relevant_for_property(vc_q, prop):
+                    continue
                 math_chk = classify_deterministic_math_opportunity(slug=vc_slug, query=vc_q, tenant_id=prop)
                 is_prexvo_cand = math_chk["math_domain"] == "TITLE_IV_STUDENT_LOAN_MATH" and any(
-                    tok in f"{vc_slug} {vc_q}".lower()
-                    for tok in ("student", "rap", "ibr", "pslf", "icr", "parent", "paye", "loan")
+                    tok in comb_low
+                    for tok in ("student", "rap", "ibr", "pslf", "icr", "parent", "paye", "title iv", "title-iv", "grad plus", "grad-plus")
                 )
                 is_gainhelm_cand = any(
-                    tok in f"{vc_slug} {vc_q}".lower()
+                    tok in comb_low
                     for tok in ("soc-2", "soc 2", "cmmc", "sprs", "800-171", "iso-27001", "iso 27001", "hipaa", "pci-dss", "pci dss", "fedramp", "cyber-insurance", "vanta", "drata")
                 )
                 if (
@@ -4297,8 +4440,17 @@ def compile_ai_citation_digital_pr_queue(
                     or (prop == "profithelm" and (is_prexvo_cand or is_gainhelm_cand))
                 ):
                     continue
+                resolved_vc = resolve_redirected_gsc_target(
+                    query=vc_q,
+                    slug=vc_slug,
+                    property_id=prop,
+                    repo_root=root,
+                )
+                if resolved_vc.get("is_off_topic_sink"):
+                    continue
+                resolved_c_path = str(resolved_vc.get("canonical_path") or "").rstrip("/")
+                c_p = resolved_c_path if (resolved_c_path and resolved_c_path not in ("/", "/tools")) else f"/tools/{vc_slug}"
                 candidate_queue_evaluated += 1
-                c_p = f"/tools/{vc_slug}"
                 rows.append(
                     {
                         "query": vc_q,
@@ -4358,6 +4510,8 @@ def compile_ai_citation_digital_pr_queue(
         c_url = str(r.get("canonical_url") or r.get("page") or "").strip()
         c_path = (str(r.get("canonical_path") or "").strip().rstrip("/")) or "/"
         if not q or not c_url or c_path in ("/", "/tools"):
+            continue
+        if any(leg in f"{q.lower()} {c_path.lower()}" for leg in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
             continue
         dedup_k = f"{c_path}:{q.lower()}"
         src_tag = str(r.get("_signal_source") or "gsc_striking_distance")
@@ -4550,12 +4704,23 @@ def compile_ai_citation_digital_pr_queue(
                     }
                 )
 
+        sig_sources = list(r.get("_signal_sources", ["gsc_striking_distance"]))
+        route_in_dist = (
+            (d_dir / c_path.lstrip("/") / "index.html").is_file()
+            if d_dir.is_dir()
+            else True
+        )
+        has_gsc_signal = any(
+            s in sig_sources for s in ("gsc_striking_distance", "gsc_remediation_queue")
+        )
         pr_candidates.append(
             {
                 "property_id": prop,
                 "slug": slug_str,
                 "query": q,
                 "target_url": c_url,
+                "route_exists_in_dist": route_in_dist,
+                "has_empirical_gsc_signal": has_gsc_signal,
                 "impressions": impr,
                 "clicks": clicks,
                 "current_position": round(pos, 2),
@@ -4574,7 +4739,7 @@ def compile_ai_citation_digital_pr_queue(
                 "missing_ai_overview": ai_res["missing_ai_overview"],
                 "needs_deterministic_math": math_info["needs_deterministic_math"],
                 "math_domain": math_info["math_domain"],
-                "signal_sources": r.get("_signal_sources", ["gsc_striking_distance"]),
+                "signal_sources": sig_sources,
                 "statutory_data_hook": statutory_hook,
                 "benchmark_node_file": benchmark_node,
                 "machine_endpoints": [f"https://{domain}/llms.txt", f"https://{domain}/llms-full.txt"],
@@ -4586,6 +4751,8 @@ def compile_ai_citation_digital_pr_queue(
 
     pr_candidates.sort(
         key=lambda x: (
+            -int(bool(x.get("route_exists_in_dist", True))),
+            -int(bool(x.get("has_empirical_gsc_signal", False))),
             -int(bool(x.get("needs_deterministic_math"))),
             -float(x["priority_score"]),
             -int(x["impressions"]),
