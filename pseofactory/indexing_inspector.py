@@ -384,26 +384,54 @@ class DailyIndexingInspector:
 
         curr_rma7 = float(timeline[-1].get("rma_7", 0.0))
         prev_rma7 = float(timeline[-8].get("rma_7", 0.0)) if len(timeline) >= 8 else curr_rma7
+        curr_rma28 = float(timeline[-1].get("rma_28", curr_rma7))
+        prev_rma28 = float(timeline[-8].get("rma_28", prev_rma7)) if len(timeline) >= 8 else curr_rma28
+        rma7_vs_rma28_ratio = round(curr_rma7 / max(1.0, curr_rma28), 4)
+        rma7_rma28_div_pct = round(((curr_rma7 - curr_rma28) / max(1.0, curr_rma28)) * 100.0, 2)
 
-        if prev_rma7 < min_impressions_floor:
+        if prev_rma7 < min_impressions_floor and curr_rma28 < min_impressions_floor:
             return {
                 "status": "PASS",
                 "traffic_drop_detected": False,
                 "reason": "BELOW_DYNAMIC_IMPRESSIONS_FLOOR",
-                "current_rma7": curr_rma7,
-                "previous_rma7": prev_rma7,
+                "current_rma7": round(curr_rma7, 2),
+                "previous_rma7": round(prev_rma7, 2),
+                "current_rma28": round(curr_rma28, 2),
+                "previous_rma28": round(prev_rma28, 2),
+                "rma7_vs_rma28_velocity_ratio": rma7_vs_rma28_ratio,
+                "rma7_rma28_divergence_pct": rma7_rma28_div_pct,
+                "decay_velocity_score": 0.0,
+                "actual_drop_percentage": 0.0,
                 "drop_percentage": 0.0,
             }
 
-        pct_change = (curr_rma7 - prev_rma7) / prev_rma7
-        drop_detected = pct_change < -drop_threshold
+        baseline_denom = max(prev_rma7, curr_rma28, 1.0) if prev_rma7 < min_impressions_floor else prev_rma7
+        pct_change = (curr_rma7 - baseline_denom) / baseline_denom
+        rma28_pct_change = (curr_rma7 - curr_rma28) / max(1.0, curr_rma28)
+        drop_detected = (pct_change < -drop_threshold) or (
+            curr_rma28 >= min_impressions_floor and rma28_pct_change < -drop_threshold and pct_change < 0.0
+        )
+        actual_drop_pct = round(max(0.0, -min(pct_change, rma28_pct_change) * 100.0), 2)
+        decay_velocity_score = round(
+            min(
+                100.0,
+                max(0.0, -pct_change * 100.0) * 0.65 + max(0.0, -rma28_pct_change * 100.0) * 0.35,
+            ),
+            2,
+        )
 
         return {
             "status": "FAIL" if drop_detected else "PASS",
             "traffic_drop_detected": drop_detected,
             "drop_percentage": round(pct_change * 100, 2),
+            "actual_drop_percentage": actual_drop_pct,
             "current_rma7": round(curr_rma7, 2),
             "previous_rma7": round(prev_rma7, 2),
+            "current_rma28": round(curr_rma28, 2),
+            "previous_rma28": round(prev_rma28, 2),
+            "rma7_vs_rma28_velocity_ratio": rma7_vs_rma28_ratio,
+            "rma7_rma28_divergence_pct": rma7_rma28_div_pct,
+            "decay_velocity_score": decay_velocity_score,
             "threshold_percentage": round(drop_threshold * 100, 2),
         }
 

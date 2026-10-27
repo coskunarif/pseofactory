@@ -193,6 +193,21 @@ class CompetitorGapEngine:
             if not isinstance(item, dict):
                 continue
 
+            raw_dom = str(item.get("raw_html", "") or item.get("dom_snapshot", "") or "")
+            raw_js = str(item.get("raw_js", "") or "")
+            if raw_dom.strip():
+                dom_diff = diff_competitor_dom_structure(
+                    competitor_html=raw_dom,
+                    tenant_html=str((existing_tool or {}).get("raw_html", "") or ""),
+                    competitor_js=raw_js,
+                    tenant_id=self.tenant_id,
+                    target_slug=str((existing_tool or {}).get("slug", "") or ""),
+                    query=clean_query,
+                )
+                for wedge in dom_diff.get("competitor_wedges_to_absorb", []):
+                    if isinstance(wedge, str) and wedge.strip():
+                        comp_interactive.add(_normalize_feature_name(wedge))
+
             for feat in item.get("interactive_features", []):
                 if isinstance(feat, str) and feat.strip():
                     comp_interactive.add(_normalize_feature_name(feat))
@@ -253,18 +268,36 @@ class CompetitorGapEngine:
 
         base_slug = sanitize_url_slug(clean_query)
         base_title = clean_query.title()
+        combined_q = f"{clean_query.lower()} {base_slug}"
 
         if self.tenant_id == "prexvo":
             default_category = "Student Loan Repayment"
             restricted_ps = is_restricted_public_service_slug(base_slug, clean_query)
             affiliates = [] if restricted_ps else ["splash_financial", "sofi"]
-            statutory_authority = "34 CFR Part 685"
-            economic_dataset = "FRED SLSTTOTAL Series"
-            model_name = "Direct Consolidation Loan Weighted Model"
-            formula = "balance * (weighted_rate / 100.0)"
-            inputs = {"balance": 45000, "weighted_rate": 6.5}
-            published_output = 2925.0
-            sample_calculation = "Balance 45,000 at 6.5 percent weighted rate yields 2,925 annual interest"
+            if "rap" in combined_q or "obbba" in combined_q:
+                statutory_authority = "Public Law 119-21 (OBBBA) Title VIII Subtitle B & 34 CFR Part 685"
+                economic_dataset = "HHS Federal Poverty Guidelines & FRED SLSTTOTAL Series"
+                model_name = "OBBBA Repayment Assistance Plan (RAP) Tiered AGI Model"
+                formula = "max(10.0, (agi * rap_tier_rate / 12.0) - (dependents * 50.0))"
+                inputs = {"agi": 85000, "rap_tier_rate": 0.08, "dependents": 1}
+                published_output = 516.67
+                sample_calculation = "AGI $85,000 at 8% RAP tier less $50 dependent credit yields $516.67/mo"
+            elif "refinance" in combined_q:
+                statutory_authority = "34 CFR Part 685 & TILA Regulation Z (12 CFR Part 1026)"
+                economic_dataset = "FRED SLSTTOTAL & 10-Year Treasury Yield Series"
+                model_name = "Federal Title IV vs Private Refinance Break-Even Model"
+                formula = "balance * ((federal_rate - refinance_rate) / 100.0)"
+                inputs = {"balance": 68500, "federal_rate": 7.05, "refinance_rate": 5.25}
+                published_output = 1233.0
+                sample_calculation = "Balance $68,500 refinanced from 7.05% to 5.25% saves $1,233.00 first-year interest"
+            else:
+                statutory_authority = "34 CFR Part 685"
+                economic_dataset = "FRED SLSTTOTAL Series"
+                model_name = "Direct Consolidation Loan Weighted Model"
+                formula = "balance * (weighted_rate / 100.0)"
+                inputs = {"balance": 45000, "weighted_rate": 6.5}
+                published_output = 2925.0
+                sample_calculation = "Balance 45,000 at 6.5 percent weighted rate yields 2,925 annual interest"
             disclosures = (
                 [
                     "Title IV Public Service Statutory Guardrail: Commercial private lender offers are suppressed on public-service and statutory hardship pages",
@@ -281,33 +314,134 @@ class CompetitorGapEngine:
         elif self.tenant_id == "gainhelm":
             default_category = "Cyber Compliance & GRC Audit"
             affiliates = ["vanta_security", "drata_compliance"]
-            statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
-            economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
-            model_name = "SOC 2 Type II Audit & Readiness TCO Model"
-            formula = "cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate)"
-            inputs = {
-                "cpa_audit_fee": 28000,
-                "grc_platform_annual_cost": 15000,
-                "readiness_hours": 160,
-                "eng_hourly_rate": 95,
-            }
-            published_output = 58200.0
-            sample_calculation = "CPA audit fee $28,000 plus $15,000 GRC platform plus 160 hours at $95/hr yields $58,200 total SOC 2 Type II TCO"
+            if any(t in combined_q for t in ("cmmc", "800-171", "sprs", "dfars", "c3pao")):
+                statutory_authority = "32 CFR Part 170 & DFARS 252.204-7012 / 7019 / 7020 / 7021"
+                economic_dataset = "DoD CMMC 2.0 Cost Assessment & BLS OEWS 15-1212"
+                model_name = "CMMC 2.0 Level 2 C3PAO & NIST 800-171 SPRS Readiness Model"
+                formula = "c3pao_assessment_fee + enclave_licensing_cost + (remediation_hours * eng_hourly_rate)"
+                inputs = {
+                    "c3pao_assessment_fee": 48000,
+                    "enclave_licensing_cost": 18000,
+                    "remediation_hours": 220,
+                    "eng_hourly_rate": 95,
+                }
+                published_output = 86900.0
+                sample_calculation = "C3PAO fee $48,000 plus $18,000 CUI enclave plus 220 hrs at $95/hr yields $86,900 CMMC Level 2 TCO"
+            elif any(t in combined_q for t in ("iso-27001", "iso 27001", "isms", "27006")):
+                statutory_authority = "ISO/IEC 27001:2022 Annex A (93 Controls) & ISO/IEC 27006-1:2024"
+                economic_dataset = "IAF MD 5 Auditor-Day Schedule & BLS OEWS 15-1212"
+                model_name = "ISO/IEC 27001:2022 Stage 1/2 & Surveillance Certification Model"
+                formula = "(auditor_days * auditor_day_rate) + grc_platform_annual_cost + (isms_prep_hours * eng_hourly_rate)"
+                inputs = {
+                    "auditor_days": 14,
+                    "auditor_day_rate": 1850,
+                    "grc_platform_annual_cost": 15000,
+                    "isms_prep_hours": 140,
+                    "eng_hourly_rate": 95,
+                }
+                published_output = 54200.0
+                sample_calculation = "14 auditor-days at $1,850/day plus $15,000 GRC platform plus 140 hrs at $95/hr yields $54,200 ISO 27001 TCO"
+            elif any(t in combined_q for t in ("hipaa", "hitech", "ocr", "breach", "phi")):
+                statutory_authority = "45 CFR 160.404, 45 CFR Part 164 & 42 U.S.C. 1320d-5"
+                economic_dataset = "HHS OCR Penalty Inflation Schedule & IBM Cost of a Data Breach Report"
+                model_name = "HIPAA / HITECH Breach Notification & OCR Civil Penalty Exposure Model"
+                formula = "(compromised_records * per_record_forensic_cost) + ocr_tier_penalty_estimate"
+                inputs = {
+                    "compromised_records": 2500,
+                    "per_record_forensic_cost": 165,
+                    "ocr_tier_penalty_estimate": 75500,
+                }
+                published_output = 488000.0
+                sample_calculation = "2,500 records at $165/record plus $75,500 OCR Tier 2 penalty yields $488,000 total breach exposure"
+            else:
+                statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
+                economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
+                model_name = "SOC 2 Type II Audit & Readiness TCO Model"
+                formula = "cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate)"
+                inputs = {
+                    "cpa_audit_fee": 28000,
+                    "grc_platform_annual_cost": 15000,
+                    "readiness_hours": 160,
+                    "eng_hourly_rate": 95,
+                }
+                published_output = 58200.0
+                sample_calculation = "CPA audit fee $28,000 plus $15,000 GRC platform plus 160 hours at $95/hr yields $58,200 total SOC 2 Type II TCO"
             disclosures = [
                 GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
                 GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
             ]
             canonical_base = "https://gainhelm.com"
         else:
-            default_category = "Tax Intelligence"
-            affiliates = ["crest_capital", "mercury"]
-            statutory_authority = "IRC Section 179(b)(1)"
-            economic_dataset = "FRED CPILFESL Series"
-            model_name = "Section 179 Grounded Model"
-            formula = "min(cost, cap)"
-            inputs = {"cost": 400000, "cap": 1220000}
-            published_output = 400000.0
-            sample_calculation = "Cost 400,000 under cap 1,220,000 gives 400,000 deduction"
+            if "1031" in combined_q or "like-kind" in combined_q:
+                default_category = "1031 Exchange"
+                affiliates = ["ipx1031", "exeter1031"]
+                statutory_authority = "IRC Section 1031(a)(1)"
+                economic_dataset = "FRED CPILFESL Series"
+                model_name = "Section 1031 Like-Kind Exchange Model"
+                formula = "relinquished_basis + recognized_gain"
+                inputs = {"relinquished_basis": 450000, "recognized_gain": 0}
+                published_output = 450000.0
+                sample_calculation = "Relinquished basis 450,000 with zero recognized gain yields replacement basis 450,000"
+            elif any(t in combined_q for t in ("crypto", "bitcoin", "staking", "airdrop", "8949", "1099-da")):
+                default_category = "Crypto Tax Intelligence"
+                affiliates = ["coinledger", "koinly"]
+                statutory_authority = "IRC Section 1001 & IRS Form 8949"
+                economic_dataset = "FRED CPILFESL Series"
+                model_name = "Digital Asset Realized Gain Model"
+                formula = "proceeds - cost_basis"
+                inputs = {"proceeds": 85000, "cost_basis": 35000}
+                published_output = 50000.0
+                sample_calculation = "Proceeds 85,000 minus cost basis 35,000 yields 50,000 net taxable capital gain"
+            elif any(t in combined_q for t in ("prediction", "kalshi", "polymarket", "implied-probability", "implied probability", "kelly", "event-contract", "1256")):
+                default_category = "Quantitative Market Analytics"
+                affiliates = ["coinledger", "kalshi"]
+                statutory_authority = "IRC Section 1256 & CFTC 17 CFR Part 40"
+                economic_dataset = "FRED DGS10 Series"
+                model_name = "Event Contract Expected Value & Section 1256 Tax Model"
+                formula = "gross_payout - contract_cost"
+                inputs = {"gross_payout": 10000, "contract_cost": 6200}
+                published_output = 3800.0
+                sample_calculation = "Gross payout 10,000 minus contract cost 6,200 yields 3,800 net settlement gain"
+            elif any(t in combined_q for t in ("bracket", "tcja", "capital-gains", "capital gains", "standard deduction")):
+                default_category = "Tax Intelligence"
+                affiliates = ["turbotax", "taxslayer"]
+                statutory_authority = "IRC Section 1(j) & Rev. Proc. 2025-32"
+                economic_dataset = "FRED CPILFESL Series"
+                model_name = "Federal Statutory Bracket Liability Model"
+                formula = "taxable_income * effective_rate"
+                inputs = {"taxable_income": 180000, "effective_rate": 0.22}
+                published_output = 39600.0
+                sample_calculation = "Taxable income 180,000 at 22 percent effective rate yields 39,600 liability"
+            elif any(t in combined_q for t in ("s-corp", "s corp", "reasonable-salary", "reasonable salary", "qbi", "199a")):
+                default_category = "Tax Intelligence"
+                affiliates = ["gusto", "collective"]
+                statutory_authority = "IRC Section 1366, Section 3121 & Section 199A"
+                economic_dataset = "BLS OEWS Wage Series & IRS SOI Pass-Through Series"
+                model_name = "S-Corporation Reasonable Salary & FICA Savings Model"
+                formula = "(net_business_income - officer_salary) * 0.153"
+                inputs = {"net_business_income": 220000, "officer_salary": 95000}
+                published_output = 19125.0
+                sample_calculation = "Distributions of $125,000 above $95,000 W-2 salary save $19,125 in 15.3% SECA tax"
+            elif any(t in combined_q for t in ("174", "r-and-d", "r&d", "research-credit")):
+                default_category = "Tax Intelligence"
+                affiliates = ["gusto", "mercury"]
+                statutory_authority = "IRC Section 41 & Section 174"
+                economic_dataset = "IRS SOI Corporation Research Credit Series"
+                model_name = "Section 41 R&D Tax Credit & Section 174 Amortization Model"
+                formula = "qre_total * 0.10"
+                inputs = {"qre_total": 450000}
+                published_output = 45000.0
+                sample_calculation = "Qualified research expenditures of $450,000 yield $45,000 payroll tax credit offset"
+            else:
+                default_category = "Tax Intelligence"
+                affiliates = ["crest_capital", "mercury"]
+                statutory_authority = "IRC Section 179(b)(1)"
+                economic_dataset = "FRED CPILFESL Series"
+                model_name = "Section 179 Grounded Model"
+                formula = "min(cost, cap)"
+                inputs = {"cost": 400000, "cap": 1220000}
+                published_output = 400000.0
+                sample_calculation = "Cost 400,000 under cap 1,220,000 gives 400,000 deduction"
             disclosures = [
                 "Circular 230 Tax Modeling Disclaimer",
                 "FTC Independent Financial Research Publisher Disclosure",
@@ -419,6 +553,61 @@ class CompetitorGapEngine:
             repo_root=repo_root,
             velocity_spike_threshold=velocity_spike_threshold,
             persist=persist,
+        )
+
+    def parse_serp_dom_structural_profile(
+        self,
+        raw_html: str,
+        raw_js: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Programmatically parses a competitor or tenant DOM snapshot across schema depth,
+        interactive calculator mechanics (SSR vs CSR output hydration, fee presets, state carry),
+        statutory/empirical citation density, and tenant entity coverage.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return parse_serp_dom_structural_profile(
+            raw_html=raw_html,
+            raw_js=raw_js,
+            tenant_id=self.tenant_id,
+        )
+
+    def diff_competitor_dom_structure(
+        self,
+        competitor_html: str,
+        tenant_html: str = "",
+        competitor_js: str = "",
+        target_slug: str = "",
+        query: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Programmatically diffs a competitor SERP DOM snapshot against a compiled tenant page
+        and emits a deterministic template_mutation_spec for automated overlay/template recovery.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return diff_competitor_dom_structure(
+            competitor_html=competitor_html,
+            tenant_html=tenant_html,
+            competitor_js=competitor_js,
+            tenant_id=self.tenant_id,
+            target_slug=target_slug,
+            query=query,
+        )
+
+    def diff_live_competitor_scratch_snapshots(
+        self,
+        scratch_dir: Optional[Union[str, Path]] = None,
+        tenant_repo_root: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Diffs live competitor SERP DOM snapshots in .agy/scratch against compiled tenant pages
+        and returns deterministic template mutation payloads.
+        Zero em-dashes. Zero en-dashes.
+        """
+        return diff_live_competitor_scratch_snapshots(
+            scratch_dir=scratch_dir,
+            tenant_repo_root=tenant_repo_root,
+            tenant_id=self.tenant_id,
         )
 
     def _assert_spec_clean(self, spec: GapCandidateSpec) -> None:
@@ -3706,6 +3895,126 @@ def _build_gainhelm_depth_spec(
     }
 
 
+def _build_prediction_market_depth_spec(
+    topic_label: str, statutory_authority: str, economic_dataset: str
+) -> Dict[str, Any]:
+    """
+    Renders the bespoke Prediction Market EV, Exchange Quadratic Fee (Kalshi Taker 0.07*P*(1-P)
+    vs Kalshi Maker 0.0175*P*(1-P) vs Polymarket 4% Winner Fee), No-Vig De-Vigging, and
+    IRC Section 1256 (60/40) vs Ordinary Income Sub-Ledger Workbench.
+    Directly absorbs and upgrades live competitor DOM mechanics from predictioncalculator.com
+    with 100% SSR-hydrated default outputs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    return {
+        "workbench_mode": "prediction_market_ev",
+        "workbench_h2": f"Interactive Event Contract EV, Exchange Fee &amp; Section 1256 Tax Sub-Ledger: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, event-contract "
+            f"traders reconcile Kalshi quadratic taker/maker fee drag, Polymarket winner fees, two-way no-vig "
+            f"implied probability, fractional Kelly sizing, and IRC Section 1256(g) 60/40 mark-to-market tax treatment:"
+        ),
+        "presets": [
+            (
+                "Kalshi Taker Contract ($0.62 Price / 68% True Win / 0.07xP(1-P) Fee)",
+                '{"pm-price":0.62,"pm-true-prob":68,"pm-contracts":10000,"serp-b2b-gross":10000,"serp-b2b-deduction":6200,"serp-b2b-rate":26.8,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "Kalshi Maker Limit Order ($0.62 Price / 68% True Win / 0.0175xP(1-P) Fee)",
+                '{"pm-price":0.62,"pm-true-prob":68,"pm-contracts":10000,"serp-b2b-gross":10000,"serp-b2b-deduction":6200,"serp-b2b-rate":24.5,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "Polymarket Event Contract ($0.55 Price / 64% True Win / 4% Profit Fee)",
+                '{"pm-price":0.55,"pm-true-prob":64,"pm-contracts":10000,"serp-b2b-gross":10000,"serp-b2b-deduction":5500,"serp-b2b-rate":37.0,"serp-b2b-regime":"unoptimized_baseline"}',
+            ),
+            (
+                "Section 1256 Regulated DCM vs Ordinary Tax Stress ($25k Net Gain)",
+                '{"pm-price":0.50,"pm-true-prob":60,"pm-contracts":50000,"serp-b2b-gross":25000,"serp-b2b-deduction":0,"serp-b2b-rate":37.0,"serp-b2b-regime":"stress_case"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-gross" class="serp-field-label">Gross Settlement Payout / Position Notional ($)</label>\n'
+            '          <input type="number" id="serp-b2b-gross" name="serp-b2b-gross" class="touch-target serp-sub-input" min="0" max="10000000" step="500" value="10000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-deduction" class="serp-field-label">Contract Cost Basis &amp; Exchange Fee Offset ($)</label>\n'
+            '          <input type="number" id="serp-b2b-deduction" name="serp-b2b-deduction" class="touch-target serp-sub-input" min="0" max="10000000" step="100" value="6365" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-rate" class="serp-field-label">Effective Tax Rate (26.8% Sec 1256 vs 37% Ord) (%)</label>\n'
+            '          <input type="number" id="serp-b2b-rate" name="serp-b2b-rate" class="touch-target serp-sub-input" min="0" max="100" step="0.2" value="26.8" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-regime" class="serp-field-label">Exchange Fee Schedule &amp; Tax Regime</label>\n'
+            '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
+            '            <option value="optimal_election" selected="selected">CFTC Regulated DCM (Kalshi 0.07xP(1-P) + IRC Sec 1256 60/40)</option>\n'
+            '            <option value="unoptimized_baseline">Non-DCM Offshore / Crypto Venue (4% Fee + Ordinary Tax Rate)</option>\n'
+            '            <option value="stress_case">High-Vigorish Two-Way Overround + Top Bracket Stress</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Post-Fee &amp; Tax Expected Value (EV)", "+$435.24"),
+            ("serp-out-secondary", "Break-Even Win Rate (After Fee)", "63.65%"),
+            ("serp-out-tertiary", "Kalshi Quadratic Taker Fee Drag", "$164.76"),
+            ("serp-out-quaternary", "IRC 1256 (60/40) Tax Alpha Saved", "$370.77"),
+        ],
+        "svg_left_label": "Net Post-Fee & Tax Retained Edge: $2,661 (73.2%)",
+        "svg_right_label": "Exchange Fee + Statutory Tax Drag: $974 (26.8%)",
+        "svg_left_width": "439",
+        "svg_right_x": "439",
+        "svg_right_width": "161",
+        "table_h3": f"Statutory &amp; Exchange Fee Reference Schedule: {topic_label} Venue Mechanics &amp; Tax Treatment",
+        "table_headers": [
+            "Venue / Quantitative Mechanic",
+            "Governing Formula or Statutory Rule",
+            "Fee / Tax Rate Impact at $0.62 Contract",
+            "Break-Even &amp; Reporting Requirement",
+        ],
+        "table_rows": [
+            (
+                "Kalshi Taker Quadratic Fee Schedule",
+                "ceil(0.07 x C x P x (1 - P)) under CFTC 17 CFR Part 40",
+                "$0.0165 per contract ($164.76 on 10,000 contracts); max $0.0175 at $0.50",
+                "Shifts break-even win probability from 62.00% to 63.65% (+1.65% hurdle)",
+            ),
+            (
+                "Kalshi Maker Resting Limit Schedule",
+                "ceil(0.0175 x C x P x (1 - P)) Maker Rebate Tier",
+                "$0.0041 per contract ($41.19 on 10,000 contracts); 75% fee reduction",
+                "Shifts break-even win probability from 62.00% to 62.41% (+0.41% hurdle)",
+            ),
+            (
+                "Polymarket Net Winner Fee Schedule",
+                "0.04 x (1 - P) x C applied on winning settlement profit",
+                "$0.0152 per winning contract ($152.00 on 10,000 contracts at $0.62)",
+                "Shifts break-even win probability from 62.00% to 62.96% (+0.96% hurdle)",
+            ),
+            (
+                "Two-Way Multiplicative De-Vigging",
+                "P_fair_yes = P_yes / (P_yes + P_no); Overround = (P_yes + P_no - 1)",
+                "Strips bid-ask spread vigorish to isolate true market consensus probability",
+                "Required input before computing Quarter-Kelly or Half-Kelly position size",
+            ),
+            (
+                "Regulated DCM vs Ordinary Tax Treatment",
+                "IRC Section 1256(g) (60% LTCG / 40% STCG) vs IRC Section 165(d)",
+                "26.8% top blended rate (Form 6781) vs 37.0% ordinary income rate (-10.2% saved)",
+                "IRS Form 6781 mark-to-market net loss carryback vs itemized wagering limits",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="prediction_market_ev">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Event-Contract Execution &amp; Tax Signal:</strong> Routing orders via maker limit books and IRC Section 1256 regulated accounting preserves <span id="serp-banner-metric-primary">+$435.24</span> net EV and saves <span id="serp-banner-metric-secondary">$370.77</span> in tax drag. Review vetted CFTC-regulated and tax reconciliation partners below.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Event-Contract &amp; Tax Lot Partners</a>\n'
+            '      </div>'
+        ),
+    }
+
+
 def _render_multi_year_cliff_visualizer_html(
     topic_label: str,
     is_prexvo: bool,
@@ -3797,19 +4106,24 @@ def _render_stateful_scenario_comparator_html(
     is_prexvo: bool,
     statutory_authority: str,
     economic_dataset: str,
+    is_gainhelm: bool = False,
 ) -> str:
     """Renders the stateful side-by-side Scenario A vs Scenario B vs Live Workbench comparator."""
-    base_a = "$85,000" if is_prexvo else "$240,000"
-    base_b = "$145,000" if is_prexvo else "$520,000"
-    base_live = "$95,000" if is_prexvo else "$285,000"
-    ret_a = "$61,510" if is_prexvo else "$184,200"
-    ret_b = "$92,800" if is_prexvo else "$368,400"
-    ret_live = "$70,510" if is_prexvo else "$215,175"
-    tax_a = "$2,349" if is_prexvo else "$55,800"
-    tax_b = "$5,220" if is_prexvo else "$151,600"
-    tax_live = "$2,949" if is_prexvo else "$69,825"
-    delta_b = "+$2,871" if is_prexvo else "+$95,800"
-    delta_live = "+$600" if is_prexvo else "+$14,025"
+    if is_prexvo:
+        base_a, base_b, base_live = "$85,000", "$145,000", "$95,000"
+        ret_a, ret_b, ret_live = "$61,510", "$92,800", "$70,510"
+        tax_a, tax_b, tax_live = "$2,349", "$5,220", "$2,949"
+        delta_b, delta_live = "+$2,871", "+$600"
+    elif is_gainhelm:
+        base_a, base_b, base_live = "$84,000", "$148,000", "$96,000"
+        ret_a, ret_b, ret_live = "$25,800", "$42,000", "$31,400"
+        tax_a, tax_b, tax_live = "$58,200", "$106,000", "$64,600"
+        delta_b, delta_live = "+$47,800", "+$6,400"
+    else:
+        base_a, base_b, base_live = "$240,000", "$520,000", "$285,000"
+        ret_a, ret_b, ret_live = "$184,200", "$368,400", "$215,175"
+        tax_a, tax_b, tax_live = "$55,800", "$151,600", "$69,825"
+        delta_b, delta_live = "+$95,800", "+$14,025"
     return (
         f'      <div id="stateful-scenario-comparator" class="serp-scenario-comparator" data-mechanic="stateful_scenario_comparator">\n'
         f'        <h3 style="margin-top: 22px; margin-bottom: 8px;">Stateful Side-by-Side Scenario Comparator: {topic_label}</h3>\n'
@@ -4111,12 +4425,20 @@ def _render_saveable_decision_blueprint_html(
     topic_label: str,
     statutory_authority: str,
     economic_dataset: str,
+    is_prexvo: bool = False,
+    is_gainhelm: bool = False,
 ) -> str:
     """Renders the saveable decision blueprint bar with localStorage persistence, deep-link URL sync, and JSON export."""
+    if is_prexvo:
+        reviewer_label = "borrower or financial aid review"
+    elif is_gainhelm:
+        reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
+    else:
+        reviewer_label = "CPA or advisor review"
     return (
         f'      <div id="saveable-decision-blueprint" class="serp-decision-blueprint" data-mechanic="saveable_decision_blueprint" data-blueprint-slug="{slug}">\n'
         f'        <h3 style="margin-top: 20px; margin-bottom: 8px;">Saveable Decision Blueprint &amp; Audit-Ready State Export</h3>\n'
-        f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Persist your active parameters locally, copy a parameterized deep-link URL for CPA or advisor review, or export a structured JSON decision blueprint cited to <strong>{statutory_authority}</strong>:</p>\n'
+        f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Persist your active parameters locally, copy a parameterized deep-link URL for {reviewer_label}, or export a structured JSON decision blueprint cited to <strong>{statutory_authority}</strong>:</p>\n'
         f'        <div class="serp-preset-bar" role="group" aria-label="Decision Blueprint Persistence Controls">\n'
         f'          <button type="button" id="btn-save-blueprint" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="save_blueprint_cta" data-blueprint-action="save">Save Decision Blueprint</button>\n'
         f'          <button type="button" id="btn-copy-blueprint-link" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="share_blueprint_cta" data-blueprint-action="share">Copy Shareable Blueprint Link</button>\n'
@@ -4161,6 +4483,19 @@ def render_serp_incumbent_depth_upgrade_block(
         spec = _build_repayment_loan_depth_spec(slug, topic_label, statutory_authority)
     elif is_gainhelm:
         spec = _build_gainhelm_depth_spec(topic_label, statutory_authority, economic_dataset)
+    elif any(
+        tok in s_low
+        for tok in (
+            "prediction",
+            "kalshi",
+            "polymarket",
+            "implied-probability",
+            "kelly",
+            "section-1256",
+            "event-contract",
+        )
+    ):
+        spec = _build_prediction_market_depth_spec(topic_label, statutory_authority, economic_dataset)
     elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash")):
         spec = _build_crypto_depth_spec(topic_label, statutory_authority)
     elif (
@@ -4246,12 +4581,15 @@ def render_serp_incumbent_depth_upgrade_block(
         is_prexvo=is_prexvo,
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
+        is_gainhelm=is_gainhelm,
     )
     blueprint_html = _render_saveable_decision_blueprint_html(
         slug=s_low,
         topic_label=topic_label,
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
+        is_prexvo=is_prexvo,
+        is_gainhelm=is_gainhelm,
     )
 
     return (
@@ -4776,6 +5114,276 @@ COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
             "and increased contextual inbound links from 1 to >=9 across Prexvo hubs."
         ),
     },
+    "prediction-market-odds": {
+        "property_id": "profithelm",
+        "slug": "prediction-market-odds",
+        "target_queries": [
+            "prediction market odds calculator",
+            "implied probability calculator",
+            "kalshi fee calculator",
+            "prediction market ev calculator",
+            "polymarket odds calculator",
+        ],
+        "incumbent_urls": [
+            "https://predictioncalculator.com/calculators/implied-probability",
+            "https://predictioncalculator.com/calculators/ev",
+            "https://predictioncalculator.com/calculators/kalshi-fees",
+            "https://predictioncalculator.com/calculators/kelly-criterion",
+        ],
+        "calculator_interactivity": (
+            "predictioncalculator.com combines Contract Price / American / Decimal / Fractional odds tabs with "
+            "two-way multiplicative vig removal, Kalshi Taker (0.07*P*(1-P)) vs Kalshi Maker (0.0175*P*(1-P)) vs "
+            "Polymarket (4% winner) fee presets, break-even win rate shift, and cross-calculator data-carry links, "
+            "but relies 100% on client-side JS with blank initial HTML output spans (<span data-out='prob'></span>)."
+        ),
+        "visual_hierarchy": (
+            "Two-column input-to-output workbench with one-click exchange fee preset chips ($0.25, $0.50, $0.65, "
+            "Kalshi Taker, Kalshi Maker, Polymarket) and instant break-even win probability delta readouts."
+        ),
+        "content_effort": (
+            "Explicit reconciliation of Kalshi quadratic taker/maker fee curves (ceil(0.07*C*P*(1-P)) peaking at "
+            "$0.0175 at P=$0.50), two-way market overround de-vigging, fractional Kelly sizing, and IRC Section 1256 "
+            "60/40 vs ordinary tax treatment."
+        ),
+        "trust_signals": (
+            "Citations to IRC Section 1256(g), CFTC 17 CFR Part 40 Designated Contract Market rules, IRS Form 6781 "
+            "mark-to-market elections, and FRED DGS10 risk-free benchmark series."
+        ),
+        "seo_structure": (
+            "Unified @graph JSON-LD with SoftwareApplication + Dataset + HowTo + FAQPage + BreadcrumbList + Organization "
+            "(fixing predictioncalculator.com's fragmented 3-script JSON-LD and double-escaped '&amp;rsquo;' FAQ defects) "
+            "plus 100% SSR-hydrated default calculator metrics."
+        ),
+        "counter_strategy_executed": (
+            "Programmatically diffed live predictioncalculator.com DOM snapshots (.agy/scratch/calc_implied_prob.html, "
+            "calc_ev.html, calc_kalshi_fees.html, competitor_calculators.js), absorbed Kalshi Taker/Maker and Polymarket "
+            "fee schedules + break-even probability shift into an SSR-hydrated workbench, and consolidated cannibalizing "
+            "'what-is-implied-probability-in-prediction-markets' clone via 301 redirect."
+        ),
+    },
+    "prediction-market-tax": {
+        "property_id": "profithelm",
+        "slug": "prediction-market-tax",
+        "target_queries": [
+            "prediction market tax calculator",
+            "kalshi tax calculator",
+            "polymarket tax calculator",
+            "section 1256 event contract tax calculator",
+        ],
+        "incumbent_urls": [
+            "https://predictioncalculator.com/calculators/kalshi-fees",
+            "https://coinledger.io/crypto-tax-calculator",
+            "https://koinly.io/crypto-tax-calculator/",
+        ],
+        "calculator_interactivity": (
+            "Models net event-contract settlement gains across CFTC-regulated Designated Contract Markets (IRC Section "
+            "1256 60% LTCG / 40% STCG = 26.8% top blended rate) versus non-DCM ordinary/wagering tax treatment (up to "
+            "37% ordinary rate + IRC Section 165(d) itemized loss limitations)."
+        ),
+        "visual_hierarchy": (
+            "Side-by-side Regulated DCM (Form 6781) vs Non-DCM Ordinary Tax Liability comparison cards paired with "
+            "quadratic exchange fee offset and net post-tax EV retention."
+        ),
+        "content_effort": (
+            "Line-by-line IRS Form 6781 Part I mark-to-market reporting vs Schedule 1 / Schedule A wagering loss "
+            "deduction limits, 3.8% IRC Section 1411 NIIT applicability, and Form 1099-B vs Form 1099-MISC reconciliation."
+        ),
+        "trust_signals": (
+            "Citations to 26 U.S.C. Section 1256, IRC Section 165(d), CFTC 17 CFR Part 40, IRS Form 6781, and verified "
+            "CoinLedger automated tax-lot reconciliation."
+        ),
+        "seo_structure": (
+            "Unified SoftwareApplication + Dataset + HowTo + FAQPage JSON-LD graph with SSR-hydrated Section 1256 vs "
+            "ordinary income sensitivity schedule and direct internal linkage with /tools/prediction-market-odds/."
+        ),
+        "counter_strategy_executed": (
+            "Wired live predictioncalculator.com fee-drag mechanics into the Section 1256 tax sub-ledger so traders "
+            "evaluate exchange fees and Form 6781 60/40 tax alpha in a single deterministic model."
+        ),
+    },
+    "soc-2-audit-cost-calculator": {
+        "property_id": "gainhelm",
+        "slug": "soc-2-audit-cost-calculator",
+        "target_queries": [
+            "soc 2 audit cost calculator",
+            "soc 2 compliance cost calculator",
+            "soc 2 type 2 cost estimator",
+            "vanta vs drata soc 2 cost calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.vanta.com/resources/soc-2-cost-breakdown",
+            "https://drata.com/grc-central/soc-2/soc-2-cost",
+            "https://secureframe.com/hub/soc-2/cost",
+            "https://sprinto.com/blog/soc-2-certification-cost/",
+        ],
+        "calculator_interactivity": (
+            "Models total SOC 2 Type I and Type II cost of ownership across AICPA CPA firm attestation fees ($18,000 "
+            "to $65,000), continuous GRC automation licensing ($10,000 to $28,000), CREST penetration testing, and "
+            "internal engineering readiness hours (BLS OEWS 15-1212)."
+        ),
+        "visual_hierarchy": (
+            "Above-the-fold Automated GRC + Segmented Enclave TCO vs Manual Unsegmented Audit TCO cards with instant "
+            "engineering hours saved and enterprise GRC quote intake."
+        ),
+        "content_effort": (
+            "Headcount-tiered CPA fee benchmarks, Trust Services Criteria (Security, Availability, Processing Integrity, "
+            "Confidentiality, Privacy) scope multipliers, and 3-to-12-month Type II observation window timelines."
+        ),
+        "trust_signals": (
+            "Citations to AICPA SSAE 18, AT-C Section 205, Trust Services Criteria TSP Section 100, BLS OEWS 13-2011 / "
+            "15-1212 wage series, and IBM Cost of a Data Breach Report."
+        ),
+        "seo_structure": (
+            "Unified SoftwareApplication + Dataset + HowTo + FAQPage JSON-LD graph, strict GainHelm GRC tenant isolation, "
+            "and 3-tier topic cluster linking to CMMC 2.0, ISO 27001, and Penetration Testing calculators."
+        ),
+        "counter_strategy_executed": (
+            "Eliminated ProfitHelm cross-tenant fallback in get_competitive_incumbent_profile and stateful scenario "
+            "comparators, and blocked legacy pre-pivot field-service queries from polluting GainHelm spike briefs."
+        ),
+    },
+    "cmmc-2-0-compliance-cost-calculator": {
+        "property_id": "gainhelm",
+        "slug": "cmmc-2-0-compliance-cost-calculator",
+        "target_queries": [
+            "cmmc 2.0 compliance cost calculator",
+            "cmmc level 2 c3pao audit cost calculator",
+            "dfars 252.204-7021 compliance cost estimator",
+        ],
+        "incumbent_urls": [
+            "https://cyberab.org/",
+            "https://www.preveil.com/cmmc-cost/",
+            "https://www.vanta.com/products/cmmc",
+        ],
+        "calculator_interactivity": (
+            "Computes CMMC 2.0 Level 2 triennial C3PAO assessment fees, CUI enclave segmentation savings, FedRAMP High "
+            "/ GCC High licensing delta, and NIST SP 800-171 Rev 2 110-control remediation engineering hours."
+        ),
+        "visual_hierarchy": (
+            "Segmented CUI Enclave TCO vs Full Enterprise Network Scope comparison cards paired with 2026 DFARS "
+            "solicitation gate timeline."
+        ),
+        "content_effort": (
+            "Detailed breakdown of 32 CFR Part 170 final rule tiers (Level 1 17 practices, Level 2 110 controls, Level 3 "
+            "DIBCAC 24 SP 800-172 controls) and POA&M 180-day closeout eligibility rules."
+        ),
+        "trust_signals": (
+            "Citations to 32 CFR Part 170, 48 CFR DFARS 252.204-7012 / 7019 / 7020 / 7021, NIST SP 800-171 Rev 2, and "
+            "DoD CMMC 2.0 Cost Assessment regulatory impact series."
+        ),
+        "seo_structure": (
+            "SoftwareApplication + Dataset + HowTo + FAQPage JSON-LD graph connected directly to the companion "
+            "/tools/nist-800-171-sprs-score-calculator/."
+        ),
+        "counter_strategy_executed": (
+            "Added sub-vertical CMMC 2.0 / 32 CFR Part 170 statutory enrichment to CompetitorGapEngine and wired "
+            "dedicated GainHelm incumbent profiling."
+        ),
+    },
+    "nist-800-171-sprs-score-calculator": {
+        "property_id": "gainhelm",
+        "slug": "nist-800-171-sprs-score-calculator",
+        "target_queries": [
+            "nist 800 171 sprs score calculator",
+            "sprs score calculator",
+            "dfars 7019 sprs weighted point deduction calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.dodprocurementtoolbox.com/",
+            "https://www.preveil.com/nist-800-171-sprs-score/",
+        ],
+        "calculator_interactivity": (
+            "Calculates exact Supplier Performance Risk System (SPRS) score across the -203 to +110 scale using DoD "
+            "Assessment Methodology 5-point, 3-point, and 1-point control deduction weights and POA&M conditional eligibility."
+        ),
+        "visual_hierarchy": (
+            "Instant SPRS Score readout (-203 to +110) with CMMC Level 2 Conditional (>=88 score) vs Unconditional (110) "
+            "gate status indicator."
+        ),
+        "content_effort": (
+            "Complete 14-family NIST SP 800-171 Rev 2 control weight schedule, non-waivable 5-point CUI encryption/MFA "
+            "controls, and False Claims Act (31 U.S.C. 3729) misreporting risk warnings."
+        ),
+        "trust_signals": (
+            "Citations to DFARS 252.204-7019 / 7020, NIST SP 800-171 DoD Assessment Methodology v1.2.1, and 32 CFR 170.21."
+        ),
+        "seo_structure": (
+            "Dataset + HowTo + FAQPage JSON-LD with SSR-hydrated 5-point/3-point/1-point deduction sensitivity matrix."
+        ),
+        "counter_strategy_executed": (
+            "Enforced strict GRC query relevance filtering and connected SPRS scoring directly to CMMC 2.0 C3PAO readiness."
+        ),
+    },
+    "iso-27001-certification-cost-calculator": {
+        "property_id": "gainhelm",
+        "slug": "iso-27001-certification-cost-calculator",
+        "target_queries": [
+            "iso 27001 certification cost calculator",
+            "iso 27001 audit cost estimator",
+            "iso 27001 auditor day calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.vanta.com/collection/iso-27001/iso-27001-cost",
+            "https://advisera.com/27001academy/blog/how-much-does-iso-27001-implementation-cost/",
+            "https://www.isms.online/iso-27001/cost/",
+        ],
+        "calculator_interactivity": (
+            "Models Stage 1 + Stage 2 accredited Certification Body auditor-days under ISO/IEC 27006-1:2024 and IAF MD 5 "
+            "headcount tables alongside Years 2-3 surveillance audits and Annex A (93 controls) automation savings."
+        ),
+        "visual_hierarchy": (
+            "3-Year ISMS Certification + Surveillance TCO breakdown card paired with SOC 2 dual-mapping control overlap savings."
+        ),
+        "content_effort": (
+            "IAF MD 5 headcount-to-auditor-day schedule, ISO/IEC 27001:2022 Annex A 4-theme consolidation (Organizational, "
+            "People, Physical, Technological), and Statement of Applicability (SoA) scopereduction rules."
+        ),
+        "trust_signals": (
+            "Citations to ISO/IEC 27001:2022 Clauses 4-10, Annex A (93 controls), ISO/IEC 27006-1:2024, and ANAB/UKAS accreditation."
+        ),
+        "seo_structure": (
+            "Unified SoftwareApplication + Dataset + HowTo + FAQPage JSON-LD graph and cross-framework SOC 2 overlap links."
+        ),
+        "counter_strategy_executed": (
+            "Grounded ISO 27001 cost modeling in ISO/IEC 27006-1:2024 auditor-day formulas and GainHelm GRC benchmarks."
+        ),
+    },
+    "hipaa-violation-penalty-breach-cost-calculator": {
+        "property_id": "gainhelm",
+        "slug": "hipaa-violation-penalty-breach-cost-calculator",
+        "target_queries": [
+            "hipaa violation penalty calculator",
+            "hipaa breach cost calculator",
+            "hhs ocr civil monetary penalty calculator",
+        ],
+        "incumbent_urls": [
+            "https://www.hipaajournal.com/hipaa-violation-fines/",
+            "https://sprinto.com/blog/hipaa-violation-fines/",
+            "https://www.vanta.com/collection/hipaa/hipaa-violations",
+        ],
+        "calculator_interactivity": (
+            "Combines HHS OCR 45 CFR 160.404 4-tier inflation-adjusted Civil Monetary Penalty schedules with per-record "
+            "healthcare breach forensic, notification, credit monitoring, and class-action settlement costs."
+        ),
+        "visual_hierarchy": (
+            "4-Tier OCR Culpability Penalty Matrix paired with >500 ePHI record 60-day media/OCR breach notification triggers."
+        ),
+        "content_effort": (
+            "Reconciliation of 42 U.S.C. 1320d-5 statutory tiers vs 45 CFR 160.404 inflation-adjusted caps ($141 to "
+            "$2,134,831 annual cap per identical provision) and HITECH Act recognized security practices mitigation."
+        ),
+        "trust_signals": (
+            "Citations to 45 CFR 160.404, 45 CFR Part 164 Subpart C/D, 42 U.S.C. 1320d-5, Public Law 116-321 (HITECH "
+            "Recognized Security Practices), and IBM Healthcare Breach Cost benchmark series."
+        ),
+        "seo_structure": (
+            "Dataset + HowTo + FAQPage JSON-LD graph with SSR-hydrated 4-tier OCR penalty schedule and cyber insurance linkage."
+        ),
+        "counter_strategy_executed": (
+            "Paired HHS OCR 4-tier statutory fine arithmetic with HITECH Public Law 116-321 12-month recognized security "
+            "practices penalty mitigation."
+        ),
+    },
 }
 
 
@@ -4808,7 +5416,7 @@ BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION: List[Dict[str, Any]] = [
     {
         "upgrade_id": "sys_nofollow_preset_crawl_budget_guard",
         "scope": "SYSTEMIC_TEMPLATE_ENHANCEMENT",
-        "target_assets": "All ProfitHelm (148) and Prexvo (13) calculator pages (.scenario-preset-link anchors)",
+        "target_assets": "All ProfitHelm, Prexvo, and GainHelm calculator pages (.scenario-preset-link anchors)",
         "engineering_cost": "LOW",
         "ranking_impact_score": 9.4,
         "conversion_impact_score": 8.2,
@@ -4853,6 +5461,21 @@ BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION: List[Dict[str, Any]] = [
         ),
     },
     {
+        "upgrade_id": "sys_live_serp_dom_structural_diff_and_rma_velocity_engine",
+        "scope": "SYSTEMIC_TEMPLATE_ENHANCEMENT",
+        "target_assets": "CompetitorGapEngine, DailyIndexingInspector, and closed-loop overlay/HTML remediation across all 3 tenants",
+        "engineering_cost": "MEDIUM",
+        "ranking_impact_score": 9.8,
+        "conversion_impact_score": 9.3,
+        "composite_roi_score": 9.6,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Replaces passive competitor reports with programmatic HTML/JS DOM structural diffing (schema depth, SSR vs "
+            "CSR calculator mechanics, statutory citation density, and entity coverage), RMA-7/RMA-28 decay velocity "
+            "scoring, and automated overlay + HTML template mutation across ProfitHelm, Prexvo, and GainHelm."
+        ),
+    },
+    {
         "upgrade_id": "bespoke_prexvo_refinance_and_idr_workbench",
         "scope": "BESPOKE_TOOL_MECHANIC",
         "target_assets": "/tools/student-loan-refinance-break-even-calculator/, /tools/icr-repayment-calculator/, /tools/ibr-hardship-cap-calculator/",
@@ -4867,33 +5490,122 @@ BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION: List[Dict[str, Any]] = [
             "and 9 new contextual inbound links from commercial IDR hubs."
         ),
     },
+    {
+        "upgrade_id": "bespoke_profithelm_prediction_market_fee_and_1256_workbench",
+        "scope": "BESPOKE_TOOL_MECHANIC",
+        "target_assets": "/tools/prediction-market-odds/, /tools/prediction-market-tax/",
+        "engineering_cost": "LOW",
+        "ranking_impact_score": 9.7,
+        "conversion_impact_score": 9.4,
+        "composite_roi_score": 9.6,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Directly counters predictioncalculator.com's CSR-only calculators by absorbing Kalshi quadratic Taker "
+            "(0.07*P*(1-P)) / Maker (0.0175*P*(1-P)) and Polymarket (4%) fee presets + break-even win rate shifts into "
+            "an SSR-hydrated workbench paired with IRC Section 1256 (60/40) Form 6781 tax drag analysis."
+        ),
+    },
+    {
+        "upgrade_id": "bespoke_gainhelm_grc_audit_scoping_workbench",
+        "scope": "BESPOKE_TOOL_MECHANIC",
+        "target_assets": "/tools/soc-2-audit-cost-calculator/, /tools/cmmc-2-0-compliance-cost-calculator/, /tools/nist-800-171-sprs-score-calculator/",
+        "engineering_cost": "LOW",
+        "ranking_impact_score": 9.5,
+        "conversion_impact_score": 9.4,
+        "composite_roi_score": 9.5,
+        "decision": "EXECUTE_IMMEDIATELY",
+        "rationale": (
+            "Isolates GainHelm's GRC audit scoping and SPRS deduction workbenches with AICPA SSAE 18, 32 CFR Part 170, "
+            "ISO/IEC 27006-1:2024, and 45 CFR 160.404 benchmarks while purging legacy pre-pivot field-service queries."
+        ),
+    },
 ]
 
 
-def get_competitive_incumbent_profile(slug_or_query: str) -> Dict[str, Any]:
+def get_competitive_incumbent_profile(
+    slug_or_query: str,
+    property_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Returns the durable competitive incumbent profile for a calculator slug or target money query.
+    Strictly parameterized by property_id when provided (or inferred from slug/query) so tenant
+    boundaries never bleed across ProfitHelm, Prexvo, and GainHelm.
     Zero em-dashes. Zero en-dashes.
     """
     key = str(slug_or_query or "").strip().lower().strip("/")
     if key.startswith("tools/"):
         key = key[len("tools/") :]
+    prop_norm = str(property_id or "").strip().lower()
+
+    if not prop_norm:
+        if any(
+            tok in key
+            for tok in (
+                "soc-2",
+                "soc 2",
+                "cmmc",
+                "sprs",
+                "800-171",
+                "iso-27001",
+                "iso 27001",
+                "hipaa",
+                "pci-dss",
+                "fedramp",
+                "hitrust",
+                "pentest",
+                "penetration-testing",
+                "cyber-insurance",
+                "vanta",
+                "drata",
+            )
+        ):
+            prop_norm = "gainhelm"
+        elif any(
+            tok in key
+            for tok in (
+                "rap-",
+                "rap ",
+                "ibr",
+                "icr",
+                "pslf",
+                "student-loan",
+                "student loan",
+                "save-plan",
+                "parent-plus",
+                "obbba",
+            )
+        ):
+            prop_norm = "prexvo"
+
     if key in COMPETITIVE_INCUMBENT_PROFILES:
-        return dict(COMPETITIVE_INCUMBENT_PROFILES[key])
+        prof = COMPETITIVE_INCUMBENT_PROFILES[key]
+        if not prop_norm or prof.get("property_id") == prop_norm:
+            return dict(prof)
+
     base_slug = key.split("/")[0]
     if base_slug in COMPETITIVE_INCUMBENT_PROFILES:
-        return dict(COMPETITIVE_INCUMBENT_PROFILES[base_slug])
+        prof = COMPETITIVE_INCUMBENT_PROFILES[base_slug]
+        if not prop_norm or prof.get("property_id") == prop_norm:
+            return dict(prof)
+
     for prof in COMPETITIVE_INCUMBENT_PROFILES.values():
+        if prop_norm and prof.get("property_id") != prop_norm:
+            continue
         if any(key in q.lower() or q.lower() in key for q in prof.get("target_queries", [])):
             return dict(prof)
+
+    if prop_norm == "gainhelm":
+        return dict(COMPETITIVE_INCUMBENT_PROFILES["soc-2-audit-cost-calculator"])
+    if prop_norm == "prexvo":
+        return dict(COMPETITIVE_INCUMBENT_PROFILES["rap-payment-calculator"])
     return dict(COMPETITIVE_INCUMBENT_PROFILES["section-1031-calculator"])
 
 
 def evaluate_bespoke_vs_systemic_upgrades(property_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Returns the structured evaluation of bespoke interactive tool mechanics vs systemic
-    template enhancements across ProfitHelm and Prexvo, including durable incumbent profiles
-    and rejected cosmetic changes.
+    template enhancements across ProfitHelm, Prexvo, and GainHelm, including durable incumbent
+    profiles and rejected cosmetic changes.
     Zero em-dashes. Zero en-dashes.
     """
     prop_norm = str(property_id or "").strip().lower()
@@ -4908,6 +5620,543 @@ def evaluate_bespoke_vs_systemic_upgrades(property_id: Optional[str] = None) -> 
         "incumbent_profiles": profiles,
         "upgrade_tradeoff_matrix": [dict(u) for u in BESPOKE_VS_SYSTEMIC_UPGRADE_EVALUATION],
         "rejected_cosmetic_changes": [dict(c) for c in REJECTED_COSMETIC_CHANGES],
+    }
+
+
+_STATUTORY_CITATION_REGEXES: List[Tuple[str, str]] = [
+    ("irc_section", r"\b(?:IRC\s+Section|26\s+U\.S\.C\.(?:\s+Section)?)\s+\d+[A-Za-z0-9()-]*"),
+    ("irs_form", r"\b(?:IRS\s+)?Form\s+(?:1099-[A-Z]+|8949|8824|4562|6781|6765|8974|1120-S|3840|540|982)\b"),
+    ("cfr_title_34", r"\b34\s+CFR(?:\s+Part)?\s+\d+(?:\.\d+)?"),
+    ("cfr_title_17", r"\b17\s+CFR(?:\s+Part)?\s+\d+(?:\.\d+)?"),
+    ("cfr_title_32", r"\b32\s+CFR(?:\s+Part)?\s+\d+(?:\.\d+)?"),
+    ("cfr_title_45", r"\b45\s+CFR(?:\s+Part)?\s+\d+(?:\.\d+)?"),
+    ("dfars_clause", r"\bDFARS\s+252\.204-\d{4}\b"),
+    ("aicpa_standard", r"\b(?:AICPA\s+SSAE\s+18|AT-C\s+Section\s+205|TSP\s+Section\s+100)\b"),
+    ("iso_standard", r"\bISO/IEC\s+2700[16](?:-1)?(?::202[24])?\b"),
+    ("nist_standard", r"\bNIST\s+SP\s+800-(?:171|53|172)\b"),
+    ("rev_proc_rul", r"\bRev\.\s*(?:Proc\.|Rul\.)\s*\d{4}-\d+\b"),
+    ("public_law", r"\bPublic\s+Law\s+\d{3}-\d+\b"),
+    ("tila_reg_z", r"\b(?:TILA\s+)?Regulation\s+Z|\b12\s+CFR\s+Part\s+1026\b"),
+]
+
+_EMPIRICAL_DATASET_REGEXES: List[Tuple[str, str]] = [
+    ("fred_series", r"\bFRED\b|\bCPILFESL\b|\bDGS10\b|\bSLSTTOTAL\b"),
+    ("bls_oews", r"\bBLS\s+OEWS\b"),
+    ("irs_soi", r"\bIRS\s+SOI\b"),
+    ("cftc_dcm", r"\bCFTC\b"),
+    ("hhs_fpl", r"\bHHS\s+(?:Federal\s+)?Poverty\s+Guidelines\b"),
+    ("ibm_breach", r"\bIBM\s+Cost\s+of\s+a\s+Data\s+Breach\b"),
+    ("iaf_md5", r"\bIAF\s+MD\s*5\b"),
+]
+
+
+def parse_serp_dom_structural_profile(
+    raw_html: str,
+    raw_js: str = "",
+    tenant_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Programmatically parses a live competitor or tenant DOM snapshot (+ optional JS bundle)
+    across four structural dimensions:
+      1. schema_depth: JSON-LD script count, @graph unification, rich-result @type coverage,
+         and double-escaped entity defects (e.g. '&amp;rsquo;').
+      2. calculator_mechanics: Interactive input controls, output elements, SSR-hydrated vs
+         CSR-blank initial output spans, fee/scenario presets, cross-tool state carry,
+         5-point sensitivity tables, multi-year cliffs, and stateful scenario comparators.
+      3. citation_density: Primary statutory citations (IRC, CFR, DFARS, AICPA, ISO, IRS Forms)
+         and empirical macroeconomic dataset citations (FRED, BLS OEWS, IRS SOI, CFTC, HHS).
+      4. entity_coverage: TenantFactStore statutory & domain entity alignment and zero foreign
+         cross-tenant contamination.
+    Zero em-dashes. Zero en-dashes.
+    """
+    html_text = str(raw_html or "")
+    js_text = str(raw_js or "")
+    combined_source = f"{html_text}\n{js_text}"
+    prop_norm = str(tenant_id or "profithelm").strip().lower()
+
+    # 1. Schema Depth Analysis
+    ld_blocks = re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    schema_types: Set[str] = set()
+    has_unified_graph = False
+    has_double_escaped_entities = False
+    for raw_block in ld_blocks:
+        if re.search(r"&amp;(?:rsquo|lsquo|ldquo|rdquo|quot|amp|#\d+);", raw_block, re.IGNORECASE):
+            has_double_escaped_entities = True
+        try:
+            parsed = json.loads(raw_block.strip())
+            stack: List[Any] = [parsed]
+            while stack:
+                curr = stack.pop()
+                if isinstance(curr, dict):
+                    if "@graph" in curr and isinstance(curr["@graph"], list):
+                        has_unified_graph = True
+                        stack.extend(curr["@graph"])
+                    t_val = curr.get("@type")
+                    if isinstance(t_val, str) and t_val.strip():
+                        schema_types.add(t_val.strip())
+                    elif isinstance(t_val, list):
+                        for item_t in t_val:
+                            if isinstance(item_t, str) and item_t.strip():
+                                schema_types.add(item_t.strip())
+                    for v in curr.values():
+                        if isinstance(v, (dict, list)):
+                            stack.append(v)
+                elif isinstance(curr, list):
+                    stack.extend(curr)
+        except Exception:
+            pass
+
+    target_schema_types = {"SoftwareApplication", "Dataset", "HowTo", "FAQPage", "BreadcrumbList", "Organization"}
+    covered_target_schemas = sorted(t for t in target_schema_types if t in schema_types or (t == "SoftwareApplication" and "WebApplication" in schema_types))
+    missing_schema_types = sorted(t for t in target_schema_types if t not in schema_types)
+    schema_score = min(
+        10.0,
+        round(
+            (len(covered_target_schemas) / max(1, len(target_schema_types))) * 7.5
+            + (1.5 if has_unified_graph else 0.0)
+            + (1.0 if ld_blocks and not has_double_escaped_entities else 0.0),
+            2,
+        ),
+    )
+
+    # 2. Interactive Calculator Mechanics Analysis
+    input_controls: List[str] = []
+    for m in re.finditer(r"<(input|select)\b([^>]*)>", html_text, flags=re.IGNORECASE):
+        attrs = m.group(2)
+        if re.search(r'\btype\s*=\s*["\'](?:hidden|submit|button|checkbox)["\']', attrs, re.IGNORECASE):
+            continue
+        for attr_key in ("data-in", "id", "name", "data-field"):
+            am = re.search(rf'\b{re.escape(attr_key)}\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            if am and am.group(1).strip():
+                ctrl_id = am.group(1).strip()
+                if ctrl_id not in input_controls:
+                    input_controls.append(ctrl_id)
+                break
+
+    ssr_hydrated_outputs: List[str] = []
+    csr_blank_outputs: List[str] = []
+    # Check elements with data-out="...", <output ...>, or calc-metric-value / out-value classes
+    for out_m in re.finditer(
+        r'<(?:span|div|td|output|strong)\b([^>]*\b(?:data-out|class)\s*=\s*["\'][^"\']*["\'][^>]*)>(.*?)</(?:span|div|td|output|strong)>',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        attrs = out_m.group(1)
+        inner_raw = out_m.group(2)
+        is_out_node = bool(
+            re.search(r'\bdata-out\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            or re.search(r'\bclass\s*=\s*["\'][^"\']*\b(?:out-value|calc-metric-value|serp-metric-val)\b', attrs, re.IGNORECASE)
+        )
+        if not is_out_node:
+            continue
+        label_m = (
+            re.search(r'\bdata-out\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            or re.search(r'\bid\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        )
+        out_id = label_m.group(1).strip() if label_m else f"out_{len(ssr_hydrated_outputs) + len(csr_blank_outputs) + 1}"
+        inner_clean = re.sub(r"<[^>]+>", "", inner_raw).strip()
+        if inner_clean:
+            ssr_hydrated_outputs.append(out_id)
+        else:
+            csr_blank_outputs.append(out_id)
+
+    preset_mechanics: List[str] = []
+    for pm in re.finditer(
+        r'\bdata-(?:calc-)?preset\s*=\s*["\']([^"\']+)["\']',
+        html_text,
+        flags=re.IGNORECASE,
+    ):
+        val = pm.group(1).strip()
+        if val and val not in preset_mechanics:
+            preset_mechanics.append(val[:60])
+
+    js_fee_schedules: List[str] = []
+    if re.search(r"0\.07\s*\*\s*[a-zA-Z_]+\s*\*\s*\(\s*1\s*-\s*[a-zA-Z_]+\s*\)", combined_source) or "0.07" in combined_source and "kalshi" in combined_source.lower():
+        js_fee_schedules.append("kalshi_taker_007_quadratic_fee")
+    if "0.0175" in combined_source and "kalshi" in combined_source.lower():
+        js_fee_schedules.append("kalshi_maker_00175_fee")
+    if ("0.04" in combined_source or "4%" in combined_source) and "polymarket" in combined_source.lower():
+        js_fee_schedules.append("polymarket_004_winner_fee")
+    if re.search(r"\bdata-carry\s*=", html_text, re.IGNORECASE) or "data-blueprint-action" in html_text:
+        js_fee_schedules.append("cross_tool_state_carry_blueprint")
+    if re.search(r"breakEven|break-even|beShift", combined_source, re.IGNORECASE):
+        js_fee_schedules.append("break_even_win_rate_delta")
+    if re.search(r"noVig|no-vig|de-vig|overround", combined_source, re.IGNORECASE):
+        js_fee_schedules.append("two_way_multiplicative_devigging")
+
+    has_sensitivity_matrix = bool(
+        re.search(
+            r'class=["\'][^"\']*(?:sensitivity-table|serp-statutory-reference-table|comparison-table)[^"\']*["\']',
+            html_text,
+            re.IGNORECASE,
+        )
+    )
+    has_multi_year_cliff = "multi-year-cliff-visualizer" in html_text
+    has_stateful_comparator = "stateful-scenario-comparator" in html_text
+    has_statutory_tax_drag = bool(
+        re.search(r"\b(?:Section\s+1256|Form\s+6781|60/40|60%\s+Long-Term|Section\s+179|34\s+CFR|AICPA\s+SSAE\s+18)\b", html_text, re.IGNORECASE)
+    )
+    has_ssr_hydration = len(ssr_hydrated_outputs) > 0 and len(csr_blank_outputs) == 0
+
+    mechanics_score = min(
+        10.0,
+        round(
+            (2.0 if len(input_controls) >= 2 else 0.5)
+            + (2.5 if has_ssr_hydration else 0.0)
+            + (1.5 if preset_mechanics or js_fee_schedules else 0.0)
+            + (1.5 if has_sensitivity_matrix else 0.0)
+            + (1.25 if has_multi_year_cliff and has_stateful_comparator else 0.0)
+            + (1.25 if has_statutory_tax_drag else 0.0),
+            2,
+        ),
+    )
+
+    # 3. Statutory & Empirical Citation Density Analysis
+    visible_text = re.sub(r"<script\b[^>]*>.*?</script>", " ", html_text, flags=re.IGNORECASE | re.DOTALL)
+    visible_text = re.sub(r"<style\b[^>]*>.*?</style>", " ", visible_text, flags=re.IGNORECASE | re.DOTALL)
+    visible_text = re.sub(r"<[^>]+>", " ", visible_text)
+
+    statutory_citations: List[str] = []
+    for _, pat in _STATUTORY_CITATION_REGEXES:
+        for cm in re.finditer(pat, visible_text, flags=re.IGNORECASE):
+            token = re.sub(r"\s+", " ", cm.group(0).strip())
+            if token not in statutory_citations:
+                statutory_citations.append(token)
+
+    empirical_datasets: List[str] = []
+    for ds_name, pat in _EMPIRICAL_DATASET_REGEXES:
+        if re.search(pat, visible_text, flags=re.IGNORECASE):
+            empirical_datasets.append(ds_name)
+
+    citation_score = min(
+        10.0,
+        round(min(6.5, len(statutory_citations) * 1.65) + min(3.5, len(empirical_datasets) * 1.75), 2),
+    )
+
+    # 4. Entity Coverage & Tenant Isolation Analysis
+    store = TenantFactStore.get_instance()
+    t_profile = store.get_profile(prop_norm)
+    scanner = CrossPropertyContaminationScanner()
+    foreign_contaminations = scanner.scan_text(visible_text.lower(), prop_norm)
+
+    matched_entities: List[str] = []
+    missing_entities: List[str] = []
+    if t_profile and t_profile.statutory_truth and t_profile.statutory_truth.statutory_citations:
+        for cit_key, cit_val in t_profile.statutory_truth.statutory_citations.items():
+            cit_str = str(cit_val).strip()
+            if not cit_str:
+                continue
+            if cit_str.lower() in visible_text.lower() or cit_key.replace("_", " ").lower() in visible_text.lower():
+                matched_entities.append(cit_key)
+            else:
+                missing_entities.append(cit_key)
+
+    entity_score = max(
+        0.0,
+        min(
+            10.0,
+            round(
+                (5.0 if statutory_citations else 1.5)
+                + min(5.0, len(matched_entities) * 1.25)
+                - (5.0 * len(foreign_contaminations)),
+                2,
+            ),
+        ),
+    )
+
+    composite_dom_score = round(
+        (schema_score * 0.25) + (mechanics_score * 0.35) + (citation_score * 0.25) + (entity_score * 0.15),
+        2,
+    )
+
+    return {
+        "tenant_id": prop_norm,
+        "composite_dom_score": composite_dom_score,
+        "schema_depth": {
+            "jsonld_script_count": len(ld_blocks),
+            "has_unified_graph": has_unified_graph,
+            "schema_types": sorted(schema_types),
+            "covered_target_schemas": covered_target_schemas,
+            "missing_schema_types": missing_schema_types,
+            "has_double_escaped_entities": has_double_escaped_entities,
+            "score": schema_score,
+        },
+        "calculator_mechanics": {
+            "input_controls": input_controls,
+            "ssr_hydrated_outputs_count": len(ssr_hydrated_outputs),
+            "csr_blank_outputs_count": len(csr_blank_outputs),
+            "csr_blank_output_ids": csr_blank_outputs,
+            "has_ssr_hydration": has_ssr_hydration,
+            "preset_mechanics": preset_mechanics,
+            "detected_fee_and_carry_mechanics": js_fee_schedules,
+            "has_sensitivity_matrix": has_sensitivity_matrix,
+            "has_multi_year_cliff": has_multi_year_cliff,
+            "has_stateful_comparator": has_stateful_comparator,
+            "has_statutory_tax_drag": has_statutory_tax_drag,
+            "score": mechanics_score,
+        },
+        "citation_density": {
+            "statutory_citations": statutory_citations,
+            "statutory_citation_count": len(statutory_citations),
+            "empirical_datasets": empirical_datasets,
+            "dataset_citation_count": len(empirical_datasets),
+            "score": citation_score,
+        },
+        "entity_coverage": {
+            "matched_tenant_entities": matched_entities,
+            "missing_tenant_entities": missing_entities[:10],
+            "foreign_tenant_contaminations": foreign_contaminations,
+            "tenant_isolated": len(foreign_contaminations) == 0,
+            "score": entity_score,
+        },
+    }
+
+
+def diff_competitor_dom_structure(
+    competitor_html: str,
+    tenant_html: str = "",
+    competitor_js: str = "",
+    tenant_id: str = "profithelm",
+    target_slug: str = "",
+    query: str = "",
+) -> Dict[str, Any]:
+    """
+    Programmatically diffs a competitor SERP DOM snapshot (+ optional JS bundle) against a
+    compiled tenant page across schema depth, SSR vs CSR calculator mechanics, citation density,
+    and entity coverage. Emits a deterministic template_mutation_spec that mutates target tenant
+    overlays and compiled HTML builds.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop_norm = str(tenant_id or "profithelm").strip().lower()
+    comp_prof = parse_serp_dom_structural_profile(competitor_html, competitor_js, tenant_id=prop_norm)
+    tenant_prof = (
+        parse_serp_dom_structural_profile(tenant_html, "", tenant_id=prop_norm)
+        if str(tenant_html or "").strip()
+        else None
+    )
+
+    slug_clean = str(target_slug or "").strip().strip("/").lower()
+    if slug_clean.startswith("tools/"):
+        slug_clean = slug_clean[len("tools/") :]
+    q_clean = str(query or slug_clean.replace("-", " ")).strip()
+
+    # 1. Identify competitor interactive wedges to absorb
+    competitor_wedges_to_absorb: List[str] = []
+    for mech in comp_prof["calculator_mechanics"]["detected_fee_and_carry_mechanics"]:
+        if mech not in competitor_wedges_to_absorb:
+            competitor_wedges_to_absorb.append(mech)
+    for preset in comp_prof["calculator_mechanics"]["preset_mechanics"]:
+        norm_p = _normalize_feature_name(f"preset_{preset}")
+        if norm_p and norm_p not in competitor_wedges_to_absorb:
+            competitor_wedges_to_absorb.append(norm_p)
+    for ctrl in comp_prof["calculator_mechanics"]["input_controls"]:
+        norm_c = _normalize_feature_name(ctrl)
+        if norm_c and norm_c not in competitor_wedges_to_absorb:
+            competitor_wedges_to_absorb.append(norm_c)
+
+    # 2. Identify structural vulnerabilities in the competitor DOM that our template exploits
+    competitor_structural_vulnerabilities: List[str] = []
+    if comp_prof["calculator_mechanics"]["csr_blank_outputs_count"] > 0:
+        competitor_structural_vulnerabilities.append("csr_only_blank_initial_outputs")
+    if not comp_prof["schema_depth"]["has_unified_graph"]:
+        competitor_structural_vulnerabilities.append("fragmented_jsonld_missing_unified_graph")
+    if comp_prof["schema_depth"]["missing_schema_types"]:
+        competitor_structural_vulnerabilities.append(
+            "missing_rich_result_schemas:" + ",".join(comp_prof["schema_depth"]["missing_schema_types"])
+        )
+    if comp_prof["schema_depth"]["has_double_escaped_entities"]:
+        competitor_structural_vulnerabilities.append("double_escaped_jsonld_entities")
+    if comp_prof["citation_density"]["statutory_citation_count"] == 0:
+        competitor_structural_vulnerabilities.append("zero_primary_statutory_citations")
+    if comp_prof["citation_density"]["dataset_citation_count"] == 0:
+        competitor_structural_vulnerabilities.append("zero_empirical_dataset_citations")
+    if not comp_prof["calculator_mechanics"]["has_statutory_tax_drag"]:
+        competitor_structural_vulnerabilities.append("missing_statutory_tax_drag_comparison")
+    if not comp_prof["calculator_mechanics"]["has_sensitivity_matrix"]:
+        competitor_structural_vulnerabilities.append("missing_5_point_ssr_sensitivity_table")
+
+    # 3. Identify any gaps on the compiled tenant page relative to the absorbed competitor wedges
+    tenant_structural_gaps: List[str] = []
+    if tenant_prof is None:
+        tenant_structural_gaps.append("uncompiled_or_missing_tenant_dom")
+    else:
+        if tenant_prof["schema_depth"]["missing_schema_types"]:
+            tenant_structural_gaps.append(
+                "missing_schema_types:" + ",".join(tenant_prof["schema_depth"]["missing_schema_types"])
+            )
+        if not tenant_prof["calculator_mechanics"]["has_ssr_hydration"]:
+            tenant_structural_gaps.append("incomplete_ssr_output_hydration")
+        tenant_mechs = set(tenant_prof["calculator_mechanics"]["detected_fee_and_carry_mechanics"])
+        for c_mech in comp_prof["calculator_mechanics"]["detected_fee_and_carry_mechanics"]:
+            if c_mech not in tenant_mechs:
+                tenant_structural_gaps.append(f"missing_competitor_wedge:{c_mech}")
+        if (
+            any(tok in f"{slug_clean} {q_clean.lower()}" for tok in ("prediction", "kalshi", "polymarket", "implied-probability", "ev"))
+            and 'data-workbench-mode="prediction_market_ev"' not in str(tenant_html or "")
+        ):
+            tenant_structural_gaps.append("missing_bespoke_prediction_market_ev_workbench")
+
+    # Resolve target statutory authority & dataset via CompetitorGapEngine
+    engine = CompetitorGapEngine(tenant_id=prop_norm)
+    enriched_meta = engine.enrich_candidate_spec(
+        {
+            "slug": slug_clean or sanitize_url_slug(q_clean or "calculator"),
+            "query": q_clean or slug_clean.replace("-", " "),
+            "title": (slug_clean or q_clean or "Calculator").replace("-", " ").title(),
+        }
+    )
+    stat_auth = str(enriched_meta.get("statutory_authority", "IRC Section 179(b)(1)"))
+    econ_ds = str(enriched_meta.get("economic_dataset", "FRED CPILFESL Series"))
+    canonical_base = str(enriched_meta.get("canonical_base", f"https://{prop_norm}.com"))
+    eff_slug = slug_clean or str(enriched_meta.get("slug", "calculator"))
+    eff_title = (eff_slug.replace("-", " ").title() if eff_slug else "Calculator")
+
+    serp_workbench_html = render_serp_incumbent_depth_upgrade_block(
+        slug=eff_slug,
+        title=eff_title,
+        property_id=prop_norm,
+        canonical_base=canonical_base,
+        statutory_authority=stat_auth,
+        economic_dataset=econ_ds,
+    )
+
+    mutation_required = bool(tenant_structural_gaps or competitor_wedges_to_absorb)
+    template_mutation_spec = {
+        "property_id": prop_norm,
+        "target_slug": eff_slug,
+        "query": q_clean,
+        "mutation_required": mutation_required,
+        "statutory_authority": stat_auth,
+        "economic_dataset": econ_ds,
+        "absorbed_mechanics": competitor_wedges_to_absorb,
+        "exploited_competitor_vulnerabilities": competitor_structural_vulnerabilities,
+        "tenant_gaps_closed": tenant_structural_gaps,
+        "schema_upgrades_required": ["SoftwareApplication", "Dataset", "HowTo", "FAQPage", "BreadcrumbList", "Organization"],
+        "serp_depth_upgrade_html": serp_workbench_html,
+    }
+
+    return {
+        "property_id": prop_norm,
+        "target_slug": eff_slug,
+        "query": q_clean,
+        "competitor_profile": comp_prof,
+        "tenant_profile": tenant_prof,
+        "competitor_wedges_to_absorb": competitor_wedges_to_absorb,
+        "competitor_structural_vulnerabilities": competitor_structural_vulnerabilities,
+        "tenant_structural_gaps": tenant_structural_gaps,
+        "template_mutation_spec": template_mutation_spec,
+    }
+
+
+def diff_live_competitor_scratch_snapshots(
+    scratch_dir: Optional[Union[str, Path]] = None,
+    tenant_repo_root: Optional[Union[str, Path]] = None,
+    tenant_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Discovers and programmatically diffs live competitor DOM snapshots in .agy/scratch
+    (e.g. calc_implied_prob.html, calc_ev.html, calc_kalshi_fees.html, competitor_calculators.js)
+    against compiled tenant HTML pages in dist/tools/<slug>/index.html, returning deterministic
+    template_mutation_specs ready for closed-loop overlay and build mutation.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop_norm = str(tenant_id or "profithelm").strip().lower()
+    default_scratch = Path(__file__).resolve().parent.parent / ".agy" / "scratch"
+    s_dir = Path(scratch_dir) if scratch_dir else default_scratch
+    if not s_dir.exists():
+        return {
+            "property_id": prop_norm,
+            "scratch_dir": str(s_dir),
+            "snapshots_evaluated": 0,
+            "diffs": [],
+            "template_mutation_specs": [],
+        }
+
+    js_bundle = ""
+    js_path = s_dir / "competitor_calculators.js"
+    if js_path.exists():
+        try:
+            js_bundle = js_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            js_bundle = ""
+
+    snapshot_mappings: List[Tuple[str, str, str]] = [
+        ("calc_implied_prob.html", "prediction-market-odds", "prediction market implied probability calculator"),
+        ("calc_ev.html", "prediction-market-odds", "prediction market expected value calculator"),
+        ("calc_kalshi_fees.html", "prediction-market-tax", "kalshi fee and prediction market tax calculator"),
+    ]
+
+    if tenant_repo_root is None:
+        workspace_root = Path(__file__).resolve().parent.parent.parent
+        repo_map = {
+            "profithelm": workspace_root / "profithelm-platform",
+            "prexvo": workspace_root / "prexvo",
+            "gainhelm": workspace_root / "gainhelm",
+        }
+        t_root = repo_map.get(prop_norm)
+    else:
+        t_root = Path(tenant_repo_root)
+
+    diffs: List[Dict[str, Any]] = []
+    mutation_specs_by_slug: Dict[str, Dict[str, Any]] = {}
+
+    for filename, target_slug, target_query in snapshot_mappings:
+        snap_path = s_dir / filename
+        if not snap_path.exists():
+            continue
+        try:
+            comp_html = snap_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        tenant_html = ""
+        if t_root and (t_root / "dist" / "tools" / target_slug / "index.html").exists():
+            try:
+                tenant_html = (t_root / "dist" / "tools" / target_slug / "index.html").read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except Exception:
+                tenant_html = ""
+
+        diff_res = diff_competitor_dom_structure(
+            competitor_html=comp_html,
+            tenant_html=tenant_html,
+            competitor_js=js_bundle,
+            tenant_id=prop_norm,
+            target_slug=target_slug,
+            query=target_query,
+        )
+        diff_res["snapshot_file"] = filename
+        diffs.append(diff_res)
+
+        mut_spec = diff_res["template_mutation_spec"]
+        if target_slug not in mutation_specs_by_slug:
+            mutation_specs_by_slug[target_slug] = dict(mut_spec)
+        else:
+            existing_mut = mutation_specs_by_slug[target_slug]
+            for mech in mut_spec.get("absorbed_mechanics", []):
+                if mech not in existing_mut["absorbed_mechanics"]:
+                    existing_mut["absorbed_mechanics"].append(mech)
+            for vuln in mut_spec.get("exploited_competitor_vulnerabilities", []):
+                if vuln not in existing_mut["exploited_competitor_vulnerabilities"]:
+                    existing_mut["exploited_competitor_vulnerabilities"].append(vuln)
+            for gap in mut_spec.get("tenant_gaps_closed", []):
+                if gap not in existing_mut["tenant_gaps_closed"]:
+                    existing_mut["tenant_gaps_closed"].append(gap)
+            existing_mut["mutation_required"] = bool(
+                existing_mut.get("mutation_required") or mut_spec.get("mutation_required")
+            )
+
+    return {
+        "property_id": prop_norm,
+        "scratch_dir": str(s_dir),
+        "snapshots_evaluated": len(diffs),
+        "diffs": diffs,
+        "template_mutation_specs": list(mutation_specs_by_slug.values()),
     }
 
 
@@ -4933,6 +6182,9 @@ __all__ = [
     "render_competitor_winning_pattern_blocks",
     "get_competitive_incumbent_profile",
     "evaluate_bespoke_vs_systemic_upgrades",
+    "parse_serp_dom_structural_profile",
+    "diff_competitor_dom_structure",
+    "diff_live_competitor_scratch_snapshots",
 ]
 
 
