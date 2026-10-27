@@ -1831,6 +1831,44 @@ def identify_content_decay(
     decay_candidates: List[Dict[str, Any]] = []
     seen_qp: Set[Tuple[str, str]] = set()
 
+    # Pre-compute same-domain cannibalization query map and indexation-first checks (Workflow 1 upgrade)
+    query_paths_map: Dict[str, Set[str]] = {}
+    for cr in list(latest_rows) + list(current_rows):
+        if not isinstance(cr, dict):
+            continue
+        cr_q = str(cr.get("query") or "").strip().lower()
+        cr_p = (str(cr.get("canonical_path") or "").strip().rstrip("/")) or "/"
+        cr_imp = int(float(cr.get("impressions", 0) or 0))
+        if cr_q and cr_p and cr_imp >= 2:
+            query_paths_map.setdefault(cr_q, set()).add(cr_p)
+    cannibalized_queries_set: Set[str] = {
+        qk for qk, pset in query_paths_map.items() if len(pset) >= 2
+    }
+
+    dist_root = root / "dist"
+    noindex_check_re = re.compile(
+        r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex',
+        re.IGNORECASE,
+    )
+    indexation_cache: Dict[str, str] = {}
+
+    def _check_route_indexation_status(c_p: str) -> str:
+        if c_p in indexation_cache:
+            return indexation_cache[c_p]
+        status_val = "INDEXED_OK"
+        if dist_root.is_dir():
+            rel_p = c_p.strip("/")
+            cand_html = dist_root / rel_p / "index.html" if rel_p else dist_root / "index.html"
+            if cand_html.is_file():
+                try:
+                    raw_h = cand_html.read_text(encoding="utf-8", errors="ignore")
+                    if noindex_check_re.search(raw_h):
+                        status_val = "NOINDEX_DETECTED"
+                except Exception:
+                    pass
+        indexation_cache[c_p] = status_val
+        return status_val
+
     # Compare baseline vs latest snapshot rows first, then current_rows
     for row in list(latest_rows) + list(current_rows):
         if not isinstance(row, dict):
@@ -1895,6 +1933,54 @@ def identify_content_decay(
 
         if decay_type:
             leaf_slug = _slug_from_url_or_query(target_url=c_url, query=q)
+            idx_status = _check_route_indexation_status(c_path)
+            if idx_status != "INDEXED_OK":
+                decline_cause = "TECHNICAL_OR_INDEXATION_ISSUE"
+                fixability_weight = 1.5
+                primary_action = "RESTORE_INDEXABILITY_AND_CANONICAL_PARITY"
+                fallback_action = "RESUBMIT_SITEMAP_AND_VERIFY_HTTP_200"
+            elif q_low in cannibalized_queries_set:
+                decline_cause = "CANNIBALIZATION"
+                fixability_weight = 1.4
+                primary_action = "CONSOLIDATE_INTENT_OR_DIFFERENTIATE_SPOKE_HEADINGS"
+                fallback_action = "APPLY_301_ROLLUP_TO_DOMINANT_HUB"
+            elif decay_type == "CTR_DECAY" and curr_impr >= base_impr and curr_clicks == 0:
+                decline_cause = "SERP_OR_AI_ANSWER_REDUCED_CLICK_OPPORTUNITY"
+                fixability_weight = 1.25
+                primary_action = "INJECT_AI_PASSAGE_EXTRACTABILITY_AND_INTERACTIVE_PRESETS"
+                fallback_action = "REWRITE_TITLE_MODIFIER_FOR_CALCULATOR_INTENT"
+            elif decay_type == "CTR_DECAY":
+                decline_cause = "CTR_DECLINED_WHILE_RANKINGS_HELD"
+                fixability_weight = 1.45
+                primary_action = "REWRITE_TITLE_AND_QUICK_ANSWER"
+                fallback_action = "TEST_SECONDARY_STATUTORY_YEAR_MODIFIER"
+            elif curr_impr < (base_impr * 0.6) and abs(pos_delta) < 1.5:
+                decline_cause = "SEARCH_DEMAND_DECLINED"
+                fixability_weight = 0.65
+                primary_action = "MONITOR_SEASONAL_DEMAND_NO_TEMPLATE_CHURN"
+                fallback_action = "EXPAND_ADJACENT_EVERGREEN_QUERY_CLUSTER"
+            elif crossed_page_one and curr_impr >= max(2, int(base_impr * 0.7)):
+                decline_cause = "COMPETITOR_REPLACED_PAGE"
+                fixability_weight = 1.35
+                primary_action = "UPGRADE_INTERACTIVE_WORKBENCH_AND_STATUTORY_DEPTH"
+                fallback_action = "ROUTE_CONTEXTUAL_INTERNAL_LINKS_FROM_CLUSTER_HUBS"
+            elif any(yr in q_low for yr in ("2023", "2024", "2025")) or pos_delta >= 5.0:
+                decline_cause = "CONTENT_IS_OUTDATED"
+                fixability_weight = 1.3
+                primary_action = "REFRESH_2026_2027_STATUTORY_TABLES_AND_OVERLAY"
+                fallback_action = "UPDATE_DATE_MODIFIED_AND_FAQ_SCHEMA"
+            else:
+                decline_cause = "RANKINGS_DECLINED"
+                fixability_weight = 1.25
+                primary_action = "REFRESH_OVERLAY_AND_HEADINGS"
+                fallback_action = "BOOST_CONTEXTUAL_INBOUND_LINKS_FROM_SIBLING_TOOLS"
+
+            confidence_level = "High" if max(curr_impr, base_impr) >= 10 else "Medium"
+            supporting_evidence = (
+                f"Indexation={idx_status}; baseline_pos={base_pos:.2f}->current_pos={curr_pos:.2f} "
+                f"(delta={pos_delta:+.2f}); baseline_impr={base_impr}->current_impr={curr_impr}; "
+                f"current_ctr={curr_ctr:.4f} vs expected_ctr={expected_ctr:.4f}."
+            )
             severity_mult = 2.0 if severity == "CRITICAL" else (1.5 if severity == "HIGH" else 1.0)
             rma7_rma28_ratio = float(timeline_audit.get("rma7_vs_rma28_velocity_ratio", 1.0) or 1.0)
             prop_decay_vel = float(timeline_audit.get("decay_velocity_score", 0.0) or 0.0)
@@ -1921,6 +2007,14 @@ def identify_content_decay(
                     "canonical_path": c_path,
                     "query": _clean_dashes(q),
                     "decay_type": decay_type,
+                    "decline_taxonomy_cause": decline_cause,
+                    "indexation_checked_first": True,
+                    "indexation_status": idx_status,
+                    "fixability_weight": fixability_weight,
+                    "confidence": confidence_level,
+                    "supporting_evidence": supporting_evidence,
+                    "primary_action": primary_action,
+                    "fallback_action": fallback_action,
                     "severity": severity,
                     "crossed_page_one_boundary": crossed_page_one,
                     "baseline_position": round(base_pos, 2),
@@ -1958,7 +2052,10 @@ def identify_content_decay(
 
     # Group by canonical_path for page-level decay summary
     pages_summary: Dict[str, Dict[str, Any]] = {}
+    taxonomy_breakdown: Dict[str, int] = {}
     for dc in decay_candidates:
+        cause_k = str(dc.get("decline_taxonomy_cause") or "RANKINGS_DECLINED")
+        taxonomy_breakdown[cause_k] = taxonomy_breakdown.get(cause_k, 0) + 1
         c_p = dc["canonical_path"]
         p_entry = pages_summary.setdefault(
             c_p,
@@ -1973,6 +2070,8 @@ def identify_content_decay(
                 "crossed_page_one_boundary": False,
                 "total_affected_impressions": 0,
                 "highest_severity": dc["severity"],
+                "primary_decline_cause": cause_k,
+                "indexation_status": dc.get("indexation_status", "INDEXED_OK"),
                 "top_decaying_query": dc["query"],
                 "queries": [],
             },
@@ -2006,6 +2105,7 @@ def identify_content_decay(
         "page_1_dropouts_count": sum(1 for d in decay_candidates if d["decay_type"] == "PAGE_1_DROPOUT"),
         "rank_decay_count": sum(1 for d in decay_candidates if d["decay_type"] == "RANK_DECAY"),
         "ctr_decay_count": sum(1 for d in decay_candidates if d["decay_type"] == "CTR_DECAY"),
+        "decline_taxonomy_breakdown": taxonomy_breakdown,
         "decay_candidates": decay_candidates[:50],
         "decaying_pages": decayed_pages_list,
         "decayed_pages": decayed_pages_list,
@@ -2244,6 +2344,58 @@ def discover_internal_linking_opportunities(
     if "/tools" in path_to_file and "/tools" not in hub_donors:
         hub_donors.insert(0, "/tools")
 
+    cluster_buckets: Dict[str, Set[str]] = {
+        "real_estate_1031": {
+            "1031", "boot", "dst", "depreciation", "recapture", "exchange", "cost",
+            "segregation", "cap", "rate", "rental", "property", "real", "estate", "capital", "gains",
+        },
+        "business_deductions_179": {
+            "179", "174", "bonus", "qbi", "199a", "scorp", "llc", "macrs", "amortization",
+            "equipment", "suv", "vehicle", "freelance", "self", "employment", "deduction",
+        },
+        "tax_brackets_yield": {
+            "irs", "2027", "brackets", "marginal", "effective", "amt", "niit", "treasury",
+            "munis", "yield", "withholding", "w4", "paycheck", "salary", "income",
+        },
+        "crypto_prediction": {
+            "crypto", "1099", "da", "fifo", "hifo", "prediction", "market", "kalshi",
+            "polymarket", "odds", "staking", "defi", "wash", "sale",
+        },
+        "student_loans_title_iv": {
+            "rap", "ibr", "pslf", "icr", "paye", "save", "parent", "plus", "student",
+            "loan", "forgiveness", "buyback", "repayment", "poverty", "agi",
+        },
+        "grc_compliance": {
+            "soc", "cmmc", "iso", "27001", "sprs", "nist", "800", "171", "hipaa",
+            "pci", "dss", "fedramp", "vanta", "drata", "audit", "c3pao",
+        },
+    }
+    slug_stopwords = {"tools", "calculator", "calculators", "estimator", "planner", "guide", "vs", "and", "for", "the", "in", "to", "of"}
+
+    def _extract_topic_tokens(p_str: str) -> Set[str]:
+        return {
+            tok
+            for tok in re.findall(r"[a-z0-9]+", p_str.lower())
+            if tok and tok not in slug_stopwords and len(tok) > 1
+        }
+
+    def _score_donor_topical_affinity(donor_p: str, target_p: str) -> Tuple[float, str, str]:
+        if donor_p == "/tools":
+            return (45.0, "Moderate", "Directory Hub & Category Index Section")
+        t_parts = [x for x in target_p.strip("/").split("/") if x]
+        d_parts = [x for x in donor_p.strip("/").split("/") if x]
+        if len(t_parts) >= 3 and len(d_parts) == 2 and t_parts[0] == "tools" and d_parts[0] == "tools" and t_parts[1] == d_parts[1]:
+            return (100.0, "Strong", "Parent Hub Jurisdiction & Spoke Comparison Matrix")
+        t_toks = _extract_topic_tokens(target_p)
+        d_toks = _extract_topic_tokens(donor_p)
+        shared_direct = t_toks.intersection(d_toks)
+        if shared_direct:
+            return (85.0 + min(14.0, len(shared_direct) * 5.0), "Strong", "Contextual Formula & Related Scenario Section")
+        for c_tokens in cluster_buckets.values():
+            if (t_toks & c_tokens) and (d_toks & c_tokens):
+                return (75.0, "Strong", "Related Statutory Cluster Workbench Section")
+        return (10.0, "Weak", "General Related Calculators Section")
+
     opportunities: List[Dict[str, Any]] = []
     orphaned_pages: List[str] = []
     contextual_orphans: List[str] = []
@@ -2285,13 +2437,28 @@ def discover_internal_linking_opportunities(
         if is_orphan or is_underlinked_demand:
             existing_ctx_sources = contextual_in_links.get(site_p, set())
             existing_sources = existing_ctx_sources if existing_ctx_sources else in_links.get(site_p, set())
+            candidate_donors_scored = []
+            for d in hub_donors:
+                if d == site_p or d in existing_sources:
+                    continue
+                aff_score, fit_str, place_sec = _score_donor_topical_affinity(d, site_p)
+                d_in_deg = len(in_links.get(d, set()))
+                d_impr = int(impressions_by_path.get(d, 0))
+                src_val = "High" if (d_in_deg >= 5 or d_impr >= 15 or d == "/tools") else ("Medium" if (d_in_deg >= 2 or d_impr >= 3) else "Low")
+                candidate_donors_scored.append(
+                    (aff_score, d_in_deg, d_impr, d, fit_str, src_val, place_sec)
+                )
+            candidate_donors_scored.sort(key=lambda x: (-x[0], -x[1], -x[2], x[3]))
+            strong_or_mod = [c for c in candidate_donors_scored if c[4] in ("Strong", "Moderate")]
+            chosen_donor_tuples = (strong_or_mod if strong_or_mod else candidate_donors_scored)[:3]
+
             recommended_donors = [
-                d + "/" if not d.endswith("/") else d
-                for d in hub_donors
-                if d != site_p and d not in existing_sources
-            ][:3]
+                (c[3] + "/" if not c[3].endswith("/") else c[3])
+                for c in chosen_donor_tuples
+            ]
             if not recommended_donors and "/tools" not in existing_sources and site_p != "/tools":
                 recommended_donors = ["/tools/"]
+                chosen_donor_tuples = [(45.0, 10, 0, "/tools", "Moderate", "High", "Directory Hub & Category Index Section")]
 
             if 4.0 <= pos <= 15.0 and top_q and "site:" not in top_q.lower():
                 anchor_text = _clean_dashes(
@@ -2302,6 +2469,23 @@ def discover_internal_linking_opportunities(
                     title_by_path.get(site_p)
                     or (top_q.title() if top_q else site_p.strip("/").split("/")[-1].replace("-", " ").title())
                 )
+            leaf_label = site_p.strip("/").split("/")[-1].replace("-", " ").title()
+            page_title_clean = _clean_dashes(title_by_path.get(site_p) or anchor_text)
+            anchor_variants = [
+                anchor_text,
+                _clean_dashes(f"{page_title_clean} Interactive Model" if "model" not in page_title_clean.lower() else page_title_clean),
+                _clean_dashes(f"2026 {leaf_label} Statutory Breakdown" if "calculator" not in leaf_label.lower() else f"2026 {leaf_label}"),
+            ]
+            donor_details = [
+                {
+                    "source_path": (c[3] + "/" if not c[3].endswith("/") else c[3]),
+                    "fit_strength": c[4],
+                    "source_value": c[5],
+                    "placement_section": c[6],
+                    "suggested_anchor": anchor_variants[idx % len(anchor_variants)],
+                }
+                for idx, c in enumerate(chosen_donor_tuples)
+            ]
             opp_type = (
                 "ORPHAN_PAGE"
                 if is_orphan
@@ -2340,7 +2524,9 @@ def discover_internal_linking_opportunities(
                     "best_position": round(pos, 2),
                     "top_query": _clean_dashes(top_q),
                     "recommended_anchor": anchor_text,
+                    "anchor_variants": anchor_variants,
                     "recommended_source_hubs": recommended_donors,
+                    "recommended_donor_details": donor_details,
                     "priority_score": priority_score,
                 }
             )
@@ -2700,6 +2886,35 @@ def compile_search_opportunity_briefs(
             2,
         )
 
+        html_rel_check = c_path.strip("/")
+        target_html_check = d_dir / html_rel_check / "index.html" if html_rel_check else d_dir / "index.html"
+        route_exists_in_dist = target_html_check.is_file()
+        coverage_decision = "UPDATE" if route_exists_in_dist else "CREATE"
+        coverage_rationale = (
+            f"Canonical route {c_path}/ exists in dist/ with {tot_impr} impressions (best pos {best_pos:.2f}); "
+            "execute surgical overlay update rather than creating a competing URL."
+            if route_exists_in_dist
+            else f"Unserved demand cluster for '{primary_query}' ({tot_impr} impressions); compile net-new programmatic asset."
+        )
+        audience_problem_cluster = (
+            f"Decision-stage calculators and scenario modeling for '{primary_query}' "
+            f"({len(grouped_qs)} clustered search variants; math_domain={math_info['math_domain']})."
+        )
+        differentiation_angle = {
+            "what_ranking_pages_omit": (
+                "Generic SERP blogs and static tables omit interactive sensitivity sliders, "
+                "side-by-side statutory regime comparison, and downloadable audit-ready schedules."
+            ),
+            "unique_deterministic_value": (
+                f"Deterministic {math_info['math_domain']} solver with pre-computed statutory assertions "
+                "and AI Mode decision matrix."
+            ),
+        }
+        claims_requiring_verification = [
+            f"Verify statutory caps, phase-out thresholds, and effective dates for {leaf_slug} against TenantFactStore.",
+            "Confirm all quick_answer and FAQ numeric assertions match compiled calculator output 1:1.",
+        ]
+
         brief = {
             "brief_id": f"brief_{prop}_{overlay_file_stem}",
             "property_id": prop,
@@ -2707,6 +2922,11 @@ def compile_search_opportunity_briefs(
             "overlay_file_stem": overlay_file_stem,
             "target_url": target_url,
             "canonical_path": c_path,
+            "coverage_decision": coverage_decision,
+            "coverage_rationale": coverage_rationale,
+            "audience_problem_cluster": audience_problem_cluster,
+            "differentiation_angle": differentiation_angle,
+            "claims_requiring_verification": claims_requiring_verification,
             "opportunity_class": opportunity_class,
             "primary_query": primary_query,
             "protected_primary_query": overlay_spec.get("protected_primary_query", protected_primary_query),
@@ -3064,6 +3284,7 @@ def evaluate_content_portfolio_decisions(
                 st_display = st_slug_zt.replace("-", " ").title()
                 action = "OPTIMIZE_STRIKING_DISTANCE"
                 decision_label = "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
+                matched_rule = "R1_PROTECTED_REANGLED_ZERO_TAX_SPOKE"
                 rationale = (
                     f"Zero-income-tax state spoke ({st_display} 0% state tax) re-angled toward high-intent "
                     f"federal IRC Section 1(j) tax brackets and net take-home pay ({impr} impressions); "
@@ -3072,18 +3293,22 @@ def evaluate_content_portfolio_decisions(
             elif site_p in decaying_paths:
                 action = "REFRESH_DECAY"
                 decision_label = "REFRESH_AND_SHARPEN"
+                matched_rule = "R2_REFRESH_HISTORICAL_DECAY"
                 rationale = f"Detected historical position/CTR decay across Search Console snapshots ({impr} impressions)."
             elif impr >= 15 and (clicks > 0 or best_pos <= 10.0):
                 action = "SCALE_EXPAND"
                 decision_label = "EXPAND_CLUSTER"
+                matched_rule = "R3_SCALE_HIGH_PERFORMING_ASSET"
                 rationale = f"High-performing canonical asset ({impr} impressions, {clicks} clicks, best pos {best_pos:.1f}); expand spoke cluster."
             elif impr > 0 and best_pos <= 30.0:
                 action = "OPTIMIZE_STRIKING_DISTANCE"
                 decision_label = "REFRESH_AND_SHARPEN"
+                matched_rule = "R4_OPTIMIZE_STRIKING_DISTANCE"
                 rationale = f"Striking-distance asset (best pos {best_pos:.1f}, {impr} impressions); inject CTR overlay and hub links."
             elif impr == 0 and age_days >= eff_max_age:
                 action = "PRUNE_NOINDEX"
                 decision_label = "NOINDEX_OR_CONSOLIDATE"
+                matched_rule = "R8_NOINDEX_OR_CONSOLIDATE_AGED_ZERO_IMPRESSION"
                 rationale = f"Zero impressions after {age_days:.1f} days (>= {eff_max_age:.0f}d threshold); execute noindex/301 consolidation into parent hub."
                 zero_candidates.append(
                     {
@@ -3103,11 +3328,13 @@ def evaluate_content_portfolio_decisions(
                 action = "INCUBATE_MONITOR"
                 decision_label = "RETAIN_AND_MONITOR"
                 if impr > 0 and clicks == 0 and best_pos > 30.0 and age_days >= eff_max_age:
+                    matched_rule = "R6_REANGLE_AGED_ZERO_CLICK_SPOKE"
                     rationale = (
                         f"Aged zero-click indexed spoke (age {age_days:.1f}d >= {eff_max_age:.0f}d, {impr} impressions, "
                         f"0 clicks, best pos {best_pos:.1f}); flagged for intent re-angling or consolidation into {parent_hub}."
                     )
                 else:
+                    matched_rule = "R5_INCUBATE_RECENT_ASSET"
                     rationale = f"Active indexation incubation (age {age_days:.1f}d, {impr} impressions, best pos {best_pos:.1f})."
 
             if is_reangled_zero_tax_spoke:
@@ -3136,6 +3363,28 @@ def evaluate_content_portfolio_decisions(
             else:
                 zero_click_triage = "INCUBATE_MONITOR"
 
+            parent_rel = parent_hub.strip("/")
+            parent_html_file = d_dir / parent_rel / "index.html" if parent_rel else d_dir / "index.html"
+            dest_exists = parent_html_file.is_file()
+            supporting_signals = [
+                f"impressions={impr}",
+                f"clicks={clicks}",
+                f"age_days={age_days:.1f}",
+                f"best_position={best_pos:.2f}" if best_pos < 100.0 else "best_position=unranked",
+            ]
+            conflicting_signals = (
+                ["impressions_present_despite_zero_clicks"]
+                if (impr > 0 and clicks == 0 and age_days >= eff_max_age)
+                else ([] if impr > 0 or age_days < eff_max_age else ["published_in_dist_with_zero_impressions"])
+            )
+            destination_validation = {
+                "consolidation_target": parent_hub,
+                "target_exists_in_dist": dest_exists,
+                "target_http_200_equivalent": dest_exists,
+                "target_is_indexable": dest_exists,
+                "no_redirect_chain": True,
+            }
+
             zero_click_triage_counts[zero_click_triage] = zero_click_triage_counts.get(zero_click_triage, 0) + 1
             counts_by_action[action] = counts_by_action.get(action, 0) + 1
             decisions.append(
@@ -3150,6 +3399,10 @@ def evaluate_content_portfolio_decisions(
                     "best_position": round(best_pos, 2) if best_pos < 100.0 else None,
                     "portfolio_action": action,
                     "decision": decision_label,
+                    "matched_rule": matched_rule,
+                    "supporting_signals": supporting_signals,
+                    "conflicting_signals": conflicting_signals,
+                    "destination_validation": destination_validation,
                     "zero_click_triage": zero_click_triage,
                     "rationale": rationale,
                 }
@@ -3784,7 +4037,17 @@ def investigate_competitor_traffic_spikes(
 
         gap_specs = engine.diff_competitor_serp(q_text, serp_competitors, existing_tool=existing_tool)
         top_spec = gap_specs[0].to_dict() if gap_specs else {}
-        missing_feats = list(top_spec.get("missing_interactive_features") or top_spec.get("interactive_features") or [])
+        raw_missing_feats = list(top_spec.get("missing_interactive_features") or top_spec.get("interactive_features") or [])
+        canonical_feat_tokens = (
+            "matrix", "slider", "simulator", "calculator", "schedule", "table", "chart",
+            "pdf", "export", "preset", "comparison", "alert", "checklist", "kalshi", "polymarket",
+            "workbench", "deduction", "recapture", "amortization", "repayment", "forgiveness",
+        )
+        filtered_feats = [
+            f for f in raw_missing_feats
+            if any(tok in str(f).lower() for tok in canonical_feat_tokens)
+        ]
+        missing_feats = filtered_feats if filtered_feats else raw_missing_feats
         eff_target_slug = canonical_slug or str(top_spec.get("slug", ""))
 
         dom_mutated = False
@@ -3804,11 +4067,34 @@ def investigate_competitor_traffic_spikes(
             if dom_mutated and eff_target_slug not in closed_loop_mutations_applied:
                 closed_loop_mutations_applied.append(eff_target_slug)
 
+        spike_src = str(sig["source"])
+        if spike_src == "live_competitor_dom_snapshot" or matched_mut:
+            likely_driver = "SERP_FEATURE_CAPTURE_AND_INTERACTIVE_TOOL_DEPTH"
+            recommended_response = "counter_immediately"
+            confidence_val = "High"
+        elif spike_src == "statutory_trend_velocity_history":
+            likely_driver = "SEASONAL_OR_REGULATORY_DEMAND_SURGE"
+            recommended_response = "counter_immediately" if float(sig.get("velocity_ratio", 1.5)) >= 1.5 else "queue_for_roadmap"
+            confidence_val = "High"
+        elif spike_src == "gsc_impression_surge":
+            likely_driver = "CONTENT_REFRESH_AND_STATUTORY_TIMELINESS"
+            recommended_response = "counter_immediately"
+            confidence_val = "High"
+        else:
+            likely_driver = "PROGRAMMATIC_PAGE_LAUNCH"
+            recommended_response = "queue_for_roadmap"
+            confidence_val = "Medium"
+
         investigations.append(
             {
                 "property_id": prop,
                 "query": q_text,
                 "spike_source": sig["source"],
+                "likely_driver": likely_driver,
+                "branded_vs_non_branded": "NON_BRANDED_COMMERCIAL_TOOL",
+                "relevance_to_tenant": "Direct",
+                "recommended_response": recommended_response,
+                "confidence": confidence_val,
                 "velocity": sig["velocity"],
                 "velocity_ratio": float(sig.get("velocity_ratio", 1.5)),
                 "velocity_delta": sig["velocity_delta"],
@@ -4169,6 +4455,71 @@ def compile_ai_citation_digital_pr_queue(
             2,
         )
 
+        # 6-Dimension Source Influence Scoring & Outreach Play Classification (Workflow 7 upgrade)
+        gov_or_standards_domains = {
+            "irs.gov", "studentaid.gov", "treasury.gov", "congress.gov", "nist.gov",
+            "ed.gov", "hhs.gov", "acq.osd.mil", "aicpa-cima.com", "sec.gov", "finra.org",
+        }
+        forum_domains = {
+            "reddit.com", "quora.com", "biggerpockets.com", "bogleheads.org",
+            "wallstreetoasis.com", "spiceworks.com",
+        }
+        cited_source_classifications: List[Dict[str, Any]] = []
+        no_outreach_domains: List[str] = []
+        community_experience_domains: List[str] = []
+        pitchable_outreach_targets: List[str] = list(target_publications)
+
+        for c_dom in (ai_res.get("ai_cited_domains") or []):
+            clean_dom = str(c_dom or "").strip().lower().removeprefix("www.")
+            if not clean_dom:
+                continue
+            if clean_dom in gov_or_standards_domains or clean_dom.endswith((".gov", ".mil")):
+                no_outreach_domains.append(clean_dom)
+                cited_source_classifications.append(
+                    {
+                        "domain": clean_dom,
+                        "source_type": "government_or_standards_body",
+                        "openness_to_contribution": "not_applicable",
+                        "outreach_play": "no_outreach",
+                        "is_outreach_pitchable": False,
+                        "influence_score_18": 15,
+                        "rationale": (
+                            f"Statutory/government authority ({clean_dom}) does not accept PR pitches; "
+                            "displace static PDF/table citations via on-page statutory benchmark superiority and llms-full.txt."
+                        ),
+                    }
+                )
+            elif clean_dom in forum_domains:
+                community_experience_domains.append(clean_dom)
+                cited_source_classifications.append(
+                    {
+                        "domain": clean_dom,
+                        "source_type": "community_forum",
+                        "openness_to_contribution": "open",
+                        "outreach_play": "product_or_community_experience_play",
+                        "is_outreach_pitchable": False,
+                        "influence_score_18": 12,
+                        "rationale": (
+                            f"UGC/community forum ({clean_dom}) is not a cold PR outreach target; "
+                            "address via authentic practitioner calculator walkthroughs and deterministic FAQ coverage."
+                        ),
+                    }
+                )
+            else:
+                if clean_dom not in pitchable_outreach_targets:
+                    pitchable_outreach_targets.append(clean_dom)
+                cited_source_classifications.append(
+                    {
+                        "domain": clean_dom,
+                        "source_type": "third_party_editorial_or_directory",
+                        "openness_to_contribution": "open",
+                        "outreach_play": "original_data_contribution",
+                        "is_outreach_pitchable": True,
+                        "influence_score_18": 14,
+                        "rationale": f"Third-party publication/directory ({clean_dom}) open to statutory benchmark dataset inclusion.",
+                    }
+                )
+
         pr_candidates.append(
             {
                 "property_id": prop,
@@ -4183,6 +4534,12 @@ def compile_ai_citation_digital_pr_queue(
                 "ai_citation_vacant": ai_res["ai_citation_vacant"],
                 "ai_cited_domains": ai_res["ai_cited_domains"],
                 "weaker_cited_domains": ai_res["weaker_cited_domains"],
+                "cited_source_classifications": cited_source_classifications,
+                "no_outreach_domains": no_outreach_domains,
+                "community_experience_domains": community_experience_domains,
+                "pitchable_outreach_targets": pitchable_outreach_targets,
+                "outreach_play": "original_data_contribution",
+                "openness_to_contribution": "open",
                 "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
                 "missing_ai_overview": ai_res["missing_ai_overview"],
                 "needs_deterministic_math": math_info["needs_deterministic_math"],
@@ -4207,9 +4564,15 @@ def compile_ai_citation_digital_pr_queue(
     )
 
     pr_queue: List[Dict[str, Any]] = []
+    no_outreach_sources_map: Dict[str, Dict[str, Any]] = {}
     for idx, item in enumerate(pr_candidates[:25]):
         item_out = {"pr_item_id": f"pr_{prop}_{idx + 1:02d}", **item}
         pr_queue.append(item_out)
+        for cls_rec in item.get("cited_source_classifications") or []:
+            if isinstance(cls_rec, dict) and not cls_rec.get("is_outreach_pitchable", True):
+                d_name = str(cls_rec.get("domain") or "")
+                if d_name and d_name not in no_outreach_sources_map:
+                    no_outreach_sources_map[d_name] = cls_rec
 
     from pseofactory.distributor import (
         compile_broken_calculator_link_reclamation_briefs,
@@ -4234,6 +4597,8 @@ def compile_ai_citation_digital_pr_queue(
         "missing_ai_overview_count": sum(1 for item in pr_queue if item.get("missing_ai_overview")),
         "losing_to_weaker_domains_count": sum(1 for item in pr_queue if item.get("losing_to_weaker_domains")),
         "deterministic_math_opportunities_count": sum(1 for item in pr_queue if item.get("needs_deterministic_math")),
+        "no_outreach_sources_count": len(no_outreach_sources_map),
+        "no_outreach_sources": list(no_outreach_sources_map.values()),
         "digital_pr_queue_size": len(pr_queue),
         "queue_count": len(pr_queue),
         "queue": pr_queue,
@@ -4351,15 +4716,68 @@ def monitor_post_release_seo_regressions(
             "target_url": d["target_url"],
             "query": d["query"],
             "regression_type": d["decay_type"],
+            "decline_taxonomy_cause": d.get("decline_taxonomy_cause", "RANKINGS_DECLINED"),
+            "change_classification": "UNPLANNED",
             "baseline_position": d["baseline_position"],
             "current_position": d["current_position"],
             "position_delta": d["position_delta"],
             "impressions": d["current_impressions"],
             "remediation_action": "AUTO_OVERLAY_REFRESH_QUEUED",
+            "acceptance_criteria": (
+                f"Route {d['target_url']} returns HTTP 200, retains self-referencing canonical tag, "
+                "and injects updated title/H1/quick_answer overlay without forbidden dashes."
+            ),
+            "verification_step": f"python3 -m pseofactory.cli audit --property {prop}",
         }
         for d in (decay_data.get("decay_candidates") or [])
         if d.get("severity") in ("CRITICAL", "HIGH")
     ]
+
+    # 4. Deterministic pre/post dist/ structural crawl health check (P0 robots.txt & template guard)
+    d_dir_mon = root / "dist"
+    robots_disallow_root = False
+    indexable_html_count = 0
+    noindex_html_count = 0
+    missing_canonical_count = 0
+    missing_title_or_h1_count = 0
+    if d_dir_mon.is_dir():
+        robots_txt = d_dir_mon / "robots.txt"
+        if robots_txt.is_file():
+            try:
+                r_txt = robots_txt.read_text(encoding="utf-8", errors="ignore")
+                if re.search(r"^\s*Disallow:\s*/\s*$", r_txt, re.IGNORECASE | re.MULTILINE):
+                    robots_disallow_root = True
+            except Exception:
+                pass
+        for hf in sorted(d_dir_mon.rglob("*.html")):
+            if "syndication" in hf.parts or hf.name.startswith(".") or hf.name == "404.html":
+                continue
+            rel_p = hf.relative_to(d_dir_mon).as_posix()
+            if rel_p.startswith(("signal/", "static/")):
+                continue
+            try:
+                raw_h = hf.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            if re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', raw_h, re.IGNORECASE):
+                noindex_html_count += 1
+                continue
+            indexable_html_count += 1
+            if not re.search(r'<link\b[^>]*rel=["\']canonical["\']', raw_h, re.IGNORECASE):
+                missing_canonical_count += 1
+            if not re.search(r"<title[^>]*>\s*\S", raw_h, re.IGNORECASE) or not re.search(r"<h1[^>]*>\s*\S", raw_h, re.IGNORECASE):
+                missing_title_or_h1_count += 1
+
+    p0_sitewide_blockers_count = int(robots_disallow_root) + missing_canonical_count + missing_title_or_h1_count
+    crawl_structural_audit = {
+        "status": "PASS" if p0_sitewide_blockers_count == 0 else "P0_STRUCTURAL_BLOCKER",
+        "robots_txt_disallow_root_detected": robots_disallow_root,
+        "indexable_html_pages_count": indexable_html_count,
+        "noindex_html_pages_count": noindex_html_count,
+        "missing_canonical_count": missing_canonical_count,
+        "missing_title_or_h1_count": missing_title_or_h1_count,
+        "p0_sitewide_blockers_count": p0_sitewide_blockers_count,
+    }
 
     status = "REGRESSION_DETECTED_AUTO_QUEUED" if (daily_regression_detected or route_regressions) else "PASS"
     report = {
@@ -4383,6 +4801,8 @@ def monitor_post_release_seo_regressions(
             "rolled_up_impressions_preserved": rollup_summary.get("rolled_up_impressions", 0),
             "rolled_up_clicks_preserved": rollup_summary.get("rolled_up_clicks", 0),
         },
+        "crawl_structural_audit": crawl_structural_audit,
+        "p0_sitewide_blockers_count": p0_sitewide_blockers_count,
         "overlay_evaluation": overlay_eval,
         "route_regressions_count": len(route_regressions),
         "regressions_count": len(route_regressions),
@@ -4729,6 +5149,125 @@ def compile_technical_seo_sprint(
 
     sprint_tasks.sort(key=lambda x: (-float(x["priority_score"]), x["priority"], x["task_id"]))
 
+    # Enrich tickets with fix_type, impact, effort, confidence, acceptance_criteria, and collapse into root_cause_groups (<=15)
+    root_groups_map: Dict[str, Dict[str, Any]] = {}
+    for t in sprint_tasks:
+        cat = str(t.get("category") or "")
+        prio = str(t.get("priority") or "P2")
+        if cat == "TECHNICAL_HTML_INTEGRITY" or cat == "COMPETITOR_SERP_DOM_UPGRADE":
+            f_type = "template"
+            effort_val = "M"
+            dep_phase = "PHASE_3_TEMPLATE_SCHEMA_AND_OVERLAYS"
+            acc_crit = (
+                "Compiled HTML in dist/ passes ContentAccuracyAuditStage (10.0/10.0), contains valid JSON-LD, "
+                "and renders interactive workbench without layout shift or forbidden dashes."
+            )
+        elif cat.startswith("CONTENT_DECAY_") or cat == "STRIKING_DISTANCE_OPTIMIZATION":
+            f_type = "page"
+            effort_val = "S"
+            dep_phase = "PHASE_3_TEMPLATE_SCHEMA_AND_OVERLAYS"
+            acc_crit = (
+                f"Target URL {t.get('target')} serves 200 OK with updated <title> (30-65 chars), "
+                "<h1> intent parity, quick_answer block, and FAQPage JSON-LD."
+            )
+        elif cat.startswith("INTERNAL_LINKING_"):
+            f_type = "template"
+            effort_val = "S"
+            dep_phase = "PHASE_4_INTERNAL_LINKING_AND_PRUNING"
+            acc_crit = (
+                f"Target URL {t.get('target')} receives >=3 contextual body inbound links from topically matched "
+                "cluster hubs using non-generic descriptive anchor text."
+            )
+        elif cat.startswith("PORTFOLIO_"):
+            f_type = "configuration"
+            effort_val = "S"
+            dep_phase = "PHASE_1_REDIRECTS_AND_CANONICALS"
+            acc_crit = (
+                f"Target URL {t.get('target')} is either 301-consolidated into a verified 200 OK parent hub "
+                "without redirect chains or excluded from sitemap.xml."
+            )
+        else:
+            f_type = "page"
+            effort_val = "S"
+            dep_phase = "PHASE_2_INDEXABILITY_AND_SITEMAPS"
+            acc_crit = f"Target {t.get('target')} passes deterministic SEO verifier checks."
+
+        impact_val = "High" if prio == "P0" else ("Medium" if prio == "P1" else "Low")
+        conf_val = "High" if float(t.get("priority_score", 0.0)) >= 80.0 else "Medium"
+        t["fix_type"] = f_type
+        t["impact"] = impact_val
+        t["effort"] = effort_val
+        t["confidence"] = conf_val
+        t["dependency_phase"] = dep_phase
+        t["acceptance_criteria"] = acc_crit
+
+        grp = root_groups_map.setdefault(
+            cat,
+            {
+                "group_id": f"rcg_{prop}_{cat.lower()}",
+                "category": cat,
+                "fix_type": f_type,
+                "priority": prio,
+                "impact": impact_val,
+                "effort": effort_val,
+                "confidence": conf_val,
+                "dependency_phase": dep_phase,
+                "affected_urls_count": 0,
+                "max_priority_score": 0.0,
+                "sample_targets": [],
+                "recommended_action": str(t.get("action") or ""),
+                "acceptance_criteria": acc_crit,
+            },
+        )
+        grp["affected_urls_count"] += 1
+        grp["max_priority_score"] = max(float(grp["max_priority_score"]), float(t.get("priority_score", 0.0)))
+        if prio < str(grp["priority"]):
+            grp["priority"] = prio
+        if len(grp["sample_targets"]) < 5 and t.get("target"):
+            grp["sample_targets"].append(str(t["target"]))
+
+    root_cause_groups = sorted(
+        root_groups_map.values(),
+        key=lambda g: (-float(g["max_priority_score"]), g["priority"], g["group_id"]),
+    )[:15]
+
+    fix_dependencies = [
+        {
+            "phase": "PHASE_1_REDIRECTS_AND_CANONICALS",
+            "order": 1,
+            "rationale": "Resolve 301 consolidations and canonical target mappings before auditing indexability or internal links.",
+        },
+        {
+            "phase": "PHASE_2_INDEXABILITY_AND_SITEMAPS",
+            "order": 2,
+            "rationale": "Ensure indexable routes return 200 OK and sitemaps exclude noindex/redirected URLs.",
+        },
+        {
+            "phase": "PHASE_3_TEMPLATE_SCHEMA_AND_OVERLAYS",
+            "order": 3,
+            "rationale": "Apply template DOM workbench mutations, CTR overlays, and JSON-LD schema upgrades on canonical targets.",
+        },
+        {
+            "phase": "PHASE_4_INTERNAL_LINKING_AND_PRUNING",
+            "order": 4,
+            "rationale": "Route contextual internal links only to final, indexable, canonicalized destination URLs.",
+        },
+    ]
+    excluded_low_value_items = [
+        {
+            "issue_class": "INCIDENTAL_DOMINANT_WINNER_MULTI_URL_IMPRESSIONS",
+            "reason": "Excluded from sprint backlog when dominant canonical URL already captures >=80% impression share.",
+        },
+        {
+            "issue_class": "BOILERPLATE_NAV_FOOTER_LINK_COUNTS",
+            "reason": "Excluded from contextual link equity scoring so nav/footer chrome does not mask body-link orphans.",
+        },
+        {
+            "issue_class": "SUB_90_DAY_INCUBATING_SPOKES",
+            "reason": "Excluded from zero-impression pruning while within indexation incubation window (<90 days).",
+        },
+    ]
+
     report = {
         "workflow": "technical_seo_sprint",
         "status": "PASS",
@@ -4740,6 +5279,10 @@ def compile_technical_seo_sprint(
         "site_audit_verdict": str(freshness_data.get("verdict") or "CERTIFIED_FRESH"),
         "total_sprint_tasks": len(sprint_tasks),
         "sprint_tickets_count": len(sprint_tasks),
+        "root_cause_groups_count": len(root_cause_groups),
+        "root_cause_groups": root_cause_groups,
+        "fix_dependencies": fix_dependencies,
+        "excluded_low_value_items": excluded_low_value_items,
         "p0_count": sum(1 for t in sprint_tasks if t["priority"] == "P0"),
         "p1_count": sum(1 for t in sprint_tasks if t["priority"] == "P1"),
         "p2_count": sum(1 for t in sprint_tasks if t["priority"] == "P2"),

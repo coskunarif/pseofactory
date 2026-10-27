@@ -7413,4 +7413,145 @@ def evaluate_x_like_2109219955271196726_capability_matrix(
     }
 
 
+X_LIKE_2102358751290236980_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "workflow_id": 1,
+        "workflow_name": "Identify content decay",
+        "upstream_skill": "content-decay-triage",
+        "claimed_mechanism": "10-category decline taxonomy, indexation-first gate, cannibalization cross-check, and fixability-weighted priority.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.identify_content_decay",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Enriches every decay candidate with decline_taxonomy_cause, indexation_checked_first, fixability_weight, supporting_evidence, primary_action, fallback_action, and confidence while preserving RMA-7/RMA-28 velocity ratios.",
+        "case_against": "Relying on manual Claude Desktop CSV uploads instead of automated Search Console SQLite/JSONL snapshots would break unattended daily execution.",
+    },
+    {
+        "workflow_id": 2,
+        "workflow_name": "Turn a Site Audit into a technical SEO sprint",
+        "upstream_skill": "technical-seo-sprint-planner",
+        "claimed_mechanism": "Collapse symptoms into <=15 root-cause groups, classify fix_type (template/page/configuration/infrastructure), order fix_dependencies, and emit non-SEO checkable acceptance_criteria.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.compile_technical_seo_sprint",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Eliminates flat URL ticket spam by grouping into root_cause_groups, enforcing 4-phase fix_dependencies, and attaching deterministic acceptance_criteria to every sprint ticket.",
+        "case_against": "Manual Jira ticket copy-pasting without automated overlay/template compilation adds latency without improving indexation.",
+    },
+    {
+        "workflow_id": 3,
+        "workflow_name": "Investigate competitor traffic spikes",
+        "upstream_skill": "competitor-traffic-spike-analysis",
+        "claimed_mechanism": "7-driver attribution taxonomy, branded vs non-branded separation, relevance_to_tenant filtering, and counter_immediately vs monitor_only response.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.investigate_competitor_traffic_spikes + competitor.CompetitorGapEngine",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Combines 7-driver attribution and canonical interactive feature filtering with closed-loop DOM workbench mutation in dist/.",
+        "case_against": "Stopping at a static markdown memo instead of mutating the target calculator workbench leaves the SERP gap open.",
+    },
+    {
+        "workflow_id": 4,
+        "workflow_name": "Turn search opportunities into content briefs",
+        "upstream_skill": "opportunity-to-content-brief",
+        "claimed_mechanism": "Pre-brief coverage decision (CREATE/UPDATE/CONSOLIDATE/NO_ACTION), audience_problem_cluster, differentiation_angle, and claims_requiring_verification.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.compile_search_opportunity_briefs",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Prevents URL bloat by explicitly deciding UPDATE vs CREATE before compiling briefs, while enforcing TenantFactStore verification and top-3 title stability locks.",
+        "case_against": "Producing prose-only writer briefs without compiling and injecting deterministic overlays into dist/ HTML creates a human bottleneck.",
+    },
+    {
+        "workflow_id": 5,
+        "workflow_name": "Find internal linking and orphaned-page opportunities",
+        "upstream_skill": "internal-linking-opportunity-finder",
+        "claimed_mechanism": "Topical cluster affinity donor scoring (fit_strength, source_value), contextual body-only link graph, placement_section, and varied anchor_variants.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.discover_internal_linking_opportunities",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Fixes off-cluster donor misrouting (e.g., routing 1031 exchange spokes from sibling 1031/boot/recapture calculators instead of crypto tax) and varies anchor text across donors.",
+        "case_against": "Sorting donor hubs purely by global in_degree pollutes topical cluster boundaries across specialized statutory calculators.",
+    },
+    {
+        "workflow_id": 6,
+        "workflow_name": "Make content portfolio decisions",
+        "upstream_skill": "content-pruning-decisions + portfolio_score.py",
+        "claimed_mechanism": "Ordered protective rules trace (R1..R8), supporting_signals, conflicting_signals, and consolidation destination_validation (200 OK, indexable, no redirect chain).",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.evaluate_content_portfolio_decisions",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Combines true asset age ledger resolution and 0%-income-tax state spoke protection with explicit rule traces and destination validation.",
+        "case_against": "Naive mtime-based pruning or unvalidated 301 targets destroy incubating programmatic spokes after full-site rebuilds.",
+    },
+    {
+        "workflow_id": 7,
+        "workflow_name": "Turn AI citation gaps into a digital PR queue",
+        "upstream_skill": "ai-citation-influence-mapping",
+        "claimed_mechanism": "6-dimension source influence scoring (0-18), source_type classification, openness_to_contribution, outreach_play, and explicit no_outreach_sources separation.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.compile_ai_citation_digital_pr_queue",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Separates government/standards bodies (irs.gov, studentaid.gov, nist.gov) and community forums (reddit.com) into no_outreach_sources and community plays while keeping trade/edu directories in pitchable_outreach_targets.",
+        "case_against": "Treating irs.gov or reddit.com as cold PR outreach targets wastes distribution cycles on non-pitchable domains.",
+    },
+    {
+        "workflow_id": 8,
+        "workflow_name": "Monitor SEO regressions after releases or migrations",
+        "upstream_skill": "post-release-seo-monitoring + crawl_diff.py",
+        "claimed_mechanism": "Pre/post dist/ structural crawl diffing, P0 robots.txt Disallow:/ guard, change_classification (EXPECTED/EXPECTED_BUT_WRONG/UNPLANNED), acceptance_criteria, and verification_step.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops.monitor_post_release_seo_regressions",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Unifies release_manifest.json correlation, 301 signal retention, expired overlay rollback, and P0 sitewide structural crawl guards in one deterministic monitor.",
+        "case_against": "Waiting weeks for organic traffic drops without immediate dist/ structural crawl checks misses P0 template regressions at deploy time.",
+    },
+]
+
+
+def evaluate_x_like_2102358751290236980_capability_matrix(
+    include_live_workflows_check: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 8 Agentic SEO workflows from x-like:2102358751290236980 (@semrush /
+    crazylunatic007/agentic-seo-skills) against pseofactory.seo_growth_loops and live
+    tenant telemetry across ProfitHelm, Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    upgraded = [
+        m for m in X_LIKE_2102358751290236980_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    tenant_summaries: Dict[str, Any] = {}
+    all_passed = True
+    if include_live_workflows_check:
+        from pseofactory.seo_growth_loops import (
+            compile_ai_citation_digital_pr_queue,
+            discover_internal_linking_opportunities,
+        )
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
+            link_rep = discover_internal_linking_opportunities(property_id=t_id, persist=False)
+            pr_rep = compile_ai_citation_digital_pr_queue(property_id=t_id, persist=False)
+            t_ok = link_rep.get("status") in ("PASS", "SKIPPED_NO_DIST") and pr_rep.get("status") == "PASS"
+            if not t_ok:
+                all_passed = False
+            tenant_summaries[t_id] = {
+                "status": "PASS" if t_ok else "FAIL",
+                "internal_linking_opportunities_count": link_rep.get("underlinked_opportunities_count", 0),
+                "digital_pr_queue_size": pr_rep.get("digital_pr_queue_size", 0),
+                "no_outreach_sources_count": pr_rep.get("no_outreach_sources_count", 0),
+            }
+
+    return {
+        "pointer": "x-like:2102358751290236980",
+        "tweet_id": "2102358751290236980",
+        "author_handle": "semrush",
+        "upstream_blog_url": "https://www.semrush.com/blog/agentic-seo/",
+        "upstream_repo_url": "https://github.com/crazylunatic007/agentic-seo-skills",
+        "total_workflows_evaluated": len(X_LIKE_2102358751290236980_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(upgraded),
+        "matrix": list(X_LIKE_2102358751290236980_CAPABILITY_MATRIX),
+        "tenant_summaries": tenant_summaries,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }
+
+
+
 

@@ -1606,8 +1606,10 @@ def inspect_raw_syndication_manifests_and_trails(
 
 
 from pseofactory.verifier import (
+    X_LIKE_2102358751290236980_CAPABILITY_MATRIX,
     X_LIKE_2109219955271196726_CAPABILITY_MATRIX,
     audit_estate_technical_seo_and_cannibalization,
+    evaluate_x_like_2102358751290236980_capability_matrix,
     evaluate_x_like_2109219955271196726_capability_matrix,
 )
 
@@ -1621,8 +1623,10 @@ __all__ = [
     "audit_distribution_draft_payload",
     "audit_historical_distribution_runs",
     "inspect_raw_syndication_manifests_and_trails",
+    "X_LIKE_2102358751290236980_CAPABILITY_MATRIX",
     "X_LIKE_2109219955271196726_CAPABILITY_MATRIX",
     "audit_estate_technical_seo_and_cannibalization",
+    "evaluate_x_like_2102358751290236980_capability_matrix",
     "evaluate_x_like_2109219955271196726_capability_matrix",
 ]
 
