@@ -3975,25 +3975,25 @@ def _build_prediction_market_depth_spec(
         "table_rows": [
             (
                 "Kalshi Taker Quadratic Fee Schedule",
-                "ceil(0.07 x C x P x (1 - P)) under CFTC 17 CFR Part 40",
+                "ceil(0.07 x C x P x (1 minus P)) under CFTC 17 CFR Part 40",
                 "$0.0165 per contract ($164.76 on 10,000 contracts); max $0.0175 at $0.50",
                 "Shifts break-even win probability from 62.00% to 63.65% (+1.65% hurdle)",
             ),
             (
                 "Kalshi Maker Resting Limit Schedule",
-                "ceil(0.0175 x C x P x (1 - P)) Maker Rebate Tier",
+                "ceil(0.0175 x C x P x (1 minus P)) Maker Rebate Tier",
                 "$0.0041 per contract ($41.19 on 10,000 contracts); 75% fee reduction",
                 "Shifts break-even win probability from 62.00% to 62.41% (+0.41% hurdle)",
             ),
             (
                 "Polymarket Net Winner Fee Schedule",
-                "0.04 x (1 - P) x C applied on winning settlement profit",
+                "0.04 x (1 minus P) x C applied on winning settlement profit",
                 "$0.0152 per winning contract ($152.00 on 10,000 contracts at $0.62)",
                 "Shifts break-even win probability from 62.00% to 62.96% (+0.96% hurdle)",
             ),
             (
                 "Two-Way Multiplicative De-Vigging",
-                "P_fair_yes = P_yes / (P_yes + P_no); Overround = (P_yes + P_no - 1)",
+                "P_fair_yes = P_yes / (P_yes + P_no); Overround = (P_yes + P_no minus 1)",
                 "Strips bid-ask spread vigorish to isolate true market consensus probability",
                 "Required input before computing Quarter-Kelly or Half-Kelly position size",
             ),
