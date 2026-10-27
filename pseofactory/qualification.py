@@ -2651,7 +2651,11 @@ def reconcile_void_candidates_queue(
     all_clone_maps: Dict[str, Dict[str, str]] = {}
     all_clone_maps.update(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
     all_clone_maps.update(CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
-    combined_core_tools = list(_DEFAULT_PROFITHELM_CORE_TOOLS) + list(_DEFAULT_PREXVO_CORE_TOOLS)
+    combined_core_tools = (
+        list(_DEFAULT_PROFITHELM_CORE_TOOLS)
+        + list(_DEFAULT_PREXVO_CORE_TOOLS)
+        + list(_DEFAULT_GAINHELM_CORE_TOOLS)
+    )
 
     updated_count = 0
     reconciled_records: List[Dict[str, Any]] = []
@@ -4634,7 +4638,8 @@ def reconcile_statutory_db_gsc_snapshots(
     import subprocess
 
     root = Path(repo_root)
-    prop = "prexvo" if "prexvo" in str(property_id).lower() or "prexvo" in root.name.lower() else "profithelm"
+    comb_prop = f"{property_id or ''} {root.name}".lower()
+    prop = "prexvo" if "prexvo" in comb_prop else ("gainhelm" if "gainhelm" in comb_prop else "profithelm")
     db_file = root / "profithelm" / "data" / "statutory.db"
     summary = {"rows_updated": 0, "queries_mapped": 0}
     if not db_file.is_file():

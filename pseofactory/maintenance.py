@@ -2668,6 +2668,16 @@ class AssetIntegrityEvaluator:
                 reasons.append(DriftReason.TRUTH_CONTRADICTION)
                 details.extend([f"Truth contradiction: {v}" for v in truth_violations])
 
+        # 12. Outbound commercial /r/ link qualification (rel='noopener sponsored')
+        if p.suffix == ".html" and "/r/" in content:
+            for r_tag_m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I):
+                r_attrs = r_tag_m.group(1).lower()
+                if "sponsored" not in r_attrs or "noopener" not in r_attrs:
+                    if DriftReason.STRUCTURAL_CONTRACT_VIOLATION not in reasons:
+                        reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
+                    details.append("Outbound commercial /r/ link missing rel='noopener sponsored' attribute")
+                    break
+
 
         if reasons:
             rec = AssetDriftRecord(
@@ -4511,7 +4521,7 @@ class MaintenanceLifecycle:
                     recon_rep = partner_engine.reconcile_edge_clicks_with_portals(
                         engagement_by_property={
                             p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                            for p_id in ("profithelm", "prexvo")
+                            for p_id in ("profithelm", "prexvo", "gainhelm")
                         }
                     )
                     if not dry_run and not in_pytest:

@@ -2936,7 +2936,7 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
         not raw
         or is_raw_spoke_title
         or ("-" in raw and " " not in raw)
-        or raw.lower().startswith(("prexvo-", "profithelm-"))
+        or raw.lower().startswith(("prexvo-", "profithelm-", "gainhelm-"))
         or raw.lower()
         in (
             "tax & capital allocation intelligence",

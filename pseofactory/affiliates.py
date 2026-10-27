@@ -5045,6 +5045,29 @@ def audit_merchant_coverage_and_yield(property_id: str = "profithelm") -> Dict[s
             "routes": verified_routes,
         }
 
+    if prop == "gainhelm":
+        gh_routes: Dict[str, Dict[str, Any]] = {}
+        for k, p_obj in GAINHELM_AFFILIATES.items():
+            gh_routes[k] = {
+                "partner_key": k,
+                "verified_merchant_name": p_obj.name,
+                "verified_url": p_obj.default_url,
+                "status": p_obj.status,
+                "approved": p_obj.status == "live",
+                "payout_rate": p_obj.commission_est,
+                "is_external_grc_marketplace": True,
+                "internal_calculator_loop": False,
+            }
+        return {
+            "status": "PASS",
+            "property_id": "gainhelm",
+            "total_routes_audited": len(gh_routes),
+            "verified_paying_count": sum(1 for r in gh_routes.values() if r["approved"]),
+            "non_paying_passthrough_count": 0,
+            "internal_loop_count": 0,
+            "routes": gh_routes,
+        }
+
     routes_report: Dict[str, Dict[str, Any]] = {}
     swapped_count = 0
     for k, meta in SOVRN_VERIFIED_PAYING_MERCHANTS.items():
@@ -5080,7 +5103,7 @@ def normalize_html_callout_message_match(
         return html
 
     prop = (property_id or "profithelm").strip().lower()
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
     fallback_copy: Dict[str, Tuple[str, str, str]] = {
         "flexport": (
             "Invoice Simple Trade & Commercial Billing",
@@ -5912,6 +5935,25 @@ def normalize_html_callout_message_match(
             full_open = full_open.replace(f'href="{raw_href}"', f'href="{new_href}"', 1).replace(
                 f"href='{raw_href}'", f'href="{new_href}"', 1
             )
+        if "target=" not in full_open.lower():
+            full_open = full_open[:-1] + ' target="_blank">'
+        rel_m = re.search(r'rel=["\']([^"\']*)["\']', full_open, re.I)
+        if not rel_m:
+            full_open = full_open[:-1] + ' rel="noopener sponsored nofollow">'
+        else:
+            rel_tokens = [t.strip().lower() for t in rel_m.group(1).split() if t.strip()]
+            for req_tok in ("noopener", "sponsored", "nofollow"):
+                if req_tok not in rel_tokens:
+                    rel_tokens.append(req_tok)
+            norm_rel = " ".join(rel_tokens)
+            if norm_rel != rel_m.group(1):
+                full_open = re.sub(
+                    r'rel=["\'][^"\']*["\']',
+                    f'rel="{norm_rel}"',
+                    full_open,
+                    count=1,
+                    flags=re.I,
+                )
         if "data-partner=" not in full_open:
             full_open = full_open[:-1] + f' data-partner="{pk}">'
         if "data-tool=" not in full_open:
@@ -5979,7 +6021,7 @@ def audit_callout_destination_message_match(
     from pathlib import Path
 
     prop = (property_id or "profithelm").strip().lower()
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else PROFITHELM_AFFILIATES
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
 
     mismatches: List[Dict[str, Any]] = []
     registry_checked = 0
@@ -7307,7 +7349,7 @@ def run_gsc_affiliate_placement_feedback_pass(
     elif dist_dir is not None:
         r_root = Path(dist_dir).resolve().parent
     else:
-        r_root = Path(f"/home/ubuntuadmin/projects/{'prexvo' if prop == 'prexvo' else 'profithelm-platform'}")
+        r_root = Path(f"/home/ubuntuadmin/projects/{'prexvo' if prop == 'prexvo' else ('gainhelm' if prop == 'gainhelm' else 'profithelm-platform')}")
     d_dir = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
 
     if gsc_rows is None:

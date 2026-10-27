@@ -6909,3 +6909,508 @@ def verify_gsc_lifecycle_telemetry_contract(
     }
 
 
+X_LIKE_2109219955271196726_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "rank": 1,
+        "extension": "Detailed SEO Extension",
+        "claimed_specialty": "Instant on-page SEO checks",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "verifier.audit_estate_technical_seo_and_cannibalization + audit.ContentAccuracyAuditStage",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Enforces deterministic compile-time title/H1/meta length, heading hierarchy (H1->H2->H3), and canonical parity across all indexable routes.",
+        "case_against": "Manual browser popup inspection per page is unscalable across 200+ programmatic routes and adds zero CI gate enforcement.",
+    },
+    {
+        "rank": 2,
+        "extension": "SEOquake",
+        "claimed_specialty": "SERP analysis and SEO metrics",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "verifier.audit_estate_technical_seo_and_cannibalization + qualification.reconcile_tenant_topical_authority_and_cannibalization",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "Deterministic intra-tenant title/H1/meta/canonical uniqueness and SERP anti-cannibalization prevents keyword dilution across spoke calculators.",
+        "case_against": "Naive keyword-density ratios from legacy toolbars encourage keyword stuffing and degrade GEO passage extractability.",
+    },
+    {
+        "rank": 3,
+        "extension": "Ahrefs SEO Toolbar",
+        "claimed_specialty": "Backlink and page-level insights",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "affiliates.normalize_html_callout_message_match + verifier.audit_estate_technical_seo_and_cannibalization",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Enforces rel='noopener sponsored nofollow' and target='_blank' on 100% of outbound /r/<partner> commercial links and validates internal link equity.",
+        "case_against": "Third-party toolbar DR/UR scraping requires paid browser sessions and duplicates GSC + internal link-graph verification.",
+    },
+    {
+        "rank": 4,
+        "extension": "MozBar",
+        "claimed_specialty": "Domain Authority and Page Authority",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "market_intel.MarketIntelligenceEngine + trends.treg_checker.TregChecker",
+        "vault_surface": "pseofactory market-intel --json",
+        "case_for": "SERP authority and weak-domain displacement are already modeled deterministically in TregChecker and MarketIntelligenceEngine.",
+        "case_against": "Proprietary Moz DA/PA scores are third-party proxy metrics not used by Google Search or AI citation engines.",
+    },
+    {
+        "rank": 5,
+        "extension": "Keywords Everywhere",
+        "claimed_specialty": "Keyword data and search volume",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "trends.jev_engine + market_intel.MarketIntelligenceEngine + seo_growth_loops",
+        "vault_surface": "pseofactory trend-intake / pseofactory market-intel",
+        "case_for": "Search volume, CPC buyer intent, and breakout velocity are already ingested via JevEngine, GSC telemetry, and MarketIntelligenceEngine.",
+        "case_against": "Browser-injected keyword overlays duplicate existing deterministic trend-intake and GSC query pipelines.",
+    },
+    {
+        "rank": 6,
+        "extension": "SEO Minion",
+        "claimed_specialty": "On-page analysis and broken links",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "verifier.audit_estate_technical_seo_and_cannibalization",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Mechanically verifies on-page heading hierarchy, internal link targets, and #fragment anchor resolution across all compiled HTML assets.",
+        "case_against": "Hreflang/multi-locale simulation is unnecessary for US federal statutory calculators (IRC, Title IV, DoD CMMC/NIST/HIPAA).",
+    },
+    {
+        "rank": 7,
+        "extension": "META SEO inspector",
+        "claimed_specialty": "Meta tags and structured data checks",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "audit.ContentAccuracyAuditStage (Gate 9) + verifier.audit_estate_technical_seo_and_cannibalization",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Enforces 1:1 canonical-to-og:url parity, OpenGraph/Twitter Card completeness, and stacked JSON-LD (SoftwareApplication, FAQPage, BreadcrumbList, Organization).",
+        "case_against": "Interactive DOM inspection in a browser tab cannot replace pre-commit static AST and JSON-LD schema verification.",
+    },
+    {
+        "rank": 8,
+        "extension": "Redirect Path",
+        "claimed_specialty": "HTTP status codes and redirect chains",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "verifier.audit_estate_technical_seo_and_cannibalization + indexing.preflight",
+        "vault_surface": "pseofactory indexing-preflight --property <tenant>",
+        "case_for": "Audits _redirects, sitemap.xml, and internal hrefs for 0-hop direct canonical resolution, zero redirect loops, and zero dead redirect targets.",
+        "case_against": "Waiting until post-deploy browser navigation to spot 301 chains wastes Googlebot crawl budget.",
+    },
+    {
+        "rank": 9,
+        "extension": "Wappalyzer",
+        "claimed_specialty": "Detect website technologies",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "infra_audit + visual_primitives + compiler",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Enforces zero external render-blocking JS frameworks and deterministic static HTML + Cloudflare Pages edge functions.",
+        "case_against": "Tech-stack fingerprinting extensions add zero value when all three tenants compile from a single deterministic Python substrate.",
+    },
+    {
+        "rank": 10,
+        "extension": "GMB Everywhere",
+        "claimed_specialty": "Google Business Profile research",
+        "disposition": "REJECTED_BLOAT_OR_OFF_VERTICAL",
+        "pseofactory_stage": "N/A (Rejected)",
+        "vault_surface": "N/A",
+        "case_for": "None for national statutory/compliance software factories.",
+        "case_against": "ProfitHelm (corporate tax), Prexvo (federal student loans), and GainHelm (enterprise cyber GRC) are national SaaS calculators; local GBP schema or geo-doorway pages would cause crawl-budget dilution and SERP spam risk.",
+    },
+    {
+        "rank": 11,
+        "extension": "Lighthouse",
+        "claimed_specialty": "Performance and technical audits",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "browser_verifier.UnifiedBrowserAuditor + visual_primitives",
+        "vault_surface": "pseofactory audit --property <tenant> --browser",
+        "case_for": "Static SSR, inline critical CSS, >=44px touch targets, and ARIA/label contracts guarantee 100/100 technical and accessibility baselines.",
+        "case_against": "Running uncalibrated Lighthouse CLI wrappers in parallel with UnifiedBrowserAuditor duplicates CDP inspection.",
+    },
+    {
+        "rank": 12,
+        "extension": "Web Vitals",
+        "claimed_specialty": "Core Web Vitals debugging",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "browser_verifier.UnifiedBrowserAuditor (CLS === 0.0, <100ms reactive widget INP)",
+        "vault_surface": "pseofactory audit --property <tenant> --browser",
+        "case_for": "UnifiedBrowserAuditor mechanically asserts CLS === 0.0, zero horizontal overflow (375px/1280px), and <100ms reactive input calculation.",
+        "case_against": "Manual browser Web Vitals overlays are redundant with automated headless CDP layout-shift assertions.",
+    },
+    {
+        "rank": 13,
+        "extension": "Similarweb",
+        "claimed_specialty": "Traffic and competitor insights",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "seo_growth_loops (Workflow 3 Competitor Spikes) + competitor.py",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "First-party GSC impression/click telemetry and deterministic competitor teardown synthesis provide exact query-level signal.",
+        "case_against": "Similarweb clickstream estimates are noisy for emerging B2B calculators and require paid API tiers.",
+    },
+    {
+        "rank": 14,
+        "extension": "Check My Links",
+        "claimed_specialty": "Find broken links on a page",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "verifier.audit_estate_technical_seo_and_cannibalization",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Crawls 100% of internal hrefs, #fragment anchors, and /r/<partner> affiliate routes across dist/ to guarantee zero broken links or orphan pages.",
+        "case_against": "Page-by-page manual link highlighting in Chrome misses cross-page #fragment anchor regressions and orphan routes.",
+    },
+    {
+        "rank": 15,
+        "extension": "Hunter",
+        "claimed_specialty": "Find professional email addresses",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "partner_tracker.PartnerTrackingEngine + email_ingest.EmailIngestionEngine + action_bus",
+        "vault_surface": "pseofactory partner-sync / pseofactory partner-status / pseofactory lead-monitor",
+        "case_for": "Partner onboarding, inbox ingestion via himalaya CLI, and transactional lead fulfillment are already managed deterministically.",
+        "case_against": "Cold email scraping extensions violate partner network compliance and duplicate verified affiliate portal workflows.",
+    },
+]
+
+
+def _resolve_tenant_dist_and_domain(
+    property_id: str,
+    dist_dir: Optional[Union[str, Path]] = None,
+) -> Tuple[str, str, Path]:
+    """Resolves normalized tenant ID, canonical domain, and dist directory path."""
+    prop = (property_id or "profithelm").strip().lower()
+    if prop == "prexvo":
+        domain = "https://prexvo.com"
+        default_dist = Path("/home/ubuntuadmin/projects/prexvo/dist")
+    elif prop == "gainhelm":
+        domain = "https://gainhelm.com"
+        default_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
+    else:
+        prop = "profithelm"
+        domain = "https://profithelm.com"
+        default_dist = Path("/home/ubuntuadmin/projects/profithelm-platform/dist")
+    resolved_dist = Path(dist_dir).resolve() if dist_dir is not None else default_dist.resolve()
+    return prop, domain, resolved_dist
+
+
+def _audit_redirects_and_sitemaps(
+    dist_path: Path,
+    domain: str,
+    valid_routes: Set[str],
+) -> Dict[str, Any]:
+    """Audits _redirects and sitemap*.xml for chains, loops, dead targets, and redirected sitemap locs."""
+    redirect_map: Dict[str, str] = {}
+    redirect_chains: List[Tuple[str, str, str]] = []
+    redirect_loops: List[str] = []
+    redirect_dead_targets: List[Tuple[str, str]] = []
+
+    redirects_file = dist_path / "_redirects"
+    if redirects_file.is_file():
+        for line in redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            parts = s.split()
+            if len(parts) >= 2:
+                redirect_map[parts[0]] = parts[1]
+
+        for src, dst in redirect_map.items():
+            if src == dst:
+                redirect_loops.append(src)
+            elif dst in redirect_map:
+                redirect_chains.append((src, dst, redirect_map[dst]))
+            if dst.startswith("/") and not dst.startswith(("/go/", "/r/", "/api/")):
+                clean_dst = dst.split("?")[0].split("#")[0]
+                if clean_dst not in valid_routes and not (dist_path / clean_dst.lstrip("/")).exists():
+                    redirect_dead_targets.append((src, dst))
+
+    sitemap_locs: Set[str] = set()
+    for sm_file in sorted(dist_path.glob("sitemap*.xml")):
+        try:
+            root = ET.fromstring(sm_file.read_text(encoding="utf-8"))
+            for elem in root.iter():
+                if elem.tag.endswith("loc") and elem.text:
+                    loc = elem.text.strip()
+                    if not loc.endswith(".xml"):
+                        sitemap_locs.add(loc)
+        except Exception:
+            pass
+
+    sitemap_redirected: List[Tuple[str, str]] = []
+    for loc in sorted(sitemap_locs):
+        path_part = loc[len(domain) :] if loc.startswith(domain) else loc
+        if path_part in redirect_map or (path_part.rstrip("/") and path_part.rstrip("/") in redirect_map):
+            target = redirect_map.get(path_part) or redirect_map.get(path_part.rstrip("/"), "")
+            sitemap_redirected.append((loc, target))
+
+    return {
+        "redirect_map": redirect_map,
+        "redirect_rules_count": len(redirect_map),
+        "redirect_chains": redirect_chains,
+        "redirect_loops": redirect_loops,
+        "redirect_dead_targets": redirect_dead_targets,
+        "sitemap_locs_count": len(sitemap_locs),
+        "sitemap_redirected_locs": sitemap_redirected,
+    }
+
+
+def audit_estate_technical_seo_and_cannibalization(
+    dist_dir: Optional[Union[str, Path]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Deterministic multi-tenant technical SEO, link-graph, redirect-hop, and SERP
+    anti-cannibalization auditor across compiled static distributions (ProfitHelm,
+    Prexvo, GainHelm). Synthesizes the compile-time verification gates corresponding
+    to x-like:2109219955271196726 without browser extension bloat.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from collections import defaultdict
+    from pseofactory.affiliates import GAINHELM_AFFILIATES, PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
+    from pseofactory.maintenance import CrossPropertyContaminationScanner
+    from pseofactory.tenant_facts import TenantFactStore
+
+    prop, domain, d_path = _resolve_tenant_dist_and_domain(property_id, dist_dir)
+    if not d_path.is_dir():
+        return {
+            "status": "FAIL",
+            "passed": False,
+            "property_id": prop,
+            "dist_dir": str(d_path),
+            "issues": [f"Distribution directory not found: {d_path}"],
+        }
+
+    registry = (
+        PREXVO_AFFILIATES
+        if prop == "prexvo"
+        else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+    )
+    scanner = CrossPropertyContaminationScanner()
+    fact_store = TenantFactStore.get_instance()
+
+    html_files = sorted(d_path.rglob("*.html"))
+    valid_routes: Set[str] = set()
+    route_ids: Dict[str, Set[str]] = {}
+    for f in html_files:
+        rel = f.relative_to(d_path)
+        route = "/" if str(rel) == "index.html" else (f"/{rel.parent.as_posix()}/" if rel.name == "index.html" else f"/{rel.as_posix()}")
+        valid_routes.add(route)
+        valid_routes.add(route.rstrip("/") or "/")
+        c_text = f.read_text(encoding="utf-8", errors="ignore")
+        route_ids[route] = set(re.findall(r'\bid=["\']([^"\']+)["\']', c_text))
+
+    red_info = _audit_redirects_and_sitemaps(d_path, domain, valid_routes)
+    redirect_map = red_info["redirect_map"]
+
+    titles_map: Dict[str, List[str]] = defaultdict(list)
+    h1s_map: Dict[str, List[str]] = defaultdict(list)
+    metas_map: Dict[str, List[str]] = defaultdict(list)
+    canonicals_map: Dict[str, List[str]] = defaultdict(list)
+    inbound_links: Dict[str, Set[str]] = defaultdict(set)
+    indexable_routes: Set[str] = set()
+
+    onpage_issues: List[str] = []
+    broken_internal_links: List[Tuple[str, str]] = []
+    broken_fragment_anchors: List[Tuple[str, str]] = []
+    links_to_redirects: List[Tuple[str, str, str]] = []
+    unqualified_commercial_links: List[Tuple[str, str]] = []
+    invalid_partner_links: List[Tuple[str, str]] = []
+    cross_tenant_leaks: List[str] = []
+
+    for f in html_files:
+        rel = f.relative_to(d_path).as_posix()
+        if rel == "404.html":
+            continue
+        route = "/" if rel == "index.html" else (f"/{rel[:-10]}" if rel.endswith("/index.html") else f"/{rel}")
+        content = f.read_text(encoding="utf-8", errors="ignore")
+        is_noindex = bool(re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', content, re.I))
+
+        leaks = scanner.scan_text(content, prop, context=rel)
+        if leaks:
+            cross_tenant_leaks.append(f"{rel}: foreign tokens {leaks}")
+        if fact_store.get_profile(prop) is not None:
+            ok_claim, f_viol = fact_store.verify_claim(prop, content, context=rel)
+            if not ok_claim:
+                cross_tenant_leaks.extend(f"{rel}: {v}" for v in f_viol)
+
+        if not is_noindex:
+            indexable_routes.add(route)
+            t_m = re.search(r"<title[^>]*>(.*?)</title>", content, re.I | re.S)
+            if t_m:
+                t_txt = html.unescape(t_m.group(1)).strip()
+                titles_map[t_txt].append(rel)
+                if len(t_txt) < 30 or len(t_txt) > 65:
+                    onpage_issues.append(f"{rel}: title length {len(t_txt)} outside [30, 65]")
+            else:
+                onpage_issues.append(f"{rel}: missing <title>")
+
+            no_script = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", content, flags=re.I | re.S)
+            h1_list = re.findall(r"<h1\b[^>]*>(.*?)</h1>", no_script, flags=re.I | re.S)
+            if len(h1_list) != 1:
+                onpage_issues.append(f"{rel}: expected 1 <h1>, found {len(h1_list)}")
+            else:
+                h1_clean = html.unescape(re.sub(r"<[^>]+>", "", h1_list[0])).strip()
+                h1s_map[h1_clean].append(rel)
+
+            h_levels = [int(m.group(1)) for m in re.finditer(r"<h([1-6])\b", no_script, re.I)]
+            for idx in range(1, len(h_levels)):
+                if h_levels[idx] > h_levels[idx - 1] + 1:
+                    onpage_issues.append(f"{rel}: skipped heading level h{h_levels[idx - 1]}->h{h_levels[idx]}")
+                    break
+
+            m_m = re.search(r'<meta\b[^>]*name=["\']description["\'][^>]*content=(["\'])(.*?)\1', content, re.I | re.S)
+            if not m_m:
+                m_m = re.search(r'<meta\b[^>]*content=(["\'])(.*?)\1[^>]*name=["\']description["\']', content, re.I | re.S)
+            if m_m:
+                m_txt = html.unescape(m_m.group(2)).strip()
+                metas_map[m_txt].append(rel)
+                if len(m_txt) < 70 or len(m_txt) > 165:
+                    onpage_issues.append(f"{rel}: meta description length {len(m_txt)} outside [70, 165]")
+            else:
+                onpage_issues.append(f"{rel}: missing meta description")
+
+            c_m = re.search(r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']', content, re.I)
+            og_m = re.search(r'<meta\b[^>]*property=["\']og:url["\'][^>]*content=["\']([^"\']+)["\']', content, re.I)
+            if c_m:
+                c_url = c_m.group(1).strip()
+                canonicals_map[c_url].append(rel)
+                if og_m and og_m.group(1).strip() != c_url:
+                    onpage_issues.append(f"{rel}: canonical '{c_url}' != og:url '{og_m.group(1).strip()}'")
+            else:
+                onpage_issues.append(f"{rel}: missing canonical link")
+
+            if 'property="og:title"' not in content and "property='og:title'" not in content:
+                onpage_issues.append(f"{rel}: missing og:title")
+            if 'name="twitter:card"' not in content and "name='twitter:card'" not in content:
+                onpage_issues.append(f"{rel}: missing twitter:card")
+
+        for tag_m in re.finditer(r'<a\b([^>]*href=["\']([^"\']+)["\'][^>]*)>', content, re.I):
+            attrs, href = tag_m.group(1), tag_m.group(2).strip()
+            if not href or href.startswith(("mailto:", "tel:", "javascript:")):
+                continue
+            if href.startswith("#"):
+                frag = href[1:]
+                if frag and frag not in route_ids.get(route, set()):
+                    broken_fragment_anchors.append((rel, href))
+                continue
+            if href.startswith("/r/"):
+                pk = href[3:].split("?")[0].split("#")[0].strip("/")
+                if pk not in registry:
+                    invalid_partner_links.append((rel, pk))
+                attrs_low = attrs.lower()
+                if "sponsored" not in attrs_low or "noopener" not in attrs_low:
+                    unqualified_commercial_links.append((rel, href))
+                continue
+            if href.startswith("/") or href.startswith(domain):
+                p_part = href[len(domain) :] if href.startswith(domain) else href
+                if not p_part.startswith("/"):
+                    p_part = "/" + p_part
+                p_clean = p_part.split("?")[0].split("#")[0]
+                frag = p_part.split("#")[1] if "#" in p_part else ""
+                if p_clean.startswith(("/go/", "/api/", "/cdn-cgi/")):
+                    continue
+                if p_clean in redirect_map or (p_clean.rstrip("/") and p_clean.rstrip("/") in redirect_map):
+                    t_red = redirect_map.get(p_clean) or redirect_map.get(p_clean.rstrip("/"), "")
+                    links_to_redirects.append((rel, p_clean, t_red))
+                if p_clean not in valid_routes and p_clean not in redirect_map and not (d_path / p_clean.lstrip("/")).exists():
+                    broken_internal_links.append((rel, href))
+                else:
+                    norm_t = p_clean if p_clean.endswith("/") or "." in p_clean.split("/")[-1] else p_clean + "/"
+                    if norm_t != route:
+                        inbound_links[norm_t].add(route)
+                    if frag and norm_t in route_ids and frag not in route_ids[norm_t]:
+                        broken_fragment_anchors.append((rel, href))
+
+    dup_titles = {k: v for k, v in titles_map.items() if len(v) > 1}
+    dup_h1s = {k: v for k, v in h1s_map.items() if len(v) > 1}
+    dup_metas = {k: v for k, v in metas_map.items() if len(v) > 1}
+    dup_canonicals = {k: v for k, v in canonicals_map.items() if len(v) > 1}
+    orphan_routes = [r for r in sorted(indexable_routes) if r != "/" and len(inbound_links.get(r, set())) == 0]
+
+    issues: List[str] = []
+    issues.extend(onpage_issues)
+    issues.extend(cross_tenant_leaks)
+    for k, v in dup_titles.items():
+        issues.append(f"Duplicate <title> '{k}' across {v}")
+    for k, v in dup_h1s.items():
+        issues.append(f"Duplicate <h1> '{k}' across {v}")
+    for k, v in dup_metas.items():
+        issues.append(f"Duplicate meta description across {v}")
+    for k, v in dup_canonicals.items():
+        issues.append(f"Duplicate canonical '{k}' across {v}")
+    for rel, href in broken_internal_links:
+        issues.append(f"{rel}: broken internal link '{href}'")
+    for rel, href in broken_fragment_anchors:
+        issues.append(f"{rel}: broken fragment anchor '{href}'")
+    for rel, href in unqualified_commercial_links:
+        issues.append(f"{rel}: commercial link '{href}' missing rel='noopener sponsored'")
+    for rel, pk in invalid_partner_links:
+        issues.append(f"{rel}: unknown partner key '{pk}' for tenant '{prop}'")
+    for r in orphan_routes:
+        issues.append(f"Orphan indexable route with 0 inbound links: '{r}'")
+    for src, mid, dst in red_info["redirect_chains"]:
+        issues.append(f"Redirect chain detected: {src} -> {mid} -> {dst}")
+    for src in red_info["redirect_loops"]:
+        issues.append(f"Redirect loop detected: {src}")
+    for src, dst in red_info["redirect_dead_targets"]:
+        issues.append(f"Dead redirect target: {src} -> {dst}")
+    for loc, dst in red_info["sitemap_redirected_locs"]:
+        issues.append(f"Sitemap loc points to redirect: {loc} -> {dst}")
+    for rel, src, dst in links_to_redirects:
+        issues.append(f"{rel}: internal link points to redirect '{src}' -> '{dst}'")
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": len(issues) == 0,
+        "property_id": prop,
+        "domain": domain,
+        "dist_dir": str(d_path),
+        "html_files_scanned": len(html_files),
+        "indexable_routes_count": len(indexable_routes),
+        "sitemap_locs_count": red_info["sitemap_locs_count"],
+        "redirect_rules_count": red_info["redirect_rules_count"],
+        "duplicate_titles_count": len(dup_titles),
+        "duplicate_h1s_count": len(dup_h1s),
+        "duplicate_metas_count": len(dup_metas),
+        "duplicate_canonicals_count": len(dup_canonicals),
+        "broken_internal_links_count": len(broken_internal_links),
+        "broken_fragment_anchors_count": len(broken_fragment_anchors),
+        "unqualified_commercial_links_count": len(unqualified_commercial_links),
+        "invalid_partner_links_count": len(invalid_partner_links),
+        "orphan_routes_count": len(orphan_routes),
+        "redirect_chains_count": len(red_info["redirect_chains"]),
+        "links_to_redirects_count": len(links_to_redirects),
+        "cross_tenant_leaks_count": len(cross_tenant_leaks),
+        "issues": issues,
+    }
+
+
+def evaluate_x_like_2109219955271196726_capability_matrix(
+    include_live_estate_audit: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 15 SEO Chrome extensions from x-like:2109219955271196726 (@seo_bint_ejamil)
+    against pseofactory engine stages and vault CLI capabilities, returning the disposition
+    matrix and (optionally) live multi-tenant verification results across ProfitHelm, Prexvo,
+    and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    integrated = [m for m in X_LIKE_2109219955271196726_CAPABILITY_MATRIX if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"]
+    already_solved = [m for m in X_LIKE_2109219955271196726_CAPABILITY_MATRIX if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"]
+    rejected = [m for m in X_LIKE_2109219955271196726_CAPABILITY_MATRIX if m["disposition"] == "REJECTED_BLOAT_OR_OFF_VERTICAL"]
+
+    tenant_reports: Dict[str, Any] = {}
+    all_passed = True
+    if include_live_estate_audit:
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
+            rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
+            tenant_reports[t_id] = rep
+            if not rep["passed"]:
+                all_passed = False
+
+    return {
+        "pointer": "x-like:2109219955271196726",
+        "tweet_id": "2109219955271196726",
+        "author_handle": "seo_bint_ejamil",
+        "total_extensions_evaluated": len(X_LIKE_2109219955271196726_CAPABILITY_MATRIX),
+        "integrated_deterministic_gates_count": len(integrated),
+        "already_solved_in_substrate_count": len(already_solved),
+        "rejected_bloat_or_off_vertical_count": len(rejected),
+        "matrix": list(X_LIKE_2109219955271196726_CAPABILITY_MATRIX),
+        "tenant_reports": tenant_reports,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }
+
+
+

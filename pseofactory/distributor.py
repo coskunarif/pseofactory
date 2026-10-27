@@ -1970,12 +1970,24 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     stat_cite = citations["statutory_source"]
     econ_cite = citations["economic_source"]
     fc_url = _with_first_comment_utm(url)
-    first_comment = f"Model your exact scenario live on ProfitHelm: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
-    teaser_content = _build_zero_link_teaser_content(text, platform="linkedin", brand="ProfitHelm")
+    prop = (
+        property_id
+        or (
+            "prexvo"
+            if any(k in slug for k in ["rap", "ibr", "icr", "pslf", "paye"])
+            else (
+                "gainhelm"
+                if any(k in slug for k in ["soc-2", "cmmc", "nist-800-171", "sprs", "iso-27001", "hipaa"])
+                else "profithelm"
+            )
+        )
+    ).lower()
+    brand_label = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else "ProfitHelm")
+    first_comment = f"Model your exact scenario live on {brand_label}: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
+    teaser_content = _build_zero_link_teaser_content(text, platform="linkedin", brand=brand_label)
 
     cid = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID")
     if not cid:
-        prop = (property_id or ("prexvo" if any(k in slug for k in ["rap", "ibr", "icr", "pslf", "paye"]) else "profithelm")).lower()
         try:
             adapter = TenantRegistry.default().get_adapter(prop)
             cid = adapter.linkedin_company_id

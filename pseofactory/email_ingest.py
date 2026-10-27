@@ -772,7 +772,7 @@ class EmailIngestionEngine:
                 continue
             if "mailer-daemon@" in sender_lower or "postmaster@" in sender_lower:
                 continue
-            if subj_lower.startswith("[profithelm playbook") or subj_lower.startswith("[prexvo playbook"):
+            if subj_lower.startswith(("[profithelm playbook", "[prexvo playbook", "[gainhelm playbook")):
                 continue
 
             if msg.mailbox != "Sent" and "rho.co" in sender_lower and (

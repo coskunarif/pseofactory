@@ -1445,7 +1445,11 @@ def calculate_candidate_roi(
     if data.get("check_ai_citation") or ("ai_citation_vacant" in data and not citation_gap_status):
         try:
             from pseofactory.trends.treg_checker import TregChecker, parse_ai_citation_payload
-            domain_for_tenant = "prexvo.com" if resolved_tenant == "prexvo" else "profithelm.com"
+            domain_for_tenant = (
+                "prexvo.com"
+                if resolved_tenant == "prexvo"
+                else ("gainhelm.com" if resolved_tenant == "gainhelm" else "profithelm.com")
+            )
             if "ai_citation_vacant" in data or "ai_cited_domains" in data:
                 parsed_ai = parse_ai_citation_payload(
                     {
@@ -5341,7 +5345,7 @@ def prioritize_gsc_signals(
         raw_items.extend(unindexed_diagnoses)
 
     eff_tenant = str(resolved_tenant or "profithelm").strip().lower()
-    domain = "prexvo.com" if eff_tenant == "prexvo" else "profithelm.com"
+    domain = "prexvo.com" if eff_tenant == "prexvo" else ("gainhelm.com" if eff_tenant == "gainhelm" else "profithelm.com")
     base_dir_arg = kwargs.get("base_dir")
     dist_dir_arg = kwargs.get("dist_dir")
     eng_metrics_arg = kwargs.get("engagement_metrics")
@@ -5367,7 +5371,11 @@ def prioritize_gsc_signals(
             rec["engagement_metrics"] = eng_metrics_arg
 
         item_tenant = str(rec.get("tenant_id") or rec.get("property_id") or eff_tenant).strip().lower()
-        item_domain = "prexvo.com" if item_tenant == "prexvo" else ("profithelm.com" if item_tenant == "profithelm" else domain)
+        item_domain = (
+            "prexvo.com"
+            if item_tenant == "prexvo"
+            else ("gainhelm.com" if item_tenant == "gainhelm" else ("profithelm.com" if item_tenant == "profithelm" else domain))
+        )
         target_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
         query = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
         slug = _slug_from_url_or_query(
@@ -5402,7 +5410,7 @@ def prioritize_gsc_signals(
 
         is_redirected_row = False
         orig_url = target_url
-        if not is_explicit_dead_route and item_tenant in ("profithelm", "prexvo"):
+        if not is_explicit_dead_route and item_tenant in ("profithelm", "prexvo", "gainhelm"):
             res_target = resolve_redirected_gsc_target(
                 target_url=target_url,
                 slug=slug,
@@ -5939,7 +5947,8 @@ def evaluate_expired_overlays(
         rollup_redirected_gsc_rows,
     )
 
-    prop = "prexvo" if "prexvo" in f"{site_url or ''} {root}".lower() else "profithelm"
+    comb_site_root = f"{site_url or ''} {root}".lower()
+    prop = "prexvo" if "prexvo" in comb_site_root else ("gainhelm" if "gainhelm" in comb_site_root else "profithelm")
     in_pytest = "PYTEST_CURRENT_TEST" in os.environ
     veh_slug_set = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
@@ -6278,7 +6287,11 @@ def evaluate_expired_overlays(
                 or not overlay_data.get("faq_entries")
             ):
                 try:
-                    canon_dom = "https://prexvo.com" if prop == "prexvo" else "https://profithelm.com"
+                    canon_dom = (
+                        "https://prexvo.com"
+                        if prop == "prexvo"
+                        else ("https://gainhelm.com" if prop == "gainhelm" else "https://profithelm.com")
+                    )
                     healed_spec = compile_remediation_overlay_spec(
                         {
                             "slug": slug,
@@ -6696,8 +6709,9 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
 
     rolled_title = _strip_forbidden_dashes(str(overlay_data.get("rolled_back_title_rewrite") or "")).strip()
     baseline_title = _strip_forbidden_dashes(str(overlay_data.get("baseline_title") or "")).strip()
-    brand = "Prexvo" if str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").lower() == "prexvo" else "ProfitHelm"
-    tenant_norm = "prexvo" if brand == "Prexvo" else "profithelm"
+    raw_ov_t = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").lower()
+    brand = "Prexvo" if raw_ov_t == "prexvo" else ("GainHelm" if raw_ov_t == "gainhelm" else "ProfitHelm")
+    tenant_norm = "prexvo" if brand == "Prexvo" else ("gainhelm" if brand == "GainHelm" else "profithelm")
 
     if not baseline_title:
         h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
@@ -6807,12 +6821,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         return rollback_degraded_overlay_from_html(html, overlay_data)
 
     # 1. Upgrade <title>
+    raw_ov_ctx = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or "").lower()
     ov_tenant = (
         "prexvo"
-        if "prexvo" in str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or "").lower()
-        else "profithelm"
+        if "prexvo" in raw_ov_ctx
+        else ("gainhelm" if "gainhelm" in raw_ov_ctx else "profithelm")
     )
-    ov_brand = "Prexvo" if ov_tenant == "prexvo" else "ProfitHelm"
+    ov_brand = "Prexvo" if ov_tenant == "prexvo" else ("GainHelm" if ov_tenant == "gainhelm" else "ProfitHelm")
     title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
     if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
@@ -7232,7 +7247,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             tok in raw_p_url
             for tok in ("fpr=", "via=", "try.rippling.com", "mercury.com/r/", "utm_source=", "redirect.viglink.com")
         ) or raw_p_url.startswith("/r/")
-        if raw_prop_id.lower() in ("profithelm", "prexvo") and not _has_direct_token:
+        if raw_prop_id.lower() in ("profithelm", "prexvo", "gainhelm") and not _has_direct_token:
             p_url = html_lib.escape(str(p_offer.get("redirect_path") or f"/r/{raw_p_key}"))
         else:
             p_url = html_lib.escape(raw_p_url)
