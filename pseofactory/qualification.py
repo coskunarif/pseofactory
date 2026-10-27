@@ -3745,6 +3745,114 @@ def _check_gainhelm_pre_pivot_sink(
     return None
 
 
+def _resolve_query_family_gsc_target(
+    prop: str,
+    raw_query: str,
+    norm_tokens: Dict[str, Any],
+    state_slug: Optional[str],
+    domain: str,
+) -> Optional[Dict[str, Any]]:
+    q_words = norm_tokens.get("raw_tokens", set())
+    matched_family_slug = ""
+    matched_family_path = ""
+    if prop == "profithelm":
+        if ({"crypto", "cryptocurrency", "bitcoin", "hyperliquid"} & q_words) and (
+            {"tax", "taxes", "taxable", "gains", "income", "calculator", "calculators", "calculation", "revenue"} & q_words
+        ):
+            matched_family_slug = (
+                "crypto-tax-form-1099-da-mandatory-reporting"
+                if ({"1099", "da"} & q_words)
+                else "crypto-tax-calculator"
+            )
+            matched_family_path = f"/tools/{matched_family_slug}/"
+        elif "1031" in q_words or ({"tax", "deferral"} <= q_words):
+            matched_family_slug = "section-1031-calculator"
+            matched_family_path = (
+                f"/tools/section-1031-calculator/{state_slug}/"
+                if state_slug
+                else "/tools/section-1031-calculator/"
+            )
+        elif {"capital", "gains"} <= q_words:
+            matched_family_slug = "tcja-sunset-capital-gains"
+            matched_family_path = "/tools/tcja-sunset-capital-gains/"
+        elif "179" in q_words:
+            matched_family_slug = "section-179-calculator"
+            matched_family_path = "/tools/section-179-calculator/"
+        elif {"yukon", "xl"} <= q_words:
+            matched_family_slug = "section-179-calculator"
+            matched_family_path = "/tools/section-179-calculator/gmc-yukon-xl/"
+        elif {"lincoln", "navigator"} <= q_words:
+            matched_family_slug = "section-179-calculator"
+            matched_family_path = "/tools/section-179-calculator/lincoln-navigator-l/"
+        elif {"ford", "vans"} <= q_words or {"ford", "cargo"} <= q_words:
+            matched_family_slug = "section-179-calculator"
+            matched_family_path = "/tools/section-179-calculator/ford-transit-cargo-van/"
+        elif ({"treasury", "tbill", "yield", "hysa"} & q_words) and ({"tax", "yield", "bills", "hysa"} & q_words):
+            matched_family_slug = "treasury-yield-calculator"
+            matched_family_path = "/tools/treasury-yield-calculator/"
+        elif {"bid", "bond"} <= q_words or {"surety", "bond"} <= q_words:
+            matched_family_slug = "contractor-surety-bond-cost-calculator"
+            matched_family_path = "/tools/contractor-surety-bond-cost-calculator/"
+        elif {"entity", "choice", "tax"} <= q_words:
+            matched_family_slug = "s-corp-reasonable-salary-tax-calculator"
+            matched_family_path = "/tools/s-corp-reasonable-salary-tax-calculator/"
+        elif ({"tax", "bracket"} <= q_words or {"tax", "brackets"} <= q_words) and state_slug:
+            matched_family_slug = "irs-2027-tax-brackets"
+            matched_family_path = f"/tools/irs-2027-tax-brackets/{state_slug}/"
+    elif prop == "gainhelm":
+        q_lower = raw_query.lower()
+        if "soc 2" in q_lower or "soc-2" in q_lower or ({"soc", "2"} <= q_words):
+            matched_family_slug = "soc-2-audit-cost-calculator"
+        elif "cmmc" in q_words or "c3pao" in q_words:
+            matched_family_slug = "cmmc-2-0-compliance-cost-calculator"
+        elif "sprs" in q_words or "800-171" in q_lower or ({"800", "171"} <= q_words):
+            matched_family_slug = "nist-800-171-sprs-score-calculator"
+        elif "iso 27001" in q_lower or "iso-27001" in q_lower or ({"iso", "27001"} <= q_words):
+            matched_family_slug = "iso-27001-certification-cost-calculator"
+        elif "hipaa" in q_words or "hitech" in q_words:
+            matched_family_slug = "hipaa-violation-penalty-breach-cost-calculator"
+        elif "pci" in q_words or "dss" in q_words:
+            matched_family_slug = "pci-dss-4-0-compliance-cost-calculator"
+        elif "fedramp" in q_words or "3pao" in q_words:
+            matched_family_slug = "fedramp-authorization-3pao-cost-calculator"
+        elif "hitrust" in q_words:
+            matched_family_slug = "hitrust-csf-e1-i1-r2-certification-cost-calculator"
+        elif "penetration" in q_words or "pentest" in q_words:
+            matched_family_slug = "penetration-testing-scoping-cost-calculator"
+        elif "cyber" in q_words or "breach" in q_words:
+            matched_family_slug = "cyber-liability-insurance-breach-exposure-calculator"
+        if matched_family_slug:
+            matched_family_path = f"/tools/{matched_family_slug}/"
+    elif prop == "prexvo":
+        if "pslf" in q_words or "forgiveness" in q_words or "buyback" in q_words:
+            matched_family_slug = "pslf-calculator"
+        elif "refinance" in q_words or "refi" in q_words or "sofi" in q_words:
+            matched_family_slug = "student-loan-refinance-calculator"
+        elif "rap" in q_words or "save" in q_words or "ibr" in q_words:
+            matched_family_slug = "save-vs-rap-calculator"
+        elif "repayment" in q_words or "student" in q_words:
+            matched_family_slug = "student-loan-repayment-calculator"
+        if matched_family_slug:
+            matched_family_path = f"/tools/{matched_family_slug}/"
+
+    if matched_family_slug and matched_family_path:
+        m_parts = [p for p in matched_family_path.split("/") if p]
+        leaf_ov = f"{m_parts[1]}-{m_parts[2]}" if (len(m_parts) >= 3 and m_parts[0] == "tools") else matched_family_slug
+        return {
+            "is_redirected": False,
+            "is_off_topic_sink": False,
+            "original_url": "",
+            "original_path": matched_family_path,
+            "original_slug": matched_family_slug,
+            "canonical_path": matched_family_path,
+            "canonical_url": f"https://{domain}{matched_family_path}",
+            "canonical_slug": matched_family_slug,
+            "leaf_overlay_slug": leaf_ov,
+            "resolved_via": "query_family_match",
+        }
+    return None
+
+
 def resolve_redirected_gsc_target(
     target_url: Union[str, Dict[str, Any]] = "",
     slug: str = "",
@@ -4032,135 +4140,10 @@ def resolve_redirected_gsc_target(
                 "resolved_via": "intent_cannibalization",
             }
 
-        # Domain query-family fallback for ProfitHelm core clusters when page URL is omitted
-        if prop == "profithelm":
-            q_words = norm_tokens.get("raw_tokens", set())
-            matched_family_slug = ""
-            matched_family_path = ""
-            if ({"crypto", "cryptocurrency", "bitcoin", "hyperliquid"} & q_words) and (
-                {"tax", "taxes", "taxable", "gains", "income", "calculator", "calculators", "calculation", "revenue"} & q_words
-            ):
-                matched_family_slug = (
-                    "crypto-tax-form-1099-da-mandatory-reporting"
-                    if ({"1099", "da"} & q_words)
-                    else "crypto-tax-calculator"
-                )
-                matched_family_path = f"/tools/{matched_family_slug}/"
-            elif "1031" in q_words or ({"tax", "deferral"} <= q_words):
-                matched_family_slug = "section-1031-calculator"
-                matched_family_path = (
-                    f"/tools/section-1031-calculator/{state_slug}/"
-                    if state_slug
-                    else "/tools/section-1031-calculator/"
-                )
-            elif {"capital", "gains"} <= q_words:
-                matched_family_slug = "tcja-sunset-capital-gains"
-                matched_family_path = "/tools/tcja-sunset-capital-gains/"
-            elif "179" in q_words:
-                matched_family_slug = "section-179-calculator"
-                matched_family_path = "/tools/section-179-calculator/"
-            elif {"yukon", "xl"} <= q_words:
-                matched_family_slug = "section-179-calculator"
-                matched_family_path = "/tools/section-179-calculator/gmc-yukon-xl/"
-            elif {"lincoln", "navigator"} <= q_words:
-                matched_family_slug = "section-179-calculator"
-                matched_family_path = "/tools/section-179-calculator/lincoln-navigator-l/"
-            elif {"ford", "vans"} <= q_words or {"ford", "cargo"} <= q_words:
-                matched_family_slug = "section-179-calculator"
-                matched_family_path = "/tools/section-179-calculator/ford-transit-cargo-van/"
-            elif ({"treasury", "tbill", "yield", "hysa"} & q_words) and ({"tax", "yield", "bills", "hysa"} & q_words):
-                matched_family_slug = "treasury-yield-calculator"
-                matched_family_path = "/tools/treasury-yield-calculator/"
-            elif {"bid", "bond"} <= q_words or {"surety", "bond"} <= q_words:
-                matched_family_slug = "contractor-surety-bond-cost-calculator"
-                matched_family_path = "/tools/contractor-surety-bond-cost-calculator/"
-            elif {"entity", "choice", "tax"} <= q_words:
-                matched_family_slug = "s-corp-reasonable-salary-tax-calculator"
-                matched_family_path = "/tools/s-corp-reasonable-salary-tax-calculator/"
-            elif ({"tax", "bracket"} <= q_words or {"tax", "brackets"} <= q_words) and state_slug:
-                matched_family_slug = "irs-2027-tax-brackets"
-                matched_family_path = f"/tools/irs-2027-tax-brackets/{state_slug}/"
-
-            if matched_family_slug and matched_family_path:
-                m_parts = [p for p in matched_family_path.split("/") if p]
-                leaf_ov = f"{m_parts[1]}-{m_parts[2]}" if (len(m_parts) >= 3 and m_parts[0] == "tools") else matched_family_slug
-                return {
-                    "is_redirected": False,
-                    "is_off_topic_sink": False,
-                    "original_url": "",
-                    "original_path": matched_family_path,
-                    "original_slug": matched_family_slug,
-                    "canonical_path": matched_family_path,
-                    "canonical_url": f"https://{domain}{matched_family_path}",
-                    "canonical_slug": matched_family_slug,
-                    "leaf_overlay_slug": leaf_ov,
-                    "resolved_via": "query_family_match",
-                }
-        elif prop == "gainhelm":
-            q_words = norm_tokens.get("raw_tokens", set())
-            q_lower = raw_query.lower()
-            matched_family_slug = ""
-            if "soc 2" in q_lower or "soc-2" in q_lower or ({"soc", "2"} <= q_words):
-                matched_family_slug = "soc-2-audit-cost-calculator"
-            elif "cmmc" in q_words or "c3pao" in q_words:
-                matched_family_slug = "cmmc-2-0-compliance-cost-calculator"
-            elif "sprs" in q_words or "800-171" in q_lower or ({"800", "171"} <= q_words):
-                matched_family_slug = "nist-800-171-sprs-score-calculator"
-            elif "iso 27001" in q_lower or "iso-27001" in q_lower or ({"iso", "27001"} <= q_words):
-                matched_family_slug = "iso-27001-certification-cost-calculator"
-            elif "hipaa" in q_words or "hitech" in q_words:
-                matched_family_slug = "hipaa-violation-penalty-breach-cost-calculator"
-            elif "pci" in q_words or "dss" in q_words:
-                matched_family_slug = "pci-dss-4-0-compliance-cost-calculator"
-            elif "fedramp" in q_words or "3pao" in q_words:
-                matched_family_slug = "fedramp-authorization-3pao-cost-calculator"
-            elif "hitrust" in q_words:
-                matched_family_slug = "hitrust-csf-e1-i1-r2-certification-cost-calculator"
-            elif "penetration" in q_words or "pentest" in q_words:
-                matched_family_slug = "penetration-testing-scoping-cost-calculator"
-            elif "cyber" in q_words or "breach" in q_words:
-                matched_family_slug = "cyber-liability-insurance-breach-exposure-calculator"
-
-            if matched_family_slug:
-                matched_family_path = f"/tools/{matched_family_slug}/"
-                return {
-                    "is_redirected": False,
-                    "is_off_topic_sink": False,
-                    "original_url": "",
-                    "original_path": matched_family_path,
-                    "original_slug": matched_family_slug,
-                    "canonical_path": matched_family_path,
-                    "canonical_url": f"https://{domain}{matched_family_path}",
-                    "canonical_slug": matched_family_slug,
-                    "leaf_overlay_slug": matched_family_slug,
-                    "resolved_via": "query_family_match",
-                }
-        elif prop == "prexvo":
-            q_words = norm_tokens.get("raw_tokens", set())
-            matched_family_slug = ""
-            if "pslf" in q_words or "forgiveness" in q_words or "buyback" in q_words:
-                matched_family_slug = "pslf-calculator"
-            elif "refinance" in q_words or "refi" in q_words or "sofi" in q_words:
-                matched_family_slug = "student-loan-refinance-calculator"
-            elif "rap" in q_words or "save" in q_words or "ibr" in q_words:
-                matched_family_slug = "save-vs-rap-calculator"
-            elif "repayment" in q_words or "student" in q_words:
-                matched_family_slug = "student-loan-repayment-calculator"
-
-            if matched_family_slug:
-                matched_family_path = f"/tools/{matched_family_slug}/"
-                return {
-                    "is_redirected": False,
-                    "is_off_topic_sink": False,
-                    "original_url": "",
-                    "original_path": matched_family_path,
-                    "original_slug": matched_family_slug,
-                    "canonical_path": matched_family_path,
-                    "canonical_url": f"https://{domain}{matched_family_path}",
-                    "canonical_slug": matched_family_slug,
-                    "leaf_overlay_slug": matched_family_slug,
-                    "resolved_via": "query_family_match",
-                }
+        # Domain query-family fallback for core clusters when page URL is omitted
+        fam_res = _resolve_query_family_gsc_target(prop, raw_query, norm_tokens, state_slug, domain)
+        if fam_res is not None:
+            return fam_res
 
     if raw_slug:
         c_path = f"/tools/{raw_slug}/"
