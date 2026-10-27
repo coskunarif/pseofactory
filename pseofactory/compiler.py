@@ -1118,6 +1118,13 @@ def _build_compiled_json_ld_graph(
                 "url": f"{canonical_base}/tools/{slug}/",
                 "name": title,
                 "description": raw_meta_desc,
+                "inLanguage": "en-US",
+                "datePublished": "2026-01-15",
+                "dateModified": "2026-10-27",
+                "speakable": {
+                    "@type": "SpeakableSpecification",
+                    "cssSelector": [".quick-answer", "h1"],
+                },
                 "breadcrumb": {"@id": f"{canonical_base}/tools/{slug}/#breadcrumb"},
             },
             {
@@ -1127,12 +1134,26 @@ def _build_compiled_json_ld_graph(
                 "applicationCategory": application_category,
                 "operatingSystem": "All",
                 "url": f"{canonical_base}/tools/{slug}/",
+                "inLanguage": "en-US",
+                "dateModified": "2026-10-27",
                 "featureList": [
                     f"Deterministic Statutory Formula Evaluation ({statutory_authority})",
                     f"Empirical Benchmark Corroboration ({economic_dataset})",
                     "Interactive 5-Point Scenario Comparison Matrix",
                 ],
-                "offers": {"@type": "Offer", "price": "0.00", "priceCurrency": "USD"},
+                "offers": {
+                    "@type": "Offer",
+                    "price": "0.00",
+                    "priceCurrency": "USD",
+                    "availability": "https://schema.org/InStock",
+                },
+                "isRelatedTo": [
+                    {
+                        "@type": "SoftwareApplication",
+                        "name": f"{brand_org_name} Statutory Tools Directory",
+                        "url": f"{canonical_base}/tools/",
+                    }
+                ],
             },
             {
                 "@type": "Dataset",

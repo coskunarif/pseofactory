@@ -2610,7 +2610,10 @@ class AssetIntegrityEvaluator:
 
             if (
                 RetroReflectionEngine.is_tool_or_calculator_page(p, adapter.dist_dir, content)
-                and _needs_page_structure_geo_normalization(content)
+                and _needs_page_structure_geo_normalization(
+                    content,
+                    check_aeo_geo_graph=(adapter.dist_dir / "catalog.json").is_file(),
+                )
             ):
                 if DriftReason.STRUCTURAL_CONTRACT_VIOLATION not in reasons:
                     reasons.append(DriftReason.STRUCTURAL_CONTRACT_VIOLATION)
@@ -5001,7 +5004,10 @@ def _extract_faq_schema_and_body_counts(html_content: str) -> Tuple[List[Tuple[s
     return schema_pairs, body_pairs
 
 
-def _needs_page_structure_geo_normalization(html_content: str) -> bool:
+def _needs_page_structure_geo_normalization(
+    html_content: str,
+    check_aeo_geo_graph: bool = True,
+) -> bool:
     """Checks whether an HTML document has structural or GEO answer-delivery gaps requiring normalization."""
     if any(
         generic_h2 in html_content
@@ -5223,7 +5229,7 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if '"WebApplication"' in html_content and '"priceCurrency"' not in html_content:
         return True
 
-    if '"@graph"' in html_content and (
+    if check_aeo_geo_graph and '"@graph"' in html_content and (
         '"inLanguage"' not in html_content
         or '"dateModified"' not in html_content
         or ('class="quick-answer"' in html_content and '"SpeakableSpecification"' not in html_content)
@@ -9393,7 +9399,11 @@ class RetroReflectionEngine:
                         return True
             except Exception:
                 return True
-        if root_tool_slugs and (dist_dir / "index.html").is_file() and not (dist_dir / "catalog.json").is_file():
+        if (
+            root_tool_slugs
+            and (llms_path.is_file() or llms_full_path.is_file())
+            and not (dist_dir / "catalog.json").is_file()
+        ):
             return True
         return False
 
@@ -9676,7 +9686,11 @@ class RetroReflectionEngine:
             except Exception:
                 pass
 
-        if tool_meta:
+        if tool_meta and (
+            llms_path.is_file()
+            or llms_full_path.is_file()
+            or (dist_dir / "catalog.json").is_file()
+        ):
             try:
                 is_prexvo_cat = property_id.lower() == "prexvo"
                 is_gainhelm_cat = property_id.lower() == "gainhelm"
