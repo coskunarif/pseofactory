@@ -3672,15 +3672,18 @@ def investigate_competitor_traffic_spikes(
 
     for sig in spike_signals[:12]:
         q_text = sig["query"]
+        raw_cluster_slug = str(sig.get("intent_cluster") or "").strip().lower()
+        if raw_cluster_slug in ("calculator", "calculators", "general", "default", "tool", "tools"):
+            raw_cluster_slug = ""
         resolved_target = resolve_redirected_gsc_target(
             target_url=str(sig.get("target_url") or ""),
-            slug=str(sig.get("intent_cluster") or ""),
+            slug=raw_cluster_slug,
             query=q_text,
             property_id=prop,
             repo_root=root,
         )
-        canonical_slug = str(resolved_target.get("canonical_slug") or sig.get("intent_cluster") or "").strip().lower()
-        if canonical_slug in ("", prop, "tools", "root"):
+        canonical_slug = str(resolved_target.get("canonical_slug") or raw_cluster_slug or "").strip().lower()
+        if canonical_slug in ("", prop, "tools", "root", "calculator", "calculators"):
             canonical_slug = ""
 
         existing_tool: Optional[Dict[str, Any]] = None

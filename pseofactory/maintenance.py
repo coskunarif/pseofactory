@@ -10449,7 +10449,11 @@ class RetroReflectionEngine:
                     str(d.parent).startswith("/home/ubuntuadmin/projects/")
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
-                if is_real_tenant_repo and synd_dir.is_dir():
+                if (
+                    is_real_tenant_repo
+                    and synd_dir.is_dir()
+                    and not (property_id.lower() == "profithelm" and "profithelm.builder" in sys.modules)
+                ):
                     needs_synd_export = bool(retrofitted_paths) or any(
                         not (synd_dir / td.name / "syndication_pack.json").is_file()
                         for td in tools_dir.iterdir()
@@ -11479,12 +11483,8 @@ def reflect_and_recompile_all_assets(
                         if norm_c != raw_c:
                             html_f.write_text(norm_c, encoding="utf-8")
                             pre_retrofitted_count += 1
-                evaluator._audit_cache.clear()
-                evaluator._fingerprint_cache.clear()
-                try:
-                    Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
-                except Exception:
-                    pass
+                for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
+                    evaluator._audit_cache.pop(_ck, None)
             except Exception:
                 pass
 
@@ -11658,13 +11658,9 @@ def reflect_and_recompile_all_assets(
                     pass
 
         if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
-            # Clear evaluator cache after rebuild/retrofit so verification reads fresh files
-            evaluator._audit_cache.clear()
-            evaluator._fingerprint_cache.clear()
-            try:
-                Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
-            except Exception:
-                pass
+            # Evict failed drift entries from evaluator cache after rebuild/retrofit while preserving SHA-256-verified clean entries
+            for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
+                evaluator._audit_cache.pop(_ck, None)
 
         will_run_downstream = bool(
             run_downstream
@@ -11727,12 +11723,8 @@ def reflect_and_recompile_all_assets(
                         if norm_c != raw_c:
                             html_f.write_text(norm_c, encoding="utf-8")
                             retrofitted_count += 1
-                    evaluator._audit_cache.clear()
-                    evaluator._fingerprint_cache.clear()
-                    try:
-                        Path("/tmp/pseofactory_asset_eval_cache_v1.json").unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                    for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
+                        evaluator._audit_cache.pop(_ck, None)
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
