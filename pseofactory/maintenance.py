@@ -9723,6 +9723,17 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
+        # 4. Synchronize public IndexNow verification file in dist/
+        try:
+            if not is_prexvo and not is_gainhelm:
+                ph_v2 = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+                ph_kf = d / f"{ph_v2}.txt"
+                if not ph_kf.is_file() or ph_kf.read_text(encoding="utf-8").strip() != ph_v2:
+                    ph_kf.write_text(ph_v2, encoding="utf-8")
+                    updated_files.append(f"{ph_v2}.txt")
+        except Exception:
+            pass
+
         # Mirror to self-hosted GitHub Actions runner dist workspace when invoked on canonical tenant dist
         runner_dist_map = {
             Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
@@ -9838,6 +9849,14 @@ class RetroReflectionEngine:
 
         if cls._has_stale_llms_manifests(d, property_id):
             stale_pages["llms.txt"] = ["llms_manifest_parity"]
+
+        if (
+            d == Path("/home/ubuntuadmin/projects/profithelm-platform/dist")
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        ):
+            ph_v2 = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+            if not (d / f"{ph_v2}.txt").is_file():
+                stale_pages[f"{ph_v2}.txt"] = ["indexnow_verification_parity"]
 
         for app_js_path in (
             d / "static" / "js" / "app.js",

@@ -1422,5 +1422,73 @@ def test_semantic_quarantine_triage_and_unquarantine_passing_routes(tmp_path):
     assert json.loads(q_path.read_text(encoding="utf-8")) == []
 
 
+def test_gsc_unknown_url_and_sitemap_data_schema_and_indexnow_hygiene(tmp_path):
+    """
+    Verifies:
+    1. 'URL is unknown to Google' classifies as CRAWL_BUDGET_SIGNAL_LAG for valid routes
+       and DEAD_ROUTE_IN_SITEMAP when HTTP 404.
+    2. PushIndexer.fetch_gsc_sitemaps parses gsccli 'data' array with string 'errors'/'warnings'
+       and supports live=False.
+    3. PushIndexer.submit_indexnow_batch strips URL #fragments and rejects >2000-char URLs.
+    """
+    diag_live = GSCRootCauseClassifier.classify({
+        "url": "https://profithelm.com/about/",
+        "coverageState": "URL is unknown to Google",
+        "verdict": "NEUTRAL",
+    })
+    assert diag_live.classification == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
+
+    diag_dead = GSCRootCauseClassifier.classify({
+        "url": "https://profithelm.com/tools/retired-calc/",
+        "coverageState": "URL is unknown to Google",
+        "status_code": 404,
+    })
+    assert diag_dead.classification == RootCauseClassification.DEAD_ROUTE_IN_SITEMAP.value
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        '<!DOCTYPE html><html><head><title>Home</title><link rel="canonical" href="https://profithelm.com/"></head><body><h1>Home</h1></body></html>',
+        encoding="utf-8",
+    )
+
+    indexer = PushIndexer(
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        ledger_path=tmp_path / ".agy" / "index_push_ledger.json",
+        tenant_id="profithelm",
+    )
+
+    sim_sm = indexer.fetch_gsc_sitemaps(live=False)
+    assert sim_sm["status"] == "SIMULATED"
+
+    fake_gsc_json = json.dumps({
+        "rowCount": 2,
+        "data": [
+            {"path": "https://profithelm.com/sitemap.xml", "errors": "0", "warnings": "0"},
+            {"path": "https://profithelm.com/sitemap-old.xml", "errors": "2", "warnings": "0"},
+        ],
+    })
+    with patch("shutil.which", return_value="/mock/bin/gsccli"), \
+         patch("pathlib.Path.is_file", return_value=True), \
+         patch("subprocess.run", return_value=subprocess.CompletedProcess(["gsccli"], 0, stdout=fake_gsc_json)):
+        live_sm = indexer.fetch_gsc_sitemaps(live=True, site="sc-domain:profithelm.com")
+        assert live_sm["status"] == "OK"
+        assert live_sm["row_count"] == 2
+        assert live_sm["errors_detected"] == 1
+
+    res_in = indexer.submit_indexnow_batch(
+        urls=[
+            "https://profithelm.com/#section-anchor",
+            "https://profithelm.com/" + ("a" * 2050),
+        ],
+        dry_run=True,
+    )
+    assert res_in["urls_submitted"] == 1
+
+
+
 
 

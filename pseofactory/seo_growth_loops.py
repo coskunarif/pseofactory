@@ -152,6 +152,18 @@ def harvest_and_sync_gsc_daily_timeline(
                                     recorded_at=now_iso,
                                 )
                             )
+                        records.sort(key=lambda x: x.date)
+                        today_local = datetime.now().strftime("%Y-%m-%d")
+                        while len(records) > 7 and any(x.impressions > 0 for x in records[:-1]):
+                            last_r = records[-1]
+                            prior_slice = records[-8:-1]
+                            prior_avg = sum(x.impressions for x in prior_slice) / float(len(prior_slice))
+                            if (last_r.clicks == 0 and last_r.impressions == 0) or (
+                                last_r.date >= today_local and prior_avg > 0 and last_r.impressions < (prior_avg * 0.5)
+                            ):
+                                records.pop()
+                            else:
+                                break
             except Exception:
                 pass
 
@@ -166,6 +178,14 @@ def harvest_and_sync_gsc_daily_timeline(
             main_repo_db = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
             if main_repo_db.is_file():
                 target_db_path = main_repo_db
+
+        if not fixture_records and target_db_path.is_file() and len(records) < 14:
+            with TrendHistoryDB(target_db_path) as tdb:
+                db_recs = tdb.get_gsc_daily_metrics(prop, days=days)
+                by_dt = {r.date: r for r in db_recs}
+                for r in records:
+                    by_dt[r.date] = r
+                records = sorted(by_dt.values(), key=lambda x: x.date)
 
         if records and persist and (db_path is not None or local_tdb.parent.is_dir() or "PYTEST_CURRENT_TEST" not in os.environ):
             with TrendHistoryDB(target_db_path) as tdb:
@@ -229,7 +249,18 @@ def harvest_and_sync_gsc_daily_timeline(
             except Exception:
                 pass
 
-    return sorted(records, key=lambda r: r.date)
+    sorted_recs = sorted(records, key=lambda r: r.date)
+    if not fixture_records and len(sorted_recs) >= 14 and any(r.impressions > 0 for r in sorted_recs[:-3]):
+        stripped = 0
+        while (
+            stripped < 3
+            and len(sorted_recs) >= 14
+            and sorted_recs[-1].clicks == 0
+            and sorted_recs[-1].impressions == 0
+        ):
+            sorted_recs.pop()
+            stripped += 1
+    return sorted_recs
 
 
 def _normalize_gsc_path_key(url_or_path: str) -> str:
@@ -983,14 +1014,25 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                     raw_insp_items.extend(oracle_block.get("inspections", []) or [])
             except Exception:
                 pass
+        if live_gsc and "PYTEST_CURRENT_TEST" not in os.environ and target_db_path.is_file():
+            try:
+                with TrendHistoryDB(target_db_path) as tdb_pre:
+                    for db_rec in tdb_pre.get_gsc_url_inspection_states(prop):
+                        raw_insp_items.append(db_rec.to_dict())
+            except Exception:
+                pass
         if str(root).startswith("/home/ubuntuadmin/projects/") or (raw_insp_items and "PYTEST_CURRENT_TEST" not in os.environ):
             raw_insp_items.extend(SEEDED_LIVE_GSC_URL_INSPECTIONS.get(prop, []))
         seen_insp_urls: Set[str] = set()
+        expected_hosts = {f"{prop}.com", f"www.{prop}.com"}
         for item in raw_insp_items:
             if not isinstance(item, dict):
                 continue
             p_url = _clean_dashes(str(item.get("page_url") or item.get("url") or "")).strip()
             if not p_url or p_url in seen_insp_urls:
+                continue
+            p_host = urllib.parse.urlparse(p_url).netloc.split(":")[0].lower()
+            if p_host and p_host not in expected_hosts:
                 continue
             seen_insp_urls.add(p_url)
             raw_out = ((item.get("raw_output") or {}).get("inspectionResult") or {}) if isinstance(item.get("raw_output"), dict) else {}
@@ -1026,7 +1068,11 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                 if not fixture_payload:
                     existing_db_insp = tdb.get_gsc_url_inspection_states(prop)
                     seen_u = {r.page_url for r in inspection_records}
+                    expected_hosts_db = {f"{prop}.com", f"www.{prop}.com"}
                     for db_rec in existing_db_insp:
+                        db_host = urllib.parse.urlparse(db_rec.page_url).netloc.split(":")[0].lower()
+                        if db_host and db_host not in expected_hosts_db:
+                            continue
                         if db_rec.page_url not in seen_u:
                             inspection_records.append(db_rec)
                             seen_u.add(db_rec.page_url)

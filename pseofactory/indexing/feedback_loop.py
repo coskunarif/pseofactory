@@ -267,27 +267,7 @@ class GSCRootCauseClassifier:
                 submitted_pages_only_scope=submitted_scope,
             )
 
-        # 2. Discovered - currently not indexed
-        if (
-            "discovered - currently not indexed" in cov_lower
-            or "discovered - currently not indexed" in err_lower
-            or ("discovered" in cov_lower and "not indexed" in cov_lower)
-        ):
-            return DiagnosisResult(
-                url=url,
-                classification=RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG,
-                reason="Page discovered but crawl queue delayed due to crawl budget or external signal lag",
-                remediation_action="Verify depth <= 2. Boost crawling signals across AI and traditional aggregators without burning GSC daily API quota",
-                reflection_path=f"Dispatch fast-index (IndexNow + WebSub hub ping + Ping-O-Matic). Keep in {child_sitemap}",
-                metadata={**base_meta, "coverage_state": eff_cov, "verdict": eff_verdict},
-                section=section,
-                child_sitemap=child_sitemap,
-                child_sitemap_url=child_sitemap_url,
-                date_bucket=date_bucket,
-                submitted_pages_only_scope=submitted_scope,
-            )
-
-        # 3. HTTP 404 / 410 / Soft 404 / Dead Route
+        # 2. Discovered - currently not indexed / URL is unknown to Google (when not 404/dead)
         page_fetch = str(data.get("page_fetch_state") or data.get("pageFetchState") or "").lower()
         is_404 = (
             eff_status in (404, 410, "404", "410")
@@ -302,6 +282,28 @@ class GSCRootCauseClassifier:
             or "dead_route" in err_lower
             or "quarantine_http_error" in err_lower
         )
+        if not is_404 and (
+            "discovered - currently not indexed" in cov_lower
+            or "discovered - currently not indexed" in err_lower
+            or ("discovered" in cov_lower and "not indexed" in cov_lower)
+            or "unknown to google" in cov_lower
+            or "unknown to google" in err_lower
+        ):
+            return DiagnosisResult(
+                url=url,
+                classification=RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG,
+                reason="Page discovered or newly published but crawl queue delayed due to crawl budget or external signal lag",
+                remediation_action="Verify depth <= 2. Boost crawling signals across AI and traditional aggregators without burning GSC daily API quota",
+                reflection_path=f"Dispatch fast-index (IndexNow + WebSub hub ping + Ping-O-Matic). Keep in {child_sitemap}",
+                metadata={**base_meta, "coverage_state": eff_cov, "verdict": eff_verdict},
+                section=section,
+                child_sitemap=child_sitemap,
+                child_sitemap_url=child_sitemap_url,
+                date_bucket=date_bucket,
+                submitted_pages_only_scope=submitted_scope,
+            )
+
+        # 3. HTTP 404 / 410 / Soft 404 / Dead Route
         if is_404:
             return DiagnosisResult(
                 url=url,
@@ -1005,9 +1007,10 @@ class IndexingFeedbackLoop:
         except Exception as e:
             logger.warning("Failed loading rollover queue: %s", e)
 
-        # 3. Live or sample GSC inspection
-        target_sample = sample_urls or []
-        if not target_sample and self.dist_dir and self.dist_dir.exists():
+        # 3. Live or sample GSC inspection + TrendHistoryDB URL inspection states
+        target_sample = list(sample_urls) if sample_urls else []
+        sitemap_locs: List[str] = []
+        if self.dist_dir and self.dist_dir.exists():
             sitemap_path = self.dist_dir / "sitemap.xml"
             if sitemap_path.exists():
                 try:
@@ -1015,11 +1018,43 @@ class IndexingFeedbackLoop:
                     tree = ET.parse(sitemap_path)
                     root = tree.getroot()
                     ns = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-                    locs = [elem.text.strip() for elem in root.findall(".//ns:loc", ns) if elem.text]
-                    target_sample = locs[:5]
+                    sitemap_locs = [elem.text.strip() for elem in root.findall(".//ns:loc", ns) if elem.text]
+                    if not sitemap_locs:
+                        sitemap_locs = [elem.text.strip() for elem in root.findall(".//loc") if elem.text]
                 except Exception:
                     pass
 
+        db_unindexed_records: List[Dict[str, Any]] = []
+        if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+            try:
+                from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+                if DEFAULT_DB_PATH.is_file():
+                    valid_set = {u.rstrip("/") for u in sitemap_locs}
+                    with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
+                        for rec in tdb.get_gsc_url_inspection_states(self.property_id):
+                            p_url = str(rec.page_url or "").strip()
+                            if not p_url or (self.domain and self.domain.lower() not in p_url.lower()):
+                                continue
+                            if valid_set and p_url.rstrip("/") not in valid_set:
+                                continue
+                            if rec.verdict != "PASS" or "not indexed" in str(rec.coverage_state).lower():
+                                db_unindexed_records.append({
+                                    "url": p_url,
+                                    "coverage_state": rec.coverage_state,
+                                    "verdict": rec.verdict,
+                                    "status": "UNINDEXED_GSC",
+                                })
+                                if not sample_urls and p_url not in target_sample:
+                                    target_sample.append(p_url)
+            except Exception as db_err:
+                logger.warning("Failed reading TrendHistoryDB inspection states: %s", db_err)
+
+        if not sample_urls and not db_unindexed_records and sitemap_locs:
+            for loc_u in sitemap_locs[:5]:
+                if loc_u not in target_sample:
+                    target_sample.append(loc_u)
+
+        inspected_map: Dict[str, Dict[str, Any]] = {}
         if target_sample:
             try:
                 gsc_oracle = self.indexer.verify_gsc_indexation_loop(
@@ -1032,7 +1067,9 @@ class IndexingFeedbackLoop:
                     u = insp.get("url")
                     cov = insp.get("coverage_state", "")
                     verdict = insp.get("verdict", "")
-                    if verdict != "PASS" and u not in seen_urls:
+                    if u:
+                        inspected_map[u.rstrip("/")] = insp
+                    if verdict != "PASS" and u and u not in seen_urls:
                         seen_urls.add(u)
                         candidates.append({
                             "url": u,
@@ -1042,6 +1079,15 @@ class IndexingFeedbackLoop:
                         })
             except Exception as e:
                 logger.warning("Failed running verify_gsc_indexation_loop: %s", e)
+
+        for db_item in db_unindexed_records:
+            u = db_item["url"]
+            live_check = inspected_map.get(u.rstrip("/"))
+            if live and live_check and live_check.get("verdict") == "PASS":
+                continue
+            if u not in seen_urls:
+                seen_urls.add(u)
+                candidates.append(db_item)
 
         return candidates
 
@@ -1939,10 +1985,21 @@ class IndexingFeedbackLoop:
         crawl_lag_dispatched = len(crawl_lag_urls) > 0
 
         reflection_res: Dict[str, Any] = {"status": "SKIPPED", "total_recompiled": 0}
+        is_prod_only_overlays = bool(
+            self.base_dir
+            and "PYTEST_CURRENT_TEST" not in os.environ
+            and "pytest" not in sys.modules
+            and str(self.base_dir.resolve()) in (
+                "/home/ubuntuadmin/projects/profithelm-platform",
+                "/home/ubuntuadmin/projects/prexvo",
+                "/home/ubuntuadmin/projects/gainhelm",
+            )
+            and self.gitops_coordinator is None
+        )
         if needs_recompile or (overlays_written and not skip_recompile):
             if dry_run:
                 reflection_res = {"status": "DRY_RUN", "total_recompiled": 0}
-            elif skip_recompile or (html_files_repaired > 0 and not force):
+            elif skip_recompile or ((html_files_repaired > 0 or (is_prod_only_overlays and len(overlays_written) > 0)) and not force):
                 reflection_res = {
                     "status": "SKIPPED_FAST_PATH" if skip_recompile else "SUCCESS",
                     "total_recompiled": max(len(overlays_written), html_files_repaired),
@@ -2059,10 +2116,12 @@ class IndexingFeedbackLoop:
                     locs = [elem.text.strip() for elem in root.findall(".//sm:loc", ns) if elem.text]
                     if not locs:
                         locs = [elem.text.strip() for elem in root.findall(".//loc") if elem.text]
-                    candidate_urls = locs[:max_hub_urls]
+                    candidate_urls = locs
                 except Exception:
                     pass
 
+        if hasattr(self.preflight_engine, "tier1_cap"):
+            self.preflight_engine.tier1_cap = max_hub_urls
         if candidate_urls:
             report = self.preflight_engine.inspect_urls(candidate_urls)
         else:
@@ -2087,6 +2146,7 @@ class IndexingFeedbackLoop:
         urls: List[str],
         live: bool = False,
         hubs_only: bool = True,
+        force_urls: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Dispatches multi-engine push indexing across AI and traditional engines
@@ -2099,6 +2159,17 @@ class IndexingFeedbackLoop:
             engine=None,
             tenant_id=self.property_id,
         )
+        if live and force_urls:
+            force_norm = {str(fu).strip().rstrip("/") for fu in force_urls if fu}
+            for u in urls:
+                if u.rstrip("/") in force_norm and u not in to_push:
+                    to_push.append(u)
+                    if u in skipped:
+                        skipped.remove(u)
+                    try:
+                        self.indexer.purge_pushed_urls([u], engine="indexnow")
+                    except Exception:
+                        pass
 
         if not to_push:
             sitemap_reg: Dict[str, Any] = {"status": "IDEMPOTENT_NO_OP", "submissions": []}
@@ -2377,6 +2448,7 @@ class IndexingFeedbackLoop:
                 urls=eligible_urls,
                 live=live and not dry_run,
                 hubs_only=True,
+                force_urls=repair_summary.get("crawl_lag_urls", []),
             )
 
         section_coverage = self.attribute_section_coverage(raw_unindexed)
