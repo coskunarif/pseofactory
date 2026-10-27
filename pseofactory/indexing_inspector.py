@@ -229,13 +229,14 @@ class DailyIndexingInspector:
                 continue
 
             tenant_count += 1
-            code = str(details.get("code") or details.get("quarantine_code") or "").upper()
-            reason = str(details.get("reason") or details.get("details") or "").lower()
+            code = str(details.get("code") or details.get("quarantine_code") or details.get("stage") or "").upper()
+            raw_reason = str(details.get("reason") or details.get("details") or details.get("error") or "")
+            reason = raw_reason.lower()
 
             rec = {
                 "url": url_str,
                 "code": code,
-                "reason": details.get("reason", ""),
+                "reason": raw_reason,
                 "timestamp": details.get("timestamp", ""),
             }
 
@@ -345,14 +346,17 @@ class DailyIndexingInspector:
 
     def audit_search_traffic(
         self,
-        gsc_records: Optional[List[GSCDailyMetricRecord]] = None,
+        gsc_records: Optional[List[Union[GSCDailyMetricRecord, Dict[str, Any]]]] = None,
         drop_threshold: float = 0.15,
         min_impressions_floor: float = 20.0,
+        daily_series: Optional[List[Union[GSCDailyMetricRecord, Dict[str, Any]]]] = None,
     ) -> Dict[str, Any]:
         """
-        Audits search traffic drops by computing 7-day rolling averages (RMA_7)
+        Audits search traffic drops by computing 7-day and 28-day rolling averages (RMA_7 / RMA_28)
         and flagging declines exceeding drop_threshold (15%) past dynamic floor.
         """
+        if gsc_records is None and daily_series is not None:
+            gsc_records = daily_series
         if not gsc_records and "PYTEST_CURRENT_TEST" not in os.environ:
             try:
                 from pseofactory.seo_growth_loops import harvest_and_sync_gsc_daily_timeline
@@ -372,8 +376,16 @@ class DailyIndexingInspector:
                 "drop_percentage": 0.0,
             }
 
-        from pseofactory.trends.gsc_ceiling import compute_rolling_averages
-        timeline = compute_rolling_averages(gsc_records)
+        from pseofactory.trends.gsc_ceiling import GSCDailyMetricRecord, compute_rolling_averages
+        normalized_records: List[GSCDailyMetricRecord] = []
+        for rec in gsc_records:
+            if isinstance(rec, dict):
+                rec_payload = dict(rec)
+                rec_payload.setdefault("property_id", self.tenant_id)
+                normalized_records.append(GSCDailyMetricRecord.from_dict(rec_payload))
+            else:
+                normalized_records.append(rec)
+        timeline = compute_rolling_averages(normalized_records)
         if len(timeline) < 14:
             return {
                 "status": "PASS",

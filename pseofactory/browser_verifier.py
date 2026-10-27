@@ -661,6 +661,15 @@ class UnifiedBrowserAuditor:
         if (trapEl && handoffEl && (trapEl.nextElementSibling === handoffEl || handoffEl.nextElementSibling === trapEl)) {
             result.cta_density_violations.push({ type: 'adjacent_trap_and_handoff' });
         }
+        const firstPresetChip = document.querySelector('.above-fold-preset-bar [data-calc-preset], [data-calc-preset], .scenario-preset-link, .btn-preset');
+        if (firstPresetChip) {
+            const pr = firstPresetChip.getBoundingClientRect();
+            result.first_preset_chip_top = Math.round(pr.top);
+            result.preset_chips_above_fold = pr.top <= 680;
+        } else {
+            result.first_preset_chip_top = null;
+            result.preset_chips_above_fold = null;
+        }
         return result;
     })()"""
 

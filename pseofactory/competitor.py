@@ -3916,11 +3916,11 @@ def _build_prediction_market_depth_spec(
         ),
         "presets": [
             (
-                "Kalshi Taker Contract ($0.62 Price / 68% True Win / 0.07xP(1-P) Fee)",
+                "Kalshi Parabolic Taker ($0.62 Price / 68% True Win / 0.07xP(1 minus P) Fee)",
                 '{"pm-price":0.62,"pm-true-prob":68,"pm-contracts":10000,"serp-b2b-gross":10000,"serp-b2b-deduction":6200,"serp-b2b-rate":26.8,"serp-b2b-regime":"optimal_election"}',
             ),
             (
-                "Kalshi Maker Limit Order ($0.62 Price / 68% True Win / 0.0175xP(1-P) Fee)",
+                "Kalshi Maker Limit Order ($0.62 Price / 68% True Win / 0.0175xP(1 minus P) Fee)",
                 '{"pm-price":0.62,"pm-true-prob":68,"pm-contracts":10000,"serp-b2b-gross":10000,"serp-b2b-deduction":6200,"serp-b2b-rate":24.5,"serp-b2b-regime":"optimal_election"}',
             ),
             (
@@ -3928,7 +3928,7 @@ def _build_prediction_market_depth_spec(
                 '{"pm-price":0.55,"pm-true-prob":64,"pm-contracts":10000,"serp-b2b-gross":10000,"serp-b2b-deduction":5500,"serp-b2b-rate":37.0,"serp-b2b-regime":"unoptimized_baseline"}',
             ),
             (
-                "Section 1256 Regulated DCM vs Ordinary Tax Stress ($25k Net Gain)",
+                "Section 1256 (60/40 Hybrid) Regulated DCM vs Ordinary Tax Stress ($25k Net Gain)",
                 '{"pm-price":0.50,"pm-true-prob":60,"pm-contracts":50000,"serp-b2b-gross":25000,"serp-b2b-deduction":0,"serp-b2b-rate":37.0,"serp-b2b-regime":"stress_case"}',
             ),
         ],
@@ -3948,7 +3948,7 @@ def _build_prediction_market_depth_spec(
             '        <div class="serp-field-group">\n'
             '          <label for="serp-b2b-regime" class="serp-field-label">Exchange Fee Schedule &amp; Tax Regime</label>\n'
             '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
-            '            <option value="optimal_election" selected="selected">CFTC Regulated DCM (Kalshi 0.07xP(1-P) + IRC Sec 1256 60/40)</option>\n'
+            '            <option value="optimal_election" selected="selected">CFTC Regulated DCM (Kalshi 0.07xP(1 minus P) + IRC Sec 1256 60/40)</option>\n'
             '            <option value="unoptimized_baseline">Non-DCM Offshore / Crypto Venue (4% Fee + Ordinary Tax Rate)</option>\n'
             '            <option value="stress_case">High-Vigorish Two-Way Overround + Top Bracket Stress</option>\n'
             '          </select>\n'
@@ -4103,9 +4103,9 @@ def _render_multi_year_cliff_visualizer_html(
 
 def _render_stateful_scenario_comparator_html(
     topic_label: str,
-    is_prexvo: bool,
-    statutory_authority: str,
-    economic_dataset: str,
+    is_prexvo: bool = False,
+    statutory_authority: str = "",
+    economic_dataset: str = "",
     is_gainhelm: bool = False,
 ) -> str:
     """Renders the stateful side-by-side Scenario A vs Scenario B vs Live Workbench comparator."""
@@ -4124,9 +4124,10 @@ def _render_stateful_scenario_comparator_html(
         ret_a, ret_b, ret_live = "$184,200", "$368,400", "$215,175"
         tax_a, tax_b, tax_live = "$55,800", "$151,600", "$69,825"
         delta_b, delta_live = "+$95,800", "+$14,025"
+    comp_prefix = "GRC Audit &amp; Control TCO" if is_gainhelm else "Scenario"
     return (
         f'      <div id="stateful-scenario-comparator" class="serp-scenario-comparator" data-mechanic="stateful_scenario_comparator">\n'
-        f'        <h3 style="margin-top: 22px; margin-bottom: 8px;">Stateful Side-by-Side Scenario Comparator: {topic_label}</h3>\n'
+        f'        <h3 style="margin-top: 22px; margin-bottom: 8px;">Stateful Side-by-Side {comp_prefix} Comparator: {topic_label}</h3>\n'
         f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Pin any active input state to Scenario A or Scenario B to evaluate multi-variable counterfactual deltas in real time:</p>\n'
         f'        <div class="serp-preset-bar" role="group" aria-label="Stateful Scenario Pin Controls">\n'
         f'          <button type="button" id="btn-pin-scenario-a" class="touch-target btn-preset serp-comparator-btn" data-cta-slot="pin_scenario_a_cta" data-scenario-pin="A">Pin Current State to Scenario A</button>\n'
@@ -4422,23 +4423,26 @@ def render_partner_quote_intake_html(
 
 def _render_saveable_decision_blueprint_html(
     slug: str,
-    topic_label: str,
-    statutory_authority: str,
-    economic_dataset: str,
+    topic_label: str = "",
+    statutory_authority: str = "",
+    economic_dataset: str = "",
     is_prexvo: bool = False,
     is_gainhelm: bool = False,
 ) -> str:
     """Renders the saveable decision blueprint bar with localStorage persistence, deep-link URL sync, and JSON export."""
     if is_prexvo:
         reviewer_label = "borrower or financial aid review"
+        eff_stat = statutory_authority or "34 CFR Part 685 and Higher Education Act Title IV"
     elif is_gainhelm:
         reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
+        eff_stat = statutory_authority or "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
     else:
         reviewer_label = "CPA or advisor review"
+        eff_stat = statutory_authority or "26 U.S.C. Internal Revenue Code"
     return (
         f'      <div id="saveable-decision-blueprint" class="serp-decision-blueprint" data-mechanic="saveable_decision_blueprint" data-blueprint-slug="{slug}">\n'
         f'        <h3 style="margin-top: 20px; margin-bottom: 8px;">Saveable Decision Blueprint &amp; Audit-Ready State Export</h3>\n'
-        f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Persist your active parameters locally, copy a parameterized deep-link URL for {reviewer_label}, or export a structured JSON decision blueprint cited to <strong>{statutory_authority}</strong>:</p>\n'
+        f'        <p style="font-size: 14px; color: var(--text-secondary, #475569); margin-bottom: 10px;">Persist your active parameters locally, copy a parameterized deep-link URL for {reviewer_label}, or export a structured JSON decision blueprint cited to <strong>{eff_stat}</strong>:</p>\n'
         f'        <div class="serp-preset-bar" role="group" aria-label="Decision Blueprint Persistence Controls">\n'
         f'          <button type="button" id="btn-save-blueprint" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="save_blueprint_cta" data-blueprint-action="save">Save Decision Blueprint</button>\n'
         f'          <button type="button" id="btn-copy-blueprint-link" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="share_blueprint_cta" data-blueprint-action="share">Copy Shareable Blueprint Link</button>\n'
@@ -4451,11 +4455,12 @@ def _render_saveable_decision_blueprint_html(
 
 def render_serp_incumbent_depth_upgrade_block(
     slug: str,
-    title: str,
-    property_id: str,
-    canonical_base: str,
-    statutory_authority: str,
-    economic_dataset: str,
+    title: str = "",
+    property_id: str = "profithelm",
+    canonical_base: str = "https://profithelm.com",
+    statutory_authority: str = "26 U.S.C. Section 1256; CFTC 17 CFR Part 40",
+    economic_dataset: str = "FRED 3-Month Treasury Bill (DTB3) and CFTC DCM Series",
+    topic_label: str = "",
 ) -> str:
     """
     Renders the SERP Incumbent Depth Upgrade Workbench (#serp-incumbent-depth-workbench)
@@ -5654,6 +5659,8 @@ def parse_serp_dom_structural_profile(
     raw_html: str,
     raw_js: str = "",
     tenant_id: str = "profithelm",
+    js_source: str = "",
+    property_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Programmatically parses a live competitor or tenant DOM snapshot (+ optional JS bundle)
@@ -5670,9 +5677,9 @@ def parse_serp_dom_structural_profile(
     Zero em-dashes. Zero en-dashes.
     """
     html_text = str(raw_html or "")
-    js_text = str(raw_js or "")
+    js_text = str(raw_js or js_source or "")
     combined_source = f"{html_text}\n{js_text}"
-    prop_norm = str(tenant_id or "profithelm").strip().lower()
+    prop_norm = str(property_id or tenant_id or "profithelm").strip().lower()
 
     # 1. Schema Depth Analysis
     ld_blocks = re.findall(
@@ -5739,7 +5746,7 @@ def parse_serp_dom_structural_profile(
 
     ssr_hydrated_outputs: List[str] = []
     csr_blank_outputs: List[str] = []
-    # Check elements with data-out="...", <output ...>, or calc-metric-value / out-value classes
+    # Check elements with data-out="...", <output ...>, or calc-metric-value / calc-result-value / out-value classes
     for out_m in re.finditer(
         r'<(?:span|div|td|output|strong)\b([^>]*\b(?:data-out|class)\s*=\s*["\'][^"\']*["\'][^>]*)>(.*?)</(?:span|div|td|output|strong)>',
         html_text,
@@ -5749,7 +5756,11 @@ def parse_serp_dom_structural_profile(
         inner_raw = out_m.group(2)
         is_out_node = bool(
             re.search(r'\bdata-out\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
-            or re.search(r'\bclass\s*=\s*["\'][^"\']*\b(?:out-value|calc-metric-value|serp-metric-val)\b', attrs, re.IGNORECASE)
+            or re.search(
+                r'\bclass\s*=\s*["\'][^"\']*\b(?:out-value|calc-metric-value|calc-result-value|serp-metric-val)\b',
+                attrs,
+                re.IGNORECASE,
+            )
         )
         if not is_out_node:
             continue
@@ -5759,7 +5770,7 @@ def parse_serp_dom_structural_profile(
         )
         out_id = label_m.group(1).strip() if label_m else f"out_{len(ssr_hydrated_outputs) + len(csr_blank_outputs) + 1}"
         inner_clean = re.sub(r"<[^>]+>", "", inner_raw).strip()
-        if inner_clean:
+        if inner_clean and inner_clean not in ("-", "--", "N/A", "n/a", "\u2014", "\u2013"):
             ssr_hydrated_outputs.append(out_id)
         else:
             csr_blank_outputs.append(out_id)
@@ -5775,8 +5786,11 @@ def parse_serp_dom_structural_profile(
             preset_mechanics.append(val[:60])
 
     js_fee_schedules: List[str] = []
-    if re.search(r"0\.07\s*\*\s*[a-zA-Z_]+\s*\*\s*\(\s*1\s*-\s*[a-zA-Z_]+\s*\)", combined_source) or "0.07" in combined_source and "kalshi" in combined_source.lower():
+    if re.search(r"0\.07\s*\*\s*[a-zA-Z_]+\s*\*\s*\(\s*1\s*-\s*[a-zA-Z_]+\s*\)", combined_source) or (
+        "0.07" in combined_source and "kalshi" in combined_source.lower()
+    ):
         js_fee_schedules.append("kalshi_taker_007_quadratic_fee")
+        js_fee_schedules.append("kalshi_7pct_p_1_minus_p_parabolic_fee_preset")
     if "0.0175" in combined_source and "kalshi" in combined_source.lower():
         js_fee_schedules.append("kalshi_maker_00175_fee")
     if ("0.04" in combined_source or "4%" in combined_source) and "polymarket" in combined_source.lower():
@@ -5801,6 +5815,8 @@ def parse_serp_dom_structural_profile(
         re.search(r"\b(?:Section\s+1256|Form\s+6781|60/40|60%\s+Long-Term|Section\s+179|34\s+CFR|AICPA\s+SSAE\s+18)\b", html_text, re.IGNORECASE)
     )
     has_ssr_hydration = len(ssr_hydrated_outputs) > 0 and len(csr_blank_outputs) == 0
+    csr_only_hydration = len(csr_blank_outputs) > 0 and len(ssr_hydrated_outputs) == 0
+    has_kalshi_fee_schedule = "kalshi_taker_007_quadratic_fee" in js_fee_schedules
 
     mechanics_score = min(
         10.0,
@@ -5884,6 +5900,7 @@ def parse_serp_dom_structural_profile(
             "missing_schema_types": missing_schema_types,
             "has_double_escaped_entities": has_double_escaped_entities,
             "score": schema_score,
+            "schema_depth_score": round(schema_score * 10.0, 2),
         },
         "calculator_mechanics": {
             "input_controls": input_controls,
@@ -5891,6 +5908,8 @@ def parse_serp_dom_structural_profile(
             "csr_blank_outputs_count": len(csr_blank_outputs),
             "csr_blank_output_ids": csr_blank_outputs,
             "has_ssr_hydration": has_ssr_hydration,
+            "csr_only_hydration": csr_only_hydration,
+            "has_kalshi_fee_schedule": has_kalshi_fee_schedule,
             "preset_mechanics": preset_mechanics,
             "detected_fee_and_carry_mechanics": js_fee_schedules,
             "has_sensitivity_matrix": has_sensitivity_matrix,
@@ -5923,6 +5942,7 @@ def diff_competitor_dom_structure(
     tenant_id: str = "profithelm",
     target_slug: str = "",
     query: str = "",
+    property_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Programmatically diffs a competitor SERP DOM snapshot (+ optional JS bundle) against a
@@ -5931,7 +5951,7 @@ def diff_competitor_dom_structure(
     overlays and compiled HTML builds.
     Zero em-dashes. Zero en-dashes.
     """
-    prop_norm = str(tenant_id or "profithelm").strip().lower()
+    prop_norm = str(property_id or tenant_id or "profithelm").strip().lower()
     comp_prof = parse_serp_dom_structural_profile(competitor_html, competitor_js, tenant_id=prop_norm)
     tenant_prof = (
         parse_serp_dom_structural_profile(tenant_html, "", tenant_id=prop_norm)
@@ -6023,6 +6043,8 @@ def diff_competitor_dom_structure(
         statutory_authority=stat_auth,
         economic_dataset=econ_ds,
     )
+    wb_mode_m = re.search(r'data-workbench-mode=["\']([^"\']+)["\']', serp_workbench_html)
+    workbench_mode = wb_mode_m.group(1) if wb_mode_m else "tax_deduction"
 
     mutation_required = bool(tenant_structural_gaps or competitor_wedges_to_absorb)
     template_mutation_spec = {
@@ -6030,9 +6052,11 @@ def diff_competitor_dom_structure(
         "target_slug": eff_slug,
         "query": q_clean,
         "mutation_required": mutation_required,
+        "workbench_mode": workbench_mode,
         "statutory_authority": stat_auth,
         "economic_dataset": econ_ds,
         "absorbed_mechanics": competitor_wedges_to_absorb,
+        "inject_presets": list(competitor_wedges_to_absorb),
         "exploited_competitor_vulnerabilities": competitor_structural_vulnerabilities,
         "tenant_gaps_closed": tenant_structural_gaps,
         "schema_upgrades_required": ["SoftwareApplication", "Dataset", "HowTo", "FAQPage", "BreadcrumbList", "Organization"],
@@ -6043,6 +6067,7 @@ def diff_competitor_dom_structure(
         "property_id": prop_norm,
         "target_slug": eff_slug,
         "query": q_clean,
+        "requires_template_mutation": mutation_required,
         "competitor_profile": comp_prof,
         "tenant_profile": tenant_prof,
         "competitor_wedges_to_absorb": competitor_wedges_to_absorb,
@@ -6066,14 +6091,20 @@ def diff_live_competitor_scratch_snapshots(
     """
     prop_norm = str(tenant_id or "profithelm").strip().lower()
     default_scratch = Path(__file__).resolve().parent.parent / ".agy" / "scratch"
+    if not default_scratch.exists():
+        main_scratch = Path("/home/ubuntuadmin/projects/pseofactory/.agy/scratch")
+        if main_scratch.exists():
+            default_scratch = main_scratch
     s_dir = Path(scratch_dir) if scratch_dir else default_scratch
     if not s_dir.exists():
         return {
             "property_id": prop_norm,
             "scratch_dir": str(s_dir),
             "snapshots_evaluated": 0,
+            "snapshots_analyzed": 0,
             "diffs": [],
             "template_mutation_specs": [],
+            "mutations_required": [],
         }
 
     js_bundle = ""
@@ -6151,12 +6182,15 @@ def diff_live_competitor_scratch_snapshots(
                 existing_mut.get("mutation_required") or mut_spec.get("mutation_required")
             )
 
+    all_mut_specs = list(mutation_specs_by_slug.values())
     return {
         "property_id": prop_norm,
         "scratch_dir": str(s_dir),
         "snapshots_evaluated": len(diffs),
+        "snapshots_analyzed": len(diffs),
         "diffs": diffs,
-        "template_mutation_specs": list(mutation_specs_by_slug.values()),
+        "template_mutation_specs": all_mut_specs,
+        "mutations_required": [m for m in all_mut_specs if m.get("mutation_required")],
     }
 
 

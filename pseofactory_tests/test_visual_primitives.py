@@ -344,3 +344,44 @@ def test_historical_commit_regressions_caught_and_self_healed():
     )
     assert post_issues == [], f"Expected 0 visual contract issues after self-healing, got: {post_issues}"
 
+
+def test_above_fold_preset_salience_and_ssr_latency_optimization():
+    """
+    Verifies normalize_html_visual_primitives surfaces buried [data-calc-preset] chips
+    into .above-fold-preset-bar inside .hero-section, strips legacy file:// runtime
+    bundle bloat, and parses under 100ms in SinglePassSEODocumentParser.
+    """
+    import time
+    from pseofactory.verifier import SinglePassSEODocumentParser
+
+    filler = "<p>" + ("Statutory depreciation schedule analysis for heavy vehicles. " * 60) + "</p>\n"
+    raw_doc = (
+        "<!DOCTYPE html><html lang='en'><head><title>Silverado 2500HD Section 179</title></head><body>"
+        "<main class='main'><div class='container'>"
+        "<section class='hero-section'><h1 class='hero-title'>Silverado 2500HD Section 179 Calculator</h1>"
+        "<p class='hero-subtitle'>Heavy duty truck deduction schedule.</p></section>"
+        "<aside class='quick-answer'><p>Immediate $51,200 first-year write-off under IRC Section 179.</p></aside>"
+        "<div class='calculator-grid'><div class='card'><h2>Parameters</h2>"
+        "<input type='number' id='sec179-cost' value='51200'>"
+        "<div class='result-box'><div class='output-value'>$17,920</div></div></div></div>"
+        + filler
+        + "<div class='serp-preset-bar'>"
+        + "<button type='button' class='touch-target btn-preset serp-archetype-btn' data-cta-slot='calculator_preset_cta' data-calc-preset='{\"sec179-cost\":95000}'>Heavy Work Truck</button>"
+        + "</div>"
+        + "<script>if (typeof window !== 'undefined' && window.location && window.location.protocol === 'file:') { try { var x = 1; } catch (err) {} }</script>"
+        + "</div></main></body></html>"
+    )
+    healed, actions = normalize_html_visual_primitives(raw_doc, is_tenant_porcelain=True)
+    assert "above_fold_preset_salience" in actions
+    assert "legacy_file_runtime_dedup" in actions
+    assert 'data-above-fold-presets="true"' in healed
+    assert "window.location.protocol === 'file:'" not in healed
+
+    t0 = time.perf_counter()
+    parser = SinglePassSEODocumentParser(brand_domain="profithelm.com")
+    parser.feed(healed)
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    assert elapsed_ms < 100.0
+    assert parser.h1_list == ["Silverado 2500HD Section 179 Calculator"]
+
+

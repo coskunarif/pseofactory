@@ -1850,8 +1850,20 @@ def identify_content_decay(
         if decay_type:
             leaf_slug = _slug_from_url_or_query(target_url=c_url, query=q)
             severity_mult = 2.0 if severity == "CRITICAL" else (1.5 if severity == "HIGH" else 1.0)
+            rma7_rma28_ratio = float(timeline_audit.get("rma7_vs_rma28_velocity_ratio", 1.0) or 1.0)
+            prop_decay_vel = float(timeline_audit.get("decay_velocity_score", 0.0) or 0.0)
+            qp_impr_vel_ratio = round(curr_impr / float(max(1, base_impr)), 4)
+            cand_decay_vel = round(
+                min(
+                    100.0,
+                    max(0.0, (1.0 - min(qp_impr_vel_ratio, rma7_rma28_ratio)) * 100.0) * 0.5
+                    + max(0.0, pos_delta * 6.0)
+                    + (prop_decay_vel * 0.25),
+                ),
+                2,
+            )
             urgency_score = round(
-                max(curr_impr, base_impr, 1) * max(pos_delta, 1.0) * severity_mult,
+                max(curr_impr, base_impr, 1) * max(pos_delta, 1.0) * severity_mult * (1.0 + cand_decay_vel / 200.0),
                 2,
             )
             decay_candidates.append(
@@ -1884,6 +1896,9 @@ def identify_content_decay(
                     "mobile_ctr_gap": mob_ctr_gap,
                     "device_focus": dev_focus,
                     "time_window_trajectory": str(win_delta.get("trajectory_state") or "DECAYING"),
+                    "rma7_vs_rma28_velocity_ratio": rma7_rma28_ratio,
+                    "query_impression_velocity_ratio": qp_impr_vel_ratio,
+                    "decay_velocity_score": cand_decay_vel,
                     "urgency_score": urgency_score,
                     "recommended_action": (
                         "REFRESH_OVERLAY_AND_HEADINGS"
@@ -1908,6 +1923,7 @@ def identify_content_decay(
                 "decaying_queries_count": 0,
                 "max_position_drop": 0.0,
                 "position_drop": 0.0,
+                "max_decay_velocity_score": 0.0,
                 "crossed_page_one_boundary": False,
                 "total_affected_impressions": 0,
                 "highest_severity": dc["severity"],
@@ -1918,6 +1934,9 @@ def identify_content_decay(
         p_entry["decaying_queries_count"] += 1
         p_entry["max_position_drop"] = max(p_entry["max_position_drop"], float(dc["position_delta"]))
         p_entry["position_drop"] = p_entry["max_position_drop"]
+        p_entry["max_decay_velocity_score"] = max(
+            p_entry["max_decay_velocity_score"], float(dc.get("decay_velocity_score", 0.0))
+        )
         if dc.get("crossed_page_one_boundary"):
             p_entry["crossed_page_one_boundary"] = True
         p_entry["total_affected_impressions"] += int(dc["current_impressions"])
@@ -1931,6 +1950,8 @@ def identify_content_decay(
         "property_id": prop,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "timeline_audit": timeline_audit,
+        "rma7_vs_rma28_velocity_ratio": float(timeline_audit.get("rma7_vs_rma28_velocity_ratio", 1.0) or 1.0),
+        "property_decay_velocity_score": float(timeline_audit.get("decay_velocity_score", 0.0) or 0.0),
         "earliest_snapshot_id": gsc_bundle.get("earliest_snapshot_id", ""),
         "latest_snapshot_id": gsc_bundle.get("latest_snapshot_id", ""),
         "total_decaying_queries": len(decay_candidates),
@@ -2429,6 +2450,37 @@ def compile_search_opportunity_briefs(
                             "source": "gsc_remediation_queue",
                         }
                     )
+        except Exception:
+            pass
+
+    # Also ingest .agy/competitor_spike_actions.json so competitor SERP gaps and live DOM diffs trigger closed-loop briefs & overlays
+    comp_spike_path = root / ".agy" / "competitor_spike_actions.json"
+    if comp_spike_path.is_file():
+        try:
+            comp_data = json.loads(comp_spike_path.read_text(encoding="utf-8"))
+            if isinstance(comp_data, dict):
+                for inv in (comp_data.get("investigations") or []) + (comp_data.get("dom_structural_mutations") or []):
+                    if not isinstance(inv, dict):
+                        continue
+                    c_slug = str(inv.get("canonical_slug") or inv.get("target_slug") or "").strip().lower()
+                    if not c_slug or c_slug in ("tools", "root", prop):
+                        continue
+                    c_p = f"/tools/{c_slug}"
+                    html_cand = d_dir / "tools" / c_slug / "index.html"
+                    if html_cand.is_file():
+                        q_str = str(inv.get("query") or c_slug.replace("-", " ")).strip()
+                        if _is_query_relevant_for_property(q_str, prop):
+                            rows.append(
+                                {
+                                    "query": q_str,
+                                    "canonical_path": c_p,
+                                    "canonical_url": f"https://{domain}{c_p}/",
+                                    "impressions": max(15, int(float(inv.get("velocity", 25) or 25))),
+                                    "clicks": 0,
+                                    "position": 9.5,
+                                    "source": "competitor_spike_actions",
+                                }
+                            )
         except Exception:
             pass
 
@@ -3263,6 +3315,170 @@ def evaluate_content_portfolio_decisions(
 # ==============================================================================
 # WORKFLOW 3: INVESTIGATE COMPETITOR TRAFFIC SPIKES
 # ==============================================================================
+_GAINHELM_PRE_PIVOT_LEGACY_TERMS: Tuple[str, ...] = (
+    "plumber",
+    "plumbing",
+    "hvac",
+    "landscaping",
+    "lawn care",
+    "pest control",
+    "maid",
+    "handyman",
+    "roofing",
+    "electrician",
+    "jobber",
+    "housecall pro",
+    "servicetitan",
+    "fieldpulse",
+    "workiz",
+    "gorilladesk",
+    "field service",
+    "dispatch app",
+    "scheduling software",
+    "pool service",
+    "carpet cleaning",
+)
+
+_GAINHELM_GRC_RELEVANCE_TERMS: Tuple[str, ...] = (
+    "soc 2",
+    "soc-2",
+    "cmmc",
+    "nist",
+    "800-171",
+    "800-53",
+    "sprs",
+    "iso 27001",
+    "iso-27001",
+    "27001",
+    "hipaa",
+    "hitech",
+    "pci dss",
+    "pci-dss",
+    "fedramp",
+    "hitrust",
+    "cyber",
+    "grc",
+    "vanta",
+    "drata",
+    "audit",
+    "pentest",
+    "penetration",
+    "compliance",
+    "breach",
+    "security",
+    "c3pao",
+    "qsa",
+    "dfars",
+    "aicpa",
+    "ssae",
+)
+
+
+def _is_query_relevant_for_property(query_text: str, property_id: str) -> bool:
+    """
+    Enforces strict vertical query relevance across ProfitHelm, Prexvo, and GainHelm
+    so legacy pre-pivot field-service queries (e.g. plumber/HVAC scheduling) or
+    cross-tenant queries never pollute competitor spike investigations or overlays.
+    Zero em-dashes. Zero en-dashes.
+    """
+    q_low = str(query_text or "").strip().lower()
+    if not q_low or "site:" in q_low:
+        return False
+    prop = str(property_id or "profithelm").strip().lower()
+    if any(legacy in q_low for legacy in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
+        return False
+    if prop == "gainhelm":
+        if any(
+            foreign in q_low
+            for foreign in ("1031", "section 179", "student loan", "pslf", "ibr", "rap calculator", "crypto tax")
+        ):
+            return False
+        return any(k in q_low for k in _GAINHELM_GRC_RELEVANCE_TERMS)
+    if prop == "prexvo":
+        if any(
+            foreign in q_low
+            for foreign in ("1031", "section 179", "soc 2", "cmmc", "iso 27001", "sprs", "crypto tax", "kalshi")
+        ):
+            return False
+        return any(
+            k in q_low
+            for k in (
+                "loan",
+                "ibr",
+                "rap",
+                "pslf",
+                "paye",
+                "save",
+                "icr",
+                "student",
+                "tuition",
+                "borrow",
+                "refinance",
+                "forgiveness",
+                "idr",
+                "obbba",
+            )
+        )
+    # profithelm
+    if any(
+        foreign in q_low
+        for foreign in ("student loan", "pslf", "save plan", "soc 2", "cmmc", "iso 27001", "sprs score", "hipaa violation")
+    ):
+        return False
+    return True
+
+
+def _apply_closed_loop_dom_mutation_to_dist_html(
+    html_path: Path,
+    mutation_spec: Dict[str, Any],
+    property_id: str,
+    dist_dir: Path,
+) -> bool:
+    """
+    Deterministically mutates a compiled tenant HTML file in dist/ using a programmatic
+    competitor SERP DOM structural diff template_mutation_spec (replacing or injecting
+    #serp-incumbent-depth-workbench and healing rich-result JSON-LD via RetroReflectionEngine).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not html_path.is_file():
+        return False
+    try:
+        raw_html = html_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+    updated_html = raw_html
+    new_workbench = str(mutation_spec.get("serp_depth_upgrade_html") or "").strip()
+    target_slug = str(mutation_spec.get("target_slug") or "").strip()
+
+    if new_workbench:
+        wb_pattern = re.compile(
+            r'<section[^>]*id=["\']serp-incumbent-depth-workbench["\'][^>]*>.*?</section>',
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if wb_pattern.search(updated_html):
+            updated_html = wb_pattern.sub(lambda _m: new_workbench, updated_html, count=1)
+        elif "</main>" in updated_html:
+            updated_html = updated_html.replace("</main>", f"\n{new_workbench}\n</main>", 1)
+
+    try:
+        from pseofactory.maintenance import RetroReflectionEngine
+
+        updated_html, _ = RetroReflectionEngine.retrofit_html(
+            updated_html,
+            property_id=property_id,
+            slug=target_slug,
+            dist_dir=dist_dir,
+        )
+    except Exception:
+        pass
+
+    if updated_html != raw_html:
+        html_path.write_text(updated_html, encoding="utf-8")
+        return True
+    return False
+
+
 def investigate_competitor_traffic_spikes(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -3274,12 +3490,14 @@ def investigate_competitor_traffic_spikes(
     Workflow 3: Correlates longitudinal search velocity spikes from TrendHistoryDB
     (keyword_history / treg_metric_snapshots) and statutory.db (trend_velocity_history &
     gsc_performance_snapshots impression surges) against CompetitorGapEngine.diff_competitor_serp
-    to identify why competitor SERP pages are spiking and extract missing interactive features,
-    click magnets, and conversion hooks into actionable specs.
+    and live competitor SERP DOM snapshots (.agy/scratch/) to identify why competitor SERP
+    pages are spiking, extract missing interactive features/magnets/hooks, and deterministically
+    mutate target tenant builds and overlays.
     Persists <repo_root>/.agy/competitor_spike_actions.json.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.competitor import CompetitorGapEngine
+    from pseofactory.qualification import resolve_redirected_gsc_target
     from pseofactory.tenant_facts import TenantFactStore
 
     prop = _resolve_property_id(property_id, repo_root)
@@ -3289,8 +3507,21 @@ def investigate_competitor_traffic_spikes(
     profile = TenantFactStore.get_instance().get_profile(prop)
     engine = CompetitorGapEngine(profile)
 
+    # Programmatically diff live competitor DOM snapshots in .agy/scratch/ when applicable
+    live_dom_diff_summary: Dict[str, Any] = (
+        engine.diff_live_competitor_scratch_snapshots(tenant_repo_root=root)
+        if prop == "profithelm"
+        else {"property_id": prop, "snapshots_evaluated": 0, "diffs": [], "template_mutation_specs": []}
+    )
+    mutation_by_slug: Dict[str, Dict[str, Any]] = {
+        str(m.get("target_slug") or ""): m
+        for m in (live_dom_diff_summary.get("template_mutation_specs") or [])
+        if isinstance(m, dict) and m.get("target_slug")
+    }
+
     spike_signals: List[Dict[str, Any]] = []
     seen_queries: Set[str] = set()
+    filtered_off_vertical_queries: List[str] = []
 
     # 0. Check local statutory.db trend_velocity_history first
     stat_db = root / "profithelm" / "data" / "statutory.db"
@@ -3313,7 +3544,12 @@ def investigate_competitor_traffic_spikes(
                     ).fetchall():
                         q_clean = _clean_dashes(str(kw or "").strip())
                         vr = float(v_ratio or 1.0)
-                        if q_clean and vr >= (1.0 + velocity_spike_threshold) and q_clean.lower() not in seen_queries:
+                        if not q_clean or q_clean.lower() in seen_queries:
+                            continue
+                        if not _is_query_relevant_for_property(q_clean, prop):
+                            filtered_off_vertical_queries.append(q_clean)
+                            continue
+                        if vr >= (1.0 + velocity_spike_threshold):
                             seen_queries.add(q_clean.lower())
                             spike_signals.append(
                                 {
@@ -3352,13 +3588,8 @@ def investigate_competitor_traffic_spikes(
                 q_clean = _clean_dashes(str(q_str or "").strip())
                 if not q_clean or q_clean.lower() in seen_queries:
                     continue
-                if prop == "prexvo" and not any(
-                    k in q_clean.lower() for k in ("loan", "ibr", "rap", "pslf", "paye", "save", "icr", "student", "tuition", "borrow")
-                ):
-                    continue
-                if prop == "gainhelm" and not any(
-                    k in q_clean.lower() for k in ("soc 2", "soc-2", "cmmc", "nist", "800-171", "sprs", "iso 27001", "iso-27001", "hipaa", "pci dss", "pci-dss", "fedramp", "cyber", "grc", "vanta", "drata", "audit")
-                ):
+                if not _is_query_relevant_for_property(q_clean, prop):
+                    filtered_off_vertical_queries.append(q_clean)
                     continue
                 seen_queries.add(q_clean.lower())
                 spike_signals.append(
@@ -3376,7 +3607,7 @@ def investigate_competitor_traffic_spikes(
         except Exception:
             pass
 
-    # 2. Pull impression surges across GSC snapshots
+    # 2. Pull impression surges across GSC snapshots (strictly filtered by vertical query relevance)
     base_map = {
         (str(r.get("canonical_path") or "").rstrip("/"), str(r.get("query") or "").lower()): int(float(r.get("impressions", 0) or 0))
         for r in (gsc_bundle.get("baseline_rows") or [])
@@ -3388,6 +3619,9 @@ def investigate_competitor_traffic_spikes(
         q_clean = _clean_dashes(str(r.get("query") or "").strip())
         c_path = str(r.get("canonical_path") or "").rstrip("/")
         if not q_clean or q_clean.lower() in seen_queries:
+            continue
+        if not _is_query_relevant_for_property(q_clean, prop):
+            filtered_off_vertical_queries.append(q_clean)
             continue
         curr_imp = int(float(r.get("impressions", 0) or 0))
         prev_imp = base_map.get((c_path, q_clean.lower()), 0)
@@ -3410,15 +3644,63 @@ def investigate_competitor_traffic_spikes(
                 }
             )
 
+    # 3. Ensure live competitor DOM snapshot targets are included in spike signals for closed-loop action
+    for mut_slug, mut_spec in mutation_by_slug.items():
+        mut_q = str(mut_spec.get("query") or mut_slug.replace("-", " ")).strip()
+        if mut_q and mut_q.lower() not in seen_queries:
+            seen_queries.add(mut_q.lower())
+            spike_signals.append(
+                {
+                    "query": mut_q,
+                    "source": "live_competitor_dom_snapshot",
+                    "intent_cluster": mut_slug,
+                    "velocity": 85.0,
+                    "velocity_ratio": 1.85,
+                    "velocity_delta": 35.0,
+                    "acceleration": 17.5,
+                    "consecutive_cycles": 3,
+                    "target_url": f"https://profithelm.com/tools/{mut_slug}/",
+                    "current_position": 9.5,
+                }
+            )
+
     spike_signals.sort(key=lambda x: (-float(x.get("velocity_ratio", 1.0)), -float(x["velocity"]), x["query"]))
 
+    d_dir = root / "dist"
+    closed_loop_mutations_applied: List[str] = []
     investigations: List[Dict[str, Any]] = []
+
     for sig in spike_signals[:12]:
         q_text = sig["query"]
+        resolved_target = resolve_redirected_gsc_target(
+            target_url=str(sig.get("target_url") or ""),
+            slug=str(sig.get("intent_cluster") or ""),
+            query=q_text,
+            property_id=prop,
+            repo_root=root,
+        )
+        canonical_slug = str(resolved_target.get("canonical_slug") or sig.get("intent_cluster") or "").strip().lower()
+        if canonical_slug in ("", prop, "tools", "root"):
+            canonical_slug = ""
+
+        existing_tool: Optional[Dict[str, Any]] = None
+        if canonical_slug and (d_dir / "tools" / canonical_slug / "index.html").is_file():
+            try:
+                existing_tool = {
+                    "slug": canonical_slug,
+                    "title": canonical_slug.replace("-", " ").title(),
+                    "raw_html": (d_dir / "tools" / canonical_slug / "index.html").read_text(
+                        encoding="utf-8", errors="ignore"
+                    ),
+                }
+            except Exception:
+                existing_tool = {"slug": canonical_slug}
+
+        matched_mut = mutation_by_slug.get(canonical_slug)
         if prop == "prexvo":
             serp_competitors = [
                 {
-                    "title": f"{q_text.title()} - Interactive 2026 Title IV RAP vs IBR Simulator & PDF Schedule",
+                    "title": f"{q_text.title()}: Interactive 2026 Title IV RAP vs IBR Simulator & PDF Schedule",
                     "snippet": "Compare monthly student loan payment sliders, discretionary income poverty exemption matrix, and forgiveness tax bomb calculator.",
                     "interactive_features": ["repayment_comparison_matrix", "agi_discretionary_slider", "forgiveness_payoff_simulator"],
                     "click_magnets": ["Amortization Schedule PDF", "Title IV Eligibility Checklist"],
@@ -3428,7 +3710,7 @@ def investigate_competitor_traffic_spikes(
         elif prop == "gainhelm":
             serp_competitors = [
                 {
-                    "title": f"{q_text.title()} - 2026 SOC 2, CMMC 2.0 & ISO 27001 Audit Cost & SPRS Score Simulator",
+                    "title": f"{q_text.title()}: 2026 SOC 2, CMMC 2.0 & ISO 27001 Audit Cost & SPRS Score Simulator",
                     "snippet": "Interactive auditor-day fee calculator, DoD 32 CFR Part 170 SPRS deduction matrix, and downloadable GRC audit readiness workpaper.",
                     "interactive_features": ["audit_cost_sensitivity_matrix", "grc_automation_roi_slider", "sprs_control_deduction_simulator"],
                     "click_magnets": ["GRC Audit Readiness Workpaper PDF", "NIST 800-171 SSP Control Checklist"],
@@ -3436,19 +3718,41 @@ def investigate_competitor_traffic_spikes(
                 }
             ]
         else:
-            serp_competitors = [
-                {
-                    "title": f"{q_text.title()} - 2026/2027 Statutory Tax & Scenario Comparison Calculator",
-                    "snippet": "Interactive marginal bracket slider, post-TCJA sunset comparison matrix, and downloadable CPA audit checklist.",
-                    "interactive_features": ["statutory_scenario_matrix", "marginal_rate_slider", "breakeven_sensitivity_simulator"],
-                    "click_magnets": ["Statutory Projection PDF", "CPA Compliance Checklist"],
-                    "conversion_hooks": ["Statutory Rate Change Alert"],
-                }
-            ]
+            comp_entry: Dict[str, Any] = {
+                "title": f"{q_text.title()}: 2026/2027 Statutory Tax & Scenario Comparison Calculator",
+                "snippet": "Interactive marginal bracket slider, post-TCJA sunset comparison matrix, and downloadable CPA audit checklist.",
+                "interactive_features": (
+                    list(matched_mut.get("absorbed_mechanics") or [])
+                    if matched_mut
+                    else ["statutory_scenario_matrix", "marginal_rate_slider", "breakeven_sensitivity_simulator"]
+                ),
+                "click_magnets": ["Statutory Projection PDF", "CPA Compliance Checklist"],
+                "conversion_hooks": ["Statutory Rate Change Alert"],
+            }
+            serp_competitors = [comp_entry]
 
-        gap_specs = engine.diff_competitor_serp(q_text, serp_competitors)
+        gap_specs = engine.diff_competitor_serp(q_text, serp_competitors, existing_tool=existing_tool)
         top_spec = gap_specs[0].to_dict() if gap_specs else {}
         missing_feats = list(top_spec.get("missing_interactive_features") or top_spec.get("interactive_features") or [])
+        eff_target_slug = canonical_slug or str(top_spec.get("slug", ""))
+
+        dom_mutated = False
+        if persist and eff_target_slug and (d_dir / "tools" / eff_target_slug / "index.html").is_file():
+            mut_payload = matched_mut or {
+                "target_slug": eff_target_slug,
+                "property_id": prop,
+                "statutory_authority": str(top_spec.get("statutory_authority", "")),
+                "economic_dataset": str(top_spec.get("economic_dataset", "")),
+            }
+            dom_mutated = _apply_closed_loop_dom_mutation_to_dist_html(
+                html_path=d_dir / "tools" / eff_target_slug / "index.html",
+                mutation_spec=mut_payload,
+                property_id=prop,
+                dist_dir=d_dir,
+            )
+            if dom_mutated and eff_target_slug not in closed_loop_mutations_applied:
+                closed_loop_mutations_applied.append(eff_target_slug)
+
         investigations.append(
             {
                 "property_id": prop,
@@ -3458,15 +3762,28 @@ def investigate_competitor_traffic_spikes(
                 "velocity_ratio": float(sig.get("velocity_ratio", 1.5)),
                 "velocity_delta": sig["velocity_delta"],
                 "acceleration": sig["acceleration"],
-                "target_slug": top_spec.get("slug", ""),
+                "target_slug": eff_target_slug,
+                "canonical_slug": canonical_slug,
                 "missing_interactive_features": missing_feats,
                 "missing_serp_features": missing_feats,
                 "click_magnets_to_absorb": top_spec.get("click_magnets", []),
                 "conversion_hooks_to_absorb": top_spec.get("conversion_hooks", []),
                 "statutory_authority": _clean_dashes(str(top_spec.get("statutory_authority", ""))),
+                "exploited_competitor_vulnerabilities": (
+                    list(matched_mut.get("exploited_competitor_vulnerabilities", [])) if matched_mut else []
+                ),
+                "closed_loop_dom_mutated": dom_mutated,
                 "recommended_action": "INJECT_INTERACTIVE_SCENARIO_MATRIX",
             }
         )
+
+    # Also apply any remaining live DOM snapshot mutations directly to dist/tools/<slug>/index.html
+    if persist and d_dir.is_dir():
+        for mut_slug, mut_spec in mutation_by_slug.items():
+            t_html = d_dir / "tools" / mut_slug / "index.html"
+            if t_html.is_file() and mut_slug not in closed_loop_mutations_applied:
+                if _apply_closed_loop_dom_mutation_to_dist_html(t_html, mut_spec, prop, d_dir):
+                    closed_loop_mutations_applied.append(mut_slug)
 
     report = {
         "workflow": "investigate_competitor_traffic_spikes",
@@ -3475,6 +3792,21 @@ def investigate_competitor_traffic_spikes(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "spikes_investigated_count": len(investigations),
         "spikes_count": len(investigations),
+        "filtered_off_vertical_queries_count": len(filtered_off_vertical_queries),
+        "live_dom_snapshots_evaluated": int(live_dom_diff_summary.get("snapshots_evaluated", 0)),
+        "closed_loop_mutations_applied": closed_loop_mutations_applied,
+        "dom_structural_mutations": [
+            {
+                "target_slug": m.get("target_slug"),
+                "query": m.get("query"),
+                "statutory_authority": m.get("statutory_authority"),
+                "absorbed_mechanics": m.get("absorbed_mechanics", []),
+                "exploited_competitor_vulnerabilities": m.get("exploited_competitor_vulnerabilities", []),
+                "tenant_gaps_closed": m.get("tenant_gaps_closed", []),
+            }
+            for m in (live_dom_diff_summary.get("template_mutation_specs") or [])
+            if isinstance(m, dict)
+        ],
         "investigations": investigations,
         "spikes": investigations,
     }
@@ -4268,6 +4600,33 @@ def compile_technical_seo_sprint(
                         "execution_state": br.get("execution_status", "COMPILED_READY"),
                     }
                 )
+
+    # 3b. Competitor SERP DOM structural diff & spike actions
+    comp_spike_file = root / ".agy" / "competitor_spike_actions.json"
+    if comp_spike_file.is_file():
+        try:
+            comp_data = json.loads(comp_spike_file.read_text(encoding="utf-8"))
+            if isinstance(comp_data, dict):
+                domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+                for dom_mut in (comp_data.get("dom_structural_mutations") or [])[:5]:
+                    if not isinstance(dom_mut, dict) or not dom_mut.get("target_slug"):
+                        continue
+                    t_slug = str(dom_mut["target_slug"])
+                    sprint_tasks.append(
+                        {
+                            "task_id": f"sprint_{prop}_serp_dom_{len(sprint_tasks) + 1:02d}",
+                            "category": "COMPETITOR_SERP_DOM_UPGRADE",
+                            "priority": "P0",
+                            "roi_score": 880.0,
+                            "priority_score": 880.0,
+                            "target": f"https://{domain}/tools/{t_slug}/",
+                            "query": str(dom_mut.get("query") or t_slug.replace("-", " ")),
+                            "action": "MUTATE_TEMPLATE_WORKBENCH_AND_UNIFIED_SCHEMA",
+                            "execution_state": "AUTO_MUTATED_TEMPLATE_AND_OVERLAY",
+                        }
+                    )
+        except Exception:
+            pass
 
     # 4. Internal linking & orphan page elevation
     if link_report:
@@ -6586,7 +6945,7 @@ def compile_quantitative_revenue_forecast(
             )
 
         total_forecasted_90d_rev += forecast_90d_rev
-        incumbent_prof = get_competitive_incumbent_profile(slug)
+        incumbent_prof = get_competitive_incumbent_profile(slug, property_id=prop)
 
         bottlenecks_resolved: List[str] = []
         if is_discovered_not_indexed:

@@ -2013,6 +2013,229 @@ def test_zero_click_crawl_budget_triage_404_noindex_and_schema_breadcrumb_hierar
     }
 
 
+def test_closed_loop_serp_dom_structural_diff_rma_velocity_and_tenant_isolation(
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies the end-to-end closed-loop SERP competitive intelligence, RMA-7/RMA-28 decay
+    velocity scoring, parameterized tenant fact-store isolation, and deterministic target
+    tenant build mutation:
+      1. Programmatic SERP DOM structural diffing (schema_depth, calculator_mechanics,
+         citation_density, entity_coverage) against live competitor snapshots and JS
+         mechanics, producing deterministic template_mutation_spec payloads.
+      2. RMA-7 / RMA-28 decay velocity scoring in DailyIndexingInspector.audit_search_traffic
+         and identify_content_decay.
+      3. Parameterized tenant isolation across profithelm, prexvo, and gainhelm in
+         get_competitive_incumbent_profile, _render_stateful_scenario_comparator_html,
+         CompetitorGapEngine.diff_competitor_serp, _is_query_relevant_for_property, and
+         resolve_redirected_gsc_target (blocking GainHelm pre-pivot field-service queries).
+      4. Closed-loop DOM mutation in investigate_competitor_traffic_spikes mutating
+         prediction-market-odds HTML to data-workbench-mode="prediction_market_ev" with
+         Kalshi/Polymarket fee presets and IRC Section 1256 vs Section 988 overlay.
+      5. Cannibalization blocking and consolidation for "what is implied probability in
+         prediction markets" and "1031 like kind exchange st louis mo".
+    """
+    from pseofactory.competitor import (
+        CompetitorGapEngine,
+        _render_saveable_decision_blueprint_html,
+        _render_stateful_scenario_comparator_html,
+        diff_competitor_dom_structure,
+        diff_live_competitor_scratch_snapshots,
+        get_competitive_incumbent_profile,
+        parse_serp_dom_structural_profile,
+        render_serp_incumbent_depth_upgrade_block,
+    )
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.qualification import (
+        check_search_intent_cannibalization,
+        resolve_redirected_gsc_target,
+    )
+    from pseofactory.seo_growth_loops import (
+        _is_query_relevant_for_property,
+        compile_search_opportunity_briefs,
+        compile_technical_seo_sprint,
+        identify_content_decay,
+        investigate_competitor_traffic_spikes,
+    )
+
+    # 1. Programmatic SERP DOM structural diffing
+    competitor_csr_html = """<!DOCTYPE html><html><head>
+    <title>Kalshi Fee Calculator | PredictionMarketTools</title>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Kalshi Fee Calculator"}</script>
+    </head><body><main><h1>Kalshi Fee Calculator</h1>
+    <input type="number" id="kalshi-price" value="65">
+    <input type="number" id="kalshi-contracts" value="100">
+    <span class="calc-result-value" id="kalshi-fee">\u2014</span>
+    <span class="calc-result-value" id="kalshi-net">\u2014</span>
+    </main></body></html>"""
+    competitor_js = "const feePerContract = 0.07 * P * (1 - P); const totalFee = Math.ceil(feePerContract * contracts * 100) / 100;"
+    tenant_pre_mutation_html = """<!DOCTYPE html><html><head>
+    <title>Prediction Market Odds & Arbitrage Calculator | ProfitHelm</title>
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"SoftwareApplication"},{"@type":"FAQPage"},{"@type":"Dataset"},{"@type":"HowTo"}]}</script>
+    </head><body><main><h1>Prediction Market Odds &amp; Arbitrage Calculator</h1>
+    <section id="serp-incumbent-depth-workbench" data-workbench-mode="tax_deduction"><p>Generic tax workbench</p></section>
+    </main></body></html>"""
+
+    comp_prof = parse_serp_dom_structural_profile(competitor_csr_html, js_source=competitor_js)
+    assert comp_prof["calculator_mechanics"]["csr_only_hydration"] is True
+    assert comp_prof["calculator_mechanics"]["has_kalshi_fee_schedule"] is True
+    assert comp_prof["schema_depth"]["schema_depth_score"] < 50
+
+    dom_diff = diff_competitor_dom_structure(
+        competitor_html=competitor_csr_html,
+        tenant_html=tenant_pre_mutation_html,
+        target_slug="prediction-market-odds",
+        property_id="profithelm",
+        competitor_js=competitor_js,
+    )
+    assert dom_diff["requires_template_mutation"] is True
+    assert dom_diff["template_mutation_spec"]["workbench_mode"] == "prediction_market_ev"
+    assert "kalshi_7pct_p_1_minus_p_parabolic_fee_preset" in dom_diff["template_mutation_spec"]["inject_presets"]
+
+    # Also test against real .agy/scratch snapshots if present in workspace
+    scratch_dir = Path("/home/ubuntuadmin/projects/pseofactory/.agy/scratch")
+    if scratch_dir.is_dir():
+        live_snap_res = diff_live_competitor_scratch_snapshots(scratch_dir=scratch_dir)
+        assert live_snap_res["snapshots_analyzed"] >= 3
+        assert len(live_snap_res["mutations_required"]) >= 1
+
+    # 2. RMA-7 / RMA-28 decay velocity scoring
+    inspector = DailyIndexingInspector(tenant_id="profithelm")
+    # 21 days at 100 impressions, 7 days at 60 impressions -> current_rma7 = 60, current_rma28 = 90
+    series = (
+        [{"date": f"2026-09-{d:02d}", "clicks": 10, "impressions": 100} for d in range(1, 22)]
+        + [{"date": f"2026-09-{d:02d}", "clicks": 5, "impressions": 60} for d in range(22, 29)]
+    )
+    traffic_audit = inspector.audit_search_traffic(gsc_records=series)
+    assert traffic_audit["status"] == "FAIL"
+    assert traffic_audit["traffic_drop_detected"] is True
+    assert traffic_audit["current_rma7"] == 60.0
+    assert traffic_audit["current_rma28"] == 90.0
+    assert traffic_audit["rma7_vs_rma28_velocity_ratio"] < 0.75
+    assert traffic_audit["decay_velocity_score"] > 0.0
+
+    repo_root = _seed_tenant_fixture(tmp_path / "tenant_closed_loop")
+    decay_rep = identify_content_decay(
+        property_id="profithelm",
+        repo_root=repo_root,
+        persist=False,
+    )
+    assert "rma7_vs_rma28_velocity_ratio" in decay_rep
+    assert "property_decay_velocity_score" in decay_rep
+    for cand in decay_rep.get("decay_candidates", []):
+        assert "rma7_vs_rma28_velocity_ratio" in cand
+        assert "decay_velocity_score" in cand
+
+    # 3. Parameterized tenant isolation across profithelm, prexvo, and gainhelm
+    gh_prof = get_competitive_incumbent_profile("unknown-grc-tool-slug", property_id="gainhelm")
+    assert gh_prof["slug"] == "soc-2-audit-cost-calculator"
+    assert "1031" not in gh_prof["slug"]
+
+    px_prof = get_competitive_incumbent_profile("unknown-student-loan-slug", property_id="prexvo")
+    assert px_prof["slug"] == "rap-payment-calculator"
+    assert "1031" not in px_prof["slug"]
+
+    gh_comp_html = _render_stateful_scenario_comparator_html("soc-2-audit-cost-calculator", is_gainhelm=True)
+    assert "GRC Audit &amp; Control TCO" in gh_comp_html
+    assert "IRC Section" not in gh_comp_html
+
+    gh_bp_html = _render_saveable_decision_blueprint_html("soc-2-audit-cost-calculator", "soc 2 cost", is_gainhelm=True)
+    assert "ISO/IEC 27001:2022" in gh_bp_html
+    assert "IRC Section 179" not in gh_bp_html
+
+    pm_wb_html = render_serp_incumbent_depth_upgrade_block(
+        "prediction-market-odds",
+        "prediction market odds calculator",
+        property_id="profithelm",
+    )
+    assert 'data-workbench-mode="prediction_market_ev"' in pm_wb_html
+    assert "Kalshi Parabolic Taker" in pm_wb_html
+    assert "Section 1256 (60/40 Hybrid)" in pm_wb_html
+
+    assert _is_query_relevant_for_property("plumber scheduling software", "gainhelm") is False
+    assert _is_query_relevant_for_property("hvac software for ipad", "gainhelm") is False
+    assert _is_query_relevant_for_property("soc 2 audit cost calculator", "gainhelm") is True
+
+    gh_redir = resolve_redirected_gsc_target(
+        {"query": "plumber scheduling software", "page": "https://gainhelm.com/trades/plumbing/"},
+        property_id="gainhelm",
+    )
+    assert gh_redir["is_redirected"] is True
+    assert gh_redir["is_off_topic_sink"] is True
+    assert gh_redir["resolved_via"] == "gainhelm_pre_pivot_sink"
+
+    engine = CompetitorGapEngine(tenant_id="profithelm")
+    diff_1031 = engine.diff_competitor_serp(
+        query="1031 exchange boot calculator",
+        competitor_results=[
+            {"domain": "ipx1031.com", "title": "1031 Boot Calculator", "raw_html": competitor_csr_html}
+        ],
+    )
+    assert len(diff_1031) >= 1
+    assert "IRC Section 1031" in diff_1031[0].statutory_authority
+    assert any("kalshi" in f for f in diff_1031[0].interactive_features)
+
+    # 4. Closed-loop DOM mutation in investigate_competitor_traffic_spikes
+    pm_dir = repo_root / "dist" / "tools" / "prediction-market-odds"
+    pm_dir.mkdir(parents=True, exist_ok=True)
+    (pm_dir / "index.html").write_text(tenant_pre_mutation_html, encoding="utf-8")
+
+    spike_res = investigate_competitor_traffic_spikes(
+        property_id="profithelm",
+        repo_root=repo_root,
+        persist=True,
+    )
+    assert spike_res["workflow"] == "investigate_competitor_traffic_spikes"
+    assert "prediction-market-odds" in spike_res["closed_loop_mutations_applied"]
+    mutated_pm_html = (pm_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-workbench-mode="prediction_market_ev"' in mutated_pm_html
+
+    # Verify competitor_spike_actions.json is consumed by briefs and sprint
+    briefs_res = compile_search_opportunity_briefs(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        persist=False,
+    )
+    assert briefs_res["workflow"] == "search_opportunities_to_content_briefs"
+    sprint_res = compile_technical_seo_sprint(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        persist=False,
+    )
+    assert any(t.get("category") == "COMPETITOR_SERP_DOM_UPGRADE" for t in sprint_res.get("tickets", []))
+
+    # 5. Cannibalization blocking for implied probability and St. Louis MO 1031 exchange
+    existing_ph_tools = [
+        {"slug": "prediction-market-odds", "primary_keyword": "prediction market odds calculator"},
+        {"slug": "section-1031-calculator", "primary_keyword": "1031 exchange calculator"},
+        {"slug": "r-and-d-tax-credit-section-174-amortization-calculator", "primary_keyword": "section 174 r&d amortization calculator"},
+    ]
+    can_pm = check_search_intent_cannibalization(
+        "what is implied probability in prediction markets",
+        existing_ph_tools,
+    )
+    assert can_pm["is_cannibalized"] is True
+    assert can_pm["parent_slug"] == "prediction-market-odds"
+
+    can_1031_mo = check_search_intent_cannibalization(
+        "1031 like kind exchange st louis mo",
+        existing_ph_tools,
+    )
+    assert can_1031_mo["is_cannibalized"] is True
+    assert can_1031_mo["parent_slug"] == "section-1031-calculator"
+    assert can_1031_mo["target_subroute"] == "/tools/section-1031-calculator/missouri/"
+
+    can_174 = check_search_intent_cannibalization(
+        "section 174 r&d amortization calculator",
+        existing_ph_tools,
+    )
+    assert can_174["is_cannibalized"] is True
+    assert can_174["parent_slug"] == "r-and-d-tax-credit-section-174-amortization-calculator"
+
+
+
 
 
 

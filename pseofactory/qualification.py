@@ -162,6 +162,7 @@ SYNONYM_TOKEN_MAP: Dict[str, str] = {
     "table": "brackets",
     "schedule": "brackets",
     "schedules": "brackets",
+    "markets": "market",
 }
 
 FILING_MODIFIER_STOPWORDS = frozenset({
@@ -544,7 +545,15 @@ def _match_core_topic_modifier_variant(
     ):
         is_match = True
     elif tool_slug == "prediction-market-odds" and {"prediction", "market"}.issubset(q_core) and q_core.issubset(
-        {"kalshi", "polymarket", "prediction", "market", "odds", "arbitrage", "strategy", "implied", "probability"}
+        {
+            "kalshi", "polymarket", "prediction", "market", "odds", "arbitrage", "strategy",
+            "implied", "probability", "what", "is", "how", "to", "calculate", "ev",
+            "expected", "value", "fees", "fee", "kelly", "criterion", "contract", "contracts",
+        }
+    ):
+        is_match = True
+    elif tool_slug == "r-and-d-tax-credit-section-174-amortization-calculator" and "174" in q_core and (
+        "amortization" in q_core or "research" in q_core or {"r", "d"}.issubset(q_core)
     ):
         is_match = True
     elif tool_slug == "rap-payment-calculator" and "rap" in q_core and "ibr" not in q_core and q_core.issubset(
@@ -850,8 +859,11 @@ def check_search_intent_cannibalization(
                             and (
                                 (
                                     "1031" in q_core
-                                    and not (
-                                        len(q_core - {"1031", "exchange", "section", "like", "kind", "deferral", "tax", "property", "real", "estate"}) >= 2
+                                    and (
+                                        not (
+                                            len(q_core - {"1031", "exchange", "section", "like", "kind", "deferral", "tax", "property", "real", "estate"}) >= 2
+                                        )
+                                        or ("exchange" in q_core or {"like", "kind"}.issubset(q_core))
                                     )
                                 )
                                 or (
@@ -1236,6 +1248,151 @@ def evaluate_query_impression_split(
     }
 
 
+_SINGLE_FACT_ZERO_CLICK_RE = re.compile(
+    r"^(?:what\s+is\s+the\s+exact\s+date|when\s+is\s+the\s+deadline|how\s+many\s+calendar\s+days|"
+    r"what\s+form\s+number\s+is|who\s+is\s+the\s+commissioner\s+of|what\s+does\s+irc\s+stand\s+for|"
+    r"what\s+is\s+the\s+mailing\s+address\s+for\s+irs)\b",
+    re.IGNORECASE,
+)
+
+
+def evaluate_query_expected_value_gate(
+    query: str,
+    query_data: Optional[Dict[str, Any]] = None,
+    min_ev_score: float = 0.65,
+) -> Dict[str, Any]:
+    """
+    Scores candidate queries on expected-value (EV) commercial calculator utility
+    to prevent single-fact zero-click lookup queries from spawning thin standalone spokes.
+    Combines multi-variable calculation utility, commercial monetization alignment,
+    and SERP click retention resistance, with optional vault_jev System-1 scoring
+    cached deterministically on disk.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import hashlib
+
+    q_clean = str(query or "").strip()
+    q_low = q_clean.lower()
+    data = query_data if isinstance(query_data, dict) else {}
+
+    if "expected_value_score" in data and data["expected_value_score"] is not None:
+        explicit_ev = round(float(data["expected_value_score"]), 4)
+        passed = explicit_ev >= min_ev_score
+        return {
+            "query": q_clean,
+            "expected_value_score": explicit_ev,
+            "min_ev_score": min_ev_score,
+            "passed": passed,
+            "is_zero_click_single_fact": not passed,
+            "recommended_action": "BUILD_PAGE" if passed else "FOLD_INTO_HUB_FAQ",
+            "triage_source": "explicit_input",
+            "reason": (
+                f"Expected-value score ({explicit_ev:.2f}) meets commercial calculator threshold ({min_ev_score:.2f})"
+                if passed
+                else f"Expected-value score ({explicit_ev:.2f}) below commercial calculator threshold ({min_ev_score:.2f}); fold into parent hub FAQ"
+            ),
+        }
+
+    has_multi_var_intent = any(
+        tok in q_low
+        for tok in (
+            "calculator",
+            "estimator",
+            "model",
+            "schedule",
+            "vs",
+            "comparison",
+            "deduction",
+            "credit",
+            "incentive",
+            "arbitrage",
+            "repayment",
+            "refinance",
+            "consolidation",
+            "depreciation",
+            "exchange",
+            "amortization",
+            "tax",
+            "tariff",
+            "cost",
+            "audit",
+            "compliance",
+        )
+    )
+    is_single_fact = bool(
+        data.get("zero_click_single_fact")
+        or data.get("single_fact_lookup")
+        or (_SINGLE_FACT_ZERO_CLICK_RE.search(q_low) and "calculator" not in q_low and "estimator" not in q_low)
+    )
+
+    multi_var_score = 0.25 if is_single_fact else (0.90 if has_multi_var_intent else 0.75)
+    commercial_score = 0.30 if is_single_fact else (0.88 if has_multi_var_intent else 0.72)
+    click_retention_score = 0.20 if is_single_fact else 0.85
+    ev_score = round(0.45 * multi_var_score + 0.35 * commercial_score + 0.20 * click_retention_score, 4)
+    triage_source = "deterministic_ev_heuristic"
+
+    cache_key = hashlib.sha256(q_low.encode("utf-8")).hexdigest()[:24]
+    cache_path = Path("/home/ubuntuadmin/projects/.agy/jev_intent_ev_cache.json")
+    if cache_path.is_file():
+        try:
+            raw_c = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(raw_c, dict) and isinstance(raw_c.get(cache_key), dict):
+                ev_score = round(float(raw_c[cache_key].get("expected_value_score", ev_score)), 4)
+                is_single_fact = bool(raw_c[cache_key].get("is_zero_click_single_fact", is_single_fact))
+                triage_source = "jev_ev_cache"
+        except Exception:
+            pass
+    elif "PYTEST_CURRENT_TEST" not in os.environ and bool(data.get("invoke_jev_live", False)):
+        try:
+            import sys as _sys
+            if "/home/ubuntuadmin/projects/vault" not in _sys.path:
+                _sys.path.append("/home/ubuntuadmin/projects/vault")
+            import vault_jev  # type: ignore
+            prompt = (
+                f"Evaluate search query '{q_clean}' for interactive financial/statutory calculator utility. "
+                f"Return JSON with keys 'expected_value_score' (float 0.0 to 1.0) and 'is_zero_click_single_fact' (bool)."
+            )
+            jev_res = vault_jev.call_system_one(prompt, json_mode=True)
+            if isinstance(jev_res, dict) and "expected_value_score" in jev_res:
+                ev_score = round(float(jev_res["expected_value_score"]), 4)
+                is_single_fact = bool(jev_res.get("is_zero_click_single_fact", ev_score < min_ev_score))
+                triage_source = "jev_system_one"
+                try:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    curr_c = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
+                    if not isinstance(curr_c, dict):
+                        curr_c = {}
+                    curr_c[cache_key] = {
+                        "query": q_clean,
+                        "expected_value_score": ev_score,
+                        "is_zero_click_single_fact": is_single_fact,
+                    }
+                    cache_path.write_text(json.dumps(curr_c, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    passed = (ev_score >= min_ev_score) and not is_single_fact
+    return {
+        "query": q_clean,
+        "expected_value_score": ev_score,
+        "min_ev_score": min_ev_score,
+        "multi_variable_utility_score": multi_var_score,
+        "commercial_monetization_score": commercial_score,
+        "serp_click_retention_score": click_retention_score,
+        "passed": passed,
+        "is_zero_click_single_fact": is_single_fact,
+        "recommended_action": "BUILD_PAGE" if passed else "FOLD_INTO_HUB_FAQ",
+        "triage_source": triage_source,
+        "reason": (
+            f"Query '{q_clean}' passes expected-value calculator gate (EV={ev_score:.2f} >= {min_ev_score:.2f})"
+            if passed
+            else f"Zero-click single-fact query '{q_clean}' (EV={ev_score:.2f} < {min_ev_score:.2f}) folded into parent hub FAQ to prevent zero-click URL bloat"
+        ),
+    }
+
+
 def qualify_search_intent(
     query_data: Optional[Union[Dict[str, Any], str]] = None,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
@@ -1504,6 +1661,24 @@ def qualify_search_intent(
             "reason": f"Position {pos} > 20 with exploratory impressions ({impr}) - monitor before building page",
         })
 
+    # Expected-Value (EV) Commercial & Multi-Variable Calculation Gate (prevents zero-click single-fact spoke bloat)
+    ev_gate = evaluate_query_expected_value_gate(
+        query=q_text,
+        query_data=query_data,
+        min_ev_score=float(query_data.get("min_ev_score", 0.65)),
+    )
+    if not ev_gate["passed"]:
+        return SearchIntentVerdict({
+            "action": ev_gate["recommended_action"],
+            "status": "MONITOR",
+            "query": q_text,
+            "position": pos,
+            "impressions": impr,
+            "expected_value_score": ev_gate["expected_value_score"],
+            "expected_value_gate": ev_gate,
+            "reason": ev_gate["reason"],
+        })
+
     # Qualified unserved void
     candidate_spec = {
         "query": q_text,
@@ -1511,6 +1686,7 @@ def qualify_search_intent(
         "position": pos,
         "impressions": impr,
         "clicks": clicks,
+        "expected_value_score": ev_gate["expected_value_score"],
         "status": "PENDING",
         "source": "gsc_void_harvest",
         "discovered_at": datetime.now(timezone.utc).isoformat(),
@@ -2058,6 +2234,18 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
     "section-1031-calculator-scenario-comparison-model": {
         "canonical_slug": "section-1031-calculator",
         "redirect_target": "/tools/section-1031-calculator/",
+    },
+    "what-is-implied-probability-in-prediction-markets": {
+        "canonical_slug": "prediction-market-odds",
+        "redirect_target": "/tools/prediction-market-odds/",
+    },
+    "1031-like-kind-exchange-st-louis-mo": {
+        "canonical_slug": "section-1031-calculator",
+        "redirect_target": "/tools/section-1031-calculator/missouri/",
+    },
+    "section-174-r-d-amortization-calculator": {
+        "canonical_slug": "r-and-d-tax-credit-section-174-amortization-calculator",
+        "redirect_target": "/tools/r-and-d-tax-credit-section-174-amortization-calculator/",
     },
 }
 
@@ -3045,6 +3233,17 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         elif "/" not in clean_off and clean_off:
             slugs_to_purge.add(clean_off)
 
+    for mod_name in (f"{prop}.config", "profithelm.config", "prexvo.config", "gainhelm.config"):
+        cfg_mod = sys.modules.get(mod_name)
+        if cfg_mod is not None:
+            for attr_name in ("TOOLS", "DYNAMIC_TOOLS"):
+                tool_list = getattr(cfg_mod, attr_name, None)
+                if isinstance(tool_list, list):
+                    tool_list[:] = [
+                        t for t in tool_list
+                        if not (isinstance(t, dict) and str(t.get("slug") or "").strip() in slugs_to_purge)
+                    ]
+
     # Remove stale .agy/tool_spec_<slug>.json files for retired/consolidated/synthetic slugs
     agy_dir = root / ".agy"
     if agy_dir.is_dir():
@@ -3477,7 +3676,7 @@ def load_property_redirect_map(
 
 
 def resolve_redirected_gsc_target(
-    target_url: str = "",
+    target_url: Union[str, Dict[str, Any]] = "",
     slug: str = "",
     query: str = "",
     property_id: str = "profithelm",
@@ -3493,7 +3692,14 @@ def resolve_redirected_gsc_target(
     """
     import urllib.parse
 
-    eff_url = str(target_url or page_url or "").strip()
+    if isinstance(target_url, dict):
+        row_d = target_url
+        eff_url = str(row_d.get("target_url") or row_d.get("page") or row_d.get("url") or page_url or "").strip()
+        slug = str(slug or row_d.get("slug") or "")
+        query = str(query or row_d.get("query") or "")
+        property_id = str(row_d.get("property_id") or property_id or "profithelm")
+    else:
+        eff_url = str(target_url or page_url or "").strip()
     prop = str(property_id or "profithelm").strip().lower()
     if "prexvo" in prop or "prexvo.com" in eff_url.lower():
         prop = "prexvo"
@@ -3599,6 +3805,62 @@ def resolve_redirected_gsc_target(
                 "canonical_slug": parent_hub,
                 "leaf_overlay_slug": f"{parent_hub}-{sub_leaf}",
                 "resolved_via": "slash_leaf",
+            }
+
+    # 2.5 GainHelm pre-pivot field-service wildcard routes and queries -> /tools/ off-topic sink
+    if prop == "gainhelm":
+        gh_pre_pivot_prefixes = (
+            "/compare/",
+            "/software/",
+            "/industry/",
+            "/trades/",
+            "/pricing/",
+            "/features/",
+            "/vs/",
+            "/best-",
+            "/field-service-",
+            "/hvac-",
+            "/plumbing-",
+            "/electrical-",
+            "/landscaping-",
+        )
+        gh_pre_pivot_terms = (
+            "plumber",
+            "plumbing",
+            "hvac",
+            "landscaping",
+            "lawn care",
+            "pest control",
+            "maid",
+            "handyman",
+            "roofing",
+            "electrician",
+            "jobber",
+            "housecall pro",
+            "servicetitan",
+            "fieldpulse",
+            "workiz",
+            "gorilladesk",
+            "field service",
+            "dispatch app",
+            "scheduling software",
+        )
+        q_check_gh = f"{raw_query} {raw_slug}".lower()
+        if (norm_path and any(norm_path.startswith(pfx) for pfx in gh_pre_pivot_prefixes)) or any(
+            term in q_check_gh for term in gh_pre_pivot_terms
+        ):
+            return {
+                "is_redirected": True,
+                "is_off_topic_sink": True,
+                "ignored_off_topic": True,
+                "original_url": raw_url or (f"https://{domain}{norm_path}" if norm_path else ""),
+                "original_path": norm_path,
+                "original_slug": raw_slug,
+                "canonical_path": "/tools/",
+                "canonical_url": f"https://{domain}/tools/",
+                "canonical_slug": "",
+                "leaf_overlay_slug": "",
+                "resolved_via": "gainhelm_pre_pivot_sink",
             }
 
     # 3. If norm_path is an active canonical route (/tools/<slug>/ or /tools/<slug>/<leaf>/)
@@ -4835,6 +5097,38 @@ def sync_tenant_redirect_rollup_adapters(
             if fa_txt != fa_orig:
                 fac_py.write_text(fa_txt, encoding="utf-8")
                 updated_files += 1
+
+        gen_py = root / "profithelm" / "generator.py"
+        if gen_py.is_file():
+            g_txt = gen_py.read_text(encoding="utf-8")
+            g_orig = g_txt
+            old_short_title = '    short_title = title.split("&")[0].split(":")[0].strip()'
+            new_short_title = '    short_title = re.split(r"\\s+&\\s+", title)[0].split(":")[0].strip()'
+            if old_short_title in g_txt:
+                g_txt = g_txt.replace(old_short_title, new_short_title, 1)
+            old_qa_join = '            resolved_quick_answer = f"{qa_clean.rstrip(\'.\')} {\' \'.join(expansion_words)}"'
+            new_qa_join = '            resolved_quick_answer = f"{qa_clean.rstrip(\'.\')}. {\' \'.join(expansion_words)}"'
+            if old_qa_join in g_txt:
+                g_txt = g_txt.replace(old_qa_join, new_qa_join, 1)
+            if g_txt != g_orig:
+                gen_py.write_text(g_txt, encoding="utf-8")
+                updated_files += 1
+
+        dlq_file = root / ".agy" / "maintenance_dlq.json"
+        if dlq_file.is_file():
+            try:
+                dlq_items = json.loads(dlq_file.read_text(encoding="utf-8"))
+                if isinstance(dlq_items, list):
+                    consolidated_slugs = set(CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys())
+                    filtered_dlq = [
+                        item for item in dlq_items
+                        if not (isinstance(item, dict) and str(item.get("slug", "")).strip() in consolidated_slugs)
+                    ]
+                    if len(filtered_dlq) != len(dlq_items):
+                        dlq_file.write_text(json.dumps(filtered_dlq, indent=2) + "\n", encoding="utf-8")
+                        updated_files += 1
+            except Exception:
+                pass
     else:
         prexvo_freshness = root / "prexvo" / "freshness.py"
         if prexvo_freshness.is_file():

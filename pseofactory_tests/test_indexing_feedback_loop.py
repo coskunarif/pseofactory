@@ -1375,4 +1375,52 @@ def test_pending_manual_partner_approvals_ranked_by_estimated_revenue_impact(tmp
     assert ranked[0]["outbound_cta_intent_clicks"] == 12
 
 
+def test_semantic_quarantine_triage_and_unquarantine_passing_routes(tmp_path):
+    """
+    Verifies GSCRootCauseClassifier resolves cov='', err='OTHER' / status='QUARANTINED'
+    records into CONTENT_QUALITY_OR_ANSWER_DEFICIENCY and prunes repaired passing routes
+    from indexing_quarantine_ledger.json.
+    """
+    diag = GSCRootCauseClassifier.classify({
+        "url": "https://profithelm.com/tools/section-1031-calculator/alaska/",
+        "coverageState": "",
+        "error": "OTHER",
+        "status": "QUARANTINED",
+        "stage": "PREFLIGHT",
+    })
+    assert diag.classification == RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value
+    assert "triage_source" in diag.metadata
+
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    q_path = agy_dir / "indexing_quarantine_ledger.json"
+    q_path.write_text(
+        json.dumps([
+            {
+                "property_id": "profithelm",
+                "domain": "profithelm.com",
+                "url": "https://profithelm.com/tools/section-1031-calculator/alaska/",
+                "status": "BLOCKED",
+                "stage": "PREFLIGHT",
+                "error": "Failed preflight indexing airlock criteria",
+            }
+        ]),
+        encoding="utf-8",
+    )
+    mock_preflight = MagicMock()
+    mock_preflight.inspect_url.return_value = MagicMock(status="PASS")
+    loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=tmp_path,
+        dist_dir=tmp_path / "dist",
+        preflight_engine=mock_preflight,
+    )
+    cleared = loop._prune_repaired_urls_from_quarantine_ledger([diag], dry_run=False)
+    assert cleared == ["https://profithelm.com/tools/section-1031-calculator/alaska/"]
+    assert json.loads(q_path.read_text(encoding="utf-8")) == []
+
+
+
 

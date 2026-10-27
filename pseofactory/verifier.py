@@ -580,18 +580,82 @@ class SinglePassSEODocumentParser(HTMLParser):
         r"<style\b[^>]*>[\s\S]*?</style>|<script(?![^>]*type\s*=\s*[\"']application/(?:ld\+)?json)\b[^>]*>[\s\S]*?</script>",
         re.IGNORECASE,
     )
+    _FAST_STRIP_BLOCKS_RE = re.compile(
+        r"<(style|script)\b([^>]*)>[\s\S]*?</\1>",
+        re.IGNORECASE,
+    )
+    _FAST_TOKEN_RE = re.compile(
+        r"<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<!DOCTYPE[^>]*>"
+        r"|<script\b([^>]*)>([\s\S]*?)</script>"
+        r"|<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:\s+[^>]*?)?)\s*(/?)>"
+        r"|([^<]+|<)",
+        re.IGNORECASE,
+    )
+    _FAST_ATTR_RE = re.compile(
+        r"""([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"""
+    )
+    _VOID_TAGS = frozenset({
+        "area", "base", "br", "col", "embed", "hr", "img",
+        "input", "link", "meta", "param", "source", "track", "wbr",
+    })
+    _SEARCH_CRAWLERS = frozenset(
+        {"robots", "claude-web"}
+        | {b.lower() for b in AI_SEARCH_BOTS}
+        | {b.lower() for b in AI_USER_TRIGGERED_BOTS}
+    )
+    _QA_TOKENS = frozenset({"quick-answer", "quick_answer"})
+
+    @staticmethod
+    def _strip_non_seo_cb(m: re.Match) -> str:
+        if m.group(1).lower() == "script":
+            attrs_low = m.group(2).lower()
+            if "application/ld+json" in attrs_low or "application/json" in attrs_low:
+                return m.group(0)
+        return ""
+
+    @classmethod
+    def _parse_fast_attrs(cls, attr_str: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+        if not attr_str:
+            return []
+        from html import unescape as _html_unescape
+        attrs: List[Tuple[str, Optional[str]]] = []
+        for am in cls._FAST_ATTR_RE.finditer(attr_str):
+            k, v1, v2, v3 = am.groups()
+            val = v1 if v1 is not None else (v2 if v2 is not None else (v3 if v3 is not None else None))
+            if val is not None and "&" in val:
+                val = _html_unescape(val)
+            attrs.append((k.lower(), val))
+        return attrs
 
     def feed(self, data: str) -> None:
-        if len(data) > 20000:
-            data = self._STRIP_NON_SEO_BLOCKS_RE.sub("", data)
-        super().feed(data)
+        if len(data) <= 20000:
+            super().feed(data)
+            return
+        from html import unescape as _html_unescape
+        cleaned = self._FAST_STRIP_BLOCKS_RE.sub(self._strip_non_seo_cb, data)
+        for m in self._FAST_TOKEN_RE.finditer(cleaned):
+            s_attrs, s_body, slash_open, tag_raw, attr_str, slash_close, text_chunk = m.groups()
+            if tag_raw is not None:
+                tag = tag_raw.lower()
+                if slash_open:
+                    self.handle_endtag(tag)
+                else:
+                    self.handle_starttag(tag, self._parse_fast_attrs(attr_str))
+                    if slash_close:
+                        self.handle_endtag(tag)
+            elif text_chunk is not None:
+                if "&" in text_chunk:
+                    text_chunk = _html_unescape(text_chunk)
+                self.handle_data(text_chunk)
+            elif s_attrs is not None:
+                self.handle_starttag("script", self._parse_fast_attrs(s_attrs))
+                if s_body:
+                    self.handle_data(s_body)
+                self.handle_endtag("script")
 
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
         attrs_dict = {k.lower(): (v or "") for k, v in attrs}
-        if tag not in (
-            "area", "base", "br", "col", "embed", "hr", "img",
-            "input", "link", "meta", "param", "source", "track", "wbr",
-        ):
+        if tag not in self._VOID_TAGS:
             self.tag_stack.append((tag, attrs_dict))
 
         if "data-nosnippet" in attrs_dict:
@@ -625,8 +689,7 @@ class SinglePassSEODocumentParser(HTMLParser):
             elif name in ("target-query", "target_query", "query"):
                 self.target_query = content
 
-            search_crawlers = {"robots", "claude-web"} | {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS}
-            if name in search_crawlers or http_equiv in ("x-robots-tag", "robots"):
+            if name in self._SEARCH_CRAWLERS or http_equiv in ("x-robots-tag", "robots"):
                 c_lower = content.lower()
                 if "nosnippet" in c_lower:
                     self.has_nosnippet = True
@@ -705,10 +768,9 @@ class SinglePassSEODocumentParser(HTMLParser):
         if "proprietary-model" in tag_cls or "data-proprietary-model" in attrs_dict:
             self.has_proprietary_model_element = True
 
-        tag_cls_tokens = set(tag_cls.split())
-        tag_id_tokens = set(tag_id.split())
-        is_qa_element = bool({"quick-answer", "quick_answer"} & tag_cls_tokens) or bool(
-            {"quick-answer", "quick_answer"} & tag_id_tokens
+        is_qa_element = (
+            ("quick" in tag_cls and bool(self._QA_TOKENS & set(tag_cls.split())))
+            or ("quick" in tag_id and bool(self._QA_TOKENS & set(tag_id.split())))
         )
         if is_qa_element:
             self.quick_answer_count += 1

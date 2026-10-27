@@ -4001,6 +4001,40 @@ def normalize_html_visual_primitives(
         )
         repaired.append("playbook_lead_capture_form")
 
+    # 5i. Surface above-the-fold scenario preset chips (<=680px viewport salience) when buried below fold
+    if 'data-above-fold-presets="true"' not in updated and "data-calc-preset" in updated:
+        main_pos = updated.find("<main")
+        first_preset_pos = updated.find("data-calc-preset")
+        if main_pos != -1 and (first_preset_pos-main_pos) > 2500:
+            archetype_btns = re.findall(
+                r'<button\b[^>]*class="[^"]*serp-archetype-btn[^"]*"[^>]*data-calc-preset=[^>]*>[\s\S]*?</button>',
+                updated,
+                flags=re.IGNORECASE,
+            )[:3]
+            if not archetype_btns:
+                archetype_btns = re.findall(
+                    r'<button\b[^>]*data-calc-preset=[^>]*>[\s\S]*?</button>',
+                    updated,
+                    flags=re.IGNORECASE,
+                )[:3]
+            if archetype_btns:
+                above_fold_bar = (
+                    '        <div class="serp-preset-bar above-fold-preset-bar" data-above-fold-presets="true" '
+                    'role="group" aria-label="Quick Statutory Scenario Presets" style="margin-top: 10px; margin-bottom: 4px;">\n'
+                    + "\n".join("          " + b for b in archetype_btns)
+                    + "\n        </div>\n"
+                )
+                hero_injected, n_hero = re.subn(
+                    r'(<section\b[^>]*class=["\'][^"\']*\bhero-section\b[^"\']*["\'][^>]*>[\s\S]*?)(</section>)',
+                    lambda m: m.group(1) + above_fold_bar + "      " + m.group(2),
+                    updated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                if n_hero > 0:
+                    updated = hero_injected
+                    repaired.append("above_fold_preset_salience")
+
     # 6. Inject or repair <script id="pseo-runtime-sync">
     has_interactive_controls = any(
         tok in updated
@@ -4018,6 +4052,16 @@ def normalize_html_visual_primitives(
         )
     )
     if has_interactive_controls:
+        # Strip redundant legacy file:// inline duplicate runtime bundle (~96.7 KB) superseded by #pseo-runtime-sync
+        stripped_legacy_file_rt = re.sub(
+            r"\s*<script>\s*if\s*\(typeof\s+window\s*!==\s*['\"]undefined['\"]\s*&&\s*window\.location\s*&&\s*window\.location\.protocol\s*===\s*['\"]file:['\"]\)\s*\{[\s\S]*?\}\s*</script>",
+            "",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if stripped_legacy_file_rt != updated:
+            updated = stripped_legacy_file_rt
+            repaired.append("legacy_file_runtime_dedup")
         script_block = render_runtime_synchronizer_script()
         if 'id="pseo-runtime-sync"' in updated or "id='pseo-runtime-sync'" in updated:
             sync_match = re.search(

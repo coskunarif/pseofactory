@@ -185,3 +185,16 @@ def test_assert_search_intent_qualified_passes_on_distinct(mock_existing_tools):
         "slug": "autonomous-electric-vehicle-fleet-tax-credit",
     }
     assert assert_search_intent_qualified(spec, mock_existing_tools) is True
+
+
+def test_expected_value_gate_blocks_zero_click_single_fact_lookup(mock_existing_tools):
+    q_single_fact = {
+        "query": "what is the exact date for 2026 tax filing deadline",
+        "position": 14.0,
+        "impressions": 45,
+    }
+    res_single = qualify_search_intent(q_single_fact, mock_existing_tools, total_site_impressions=500)
+    assert res_single["action"] == "FOLD_INTO_HUB_FAQ"
+    assert res_single["expected_value_score"] < 0.65
+    assert res_single["expected_value_gate"]["is_zero_click_single_fact"] is True
+
