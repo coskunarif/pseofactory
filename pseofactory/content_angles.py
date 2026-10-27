@@ -64,6 +64,68 @@ UGC_FORUM_DOMAINS: Set[str] = {
     "stackoverflow.com",
 }
 
+# Multi-surface social, video, and community domains scanned for SERP vulnerability
+SOCIAL_AND_VIDEO_SERP_PLATFORMS: Dict[str, Set[str]] = {
+    "youtube": {"youtube.com", "youtu.be", "m.youtube.com"},
+    "reddit": {"reddit.com", "old.reddit.com"},
+    "facebook": {"facebook.com", "fb.com", "fb.watch", "m.facebook.com"},
+    "instagram": {"instagram.com"},
+    "x": {"x.com", "twitter.com"},
+    "linkedin": {"linkedin.com"},
+    "quora": {"quora.com"},
+    "pinterest": {"pinterest.com"},
+    "medium": {"medium.com"},
+    "substack": {"substack.com"},
+    "github": {"github.com", "gist.github.com"},
+    "ghost": {"ghost.org", "ghost.io"},
+}
+
+# Ambiguous geographic/proper-noun homographs that cause off-topic SERP token collisions
+# (e.g., personal name "Austin Haye" matching city token "Austin" on "flat roof repair Austin")
+AMBIGUOUS_GEO_OR_PROPER_NOUN_TOKENS: Set[str] = {
+    "austin",
+    "dallas",
+    "houston",
+    "phoenix",
+    "charlotte",
+    "jordan",
+    "madison",
+    "jackson",
+    "lincoln",
+    "washington",
+    "franklin",
+    "clinton",
+    "taylor",
+    "morgan",
+    "warren",
+    "grant",
+    "chase",
+    "marshall",
+    "wayne",
+    "clark",
+}
+
+# Off-vertical local contractor / doorway seed terms rejected by pseofactory
+OFF_VERTICAL_LOCAL_DOORWAY_TERMS: Set[str] = {
+    "roofing",
+    "roofer",
+    "roofers",
+    "flat roof",
+    "roof repair",
+    "shingle",
+    "gutter",
+    "plumber",
+    "plumbing",
+    "hvac",
+    "landscaping",
+    "lawn care",
+    "pest control",
+    "locksmith",
+    "carpet cleaning",
+    "garage door",
+}
+
+
 
 @dataclass
 class GrantOTriad:
@@ -233,8 +295,17 @@ def classify_serp_incumbent(
         category = str(serp_item["weakness_category"])
         detail = serp_item.get("weakness_detail") or f"Identified weakness category {category}."
     else:
-        category = "GENERIC_THIN_ARTICLE"
-        detail = serp_item.get("weakness_detail") or "Generic thin article lacking specialized operator depth or actionable workflows."
+        collision_info = (
+            detect_off_topic_token_collision(serp_item, target_query)
+            if target_query
+            else {"is_off_topic_collision": False}
+        )
+        if collision_info.get("is_off_topic_collision"):
+            category = "AUDIENCE_MISMATCH"
+            detail = serp_item.get("weakness_detail") or str(collision_info.get("collision_reason", "Off-topic partial token collision."))
+        else:
+            category = "GENERIC_THIN_ARTICLE"
+            detail = serp_item.get("weakness_detail") or "Generic thin article lacking specialized operator depth or actionable workflows."
 
     summary = IncumbentSummary(
         domain=domain or "unknown",
@@ -1032,4 +1103,380 @@ def evaluate_content_angles(
         overlay_spec=overlay_spec,
         candidate_spec=candidate_spec,
     )
+
+
+def detect_off_topic_token_collision(
+    serp_item: Dict[str, Any],
+    target_query: str,
+) -> Dict[str, Any]:
+    """
+    Detects off-topic lexical token collisions in SERP results where a result ranks solely
+    because an ambiguous geographic or proper-noun token matches (e.g., a LinkedIn post for
+    'Austin Haye - Applied AI Growth System and Ops' ranking on 'flat roof repair Austin' or
+    'section 1031 exchange Austin' while missing 100% of the core problem/statutory tokens).
+    Zero em-dashes. Zero en-dashes.
+    """
+    clean_query = _sanitize_contract_text(str(target_query or "")).lower()
+    query_tokens = [
+        tok for tok in re.findall(r"[a-z0-9]+", clean_query)
+        if tok and tok not in ENGLISH_STOPWORDS and len(tok) >= 2
+    ]
+    if len(query_tokens) < 2:
+        return {
+            "is_off_topic_collision": False,
+            "weakness_category": None,
+            "matched_ambiguous_tokens": [],
+            "missing_core_problem_tokens": [],
+            "collision_reason": "",
+        }
+
+    ambiguous_in_query = {t for t in query_tokens if t in AMBIGUOUS_GEO_OR_PROPER_NOUN_TOKENS}
+    core_problem_tokens = {t for t in query_tokens if t not in ambiguous_in_query}
+    if not core_problem_tokens:
+        core_problem_tokens = set(query_tokens[:-1])
+        ambiguous_in_query = {query_tokens[-1]}
+
+    title = _sanitize_contract_text(str(serp_item.get("title", "Untitled"))).strip()
+    snippet = _sanitize_contract_text(str(serp_item.get("snippet", serp_item.get("description", "")))).strip()
+    raw_url = str(serp_item.get("url", "")).strip()
+    raw_domain = str(serp_item.get("domain", "")).strip().lower()
+    if not raw_domain and raw_url:
+        try:
+            raw_domain = urlparse(raw_url).netloc.lower()
+        except Exception:
+            raw_domain = ""
+    clean_domain = raw_domain.split(":")[0].removeprefix("www.") or "unknown"
+
+    item_tokens = set(re.findall(r"[a-z0-9]+", f"{title} {snippet} {raw_url}".lower()))
+    matched_core = sorted(core_problem_tokens & item_tokens)
+    matched_ambiguous = sorted(ambiguous_in_query & item_tokens)
+
+    # Off-topic collision occurs when 0 core problem tokens match AND either:
+    # (a) an ambiguous geo/person homograph token matched (e.g., "Austin" in "Austin Haye"), or
+    # (b) the result is a social profile/post with zero lexical overlap on a 3+ token query.
+    is_social_host = any(
+        clean_domain == d or clean_domain.endswith("." + d)
+        for dom_set in SOCIAL_AND_VIDEO_SERP_PLATFORMS.values()
+        for d in dom_set
+    )
+    is_collision = bool(
+        len(matched_core) == 0
+        and len(core_problem_tokens) >= 1
+        and (len(matched_ambiguous) >= 1 or (is_social_host and len(query_tokens) >= 3))
+    )
+    reason = ""
+    if is_collision:
+        matched_desc = ", ".join(matched_ambiguous) if matched_ambiguous else "zero domain tokens"
+        missing_desc = ", ".join(sorted(core_problem_tokens))
+        reason = (
+            f"Off-topic token collision on {clean_domain}: result '{title}' matches only "
+            f"ambiguous token ({matched_desc}) while omitting core problem tokens ({missing_desc})."
+        )
+        assert_no_forbidden_dashes(reason, "detect_off_topic_token_collision.reason")
+
+    return {
+        "is_off_topic_collision": is_collision,
+        "weakness_category": "AUDIENCE_MISMATCH" if is_collision else None,
+        "domain": clean_domain,
+        "title": title,
+        "matched_core_tokens": matched_core,
+        "matched_ambiguous_tokens": matched_ambiguous,
+        "missing_core_problem_tokens": sorted(core_problem_tokens - set(matched_core)),
+        "collision_reason": reason,
+    }
+
+
+def analyze_serp_social_vulnerability(
+    serp_items: List[Dict[str, Any]],
+    target_query: str = "",
+) -> Dict[str, Any]:
+    """
+    Quantifies multi-platform social/video/UGC density across SERP results (YouTube, Reddit,
+    Facebook, Instagram, X/Twitter, LinkedIn, Quora, GitHub, Ghost, Substack, Medium) and
+    identifies off-topic token collisions.
+    Maps SERP openings strictly to pseofactory's authorized truth-verified distribution channels
+    while blocking prohibited spam channels (Reddit).
+    Zero em-dashes. Zero en-dashes.
+    """
+    platform_counts: Dict[str, int] = {k: 0 for k in SOCIAL_AND_VIDEO_SERP_PLATFORMS}
+    social_positions: List[Dict[str, Any]] = []
+    off_topic_collisions: List[Dict[str, Any]] = []
+    total_items = len(serp_items or [])
+
+    for idx, item in enumerate(serp_items or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        raw_domain = str(item.get("domain", "")).strip().lower()
+        if not raw_domain and item.get("url"):
+            try:
+                raw_domain = urlparse(str(item["url"])).netloc.lower()
+            except Exception:
+                raw_domain = ""
+        clean_domain = raw_domain.split(":")[0].removeprefix("www.")
+        rank = int(item.get("rank", item.get("position", idx)))
+
+        matched_platform: Optional[str] = None
+        for plat, dom_set in SOCIAL_AND_VIDEO_SERP_PLATFORMS.items():
+            if clean_domain in dom_set or any(clean_domain.endswith("." + d) for d in dom_set):
+                matched_platform = plat
+                platform_counts[plat] += 1
+                break
+
+        collision = (
+            detect_off_topic_token_collision(item, target_query)
+            if target_query
+            else {"is_off_topic_collision": False}
+        )
+        if collision.get("is_off_topic_collision"):
+            off_topic_collisions.append({
+                "rank": rank,
+                "domain": clean_domain,
+                "platform": matched_platform or "web",
+                "title": str(item.get("title", "")),
+                "collision_reason": collision.get("collision_reason", ""),
+            })
+
+        if matched_platform:
+            social_positions.append({
+                "rank": rank,
+                "platform": matched_platform,
+                "domain": clean_domain,
+                "title": _sanitize_contract_text(str(item.get("title", ""))),
+                "is_off_topic_collision": bool(collision.get("is_off_topic_collision")),
+            })
+
+    total_social_slots = sum(platform_counts.values())
+    social_share = round(total_social_slots / float(max(1, total_items)), 4) if total_items > 0 else 0.0
+
+    if total_social_slots >= 3 or social_share >= 0.30 or len(off_topic_collisions) >= 1:
+        vulnerability_tier = "HIGH_MULTI_SURFACE_OPENING"
+    elif total_social_slots >= 1:
+        vulnerability_tier = "MODERATE_SOCIAL_OPENING"
+    else:
+        vulnerability_tier = "ENTRENCHED_CANONICAL_SERP"
+
+    return {
+        "target_query": _sanitize_contract_text(target_query),
+        "total_serp_items": total_items,
+        "total_social_slots": total_social_slots,
+        "social_serp_share": social_share,
+        "platform_counts": platform_counts,
+        "social_positions": social_positions,
+        "off_topic_collisions_count": len(off_topic_collisions),
+        "off_topic_collisions": off_topic_collisions,
+        "vulnerability_tier": vulnerability_tier,
+        "authorized_displacement_channels": [
+            "canonical_calculator",
+            "youtube",
+            "linkedin",
+            "facebook",
+            "ghost",
+            "github_gist",
+        ],
+        "prohibited_channels": ["reddit"],
+        "reddit_policy": "READ_ONLY_WEAKNESS_SIGNAL_ONLY_NEVER_PUBLISH",
+    }
+
+
+def expand_commercial_and_question_keywords(
+    seed_query: str,
+    property_id: str = "profithelm",
+    keyword_difficulty: float = 40.0,
+    total_keywords: int = 20,
+    question_only: bool = False,
+) -> Dict[str, Any]:
+    """
+    Deterministically expands a tenant tool seed query into paired commercial keywords and
+    conversational LLM-style question keywords:
+    - Standard KD (< 65.0): 50/50 split between high-intent commercial calculator queries and
+      long-tail conversational question queries ('should i...', 'how much does...', 'when does...').
+    - High KD (>= 65.0) or question_only=True: shifts 100% to conversational question queries
+      where AI Overviews and multi-surface technical answers bypass entrenched high-DR incumbents.
+    - Enforces vertical hygiene: rejects off-vertical local contractor geo-doorway seeds
+      (e.g., 'roofing companies Austin Texas').
+    Zero em-dashes. Zero en-dashes.
+    """
+    clean_seed = _sanitize_contract_text(str(seed_query or "")).strip()
+    assert_no_forbidden_dashes(clean_seed, "expand_commercial_and_question_keywords.seed_query")
+    low_seed = re.sub(r"\s+", " ", clean_seed.lower()).strip()
+
+    prop = str(property_id or "profithelm").strip().lower()
+    if "prexvo" in prop:
+        prop = "prexvo"
+    elif "gainhelm" in prop:
+        prop = "gainhelm"
+    else:
+        prop = "profithelm"
+
+    matched_off_vertical = [
+        term for term in sorted(OFF_VERTICAL_LOCAL_DOORWAY_TERMS)
+        if re.search(rf"\b{re.escape(term)}\b", low_seed)
+    ]
+    if matched_off_vertical:
+        return {
+            "status": "REJECTED_OFF_VERTICAL_DOORWAY",
+            "property_id": prop,
+            "seed_query": clean_seed,
+            "keyword_difficulty": float(keyword_difficulty),
+            "mode": "REJECTED",
+            "rejected_terms": matched_off_vertical,
+            "commercial_keywords": [],
+            "question_keywords": [],
+            "all_keywords": [],
+            "commercial_ratio": 0.0,
+            "question_ratio": 0.0,
+        }
+
+    base_topic = re.sub(r"\b(?:calculator|model|simulator|tool|2026|2027)\b", "", low_seed).strip()
+    base_topic = re.sub(r"\s+", " ", base_topic).strip() or low_seed
+
+    if prop == "prexvo":
+        statutory_tag = "34 cfr part 685 title iv"
+        authority_label = "Title IV Higher Education Act (34 CFR Part 685)"
+        commercial_templates = [
+            f"{base_topic} calculator",
+            f"2026 {base_topic} monthly payment schedule",
+            f"{base_topic} discretionary income formula",
+            f"{base_topic} vs ibr payment comparison",
+            f"{base_topic} 225 percent poverty line table",
+            f"{base_topic} forgiveness timeline simulator",
+            f"{base_topic} unpaid interest subsidy model",
+            f"{base_topic} married filing separately tax calculator",
+            f"{base_topic} pslf 120 qualifying payment tracker",
+            f"{base_topic} title iv statutory amortization",
+        ]
+        question_templates = [
+            f"how much is my {base_topic} monthly payment in 2026",
+            f"should i switch from save to {base_topic} or ibr",
+            f"does {base_topic} waive 100 percent of unpaid monthly interest",
+            f"when does the {base_topic} 10 year standard cap apply",
+            f"how does married filing separately affect {base_topic} payments",
+            f"what is the exact 34 cfr 685 formula for {base_topic}",
+            f"do {base_topic} months count toward 120 pslf payments",
+            f"why choose {base_topic} over private student loan refinancing",
+            f"who qualifies for {base_topic} partial financial hardship in 2026",
+            f"can parent plus borrowers use double consolidation for {base_topic}",
+            f"how much loan balance is forgiven under {base_topic} after 20 years",
+            f"is {base_topic} forgiveness tax free under irc section 108f",
+        ]
+    elif prop == "gainhelm":
+        statutory_tag = "32 cfr part 170 nist 800 171 aicpa ssae 18"
+        authority_label = "AICPA SSAE 18, 32 CFR Part 170 (CMMC 2.0), and NIST SP 800-171"
+        commercial_templates = [
+            f"{base_topic} calculator",
+            f"2026 {base_topic} auditor fee schedule",
+            f"{base_topic} total cost of ownership model",
+            f"{base_topic} engineering remediation hours estimator",
+            f"{base_topic} vs grc automation roi comparison",
+            f"{base_topic} enclave boundary scoping matrix",
+            f"{base_topic} stage 1 and stage 2 audit budget",
+            f"{base_topic} bls soc 15 1212 labor benchmark",
+            f"{base_topic} control gap readiness scorecard",
+            f"{base_topic} enterprise compliance cost breakdown",
+        ]
+        question_templates = [
+            f"how much does {base_topic} cost for a 50 person company in 2026",
+            f"should i build a cui enclave or scope the full enterprise for {base_topic}",
+            f"does grc automation reduce external auditor fees for {base_topic}",
+            f"when is an accredited third party assessor required for {base_topic}",
+            f"how many engineering hours are needed to pass {base_topic}",
+            f"what is the minimum sprs or control score threshold for {base_topic}",
+            f"why compare type 1 vs type 2 attestation windows for {base_topic}",
+            f"what are the mandatory auditor day tables for {base_topic}",
+            f"how much do annual surveillance audits add to 3 year {base_topic} cost",
+            f"can cloud shared responsibility inheritance lower {base_topic} scope",
+            f"what penalties apply if an enterprise fails {base_topic} requirements",
+            f"how to calculate internal security labor at 95 dollars per hour for {base_topic}",
+        ]
+    else:
+        statutory_tag = "irc 26 cfr statutory schedule"
+        authority_label = "Internal Revenue Code (26 U.S.C.) and FRED Economic Benchmarks"
+        commercial_templates = [
+            f"{base_topic} calculator",
+            f"2026 {base_topic} statutory rate table",
+            f"{base_topic} federal and state tax model",
+            f"{base_topic} marginal bracket threshold schedule",
+            f"{base_topic} after tax cash flow simulator",
+            f"{base_topic} phase out limit calculator",
+            f"{base_topic} CPA workpaper calculation matrix",
+            f"{base_topic} multi state conformity comparison",
+            f"{base_topic} net present value break even tool",
+            f"{base_topic} irc statutory deduction optimizer",
+        ]
+        question_templates = [
+            f"how much tax does {base_topic} save in 2026",
+            f"should i elect {base_topic} or spread deductions across future tax years",
+            f"when does the 2026 statutory phase out threshold hit for {base_topic}",
+            f"does california conform to federal {base_topic} rules",
+            f"how to calculate {base_topic} with 20 percent bonus depreciation",
+            f"what is the exact irc formula for {base_topic}",
+            f"why compare s corp vs llc treatment when modeling {base_topic}",
+            f"who qualifies for 100 percent first year write offs under {base_topic}",
+            f"can {base_topic} offset ordinary w2 or active business income",
+            f"what triggers depreciation recapture or penalties under {base_topic}",
+            f"how does the 3.8 percent niit surtax interact with {base_topic}",
+            f"what documentation is required to audit proof {base_topic}",
+        ]
+
+    total_n = max(2, int(total_keywords))
+    kd_val = float(keyword_difficulty)
+    high_kd_shift = bool(question_only or kd_val >= 65.0)
+
+    if high_kd_shift:
+        mode = "HIGH_KD_QUESTION_DOMINANT"
+        comm_n = 0
+        quest_n = total_n
+    else:
+        mode = "BALANCED_COMMERCIAL_AND_QUESTION"
+        comm_n = total_n // 2
+        quest_n = total_n - comm_n
+
+    def _fill_stream(templates: List[str], count: int, is_question: bool) -> List[str]:
+        out: List[str] = []
+        seen: Set[str] = set()
+        for tpl in templates:
+            if len(out) >= count:
+                break
+            clean_k = _sanitize_contract_text(tpl)
+            if clean_k not in seen:
+                seen.add(clean_k)
+                out.append(clean_k)
+        idx = 1
+        while len(out) < count:
+            extra = (
+                f"how to verify {base_topic} scenario {idx} under {statutory_tag}"
+                if is_question
+                else f"{base_topic} {statutory_tag} scenario {idx} calculator"
+            )
+            clean_extra = _sanitize_contract_text(extra)
+            if clean_extra not in seen:
+                seen.add(clean_extra)
+                out.append(clean_extra)
+            idx += 1
+        return out
+
+    comm_list = _fill_stream(commercial_templates, comm_n, is_question=False)
+    quest_list = _fill_stream(question_templates, quest_n, is_question=True)
+    all_kw = comm_list + quest_list
+
+    for kw in all_kw:
+        assert_no_forbidden_dashes(kw, "expand_commercial_and_question_keywords.keyword")
+
+    return {
+        "status": "PASS",
+        "property_id": prop,
+        "seed_query": clean_seed,
+        "base_topic": base_topic,
+        "authority_basis": authority_label,
+        "keyword_difficulty": kd_val,
+        "mode": mode,
+        "commercial_keywords": comm_list,
+        "question_keywords": quest_list,
+        "all_keywords": all_kw,
+        "commercial_count": len(comm_list),
+        "question_count": len(quest_list),
+        "commercial_ratio": round(len(comm_list) / float(len(all_kw)), 2) if all_kw else 0.0,
+        "question_ratio": round(len(quest_list) / float(len(all_kw)), 2) if all_kw else 0.0,
+    }
+
 

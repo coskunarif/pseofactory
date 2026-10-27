@@ -7553,5 +7553,219 @@ def evaluate_x_like_2102358751290236980_capability_matrix(
     }
 
 
+X_LIKE_2102328294410461564_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "claim_id": 1,
+        "video_chapter": "0:00 - 1:18 (Keyword research workflow)",
+        "claim_name": "Dual-Stream Commercial + Conversational Question Keyword Expansion",
+        "upstream_surface": "SomePoster Parasite Poster (someposter.ai)",
+        "claimed_mechanism": "Generate a paired 50/50 split of 10 commercial keywords and 10 conversational long-tail question keywords ('Why choose...', 'Does... cover...', 'When can... start...') to capture LLM-conditioned Google searchers.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "content_angles.expand_commercial_and_question_keywords + distributor.generate_youtube_syndication + seo_growth_loops.compile_search_opportunity_briefs",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Deterministically pairs commercial calculator queries with conversational decision questions grounded in TenantFactStore statutory parameters across every tenant brief and syndication pack.",
+        "case_against": "Uncritically generating ungrounded question keywords without statutory anchoring or vertical filtering introduces local contractor doorway noise.",
+    },
+    {
+        "claim_id": 2,
+        "video_chapter": "1:18 - 1:48 (Keyword research workflow - High-KD Question Shift)",
+        "claim_name": "High-KD Conversational Question Ratio Shift (100% Questions on Competitive SERPs)",
+        "upstream_surface": "SomePoster Parasite Poster (someposter.ai)",
+        "claimed_mechanism": "Shift keyword generation to 100% conversational question queries when head commercial keywords have high keyword difficulty, exploiting long-tail decision voids where AI Overviews and social/video answers rank.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "content_angles.expand_commercial_and_question_keywords",
+        "vault_surface": "pseofactory content-angles --query <seed>",
+        "case_for": "Automatically shifts question_ratio to 1.0 when keyword_difficulty >= 65.0 or question_only=True so high-KD clusters target specific statutory threshold and comparison questions.",
+        "case_against": "Targeting head commercial terms with static prose when KD >= 65 wastes crawl budget against entrenched institutional domains.",
+    },
+    {
+        "claim_id": 3,
+        "video_chapter": "1:48 - 3:12 (Analyzing search results - Multi-Platform Social SERP Density)",
+        "claim_name": "Multi-Platform Social/Video SERP Vulnerability Density Scanner",
+        "upstream_surface": "SomePoster Parasite Poster SERP Analyzer (someposter.ai)",
+        "claimed_mechanism": "Scan Page-1 Google SERPs across the expanded keyword matrix to count slots held by YouTube, Reddit, Facebook, Instagram, X/Twitter, and LinkedIn as a proxy for low SERP barrier to entry.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "content_angles.analyze_serp_social_vulnerability",
+        "vault_surface": "pseofactory seo-workflows --property <tenant> --json",
+        "case_for": "Quantifies social/video SERP density across 12 platforms (YouTube, Reddit, Facebook, Instagram, X, LinkedIn, Quora, GitHub, Ghost, Substack, Medium, Pinterest) and routes openings strictly to authorized truth-verified channels.",
+        "case_against": "Treating every social SERP slot as an invitation to spam unverified social posts violates domain authority and compliance gates.",
+    },
+    {
+        "claim_id": 4,
+        "video_chapter": "3:12 - 3:47 (Analyzing search results - Off-Topic Lexical Collisions)",
+        "claim_name": "Off-Topic Partial-Token Collision Detection ('Austin Haye' vs 'flat roof repair Austin')",
+        "upstream_surface": "Jesper Nissen SERP Inspection (https://youtu.be/MYEqgkuiObw)",
+        "claimed_mechanism": "Identify Page-1 SERP results that rank solely due to an ambiguous proper-noun or geographic homograph match (e.g., LinkedIn post 'Austin Haye - Applied AI Growth System and Ops' ranking for 'flat roof repair Austin') while omitting core problem tokens.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "content_angles.detect_off_topic_token_collision + content_angles.classify_serp_incumbent",
+        "vault_surface": "pseofactory content-angles --query <seed>",
+        "case_for": "Deterministically separates core problem tokens from ambiguous geo/person homographs and classifies zero-problem-overlap incumbents as AUDIENCE_MISMATCH.",
+        "case_against": "Counting an off-topic LinkedIn profile as a strong incumbent overestimates SERP competition and hides immediate displacement openings.",
+    },
+    {
+        "claim_id": 5,
+        "video_chapter": "3:47 - 6:36 (Leveraging Reddit for SEO)",
+        "claim_name": "Owned Subreddit Creation & Exact-Match Commercial Keyword Reddit Thread Hijacking",
+        "upstream_surface": "Jesper Nissen Reddit Tactic (https://youtu.be/MYEqgkuiObw)",
+        "claimed_mechanism": "Create owned subreddits and publish exact-match commercial keyword threads to piggyback on Google's Reddit ranking boost.",
+        "disposition": "REJECTED_BLOAT_OR_OFF_VERTICAL",
+        "pseofactory_stage": "audit.audit_syndication_asset_against_truth_store (Gate S1 PROHIBITED_CHANNEL_REDDIT) + seo_growth_loops.compile_ai_citation_digital_pr_queue (no_outreach_sources)",
+        "vault_surface": "pseofactory verify --property <tenant>",
+        "case_for": "Reddit SERP presence is useful strictly as a read-only weakness indicator (FORUM_INCOMPLETE_ANSWER) signaling that Google lacks a deterministic quantitative calculator.",
+        "case_against": "Autonomous subreddit creation and self-promotional Reddit thread seeding trigger immediate moderator bans, account suspension, and brand reputation damage; strictly prohibited by Gate S1.",
+    },
+    {
+        "claim_id": 6,
+        "video_chapter": "6:36 - 8:36 (Social media ranking strategy & AI Overview Co-Citation)",
+        "claim_name": "Multi-Surface Page-1 & AI Overview Co-Citation Architecture",
+        "upstream_surface": "Jesper Nissen Multi-Platform Strategy & schemawriter.ai",
+        "claimed_mechanism": "Surround conversational queries where Google displays an AI Overview at the top followed by YouTube, Facebook, LinkedIn, and Ghost surfaces.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "distributor.generate_all_distribution_assets + trends.treg_checker.TregChecker + verifier.check_schema_markup_gate",
+        "vault_surface": "pseofactory distribute --property <tenant> --dry-run",
+        "case_for": "Already native: pseofactory compiles 5-type JSON-LD (@graph FAQPage, SoftwareApplication, Dataset, HowTo, BreadcrumbList), spoken YouTube VideoObject transcripts, LinkedIn, Facebook, Ghost DR 85, and executable GitHub Gist DR 96 proofs.",
+        "case_against": "Adding an external third-party schema writer or unverified social poster would duplicate compiler.py and distributor.py while weakening AST proof verification.",
+    },
+    {
+        "claim_id": 7,
+        "video_chapter": "8:36 - 9:15 (Automating post optimization - One-Click AI Writer & Local Geo-Doorways)",
+        "claim_name": "One-Click Unverified AI Post Generation & Local Contractor Geo-Doorway Seeds",
+        "upstream_surface": "SomePoster One-Click Write Post (someposter.ai)",
+        "claimed_mechanism": "Click 'Write Post' to auto-generate advice on unfamiliar local niches ('flat roof repair Austin', 'roofing companies Austin Texas') and ping instant indexers.",
+        "disposition": "REJECTED_BLOAT_OR_OFF_VERTICAL",
+        "pseofactory_stage": "audit.audit_syndication_asset_against_truth_store (Gates S3, S4, S6) + content_angles.OFF_VERTICAL_LOCAL_DOORWAY_TERMS",
+        "vault_surface": "pseofactory verify --property <tenant>",
+        "case_for": "Enforcing AST calculation parity (Gate S3), TenantFactStore statutory verification (Gate S4), and off-vertical local doorway rejection prevents hallucinated claims.",
+        "case_against": "Unverified one-click AI prose without mathematical proof or statutory grounding violates E-E-A-T and YMYL truthfulness contracts.",
+    },
+    {
+        "claim_id": 8,
+        "video_chapter": "9:15 - 10:31 (Automating post optimization - Target Post 20-Backlink Daisy-Chain)",
+        "claim_name": "Target-Post Parasite-to-Parasite 20-Backlink Daisy-Chaining & YACSS Cloud Link Wheels",
+        "upstream_surface": "SomePoster Target Post & YACSS (someposter.ai / yacss.site)",
+        "claimed_mechanism": "Publish a post to Facebook first, copy the Facebook post URL as the 'Target Post', and point 20 other social/cloud posts to the Facebook URL instead of the canonical domain.",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "audit.audit_syndication_asset_against_truth_store (Gate S5 PARASITE_LINK_WHEEL_INTERMEDIARY_DETECTED)",
+        "vault_surface": "pseofactory verify --property <tenant>",
+        "case_for": "Gate S5 deterministically blocks any syndication channel whose primary CTA or target_url points to a third-party social/cloud intermediary (facebook.com, reddit.com, yacss.site, someposter.ai) instead of the tenant's parameterized canonical calculator URL.",
+        "case_against": "Daisy-chaining social posts to a Facebook URL or YACSS cloud bucket leaks crawl equity away from canonical domains and creates link-spam footprints.",
+    },
+]
+
+
+def evaluate_x_like_2102328294410461564_capability_matrix(
+    include_live_audit: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates all 8 claims, chapters, and outbound tool mechanisms from x-like:2102328294410461564
+    (@JespernissenSEO / https://youtu.be/MYEqgkuiObw / someposter.ai / yacss.site / schemawriter.ai)
+    against pseofactory verification rules, content angle discovery, and multi-tenant syndication packs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    compounding = [
+        m for m in X_LIKE_2102328294410461564_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    deterministic_gates = [
+        m for m in X_LIKE_2102328294410461564_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"
+    ]
+    already_solved = [
+        m for m in X_LIKE_2102328294410461564_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    rejected = [
+        m for m in X_LIKE_2102328294410461564_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_OFF_VERTICAL"
+    ]
+
+    tenant_summaries: Dict[str, Any] = {}
+    all_passed = True
+
+    if include_live_audit:
+        from pseofactory.audit import audit_syndication_asset_against_truth_store
+        from pseofactory.content_angles import expand_commercial_and_question_keywords
+        from pseofactory.distributor import generate_all_distribution_assets
+
+        sample_seeds = {
+            "profithelm": "section 179 calculator",
+            "prexvo": "rap payment calculator",
+            "gainhelm": "cmmc 2.0 compliance cost calculator",
+        }
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
+            est_rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
+            kw_std = expand_commercial_and_question_keywords(
+                seed_query=sample_seeds[t_id],
+                property_id=t_id,
+                keyword_difficulty=40.0,
+                total_keywords=10,
+            )
+            kw_high_kd = expand_commercial_and_question_keywords(
+                seed_query=sample_seeds[t_id],
+                property_id=t_id,
+                keyword_difficulty=75.0,
+                total_keywords=10,
+            )
+            assets = generate_all_distribution_assets(property_id=t_id)
+            synd_failures: List[str] = []
+            slug_title_leaks: List[str] = []
+            for s_key, pack in assets.items():
+                t_audit = audit_syndication_asset_against_truth_store(pack, property_id=t_id)
+                if not t_audit["passed"]:
+                    synd_failures.extend(f"{s_key}:{v}" for v in t_audit["violations"])
+                yt_title = str((pack.get("youtube") or {}).get("title") or "")
+                if yt_title.lower().startswith(s_key.lower() + " "):
+                    slug_title_leaks.append(f"{s_key}:{yt_title}")
+
+            t_ok = (
+                est_rep["passed"]
+                and kw_std["status"] == "PASS"
+                and kw_std["commercial_ratio"] == 0.5
+                and kw_std["question_ratio"] == 0.5
+                and kw_high_kd["question_ratio"] == 1.0
+                and len(assets) > 0
+                and len(synd_failures) == 0
+                and len(slug_title_leaks) == 0
+            )
+            if not t_ok:
+                all_passed = False
+            tenant_summaries[t_id] = {
+                "status": "PASS" if t_ok else "FAIL",
+                "html_files_scanned": est_rep["html_files_scanned"],
+                "estate_issues_count": len(est_rep["issues"]),
+                "syndication_tools_verified": len(assets),
+                "syndication_failures": synd_failures,
+                "youtube_slug_title_leaks": slug_title_leaks,
+                "balanced_question_ratio": kw_std["question_ratio"],
+                "high_kd_question_ratio": kw_high_kd["question_ratio"],
+            }
+
+    return {
+        "pointer": "x-like:2102328294410461564",
+        "tweet_id": "2102328294410461564",
+        "author_handle": "JespernissenSEO",
+        "author_name": "Jesper Nissen",
+        "youtube_url": "https://youtu.be/MYEqgkuiObw",
+        "media_url": "https://pbs.twimg.com/media/HSz4cSWWYAAK1Sn.jpg?name=orig",
+        "outbound_domains_inspected": [
+            "youtu.be",
+            "someposter.ai",
+            "yacss.site",
+            "schemawriter.ai",
+            "jespernissen.com",
+        ],
+        "total_claims_evaluated": len(X_LIKE_2102328294410461564_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(compounding),
+        "integrated_deterministic_gates_count": len(deterministic_gates),
+        "already_solved_in_substrate_count": len(already_solved),
+        "rejected_bloat_or_off_vertical_count": len(rejected),
+        "matrix": list(X_LIKE_2102328294410461564_CAPABILITY_MATRIX),
+        "tenant_summaries": tenant_summaries,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }
+
+
+
 
 

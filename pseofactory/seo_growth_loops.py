@@ -2915,6 +2915,23 @@ def compile_search_opportunity_briefs(
             "Confirm all quick_answer and FAQ numeric assertions match compiled calculator output 1:1.",
         ]
 
+        from pseofactory.content_angles import (
+            analyze_serp_social_vulnerability,
+            expand_commercial_and_question_keywords,
+        )
+        est_kd = 70.0 if (best_pos > 15.0 and not ai_res["losing_to_weaker_domains"]) else 42.0
+        kw_mix = expand_commercial_and_question_keywords(
+            seed_query=primary_query or leaf_slug.replace("-", " "),
+            property_id=prop,
+            keyword_difficulty=est_kd,
+            total_keywords=10,
+        )
+        synthetic_serp = [
+            {"rank": idx + 1, "domain": dom_name, "title": f"{primary_query} reference on {dom_name}"}
+            for idx, dom_name in enumerate(ai_res.get("ai_cited_domains") or [])
+        ]
+        social_vuln = analyze_serp_social_vulnerability(synthetic_serp, target_query=primary_query)
+
         brief = {
             "brief_id": f"brief_{prop}_{overlay_file_stem}",
             "property_id": prop,
@@ -2927,6 +2944,19 @@ def compile_search_opportunity_briefs(
             "audience_problem_cluster": audience_problem_cluster,
             "differentiation_angle": differentiation_angle,
             "claims_requiring_verification": claims_requiring_verification,
+            "commercial_vs_question_keyword_mix": {
+                "mode": kw_mix["mode"],
+                "commercial_ratio": kw_mix["commercial_ratio"],
+                "question_ratio": kw_mix["question_ratio"],
+                "commercial_keywords": kw_mix["commercial_keywords"][:5],
+                "question_keywords": kw_mix["question_keywords"][:5],
+            },
+            "serp_social_vulnerability": {
+                "vulnerability_tier": social_vuln["vulnerability_tier"],
+                "total_social_slots": social_vuln["total_social_slots"],
+                "authorized_displacement_channels": social_vuln["authorized_displacement_channels"],
+                "prohibited_channels": social_vuln["prohibited_channels"],
+            },
             "opportunity_class": opportunity_class,
             "primary_query": primary_query,
             "protected_primary_query": overlay_spec.get("protected_primary_query", protected_primary_query),

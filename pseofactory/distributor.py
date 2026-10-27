@@ -5699,6 +5699,161 @@ TOOL_YOUTUBE_METADATA = {
             "gainhelm tools",
         ],
     },
+    "cmmc-2-0-compliance-cost-calculator": {
+        "title": "CMMC 2.0 Level 2 C3PAO Audit Cost Calculator [32 CFR Part 170]",
+        "preset_query": "cui_users=35&level=2&enclave=1",
+        "chapters": [
+            "DoD 32 CFR Part 170 & DFARS 252.204-7021 CMMC Level 2 Mandate",
+            "Accredited C3PAO Assessment Fees Across 110 NIST 800-171 Controls",
+            "CUI Enclave Boundary Isolation vs Full-Enterprise Remediation",
+            "Interactive CMMC 2.0 Level 2 Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR CMMC 2.0 LEVEL 2 CERTIFICATION BUDGET:\n"
+            "Defense contractors handling CUI face an average $88,800 certification budget ($48,000 C3PAO assessment + $18,000 CUI enclave boundary + 240 engineering hours at $95/hr).\n\n"
+            "Scope your C3PAO audit and CUI enclave boundary live on GainHelm:\n"
+            "https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/?cui_users=35&level=2&enclave=1&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-2-0-compliance-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under DoD 32 CFR Part 170, DFARS 252.204-7021, and NIST SP 800-171 Rev 2."
+        ),
+        "tags": [
+            "cmmc 2.0 compliance cost calculator",
+            "c3pao assessment cost",
+            "32 cfr part 170 cmmc",
+            "nist 800 171 audit budget",
+            "cui enclave cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "hipaa-violation-penalty-breach-cost-calculator": {
+        "title": "HIPAA Civil Monetary Penalty & ePHI Breach Cost Calculator",
+        "preset_query": "records=2500&tier=2&encrypted=0",
+        "chapters": [
+            "45 CFR 160.404 HHS OCR Four-Tier Civil Monetary Penalty Schedule",
+            "45 CFR 164.404 Breach Notification & 500-Record Media Threshold",
+            "Per-Record ePHI Forensic, Notification, and Credit Monitoring Math",
+            "Interactive HIPAA Breach & Penalty Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR HIPAA BREACH & HHS OCR PENALTY EXPOSURE:\n"
+            "A 2,500-record ePHI breach at $165/record forensic/notification cost plus $100,000 45 CFR 160.404 Tier 2 penalty reaches $512,500 in total HIPAA breach exposure.\n\n"
+            "Model your 45 CFR 160.404 penalty tier and ePHI breach liability live on GainHelm:\n"
+            "https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/?records=2500&tier=2&encrypted=0&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 45 CFR 160.404, 42 U.S.C. 1320d-5, and 45 CFR Part 164."
+        ),
+        "tags": [
+            "hipaa violation penalty calculator",
+            "hipaa breach cost calculator",
+            "45 cfr 160 404 penalty tiers",
+            "ephi breach cost per record",
+            "hhs ocr fine calculator",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "penetration-testing-scoping-cost-calculator": {
+        "title": "Enterprise Penetration Testing Cost & Scope Calculator [2026]",
+        "preset_query": "days=9&rate=2200&retest=1",
+        "chapters": [
+            "NIST SP 800-115 & OWASP ASST v4.0 Technical Assessment Scoping",
+            "Grey-Box Web App, Authenticated API & Cloud IAM Role Complexity",
+            "Remediation Retest Verification & Auditor Attestation Letters",
+            "Interactive Penetration Testing Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR ENTERPRISE PENETRATION TESTING BUDGET:\n"
+            "A 9-day OSCP/CREST manual penetration test at $2,200/day under NIST SP 800-115 plus a $3,500 remediation retest and attestation letter totals $23,300.\n\n"
+            "Scope your SOC 2, PCI DSS 11.4, or ISO 27001 pentest live on GainHelm:\n"
+            "https://gainhelm.com/tools/penetration-testing-scoping-cost-calculator/?days=9&rate=2200&retest=1&utm_source=youtube&utm_medium=video&utm_campaign=penetration-testing-scoping-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under NIST SP 800-115, PCI DSS v4.0.1 Req. 11.4, and OWASP WSTG."
+        ),
+        "tags": [
+            "penetration testing cost calculator",
+            "pentest scoping calculator",
+            "soc 2 pentest cost",
+            "pci dss 11.4 penetration test",
+            "web application pentest cost",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "fedramp-authorization-3pao-cost-calculator": {
+        "title": "FedRAMP 20x & Moderate ATO Cost Calculator [3PAO & ConMon]",
+        "preset_query": "baseline=2&controls=325&conmon=1",
+        "chapters": [
+            "44 U.S.C. 3607 FedRAMP Authorization Act & NIST SP 800-53 Rev 5",
+            "FedRAMP 20x / Li-SaaS vs Moderate (325 Controls) Baseline",
+            "3PAO Readiness Assessment (RAR), Full SAR & Monthly ConMon Costs",
+            "Interactive FedRAMP ATO Cost Calculator Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR FEDRAMP MODERATE ATO & CONMON BUDGET:\n"
+            "Achieving FedRAMP Moderate ATO requires $500,000 in Year-1 outlay ($185,000 SSP boundary engineering + $145,000 3PAO RAR/SAR + $95,000 FIPS 140-3 crypto + $75,000 ConMon).\n\n"
+            "Compare FedRAMP Moderate vs Li-SaaS/20x authorization budgets live on GainHelm:\n"
+            "https://gainhelm.com/tools/fedramp-authorization-3pao-cost-calculator/?baseline=2&controls=325&conmon=1&utm_source=youtube&utm_medium=video&utm_campaign=fedramp-authorization-3pao-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 44 U.S.C. 3607, OMB Memo M-24-15, and NIST SP 800-53 Rev 5."
+        ),
+        "tags": [
+            "fedramp authorization cost calculator",
+            "fedramp moderate ato cost",
+            "3pao assessment fees",
+            "fedramp 20x cost",
+            "nist 800 53 rev 5 fedramp",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+        "title": "HITRUST CSF e1 vs i1 vs r2 Certification Cost Calculator [2026]",
+        "preset_query": "tier=2&controls=182&systems=3",
+        "chapters": [
+            "HITRUST CSF v11.x Tier Selection: e1 (44) vs i1 (182) vs r2 (350+)",
+            "MyCSF Portal Subscription & Cloud Shared Responsibility Inheritance",
+            "Authorized External Assessor Fees & Internal Readiness Remediation",
+            "Interactive HITRUST Certification Cost Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR HITRUST CSF e1, i1, OR r2 CERTIFICATION COST:\n"
+            "A HITRUST CSF v11 assessment with $27,500 MyCSF portal/report fee, $55,000 External Assessor validation, and $32,500 readiness remediation totals $115,000.\n\n"
+            "Compare HITRUST e1 vs i1 vs r2 scoping and cloud inheritance live on GainHelm:\n"
+            "https://gainhelm.com/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/?tier=2&controls=182&systems=3&utm_source=youtube&utm_medium=video&utm_campaign=hitrust-csf-e1-i1-r2-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 45 CFR Part 164, NIST SP 800-53 Rev 5, and HITRUST CSF v11.x."
+        ),
+        "tags": [
+            "hitrust certification cost calculator",
+            "hitrust e1 vs i1 vs r2 cost",
+            "hitrust mycsf pricing",
+            "healthcare cyber compliance cost",
+            "hitrust external assessor fees",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
+    "cyber-liability-insurance-breach-exposure-calculator": {
+        "title": "Cyber Liability Insurance Premium & Breach Exposure Calculator",
+        "preset_query": "limit=5&rate=6800&posture=85",
+        "chapters": [
+            "SEC Form 8-K Item 1.05 4-Business-Day Material Incident Rule",
+            "First-Party ePHI/PII Forensics vs Third-Party Regulatory Defense",
+            "EDR, MFA & Immutable Backup Underwriting Rate Modifiers",
+            "Interactive Cyber Insurance & Breach Exposure Walkthrough",
+        ],
+        "pinned_comment": (
+            "CALCULATE YOUR CYBER LIABILITY INSURANCE & RETENTION COST:\n"
+            "A $5M cyber liability policy at $6,800/M base rate with an 0.85 EDR/MFA security posture modifier ($28,900 premium) plus $10,000 SIR reserve totals $38,900/yr.\n\n"
+            "Model your cyber insurance policy limits and SEC Item 1.05 breach exposure live on GainHelm:\n"
+            "https://gainhelm.com/tools/cyber-liability-insurance-breach-exposure-calculator/?limit=5&rate=6800&posture=85&utm_source=youtube&utm_medium=video&utm_campaign=cyber-liability-insurance-breach-exposure-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under SEC 17 CFR 229.106 (Form 8-K Item 1.05) and NAIC Cyber Insurance Data."
+        ),
+        "tags": [
+            "cyber liability insurance calculator",
+            "cyber insurance cost per million",
+            "sec form 8k item 1.05 breach cost",
+            "ransomware retention calculator",
+            "gainhelm",
+            "gainhelm tools",
+        ],
+    },
 }
 
 
@@ -5798,7 +5953,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     slug = tool["slug"]
     raw_title = tool.get("title", slug.replace("-", " ").title())
     raw_short = tool.get("short_title", "")
-    title, short_title = _clean_tool_title_and_short(slug, raw_title, raw_short)
+    title, short_title = _clean_tool_title_and_short(raw_title, slug, raw_short)
     desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
     query = tool.get("primary_keyword", short_title.lower())
 
@@ -6113,13 +6268,28 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         },
     }
 
+    from pseofactory.content_angles import expand_commercial_and_question_keywords
+    kw_matrix = expand_commercial_and_question_keywords(
+        seed_query=query,
+        property_id=effective_prop,
+        keyword_difficulty=float(tool.get("keyword_difficulty", 45.0) or 45.0),
+        total_keywords=10,
+    )
+    segment_queries = [seg["target_query"] for seg in segments]
+    combined_target_queries: List[str] = []
+    for q_cand in segment_queries + kw_matrix.get("question_keywords", [])[:3] + kw_matrix.get("commercial_keywords", [])[:2]:
+        if q_cand and q_cand not in combined_target_queries:
+            combined_target_queries.append(q_cand)
+
     transcript_pack = {
         "full_text": full_text,
         "transcript": full_text,
         "estimated_duration_seconds": len(segments) * 30,
         "word_count": len(full_text.split()),
         "target_entities": [brand_name, short_title, title],
-        "target_queries": [seg["target_query"] for seg in segments],
+        "target_queries": combined_target_queries,
+        "commercial_keywords": kw_matrix.get("commercial_keywords", []),
+        "question_keywords": kw_matrix.get("question_keywords", []),
         "segments": segments,
         "schema": schema,
         "calculation_proof": proof,
@@ -6150,7 +6320,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
     slug = tool["slug"]
     raw_title = tool.get("title", slug.replace("-", " ").title())
     raw_short = tool.get("short_title", "")
-    title, short_title = _clean_tool_title_and_short(slug, raw_title, raw_short)
+    title, short_title = _clean_tool_title_and_short(raw_title, slug, raw_short)
     desc = tool.get("description", f"Quantitative model and planning calculator for {title}.")
     qa = tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis.")
     query = tool.get("primary_keyword", short_title.lower())
@@ -8514,6 +8684,8 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             normalized_tools.append(t)
     target_tools = normalized_tools
 
+    from pseofactory.content_angles import expand_commercial_and_question_keywords
+
     if property_id == "prexvo":
         distribution_pack = {}
         for t in target_tools:
@@ -8525,6 +8697,12 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             li = _generate_prexvo_linkedin(t, base_url)
             ghost_pack = generate_ghost_article(t, property_id="prexvo")
             gist_pack = generate_exact_match_github_gist(t, property_id="prexvo")
+            kw_matrix = expand_commercial_and_question_keywords(
+                seed_query=str(t.get("primary_keyword") or slug.replace("-", " ")),
+                property_id="prexvo",
+                keyword_difficulty=float(t.get("keyword_difficulty", 45.0) or 45.0),
+                total_keywords=10,
+            )
             distribution_pack[slug] = {
                 "slug": slug,
                 "property_id": "prexvo",
@@ -8537,6 +8715,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
                 "economic_source": proof["economic_source"],
                 "dual_dataset_citations": [proof["statutory_source"], proof["economic_source"]],
                 "calculation_proof": proof,
+                "keyword_intent_matrix": kw_matrix,
                 "linkedin": li,
                 "x": _generate_prexvo_x(t, base_url),
                 "facebook": _generate_prexvo_facebook(t, base_url),
@@ -8564,6 +8743,12 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             li = _generate_gainhelm_linkedin(t, base_url)
             ghost_pack = generate_ghost_article(t, property_id="gainhelm")
             gist_pack = generate_exact_match_github_gist(t, property_id="gainhelm")
+            kw_matrix = expand_commercial_and_question_keywords(
+                seed_query=str(t.get("primary_keyword") or slug.replace("-", " ")),
+                property_id="gainhelm",
+                keyword_difficulty=float(t.get("keyword_difficulty", 45.0) or 45.0),
+                total_keywords=10,
+            )
             distribution_pack[slug] = {
                 "slug": slug,
                 "property_id": "gainhelm",
@@ -8576,6 +8761,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
                 "economic_source": proof["economic_source"],
                 "dual_dataset_citations": [proof["statutory_source"], proof["economic_source"]],
                 "calculation_proof": proof,
+                "keyword_intent_matrix": kw_matrix,
                 "linkedin": li,
                 "x": _generate_gainhelm_x(t, base_url),
                 "facebook": _generate_gainhelm_facebook(t, base_url),
@@ -8598,6 +8784,12 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         slug = t["slug"]
         social_pack = generate_social_syndication_pack(t, property_id=eff_prop_norm)
         proof = social_pack["calculation_proof"]
+        kw_matrix = expand_commercial_and_question_keywords(
+            seed_query=str(t.get("primary_keyword") or slug.replace("-", " ")),
+            property_id=eff_prop_norm,
+            keyword_difficulty=float(t.get("keyword_difficulty", 45.0) or 45.0),
+            total_keywords=10,
+        )
         distribution_pack[slug] = {
             "slug": slug,
             "property_id": eff_prop_norm,
@@ -8610,6 +8802,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             "economic_source": social_pack["economic_source"],
             "dual_dataset_citations": social_pack["dual_dataset_citations"],
             "calculation_proof": proof,
+            "keyword_intent_matrix": kw_matrix,
             "linkedin": social_pack["linkedin"],
             "x": social_pack["x"],
             "facebook": social_pack["facebook"],
@@ -8830,14 +9023,20 @@ def prioritize_distribution_queue_by_referral_yield(
     gainhelm_urgency_weights: Dict[str, float] = {
         "soc-2-audit-cost-calculator": 69.0,
         "cmmc-level-2-audit-cost-calculator": 67.0,
+        "cmmc-2-0-compliance-cost-calculator": 67.0,
         "nist-800-171-sprs-score-calculator": 65.0,
         "iso-27001-certification-cost-calculator": 62.0,
         "hipaa-violation-penalty-and-breach-cost-calculator": 60.0,
+        "hipaa-violation-penalty-breach-cost-calculator": 60.0,
         "pci-dss-4-0-compliance-cost-calculator": 58.0,
         "grc-automation-roi-calculator": 56.0,
         "penetration-testing-cost-calculator": 54.0,
+        "penetration-testing-scoping-cost-calculator": 54.0,
         "fedramp-authorization-cost-calculator": 52.0,
+        "fedramp-authorization-3pao-cost-calculator": 52.0,
         "hitrust-certification-cost-calculator": 50.0,
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": 50.0,
+        "cyber-liability-insurance-breach-exposure-calculator": 49.0,
     }
 
     ranked: List[Dict[str, Any]] = []

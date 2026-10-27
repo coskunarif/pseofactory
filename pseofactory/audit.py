@@ -1075,6 +1075,87 @@ GENERIC_SYNDICATION_FILLER_PHRASES = (
     "Users analyze complex tax liabilities and cash flow projections",
     "Read our full breakdown of the 2026 student loan forgiveness rules and IDR plan updates:",
 )
+PARASITE_LINK_WHEEL_INTERMEDIARY_HOSTS = (
+    "facebook.com",
+    "fb.com",
+    "fb.watch",
+    "reddit.com",
+    "old.reddit.com",
+    "yacss.site",
+    "someposter.ai",
+    "schemawriter.ai",
+    "sites.google.com",
+    "medium.com",
+    "quora.com",
+)
+TENANT_CANONICAL_HOSTS = {
+    "profithelm": "profithelm.com",
+    "prexvo": "prexvo.com",
+    "gainhelm": "gainhelm.com",
+}
+
+
+def _check_parasite_link_wheel_and_hub_spoke_gate(
+    asset_pack: Dict[str, Any],
+    resolved_prop: str,
+    slug: str,
+) -> List[str]:
+    """
+    Enforces direct hub-and-spoke canonical attribution (Gate S5 extension):
+    1. Rejects 'Target Post' parasite-to-parasite link wheels (e.g., pointing LinkedIn, X, YouTube,
+       or Ghost target_url / first_comment_url to facebook.com, reddit.com, yacss.site, or someposter.ai
+       instead of the tenant's first-party canonical calculator domain).
+    2. Rejects raw hyphenated tool slugs leaked as YouTube video titles.
+    """
+    from urllib.parse import urlparse
+
+    violations: List[str] = []
+    expected_host = TENANT_CANONICAL_HOSTS.get(resolved_prop, "profithelm.com")
+
+    def _inspect_target_url(label: str, raw_u: Any) -> None:
+        if not isinstance(raw_u, str) or not raw_u.strip():
+            return
+        u_str = raw_u.strip()
+        if not u_str.startswith(("http://", "https://")):
+            return
+        try:
+            host = urlparse(u_str).netloc.lower().split(":")[0].removeprefix("www.")
+        except Exception:
+            host = ""
+        if not host:
+            return
+        if any(host == h or host.endswith("." + h) for h in PARASITE_LINK_WHEEL_INTERMEDIARY_HOSTS):
+            violations.append(f"PARASITE_LINK_WHEEL_INTERMEDIARY_DETECTED:{label}:{host}")
+        elif host != expected_host and not host.endswith("." + expected_host):
+            violations.append(f"NON_CANONICAL_SYNDICATION_TARGET:{label}:{host}_expected_{expected_host}")
+
+    for top_k in ("url", "canonical_url", "parameterized_url", "target_url"):
+        _inspect_target_url(f"pack.{top_k}", asset_pack.get(top_k))
+
+    proof = asset_pack.get("calculation_proof")
+    if isinstance(proof, dict):
+        for pk in ("canonical_url", "parameterized_url"):
+            _inspect_target_url(f"calculation_proof.{pk}", proof.get(pk))
+
+    for ch_name in ("youtube", "linkedin", "facebook", "ghost", "github_gist", "x", "linkedin_pulse", "substack_teardown"):
+        ch_obj = asset_pack.get(ch_name)
+        if isinstance(ch_obj, dict):
+            for uk in ("target_url", "first_comment_url", "canonical_url", "url"):
+                _inspect_target_url(f"{ch_name}.{uk}", ch_obj.get(uk))
+            # Also inspect explicit URLs inside first_comment or pinned_comment if present
+            for comment_k in ("first_comment", "pinned_comment"):
+                c_txt = ch_obj.get(comment_k)
+                if isinstance(c_txt, str) and "http" in c_txt:
+                    for m_url in re.findall(r"https?://[^\s)\"'>]+", c_txt):
+                        _inspect_target_url(f"{ch_name}.{comment_k}", m_url)
+
+    yt_obj = asset_pack.get("youtube")
+    if isinstance(yt_obj, dict) and slug and "-" in slug:
+        yt_title = str(yt_obj.get("title") or "").strip()
+        if yt_title.lower().startswith(slug.lower() + " ") or yt_title.lower() == slug.lower():
+            violations.append(f"UNFORMATTED_SLUG_YOUTUBE_TITLE:{yt_title}")
+
+    return violations
 
 
 def _extract_channel_text_and_urls(channel_name: str, payload: Any) -> Dict[str, Any]:
@@ -1365,6 +1446,8 @@ def audit_syndication_asset_against_truth_store(
         if not has_url:
             violations.append(f"UNPARAMETERIZED_CANONICAL_URL:{ch}")
 
+    violations.extend(_check_parasite_link_wheel_and_hub_spoke_gate(asset_pack, resolved_prop, slug))
+
     # Gate S6: Anti-Slop / Thin Stub Rejection
     for phrase in GENERIC_SYNDICATION_FILLER_PHRASES:
         if phrase.lower() in combined_text.lower():
@@ -1606,9 +1689,11 @@ def inspect_raw_syndication_manifests_and_trails(
 
 
 from pseofactory.verifier import (
+    X_LIKE_2102328294410461564_CAPABILITY_MATRIX,
     X_LIKE_2102358751290236980_CAPABILITY_MATRIX,
     X_LIKE_2109219955271196726_CAPABILITY_MATRIX,
     audit_estate_technical_seo_and_cannibalization,
+    evaluate_x_like_2102328294410461564_capability_matrix,
     evaluate_x_like_2102358751290236980_capability_matrix,
     evaluate_x_like_2109219955271196726_capability_matrix,
 )
@@ -1623,9 +1708,11 @@ __all__ = [
     "audit_distribution_draft_payload",
     "audit_historical_distribution_runs",
     "inspect_raw_syndication_manifests_and_trails",
+    "X_LIKE_2102328294410461564_CAPABILITY_MATRIX",
     "X_LIKE_2102358751290236980_CAPABILITY_MATRIX",
     "X_LIKE_2109219955271196726_CAPABILITY_MATRIX",
     "audit_estate_technical_seo_and_cannibalization",
+    "evaluate_x_like_2102328294410461564_capability_matrix",
     "evaluate_x_like_2102358751290236980_capability_matrix",
     "evaluate_x_like_2109219955271196726_capability_matrix",
 ]
