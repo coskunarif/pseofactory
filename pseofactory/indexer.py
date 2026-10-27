@@ -1366,18 +1366,6 @@ class PushIndexer:
         else:
             self.canonical_base = canonical_base.rstrip("/")
         self.indexnow_key = indexnow_key
-        if (
-            indexnow_key == DEFAULT_INDEXNOW_KEY
-            and not os.environ.get("PYTEST_CURRENT_TEST")
-            and self.domain in ("profithelm.com", "prexvo.com", "gainhelm.com")
-        ):
-            cached_token_path = Path.home() / ".indexnow" / f"{self.domain}.key"
-            if cached_token_path.is_file():
-                cached_val = cached_token_path.read_text(encoding="utf-8").strip()
-                if len(cached_val) == 32:
-                    self.indexnow_key = cached_val
-            elif "profithelm" in self.domain.lower():
-                self.indexnow_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
         is_pytest_foreign = bool(
             os.environ.get("PYTEST_CURRENT_TEST")
             and base_dir is None
@@ -1399,6 +1387,18 @@ class PushIndexer:
             _default_base = DEFAULT_BASE_DIR
         self.base_dir = Path(base_dir) if base_dir else _default_base
         self.dist_dir = Path(dist_dir) if dist_dir else (self.base_dir / "dist")
+        if (
+            indexnow_key == DEFAULT_INDEXNOW_KEY
+            and not os.environ.get("PYTEST_CURRENT_TEST")
+            and "/home/ubuntuadmin/projects/" in str(self.dist_dir)
+        ):
+            if "profithelm" in self.domain.lower():
+                self.indexnow_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+            elif self.dist_dir.is_dir():
+                for cand_txt in sorted(self.dist_dir.glob("*.txt")):
+                    if len(cand_txt.stem) == 32 and cand_txt.stem != DEFAULT_INDEXNOW_KEY:
+                        self.indexnow_key = cand_txt.stem
+                        break
         self.tools = list(tools) if tools else []
         self.indexmysite_project_id = indexmysite_project_id
         self.ledger_path = Path(ledger_path) if ledger_path else (self.base_dir / ".agy" / "index_push_ledger.json")
@@ -1731,6 +1731,7 @@ class PushIndexer:
 
         if (
             not os.environ.get("PYTEST_CURRENT_TEST")
+            and "/home/ubuntuadmin/projects/" in str(self.dist_dir)
             and self.domain in ("profithelm.com", "prexvo.com", "gainhelm.com")
         ):
             try:
