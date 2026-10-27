@@ -9777,6 +9777,27 @@ class RetroReflectionEngine:
                 if new_cat_txt != old_cat_txt:
                     cat_path.write_text(new_cat_txt, encoding="utf-8")
                     updated_files.append("catalog.json")
+                repo_parent = Path(dist_dir).resolve().parent
+                if (
+                    cat_path.is_file()
+                    and (repo_parent / ".git").exists()
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                    and "pytest" not in sys.modules
+                ):
+                    ls_idx = subprocess.run(
+                        ["git", "-C", str(repo_parent), "ls-files", "dist/index.html"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if ls_idx.returncode == 0 and ls_idx.stdout.strip():
+                        subprocess.run(
+                            ["git", "-C", str(repo_parent), "add", "-f", "dist/catalog.json"],
+                            capture_output=True,
+                            check=False,
+                            timeout=5,
+                        )
             except Exception:
                 pass
 

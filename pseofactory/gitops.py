@@ -2787,6 +2787,8 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                     "          export PROFITHELM_OFFLINE_JEV=\"1\"\n"
                     "          if [ ! -f dist/index.html ]; then\n"
                     "            python3 -m profithelm.cli build\n"
+                    "          elif [ ! -f dist/catalog.json ]; then\n"
+                    "            python3 -m profithelm.cli build\n"
                     "          fi\n"
                     "          python3 -m profithelm.cli audit\n\n"
                     "      - name: Execute Full Test Suite\n"
@@ -2877,6 +2879,8 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                     "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
                     "          if [ ! -f dist/index.html ]; then\n"
                     "            python3 -m prexvo.cli build\n"
+                    "          elif [ ! -f dist/catalog.json ]; then\n"
+                    "            python3 -m prexvo.cli build\n"
                     "          fi\n"
                     "          python3 -m prexvo.cli audit\n\n"
                     "      - name: Execute Full Test Suite\n"
@@ -2898,6 +2902,25 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 if ci_yml_path.read_text(encoding="utf-8") != desired_px_ci:
                     ci_yml_path.write_text(desired_px_ci, encoding="utf-8")
                     updated_files.append(str(ci_yml_path))
+            if (
+                (repo / ".git").exists()
+                and (repo / "dist" / "catalog.json").is_file()
+                and not _is_test_context(repo)
+            ):
+                ls_idx = subprocess.run(
+                    ["git", "-C", str(repo), "ls-files", "dist/index.html"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if ls_idx.returncode == 0 and ls_idx.stdout.strip():
+                    subprocess.run(
+                        ["git", "-C", str(repo), "add", "-f", "dist/catalog.json"],
+                        capture_output=True,
+                        check=False,
+                        timeout=5,
+                    )
         except Exception:
             pass
 
