@@ -9426,21 +9426,6 @@ class RetroReflectionEngine:
                     return True
             except Exception:
                 return True
-            sample_t = tools_dir / root_tool_slugs[0] / "index.html"
-            if sample_t.is_file():
-                try:
-                    st_raw = sample_t.read_text(encoding="utf-8", errors="ignore")
-                    if 'rel="tool-catalog"' not in st_raw:
-                        return True
-                except Exception:
-                    return True
-            hdr_f = dist_dir / "_headers"
-            if hdr_f.is_file():
-                try:
-                    if "/catalog.json" not in hdr_f.read_text(encoding="utf-8", errors="ignore"):
-                        return True
-                except Exception:
-                    return True
         return False
 
     @classmethod
@@ -10345,6 +10330,25 @@ class RetroReflectionEngine:
 
         if cls._has_stale_llms_manifests(d, property_id):
             stale_pages["llms.txt"] = ["llms_manifest_parity"]
+
+        if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
+            hdr_f = d / "_headers"
+            if hdr_f.is_file():
+                try:
+                    if "/catalog.json" not in hdr_f.read_text(encoding="utf-8", errors="ignore"):
+                        stale_pages["_headers"] = ["publisher_prerequisites_parity"]
+                except Exception:
+                    pass
+            tools_dir_chk = d / "tools"
+            if tools_dir_chk.is_dir():
+                for td_chk in sorted(tools_dir_chk.iterdir()):
+                    if td_chk.is_dir() and not td_chk.name.startswith(".") and (td_chk / "index.html").is_file():
+                        try:
+                            if 'rel="tool-catalog"' not in (td_chk / "index.html").read_text(encoding="utf-8", errors="ignore"):
+                                stale_pages["tools/index.html"] = ["publisher_prerequisites_parity"]
+                        except Exception:
+                            pass
+                        break
 
         if (
             d == Path("/home/ubuntuadmin/projects/profithelm-platform/dist")
