@@ -148,7 +148,7 @@ class DailyIndexingInspector:
         quota_reasons = []
         try:
             recent_events = self.telemetry_logger.read_recent(limit=50, tenant_id=self.tenant_id)
-            for ev in reversed(recent_events):
+            for ev in recent_events:
                 act = (ev.action_taken or "").upper()
                 if act in ("AUTO_REMEDIATED", "QUOTA_GOVERNOR_DEFERRED"):
                     break
@@ -962,7 +962,7 @@ class DailyIndexingInspector:
                 # If child sitemaps and feedback loop pass in live mode, reconcile rollover URLs covered by child sitemaps
                 if (
                     not dry_run
-                    and has_pending_rollover
+                    and (has_pending_rollover or rollover_report.get("quota_exhausted"))
                     and child_sitemaps_report.get("status") == "PASS"
                     and isinstance(auto_rem_res, dict)
                     and auto_rem_res.get("status") in ("SUCCESS", "NO_ACTION_REQUIRED", "IDEMPOTENT_NO_OP")

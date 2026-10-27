@@ -328,3 +328,62 @@ def test_indexing_inspector_merges_global_and_tenant_ledgers(tmp_path):
     assert rollover_audit["queue_size"] == 2
 
 
+def test_audit_gsc_rollover_queue_newest_first_clears_reconciled_429(tmp_path):
+    """
+    Failure mode: audit_gsc_rollover_queue reversed read_recent() (which is already newest-first),
+    scanning oldest-first and letting historical 429 events mask newer AUTO_REMEDIATED events.
+    """
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.telemetry import AtomicTelemetryLogger
+
+    telemetry_path = tmp_path / "telemetry_events.jsonl"
+    logger = AtomicTelemetryLogger(log_path=telemetry_path)
+    rollover_path = tmp_path / "gsc_rollover_queue.json"
+    rollover_path.write_text("[]", encoding="utf-8")
+
+    logger.record(
+        event_type="SUBPROCESS_CRASH",
+        tenant_id="prexvo",
+        error_type="GoogleIndexingQuotaExhausted",
+        error_message="429 Quota exhausted during GSC indexing on https://prexvo.com/",
+        action_taken="RECORDED",
+        dedup_window_seconds=0,
+    )
+    logger.record(
+        event_type="INDEXING_ROLLOVER_RECONCILED",
+        tenant_id="prexvo",
+        error_type="NONE",
+        error_message="Reconciled 0 rollover URLs via verified GSC child sitemaps",
+        action_taken="AUTO_REMEDIATED",
+        dedup_window_seconds=0,
+    )
+
+    inspector = DailyIndexingInspector(
+        tenant_id="prexvo",
+        rollover_queue_path=rollover_path,
+        telemetry_logger=logger,
+    )
+    audit = inspector.audit_gsc_rollover_queue()
+    assert audit["quota_exhausted"] is False
+    assert audit["status"] == "PASS"
+
+
+def test_gainhelm_statutory_routing_covers_soc2_compliance_and_c3pao():
+    """
+    Failure mode: 'soc 2 compliance cost calculator' and 'cmmc level 2 c3pao audit cost calculator'
+    fell through to unassigned instead of routing deterministically to gainhelm.
+    """
+    from pseofactory.trends.cron import TrendCronRunner
+
+    runner = TrendCronRunner()
+    for q in (
+        "soc 2 compliance cost calculator",
+        "soc 2 compliance price",
+        "cmmc level 2 c3pao audit cost calculator",
+    ):
+        res = runner.determine_property_assignment(q)
+        assert res["property_id"] == "gainhelm"
+        assert res["contamination_scan_passed"] == 1
+
+
+

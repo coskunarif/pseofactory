@@ -265,12 +265,14 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
     if _ancestor_or_inherited_fd_holds_lock(lock_file):
         os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+        os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
     if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
         try:
             import fcntl
             lock_fd = open(lock_file, "a+", encoding="utf-8")
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+            os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
         except OSError:
             if lock_fd is not None:
                 lock_fd.close()
@@ -554,6 +556,7 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
         lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
         if _ancestor_or_inherited_fd_holds_lock(lock_file):
             os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+            os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
         if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
             try:
                 import fcntl
@@ -562,6 +565,8 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
                     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 else:
                     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+                os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
             except OSError:
                 if lock_fd is not None:
                     lock_fd.close()

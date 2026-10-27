@@ -2615,6 +2615,17 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             if old_main_exit in f_new and '"reset", "-q", "HEAD", "--", "dist"' not in f_new:
                 f_new = f_new.replace(old_main_exit, new_main_exit, 1)
 
+            old_dist_only_reset = (
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "reset", "-q", "HEAD", "--", "dist"], capture_output=True, check=False, timeout=10)\n'
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "checkout", "-q", "HEAD", "--", "dist"], capture_output=True, check=False, timeout=10)\n'
+            )
+            new_dist_and_dyn_reset = (
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "reset", "-q", "HEAD", "--", "dist", "profithelm/data/dynamic_tools.json", "content/redirects.json"], capture_output=True, check=False, timeout=10)\n'
+                '                subprocess.run(["git", "-C", str(BASE_DIR), "checkout", "-q", "HEAD", "--", "dist", "profithelm/data/dynamic_tools.json", "content/redirects.json"], capture_output=True, check=False, timeout=10)\n'
+            )
+            if old_dist_only_reset in f_new:
+                f_new = f_new.replace(old_dist_only_reset, new_dist_and_dyn_reset, 1)
+
             old_prexvo_desc = '                        "description": selected_opp.get("description", f"Calculate statutory options for {target_q}."),'
             new_prexvo_desc = (
                 '                        "description": (\n'
@@ -2706,7 +2717,7 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             old_pid_echo = 'echo "$$" > "$PID_FILE"'
             new_pid_echo = (
                 'echo "$$" > "$PID_FILE"\n'
-                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then\n'
+                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then\n'
                 '    exec 201>"/tmp/pseofactory_supervisor.lock"\n'
                 '    if ! flock -w "${LOCK_WAIT_TIMEOUT:-60}" 201; then\n'
                 '        echo "Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL)." >&2\n'
@@ -2718,6 +2729,16 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             )
             if old_pid_echo in rf_new and "PSEUFACTORY_HOLDS_SUPERVISOR_LOCK" not in rf_new:
                 rf_new = rf_new.replace(old_pid_echo, new_pid_echo, 1)
+
+            old_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
+            new_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
+            if old_lock_cond in rf_new:
+                rf_new = rf_new.replace(old_lock_cond, new_lock_cond, 1)
+
+            old_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@"\n'
+            new_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@" </dev/null 200>&-\n'
+            if old_px_exec in rf_new:
+                rf_new = rf_new.replace(old_px_exec, new_px_exec, 1)
 
             if rf_new != rf_src:
                 run_factory_sh.write_text(rf_new, encoding="utf-8")

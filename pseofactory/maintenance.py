@@ -3622,7 +3622,13 @@ class RefactorCascadeEngine:
             and not getattr(adapter, "_build_asset_command", None)
             and not getattr(adapter, "_build_command", None)
         )
-        should_bulk_rebuild = bool(actionable_records) and (
+        all_in_place_overlays = bool(actionable_records) and all(
+            rec.reasons == [DriftReason.OPPORTUNITY_OVERLAY]
+            and Path(rec.asset_path).is_file()
+            and Path(rec.asset_path).suffix == ".html"
+            for rec in actionable_records
+        )
+        should_bulk_rebuild = bool(actionable_records) and not all_in_place_overlays and (
             any(DriftReason.ENGINE_HASH_DRIFT in rec.reasons for rec in actionable_records)
             or (total_assets > 0 and len(actionable_records) >= total_assets * 0.5)
             or (is_bulk_only_subprocess and len(actionable_records) >= 2)
@@ -4136,7 +4142,11 @@ class MaintenanceLifecycle:
                 and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
                 and "PYTEST_CURRENT_TEST" not in os.environ
             )
-            prod_full_build_done = False
+            prod_full_build_done = bool(
+                is_prod_subproc_tenant
+                and not getattr(adapter, "_build_asset_command", None)
+                and cascade_res.get("refactored", 0) > 0
+            )
             for item in approved_build:
                 b_slug = item.get("slug") if isinstance(item, dict) else str(item)
                 if dry_run:
