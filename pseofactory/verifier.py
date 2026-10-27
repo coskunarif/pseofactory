@@ -7987,6 +7987,8 @@ def audit_aeo_geo_three_plane_readiness(
                 issues.append(f"Plane 1 ({rel_p}): Missing isRelatedTo complementary tool links in JSON-LD")
             if '"https://schema.org/InStock"' not in joined_ld:
                 issues.append(f"Plane 1 ({rel_p}): Missing Offer availability='https://schema.org/InStock'")
+            if 'rel="tool-catalog"' not in raw_h and "rel='tool-catalog'" not in raw_h:
+                issues.append(f"Plane 2 ({rel_p}): Missing <link rel='tool-catalog' href='/catalog.json'> in <head>")
             if 'class="quick-answer' not in raw_h and "class='quick-answer" not in raw_h:
                 issues.append(f"Plane 3 ({rel_p}): Missing SSR .quick-answer block")
             if 'id="calculation-manifest"' not in raw_h and 'class="calculation-manifest"' not in raw_h:
@@ -8043,6 +8045,14 @@ def audit_aeo_geo_three_plane_readiness(
                     issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): Missing fields {missing_f}")
                 elif "?" not in str(t_entry.get("query_syntax", "")):
                     issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): query_syntax missing parameterized query string")
+                elif (
+                    "directly to your inbox" in str(t_entry.get("quick_answer", "")).lower()
+                    or "total acquisition price of" in str(t_entry.get("quick_answer", "")).lower()
+                    or len(str(t_entry.get("quick_answer", "")).split()) < 10
+                ):
+                    issues.append(
+                        f"Plane 2 (catalog.json:{t_entry.get('slug')}): quick_answer leaked form/footer text or too short"
+                    )
                 else:
                     catalog_tools_verified += 1
         except Exception as exc:

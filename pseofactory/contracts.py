@@ -8922,10 +8922,11 @@ def detect_asset_partner_roster_and_slot_issues(
             for k in found_partner_keys
             if k in registry
         }
-        if len(found_partner_keys) < 3 or len(distinct_brands) < 3:
+        min_req = 6 if prop == "gainhelm" else 3
+        if len(found_partner_keys) < min_req or len(distinct_brands) < min_req:
             issues.append(
                 f"Page {rel_path}: Multi-company partner roster violation: found {len(found_partner_keys)} partner keys "
-                f"({found_partner_keys}) and {len(distinct_brands)} distinct companies ({sorted(distinct_brands)}), minimum 3 required"
+                f"({found_partner_keys}) and {len(distinct_brands)} distinct companies ({sorted(distinct_brands)}), minimum {min_req} required"
             )
 
     # Check conversion slot coverage on interactive calculators

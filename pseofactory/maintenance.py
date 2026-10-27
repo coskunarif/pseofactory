@@ -5232,6 +5232,7 @@ def _needs_page_structure_geo_normalization(
     if check_aeo_geo_graph and '"@graph"' in html_content and (
         '"inLanguage"' not in html_content
         or '"dateModified"' not in html_content
+        or ('</head>' in html_content and 'rel="tool-catalog"' not in html_content)
         or ('class="quick-answer"' in html_content and '"SpeakableSpecification"' not in html_content)
         or (
             canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com")
@@ -7188,6 +7189,21 @@ def _normalize_page_structure_and_geo_parity(
         )
         if bc_updated != updated:
             updated = bc_updated
+            changed = True
+
+    if (
+        "</head>" in updated
+        and slug.lower() not in ("404",)
+        and not (canonical_url or "").endswith("/404.html")
+        and ('rel="tool-catalog"' not in updated or 'rel="publisher-media-kit"' not in updated)
+    ):
+        disc_links: List[str] = []
+        if 'rel="publisher-media-kit"' not in updated:
+            disc_links.append('  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">')
+        if 'rel="tool-catalog"' not in updated:
+            disc_links.append('  <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json">')
+        if disc_links:
+            updated = updated.replace("</head>", "\n".join(disc_links) + "\n</head>", 1)
             changed = True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -9392,6 +9408,8 @@ class RetroReflectionEngine:
                     or "$161,000" in ftxt
                     or "(1: 13.3%" in ftxt
                     or "(100%: 15%" in ftxt
+                    or "directly to your inbox" in ftxt
+                    or "Total acquisition price of" in ftxt
                 ):
                     return True
                 for r_slug in root_tool_slugs:
@@ -9399,12 +9417,16 @@ class RetroReflectionEngine:
                         return True
             except Exception:
                 return True
-        if (
-            root_tool_slugs
-            and (llms_path.is_file() or llms_full_path.is_file())
-            and not (dist_dir / "catalog.json").is_file()
-        ):
-            return True
+        if root_tool_slugs and (llms_path.is_file() or llms_full_path.is_file()):
+            cat_f = dist_dir / "catalog.json"
+            if not cat_f.is_file():
+                return True
+            try:
+                ct = cat_f.read_text(encoding="utf-8", errors="ignore")
+                if "directly to your inbox" in ct or "Total acquisition price of" in ct:
+                    return True
+            except Exception:
+                return True
         return False
 
     @classmethod
@@ -9459,12 +9481,41 @@ class RetroReflectionEngine:
                 re.IGNORECASE,
             )
             desc_txt = desc_m.group(1).strip() if desc_m else ""
-            qa_m = re.search(
-                r'<aside[^>]+class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)</p>',
+            qa_aside_m = re.search(
+                r'<aside[^>]+class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
+                raw_h,
+                re.IGNORECASE,
+            ) or re.search(
+                r'<div[^>]+class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>([\s\S]*?)</div>',
                 raw_h,
                 re.IGNORECASE,
             )
-            qa_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", qa_m.group(1))).strip() if qa_m else desc_txt
+            qa_txt = ""
+            if qa_aside_m:
+                aside_inner = re.sub(
+                    r'<div[^>]+class=["\'][^"\']*\bquick-answer-title\b[^"\']*["\'][^>]*>[\s\S]*?</div>',
+                    " ",
+                    qa_aside_m.group(1),
+                    flags=re.IGNORECASE,
+                )
+                qb_m = re.search(
+                    r'<div[^>]+class=["\'][^"\']*\bquick-answer-body\b[^"\']*["\'][^>]*>([\s\S]*?)</div>',
+                    aside_inner,
+                    re.IGNORECASE,
+                ) or re.search(
+                    r"<p[^>]*>([\s\S]*?)</p>",
+                    aside_inner,
+                    re.IGNORECASE,
+                )
+                raw_qa_src = qb_m.group(1) if qb_m else aside_inner
+                qa_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw_qa_src)).strip()
+            if (
+                not qa_txt
+                or "directly to your inbox" in qa_txt.lower()
+                or "total acquisition price of" in qa_txt.lower()
+                or len(qa_txt.split()) < 12
+            ):
+                qa_txt = desc_txt
             h1_txt = _clean_non_math_dashes(h1_txt)
             desc_txt = _clean_non_math_dashes(desc_txt)
             qa_txt = _clean_non_math_dashes(qa_txt)
@@ -9922,6 +9973,29 @@ class RetroReflectionEngine:
             except Exception:
                 pass
 
+        # Ensure all tool HTML pages also link to /catalog.json and /media-kit.json in <head>
+        tools_dir_prereq = d / "tools"
+        if tools_dir_prereq.is_dir():
+            for t_html in sorted(tools_dir_prereq.rglob("index.html")):
+                rel_tp = t_html.relative_to(d).as_posix()
+                if rel_tp == "tools/index.html":
+                    continue
+                try:
+                    raw_th = t_html.read_text(encoding="utf-8", errors="ignore")
+                    new_th = raw_th
+                    t_missing: List[str] = []
+                    if 'rel="publisher-media-kit"' not in new_th:
+                        t_missing.append('  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">')
+                    if 'rel="tool-catalog"' not in new_th:
+                        t_missing.append('  <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json">')
+                    if t_missing and "</head>" in new_th:
+                        new_th = new_th.replace("</head>", "\n".join(t_missing) + "\n</head>", 1)
+                        if new_th != raw_th:
+                            t_html.write_text(new_th, encoding="utf-8")
+                            updated_files.append(rel_tp)
+                except Exception:
+                    pass
+
         # 2. Governance redirect parity in dist/_redirects (placed at top of file within Cloudflare Pages 100-rule limit)
         redirects_file = d / "_redirects"
         if redirects_file.is_file() or ((d / "index.html").is_file() and (d / "tools" / "index.html").is_file()):
@@ -9966,6 +10040,28 @@ class RetroReflectionEngine:
                     if new_red != orig_red:
                         redirects_file.write_text(new_red, encoding="utf-8")
                         updated_files.append("_redirects")
+            except Exception:
+                pass
+
+        # 2b. Ensure dist/_headers includes canonical Link, Content-Type, and Cache-Control headers for /catalog.json and /media-kit.json
+        headers_file = d / "_headers"
+        if headers_file.is_file():
+            try:
+                orig_hdr = headers_file.read_text(encoding="utf-8")
+                new_hdr = orig_hdr
+                for ep_json in ("/catalog.json", "/media-kit.json"):
+                    if f"\n{ep_json}\n" not in f"\n{new_hdr}\n":
+                        block_hdr = (
+                            f"\n{ep_json}\n"
+                            f"  Content-Type: application/json; charset=utf-8\n"
+                            f"  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800\n"
+                            f"  X-Robots-Tag: index, follow\n"
+                            f'  Link: <{canon}{ep_json}>; rel="canonical"\n'
+                        )
+                        new_hdr = new_hdr.rstrip() + "\n" + block_hdr
+                if new_hdr != orig_hdr:
+                    headers_file.write_text(new_hdr, encoding="utf-8")
+                    updated_files.append("_headers")
             except Exception:
                 pass
 
@@ -10188,7 +10284,13 @@ class RetroReflectionEngine:
                     property_id.lower() == "gainhelm"
                     and 'href="/r/' in content
                     and 'data-restricted-public-service="true"' not in content
-                    and ('data-partner-roster=' not in content or 'data-cta-slot="calculator_result_inline"' not in content)
+                    and (
+                        'data-partner-roster=' not in content
+                        or 'data-cta-slot="calculator_result_inline"' not in content
+                        or "sprinto_compliance" not in content
+                        or "coalition_cyber_insurance" not in content
+                        or "cobalt_pentest" not in content
+                    )
                 )
                 or any(
                     "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
@@ -11023,6 +11125,24 @@ class RetroReflectionEngine:
                                             wf_f.write_text(json.dumps(wf_obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                                     except Exception:
                                         pass
+            except Exception:
+                pass
+
+        runner_dist_map = {
+            Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/profithelm-platform/_work/profithelm-platform/profithelm-platform/dist"
+            ),
+            Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
+            ),
+            Path("/home/ubuntuadmin/projects/gainhelm/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist"
+            ),
+        }
+        runner_dist = runner_dist_map.get(d)
+        if runner_dist and runner_dist.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ:
+            try:
+                shutil.copytree(d, runner_dist, dirs_exist_ok=True)
             except Exception:
                 pass
 

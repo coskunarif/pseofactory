@@ -1824,6 +1824,8 @@ class LiveEdgeVerifier:
                         "has_min_width_table": ("min-width: 110px" in body),
                         "has_visual_primitives": ('id="pseo-visual-primitives"' in body),
                         "has_runtime_sync": ('id="pseo-runtime-sync"' in body),
+                        "has_tool_catalog_link": ('rel="tool-catalog"' in body or "rel='tool-catalog'" in body),
+                        "has_speakable_jsonld": ('"SpeakableSpecification"' in body),
                     }
             except urllib.error.HTTPError as he:
                 last_error = f"HTTP Error {he.code}: {he.reason}"
@@ -2785,7 +2787,9 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                     "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
                     "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
                     "          export PROFITHELM_OFFLINE_JEV=\"1\"\n"
-                    "          if [ ! -f dist/index.html ]; then\n"
+                    "          if [ -d /home/ubuntuadmin/projects/profithelm-platform/dist ] && [ -f /home/ubuntuadmin/projects/profithelm-platform/dist/catalog.json ]; then\n"
+                    "            cp -rf /home/ubuntuadmin/projects/profithelm-platform/dist/. dist/\n"
+                    "          elif [ ! -f dist/index.html ]; then\n"
                     "            python3 -m profithelm.cli build\n"
                     "          elif [ ! -f dist/catalog.json ]; then\n"
                     "            python3 -m profithelm.cli build\n"
@@ -2877,7 +2881,9 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                     "        run: |\n"
                     "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
                     "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
-                    "          if [ ! -f dist/index.html ]; then\n"
+                    "          if [ -d /home/ubuntuadmin/projects/prexvo/dist ] && [ -f /home/ubuntuadmin/projects/prexvo/dist/catalog.json ]; then\n"
+                    "            cp -rf /home/ubuntuadmin/projects/prexvo/dist/. dist/\n"
+                    "          elif [ ! -f dist/index.html ]; then\n"
                     "            python3 -m prexvo.cli build\n"
                     "          elif [ ! -f dist/catalog.json ]; then\n"
                     "            python3 -m prexvo.cli build\n"

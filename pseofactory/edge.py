@@ -82,6 +82,8 @@ def build_edge_headers(
         "/feed.xml",
         "/llms.txt",
         "/llms-full.txt",
+        "/catalog.json",
+        "/media-kit.json",
         "/sitemap.xml",
         "/sitemap-hubs.xml",
         "/sitemap-leaves.xml",

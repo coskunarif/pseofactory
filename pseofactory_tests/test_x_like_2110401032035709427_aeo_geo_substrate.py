@@ -254,3 +254,95 @@ def test_plane_2_catalog_json_and_three_plane_readiness_audit(tmp_path: Path) ->
     assert readiness["status"] == "PASS", readiness["issues"]
     assert readiness["plane_2_catalog_feeds_and_manifests"]["catalog_json_present"] is True
     assert readiness["plane_2_catalog_feeds_and_manifests"]["catalog_tools_verified"] == 1
+
+
+def test_gainhelm_gsc_reposition_retains_six_company_roster_and_quick_answer_boundary(tmp_path: Path) -> None:
+    """
+    Verifies that:
+    1. GainHelm bind_asset_partner_roster and reposition_affiliate_placements_from_gsc_signals
+       preserve all 6 distinct GRC partner companies (Vanta, Drata, Sprinto, Thoropass,
+       Coalition, Cobalt) even when data-gsc-tier is stamped.
+    2. sync_tenant_llms_manifests extracts .quick-answer-body inside <aside class="quick-answer">
+       without crossing </aside> into subsequent form/newsletter <p> tags.
+    3. sync_tenant_publisher_prerequisites injects /catalog.json and /media-kit.json headers
+       into dist/_headers and <link rel="tool-catalog"> into tool HTML <head>.
+    """
+    from pseofactory.affiliates import (
+        bind_asset_partner_roster,
+        reposition_affiliate_placements_from_gsc_signals,
+    )
+
+    roster = bind_asset_partner_roster(
+        property_id="gainhelm",
+        slug="soc-2-audit-cost-calculator",
+        query="soc 2 audit cost calculator",
+    )
+    assert roster["distinct_companies_count"] == 6
+    assert roster["distinct_companies"] == [
+        "Vanta",
+        "Drata",
+        "Sprinto",
+        "Thoropass",
+        "Coalition",
+        "Cobalt",
+    ]
+
+    stale_3_partner_gh = (
+        '<!doctype html><html lang="en"><head>'
+        '<title>SOC 2 Audit Cost Calculator 2026 | GainHelm</title>'
+        '<link rel="canonical" href="https://gainhelm.com/tools/soc-2-audit-cost-calculator/">'
+        '</head><body><main class="container">'
+        '<h1>SOC 2 Audit Cost Calculator</h1>'
+        '<aside class="quick-answer"><div class="quick-answer-title">Key Finding</div>'
+        '<div class="quick-answer-body">Under AICPA SSAE 18 (AT-C Section 205), a 75-employee enterprise incurs $78,100.40 in Year-1 SOC 2 Type II certification costs across CPA audit fees and GRC automation.</div>'
+        '</aside>'
+        '<p>Get automated scenario PDF worksheets and statutory expiration updates directly to your inbox.</p>'
+        '<div class="ftc-disclosure-card">FTC Partner Compensation Disclosure: Sponsored referral links.</div>'
+        '<section id="calculator-workspace-anchor" class="interactive-calculator-container">'
+        '<div class="calc-grid"><div class="calc-results-column" aria-live="polite">'
+        '<h3 class="calc-column-title">Deterministic Statutory &amp; Audit Outputs</h3>'
+        '</div></div></section>'
+        '<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
+        'data-partner="vanta_security" data-primary-partner="vanta_security" '
+        'data-partner-roster="vanta_security,drata_compliance,thoropass_audit" '
+        'data-partner-companies="Vanta,Drata,Thoropass" data-gsc-tier="BASELINE_MULTI_SLOT">'
+        '<h2>Verified Partners</h2>'
+        '<div class="partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>'
+        '</section></main></body></html>'
+    )
+    repositioned_gh, rep = reposition_affiliate_placements_from_gsc_signals(
+        stale_3_partner_gh,
+        property_id="gainhelm",
+        slug="soc-2-audit-cost-calculator",
+    )
+    healed_gh = normalize_html_callout_message_match(repositioned_gh, property_id="gainhelm")
+    assert rep["distinct_companies_count"] == 6
+    res = verify_html_partner_roster_and_slot_contract(
+        healed_gh,
+        property_id="gainhelm",
+        slug="soc-2-audit-cost-calculator",
+        rel_path="tools/soc-2-audit-cost-calculator/index.html",
+    )
+    assert res["status"] == "PASS", res["issues"]
+    assert len(res["partner_keys"]) == 6
+
+    dist = tmp_path / "dist"
+    t_dir = dist / "tools" / "soc-2-audit-cost-calculator"
+    t_dir.mkdir(parents=True, exist_ok=True)
+    (t_dir / "index.html").write_text(healed_gh, encoding="utf-8")
+    (dist / "index.html").write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    (dist / "tools" / "index.html").write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    (dist / "_headers").write_text("/*\n  X-Content-Type-Options: nosniff\n", encoding="utf-8")
+    (dist / "llms.txt").write_text("# GainHelm\n\n## Calculators\n", encoding="utf-8")
+    (dist / "llms-full.txt").write_text("# GainHelm\n", encoding="utf-8")
+
+    RetroReflectionEngine.sync_tenant_llms_manifests(dist, "gainhelm", canonical_base="https://gainhelm.com")
+    RetroReflectionEngine.sync_tenant_publisher_prerequisites(dist, "gainhelm", canonical_base="https://gainhelm.com")
+
+    cat_obj = json.loads((dist / "catalog.json").read_text(encoding="utf-8"))
+    qa_extracted = cat_obj["tools"][0]["quick_answer"]
+    assert "AICPA SSAE 18" in qa_extracted
+    assert "directly to your inbox" not in qa_extracted
+    assert 'rel="tool-catalog"' in (t_dir / "index.html").read_text(encoding="utf-8")
+    assert "/catalog.json" in (dist / "_headers").read_text(encoding="utf-8")
+

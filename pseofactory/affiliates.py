@@ -5653,9 +5653,15 @@ def normalize_html_callout_message_match(
             if (
                 'data-restricted-public-service="true"' in sec_html
                 or 'data-commercial-offers="none"' in sec_html
-                or ("data-gsc-tier=" in sec_html and "data-partner-roster=" in sec_html)
+                or (
+                    "data-gsc-tier=" in sec_html
+                    and "data-partner-roster=" in sec_html
+                    and all(pk in sec_html for pk in gainhelm_roster_keys)
+                )
             ):
                 return sec_html
+            gsc_tier_m = re.search(r'data-gsc-tier=["\']([^"\']+)["\']', sec_html, flags=re.I)
+            gsc_tier_attr = f' data-gsc-tier="{html_lib.escape(gsc_tier_m.group(1))}"' if gsc_tier_m else ""
             cards_html: List[str] = []
             for idx, pk in enumerate(gainhelm_roster_keys, start=1):
                 p_obj = GAINHELM_AFFILIATES.get(pk)
@@ -5684,7 +5690,8 @@ def normalize_html_callout_message_match(
                 'data-partnership-model="QUALIFIED_LEAD_CPL" '
                 f'data-partner-models="{gainhelm_models_csv}" '
                 f'data-partner-roster="{gainhelm_roster_csv}" '
-                f'data-partner-companies="{gainhelm_companies_csv}" '
+                f'data-partner-companies="{gainhelm_companies_csv}"'
+                f'{gsc_tier_attr} '
                 'style="margin: 1.5rem 0;">\n'
                 '      <div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
                 f'{grid_inner}\n'
@@ -6264,7 +6271,7 @@ VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
     "sales_tax_1099_nexus": ["crest_capital", "rippling", "gusto", "mercury"],
     "federal_state_tax_brackets": ["crest_capital", "rippling", "mercury", "gusto"],
     "saas_unit_economics_spend": ["mercury", "rippling", "gusto", "crest_capital"],
-    "b2b_cyber_compliance": ["vanta_security", "drata_compliance", "thoropass_audit", "sprinto_compliance", "coalition_cyber_insurance", "cobalt_pentest", "rippling", "crest_capital", "mercury", "gusto"],
+    "b2b_cyber_compliance": ["vanta_security", "drata_compliance", "sprinto_compliance", "thoropass_audit", "coalition_cyber_insurance", "cobalt_pentest", "rippling", "crest_capital", "mercury", "gusto"],
     "commercial_solar_energy": ["crest_capital", "mercury", "rippling", "gusto"],
     "construction_contractor_finance": ["suretybonds_direct", "crest_capital", "rippling", "mercury"],
     "medical_practice_capex": ["crest_capital", "mercury", "rippling", "gusto"],
@@ -6922,7 +6929,7 @@ def bind_asset_partner_roster(
         ["splash_financial", "sofi", "earnest", "credible", "laurel_road"]
         if prop == "prexvo"
         else (
-            ["vanta_security", "drata_compliance", "thoropass_audit", "sprinto_compliance", "coalition_cyber_insurance", "cobalt_pentest"]
+            ["vanta_security", "drata_compliance", "sprinto_compliance", "thoropass_audit", "coalition_cyber_insurance", "cobalt_pentest"]
             if prop == "gainhelm"
             else ["crest_capital", "gusto", "rippling", "mercury", "taxslayer", "coinledger", "kalshi", "lawdepot"]
         )
@@ -6934,7 +6941,11 @@ def bind_asset_partner_roster(
     # 2. Select diversified multi-company roster prioritizing distinct underlying company brands first
     selected_keys: List[str] = []
     seen_brands: Set[str] = set()
-    target_roster_size = 5 if prop == "prexvo" else max(3, int(min_companies))
+    target_roster_size = (
+        5
+        if prop == "prexvo"
+        else (6 if prop == "gainhelm" else max(3, int(min_companies)))
+    )
 
     for ck in candidate_keys_ordered:
         brand_name = COMPANY_BRAND_BY_PARTNER_KEY.get(ck, ck.replace("_", " ").title())

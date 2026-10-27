@@ -1733,6 +1733,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <link rel="canonical" href="{canonical_base}/tools/{slug}/" />
   <link rel="alternate" hreflang="en-US" href="{canonical_base}/tools/{slug}/" />
   <link rel="alternate" hreflang="x-default" href="{canonical_base}/tools/{slug}/" />
+  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json" />
+  <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json" />
   <style>
     :root {{
       /* Surfaces & Canvas */
