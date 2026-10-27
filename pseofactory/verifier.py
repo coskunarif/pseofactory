@@ -1533,7 +1533,11 @@ class MasterSEOVerifier:
                 "FACTORY_BRAND_NAME",
                 "Prexvo"
                 if "prexvo" in self.domain.lower()
-                else ("ProfitHelm" if "profithelm" in self.domain.lower() else ""),
+                else (
+                    "GainHelm"
+                    if "gainhelm" in self.domain.lower()
+                    else ("ProfitHelm" if "profithelm" in self.domain.lower() else "")
+                ),
             )
         )
         self.dist_dir = (
@@ -1584,10 +1588,10 @@ class MasterSEOVerifier:
                         prop_id = "profithelm"
                     elif "prexvo" in dist_low:
                         prop_id = "prexvo"
-                    elif "gainhelm" in str(self.domain).lower() or "gainhelm" in str(self.brand_name).lower():
-                        prop_id = "gainhelm"
                     elif "prexvo" in str(self.domain).lower() or "prexvo" in str(self.brand_name).lower():
                         prop_id = "prexvo"
+                    elif "gainhelm" in str(self.domain).lower() or "gainhelm" in str(self.brand_name).lower():
+                        prop_id = "gainhelm"
                     else:
                         prop_id = "profithelm"
                     safe_canon = (
@@ -4504,7 +4508,7 @@ class MasterSEOVerifier:
             resolved_target_str = str(target.resolve())
             allow_disk_cache = (
                 getattr(self.is_calculation_leaf, "__name__", None)
-                in (None, "_profithelm_calculation_leaf", "_prexvo_calculation_leaf")
+                in (None, "_profithelm_calculation_leaf", "_prexvo_calculation_leaf", "_gainhelm_calculation_leaf")
                 and "/tmp/" not in resolved_target_str
                 and "/pytest-" not in resolved_target_str
             )

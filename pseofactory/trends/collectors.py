@@ -241,7 +241,7 @@ class GSCSearchConsoleCollector(BaseSuggestCollector):
     ):
         super().__init__("gsc_search_console", timeout=timeout, retries=retries)
         self.db_path = db_path
-        self.properties = properties or ["profithelm", "prexvo"]
+        self.properties = properties or ["profithelm", "prexvo", "gainhelm"]
 
     def fetch_suggestions(self, query: str = "") -> List[str]:
         spikes = self.harvest_gsc_spikes(seed_filter=query)
@@ -537,6 +537,50 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "PCT",
                 "BLS-FRED",
                 {2024: 3.40, 2025: 3.10, 2026: 2.80, 2027: 2.50, 2028: 2.30, 2029: 2.20, 2030: 2.10},
+            ),
+            (
+                "dod_cmmc_l2_c3pao_mandatory_pct",
+                "gainhelm",
+                "US-DOD",
+                "32 CFR Part 170 / DFARS 252.204-7021",
+                "cmmc_level2_c3pao_solicitation_mandate_pct",
+                "DoD CMMC 2.0 Level 2 C3PAO Solicitation Inclusion Phased Rollout",
+                "PCT",
+                "DOD-CIO",
+                {2024: 0.0, 2025: 15.0, 2026: 50.0, 2027: 85.0, 2028: 100.0, 2029: 100.0, 2030: 100.0},
+            ),
+            (
+                "hhs_ocr_hipaa_tier4_annual_cap_usd",
+                "gainhelm",
+                "US-FED",
+                "45 CFR 160.404 / 42 U.S.C. 1320d-5",
+                "hipaa_tier4_statutory_annual_penalty_cap_usd",
+                "HHS OCR HIPAA Tier 4 Willful Neglect Uncorrected Annual Statutory Penalty Cap",
+                "USD",
+                "HHS-OCR",
+                {2024: 2067813.0, 2025: 2134831.0, 2026: 2194606.0, 2027: 2249471.0, 2028: 2301209.0, 2029: 2351835.0, 2030: 2401224.0},
+            ),
+            (
+                "bls_soc_15_1212_infosec_hourly_wage_usd",
+                "gainhelm",
+                "US-MACRO",
+                "BLS OEWS SOC 15-1212",
+                "infosec_engineer_burdened_hourly_rate_usd",
+                "BLS SOC 15-1212 Information Security Engineer Fully Burdened Hourly Rate",
+                "USD",
+                "BLS-OEWS",
+                {2024: 89.0, 2025: 92.0, 2026: 95.0, 2027: 98.5, 2028: 102.0, 2029: 105.5, 2030: 109.0},
+            ),
+            (
+                "aicpa_soc2_type2_median_cpa_fee_usd",
+                "gainhelm",
+                "US-CPA",
+                "AICPA SSAE 18 AT-C Section 205",
+                "soc2_type2_median_cpa_attestation_fee_usd",
+                "AICPA SSAE 18 SOC 2 Type II Mid-Market CPA Firm Attestation Fee Benchmark",
+                "USD",
+                "AICPA-BENCHMARK",
+                {2024: 26000.0, 2025: 27000.0, 2026: 28000.0, 2027: 29200.0, 2028: 30400.0, 2029: 31600.0, 2030: 32800.0},
             ),
         ]
         records = []

@@ -514,7 +514,7 @@ class JevEngine:
             and (
                 (len(rec_partners) >= 1 and bounty_est_val >= 25.0)
                 or is_restricted_ps
-                or prop_id_resolved not in ("profithelm", "prexvo")
+                or prop_id_resolved not in ("profithelm", "prexvo", "gainhelm")
             )
         )
         is_non_tool_question = (

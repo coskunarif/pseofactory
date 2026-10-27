@@ -5400,7 +5400,11 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
             return True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
-    inferred_tenant = "prexvo" if "prexvo.com" in html_content.lower() or "34 cfr" in html_content.lower() else "profithelm"
+    inferred_tenant = (
+        "prexvo"
+        if "prexvo.com" in html_content.lower() or "34 cfr" in html_content.lower()
+        else ("gainhelm" if "gainhelm.com" in html_content.lower() else "profithelm")
+    )
     if TruthReconciliationEngine.audit_html_truth_reconciliation(
         html_content, tenant=inferred_tenant, include_fact_store=False
     ):
@@ -9699,6 +9703,9 @@ class RetroReflectionEngine:
             ),
             Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
                 "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
+            ),
+            Path("/home/ubuntuadmin/projects/gainhelm/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist"
             ),
         }
         runner_dist = runner_dist_map.get(d)

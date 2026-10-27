@@ -285,7 +285,7 @@ class FlexibleSchemaAdapter:
         # If explicit property_id passed and conforms, respect it if unassigned
         if "property_id" in item and property_id == "unassigned":
             explicit_p = str(item["property_id"]).strip()
-            if explicit_p in ("prexvo", "profithelm", "unassigned"):
+            if explicit_p in ("prexvo", "profithelm", "gainhelm", "unassigned"):
                 property_id = explicit_p
 
         assert_no_forbidden_dashes(property_id, "FlexibleSchemaAdapter.property_id")

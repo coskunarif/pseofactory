@@ -116,6 +116,25 @@ PROFITHELM_STATUTORY_TOKENS: List[str] = [
     "financial simulation",
 ]
 
+GAINHELM_STATUTORY_TOKENS: List[str] = [
+    "ssae 18",
+    "soc 2 audit",
+    "soc 2 type",
+    "cmmc 2.0",
+    "32 cfr part 170",
+    "nist 800-171",
+    "sprs score",
+    "iso 27001",
+    "iso 27006",
+    "45 cfr 160.404",
+    "hipaa violation penalty",
+    "hitrust certification",
+    "fedramp authorization",
+    "pci dss 4.0",
+    "penetration testing cost",
+    "cyber liability insurance",
+]
+
 GREENFIELD_DISCOVERY_SEEDS: List[str] = [
     "workers comp calculator",
     "surety bond cost calculator",
@@ -171,41 +190,31 @@ class TrendCronRunner:
 
         is_prexvo = any(tok in q_lower for tok in PREXVO_STATUTORY_TOKENS)
         is_profithelm = any(tok in q_lower for tok in PROFITHELM_STATUTORY_TOKENS) or ("1031" in q_lower and "exchange" in q_lower)
+        is_gainhelm = any(tok in q_lower for tok in GAINHELM_STATUTORY_TOKENS)
 
-        if is_prexvo and not is_profithelm:
-            foreign = self.scanner.scan_text(query, "prexvo")
+        matched_props = [
+            p for p, flag in (("prexvo", is_prexvo), ("profithelm", is_profithelm), ("gainhelm", is_gainhelm))
+            if flag
+        ]
+        if len(matched_props) == 1:
+            target_prop = matched_props[0]
+            foreign = self.scanner.scan_text(query, target_prop)
             if foreign:
                 return {
-                    "property_id": "prexvo",
+                    "property_id": target_prop,
                     "basis": "statutory_token",
                     "contamination_scan_passed": 0,
                     "foreign_tokens": foreign,
                 }
             return {
-                "property_id": "prexvo",
+                "property_id": target_prop,
                 "basis": "statutory_token",
                 "contamination_scan_passed": 1,
                 "foreign_tokens": [],
             }
 
-        if is_profithelm and not is_prexvo:
-            foreign = self.scanner.scan_text(query, "profithelm")
-            if foreign:
-                return {
-                    "property_id": "profithelm",
-                    "basis": "statutory_token",
-                    "contamination_scan_passed": 0,
-                    "foreign_tokens": foreign,
-                }
-            return {
-                "property_id": "profithelm",
-                "basis": "statutory_token",
-                "contamination_scan_passed": 1,
-                "foreign_tokens": [],
-            }
-
-        if is_prexvo and is_profithelm:
-            # Both matched: ambiguous and contaminated
+        if len(matched_props) > 1:
+            # Multiple matched: ambiguous and contaminated
             return {
                 "property_id": "unassigned",
                 "basis": "cross_contaminated",
@@ -385,15 +394,17 @@ class TrendCronRunner:
             site_impressions_by_prop: Dict[str, int] = {
                 "prexvo": total_site_impressions,
                 "profithelm": total_site_impressions,
+                "gainhelm": total_site_impressions,
                 "unassigned": total_site_impressions,
             }
             ceiling_by_prop: Dict[str, Optional[Dict[str, Any]]] = {
                 "prexvo": None,
                 "profithelm": None,
+                "gainhelm": None,
                 "unassigned": None,
             }
-            gsc_qp_by_prop_slug: Dict[str, Dict[str, Dict[str, Any]]] = {"prexvo": {}, "profithelm": {}}
-            outbound_engagement_by_prop: Dict[str, Dict[str, Any]] = {"prexvo": {}, "profithelm": {}}
+            gsc_qp_by_prop_slug: Dict[str, Dict[str, Dict[str, Any]]] = {"prexvo": {}, "profithelm": {}, "gainhelm": {}}
+            outbound_engagement_by_prop: Dict[str, Dict[str, Any]] = {"prexvo": {}, "profithelm": {}, "gainhelm": {}}
             try:
                 from pseofactory.affiliates import (
                     GSC_EMPIRICAL_CLUSTER_TRAFFIC,
@@ -401,7 +412,7 @@ class TrendCronRunner:
                 )
 
                 reg = TenantRegistry.default()
-                for p_id in ("prexvo", "profithelm"):
+                for p_id in ("prexvo", "profithelm", "gainhelm"):
                     try:
                         adapter = reg.get_adapter(p_id)
                         existing_tools_map[p_id] = [dict(t) for t in (getattr(adapter, "tools", []) or [])]
@@ -420,12 +431,12 @@ class TrendCronRunner:
                     except Exception:
                         existing_tools_map[p_id] = []
             except Exception:
-                existing_tools_map = {"prexvo": [], "profithelm": []}
+                existing_tools_map = {"prexvo": [], "profithelm": [], "gainhelm": []}
                 GSC_EMPIRICAL_CLUSTER_TRAFFIC = {}
 
-            gsc_rows_by_prop: Dict[str, List[Dict[str, Any]]] = {"prexvo": [], "profithelm": []}
+            gsc_rows_by_prop: Dict[str, List[Dict[str, Any]]] = {"prexvo": [], "profithelm": [], "gainhelm": []}
             try:
-                for p_id in ("prexvo", "profithelm"):
+                for p_id in ("prexvo", "profithelm", "gainhelm"):
                     if total_site_impressions == 500:
                         daily_m = db.get_gsc_daily_metrics(p_id, days=28)
                         if daily_m:
@@ -451,7 +462,7 @@ class TrendCronRunner:
                             "ctr": wr.ctr,
                             "position": wr.position,
                         })
-                        p_parts = [pt for pt in wr.page.split("/") if pt and pt not in ("https:", "http:", "profithelm.com", "prexvo.com", "tools")]
+                        p_parts = [pt for pt in wr.page.split("/") if pt and pt not in ("https:", "http:", "profithelm.com", "prexvo.com", "gainhelm.com", "tools")]
                         s_key = p_parts[0].lower() if p_parts else sanitize_url_slug(wr.query)
                         full_subroute_key = "/".join(p_parts).lower() if p_parts else s_key
                         for key_cand in {s_key, full_subroute_key}:
@@ -849,7 +860,7 @@ class TrendCronRunner:
                         cand.metadata["corroborating_sources"] = list(raw_meta["corroborating_sources"])
                     if "source_count" in raw_meta:
                         cand.metadata["source_count"] = int(raw_meta["source_count"])
-                    if assigned_property in ("prexvo", "profithelm") and "closed_loop_feedback" not in cand.metadata:
+                    if assigned_property in ("prexvo", "profithelm", "gainhelm") and "closed_loop_feedback" not in cand.metadata:
                         prop_gsc_map = gsc_qp_by_prop_slug.get(assigned_property, {})
                         prop_eng = outbound_engagement_by_prop.get(assigned_property, {})
                         cluster_tokens = [
@@ -900,7 +911,7 @@ class TrendCronRunner:
                             "synthetic_probe_clicks_filtered": int(prop_eng.get("synthetic_probe_clicks_filtered", 0) or 0),
                             "consecutive_cycles": consecutive_streak,
                         }
-                if assigned_property in ("prexvo", "profithelm"):
+                if assigned_property in ("prexvo", "profithelm", "gainhelm"):
                     cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
                         assigned_property, clean_q
                     )
@@ -931,7 +942,7 @@ class TrendCronRunner:
                 spec_payload = None
                 target_asset = decision.target_asset_type
 
-                if assigned_property in ("prexvo", "profithelm"):
+                if assigned_property in ("prexvo", "profithelm", "gainhelm"):
                     # Existing tenant: qualify improvements directly
                     if decision.action == "BUILD_PAGE":
                         spec_payload = decision.candidate_spec

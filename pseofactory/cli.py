@@ -107,7 +107,33 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 print(f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} ({'; '.join(d.details)})")
         return 0 if report.status == "PASS" else 1
 
-    property_id = args.property or "prexvo"
+    property_id = (args.property or "prexvo").strip().lower()
+    if property_id == "all":
+        all_passed = True
+        reports_dict: Dict[str, Any] = {}
+        for p_id in ("profithelm", "prexvo", "gainhelm"):
+            adp = reg.get_adapter(p_id)
+            rep = audit_property_assets(
+                property_id=p_id,
+                adapter=adp,
+                check_engine_drift=getattr(args, "check_engine_drift", False),
+            )
+            reports_dict[p_id] = rep.to_dict()
+            if not args.json:
+                print(
+                    f"[{rep.status}] Property: {rep.property_id} | Total: {rep.total_assets_checked} "
+                    f"| Compliant: {rep.compliant_assets_count} | Drifted: {rep.drifted_assets_count}"
+                )
+                for d in rep.drifted_assets:
+                    print(
+                        f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} "
+                        f"({'; '.join(d.details)})"
+                    )
+            if rep.status != "PASS":
+                all_passed = False
+        if args.json:
+            print(json.dumps({"status": "PASS" if all_passed else "DRIFT", "properties": reports_dict}, indent=2))
+        return 0 if all_passed else 1
     try:
         adapter = reg.get_adapter(property_id)
     except KeyError:
@@ -1886,7 +1912,7 @@ def build_parser() -> argparse.ArgumentParser:
         "gsc-ceiling",
         help="Analyze 480-day Search Console trajectory and detect algorithmic glass ceilings",
     )
-    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo"], help="Target property identifier")
+    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo", "gainhelm"], help="Target property identifier")
     p_ceiling.add_argument("--days", type=int, default=480, help="Historical time series lookback days (default: 480)")
     p_ceiling.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing historical GSC records")
     p_ceiling.add_argument("--ceiling-threshold", type=float, default=0.35, help="Algorithmic ceiling dampening threshold (default: 0.35)")
@@ -2009,6 +2035,7 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
             f"[PASS] Lead Monitor: total={summary['total_leads']} | "
             f"profithelm={summary['by_property'].get('profithelm', 0)} | "
             f"prexvo={summary['by_property'].get('prexvo', 0)} | "
+            f"gainhelm={summary['by_property'].get('gainhelm', 0)} | "
             f"fulfilled={summary['transactional_fulfilled_count']} | "
             f"action_bus={summary['action_bus_dispatched_count']} | "
             f"pipeline_usd=${summary['total_pipeline_calculated_usd']:,.2f} | "
@@ -2026,7 +2053,7 @@ def cmd_north_star(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
     cards = {}
     for p_id in props:
         cards[p_id] = evaluate_north_star_targets(property_id=p_id, persist=not dry_run)
@@ -2056,7 +2083,7 @@ def cmd_cohort_reflection(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
     reports = {}
     for p_id in props:
         reports[p_id] = evaluate_closed_loop_cohort_reflection(
@@ -2093,7 +2120,7 @@ def cmd_seo_workflows(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
     reports = {}
     for p_id in props:
         reports[p_id] = run_all_seo_growth_workflows(

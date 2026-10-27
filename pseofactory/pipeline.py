@@ -40,6 +40,7 @@ from pseofactory.trends.filters import NoiseFilter
 from pseofactory.trends.treg_checker import TregChecker
 from pseofactory.trends.jev_engine import JevEngine
 from pseofactory.trends.cron import (
+    GAINHELM_STATUTORY_TOKENS,
     PREXVO_STATUTORY_TOKENS,
     PROFITHELM_STATUTORY_TOKENS,
 )
@@ -345,6 +346,7 @@ class FactoryPipeline:
         is_profithelm = any(tok in q_lower for tok in PROFITHELM_STATUTORY_TOKENS) or (
             "1031" in q_lower and "exchange" in q_lower
         )
+        is_gainhelm = any(tok in q_lower for tok in GAINHELM_STATUTORY_TOKENS)
 
         if explicit_tenant:
             tenant_norm = explicit_tenant.lower().strip()
@@ -353,6 +355,8 @@ class FactoryPipeline:
                 if is_profithelm:
                     token_found = "1031 exchange" if "1031" in q_lower else "profithelm statutory token"
                     foreign = list(set(foreign + [token_found]))
+                if is_gainhelm:
+                    foreign = list(set(foreign + ["gainhelm statutory token"]))
                 if foreign:
                     return {
                         "property_id": "prexvo",
@@ -371,6 +375,8 @@ class FactoryPipeline:
                 if is_prexvo:
                     token_found = "title iv" if "title iv" in q_lower else "prexvo statutory token"
                     foreign = list(set(foreign + [token_found]))
+                if is_gainhelm:
+                    foreign = list(set(foreign + ["gainhelm statutory token"]))
                 if foreign:
                     return {
                         "property_id": "profithelm",
@@ -384,8 +390,27 @@ class FactoryPipeline:
                     "contamination_scan_passed": 1,
                     "foreign_tokens": [],
                 }
+            elif tenant_norm == "gainhelm":
+                foreign = self.scanner.scan_text(query, "gainhelm")
+                if is_prexvo:
+                    foreign = list(set(foreign + ["prexvo statutory token"]))
+                if is_profithelm:
+                    foreign = list(set(foreign + ["profithelm statutory token"]))
+                if foreign:
+                    return {
+                        "property_id": "gainhelm",
+                        "basis": "cross_contaminated",
+                        "contamination_scan_passed": 0,
+                        "foreign_tokens": foreign,
+                    }
+                return {
+                    "property_id": "gainhelm",
+                    "basis": "explicit_tenant",
+                    "contamination_scan_passed": 1,
+                    "foreign_tokens": [],
+                }
 
-        if is_prexvo and not is_profithelm:
+        if is_prexvo and not is_profithelm and not is_gainhelm:
             foreign = self.scanner.scan_text(query, "prexvo")
             if foreign:
                 return {
@@ -401,7 +426,7 @@ class FactoryPipeline:
                 "foreign_tokens": [],
             }
 
-        if is_profithelm and not is_prexvo:
+        if is_profithelm and not is_prexvo and not is_gainhelm:
             foreign = self.scanner.scan_text(query, "profithelm")
             if foreign:
                 return {
@@ -417,7 +442,23 @@ class FactoryPipeline:
                 "foreign_tokens": [],
             }
 
-        if is_prexvo and is_profithelm:
+        if is_gainhelm and not is_prexvo and not is_profithelm:
+            foreign = self.scanner.scan_text(query, "gainhelm")
+            if foreign:
+                return {
+                    "property_id": "gainhelm",
+                    "basis": "cross_contaminated",
+                    "contamination_scan_passed": 0,
+                    "foreign_tokens": foreign,
+                }
+            return {
+                "property_id": "gainhelm",
+                "basis": "statutory_token",
+                "contamination_scan_passed": 1,
+                "foreign_tokens": [],
+            }
+
+        if sum((1 if is_prexvo else 0, 1 if is_profithelm else 0, 1 if is_gainhelm else 0)) >= 2:
             return {
                 "property_id": "unassigned",
                 "basis": "cross_contaminated",

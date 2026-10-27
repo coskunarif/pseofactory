@@ -516,15 +516,19 @@ class MonetizationHub:
             raise ValueError(f"Invalid or unsafe affiliate URL: '{direct_url}'")
 
         # Prexvo student loan isolation gate
+        from pseofactory.affiliates import GAINHELM_AFFILIATES
         if prop_clean == "prexvo":
             if (
                 program_key in B2B_PARTNER_KEYS
                 or program_key in PROFITHELM_AFFILIATES
+                or program_key in GAINHELM_AFFILIATES
                 or program_key in (
                     "mercury", "ramp", "rho", "rippling", "gusto", "stripe",
                     "coinledger", "koinly", "turbotax", "taxslayer",
                     "crest_capital", "ipx1031", "exeter1031", "kalshi",
-                    "interactive_brokers"
+                    "interactive_brokers", "vanta_security", "drata_compliance",
+                    "sprinto_grc", "thoropass_audit", "coalition_cyber_insurance",
+                    "cobalt_pentest"
                 )
             ):
                 raise ValueError(
@@ -539,7 +543,7 @@ class MonetizationHub:
                     "Strict isolation violation: Sub-affiliate aggregator fallback is prohibited on Prexvo."
                 )
 
-        # ProfitHelm student loan isolation gate
+        # ProfitHelm student loan & cyber GRC isolation gate
         if prop_clean in ("profithelm", "exchange1031"):
             if (
                 program_key in STUDENT_LOAN_PARTNER_KEYS
@@ -548,6 +552,22 @@ class MonetizationHub:
             ):
                 raise ValueError(
                     f"Strict isolation violation: Student loan partner '{program_key}' is prohibited on ProfitHelm."
+                )
+            if program_key in GAINHELM_AFFILIATES:
+                raise ValueError(
+                    f"Strict isolation violation: GainHelm cyber compliance partner '{program_key}' is prohibited on ProfitHelm."
+                )
+
+        # GainHelm cyber compliance isolation gate
+        if prop_clean == "gainhelm":
+            if (
+                program_key in STUDENT_LOAN_PARTNER_KEYS
+                or program_key in PREXVO_AFFILIATES
+                or program_key in PROFITHELM_AFFILIATES
+                or category in ("STUDENT_LOAN_REFINANCE", "STUDENT_LOAN_COMPARISON", "SECTION_1031_EXCHANGE")
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Non-cyber partner '{program_key}' is prohibited on GainHelm."
                 )
 
         # Direct 1031 exchange preservation gate
@@ -1349,8 +1369,13 @@ class MonetizationHub:
                     sovrn_summary["account_id"] = str(s_resp["accountId"])
                     sovrn_summary["configured"] = True
 
+        from pseofactory.affiliates import GAINHELM_AFFILIATES
         live_links_verified: List[Dict[str, Any]] = []
-        for prop_id, registry_map in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+        for prop_id, registry_map in (
+            ("profithelm", PROFITHELM_AFFILIATES),
+            ("prexvo", PREXVO_AFFILIATES),
+            ("gainhelm", GAINHELM_AFFILIATES),
+        ):
             prop_vault = self._vault.get(prop_id, {})
             for p_key, p_obj in registry_map.items():
                 if p_key != p_obj.key:

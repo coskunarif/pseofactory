@@ -1742,17 +1742,21 @@ def test_multi_channel_social_conversion_and_deeplink_hydration(tmp_path):
         prioritize_distribution_queue_by_referral_yield,
     )
     from pseofactory.gsc_remediation import evaluate_asset_conversion_and_distribution_readiness
-    from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+    from pseofactory.maintenance import GAINHELM_DEFAULT_TOOLS, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
     from pseofactory.visual_primitives import render_runtime_synchronizer_script
     from pseofactory.affiliates import aggregate_outbound_partner_engagement
 
     # 1. ProfitHelm: all 21 active tools have curated statutory proofs and zero-link native teasers
     from pseofactory.qualification import is_retired_or_consolidated_slug
     px_slugs = {t["slug"] for t in PREXVO_DEFAULT_TOOLS} | set(PREXVO_TOOL_SCENARIOS.keys())
+    gh_slugs = {t["slug"] for t in GAINHELM_DEFAULT_TOOLS}
     ph_all_21_tools = [
         {"slug": s, "title": s.replace("-", " ").title()}
         for s in sorted(CURATED_TOOL_CALCULATION_PROOFS.keys())
-        if s not in px_slugs and not is_retired_or_consolidated_slug(s, "profithelm") and not is_retired_or_consolidated_slug(s, "prexvo")
+        if s not in px_slugs
+        and s not in gh_slugs
+        and not is_retired_or_consolidated_slug(s, "profithelm")
+        and not is_retired_or_consolidated_slug(s, "prexvo")
     ]
     ph_assets = generate_all_distribution_assets(tools=ph_all_21_tools, property_id="profithelm")
     assert len(ph_assets) == 21
@@ -2106,6 +2110,100 @@ def test_mid_rebuild_dom_parity_git_archive_fallback_and_aborted_run_manifest_sy
     synth_man = json.loads((aborted_ci_dir / "release_manifest.json").read_text(encoding="utf-8"))
     assert synth_man["status"] == "RECONCILED_BY_SUBSEQUENT_RELEASE"
     assert synth_man["reconciled_by_head_sha"] == "acbe3bb"
+
+
+def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
+    """
+    Verifies that GainHelm executes with 100% deterministic parity alongside
+    ProfitHelm and Prexvo across:
+    1. Multi-channel syndication generation, curated statutory calculation proofs,
+       YouTube transcript brand parity ('GainHelm'), and AI benchmark matrices.
+    2. Partner tracking readiness, publisher prerequisites, cluster monetization gaps,
+       and three-rail checkout/fulfillment workpapers ($79 SOC 2/CMMC and $49 HIPAA/ISO).
+    3. Indexing inspector, indexing feedback loop, and push indexer tenant boundaries.
+    4. Trend history DB statutory economic timeseries, cron property assignment, and
+       competitor query modifier expansion.
+    """
+    from pseofactory.audit import audit_syndication_asset_against_truth_store
+    from pseofactory.browser_verifier import GainHelmBrowserAdapter
+    from pseofactory.qualification import evaluate_query_modifier_expansion_vs_distinct_tool
+    from pseofactory.distributor import (
+        CURATED_TOOL_CALCULATION_PROOFS,
+        generate_ai_benchmark_nodes,
+        generate_all_distribution_assets,
+        generate_youtube_syndication,
+    )
+    from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
+    from pseofactory.indexing.milestones import VALID_TENANTS as MILESTONE_TENANTS
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.maintenance import GAINHELM_DEFAULT_TOOLS
+    from pseofactory.partner_tracker import (
+        PartnerTrackingEngine,
+        resolve_lead_monetization_offer,
+        synthesize_personalized_audit_workpaper,
+    )
+    from pseofactory.trends.cron import TrendCronRunner
+    from pseofactory.trends.db import TrendHistoryDB
+
+    assert "gainhelm" in MILESTONE_TENANTS
+    insp = DailyIndexingInspector(tenant_id="gainhelm", base_dir=tmp_path)
+    assert insp.tenant_id == "gainhelm"
+
+    gh_browser = GainHelmBrowserAdapter()
+    assert gh_browser.tenant_id == "gainhelm"
+    assert gh_browser.canonical_domain == "https://gainhelm.com"
+    assert len(gh_browser.get_widget_specs()) >= 3
+
+    gh_assets = generate_all_distribution_assets(tools=GAINHELM_DEFAULT_TOOLS, property_id="gainhelm")
+    assert len(gh_assets) == 10
+    for slug, pack in gh_assets.items():
+        assert slug in CURATED_TOOL_CALCULATION_PROOFS
+        audit_res = audit_syndication_asset_against_truth_store(pack, property_id="gainhelm")
+        assert audit_res["status"] == "PASS", f"GainHelm {slug} failed truth audit: {audit_res}"
+        yt = generate_youtube_syndication(slug, property_id="gainhelm")
+        assert "GainHelm" in yt["transcript"]
+        assert f"https://gainhelm.com/tools/{slug}/" in yt["description"]
+
+    bench = generate_ai_benchmark_nodes(tenant="gainhelm")
+    assert len(bench["files"]) >= 7
+    assert "soc2_cmmc_audit_benchmarks.md" in bench["files"]
+
+    db = TrendHistoryDB(db_path=tmp_path / "test_trends.db")
+    mat = db.compile_statutory_economic_matrix("gainhelm", "soc 2 audit cost calculator")
+    assert len(mat["series"]) >= 4
+    cron = TrendCronRunner(db_path=tmp_path / "test_trends.db")
+    assign = cron.determine_property_assignment("cmmc 2.0 level 2 c3pao audit cost calculator")
+    assert assign["property_id"] == "gainhelm"
+    assert assign["contamination_scan_passed"] == 1
+
+    mod_eval = evaluate_query_modifier_expansion_vs_distinct_tool(
+        "soc 2 type 2 audit cost for 50 employees",
+        property_id="gainhelm",
+    )
+    assert mod_eval["decision"] == "EXPAND_EXISTING_PAGE"
+    assert mod_eval["action"] == "REFACTOR_PAGE"
+    assert mod_eval["matched_tool_slug"] == "soc-2-audit-cost-calculator"
+
+    offer_79 = resolve_lead_monetization_offer("gainhelm", "soc-2-audit-cost-calculator", lead_id="lead_gh_test")
+    assert offer_79["offer_sku"] == "gh_soc2_cmmc_audit_workpapers"
+    assert offer_79["offer_price_usd"] == 79.0
+    wp_79 = synthesize_personalized_audit_workpaper(
+        property_id="gainhelm",
+        tool_slug="soc-2-audit-cost-calculator",
+        lead_record={"lead_id": "lead_gh_test", "offer_sku": "gh_soc2_cmmc_audit_workpapers"},
+        mode="paid_toolkit",
+    )
+    assert len(wp_79["reconciliation_schedule"]) >= 4
+    assert len(wp_79["statutory_trend_timeseries"]) >= 3
+
+    tracker = PartnerTrackingEngine()
+    gaps = tracker.analyze_cluster_monetization_gaps()
+    assert "gainhelm" in gaps["properties"]
+    assert gaps["properties"]["gainhelm"]["uncovered_count"] == 0
+
+    fb = IndexingFeedbackLoop(property_id="gainhelm", base_dir=tmp_path)
+    assert fb.domain == "gainhelm.com"
+
 
 
 

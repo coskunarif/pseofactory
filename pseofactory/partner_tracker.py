@@ -409,7 +409,7 @@ class PartnerTrackingEngine:
                     notes="PartnerStack ToS accepted; partnership part_jp9R0iYpPGriHu is active.",
                 )
 
-        for prop_id in ("profithelm", "prexvo"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm"):
             gate_err_id = f"act-{prop_id}-{prop_id}-monetization-gate-integration-requirement"
             if (
                 gate_err_id in self.action_bus.items
@@ -1080,6 +1080,7 @@ class PartnerTrackingEngine:
         self,
         profithelm_dist_dir: Optional[str] = None,
         prexvo_dist_dir: Optional[str] = None,
+        gainhelm_dist_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes a comprehensive readiness & parity check across affiliates.py,
@@ -1089,7 +1090,7 @@ class PartnerTrackingEngine:
         3. Flags any approved tracking URL stored in monetization_vault.json (CJ or Impact)
            that is not yet wired into affiliates.py default_url.
         4. Flags any active partner whose underlying network lacks verified payout credentials.
-        5. Scans compiled HTML in profithelm_dist_dir and prexvo_dist_dir to verify DOM parity,
+        5. Scans compiled HTML in profithelm_dist_dir, prexvo_dist_dir, and gainhelm_dist_dir to verify DOM parity,
            click share routed to network-tracked links, and YMYL restriction compliance.
         """
         payout_readiness = self._evaluate_network_payout_readiness()
@@ -1098,9 +1099,14 @@ class PartnerTrackingEngine:
         dist_dirs = {
             "profithelm": profithelm_dist_dir or "/home/ubuntuadmin/projects/profithelm-platform/dist",
             "prexvo": prexvo_dist_dir or "/home/ubuntuadmin/projects/prexvo/dist",
+            "gainhelm": gainhelm_dist_dir or "/home/ubuntuadmin/projects/gainhelm/dist",
         }
 
-        for prop_id, reg_dict in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+        for prop_id, reg_dict in (
+            ("profithelm", PROFITHELM_AFFILIATES),
+            ("prexvo", PREXVO_AFFILIATES),
+            ("gainhelm", GAINHELM_AFFILIATES),
+        ):
             vault_partners = (
                 self.hub.vault_data.get("properties", {})
                 .get(prop_id, {})
@@ -1378,7 +1384,11 @@ class PartnerTrackingEngine:
         properties_report: Dict[str, Any] = {}
         status_deltas_since_last_snapshot: List[Dict[str, Any]] = []
 
-        for prop_id, reg_dict in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+        for prop_id, reg_dict in (
+            ("profithelm", PROFITHELM_AFFILIATES),
+            ("prexvo", PREXVO_AFFILIATES),
+            ("gainhelm", GAINHELM_AFFILIATES),
+        ):
             vault_prop = (self.hub.vault_data.get("properties", {}) or {}).get(prop_id, {}) or {}
             vault_partners = vault_prop.get("partners", {}) or {}
             edge_js = generate_edge_redirect_function(prop_id)
@@ -1405,8 +1415,14 @@ class PartnerTrackingEngine:
 
                 # Determine whether partnership is fully active on its native brand contract
                 is_native_active = (
-                    prop_id == "profithelm"
-                    and p_key in ("coinledger", "koinly", "rippling", "mercury", "kalshi", "gusto")
+                    (
+                        prop_id == "profithelm"
+                        and p_key in ("coinledger", "koinly", "rippling", "mercury", "kalshi", "gusto")
+                    )
+                    or (
+                        prop_id == "gainhelm"
+                        and p_obj.status == "live"
+                    )
                 )
 
                 delta_note = "UNCHANGED since 2026-10-20T10:10-07:00 snapshot"
@@ -1619,15 +1635,17 @@ class PartnerTrackingEngine:
         endpoints = {
             "profithelm": "https://profithelm.com/api/telemetry?limit=1000",
             "prexvo": "https://prexvo.com/api/telemetry?limit=1000",
+            "gainhelm": "https://gainhelm.com/api/telemetry?limit=1000",
         }
         tenant_repos = {
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
         }
         base_ledger_dir = Path(ledger_dir) if ledger_dir is not None else None
         results: Dict[str, Dict[str, Any]] = {}
 
-        for prop_id in ("profithelm", "prexvo"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm"):
             if base_ledger_dir is not None:
                 base_ledger_dir.mkdir(parents=True, exist_ok=True)
                 jsonl_path = base_ledger_dir / f"{prop_id}_telemetry_events.jsonl"
@@ -1740,7 +1758,8 @@ class PartnerTrackingEngine:
             sync_data = self.sync_edge_click_telemetry(fetch_live=False)
             engagement_by_property = {
                 prop_id: sync_data[prop_id]["aggregation"]
-                for prop_id in ("profithelm", "prexvo")
+                for prop_id in ("profithelm", "prexvo", "gainhelm")
+                if prop_id in sync_data
             }
 
         master_nets = self.hub.vault_data.get("master_networks", {}) or {}
@@ -2163,7 +2182,7 @@ class PartnerTrackingEngine:
         }
 
         edge_clicks_by_partner: Dict[str, int] = {}
-        for prop_id in ("profithelm", "prexvo"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm"):
             agg = engagement_by_property.get(prop_id) or {}
             for pk, p_data in (agg.get("by_partner") or {}).items():
                 c_val = int(p_data.get("outbound_clicks", 0) or 0)
@@ -2178,7 +2197,11 @@ class PartnerTrackingEngine:
                 edge_clicks_by_partner[canonical_pk] = edge_clicks_by_partner.get(canonical_pk, 0) + c_val
 
         partners_reconciliation: Dict[str, Dict[str, Any]] = {}
-        for prop_id, reg_map in (("profithelm", PROFITHELM_AFFILIATES), ("prexvo", PREXVO_AFFILIATES)):
+        for prop_id, reg_map in (
+            ("profithelm", PROFITHELM_AFFILIATES),
+            ("prexvo", PREXVO_AFFILIATES),
+            ("gainhelm", GAINHELM_AFFILIATES),
+        ):
             for p_key, p_obj in reg_map.items():
                 if p_key != p_obj.key:
                     continue
@@ -2234,7 +2257,7 @@ class PartnerTrackingEngine:
         total_portal_clicks = sum(int(p["portal_verified_clicks"]) for p in portals_state.values())
         total_edge_clicks = sum(
             int((engagement_by_property.get(pid) or {}).get("total_outbound_clicks", 0) or 0)
-            for pid in ("profithelm", "prexvo")
+            for pid in ("profithelm", "prexvo", "gainhelm")
         )
         total_modeled_pipeline_usd = round(
             sum(float(p["modeled_epc_pipeline_usd"]) for p in partners_reconciliation.values()), 2
@@ -2297,7 +2320,8 @@ class PartnerTrackingEngine:
             sync_data = self.sync_edge_click_telemetry(fetch_live=False)
             engagement_by_property = {
                 prop_id: sync_data[prop_id]["aggregation"]
-                for prop_id in ("profithelm", "prexvo")
+                for prop_id in ("profithelm", "prexvo", "gainhelm")
+                if prop_id in sync_data
             }
 
         if earnings_ledger is None:
@@ -2432,7 +2456,7 @@ class PartnerTrackingEngine:
         }
         properties_summary: Dict[str, Any] = {}
 
-        for prop_id in ("profithelm", "prexvo"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm"):
             agg = engagement_by_property.get(prop_id) or aggregate_outbound_partner_engagement([], property_id=prop_id)
             by_partner = agg.get("by_partner", {}) or {}
             prop_expected_value = 0.0
@@ -3022,11 +3046,7 @@ class PartnerTrackingEngine:
         required_governance_routes = ("/about/", "/privacy/", "/terms/", "/disclaimers/", "/methodology/")
 
         properties_to_audit: List[str] = ["profithelm", "prexvo"]
-        if gainhelm_dist_dir is not None or (
-            profithelm_dist_dir is None
-            and prexvo_dist_dir is None
-            and dist_map["gainhelm"].is_dir()
-        ):
+        if gainhelm_dist_dir is not None or dist_map["gainhelm"].is_dir():
             properties_to_audit.append("gainhelm")
 
         properties_audit: Dict[str, Any] = {}
@@ -3162,6 +3182,7 @@ class PartnerTrackingEngine:
         parity = self.audit_readiness_and_vault_parity(
             profithelm_dist_dir=str(dist_map["profithelm"]),
             prexvo_dist_dir=str(dist_map["prexvo"]),
+            gainhelm_dist_dir=str(dist_map["gainhelm"]),
         )
         payout_readiness = parity.get("network_payout_readiness", {})
         all_payouts_verified = all(
@@ -3584,16 +3605,16 @@ class PartnerTrackingEngine:
                 "property_id": "gainhelm",
                 "tool_count": 5,
                 "sample_slugs": [
-                    "soc-2-type-2-audit-cost-and-readiness-calculator",
-                    "cmmc-2-0-level-2-certification-cost-calculator",
-                    "fedramp-20x-authorization-cost-and-timeline-estimator",
-                    "penetration-testing-scope-and-budget-calculator",
-                    "soc-2-vs-iso-27001-roi-and-overlap-calculator",
+                    "soc-2-audit-cost-calculator",
+                    "cmmc-2-0-compliance-cost-calculator",
+                    "fedramp-authorization-3pao-cost-calculator",
+                    "penetration-testing-scoping-cost-calculator",
+                    "nist-800-171-sprs-score-calculator",
                 ],
-                "active_direct_partners": ["vanta", "drata", "sprinto", "thoropass", "cobalt_pentest"],
+                "active_direct_partners": ["vanta_security", "drata_compliance", "thoropass_audit", "cobalt_pentest"],
                 "approved_network_contracts": [
                     "GainHelm First-Party Stripe Checkout ($79 SOC 2 & CMMC 2.0 Audit Readiness Workpapers)",
-                    "Vanta / Drata / Sprinto PartnerStack & Direct GRC Referral Funnel",
+                    "Vanta / Drata / Thoropass PartnerStack & Direct GRC Referral Funnel",
                 ],
                 "first_party_stripe_sku": "gh_soc2_cmmc_audit_workpapers",
                 "first_party_sku_price_usd": 79.0,
@@ -3604,16 +3625,16 @@ class PartnerTrackingEngine:
             },
             {
                 "cluster_id": "iso27001_hipaa_pci_and_eu_ai_act_governance",
-                "cluster_name": "ISO 27001:2022, HIPAA Security Rule, PCI DSS 4.0.1 & EU AI Act Penalty Modeling",
+                "cluster_name": "ISO 27001:2022, HIPAA Security Rule, PCI DSS 4.0.1 & HITRUST CSF Governance",
                 "property_id": "gainhelm",
                 "tool_count": 4,
                 "sample_slugs": [
-                    "iso-27001-implementation-and-certification-cost-calculator",
-                    "hipaa-compliance-audit-and-remediation-cost-calculator",
-                    "pci-dss-4-0-1-compliance-and-qsa-audit-cost-calculator",
-                    "eu-ai-act-compliance-and-penalty-risk-calculator",
+                    "iso-27001-certification-cost-calculator",
+                    "hipaa-violation-penalty-breach-cost-calculator",
+                    "pci-dss-4-0-compliance-cost-calculator",
+                    "hitrust-csf-e1-i1-r2-certification-cost-calculator",
                 ],
-                "active_direct_partners": ["vanta", "drata", "sprinto", "thoropass"],
+                "active_direct_partners": ["vanta_security", "drata_compliance", "thoropass_audit", "secureframe_grc"],
                 "approved_network_contracts": [
                     "GainHelm First-Party Stripe Checkout ($49 HIPAA, ISO 27001 & AI Governance Control Matrix)",
                 ],
@@ -3630,9 +3651,9 @@ class PartnerTrackingEngine:
                 "property_id": "gainhelm",
                 "tool_count": 1,
                 "sample_slugs": [
-                    "cyber-liability-insurance-premium-and-deductible-calculator",
+                    "cyber-liability-insurance-breach-exposure-calculator",
                 ],
-                "active_direct_partners": ["coalition_cyber", "vanta"],
+                "active_direct_partners": ["coalition_cyber_insurance", "vanta_security"],
                 "approved_network_contracts": [
                     "GainHelm First-Party Stripe Checkout ($49 HIPAA, ISO 27001 & AI Governance Control Matrix)",
                     "Coalition Active Cyber Insurance Producer Funnel",
@@ -3645,7 +3666,6 @@ class PartnerTrackingEngine:
                 "strategic_decision": "RETAIN_49_STRIPE_GOVERNANCE_KIT_AND_COALITION_FUNNEL",
             },
         ]
-
         all_commercial = [
             c for c in (profithelm_clusters + prexvo_clusters + gainhelm_clusters)
             if c["coverage_status"] != "YMYL_STATUTORY_PUBLIC_SERVICE_EXEMPT_ZERO_COMMERCIALIZATION"
@@ -4283,12 +4303,11 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
     except Exception:
         series_list = []
 
-    if not series_list:
-        series_list = [
-            dict(s)
-            for s in _CANONICAL_STATUTORY_TIMESERIES_FALLBACK
-            if s["property_id"] in (prop_clean, "shared")
-        ]
+    existing_sids = {s["series_id"] for s in series_list}
+    for s in _CANONICAL_STATUTORY_TIMESERIES_FALLBACK:
+        if s["property_id"] in (prop_clean, "shared") and s["series_id"] not in existing_sids:
+            series_list.append(dict(s))
+            existing_sids.add(s["series_id"])
 
     preferred_ids: List[str] = []
     if prop_clean == "prexvo" or sku_clean == "px_refi_amortization_decision_audit":
@@ -5731,6 +5750,13 @@ def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[s
             "ZEPTOMAIL_FROM_EMAIL": "noreply@prexvo.com",
             "ZEPTOMAIL_FROM_NAME": "Prexvo Research Desk",
         },
+        "gainhelm": {
+            **shared_vars,
+            "CANONICAL_BASE": "https://gainhelm.com",
+            "DOMAIN": "gainhelm.com",
+            "ZEPTOMAIL_FROM_EMAIL": "arif@profithelm.com",
+            "ZEPTOMAIL_FROM_NAME": "GainHelm Research Desk",
+        },
     }
 
     report: Dict[str, Any] = {
@@ -5835,6 +5861,7 @@ def sync_edge_leads_to_ledger(
     urls = edge_urls or {
         "profithelm": "https://profithelm.com/api/lead-capture",
         "prexvo": "https://prexvo.com/api/lead-capture",
+        "gainhelm": "https://gainhelm.com/api/lead-capture",
     }
     edge_status: Dict[str, Any] = {}
     newly_synced = 0
@@ -5972,7 +5999,7 @@ def get_lead_monitoring_summary(
     engine = PartnerTrackingEngine()
     leads = engine.get_captured_leads(property_id=property_id, leads_ledger_path=leads_ledger_path)
 
-    by_property: Dict[str, int] = {"profithelm": 0, "prexvo": 0}
+    by_property: Dict[str, int] = {"profithelm": 0, "prexvo": 0, "gainhelm": 0}
     by_stage: Dict[str, int] = {}
     by_type: Dict[str, int] = {}
     by_vertical: Dict[str, int] = {}
@@ -6323,7 +6350,7 @@ def audit_end_to_end_monetization_and_fulfillment(
     Zero em-dashes. Zero en-dashes.
     """
     import urllib.request
-    from pseofactory.affiliates import PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
+    from pseofactory.affiliates import GAINHELM_AFFILIATES, PROFITHELM_AFFILIATES, PREXVO_AFFILIATES
     from pseofactory.affiliates_hub import MonetizationHub
 
     diag = diagnose_stripe_merchant_readiness(execute_live=execute_live)
@@ -6407,7 +6434,11 @@ def audit_end_to_end_monetization_and_fulfillment(
         )
         live_edge_probe: Optional[Dict[str, Any]] = None
         if execute_live:
-            domain = "https://prexvo.com" if prop_id == "prexvo" else "https://profithelm.com"
+            domain = (
+                "https://prexvo.com"
+                if prop_id == "prexvo"
+                else ("https://gainhelm.com" if prop_id == "gainhelm" else "https://profithelm.com")
+            )
             chk_url = f"{domain}/api/lead-capture?checkout=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
             ff_url = f"{domain}/api/lead-capture?fulfill=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
             try:
@@ -6560,12 +6591,14 @@ def audit_end_to_end_monetization_and_fulfillment(
 def audit_publisher_prerequisites_and_compliance(
     profithelm_dist_dir: Optional[str] = None,
     prexvo_dist_dir: Optional[str] = None,
+    gainhelm_dist_dir: Optional[str] = None,
     execute_live: bool = False,
 ) -> Dict[str, Any]:
     """Module-level convenience wrapper for PartnerTrackingEngine.audit_publisher_prerequisites_and_compliance."""
     return PartnerTrackingEngine().audit_publisher_prerequisites_and_compliance(
         profithelm_dist_dir=profithelm_dist_dir,
         prexvo_dist_dir=prexvo_dist_dir,
+        gainhelm_dist_dir=gainhelm_dist_dir,
         execute_live=execute_live,
     )
 
@@ -6592,6 +6625,7 @@ def run_autonomous_partner_lifecycle_sync(
     persist: bool = True,
     profithelm_dist_dir: Optional[str] = None,
     prexvo_dist_dir: Optional[str] = None,
+    gainhelm_dist_dir: Optional[str] = None,
     persist_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Module-level convenience wrapper for PartnerTrackingEngine.run_autonomous_partner_lifecycle_sync."""
@@ -6601,6 +6635,7 @@ def run_autonomous_partner_lifecycle_sync(
         persist=persist,
         profithelm_dist_dir=profithelm_dist_dir,
         prexvo_dist_dir=prexvo_dist_dir,
+        gainhelm_dist_dir=gainhelm_dist_dir,
         persist_path=persist_path,
     )
 

@@ -579,6 +579,16 @@ def _match_core_topic_modifier_variant(
         {"student", "loan", "loans", "save", "plan", "forbearance", "interest", "capitalization", "litigation", "transition"}
     ):
         is_match = True
+    elif tool_slug == "soc-2-audit-cost-calculator" and "soc" in q_core and ("audit" in q_core or "cost" in q_core or "compliance" in q_core):
+        is_match = True
+    elif tool_slug == "cmmc-2-0-compliance-cost-calculator" and "cmmc" in q_core and ("cost" in q_core or "compliance" in q_core or "c3pao" in q_core or "level" in q_core):
+        is_match = True
+    elif tool_slug == "nist-800-171-sprs-score-calculator" and ("sprs" in q_core or {"nist", "800", "171"}.issubset(q_core)):
+        is_match = True
+    elif tool_slug == "iso-27001-certification-cost-calculator" and {"iso", "27001"}.issubset(q_core):
+        is_match = True
+    elif tool_slug == "hipaa-violation-penalty-breach-cost-calculator" and "hipaa" in q_core and ("penalty" in q_core or "fines" in q_core or "breach" in q_core or "violation" in q_core):
+        is_match = True
 
     if is_match:
         return {
@@ -950,9 +960,20 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
     Zero em-dashes. Zero en-dashes.
     """
     clean_q = str(query or "").strip()
-    prop = "prexvo" if "prexvo" in str(property_id or "").lower() else "profithelm"
+    prop_raw = str(property_id or "").lower()
+    prop = (
+        "prexvo"
+        if "prexvo" in prop_raw
+        else ("gainhelm" if "gainhelm" in prop_raw else "profithelm")
+    )
     tools_catalog = list(existing_tools) if existing_tools is not None else (
-        list(_DEFAULT_PREXVO_CORE_TOOLS) if prop == "prexvo" else list(_DEFAULT_PROFITHELM_CORE_TOOLS)
+        list(_DEFAULT_PREXVO_CORE_TOOLS)
+        if prop == "prexvo"
+        else (
+            list(_DEFAULT_GAINHELM_CORE_TOOLS)
+            if prop == "gainhelm"
+            else list(_DEFAULT_PROFITHELM_CORE_TOOLS)
+        )
     )
     cannibal = check_search_intent_cannibalization(
         clean_q,
@@ -984,6 +1005,7 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
             "suppress_duplicate_build": True,
             "is_cannibalizing": True,
             "parent_slug": p_slug,
+            "matched_tool_slug": p_slug,
             "target_subroute": subroute,
             "ranking_url": cannibal.get("ranking_url", ""),
             "ranking_position": r_pos,
@@ -3289,6 +3311,19 @@ _DEFAULT_PREXVO_CORE_TOOLS: List[Dict[str, Any]] = [
     {"slug": "student-loan-refinance-break-even-calculator", "primary_keyword": "student loan refinance break even calculator"},
 ]
 
+_DEFAULT_GAINHELM_CORE_TOOLS: List[Dict[str, Any]] = [
+    {"slug": "soc-2-audit-cost-calculator", "primary_keyword": "soc 2 audit cost calculator"},
+    {"slug": "cmmc-2-0-compliance-cost-calculator", "primary_keyword": "cmmc 2.0 compliance cost calculator"},
+    {"slug": "nist-800-171-sprs-score-calculator", "primary_keyword": "nist 800-171 sprs score calculator"},
+    {"slug": "iso-27001-certification-cost-calculator", "primary_keyword": "iso 27001 certification cost calculator"},
+    {"slug": "hipaa-violation-penalty-breach-cost-calculator", "primary_keyword": "hipaa violation penalty breach cost calculator"},
+    {"slug": "penetration-testing-cost-estimator", "primary_keyword": "penetration testing cost estimator"},
+    {"slug": "cyber-liability-insurance-premium-calculator", "primary_keyword": "cyber liability insurance premium calculator"},
+    {"slug": "fedramp-authorization-cost-calculator", "primary_keyword": "fedramp authorization cost calculator"},
+    {"slug": "pci-dss-4-0-compliance-audit-cost-calculator", "primary_keyword": "pci dss 4.0 compliance audit cost calculator"},
+    {"slug": "hitrust-certification-cost-roi-calculator", "primary_keyword": "hitrust certification cost roi calculator"},
+]
+
 
 def load_property_redirect_map(
     repo_root: Optional[Union[str, Path]] = None,
@@ -3308,6 +3343,8 @@ def load_property_redirect_map(
     prop = str(property_id or "profithelm").strip().lower()
     if "prexvo" in prop:
         prop = "prexvo"
+    elif "gainhelm" in prop:
+        prop = "gainhelm"
     else:
         prop = "profithelm"
 
@@ -3318,6 +3355,8 @@ def load_property_redirect_map(
             t_path = str(info.get("redirect_target") or "/tools/").strip()
             can_slug = str(info.get("canonical_slug") or "").strip() if t_path not in _GENERIC_REDIRECT_SINKS else ""
             raw_pairs[f"/tools/{c_slug}/"] = (t_path, can_slug)
+    elif prop == "gainhelm":
+        pass
     else:
         for src_p, dst_p in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP.items():
             s_norm = "/" + src_p.strip("/") + "/" if src_p.strip("/") else "/"
@@ -3337,7 +3376,11 @@ def load_property_redirect_map(
     default_tenant_root = (
         Path("/home/ubuntuadmin/projects/prexvo")
         if prop == "prexvo"
-        else Path("/home/ubuntuadmin/projects/profithelm-platform")
+        else (
+            Path("/home/ubuntuadmin/projects/gainhelm")
+            if prop == "gainhelm"
+            else Path("/home/ubuntuadmin/projects/profithelm-platform")
+        )
     )
     roots_to_scan: List[Path] = []
     if default_tenant_root.is_dir():
@@ -3454,10 +3497,16 @@ def resolve_redirected_gsc_target(
     prop = str(property_id or "profithelm").strip().lower()
     if "prexvo" in prop or "prexvo.com" in eff_url.lower():
         prop = "prexvo"
+    elif "gainhelm" in prop or "gainhelm.com" in eff_url.lower():
+        prop = "gainhelm"
     else:
         prop = "profithelm"
 
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    domain = (
+        "prexvo.com"
+        if prop == "prexvo"
+        else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    )
     raw_url = eff_url
     raw_slug = str(slug or "").strip().strip("/").lower()
     raw_query = str(query or "").strip()
@@ -3624,7 +3673,15 @@ def resolve_redirected_gsc_target(
         # Check existing_tools (including default core catalog + dynamic_tools.json)
         tools_list = list(existing_tools or [])
         seen_t_slugs = {str(t.get("slug") or "").strip().lower() for t in tools_list if isinstance(t, dict)}
-        default_core = _DEFAULT_PREXVO_CORE_TOOLS if prop == "prexvo" else _DEFAULT_PROFITHELM_CORE_TOOLS
+        default_core = (
+            _DEFAULT_PREXVO_CORE_TOOLS
+            if prop == "prexvo"
+            else (
+                _DEFAULT_GAINHELM_CORE_TOOLS
+                if prop == "gainhelm"
+                else _DEFAULT_PROFITHELM_CORE_TOOLS
+            )
+        )
         for dt in default_core:
             if dt["slug"] not in seen_t_slugs:
                 tools_list.append(dt)
@@ -3805,6 +3862,8 @@ def rollup_redirected_gsc_rows(
     prop = str(property_id or "profithelm").strip().lower()
     if "prexvo" in prop:
         prop = "prexvo"
+    elif "gainhelm" in prop:
+        prop = "gainhelm"
     else:
         prop = "profithelm"
 
@@ -4025,8 +4084,17 @@ def reconcile_metric_recovery_ledger(
     Zero em-dashes. Zero en-dashes.
     """
     root = Path(repo_root)
-    prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
-    domain = "prexvo.com" if prop == "prexvo" else "profithelm.com"
+    prop_low = str(property_id).lower()
+    prop = (
+        "prexvo"
+        if "prexvo" in prop_low
+        else ("gainhelm" if "gainhelm" in prop_low else "profithelm")
+    )
+    domain = (
+        "prexvo.com"
+        if prop == "prexvo"
+        else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    )
     if prop == "profithelm":
         from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
         veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
@@ -4167,7 +4235,12 @@ def reconcile_factory_execution_log(
     Zero em-dashes. Zero en-dashes.
     """
     root = Path(repo_root)
-    prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
+    prop_low = str(property_id).lower()
+    prop = (
+        "prexvo"
+        if "prexvo" in prop_low
+        else ("gainhelm" if "gainhelm" in prop_low else "profithelm")
+    )
     log_path = root / ".agy" / "factory_execution_log.json"
     summary = {"queries_resolved": 0, "updated": False}
     if not log_path.is_file():
@@ -4337,7 +4410,12 @@ def sync_tenant_redirect_rollup_adapters(
     Zero em-dashes. Zero en-dashes.
     """
     root = Path(repo_root)
-    prop = "prexvo" if "prexvo" in str(property_id).lower() else "profithelm"
+    prop_low = str(property_id).lower()
+    prop = (
+        "prexvo"
+        if "prexvo" in prop_low
+        else ("gainhelm" if "gainhelm" in prop_low else "profithelm")
+    )
     updated_files = 0
 
     if prop == "profithelm":

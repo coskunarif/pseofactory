@@ -135,6 +135,8 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         root_low = self.root_dir.lower()
         if "prexvo" in root_low:
             return "prexvo"
+        if "gainhelm" in root_low:
+            return "gainhelm"
         return "profithelm"
 
     def _handle_affiliate_redirect(self, is_head: bool = False) -> None:
@@ -143,11 +145,13 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         dest_base = _LOCAL_PARTNER_DESTINATIONS.get(partner)
         if not dest_base:
             try:
-                from pseofactory.affiliates import PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
+                from pseofactory.affiliates import GAINHELM_AFFILIATES, PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
                 if partner in PROFITHELM_AFFILIATES:
                     dest_base = PROFITHELM_AFFILIATES[partner].default_url
                 elif partner in PREXVO_AFFILIATES:
                     dest_base = PREXVO_AFFILIATES[partner].default_url
+                elif partner in GAINHELM_AFFILIATES:
+                    dest_base = GAINHELM_AFFILIATES[partner].default_url
             except Exception:
                 dest_base = None
         if not dest_base:
@@ -213,7 +217,12 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if qs.get("playbook", [""])[0] == "1" or qs.get("fulfill", [""])[0] == "1":
                 is_fulfill = qs.get("fulfill", [""])[0] == "1"
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
-                tool_slug = qs.get("tool_slug", ["section-1031-calculator" if prop_id == "profithelm" else "student-loan-refinance-break-even-calculator"])[0]
+                default_slug = (
+                    "section-1031-calculator"
+                    if prop_id == "profithelm"
+                    else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
+                )
+                tool_slug = qs.get("tool_slug", [default_slug])[0]
                 stored_rec = None
                 if dist_srv is not None:
                     for item in dist_srv.captured_leads:
@@ -281,7 +290,12 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 return
             if qs.get("checkout", [""])[0] == "1":
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
-                tool_slug = qs.get("tool_slug", ["section-1031-calculator" if prop_id == "profithelm" else "student-loan-refinance-break-even-calculator"])[0]
+                default_slug = (
+                    "section-1031-calculator"
+                    if prop_id == "profithelm"
+                    else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
+                )
+                tool_slug = qs.get("tool_slug", [default_slug])[0]
                 offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id)
                 eff_rec_chk: Dict[str, Any] = {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug}
                 amt_raw = qs.get("amount", [""])[0]
@@ -407,7 +421,10 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if raw_slug.startswith("tools/"):
                 raw_slug = raw_slug[6:]
             tool_slug = raw_slug.replace("/", "-") or "calculator"
-            partner_key = str(body.get("partner_key") or ("splash_financial" if prop_id == "prexvo" else "ipx1031")).strip().lower()
+            partner_key = str(
+                body.get("partner_key")
+                or ("splash_financial" if prop_id == "prexvo" else ("vanta_security" if prop_id == "gainhelm" else "ipx1031"))
+            ).strip().lower()
             has_quote_fields = any(
                 k in body for k in ("calculated_amount", "loan_balance", "state", "capital_band", "partner_sharing_consent")
             )

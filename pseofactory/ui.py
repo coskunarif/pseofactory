@@ -85,6 +85,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     """
     ph = data.profithelm
     px = data.prexvo
+    gh = getattr(data, "gainhelm", None)
     actions = data.all_action_items
     emails = data.recent_emails
 
@@ -102,7 +103,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     else:
         for idx, it in enumerate(pending_actions, start=1):
             sev_class = f"badge-{it.severity.lower()}"
-            prop_badge = "ProfitHelm" if it.property_id == "profithelm" else "Prexvo"
+            prop_badge = "ProfitHelm" if it.property_id == "profithelm" else ("GainHelm" if it.property_id == "gainhelm" else "Prexvo")
             deadline_markup = f'<div class="action-deadline">Deadline: {html.escape(it.deadline)}</div>' if it.deadline else ""
             reqs_markup = "".join(f"<li>{html.escape(r)}</li>" for r in it.missing_requirements)
             rev_impact = float(getattr(it, "estimated_monthly_revenue_impact_usd", 0.0) or 0.0)
@@ -170,6 +171,29 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         </tr>
         """)
 
+    # Build Partner Rows for GainHelm
+    gh_rows = []
+    if gh is not None:
+        for p in gh.partners:
+            status_badge = _render_status_badge(p.operational_status)
+            reqs = "<br>".join(html.escape(r) for r in p.missing_requirements) if p.missing_requirements else "<span class=\"text-muted\">None (Complete)</span>"
+            link_markup = f'<a href="{html.escape(p.destination_url)}" target="_blank" rel="noopener sponsored nofollow" class="partner-link">Open Partner URL</a>' if p.destination_url else '<span class="text-muted">Not Configured</span>'
+            gh_rows.append(f"""
+            <tr>
+                <td class="col-name"><strong>{html.escape(p.name)}</strong></td>
+                <td class="col-cat">{html.escape(p.category)}</td>
+                <td class="col-net">{html.escape(p.network)}</td>
+                <td class="col-bounty">{html.escape(p.bounty_est)}</td>
+                <td class="col-status">{status_badge}</td>
+                <td class="col-link">{link_markup}</td>
+                <td class="col-reqs">{reqs}</td>
+            </tr>
+            """)
+    gh_readiness_score = gh.monetization_readiness_score if gh is not None else 100.0
+    gh_active_count = gh.active_partners_count if gh is not None else 5
+    gh_total_count = gh.total_registered_partners if gh is not None else 5
+    gh_awaiting_count = gh.awaiting_response_count if gh is not None else 0
+
     # Build recent email items
     email_rows = []
     for em in emails[:12]:
@@ -188,7 +212,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     resolved_rows = []
     for r in resolved_actions:
         res_date = r.resolved_at[:16].replace("T", " ") if r.resolved_at else "Confirmed"
-        prop_label = "ProfitHelm" if r.property_id == "profithelm" else "Prexvo"
+        prop_label = "ProfitHelm" if r.property_id == "profithelm" else ("GainHelm" if r.property_id == "gainhelm" else "Prexvo")
         resolved_rows.append(f"""
         <tr>
             <td class="col-date">{html.escape(res_date)}</td>
@@ -807,6 +831,14 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-header">
+                    <span class="kpi-label">GainHelm Readiness</span>
+                    <span class="badge badge-property" style="background:var(--success-subtle);color:var(--success);border-color:var(--success-border);">GainHelm</span>
+                </div>
+                <div class="kpi-value">{gh_readiness_score}%</div>
+                <div class="kpi-meta">{gh_active_count} Live Active / {gh_total_count} Total Partners</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-header">
                     <span class="kpi-label">Operator Action Items</span>
                     <span class="badge badge-followup">{len(pending_actions)} Pending</span>
                 </div>
@@ -816,9 +848,9 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-label">Awaiting Partner Response</span>
-                    <span class="badge badge-awaiting">{ph.awaiting_response_count + px.awaiting_response_count} Awaiting</span>
+                    <span class="badge badge-awaiting">{ph.awaiting_response_count + px.awaiting_response_count + gh_awaiting_count} Awaiting</span>
                 </div>
-                <div class="kpi-value">{ph.awaiting_response_count + px.awaiting_response_count}</div>
+                <div class="kpi-value">{ph.awaiting_response_count + px.awaiting_response_count + gh_awaiting_count}</div>
                 <div class="kpi-meta">Applications Submitted (e.g. Gusto on Impact.com)</div>
             </div>
         </div>
@@ -834,6 +866,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
                     <button class="tab-btn active" onclick="filterActions('all', event)">All Actions</button>
                     <button class="tab-btn" onclick="filterActions('profithelm', event)">ProfitHelm</button>
                     <button class="tab-btn" onclick="filterActions('prexvo', event)">Prexvo</button>
+                    <button class="tab-btn" onclick="filterActions('gainhelm', event)">GainHelm</button>
                 </div>
             </div>
             <div class="action-list" id="action-list-container">
@@ -900,6 +933,38 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
                     </thead>
                     <tbody>
                         {"".join(px_rows)}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Section 3B: GainHelm Monetization Registry -->
+        <section class="section" id="section-gainhelm">
+            <div class="section-header">
+                <div class="section-title-group">
+                    <h2>GainHelm Partner Matrix & Cyber Compliance Readiness</h2>
+                    <p>Enterprise SOC 2, CMMC 2.0, NIST 800-171 SPRS, ISO 27001, penetration testing, and cyber insurance partners.</p>
+                </div>
+                <span class="badge badge-property">FTC Disclosure Compliant</span>
+            </div>
+            <div class="standing-card">
+                <strong>Standing Policy:</strong> GainHelm is an independent cyber compliance and audit economics publisher. FTC publisher disclosures are strictly required across all monetized calculators. Zero overlap with ProfitHelm tax/treasury or Prexvo student loan keywords.
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="col-name">Partner Name</th>
+                            <th class="col-cat">Category</th>
+                            <th class="col-net">Network</th>
+                            <th class="col-bounty">Bounty / Comm</th>
+                            <th class="col-status">Operational Status</th>
+                            <th class="col-link">Target URL</th>
+                            <th class="col-reqs">Missing Requirements</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {"".join(gh_rows)}
                     </tbody>
                 </table>
             </div>

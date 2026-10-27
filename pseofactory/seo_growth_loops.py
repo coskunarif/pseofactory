@@ -2404,7 +2404,7 @@ def compile_search_opportunity_briefs(
         seen_pq: Dict[str, Dict[str, Any]] = {}
         for pr in p_rows:
             qk = str(pr.get("query") or "").strip().lower()
-            if not qk or "site:" in qk or qk in ("ordermetrics", "profithelm", "prexvo"):
+            if not qk or "site:" in qk or qk in ("ordermetrics", "profithelm", "prexvo", "gainhelm"):
                 continue
             if "crypto-tax-calculator" in c_path and "futures" in qk and "crypto" not in qk:
                 continue
@@ -2610,6 +2610,16 @@ def compile_search_opportunity_briefs(
                 if target_html.is_file():
                     raw_h = target_html.read_text(encoding="utf-8")
                     updated_h = inject_overlay_into_html(raw_h, effective_ov)
+                    try:
+                        from pseofactory.maintenance import RetroReflectionEngine
+                        updated_h, _ = RetroReflectionEngine.retrofit_html(
+                            updated_h,
+                            property_id=prop,
+                            slug=leaf_slug,
+                            dist_dir=d_dir,
+                        )
+                    except Exception:
+                        pass
                     if updated_h != raw_h:
                         target_html.write_text(updated_h, encoding="utf-8")
                         if str(effective_ov.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
@@ -4475,7 +4485,7 @@ def evaluate_north_star_targets(
             "top_10_queries_30d": 15,
             "top_10_queries_60d": 35,
         }
-        if prop == "prexvo"
+        if prop in ("prexvo", "gainhelm")
         else {
             "impressions_30d_target": 8500,
             "impressions_60d_target": 18000,
@@ -5704,6 +5714,13 @@ def evaluate_closed_loop_cohort_reflection(
             updated_html = inject_overlay_into_html(raw_html, ov_spec)
             try:
                 updated_html = normalize_html_callout_message_match(updated_html, property_id=prop)
+                from pseofactory.maintenance import RetroReflectionEngine
+                updated_html, _ = RetroReflectionEngine.retrofit_html(
+                    updated_html,
+                    property_id=prop,
+                    slug=rel_slug,
+                    dist_dir=d_dir,
+                )
             except Exception:
                 pass
             if updated_html != raw_html:

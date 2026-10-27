@@ -782,7 +782,7 @@ class IndexingFeedbackLoop:
             self.base_dir = Path(base_dir).resolve() if base_dir else candidate_base
             self.dist_dir = Path(dist_dir).resolve() if dist_dir else (self.base_dir / "dist")
 
-        valid_tenants = {"profithelm", "prexvo", "unassigned"}
+        valid_tenants = {"profithelm", "prexvo", "gainhelm", "unassigned"}
         t_space = self.property_id if self.property_id in valid_tenants else "unassigned"
         self.milestone_tracker = milestone_tracker or MilestoneTracker(tenant=t_space)
 
@@ -1255,7 +1255,7 @@ class IndexingFeedbackLoop:
                 query=q_str,
                 default_slug=str(rec_copy.get("slug") or ""),
             )
-            if self.property_id in ("profithelm", "prexvo"):
+            if self.property_id in ("profithelm", "prexvo", "gainhelm"):
                 res_t = resolve_redirected_gsc_target(
                     target_url=t_url,
                     slug=slug,
@@ -1401,8 +1401,20 @@ class IndexingFeedbackLoop:
         canon_url = _scrub(target_url or f"https://{self.domain}/tools/{slug}/")
         if not canon_url.endswith("/"):
             canon_url += "/"
-        brand = "Prexvo" if self.property_id == "prexvo" else "ProfitHelm"
-        auth_tag = "Title IV 34 CFR Part 685" if self.property_id == "prexvo" else "Internal Revenue Code 2026"
+        brand = (
+            "Prexvo"
+            if self.property_id == "prexvo"
+            else ("GainHelm" if self.property_id == "gainhelm" else "ProfitHelm")
+        )
+        auth_tag = (
+            "Title IV 34 CFR Part 685"
+            if self.property_id == "prexvo"
+            else (
+                "AICPA SSAE 18 & DoD 32 CFR Part 170"
+                if self.property_id == "gainhelm"
+                else "Internal Revenue Code 2026"
+            )
+        )
 
         from pseofactory.distributor import _resolve_tool_calculation_proof
         proof = _resolve_tool_calculation_proof({"slug": slug, "title": title}, property_id=self.property_id)
@@ -1633,6 +1645,7 @@ class IndexingFeedbackLoop:
                 and str(self.base_dir.resolve()) in (
                     "/home/ubuntuadmin/projects/profithelm-platform",
                     "/home/ubuntuadmin/projects/prexvo",
+                    "/home/ubuntuadmin/projects/gainhelm",
                 )
             )
             overlays_dir = (
@@ -1660,7 +1673,7 @@ class IndexingFeedbackLoop:
                 if not isinstance(spec, dict) or "title_rewrite" not in spec:
                     spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
                 t_url = str(cand.get("target_url") or spec.get("target_url") or "")
-                if self.property_id in ("profithelm", "prexvo"):
+                if self.property_id in ("profithelm", "prexvo", "gainhelm"):
                     res_c = resolve_redirected_gsc_target(
                         target_url=t_url,
                         slug=c_slug,
@@ -1722,7 +1735,7 @@ class IndexingFeedbackLoop:
                     continue
                 d_url = d.url
                 d_slug = _slug_from_url_or_query(target_url=d_url)
-                if self.property_id in ("profithelm", "prexvo"):
+                if self.property_id in ("profithelm", "prexvo", "gainhelm"):
                     res_d = resolve_redirected_gsc_target(
                         target_url=d_url,
                         slug=d_slug,
@@ -2060,6 +2073,7 @@ class IndexingFeedbackLoop:
             and str(self.base_dir.resolve()) in (
                 "/home/ubuntuadmin/projects/profithelm-platform",
                 "/home/ubuntuadmin/projects/prexvo",
+                "/home/ubuntuadmin/projects/gainhelm",
             )
         )
         allow_worker_html_mutation = not is_prod_tenant_repo or enable_gitops or self.gitops_coordinator is not None

@@ -1682,7 +1682,11 @@ def _execute_multi_engine_benchmark(
 
         competitors = list(obs.get("higher_ranked_competitors") or base.get("higher_ranked_competitors") or [])
         if not competitors:
-            default_comp_domain = "studentaid.gov" if prop == "prexvo" else "smartasset.com"
+            default_comp_domain = (
+                "studentaid.gov"
+                if prop == "prexvo"
+                else ("secureframe.com" if prop == "gainhelm" else "smartasset.com")
+            )
             competitors = [
                 {
                     "domain": default_comp_domain,

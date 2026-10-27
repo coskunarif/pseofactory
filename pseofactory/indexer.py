@@ -1354,6 +1354,12 @@ class PushIndexer:
             or "prexvo" in str(tenant_id or "").lower()
         ):
             domain = "prexvo.com"
+        elif domain == DEFAULT_DOMAIN and (
+            "gainhelm" in str(base_dir or "").lower()
+            or "gainhelm" in str(dist_dir or "").lower()
+            or "gainhelm" in str(tenant_id or "").lower()
+        ):
+            domain = "gainhelm.com"
         self.domain = domain
         if canonical_base == DEFAULT_CANONICAL_BASE and domain and domain != DEFAULT_DOMAIN:
             self.canonical_base = f"https://{domain}".rstrip("/")
@@ -1364,7 +1370,7 @@ class PushIndexer:
             os.environ.get("PYTEST_CURRENT_TEST")
             and base_dir is None
             and (
-                self.domain not in ("profithelm.com", "prexvo.com")
+                self.domain not in ("profithelm.com", "prexvo.com", "gainhelm.com")
                 or (dist_dir is not None and "/home/ubuntuadmin/projects" not in str(dist_dir))
             )
         )
@@ -1375,6 +1381,8 @@ class PushIndexer:
             _default_base = Path(dist_dir).resolve().parent
         elif "prexvo" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/prexvo").exists():
             _default_base = Path("/home/ubuntuadmin/projects/prexvo")
+        elif "gainhelm" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/gainhelm").exists():
+            _default_base = Path("/home/ubuntuadmin/projects/gainhelm")
         else:
             _default_base = DEFAULT_BASE_DIR
         self.base_dir = Path(base_dir) if base_dir else _default_base
@@ -1553,6 +1561,10 @@ class PushIndexer:
                 u_host = (parsed.netloc or "").lower()
                 if "prexvo.com" in u_host and "prexvo" not in str(eff_dist).lower():
                     alt_dist = Path("/home/ubuntuadmin/projects/prexvo/dist")
+                    if alt_dist.exists():
+                        u_dist = alt_dist
+                elif "gainhelm.com" in u_host and "gainhelm" not in str(eff_dist).lower():
+                    alt_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
                     if alt_dist.exists():
                         u_dist = alt_dist
                 elif "profithelm.com" in u_host and "profithelm" not in str(eff_dist).lower():
@@ -2774,7 +2786,11 @@ class PushIndexer:
         if live and inspections:
             try:
                 from pseofactory.trends.db import DEFAULT_DB_PATH, GSCUrlInspectionRecord, TrendHistoryDB
-                prop_id = "prexvo" if "prexvo" in (self.domain or "").lower() else "profithelm"
+                prop_id = (
+                    "prexvo"
+                    if "prexvo" in (self.domain or "").lower()
+                    else ("gainhelm" if "gainhelm" in (self.domain or "").lower() else "profithelm")
+                )
                 db_records = []
                 for item in inspections:
                     if not isinstance(item, dict) or item.get("status") != "INSPECTED":
@@ -2943,6 +2959,8 @@ class PushIndexer:
             search_dirs.append(Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
         elif self.domain == "prexvo.com":
             search_dirs.append(Path("/home/ubuntuadmin/projects/prexvo/dist"))
+        elif self.domain == "gainhelm.com":
+            search_dirs.append(Path("/home/ubuntuadmin/projects/gainhelm/dist"))
 
         for cand_dist in search_dirs:
             if discovered:
@@ -2978,7 +2996,7 @@ class PushIndexer:
         candidate_urls: List[Any] = list(urls) if urls else []
         if not candidate_urls and "sitemap.xml" in discovered:
             candidate_urls = list(discovered["sitemap.xml"].get("urls", []))
-        if not discovered and candidate_urls and self.domain not in ("profithelm.com", "prexvo.com"):
+        if not discovered and candidate_urls and self.domain not in ("profithelm.com", "prexvo.com", "gainhelm.com"):
             try:
                 built = build_multi_tenant_sitemaps(
                     urls_or_records=candidate_urls,

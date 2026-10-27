@@ -2474,6 +2474,7 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
 
     stalled_rep = sync_rep["stalled_applications_monitor"]
     assert stalled_rep["total_tracked_partners"] == 27
+    assert stalled_rep["fleet_total_tracked_partners"] == 33
     by_partner = {r["partner_key"]: r for r in stalled_rep["applications"]}
     assert by_partner["otr_solutions_factoring"]["lifecycle_state"] == "COUNTERPARTY_INTERNAL_REVIEW_CONFIRMED"
     assert by_partner["otr_solutions_factoring"]["is_stalled"] is False
@@ -2485,6 +2486,7 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
     assert gaps_rep["uncovered_commercial_clusters_count"] == 0
     assert gaps_rep["properties"]["profithelm"]["clusters_count"] == 8
     assert gaps_rep["properties"]["prexvo"]["clusters_count"] == 3
+    assert gaps_rep["properties"]["gainhelm"]["clusters_count"] == 3
     assert_no_forbidden_dashes(json.dumps(sync_rep), context="autonomous_partner_lifecycle_report")
 
 

@@ -226,7 +226,7 @@ class TrendHistoryDB:
                     assignment_id TEXT PRIMARY KEY,
                     query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
                     cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
-                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'unassigned')),
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
                     assignment_basis TEXT NOT NULL,
                     matched_existing_slug TEXT,
                     cannibalization_score REAL NOT NULL DEFAULT 0.0,
@@ -274,7 +274,7 @@ class TrendHistoryDB:
                     evaluation_id TEXT PRIMARY KEY,
                     query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
                     cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
-                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'unassigned')),
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
                     jev_score REAL NOT NULL,
                     durable_prob REAL NOT NULL,
                     composite_profit_yield REAL NOT NULL,
@@ -527,7 +527,7 @@ class TrendHistoryDB:
                 """
                 CREATE TABLE IF NOT EXISTS statutory_economic_timeseries (
                     series_id TEXT NOT NULL,
-                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'shared', 'unassigned')),
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'shared', 'unassigned')),
                     jurisdiction TEXT NOT NULL DEFAULT 'US-FED',
                     statutory_citation TEXT NOT NULL,
                     metric_key TEXT NOT NULL,
@@ -2009,9 +2009,16 @@ class TrendHistoryDB:
         from archived statutory_economic_timeseries rows for compile-time workbench injection.
         """
         prop = str(property_id or "profithelm").strip().lower()
-        if prop not in ("profithelm", "prexvo"):
+        if prop not in ("profithelm", "prexvo", "gainhelm"):
             prop = "profithelm"
         records = self.get_statutory_economic_timeseries(property_id=prop)
+        if not any(r.property_id == prop for r in records):
+            try:
+                from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+                StatutoryEconomicDatasetCollector(db_path=self.db_path).sync_to_db(db=self)
+                records = self.get_statutory_economic_timeseries(property_id=prop)
+            except Exception:
+                pass
         series_map: Dict[str, Dict[str, Any]] = {}
         for rec in records:
             entry = series_map.setdefault(
@@ -2044,13 +2051,23 @@ class TrendHistoryDB:
         default_auth = (
             "Title IV Higher Education Act 34 CFR Part 685.209"
             if prop == "prexvo"
-            else "IRC Section 179 and 26 U.S.C. 168(k) Statutory Depreciation Schedule"
+            else (
+                "AICPA SSAE 18 Trust Services Criteria & DoD 32 CFR Part 170 CMMC 2.0"
+                if prop == "gainhelm"
+                else "IRC Section 179 and 26 U.S.C. 168(k) Statutory Depreciation Schedule"
+            )
         )
-        default_econ = "FRED Series DGS10 and CPILFESL Longitudinal Macro Dataset"
+        default_econ = (
+            "BLS OEWS SOC 15-1212 Information Security Analysts Wage Dataset"
+            if prop == "gainhelm"
+            else "FRED Series DGS10 and CPILFESL Longitudinal Macro Dataset"
+        )
         top_citation = str(ordered_series[0]["statutory_citation"]) if ordered_series else default_auth
         if prop == "profithelm" and "irc section" not in top_citation.lower():
             top_citation = f"{top_citation} ({default_auth})"
         elif prop == "prexvo" and "title iv" not in top_citation.lower():
+            top_citation = f"{top_citation} ({default_auth})"
+        elif prop == "gainhelm" and "ssae 18" not in top_citation.lower() and "32 cfr" not in top_citation.lower():
             top_citation = f"{top_citation} ({default_auth})"
         return {
             "property_id": prop,

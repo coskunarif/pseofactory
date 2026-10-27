@@ -254,6 +254,8 @@ def parse_systemd_tenant(service_name: Optional[str]) -> str:
     s = service_name.lower()
     if "prexvo" in s:
         return "prexvo"
+    if "gainhelm" in s:
+        return "gainhelm"
     if "profithelm" in s:
         return "profithelm"
     clean = s.replace(".service", "").replace("-factory", "")

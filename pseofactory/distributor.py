@@ -666,6 +666,7 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
         PROFITHELM_DEFAULT_TOOLS,
         PREXVO_EXTENDED_TOOLS,
         PROFITHELM_EXTENDED_TOOLS,
+        GAINHELM_DEFAULT_TOOLS,
     )
 
     default_slug = os.environ.get("FACTORY_DEFAULT_TOOL_SLUG", "irs-2027-tax-brackets")
@@ -697,6 +698,7 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
                 next((t for t in TOOLS if t.get("slug") == slug), None)
                 or next((t for t in PROFITHELM_EXTENDED_TOOLS if t.get("slug") == slug), None)
                 or next((t for t in PREXVO_EXTENDED_TOOLS if t.get("slug") == slug), None)
+                or next((t for t in GAINHELM_DEFAULT_TOOLS if t.get("slug") == slug), None)
             )
             if match:
                 for k, v in match.items():
@@ -746,6 +748,7 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
     match = (
         next((t for t in PROFITHELM_EXTENDED_TOOLS if t.get("slug") == tool_slug), None)
         or next((t for t in PREXVO_EXTENDED_TOOLS if t.get("slug") == tool_slug), None)
+        or next((t for t in GAINHELM_DEFAULT_TOOLS if t.get("slug") == tool_slug), None)
         or next((t for t in TOOLS if t.get("slug") == tool_slug), None)
     )
     if match:
@@ -1202,6 +1205,119 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "statutory_claim_key": "pslf_qualifying_payments",
         "statutory_claim_value": 120,
         "query_params": {"balance": 65000, "agi": 95000, "rate": 6.5, "deps": 0},
+    },
+    "soc-2-audit-cost-calculator": {
+        "formula": "round(cpa_fee + grc_cost + (eng_hours * hourly_rate), 2)",
+        "inputs": {"cpa_fee": 28000.0, "grc_cost": 12000.0, "eng_hours": 120.0, "hourly_rate": 95.0},
+        "published_output": 51400.0,
+        "sample_calculation": "$28,000 CPA attestation fee + $12,000 GRC automation + (120 hrs * $95/hr BLS SOC 15-1212 rate) = $51,400 total Year-1 SOC 2 Type II audit cost",
+        "statutory_claim_key": "sprs_max_score",
+        "statutory_claim_value": 110,
+        "query_params": {"headcount": 45, "grc_tier": 1, "audit_type": 2},
+    },
+    "cmmc-2-0-compliance-cost-calculator": {
+        "formula": "round(c3pao_fee + enclave_cost + (remediation_hours * hourly_rate), 2)",
+        "inputs": {"c3pao_fee": 48000.0, "enclave_cost": 18000.0, "remediation_hours": 240.0, "hourly_rate": 95.0},
+        "published_output": 88800.0,
+        "sample_calculation": "$48,000 C3PAO Level 2 assessment fee + $18,000 CUI enclave boundary + (240 hrs * $95/hr BLS SOC 15-1212 rate) = $88,800 total CMMC 2.0 Level 2 budget",
+        "statutory_claim_key": "cmmc_conditional_min_sprs",
+        "statutory_claim_value": 88,
+        "query_params": {"cui_users": 35, "level": 2, "enclave": 1},
+    },
+    "nist-800-171-sprs-score-calculator": {
+        "formula": "max_score - (missing_5pt * 5) - (missing_3pt * 3) - (missing_1pt * 1)",
+        "inputs": {"max_score": 110.0, "missing_5pt": 0.0, "missing_3pt": 4.0, "missing_1pt": 6.0},
+        "published_output": 92.0,
+        "sample_calculation": "110 maximum DoD SPRS score minus (0 * 5-pt gaps) minus (4 * 3-pt gaps) minus (6 * 1-pt gaps) = 92 SPRS score (exceeding the 88 conditional POA&M floor)",
+        "statutory_claim_key": "sprs_max_score",
+        "statutory_claim_value": 110,
+        "query_params": {"missing_5": 0, "missing_3": 4, "missing_1": 6},
+    },
+    "iso-27001-certification-cost-calculator": {
+        "formula": "round((initial_days + surveillance_days) * auditor_day_rate + isms_tooling, 2)",
+        "inputs": {"initial_days": 9.0, "surveillance_days": 6.0, "auditor_day_rate": 2200.0, "isms_tooling": 24000.0},
+        "published_output": 57000.0,
+        "sample_calculation": "(9 Stage 1/2 registrar days + 6 surveillance days under ISO/IEC 27006-1:2024) * $2,200/day + $24,000 ISMS tooling = $57,000 3-year ISO 27001 certification TCO",
+        "statutory_claim_key": "sprs_max_score",
+        "statutory_claim_value": 110,
+        "query_params": {"employees": 85, "sites": 1, "cycle_years": 3},
+    },
+    "hipaa-violation-penalty-breach-cost-calculator": {
+        "formula": "round((records_exposed * per_record_forensics) + ocr_tier_penalty, 2)",
+        "inputs": {"records_exposed": 2500.0, "per_record_forensics": 165.0, "ocr_tier_penalty": 100000.0},
+        "published_output": 512500.0,
+        "sample_calculation": "(2,500 ePHI records * $165 forensic/notification cost) + $100,000 45 CFR 160.404 Tier 2 reasonable cause penalty = $512,500 total HIPAA breach exposure",
+        "statutory_claim_key": "hipaa_ocr_breach_portal_threshold_records",
+        "statutory_claim_value": 500,
+        "query_params": {"records": 2500, "tier": 2, "encrypted": 0},
+    },
+    "pci-dss-4-0-compliance-cost-calculator": {
+        "formula": "round(qsa_assessment_fee + (quarterly_asv_scan_fee * 4.0) + cde_pentest_fee + remediation_and_tokenization_cost, 2)",
+        "inputs": {
+            "qsa_assessment_fee": 48000.0,
+            "quarterly_asv_scan_fee": 2200.0,
+            "cde_pentest_fee": 16000.0,
+            "remediation_and_tokenization_cost": 22000.0,
+        },
+        "published_output": 94800.0,
+        "sample_calculation": "$48,000 QSA Report on Compliance engagement + (4 quarterly ASV scans * $2,200) + $16,000 CDE segmentation pentest + $22,000 v4.0.1 remediation = $94,800 total PCI DSS Level 1 compliance cost",
+        "statutory_claim_key": "pci_level1_visa_mastercard_tx_threshold",
+        "statutory_claim_value": 6000000,
+        "query_params": {"transactions": 6500000, "level": 1, "tokenized": 1},
+    },
+    "fedramp-authorization-3pao-cost-calculator": {
+        "formula": "round(ssp_boundary_engineering_cost + threepao_readiness_and_sar_fee + fips_crypto_remediation_cost + annual_conmon_cost, 2)",
+        "inputs": {
+            "ssp_boundary_engineering_cost": 185000.0,
+            "threepao_readiness_and_sar_fee": 145000.0,
+            "fips_crypto_remediation_cost": 95000.0,
+            "annual_conmon_cost": 75000.0,
+        },
+        "published_output": 500000.0,
+        "sample_calculation": "$185,000 SSP boundary engineering + $145,000 3PAO RAR/SAR assessment + $95,000 FIPS 140-3 crypto remediation + $75,000 Year-1 ConMon = $500,000 FedRAMP Moderate ATO investment",
+        "statutory_claim_key": "sprs_max_score",
+        "statutory_claim_value": 110,
+        "query_params": {"baseline": 2, "controls": 325, "conmon": 1},
+    },
+    "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+        "formula": "round(mycsf_subscription_and_report_fee + external_assessor_validation_fee + internal_readiness_remediation_cost, 2)",
+        "inputs": {
+            "mycsf_subscription_and_report_fee": 27500.0,
+            "external_assessor_validation_fee": 55000.0,
+            "internal_readiness_remediation_cost": 32500.0,
+        },
+        "published_output": 115000.0,
+        "sample_calculation": "$27,500 HITRUST MyCSF portal and validation report fee + $55,000 External Assessor validation + $32,500 readiness remediation = $115,000 HITRUST CSF v11 certification cost",
+        "statutory_claim_key": "hipaa_ocr_breach_portal_threshold_records",
+        "statutory_claim_value": 500,
+        "query_params": {"tier": 2, "controls": 182, "systems": 3},
+    },
+    "penetration-testing-scoping-cost-calculator": {
+        "formula": "round((tester_days * daily_consultant_rate) + retesting_and_attestation_fee, 2)",
+        "inputs": {
+            "tester_days": 9.0,
+            "daily_consultant_rate": 2200.0,
+            "retesting_and_attestation_fee": 3500.0,
+        },
+        "published_output": 23300.0,
+        "sample_calculation": "(9 OSCP/CREST tester days * $2,200/day under NIST SP 800-115) + $3,500 remediation retesting and attestation letter = $23,300 manual penetration testing fee",
+        "statutory_claim_key": "sprs_max_score",
+        "statutory_claim_value": 110,
+        "query_params": {"days": 9, "rate": 2200, "retest": 1},
+    },
+    "cyber-liability-insurance-breach-exposure-calculator": {
+        "formula": "round((policy_limit_millions * base_rate_per_million * control_posture_modifier) + annual_retention_reserve_allocation, 2)",
+        "inputs": {
+            "policy_limit_millions": 5.0,
+            "base_rate_per_million": 6800.0,
+            "control_posture_modifier": 0.85,
+            "annual_retention_reserve_allocation": 10000.0,
+        },
+        "published_output": 38900.0,
+        "sample_calculation": "($5M policy limit * $6,800/M base rate * 0.85 EDR/MFA control posture credit = $28,900 annual premium) + $10,000 SIR retention reserve = $38,900 annual cyber risk transfer cost",
+        "statutory_claim_key": "sec_form_8k_item_1_05_disclosure_business_days",
+        "statutory_claim_value": 4,
+        "query_params": {"limit": 5, "rate": 6800, "posture": 85},
     },
 }
 
@@ -3973,7 +4089,7 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
     Satisfies Google contentEffort standards and institutional distribution guidelines.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS
+    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
     if (
         property_id == "prexvo"
         or any(t.get("slug") == tool_slug for t in PREXVO_DEFAULT_TOOLS)
@@ -3986,6 +4102,15 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
         return {
             "statutory_source": "Title IV Higher Education Act (34 CFR Part 685)",
             "economic_source": "HHS Poverty Guidelines and Department of Education Federal Student Aid",
+        }
+    if (
+        property_id == "gainhelm"
+        or any(t.get("slug") == tool_slug for t in GAINHELM_DEFAULT_TOOLS)
+        or any(tok in tool_slug for tok in ("soc-2", "cmmc", "sprs", "iso-27001", "hipaa", "pci-dss", "fedramp", "hitrust"))
+    ):
+        return {
+            "statutory_source": "AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and NIST SP 800-171 Rev 2",
+            "economic_source": "BLS OEWS SOC 15-1212 Information Security Analysts and ISO/IEC 27006-1:2024 Auditor-Day Tables",
         }
 
     if "treasury" in tool_slug or "tbill" in tool_slug:
@@ -5555,9 +5680,70 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "entities": ["Prexvo", "Title IV", short_title],
             },
         ]
+    elif is_gainhelm:
+        brand_name = "GainHelm"
+        canonical_base = "https://gainhelm.com"
+        ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Cyber Compliance Statutory Scope"
+        ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Auditor-Day Tables & BLS SOC 15-1212 Labor Modeling"
+        ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Framework Enclave & Control Sensitivity Testing"
+        ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on GainHelm"
+        segments = [
+            {
+                "timestamp": "00:00",
+                "seconds": 0,
+                "speaker": "[Narrator]",
+                "section_title": ch0,
+                "target_query": query,
+                "spoken_script": (
+                    f"The {short_title} model calculates enterprise cyber compliance costs pursuant to AICPA SSAE 18, DoD 32 CFR Part 170, and NIST SP 800-171 security controls. "
+                    f"Deterministic calculations verify a {out_fmt} benchmark outcome across external auditor day tables and engineering scopes. "
+                    f"GainHelm delivers verified compliance projections with sub-100ms response times and zero account registration requirements."
+                ),
+                "entities": ["GainHelm", "AICPA SSAE 18", "NIST SP 800-171", short_title],
+            },
+            {
+                "timestamp": "00:30",
+                "seconds": 30,
+                "speaker": "[Narrator]",
+                "section_title": ch1,
+                "target_query": f"{query} modeling",
+                "spoken_script": (
+                    f"Empirical labor benchmarks from BLS OEWS SOC 15-1212 dataset indices provide foundational baseline rates for internal security engineering remediation calculations. "
+                    f"Evaluating continuous GRC automation licensing and external assessor schedules confirms the {out_fmt} mathematical projection across enterprise headcount tiers. "
+                    f"GainHelm models multi-tier scenario interactions to identify optimal audit scoping and remediation budget allocations."
+                ),
+                "entities": ["GainHelm", "BLS SOC 15-1212", "ISO/IEC 27006-1:2024"],
+            },
+            {
+                "timestamp": "01:00",
+                "seconds": 60,
+                "speaker": "[Narrator]",
+                "section_title": ch2,
+                "target_query": f"{query} scenarios",
+                "spoken_script": (
+                    "Enterprise governance standards governed by ISO/IEC 27006-1:2024 and 45 CFR 160.404 mandate deterministic verification of audit evidence and technical security controls. "
+                    "Dynamic sensitivity testing demonstrates how shifting enclave boundaries impacts total compliance liabilities under federal regulations. "
+                    "GainHelm stress-tests security assumptions across variable horizons to ensure robust audit readiness and governance planning."
+                ),
+                "entities": ["GainHelm", "ISO/IEC 27006-1:2024", "45 CFR 160.404"],
+            },
+            {
+                "timestamp": "01:30",
+                "seconds": 90,
+                "speaker": "[Narrator]",
+                "section_title": ch3,
+                "target_query": f"gainhelm {short_title.lower()}",
+                "spoken_script": (
+                    f"Deterministic mathematical engines eliminate guesswork when navigating intricate cyber compliance frameworks and statutory security mandates. "
+                    f"GainHelm delivers transparent analytical tools with real-time recalculation and zero login barriers for security leaders. "
+                    f"Access the interactive {short_title} model on GainHelm today to verify your quantitative audit projections and remediation budgets with complete precision."
+                ),
+                "entities": ["GainHelm", short_title],
+            },
+        ]
     else:
-        brand_name = "GainHelm" if is_gainhelm else "ProfitHelm"
-        canonical_base = "https://gainhelm.com" if is_gainhelm else "https://profithelm.com"
+        brand_name = "ProfitHelm"
+        canonical_base = "https://profithelm.com"
         ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
         ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Core Mathematical Modeling & Rate Calculations"
         ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Tier Scenario Forecasting & Thresholds"
@@ -5855,7 +6041,11 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             f"• {basis_label}: {qa}",
             f"• Verified Calculation Proof: {sample_calc} (Published output: {out_fmt}).",
             "• Real-time Modeling: Sub-100ms deterministic math engines with live parameter synchronization.",
-            "• Scenario Analysis: Dynamic evaluation across income tiers and holding periods.",
+            (
+                "• Scenario Analysis: Dynamic evaluation across audit scopes, CUI enclave boundaries, and headcount tiers."
+                if is_gainhelm
+                else "• Scenario Analysis: Dynamic evaluation across income tiers and holding periods."
+            ),
             "",
             "Timestamps (Key Moments):",
             f"0:00 - {ch0}",
@@ -5865,17 +6055,30 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             "",
             "RESOURCES & INTERACTIVE TOOLS:",
             f"Model Your Scenario Live on {brand_name}: {desc_cta_url}",
-            f"Master Financial Tools Directory: {canonical_base}/tools/",
+            f"Master {'Cyber Compliance' if is_gainhelm else 'Financial'} Tools Directory: {canonical_base}/tools/",
             "",
             f"ABOUT {brand_name.upper()}:",
-            f"{brand_name} delivers deterministic, sub-100ms financial modeling, tax intelligence, and statutory arbitrage calculators for founders, quants, and high-income households.",
+            (
+                f"{brand_name} delivers deterministic, sub-100ms cyber compliance scoping, SOC 2 and CMMC 2.0 audit cost calculators, and NIST SP 800-171 SPRS readiness engines for CISOs, security leaders, and defense contractors."
+                if is_gainhelm
+                else f"{brand_name} delivers deterministic, sub-100ms financial modeling, tax intelligence, and statutory arbitrage calculators for founders, quants, and high-income households."
+            ),
             "",
-            f"#{slug.replace('-', '')} #QuantitativeFinance #TaxPlanning #Fintech #{brand_name}",
+            (
+                f"#{slug.replace('-', '')} #CyberCompliance #SOC2 #CMMC #GRC #{brand_name}"
+                if is_gainhelm
+                else f"#{slug.replace('-', '')} #QuantitativeFinance #TaxPlanning #Fintech #{brand_name}"
+            ),
         ]
         clean_desc = _sanitize_youtube_text(nl.join(desc_lines))
 
         default_pinned = curated.get("pinned_comment")
         if not default_pinned:
+            stat_basis_line = (
+                "Statutory Basis: Computed under AICPA SSAE 18, DoD 32 CFR Part 170, NIST SP 800-171, and BLS OEWS SOC 15-1212 benchmarks."
+                if is_gainhelm
+                else "Statutory Basis: Computed under official IRC regulations and FRED economic benchmarks."
+            )
             pinned_lines = [
                 "CALCULATE YOUR NUMBERS:",
                 f"Verified Proof: {sample_calc} (Output: {out_fmt}).",
@@ -5883,7 +6086,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
                 f"Run your exact numbers in sub-100ms on {brand_name} (free, deterministic, zero login required):",
                 f"{pinned_cta_url}",
                 "",
-                "Statutory Basis: Computed under official IRC regulations and FRED economic benchmarks.",
+                stat_basis_line,
             ]
             clean_pinned_comment = nl.join(pinned_lines)
         else:
@@ -5899,8 +6102,8 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
             slug_calc_tag,
             query,
             f"{query} model",
-            "financial model",
-            "quantitative finance",
+            "cyber compliance" if is_gainhelm else "financial model",
+            "grc audit cost" if is_gainhelm else "quantitative finance",
             brand_name.lower(),
             f"{brand_name.lower()} tools",
         ]
@@ -6160,7 +6363,7 @@ def generate_social_syndication_pack(
     proof = _resolve_tool_calculation_proof(tool, property_id=norm_prop)
     url = proof["parameterized_url"]
 
-    citations = get_dual_dataset_citations(slug)
+    citations = get_dual_dataset_citations(slug, property_id=norm_prop)
     stat_cite = citations["statutory_source"]
     econ_cite = citations["economic_source"]
 
@@ -6170,6 +6373,12 @@ def generate_social_syndication_pack(
         x_pack = _generate_prexvo_x(tool, base_url)
         fb_pack = _generate_prexvo_facebook(tool, base_url)
         first_comment = li_pack.get("first_comment", f"Model your exact scenario on Prexvo:\n{url}")
+    elif norm_prop == "gainhelm":
+        base_url = f"https://gainhelm.com/tools/{slug}/"
+        li_pack = _generate_gainhelm_linkedin(tool, base_url)
+        x_pack = _generate_gainhelm_x(tool, base_url)
+        fb_pack = _generate_gainhelm_facebook(tool, base_url)
+        first_comment = li_pack.get("first_comment", f"Model your exact scenario on GainHelm:\n{url}")
     elif include_citations:
         li_pack = generate_linkedin_company_post_with_citations(slug, stat_cite, econ_cite)
         x_pack = generate_x_post_with_citations(slug, stat_cite, econ_cite)
@@ -7392,6 +7601,276 @@ def _generate_prexvo_regulatory_lead_magnet(tool: Dict[str, Any], url: str) -> D
     return {"content": content, "target_url": deep_url}
 
 
+def _generate_gainhelm_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_x_post
+    slug = tool["slug"]
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    out_fmt = proof["published_output_formatted"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=x&utm_medium=social&utm_campaign={slug}"
+    short_title = tool.get("short_title") or tool.get("title", slug)
+    x_hook = f"on {short_title}, verified compliance math sets baseline output at {out_fmt} ({proof['sample_calculation'][:70]})."
+    raw_post = f"{x_hook}\n\nGrounded in AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212.\n{deep_url}"
+    clean_post = _sanitize_distribution_text(raw_post)
+    if len(clean_post) > 280:
+        clean_post = _sanitize_distribution_text(f"{short_title} verified baseline: {out_fmt}.\n{deep_url}")
+    if len(clean_post) > 280:
+        short_url = f"{url}{sep}{qs}&utm_source=x"
+        clean_post = _sanitize_distribution_text(f"{short_title}: {out_fmt}.\n{short_url}")
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = f"model your exact numbers on GainHelm:\n{fc_url}"
+    teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="GainHelm")
+    assert_x_post(clean_post)
+    assert_x_post(teaser_content)
+    return {
+        "platform": "x",
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "content": clean_post,
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "char_count": len(clean_post),
+        "character_count": len(clean_post),
+    }
+
+
+def _generate_gainhelm_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_linkedin
+    from pseofactory.maintenance import DEFAULT_TENANT_LINKEDIN_IDS
+    company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("gainhelm", "106482195")
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic cyber compliance scoping.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
+    raw_text = (
+        f"Deterministic compliance scoping for {title} verifies a {out_fmt} benchmark outcome.\n\n"
+        f"{qa}\n\n"
+        f"Verified Calculation Proof:\n"
+        f"• {sample_calc} (Verified output: {out_fmt})\n"
+        f"• Statutory Authority: {proof['statutory_source']}\n"
+        f"• Empirical Benchmark: {proof['economic_source']}\n\n"
+        f"Model your exact scenario live on GainHelm:\n"
+        f"{deep_url}\n\n"
+        f"#CyberCompliance #SOC2 #CMMC #GRC #GainHelm"
+    )
+    clean_content = _sanitize_distribution_text(raw_text)
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = (
+        f"Model your exact scenario on GainHelm:\n{fc_url}\n\n"
+        f"Authority: {proof['statutory_source']}\n"
+        f"Benchmark: {proof['economic_source']}"
+    )
+    teaser_content = _build_zero_link_teaser_content(clean_content, platform="linkedin", brand="GainHelm")
+    assert_linkedin(clean_content)
+    assert_linkedin(teaser_content)
+    return {
+        "platform": "linkedin",
+        "entity_type": "company",
+        "company_id": company_id,
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "content": clean_content,
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "char_count": len(clean_content),
+        "character_count": len(clean_content),
+        "status": "READY_FOR_BROADCAST",
+    }
+
+
+def _generate_gainhelm_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic cyber compliance scoping.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
+    raw_text = (
+        f"Evaluating enterprise compliance budgets for {title}? {sample_calc} (Verified output: {out_fmt}).\n\n"
+        f"{qa}\n\nRun your numbers on GainHelm: {deep_url}"
+    )
+    clean_content = _sanitize_distribution_text(raw_text)
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = f"Interactive cyber compliance scenario calculator on GainHelm (pre-filled, zero login): {fc_url}"
+    teaser_content = _build_zero_link_teaser_content(clean_content, platform="facebook", brand="GainHelm")
+    assert_no_forbidden_dashes(clean_content, context=f"{slug} facebook")
+    assert_no_forbidden_dashes(teaser_content, context=f"{slug} facebook teaser")
+    return {
+        "platform": "facebook",
+        "content": clean_content,
+        "teaser_content": teaser_content,
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "first_comment": first_comment,
+    }
+
+
+def _generate_gainhelm_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic cyber compliance scoping.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
+    text = (
+        f"How do enterprise security teams calculate audit and remediation budgets for {title}?\n\n"
+        f"{qa}\n\n"
+        f"Verified Calculation Proof: {sample_calc} (Published output: {out_fmt}). "
+        f"Grounded in {proof['statutory_source']} and {proof['economic_source']}.\n\n"
+        f"Security leaders can run side-by-side compliance projections on the free GainHelm {title}: {deep_url}"
+    )
+    clean_text = _sanitize_distribution_text(text)
+    assert_no_forbidden_dashes(clean_text, context=f"{slug} quora")
+    return {"answer_markdown": clean_text, "url": deep_url}
+
+
+def _generate_gainhelm_google_sites(tool: Dict[str, Any], url: str) -> str:
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    deep_url = proof["parameterized_url"]
+    return (
+        f"<!DOCTYPE html><html><head><title>{title} - GainHelm</title></head><body>"
+        f"<h1>{title}</h1>"
+        f"<p>{proof['sample_calculation']}</p>"
+        f"<p>Verified Formula: <code>{proof['formula']} = {proof['published_output_formatted']}</code></p>"
+        f'<p><a href="{deep_url}">Access the Free Interactive Calculator on GainHelm</a></p>'
+        f"</body></html>"
+    )
+
+
+def _generate_gainhelm_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_linkedin, assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic cyber compliance scoping.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=linkedin_pulse&utm_medium=article&utm_campaign={slug}"
+    article = (
+        f"# {title}: Statutory Audit Scoping and Compliance Cost Guide\n\n"
+        f"{qa}\n\n"
+        f"Enterprise security teams evaluating audit readiness under {proof['statutory_source']} "
+        f"must model external attestation fees alongside internal engineering remediation valued at {proof['economic_source']}.\n\n"
+        f"### Verified Statutory Calculation Proof ({proof['scenario_label']})\n"
+        f"- Formula: `{proof['formula']}`\n"
+        f"- Inputs: `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- Verified Output: **{proof['published_output_formatted']}**\n"
+        f"- Walkthrough: {proof['sample_calculation']}\n\n"
+        f"## Quantitative Modeling and Tool Access\n\n"
+        f"To calculate exact auditor-day schedules, CUI enclave boundaries, and GRC automation ROI, "
+        f"explore our deterministic tool on GainHelm at {deep_url}.\n\n"
+        f"#CyberCompliance #SOC2 #CMMC #GRC #GainHelm"
+    )
+    clean_article = _sanitize_distribution_text(article)
+    assert_linkedin(clean_article)
+    assert_no_forbidden_dashes(clean_article, context=f"{slug} pulse article")
+    return {
+        "platform": "linkedin_pulse",
+        "title": title,
+        "target_url": deep_url,
+        "content": clean_article,
+        "article_markdown": clean_article,
+        "char_count": len(clean_article),
+        "word_count": len(clean_article.split()),
+        "statutory_source": proof["statutory_source"],
+        "economic_source": proof["economic_source"],
+    }
+
+
+def _generate_gainhelm_substack(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic cyber compliance scoping.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=substack&utm_medium=article&utm_campaign={slug}"
+    sensitivity_rows = _build_sensitivity_markdown_rows(proof)
+    article = (
+        f"# Statutory Deep Dive: {title} ({proof['scenario_label']})\n\n"
+        f"{qa}\n\n"
+        f"An in-depth mathematical analysis of 2026 cyber compliance frameworks under {proof['statutory_source']} "
+        f"and {proof['economic_source']}.\n\n"
+        f"## 1. Deterministic Calculation Proof\n\n"
+        f"{proof['sample_calculation']}\n\n"
+        f"- **Formula:** `{proof['formula']}`\n"
+        f"- **Inputs:** `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- **Verified Output:** **{proof['published_output_formatted']}**\n\n"
+        f"## 2. Multi-Scenario Sensitivity Matrix\n\n"
+        f"{sensitivity_rows}\n\n"
+        f"## 3. Interactive Verification\n\n"
+        f"Model your enterprise compliance scenario with pre-populated statutory parameters on GainHelm: [{deep_url}]({deep_url})\n"
+    )
+    clean_article = _sanitize_distribution_text(article)
+    assert_no_forbidden_dashes(clean_article, context=f"{slug} substack")
+    return {
+        "platform": "substack",
+        "title": title,
+        "target_url": deep_url,
+        "content": clean_article,
+        "article_markdown": clean_article,
+        "char_count": len(clean_article),
+        "word_count": len(clean_article.split()),
+    }
+
+
+def _generate_gainhelm_outreach(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    deep_url = proof["parameterized_url"]
+    pitch = (
+        f"Subject: 2026 Enterprise Cyber Compliance Calculation Resource for Your Readers ({title})\n\n"
+        f"Dear Editor,\n\n"
+        f"Security teams budgeting for SOC 2 Type II, CMMC 2.0 Level 2, ISO 27001, and HIPAA compliance "
+        f"need transparent auditor-day and engineering remediation math.\n\n"
+        f"For example ({proof['scenario_label']}): {proof['sample_calculation']} "
+        f"(Verified output: {proof['published_output_formatted']}).\n\n"
+        f"We built an open, deterministic mathematical tool modeling these compliance requirements on GainHelm: {deep_url}\n\n"
+        f"Feel free to cite or link this resource in your cybersecurity and GRC coverage.\n\n"
+        f"Best regards,\nGainHelm Research Team"
+    )
+    clean_pitch = _sanitize_distribution_text(pitch)
+    assert_no_forbidden_dashes(clean_pitch, context=f"{slug} outreach")
+    return {"pitch_text": clean_pitch, "target_url": deep_url}
+
+
+def _generate_gainhelm_newsletter_hook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    deep_url = proof["parameterized_url"]
+    content = _sanitize_distribution_text(
+        f"{proof['sample_calculation']} Model the 2026 cyber compliance rules on GainHelm: {deep_url}"
+    )
+    return {"content": content, "target_url": deep_url}
+
+
+def _generate_gainhelm_regulatory_lead_magnet(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    proof = _resolve_tool_calculation_proof(tool, property_id="gainhelm")
+    deep_url = proof["parameterized_url"]
+    content = _sanitize_distribution_text(
+        f"Download the 2026 Enterprise Cyber Compliance Audit Workpaper Matrix ({proof['scenario_label']}: {proof['published_output_formatted']}): {deep_url}"
+    )
+    return {"content": content, "target_url": deep_url}
+
+
 def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:
     """
     Compiles complete syndication copy and calculation-backed proof payloads across all tools.
@@ -7406,7 +7885,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         adapter = None
 
     if tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
         from pseofactory.qualification import is_retired_or_consolidated_slug
         target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
         if not target_tools:
@@ -7419,6 +7898,8 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         if not target_tools:
             if property_id == "prexvo":
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
+            elif property_id == "gainhelm":
+                target_tools = list(GAINHELM_DEFAULT_TOOLS)
             else:
                 target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
         target_tools = [
@@ -7495,6 +7976,45 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             }
         return distribution_pack
 
+    if property_id == "gainhelm":
+        distribution_pack = {}
+        for t in target_tools:
+            slug = t["slug"]
+            base_url = f"https://gainhelm.com/tools/{slug}/"
+            proof = _resolve_tool_calculation_proof(t, property_id="gainhelm")
+            param_url = proof["parameterized_url"]
+            yt = generate_youtube_syndication(t, property_id="gainhelm")
+            li = _generate_gainhelm_linkedin(t, base_url)
+            ghost_pack = generate_ghost_article(t, property_id="gainhelm")
+            gist_pack = generate_exact_match_github_gist(t, property_id="gainhelm")
+            distribution_pack[slug] = {
+                "slug": slug,
+                "property_id": "gainhelm",
+                "title": t.get("title", slug),
+                "url": param_url,
+                "canonical_url": base_url,
+                "parameterized_url": param_url,
+                "first_comment": li["first_comment"],
+                "statutory_source": proof["statutory_source"],
+                "economic_source": proof["economic_source"],
+                "dual_dataset_citations": [proof["statutory_source"], proof["economic_source"]],
+                "calculation_proof": proof,
+                "linkedin": li,
+                "x": _generate_gainhelm_x(t, base_url),
+                "facebook": _generate_gainhelm_facebook(t, base_url),
+                "youtube": yt,
+                "ghost": ghost_pack,
+                "github_gist": gist_pack,
+                "google_sites": _generate_gainhelm_google_sites(t, base_url),
+                "linkedin_pulse": _generate_gainhelm_linkedin_pulse(t, base_url),
+                "substack_teardown": _generate_gainhelm_substack(t, base_url),
+                "quora": _generate_gainhelm_quora(t, base_url),
+                "outreach_pitch": _generate_gainhelm_outreach(t, base_url),
+                "newsletter_hook": _generate_gainhelm_newsletter_hook(t, base_url),
+                "regulatory_lead_magnet": _generate_gainhelm_regulatory_lead_magnet(t, base_url),
+            }
+        return distribution_pack
+
     distribution_pack = {}
     eff_prop_norm = _normalize_property_id(property_id)
     for t in target_tools:
@@ -7558,6 +8078,16 @@ def _build_facebook_groups_catalog_entry(
         else:
             queries = ["2026 RAP vs IBR student loans", "federal student loan repayment planning", "graduate borrower debt strategy"]
             group_names = ["Federal Student Loan Repayment & IDR Strategy", "Graduate & Professional Student Debt Forum"]
+    elif norm_prop == "gainhelm":
+        if "cmmc" in slug or "sprs" in slug or "fedramp" in slug:
+            queries = ["CMMC 2.0 Level 2 defense contractors", "NIST SP 800-171 SPRS score remediation", "DIB compliance and C3PAO assessments"]
+            group_names = ["CMMC 2.0 & NIST 800-171 Defense Contractors", "Federal & GovCon Cybersecurity Compliance Network"]
+        elif "hipaa" in slug or "hitrust" in slug or "pci" in slug:
+            queries = ["HIPAA compliance and healthcare security", "PCI DSS 4.0 QSA scoping", "HITRUST CSF e1 i1 r2 certification"]
+            group_names = ["Healthcare CISO & HIPAA Security Compliance", "PCI DSS & Payment Security Governance Forum"]
+        else:
+            queries = ["SOC 2 Type II audit readiness", "ISO 27001 ISMS implementation", "B2B SaaS GRC automation and security"]
+            group_names = ["SOC 2 & ISO 27001 GRC Compliance Leaders", "B2B SaaS CISO & Security Engineering Forum"]
     else:
         if "179" in slug or "vehicle" in slug or "equipment" in slug or "macrs" in slug:
             queries = ["small business equipment tax strategy", "Section 179 CPA & CFO forum", "commercial fleet & contractor finance"]
@@ -7615,7 +8145,7 @@ def prioritize_distribution_queue_by_referral_yield(
     from pseofactory.qualification import is_retired_or_consolidated_slug
 
     norm_prop = _normalize_property_id(property_id)
-    company_id = "106482194" if norm_prop == "prexvo" else "143884102"
+    company_id = "106482194" if norm_prop == "prexvo" else ("106482195" if norm_prop == "gainhelm" else "143884102")
 
     resolved_root: Optional[Path] = Path(repo_root).resolve() if repo_root else None
     if resolved_root is None:
@@ -7628,8 +8158,16 @@ def prioritize_distribution_queue_by_referral_yield(
             resolved_root = None
 
     if tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
-        raw_tools = list(PREXVO_DEFAULT_TOOLS) if norm_prop == "prexvo" else (list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS))
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+        raw_tools = (
+            list(PREXVO_DEFAULT_TOOLS)
+            if norm_prop == "prexvo"
+            else (
+                list(GAINHELM_DEFAULT_TOOLS)
+                if norm_prop == "gainhelm"
+                else (list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS))
+            )
+        )
     else:
         raw_tools = list(tools)
 
@@ -8216,6 +8754,32 @@ Calculations and statutory rules derived from:
             )
             assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
             (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")
+    elif property_id == "gainhelm":
+        ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant="gainhelm")
+        ai_bench_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in ai_benchmarks.get("files", {}).items():
+            (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+        for t in target_tools:
+            t_res = _resolve_tool(t)
+            s_val = t_res["slug"]
+            t_val = t_res["title"]
+            matrix_md = (
+                f"# {t_val} - Statutory & Empirical Benchmark Matrix\n\n"
+                f"**Canonical URL:** https://gainhelm.com/tools/{s_val}/\n"
+                f"**Statutory Authority:** AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170 (CMMC 2.0), and NIST SP 800-171 Rev 2\n"
+                f"**Empirical Data Sources:** BLS OEWS SOC 15-1212 Information Security Analysts & ISO/IEC 27006-1:2024 Auditor-Day Tables\n\n"
+                f"## Enterprise Cyber Compliance Framework Comparison Matrix (2026 Baseline)\n\n"
+                f"| Framework | Primary Authority | External Attestation Scope | Baseline Cost Range | Audit Cycle |\n"
+                f"| :--- | :--- | :--- | :--- | :--- |\n"
+                f"| **SOC 2 Type II** | AICPA SSAE 18 (AT-C 205) | Licensed CPA Firm | $24,000 - $65,000 | 6 - 12 Month Window |\n"
+                f"| **CMMC 2.0 Level 2** | 32 CFR Part 170 / NIST 800-171 | Accredited C3PAO (110 Controls) | $38,000 - $85,000 | Triennial (3 Years) |\n"
+                f"| **ISO/IEC 27001:2022** | ISO/IEC 27006-1:2024 | Accredited Registrar (Stage 1+2) | $22,000 - $58,000 | 3-Yr Cycle + Annual Surveillance |\n"
+                f"| **HIPAA / HITECH** | 45 CFR 160.404 | HHS OCR 4-Tier Penalty Schedule | $141 - $2,134,831 Cap | Continuous ePHI Safeguards |\n\n"
+                f"## Verification & Deterministic Execution\n"
+                f"All figures and compliance scoping calculations are verified at https://gainhelm.com/tools/{s_val}/.\n"
+            )
+            assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
+            (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")
 
     # Sync central pseofactory/syndication/<property_id> mirror when exporting to a real tenant repo
     if not dry_run and not _is_test_context(output_dir, property_id):
@@ -8314,11 +8878,13 @@ def dispatch_to_distribution_lead(
 
     target_tools = tools
     if target_tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
         target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
         if not target_tools:
             if property_id == "prexvo":
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
+            elif property_id == "gainhelm":
+                target_tools = list(GAINHELM_DEFAULT_TOOLS)
             else:
                 target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
 
@@ -8430,6 +8996,8 @@ def dispatch_to_distribution_lead(
         first_pack = next(iter(all_assets.values())) if all_assets else None
         if property_id == "prexvo":
             sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
+        elif property_id == "gainhelm":
+            sample_draft = first_pack["x"]["content"] if first_pack else "on a 45-person SaaS team, SOC 2 Type II audit TCO hits $51,400 ($28k CPA fee + $12k GRC + 120 hrs at $95/hr BLS rate): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
         else:
             sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert: https://profithelm.com/tools/irs-2027-tax-brackets/"
         voice_ok = False
@@ -8501,7 +9069,11 @@ def dispatch_to_distribution_lead(
             repo_root=repo_dir,
         )
         priority_by_slug = {item["slug"]: item["priority_score"] for item in prioritized_queue}
-        corp_company_id = "106482194" if _normalize_property_id(property_id) == "prexvo" else "143884102"
+        corp_company_id = (
+            "106482194"
+            if _normalize_property_id(property_id) == "prexvo"
+            else ("106482195" if _normalize_property_id(property_id) == "gainhelm" else "143884102")
+        )
 
         # Sync tenant broadcast_ledger.json and corporate LinkedIn schedule queue when not dry_run
         now_iso = datetime.now(timezone.utc).isoformat()
