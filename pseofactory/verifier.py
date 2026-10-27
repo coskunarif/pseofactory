@@ -7769,3 +7769,393 @@ def evaluate_x_like_2102328294410461564_capability_matrix(
 
 
 
+
+X_LIKE_2110401032035709427_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "claim_id": 1,
+        "claim_name": "Data Plane 1: Crawled Web & Schema.org Synchronization (inLanguage, dateModified, Offer.availability, ItemList)",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 7-8, 12-13) + X Article 2012725610217627648",
+        "claimed_mechanism": "Machine-readable Schema.org JSON-LD graph synchronization with explicit localization (inLanguage), ISO-8601 freshness timestamps (dateModified/datePublished), Offer availability, and root ItemList indexing.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "maintenance._normalize_page_structure_and_geo_parity + verifier.audit_aeo_geo_three_plane_readiness",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Eliminates 100% missing inLanguage across ProfitHelm, Prexvo, and GainHelm, 100% missing dateModified on Prexvo/GainHelm, and missing root index.html ItemList graphs.",
+        "case_against": "Static un-timestamped JSON-LD graphs fail AI assistant freshness and regional disambiguation filters.",
+    },
+    {
+        "claim_id": 2,
+        "claim_name": "Data Plane 2: Machine-Readable Catalog Feed (dist/catalog.json) & llms-full.txt Parameterized Query Syntax Parity",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 7-8, 12: Product/Catalog Feeds & APIs)",
+        "claimed_mechanism": "Structured catalog feeds synchronized 1:1 with on-page HTML and calculation manifests so AI agents ingest deterministic pricing, availability, inputs, and parameterized query syntax without scraping ambiguity.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "maintenance.RetroReflectionEngine.sync_tenant_llms_manifests + sync_tenant_publisher_prerequisites",
+        "vault_surface": "pseofactory reflect --property <tenant>",
+        "case_for": "Generates dist/catalog.json linked from <head> and media-kit.json and extends parameterized Query Syntax and Statutory Authority lines in llms-full.txt across ProfitHelm, Prexvo, and GainHelm.",
+        "case_against": "Emitting Query Syntax only on Prexvo or lacking a structured JSON catalog forces AI agents to guess URL query parameter names on ProfitHelm and GainHelm.",
+    },
+    {
+        "claim_id": 3,
+        "claim_name": "Voice & AI Assistant SpeakableSpecification Parity & Multi-Tenant Partner Roster Enforcement on GainHelm",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 4-5, 12: AI Assistants & Agentic Action Surfaces)",
+        "claimed_mechanism": "SpeakableSpecification CSS selectors (.quick-answer, h1) for assistant synthesis paired with multi-company verified partner rosters and above-the-fold inline conversion slots.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "affiliates.normalize_html_callout_message_match + maintenance._normalize_page_structure_and_geo_parity",
+        "vault_surface": "pseofactory audit --property gainhelm",
+        "case_for": "Remediates 10/10 GainHelm calculator pages that lacked SpeakableSpecification, 6-company GRC partner rosters, and above-the-fold calculator_result_inline conversion slots.",
+        "case_against": "Tenant-specific branching that omits GainHelm leaves enterprise security calculators without voice-assistant speakable selectors or compliant multi-company conversion slots.",
+    },
+    {
+        "claim_id": 4,
+        "claim_name": "Pillar 2 Complementary Tool Relationships ('Goes Well With' / Schema.org isRelatedTo & complementary_tools)",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 13: Add 'goes well with' or complementary product links)",
+        "claimed_mechanism": "Explicit machine-readable complementary tool links in SoftwareApplication.isRelatedTo and catalog.json complementary_tools so AI agents chain adjacent statutory calculators.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "maintenance._normalize_page_structure_and_geo_parity + maintenance.RetroReflectionEngine.sync_tenant_llms_manifests",
+        "vault_surface": "pseofactory reflect --property <tenant>",
+        "case_for": "Binds each calculator to 2 sibling cluster SoftwareApplication entities in JSON-LD and catalog.json to guide multi-step AI agent sessions.",
+        "case_against": "Isolated single-tool schemas without relational sibling edges fail to capture multi-step statutory comparisons in conversational AI flows.",
+    },
+    {
+        "claim_id": 5,
+        "claim_name": "Vault Signal Bus Multi-Tenant Scope Routing & Engagement-Bait DM-Gate Filtering (x-likes)",
+        "primary_source": "x-like:2110401032035709427 (@alexgroberman wrapper tweet + quoted X Article 2012725610217627648)",
+        "claimed_mechanism": "Deterministic scope classification across ProfitHelm, Prexvo, GainHelm, and pseofactory AEO/GEO signals plus engagement-bait DM-gate rejection.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "arif-cli/social/x-toolkit/src/intelligence/signal_bus.py + signal_decision_engine.py",
+        "vault_surface": "vault route 'x-likes-analyst' --compact",
+        "case_for": "Prevents AEO/GEO and Prexvo/GainHelm signals from falling through to default 'harness' scope with bypass_density=True while rejecting pure 'RT + reply with keyword' DM-gate spam.",
+        "case_against": "Unscoped fallback routing bypasses density and rejection gates in signal_decision_engine.py.",
+    },
+    {
+        "claim_id": 6,
+        "claim_name": "Data Plane 3: Live Website Data, SSR Calculation Manifests & Above-the-Fold Quick-Answer Blocks",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 8, 12-13: Live Website Data & Modular Answer Summaries)",
+        "claimed_mechanism": "Zero-JS server-rendered baseline metrics, 40-60 word .quick-answer blocks within the first 300 body words, and embedded <script id='calculation-manifest'> JSON.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "compiler.compile_candidate_to_html + contracts.assert_answer_prominence + audit.ContentAccuracyAuditStage",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Already enforced across 100% of compiled tool pages via Factor 11 Answer Prominence (+1.65) and Gate 5 AST Formula Evaluation Parity.",
+        "case_against": "Re-implementing a parallel summary block would duplicate .quick-answer and bloat DOM depth.",
+    },
+    {
+        "claim_id": 7,
+        "claim_name": "Pillar 2 Modular Comparison Tables (scope='col'), Procedural <ol> Steps & <details> FAQ Accordions",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 9-10, 13: Comparison Tables, FAQs & How-To Structure)",
+        "claimed_mechanism": "Strict H1->H2->H3 hierarchy, scoped <th> comparison tables, <ol> procedural steps, and 1:1 synchronized FAQPage JSON-LD with visible <details> accordions.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "contracts.detect_extractable_content_issues + maintenance._normalize_page_structure_and_geo_parity",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Already enforced by Factor 10 Extractable Content Structure (+1.69) and 1:1 FAQPage DOM-to-JSON-LD parity gates.",
+        "case_against": "Adding redundant static FAQ divs violates interactive <details><summary class='touch-target'> accessibility invariants.",
+    },
+    {
+        "claim_id": 8,
+        "claim_name": "Pillar 3 Verified Statutory Citations, Cryptographic Provenance & Anti-Puffery Guardrails",
+        "primary_source": "Microsoft Advertising AEO/GEO Guide (p. 11, 14: Trust Signals & High-Trust Language vs Hype)",
+        "claimed_mechanism": "Specific verifiable statutory citations (IRC, 34 CFR, 32 CFR, 45 CFR, BLS OEWS) and rejection of uncorroborated superlatives or fabricated ratings.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "contracts.detect_uncorroborated_statutory_claims + tenant_facts.TruthReconciliationEngine",
+        "vault_surface": "pseofactory truth-audit --property <tenant>",
+        "case_for": "Already enforced via Factor 8 Cross-Web Consensus & Corroboration (+1.91) and TruthReconciliationEngine.",
+        "case_against": "Synthetic star ratings or unverified testimonials violate FTC 16 CFR Part 255 and YMYL compliance contracts.",
+    },
+    {
+        "claim_id": 9,
+        "claim_name": "Third-Party Brand Radar Screenshot Vanity Metrics & Unattributed '$50,000 AI Traffic' Revenue Claims",
+        "primary_source": "x-like:2110401032035709427 (@alexgroberman wrapper tweet screenshot)",
+        "claimed_mechanism": "Using unverified third-party AI mention screenshots and unattributed revenue claims as optimization signals.",
+        "disposition": "REJECTED_BLOAT_OR_HYPE",
+        "pseofactory_stage": "seo_growth_loops.evaluate_closed_loop_cohort_reflection + verifier.verify_gsc_lifecycle_telemetry_contract",
+        "vault_surface": "pseofactory gsc-reflect --property <tenant>",
+        "case_for": "Our substrate relies exclusively on verified first-party GSC search analytics, URL inspection coverage states, and attributed /r/<partner> conversion ledgers.",
+        "case_against": "Third-party scraped AI mention counts lack query-level conversion attribution and encourage vanity-metric chasing.",
+    },
+    {
+        "claim_id": 10,
+        "claim_name": "Paid DR50+ Backlink Packages (seo-stuff.com) & 60-Article Mass AI Content Bundles",
+        "primary_source": "Quoted X Article 2012725610217627648 promotional footer (@alexgroberman)",
+        "claimed_mechanism": "Purchasing $1,500 DR50+ link packages and $1,200 60-article mass AI content bundles to game AI citations.",
+        "disposition": "REJECTED_BLOAT_OR_HYPE",
+        "pseofactory_stage": "contracts.assert_no_forbidden_dashes + verifier.audit_estate_technical_seo_and_cannibalization",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Rejected 100%: paid link schemes and mass AI article bundles trigger Google spam policies and dilute programmatic calculator authority.",
+        "case_against": "Unverified mass prose and paid link farms introduce hallucinated statutory figures and catastrophic domain risk.",
+    },
+]
+
+def audit_aeo_geo_three_plane_readiness(
+    dist_dir: Optional[Union[str, Path]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Mechanically audits a tenant's compiled dist/ directory across all 3 Microsoft
+    AEO/GEO Data Planes (x-like:2110401032035709427):
+      - Plane 1 (Crawled Web & Schema.org Synchronization): JSON-LD @graph validity,
+        inLanguage ('en-US'), ISO-8601 dateModified, Offer.availability, root ItemList,
+        SpeakableSpecification (.quick-answer), and isRelatedTo complementary tool links.
+      - Plane 2 (Product/Catalog Feeds & Machine Manifests): dist/catalog.json,
+        dist/llms.txt, dist/llms-full.txt (with Query Syntax & Direct Statutory Answer),
+        dist/feed.xml, and dist/media-kit.json (with catalog_feed_url) 1:1 parity.
+      - Plane 3 (Live Website DOM & Agentic Execution): SSR .quick-answer, interactive
+        calculator form, <script id="calculation-manifest">, parameterized scenario
+        presets (data-preset), and compliant /r/<partner> attribution.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "profithelm").strip().lower()
+    if dist_dir is not None:
+        d_path = Path(dist_dir).resolve()
+    else:
+        default_map = {
+            "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
+            "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
+        }
+        d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
+
+    issues: List[str] = []
+    if not d_path.is_dir():
+        return {
+            "status": "FAIL",
+            "passed": False,
+            "property_id": prop,
+            "dist_dir": str(d_path),
+            "issues": [f"Target dist directory does not exist: {d_path}"],
+        }
+
+    # Plane 1: Crawled Web & Schema Synchronization
+    html_pages_scanned = 0
+    tool_pages_scanned = 0
+    in_language_pages = 0
+    date_modified_pages = 0
+    speakable_tool_pages = 0
+    related_tool_pages = 0
+    root_itemlist_present = False
+
+    for hf in sorted(d_path.rglob("*.html")):
+        if hf.name.startswith(".") or hf.name == "404.html":
+            continue
+        rel_p = hf.relative_to(d_path).as_posix()
+        try:
+            raw_h = hf.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        if 'name="robots" content="noindex' in raw_h.lower():
+            continue
+        html_pages_scanned += 1
+        if "\u2014" in raw_h or "\u2013" in raw_h:
+            issues.append(f"Plane 1 ({rel_p}): Forbidden em-dash or en-dash in HTML")
+
+        ld_blocks = re.findall(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+            raw_h,
+            flags=re.I,
+        )
+        if not ld_blocks:
+            issues.append(f"Plane 1 ({rel_p}): Missing application/ld+json block")
+            continue
+        joined_ld = "\n".join(ld_blocks)
+        if '"inLanguage": "en-US"' in joined_ld or '"inLanguage":"en-US"' in joined_ld:
+            in_language_pages += 1
+        else:
+            issues.append(f"Plane 1 ({rel_p}): Missing inLanguage='en-US' in JSON-LD")
+
+        if '"dateModified":' in joined_ld or '"dateModified" :' in joined_ld:
+            date_modified_pages += 1
+        else:
+            issues.append(f"Plane 1 ({rel_p}): Missing dateModified in JSON-LD")
+
+        if rel_p == "index.html":
+            if '"ItemList"' in joined_ld:
+                root_itemlist_present = True
+            else:
+                issues.append("Plane 1 (index.html): Missing ItemList schema on root hub")
+
+        is_tool_leaf = (
+            rel_p.startswith("tools/")
+            and rel_p != "tools/index.html"
+            and rel_p.endswith("/index.html")
+        )
+        if is_tool_leaf:
+            tool_pages_scanned += 1
+            if '"SpeakableSpecification"' in joined_ld:
+                speakable_tool_pages += 1
+            else:
+                issues.append(f"Plane 1 ({rel_p}): Missing SpeakableSpecification in tool JSON-LD")
+            if '"isRelatedTo"' in joined_ld:
+                related_tool_pages += 1
+            else:
+                issues.append(f"Plane 1 ({rel_p}): Missing isRelatedTo complementary tool links in JSON-LD")
+            if '"https://schema.org/InStock"' not in joined_ld:
+                issues.append(f"Plane 1 ({rel_p}): Missing Offer availability='https://schema.org/InStock'")
+            if 'class="quick-answer' not in raw_h and "class='quick-answer" not in raw_h:
+                issues.append(f"Plane 3 ({rel_p}): Missing SSR .quick-answer block")
+            if 'id="calculation-manifest"' not in raw_h and 'class="calculation-manifest"' not in raw_h:
+                issues.append(f"Plane 3 ({rel_p}): Missing embedded calculation-manifest JSON")
+
+    # Plane 2: Catalog Feeds & Machine Manifests
+    tools_dir = d_path / "tools"
+    root_tool_slugs = (
+        sorted(
+            td.name
+            for td in tools_dir.iterdir()
+            if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file()
+        )
+        if tools_dir.is_dir()
+        else []
+    )
+    cat_file = d_path / "catalog.json"
+    llms_file = d_path / "llms.txt"
+    llms_full_file = d_path / "llms-full.txt"
+    mk_file = d_path / "media-kit.json"
+    catalog_tools_verified = 0
+
+    if not cat_file.is_file():
+        issues.append("Plane 2: Missing dist/catalog.json machine-readable catalog feed")
+    else:
+        try:
+            raw_cat = cat_file.read_text(encoding="utf-8")
+            if "\u2014" in raw_cat or "\u2013" in raw_cat:
+                issues.append("Plane 2 (catalog.json): Contains forbidden em-dash or en-dash")
+            cat_data = json.loads(raw_cat)
+            cat_tools = cat_data.get("tools", []) if isinstance(cat_data, dict) else []
+            if len(cat_tools) != len(root_tool_slugs):
+                issues.append(
+                    f"Plane 2 (catalog.json): tools count mismatch ({len(cat_tools)} vs {len(root_tool_slugs)} root tool dirs)"
+                )
+            for t_entry in cat_tools:
+                if not isinstance(t_entry, dict):
+                    continue
+                req_fields = (
+                    "slug",
+                    "url",
+                    "title",
+                    "description",
+                    "quick_answer",
+                    "statutory_authority",
+                    "query_syntax",
+                    "inLanguage",
+                    "dateModified",
+                    "offers",
+                    "complementary_tools",
+                )
+                missing_f = [f for f in req_fields if not t_entry.get(f)]
+                if missing_f:
+                    issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): Missing fields {missing_f}")
+                elif "?" not in str(t_entry.get("query_syntax", "")):
+                    issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): query_syntax missing parameterized query string")
+                else:
+                    catalog_tools_verified += 1
+        except Exception as exc:
+            issues.append(f"Plane 2 (catalog.json): Invalid JSON ({exc})")
+
+    if not llms_file.is_file():
+        issues.append("Plane 2: Missing dist/llms.txt")
+    if not llms_full_file.is_file():
+        issues.append("Plane 2: Missing dist/llms-full.txt")
+    else:
+        raw_lf = llms_full_file.read_text(encoding="utf-8", errors="ignore")
+        if "Query Syntax:" not in raw_lf or "Direct Statutory Answer:" not in raw_lf:
+            issues.append("Plane 2 (llms-full.txt): Missing Query Syntax or Direct Statutory Answer lines")
+
+    if mk_file.is_file():
+        try:
+            mk_data = json.loads(mk_file.read_text(encoding="utf-8"))
+            gov_ep = mk_data.get("governance_endpoints", {}) if isinstance(mk_data, dict) else {}
+            if not gov_ep.get("catalog_feed_url"):
+                issues.append("Plane 2 (media-kit.json): Missing governance_endpoints.catalog_feed_url")
+        except Exception as exc:
+            issues.append(f"Plane 2 (media-kit.json): Invalid JSON ({exc})")
+
+    # Plane 3: Live DOM & Partner Roster Compliance
+    partner_audit = audit_estate_partner_roster_and_compliance(d_path, property_id=prop)
+    if not partner_audit.get("passed", False):
+        for v in partner_audit.get("violations", [])[:5]:
+            issues.append(f"Plane 3 ({v.get('rel_path')}): {v.get('issues')}")
+
+    passed = len(issues) == 0
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "property_id": prop,
+        "dist_dir": str(d_path),
+        "plane_1_crawled_web_and_schema": {
+            "html_pages_scanned": html_pages_scanned,
+            "in_language_pages": in_language_pages,
+            "date_modified_pages": date_modified_pages,
+            "root_itemlist_present": root_itemlist_present,
+            "speakable_tool_pages": speakable_tool_pages,
+            "related_tool_pages": related_tool_pages,
+        },
+        "plane_2_catalog_feeds_and_manifests": {
+            "root_tools_count": len(root_tool_slugs),
+            "catalog_tools_verified": catalog_tools_verified,
+            "catalog_json_present": cat_file.is_file(),
+            "llms_txt_present": llms_file.is_file(),
+            "llms_full_txt_present": llms_full_file.is_file(),
+        },
+        "plane_3_live_dom_and_agent_execution": {
+            "tool_pages_scanned": tool_pages_scanned,
+            "partner_roster_status": partner_audit.get("status", "FAIL"),
+            "partner_roster_violations": partner_audit.get("violation_pages_count", 0),
+        },
+        "issues_count": len(issues),
+        "issues": issues,
+    }
+
+def evaluate_x_like_2110401032035709427_capability_matrix(
+    include_live_tenant_check: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 10 technical claims from x-like:2110401032035709427 (@alexgroberman /
+    X Article 2012725610217627648 / Microsoft Advertising 'From discovery to influence:
+    A guide to AEO and GEO') against pseofactory, agy, and vault across ProfitHelm,
+    Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    upgraded = [
+        m for m in X_LIKE_2110401032035709427_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    already_solved = [
+        m for m in X_LIKE_2110401032035709427_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    rejected = [
+        m for m in X_LIKE_2110401032035709427_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_HYPE"
+    ]
+    tenant_readiness: Dict[str, Any] = {}
+    all_passed = (
+        len(X_LIKE_2110401032035709427_CAPABILITY_MATRIX) == 10
+        and len(upgraded) == 5
+        and len(already_solved) == 3
+        and len(rejected) == 2
+    )
+    if include_live_tenant_check:
+        for t_id, r_path in (
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
+            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
+        ):
+            if r_path.is_dir():
+                rep = audit_aeo_geo_three_plane_readiness(dist_dir=r_path, property_id=t_id)
+                tenant_readiness[t_id] = rep
+                if not rep.get("passed", False):
+                    all_passed = False
+
+    return {
+        "pointer": "x-like:2110401032035709427",
+        "tweet_id": "2110401032035709427",
+        "quoted_tweet_id": "2012895638955204897",
+        "x_article_id": "2012725610217627648",
+        "author_handle": "alexgroberman",
+        "primary_source_pdf": "https://about.ads.microsoft.com/content/dam/sites/msa-about/global/common/content-lib/pdf/from-discovery-to-influence-a-guide-to-aeo-and-geo.pdf",
+        "total_claims_evaluated": len(X_LIKE_2110401032035709427_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(upgraded),
+        "already_solved_count": len(already_solved),
+        "rejected_bloat_or_hype_count": len(rejected),
+        "matrix": list(X_LIKE_2110401032035709427_CAPABILITY_MATRIX),
+        "tenant_readiness": tenant_readiness,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }

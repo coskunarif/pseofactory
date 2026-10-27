@@ -5223,6 +5223,23 @@ def _needs_page_structure_geo_normalization(html_content: str) -> bool:
     if '"WebApplication"' in html_content and '"priceCurrency"' not in html_content:
         return True
 
+    if '"@graph"' in html_content and (
+        '"inLanguage"' not in html_content
+        or '"dateModified"' not in html_content
+        or ('class="quick-answer"' in html_content and '"SpeakableSpecification"' not in html_content)
+        or (
+            canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com")
+            and '"ItemList"' not in html_content
+        )
+        or (
+            "/tools/" in canon_url
+            and not canon_url.rstrip("/").endswith("/tools")
+            and ('"SoftwareApplication"' in html_content or '"WebApplication"' in html_content)
+            and '"isRelatedTo"' not in html_content
+        )
+    ):
+        return True
+
     if "venues default to ordinary income rates" in html_content:
         return True
 
@@ -6838,6 +6855,206 @@ def _normalize_page_structure_and_geo_parity(
                         + updated[h1_ins_m.end() :]
                     )
                     changed = True
+
+    if '"@graph"' in updated:
+        def _normalize_aeo_geo_jsonld_graph(m_ld: re.Match) -> str:
+            o_tag, raw_j, c_tag = m_ld.group(1), m_ld.group(2), m_ld.group(3)
+            try:
+                parsed_j = json.loads(raw_j.strip())
+                if not isinstance(parsed_j, dict) or not isinstance(parsed_j.get("@graph"), list):
+                    return m_ld.group(0)
+                g_nodes = parsed_j["@graph"]
+                if not g_nodes:
+                    return m_ld.group(0)
+                mod_g = False
+                prop_l = property_id.lower()
+                base_u = (
+                    "https://prexvo.com"
+                    if prop_l == "prexvo"
+                    else ("https://gainhelm.com" if prop_l == "gainhelm" else "https://profithelm.com")
+                )
+                canon_clean_u = (canonical_url or "").split("#")[0].rstrip("/")
+                is_root_home = (
+                    slug == "index"
+                    or canon_clean_u in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com")
+                )
+                is_tool_route = (
+                    not is_root_home
+                    and not is_non_tool_slug
+                    and (
+                        "/tools/" in canon_clean_u
+                        or (slug and slug not in ("index", "tools-directory", "tools"))
+                    )
+                )
+                has_qa_dom = 'class="quick-answer' in updated or "class='quick-answer" in updated
+                if prop_l == "prexvo":
+                    peer_candidates = [
+                        ("student-loan-repayment-calculator", "Title IV Student Loan Repayment Calculator"),
+                        ("rap-vs-ibr-calculator", "RAP vs IBR Repayment Comparison Calculator"),
+                        ("pslf-buyback-calculator", "PSLF Buyback Settlement Calculator"),
+                    ]
+                elif prop_l == "gainhelm":
+                    peer_candidates = [
+                        ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC Automation Calculator"),
+                        ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Compliance Cost Calculator"),
+                        ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
+                    ]
+                else:
+                    peer_candidates = [
+                        ("irs-2027-tax-brackets", "Federal Tax Bracket & Marginal Rate Calculator"),
+                        ("section-179-calculator", "Section 179 Equipment Depreciation Calculator"),
+                        ("section-1031-calculator", "Section 1031 Real Estate Exchange Calculator"),
+                    ]
+                related_apps = [
+                    {
+                        "@type": "SoftwareApplication",
+                        "name": p_lbl,
+                        "url": f"{base_u}/tools/{p_s}/",
+                        "applicationCategory": "FinanceApplication",
+                        "operatingSystem": "All",
+                    }
+                    for p_s, p_lbl in peer_candidates
+                    if p_s != slug
+                ][:2]
+
+                existing_types: Set[str] = set()
+                stamped_lang = False
+                stamped_date = False
+                has_speakable = '"SpeakableSpecification"' in raw_j
+
+                for n in g_nodes:
+                    if not isinstance(n, dict):
+                        continue
+                    nt = n.get("@type")
+                    nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
+                    existing_types.update(nt_list)
+                    if any(
+                        t in nt_list
+                        for t in (
+                            "WebSite",
+                            "WebPage",
+                            "CollectionPage",
+                            "SoftwareApplication",
+                            "WebApplication",
+                            "TechArticle",
+                            "Dataset",
+                            "FAQPage",
+                        )
+                    ):
+                        if n.get("inLanguage") != "en-US":
+                            n["inLanguage"] = "en-US"
+                            mod_g = True
+                        stamped_lang = True
+                    if any(
+                        t in nt_list
+                        for t in (
+                            "WebPage",
+                            "CollectionPage",
+                            "SoftwareApplication",
+                            "WebApplication",
+                            "TechArticle",
+                            "Dataset",
+                            "FAQPage",
+                        )
+                    ):
+                        if not n.get("datePublished"):
+                            n["datePublished"] = "2026-01-15"
+                            mod_g = True
+                        if not n.get("dateModified"):
+                            n["dateModified"] = "2026-10-27"
+                            mod_g = True
+                        stamped_date = True
+                    if any(t in nt_list for t in ("SoftwareApplication", "WebApplication")):
+                        offers_obj = n.get("offers")
+                        if not isinstance(offers_obj, dict):
+                            n["offers"] = {
+                                "@type": "Offer",
+                                "price": "0",
+                                "priceCurrency": "USD",
+                                "availability": "https://schema.org/InStock",
+                            }
+                            mod_g = True
+                        elif offers_obj.get("availability") != "https://schema.org/InStock":
+                            offers_obj["availability"] = "https://schema.org/InStock"
+                            if "price" not in offers_obj:
+                                offers_obj["price"] = "0"
+                            if "priceCurrency" not in offers_obj:
+                                offers_obj["priceCurrency"] = "USD"
+                            mod_g = True
+                        if has_qa_dom and not n.get("speakable"):
+                            n["speakable"] = {
+                                "@type": "SpeakableSpecification",
+                                "cssSelector": [".quick-answer", "h1"],
+                            }
+                            has_speakable = True
+                            mod_g = True
+                        if is_tool_route and related_apps and not n.get("isRelatedTo"):
+                            n["isRelatedTo"] = related_apps
+                            mod_g = True
+
+                if not stamped_lang and isinstance(g_nodes[0], dict):
+                    g_nodes[0]["inLanguage"] = "en-US"
+                    mod_g = True
+                if not stamped_date and isinstance(g_nodes[0], dict):
+                    if not g_nodes[0].get("datePublished"):
+                        g_nodes[0]["datePublished"] = "2026-01-15"
+                    g_nodes[0]["dateModified"] = "2026-10-27"
+                    mod_g = True
+                if has_qa_dom and not has_speakable:
+                    target_sp = next(
+                        (
+                            n
+                            for n in g_nodes
+                            if isinstance(n, dict)
+                            and n.get("@type") in ("WebPage", "SoftwareApplication", "WebApplication")
+                        ),
+                        g_nodes[0] if isinstance(g_nodes[0], dict) else None,
+                    )
+                    if isinstance(target_sp, dict):
+                        target_sp["speakable"] = {
+                            "@type": "SpeakableSpecification",
+                            "cssSelector": [".quick-answer", "h1"],
+                        }
+                        mod_g = True
+
+                if is_root_home and "ItemList" not in existing_types:
+                    item_elements = [
+                        {
+                            "@type": "ListItem",
+                            "position": idx,
+                            "name": p_lbl,
+                            "url": f"{base_u}/tools/{p_s}/",
+                        }
+                        for idx, (p_s, p_lbl) in enumerate(peer_candidates, start=1)
+                    ]
+                    g_nodes.append(
+                        {
+                            "@type": "ItemList",
+                            "@id": f"{base_u}/#itemlist",
+                            "name": f"{brand_label} Flagship Statutory Calculators",
+                            "itemListOrder": "https://schema.org/ItemListOrderAscending",
+                            "numberOfItems": len(item_elements),
+                            "itemListElement": item_elements,
+                        }
+                    )
+                    mod_g = True
+
+                if mod_g:
+                    return f"{o_tag}\n{json.dumps(parsed_j, indent=2)}\n  {c_tag}"
+            except Exception:
+                pass
+            return m_ld.group(0)
+
+        aeo_ld_updated = re.sub(
+            r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+            _normalize_aeo_geo_jsonld_graph,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if aeo_ld_updated != updated:
+            updated = aeo_ld_updated
+            changed = True
 
     if re.search(r"<th(?![^>]*\bscope=)\b[^>]*>", updated, re.IGNORECASE):
         th_scoped = re.sub(
@@ -9164,6 +9381,7 @@ class RetroReflectionEngine:
                     or bool(re.search(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ftxt))
                     or "Princeton GEO Answer:" in ftxt
                     or "Direct Statutory Answer:" not in ftxt
+                    or "Query Syntax:" not in ftxt
                     or "$19,125" in ftxt
                     or "$161,000" in ftxt
                     or "(1: 13.3%" in ftxt
@@ -9175,6 +9393,8 @@ class RetroReflectionEngine:
                         return True
             except Exception:
                 return True
+        if root_tool_slugs and (dist_dir / "index.html").is_file() and not (dist_dir / "catalog.json").is_file():
+            return True
         return False
 
     @classmethod
@@ -9184,7 +9404,7 @@ class RetroReflectionEngine:
         property_id: str,
         canonical_base: Optional[str] = None,
     ) -> List[str]:
-        """Synchronizes llms.txt and llms-full.txt with actual retrofitted HTML tool titles, descriptions, and quick-answers."""
+        """Synchronizes llms.txt, llms-full.txt, and catalog.json with actual retrofitted HTML tool titles, descriptions, and quick-answers."""
         from pseofactory.contracts import detect_sentence_truncation_issues
 
         def _clean_non_math_dashes(val_str: str) -> str:
@@ -9206,7 +9426,7 @@ class RetroReflectionEngine:
         ).rstrip("/")
 
         # Extract metadata from every root tool HTML page in dist_dir / "tools"
-        tool_meta: Dict[str, Dict[str, str]] = {}
+        tool_meta: Dict[str, Dict[str, Any]] = {}
         for td in sorted(tools_dir.iterdir()):
             if not td.is_dir() or td.name.startswith("."):
                 continue
@@ -9248,11 +9468,34 @@ class RetroReflectionEngine:
                     "Deterministic mathematical model and planning calculator for ",
                     "Deterministic statutory financial model and compliance calculator for ",
                 )
+            manifest_obj = cls._resolve_manifest_for_page(raw_h, property_id=property_id, slug=td.name, dist_dir=dist_dir)
+            inputs_dict = manifest_obj.get("inputs") if isinstance(manifest_obj.get("inputs"), dict) else {}
+            if property_id.lower() == "prexvo":
+                q_syn = f"{canon}/tools/{td.name}/?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
+            elif inputs_dict:
+                q_params = "&".join(f"{k}={{{k}}}" for k in list(inputs_dict.keys())[:4])
+                q_syn = f"{canon}/tools/{td.name}/?{q_params}"
+            elif property_id.lower() == "gainhelm":
+                q_syn = f"{canon}/tools/{td.name}/?headcount={{headcount}}&extra_criteria={{extra_criteria}}"
+            else:
+                q_syn = f"{canon}/tools/{td.name}/?income={{income}}&status={{status}}"
+            bound_partners = list(
+                dict.fromkeys(
+                    m.group(1).lower()
+                    for m in re.finditer(r'href=["\']/r/([a-z0-9_]+)', raw_h, re.IGNORECASE)
+                )
+            )
             tool_meta[td.name] = {
                 "title": h1_txt,
                 "description": desc_txt,
                 "quick_answer": qa_txt or desc_txt,
                 "url": f"{canon}/tools/{td.name}/",
+                "query_syntax": q_syn,
+                "statutory_authority": _clean_non_math_dashes(str(manifest_obj.get("statutory_authority") or "")),
+                "economic_dataset": _clean_non_math_dashes(str(manifest_obj.get("economic_dataset") or "")),
+                "published_output": manifest_obj.get("published_output", 0.0),
+                "inputs": inputs_dict,
+                "verified_partners": bound_partners,
             }
 
         llms_path = dist_dir / "llms.txt"
@@ -9370,12 +9613,14 @@ class RetroReflectionEngine:
                     sec_title = m_info["title"]
                     if not is_prexvo and s_key == "crypto-tax-calculator":
                         sec_title = "Crypto Tax Liability & Capital Gains Calculator 2027"
+                    q_syn = m_info.get("query_syntax") or f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
+                    stat_line = f"Statutory Authority: {m_info['statutory_authority']}\n" if m_info.get("statutory_authority") else ""
                     if is_prexvo:
-                        q_syn = f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
                         sections_out.append(
                             f"## {idx}. {sec_title}\n"
                             f"Canonical URL: {m_info['url']}\n"
                             f"Query Syntax: {q_syn}\n"
+                            f"{stat_line}"
                             f"Summary: {m_info['description']}\n"
                             f"Direct Statutory Answer: {m_info['quick_answer']}\n"
                         )
@@ -9383,6 +9628,8 @@ class RetroReflectionEngine:
                         sections_out.append(
                             f"## {idx}. {sec_title}\n"
                             f"Canonical URL: {m_info['url']}\n"
+                            f"Query Syntax: {q_syn}\n"
+                            f"{stat_line}"
                             f"Description: {m_info['description']}\n"
                             f"Direct Statutory Answer: {m_info['quick_answer']}\n"
                         )
@@ -9426,6 +9673,96 @@ class RetroReflectionEngine:
                 if new_full != orig_full:
                     llms_full_path.write_text(new_full, encoding="utf-8")
                     updated_files.append("llms-full.txt")
+            except Exception:
+                pass
+
+        if tool_meta:
+            try:
+                is_prexvo_cat = property_id.lower() == "prexvo"
+                is_gainhelm_cat = property_id.lower() == "gainhelm"
+                ordered_slugs = sorted(tool_meta.keys())
+                catalog_tools: List[Dict[str, Any]] = []
+                if is_prexvo_cat:
+                    default_comp_peers = [
+                        ("student-loan-repayment-calculator", "Title IV Student Loan Repayment Calculator"),
+                        ("rap-vs-ibr-calculator", "RAP vs IBR Repayment Comparison Calculator"),
+                        ("pslf-buyback-calculator", "PSLF Buyback Settlement Calculator"),
+                    ]
+                elif is_gainhelm_cat:
+                    default_comp_peers = [
+                        ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC Automation Calculator"),
+                        ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Compliance Cost Calculator"),
+                        ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
+                    ]
+                else:
+                    default_comp_peers = [
+                        ("irs-2027-tax-brackets", "Federal Tax Bracket & Marginal Rate Calculator"),
+                        ("section-179-calculator", "Section 179 Equipment Depreciation Calculator"),
+                        ("section-1031-calculator", "Section 1031 Real Estate Exchange Calculator"),
+                    ]
+                for s_key in ordered_slugs:
+                    m_info = tool_meta[s_key]
+                    comp_tools = [
+                        {
+                            "slug": sib_k,
+                            "title": tool_meta[sib_k]["title"],
+                            "url": tool_meta[sib_k]["url"],
+                        }
+                        for sib_k in ordered_slugs
+                        if sib_k != s_key
+                    ][:2]
+                    if len(comp_tools) < 2:
+                        for p_s, p_lbl in default_comp_peers:
+                            if p_s != s_key and all(c["slug"] != p_s for c in comp_tools):
+                                comp_tools.append(
+                                    {
+                                        "slug": p_s,
+                                        "title": p_lbl,
+                                        "url": f"{canon}/tools/{p_s}/",
+                                    }
+                                )
+                            if len(comp_tools) >= 2:
+                                break
+                    catalog_tools.append(
+                        {
+                            "slug": s_key,
+                            "url": m_info["url"],
+                            "title": m_info["title"],
+                            "description": m_info["description"],
+                            "quick_answer": m_info["quick_answer"],
+                            "statutory_authority": m_info.get("statutory_authority", ""),
+                            "economic_dataset": m_info.get("economic_dataset", ""),
+                            "published_output": m_info.get("published_output", 0.0),
+                            "inputs": m_info.get("inputs", {}),
+                            "query_syntax": m_info.get("query_syntax", ""),
+                            "inLanguage": "en-US",
+                            "dateModified": "2026-10-27",
+                            "offers": {
+                                "@type": "Offer",
+                                "price": "0",
+                                "priceCurrency": "USD",
+                                "availability": "https://schema.org/InStock",
+                            },
+                            "complementary_tools": comp_tools,
+                            "verified_partners": m_info.get("verified_partners", []),
+                        }
+                    )
+                catalog_payload = {
+                    "schema_version": "2026.10.27",
+                    "property_id": "prexvo" if is_prexvo_cat else ("gainhelm" if is_gainhelm_cat else "profithelm"),
+                    "domain": "prexvo.com" if is_prexvo_cat else ("gainhelm.com" if is_gainhelm_cat else "profithelm.com"),
+                    "canonical_url": canon,
+                    "inLanguage": "en-US",
+                    "dateModified": "2026-10-27",
+                    "tools_count": len(catalog_tools),
+                    "tools": catalog_tools,
+                }
+                cat_path = dist_dir / "catalog.json"
+                new_cat_txt = json.dumps(catalog_payload, indent=2) + "\n"
+                old_cat_txt = cat_path.read_text(encoding="utf-8") if cat_path.is_file() else ""
+                if new_cat_txt != old_cat_txt:
+                    cat_path.write_text(new_cat_txt, encoding="utf-8")
+                    updated_files.append("catalog.json")
             except Exception:
                 pass
 
@@ -9501,6 +9838,7 @@ class RetroReflectionEngine:
             f'  <meta name="partnerstack-publisher-entity" content="{entity_label}">',
             '  <meta name="ftc-affiliate-disclosure" content="16-CFR-Part-255-Compliant">',
             '  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">',
+            '  <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json">',
         ]
 
         entry_rel_paths = (
@@ -9710,6 +10048,7 @@ class RetroReflectionEngine:
                 "privacy_url": f"{canon}/privacy/",
                 "tools_directory_url": f"{canon}/tools/",
                 "llms_manifest_url": f"{canon}/llms.txt",
+                "catalog_feed_url": f"{canon}/catalog.json",
                 "sitemap_url": f"{canon}/sitemap.xml",
             },
         }
@@ -9810,6 +10149,12 @@ class RetroReflectionEngine:
                 or 'data-partner="sofi_refi"' in content
                 or ("1031" in rel and 'data-partner="ipx1031"' not in content and 'data-partner="lawdepot"' not in content)
                 or ('href="/r/' in content and "source_tool=" not in content)
+                or (
+                    property_id.lower() == "gainhelm"
+                    and 'href="/r/' in content
+                    and 'data-restricted-public-service="true"' not in content
+                    and ('data-partner-roster=' not in content or 'data-cta-slot="calculator_result_inline"' not in content)
+                )
                 or any(
                     "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
                     for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)

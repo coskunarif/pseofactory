@@ -5635,6 +5635,79 @@ def normalize_html_callout_message_match(
         ):
             primary_inline_pk = "splash_financial"
 
+    elif prop == "gainhelm":
+        gainhelm_roster_keys = (
+            "vanta_security",
+            "drata_compliance",
+            "sprinto_compliance",
+            "thoropass_audit",
+            "coalition_cyber_insurance",
+            "cobalt_pentest",
+        )
+        gainhelm_roster_csv = ",".join(gainhelm_roster_keys)
+        gainhelm_companies_csv = "Vanta,Drata,Sprinto,Thoropass,Coalition,Cobalt"
+        gainhelm_models_csv = "QUALIFIED_LEAD_CPL,HYBRID_CPA_REVSHARE,CPA_BOUNTY"
+
+        def _expand_gainhelm_partner_section(match: re.Match) -> str:
+            sec_html = match.group(0)
+            if (
+                'data-restricted-public-service="true"' in sec_html
+                or 'data-commercial-offers="none"' in sec_html
+                or ("data-gsc-tier=" in sec_html and "data-partner-roster=" in sec_html)
+            ):
+                return sec_html
+            cards_html: List[str] = []
+            for idx, pk in enumerate(gainhelm_roster_keys, start=1):
+                p_obj = GAINHELM_AFFILIATES.get(pk)
+                if not p_obj:
+                    continue
+                slot = "calculator_primary_cta" if idx == 1 else "partner_matrix_card"
+                card_href = _build_r_href(pk, f"card_{idx}", slot)
+                safe_s = html_lib.escape(page_slug)
+                safe_sub = html_lib.escape(f"{page_slug}_card_{idx}")
+                safe_p_model = html_lib.escape(p_obj.partnership_model)
+                c_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(pk, pk))
+                cards_html.append(
+                    f'      <div class="partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
+                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
+                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
+                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
+                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
+                    f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
+                    f'        </a>\n'
+                    f'      </div>'
+                )
+            grid_inner = "\n".join(cards_html)
+            return (
+                '<section class="refinance-partner-section affiliates-section" data-mechanic="compliant_intent_monetization" '
+                'data-partner="vanta_security" data-primary-partner="vanta_security" '
+                'data-partnership-model="QUALIFIED_LEAD_CPL" '
+                f'data-partner-models="{gainhelm_models_csv}" '
+                f'data-partner-roster="{gainhelm_roster_csv}" '
+                f'data-partner-companies="{gainhelm_companies_csv}" '
+                'style="margin: 1.5rem 0;">\n'
+                '      <div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
+                f'{grid_inner}\n'
+                '      </div>\n'
+                '    </section>'
+            )
+
+        updated = re.sub(
+            r'<section\s+class=["\'][^"\']*(?:refinance-partner-section|affiliates?-section)[^"\']*["\'][^>]*>.*?</section>',
+            _expand_gainhelm_partner_section,
+            updated,
+            flags=re.S | re.I,
+        )
+        updated = re.sub(
+            r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
+            rf'<section class="partners-section"\g<1> data-partner="vanta_security" data-primary-partner="vanta_security" data-partnership-model="QUALIFIED_LEAD_CPL" data-partner-models="{gainhelm_models_csv}" data-partner-roster="{gainhelm_roster_csv}" data-partner-companies="{gainhelm_companies_csv}">',
+            updated,
+            count=1,
+            flags=re.I,
+        )
+        if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
+            primary_inline_pk = "vanta_security"
+
     elif prop in ("profithelm", "exchange1031"):
         def _build_profithelm_partner_card(pk: str, card_idx: int = 1) -> str:
             p_obj = PROFITHELM_AFFILIATES.get(pk)
@@ -5862,8 +5935,8 @@ def normalize_html_callout_message_match(
         for pat in (
             r'(<div\s+class=["\']card\s+result-card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
             r'(<div\s+class=["\']calculator-grid["\']>.*?<div\s+class=["\']card["\']>.*?<div\s+class=["\']card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
-            r'(<div\s+class=["\']calc-outputs-panel["\']>\s*<div\s+class=["\']calc-panel-header["\']>.*?</div>)',
-            r'(<div\s+class=["\']calc-results-column["\']>\s*<h3\s+class=["\']calc-column-title["\']>.*?</h3>)',
+            r'(<div\s+class=["\']calc-outputs-panel["\'][^>]*>\s*<div\s+class=["\']calc-panel-header["\'][^>]*>.*?</div>)',
+            r'(<div\s+class=["\']calc-results-column["\'][^>]*>\s*<h3\s+class=["\']calc-column-title["\'][^>]*>.*?</h3>)',
             r'(<div\s+class=["\']result-box["\'][^>]*>.*?)(</div>)',
         ):
             if re.search(pat, updated, re.S | re.I):
