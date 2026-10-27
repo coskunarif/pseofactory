@@ -2013,6 +2013,20 @@ def _render_runtime_sync_events_js() -> str:
           csv_fulfillment_url: fulfillBase + "&format=csv",
           reconciliation_schedule: []
         }, "checkout_fulfill");
+        if (typeof fetch === "function") {
+          fetch(fulfillBase, { headers: { "Accept": "application/json" } })
+            .then(function(res) { return res && res.ok ? res.json() : null; })
+            .then(function(data) {
+              if (data && Array.isArray(data.reconciliation_schedule) && data.reconciliation_schedule.length > 0) {
+                renderPlaybookAndFulfillmentDrawer(hostTarget, {
+                  fulfillment_url: data.fulfillment_url || fulfillBase,
+                  csv_fulfillment_url: data.csv_fulfillment_url || (fulfillBase + "&format=csv"),
+                  reconciliation_schedule: data.reconciliation_schedule
+                }, "checkout_fulfill");
+              }
+            })
+            .catch(function() {});
+        }
       } catch (e) {}
     }
 

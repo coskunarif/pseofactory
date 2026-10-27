@@ -2456,6 +2456,38 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
     gh_lead_js = generate_edge_lead_capture_function("gainhelm")
     assert "const stripeOffer = await resolveEdgeStripeCheckoutOffer(" in gh_lead_js
     assert "live_destination_url: liveDestinationUrl" in gh_lead_js
+    assert "lookupEdgeLeadRecord" in gh_lead_js
+    assert "statutory_trend_timeseries: statutoryTrendTimeseries" in gh_lead_js
+    assert "GH-400" in gh_lead_js
+
+    gh_lead_file = gh_repo / "functions" / "api" / "lead-capture.js"
+    gh_lead_file.parent.mkdir(parents=True, exist_ok=True)
+    gh_lead_file.write_text(gh_lead_js, encoding="utf-8")
+
+    lead_node_script = f"""
+    (async () => {{
+      const ghLead = await import({json.dumps(gh_lead_file.as_uri())});
+      const fulfillRes = await ghLead.onRequestGet({{
+        request: new Request("https://gainhelm.com/api/lead-capture?fulfill=1&lead_id=lead_test_gh_999&sku=gh_soc2_cmmc_audit_workpapers&tool_slug=soc-2-audit-cost-calculator&amount=62000&state=CA&synthetic_test=1"),
+        env: {{}}
+      }});
+      if (fulfillRes.status !== 200) process.exit(40);
+      const data = await fulfillRes.json();
+      if (data.status !== "toolkit_fulfilled") process.exit(41);
+      if (!Array.isArray(data.reconciliation_schedule) || data.reconciliation_schedule.length !== 4) process.exit(42);
+      if (!Array.isArray(data.sensitivity_matrix) || data.sensitivity_matrix.length !== 3) process.exit(43);
+      if (!Array.isArray(data.statutory_trend_timeseries) || data.statutory_trend_timeseries.length !== 3) process.exit(44);
+      if (!Array.isArray(data.deliverables) || data.deliverables.length !== 4) process.exit(45);
+      if (!data.playbook_url || !data.custom_parameter_ledger) process.exit(46);
+      const tableCount = String(data.html_report || "").split("<table").length - 1;
+      if (tableCount < 3 || String(data.html_report || "").length < 4500) process.exit(47);
+      const csvLines = String(data.csv_content || "").trim().split("\\n");
+      if (csvLines.length !== 8) process.exit(48);
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(98); }});
+    """
+    proc_lead = subprocess.run(["node", "-e", lead_node_script], capture_output=True, text=True, check=False)
+    assert proc_lead.returncode == 0, f"Node GainHelm lead fulfillment test failed (exit {proc_lead.returncode}): {proc_lead.stderr}"
 
     tracker = PartnerTrackingEngine()
     audit = tracker.audit_readiness_and_vault_parity()

@@ -931,21 +931,21 @@
         "ENTERPRISE_GRC_AUTOMATION": {
           "primary_partner": "vanta_security",
           "fallback_partner": "drata_compliance",
-          "direct_url": "https://www.vanta.com/",
+          "direct_url": "https://www.vanta.com/products/soc-2",
           "status": "live",
           "bounty": "$350"
         },
         "BUNDLED_GRC_ATTESTATION": {
           "primary_partner": "thoropass_audit",
           "fallback_partner": "sprinto_compliance",
-          "direct_url": "https://thoropass.com/",
+          "direct_url": "https://www.thoropass.com/solutions",
           "status": "live",
           "bounty": "$325"
         },
         "CYBER_LIABILITY_AND_PENTEST": {
           "primary_partner": "coalition_cyber_insurance",
           "fallback_partner": "cobalt_pentest",
-          "direct_url": "https://www.coalitioninc.com/",
+          "direct_url": "https://www.coalitioninc.com/cyber-insurance",
           "status": "live",
           "bounty": "$250-$275"
         }
@@ -967,8 +967,8 @@
         "vanta_security": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
-          "url": "https://www.vanta.com/",
-          "direct_url": "https://www.vanta.com/",
+          "url": "https://www.vanta.com/products/soc-2",
+          "direct_url": "https://www.vanta.com/products/soc-2",
           "edge_route": "/r/vanta_security",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
@@ -1000,8 +1000,8 @@
         "thoropass_audit": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
-          "url": "https://thoropass.com/",
-          "direct_url": "https://thoropass.com/",
+          "url": "https://www.thoropass.com/solutions",
+          "direct_url": "https://www.thoropass.com/solutions",
           "edge_route": "/r/thoropass_audit",
           "category": "BUNDLED_GRC_ATTESTATION",
           "network": "PartnerStack",
@@ -1011,8 +1011,8 @@
         "coalition_cyber_insurance": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
-          "url": "https://www.coalitioninc.com/",
-          "direct_url": "https://www.coalitioninc.com/",
+          "url": "https://www.coalitioninc.com/cyber-insurance",
+          "direct_url": "https://www.coalitioninc.com/cyber-insurance",
           "edge_route": "/r/coalition_cyber_insurance",
           "category": "CYBER_LIABILITY_AND_PENTEST",
           "network": "Impact.com",
