@@ -2357,6 +2357,118 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     assert {"profithelm", "prexvo", "gainhelm"}.issubset(spike_props)
 
 
+def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(tmp_path):
+    """
+    Verifies:
+    1. MonetizationHub.get_direct_contract_upgrades('gainhelm') maps all 6 GainHelm GRC partner slots
+       to active, counterparty-approved B2B affiliate contracts (Ramp Impact #51436, Xendoo Impact #16354,
+       LawDepot CJ #4544498) with zero cross-tenant forbidden token contamination.
+    2. GainHelm's generated functions/r/[partner].js executes in Node.js, upgrading all 6 /r/<partner>
+       routes to HTTP 302 commission-bearing contracts with X-Edge-Contract-Tier: direct_contract_upgraded
+       and preserving subId1/sharedid (Impact) and sid (CJ).
+    3. GainHelm's generated functions/api/lead-capture.js onRequestPost invokes resolveEdgeStripeCheckoutOffer
+       on POST /api/checkout, POST /api/lead-fulfillment, and POST /api/lead-capture.
+    4. PartnerTrackingEngine.audit_readiness_and_vault_parity() reports 100.0% edge_upgraded_click_share_pct
+       for gainhelm, and reconcile_non_active_partnerships_and_edge_routes() classifies all 6 GRC partners
+       under NEWLY_APPROVED_AND_WIRED_AT_EDGE.
+    """
+    import subprocess
+    from pseofactory.affiliates_hub import MonetizationHub
+    from pseofactory.edge import (
+        generate_edge_lead_capture_function,
+        sync_tenant_edge_redirect_function,
+    )
+    from pseofactory.maintenance import CrossPropertyContaminationScanner
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+
+    hub = MonetizationHub()
+    gh_upgrades = hub.get_direct_contract_upgrades("gainhelm")
+    expected_keys = {
+        "vanta_security",
+        "drata_compliance",
+        "sprinto_compliance",
+        "thoropass_audit",
+        "coalition_cyber_insurance",
+        "cobalt_pentest",
+    }
+    assert set(gh_upgrades.keys()) == expected_keys
+    assert gh_upgrades["vanta_security"] == "https://join.ramp.com/c/7932737/3981015/51436"
+    assert gh_upgrades["drata_compliance"] == "https://join.ramp.com/c/7932737/3981015/51436"
+    assert gh_upgrades["sprinto_compliance"] == "https://www.jdoqocy.com/click-101906407-16985242"
+    assert gh_upgrades["thoropass_audit"] == "https://xendoo.pxf.io/c/7932737/1357375/16354"
+    assert gh_upgrades["coalition_cyber_insurance"] == "https://www.jdoqocy.com/click-101906407-16985242"
+    assert gh_upgrades["cobalt_pentest"] == "https://join.ramp.com/c/7932737/3981015/51436"
+
+    gh_repo = tmp_path / "gainhelm"
+    (gh_repo / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    sync_tenant_edge_redirect_function(gh_repo, property_id="gainhelm")
+    scanner = CrossPropertyContaminationScanner()
+    assert scanner.scan_directory(gh_repo / "functions", "gainhelm") == {}
+
+    gh_r = gh_repo / "functions" / "r" / "[partner].js"
+    node_script = f"""
+    (async () => {{
+      const ghRedirect = await import({json.dumps(gh_r.as_uri())});
+
+      // 1. Impact contract upgrade (vanta_security -> join.ramp.com)
+      const vantaRes = await ghRedirect.onRequest({{
+        request: new Request("https://gainhelm.com/r/vanta_security?source_tool=soc-2-audit-cost-calculator&cta_slot=hero_callout&subid=vanta_soc2_hero"),
+        env: {{}},
+        params: {{ partner: "vanta_security" }}
+      }});
+      if (vantaRes.status !== 302) process.exit(10);
+      const vantaLoc = new URL(vantaRes.headers.get("Location"));
+      if (vantaLoc.hostname !== "join.ramp.com" || !vantaLoc.pathname.includes("/51436")) process.exit(11);
+      if (vantaLoc.searchParams.get("subId1") !== "vanta_soc2_hero") process.exit(12);
+      if (vantaLoc.searchParams.get("sharedid") !== "soc-2-audit-cost-calculator") process.exit(13);
+      if (vantaRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(14);
+      if (!String(vantaRes.headers.get("X-Edge-Native-Destination") || "").startsWith("https://www.vanta.com/")) process.exit(15);
+
+      // 2. CJ contract upgrade (sprinto_compliance -> www.jdoqocy.com)
+      const sprintoRes = await ghRedirect.onRequest({{
+        request: new Request("https://gainhelm.com/r/sprinto_compliance?source_tool=soc-2-audit-cost-calculator&cta_slot=comparison_table&subid=sprinto_soc2_table"),
+        env: {{}},
+        params: {{ partner: "sprinto_compliance" }}
+      }});
+      if (sprintoRes.status !== 302) process.exit(20);
+      const sprintoLoc = new URL(sprintoRes.headers.get("Location"));
+      if (sprintoLoc.hostname !== "www.jdoqocy.com") process.exit(21);
+      if (sprintoLoc.searchParams.get("sid") !== "sprinto_soc2_table") process.exit(22);
+      if (sprintoRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(23);
+
+      // 3. Impact Xendoo contract upgrade (thoropass_audit -> xendoo.pxf.io)
+      const thoroRes = await ghRedirect.onRequest({{
+        request: new Request("https://gainhelm.com/r/thoropass_audit?source_tool=hitrust-certification-cost-calculator&cta_slot=hero_callout&subid=thoro_hitrust_hero"),
+        env: {{}},
+        params: {{ partner: "thoropass_audit" }}
+      }});
+      if (thoroRes.status !== 302) process.exit(30);
+      const thoroLoc = new URL(thoroRes.headers.get("Location"));
+      if (thoroLoc.hostname !== "xendoo.pxf.io") process.exit(31);
+      if (thoroLoc.searchParams.get("subId1") !== "thoro_hitrust_hero") process.exit(32);
+
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Node GainHelm edge redirect test failed (exit {proc.returncode}): {proc.stderr}"
+
+    gh_lead_js = generate_edge_lead_capture_function("gainhelm")
+    assert "const stripeOffer = await resolveEdgeStripeCheckoutOffer(" in gh_lead_js
+    assert "live_destination_url: liveDestinationUrl" in gh_lead_js
+
+    tracker = PartnerTrackingEngine()
+    audit = tracker.audit_readiness_and_vault_parity()
+    gh_dom = audit["properties"]["gainhelm"]["compiled_dom_parity"]
+    assert gh_dom["edge_upgraded_click_share_pct"] == 100.0
+    assert gh_dom["pending_partner_links_in_dom"] == 0
+
+    gh_recon = audit["non_active_reconciliation"]["properties"]["gainhelm"]
+    assert gh_recon["total_canonical_partners"] == 6
+    assert gh_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 6
+
+
+
 
 
 

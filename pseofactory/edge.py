@@ -1013,13 +1013,26 @@ def generate_edge_redirect_function(
     active_hub = hub if hub is not None else MonetizationHub()
 
     if prop_clean == "gainhelm":
+        gh_direct_upgrades = {
+            "vanta_security": "https://join.ramp.com/c/7932737/3981015/51436",
+            "drata_compliance": "https://join.ramp.com/c/7932737/3981015/51436",
+            "sprinto_compliance": "https://www.jdoqocy.com/click-101906407-16985242",
+            "thoropass_audit": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+            "coalition_cyber_insurance": "https://www.jdoqocy.com/click-101906407-16985242",
+            "cobalt_pentest": "https://join.ramp.com/c/7932737/3981015/51436",
+        }
+        if hasattr(active_hub, "get_direct_contract_upgrades"):
+            gh_direct_upgrades.update(active_hub.get_direct_contract_upgrades("gainhelm"))
         gainhelm_catalog_entries: List[str] = []
         for k, p_obj in GAINHELM_AFFILIATES.items():
             status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
             status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
+            direct_contract_url = gh_direct_upgrades.get(k) or gh_direct_upgrades.get(p_obj.key)
+            extra_contract_line = f'    directContractUrl: "{direct_contract_url}",\n' if direct_contract_url else ""
             gainhelm_catalog_entries.append(
                 f'  {k}: {{\n'
                 f'    defaultUrl: "{p_obj.default_url}",\n'
+                f'{extra_contract_line}'
                 f'    envVar: "{p_obj.env_var}",\n'
                 f'    statusEnvVar: "{status_env}",\n'
                 f'    status: "{status_val}",\n'
@@ -1029,7 +1042,8 @@ def generate_edge_redirect_function(
         gainhelm_js = f"""/**
  * Cloudflare Pages Function: GainHelm Outbound Enterprise GRC & Security Audit Redirect Handler
  * Intercepts /r/:partner requests and executes low-latency server-side 302 redirects (<15ms TTFB).
- * Enforces strict GainHelm partner whitelist, SSRF protection, and durable KV click telemetry.
+ * Enforces strict GainHelm partner whitelist, sub-affiliate wrapper prohibition, active B2B contract
+ * upgrades (Impact.com & CJ Affiliate), SSRF protection, and durable KV click telemetry.
  * Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
  */
 
@@ -1038,6 +1052,14 @@ const PARTNER_CATALOG = {{
 }};
 
 const EDUCATIONAL_CALCULATOR_URL = "https://gainhelm.com/tools/soc-2-audit-cost-calculator/";
+
+const FORBIDDEN_AGGREGATOR_DOMAINS = [
+  "sovrn.com",
+  "viglink.com",
+  "redirect.viglink.com",
+  "skimlinks.com",
+  "go.redirectingat.com",
+];
 
 const TRACKING_PARAMS = [
   "subid",
@@ -1054,6 +1076,22 @@ const TRACKING_PARAMS = [
   "slot",
   "ph_tier",
   "tier",
+];
+
+const CJ_DOMAINS = [
+  "jdoqocy.com",
+  "dpbolvw.net",
+  "anrdoezrs.net",
+  "tkqlhce.com",
+  "kqzyfj.com",
+];
+
+const IMPACT_DOMAINS = [
+  "pxf.io",
+  "ojrq.net",
+  "evyy.net",
+  "7eer.net",
+  "join.ramp.com",
 ];
 
 function extractNormalizedParams(reqUrl) {{
@@ -1105,6 +1143,11 @@ function isSafeAndCompliantUrl(urlStr) {{
       return false;
     }}
     const hostname = parsed.hostname.toLowerCase();
+    for (const forbidden of FORBIDDEN_AGGREGATOR_DOMAINS) {{
+      if (hostname === forbidden || hostname.endsWith(`.${{forbidden}}`)) {{
+        return false;
+      }}
+    }}
     if (
       hostname === "localhost" ||
       hostname === "127.0.0.1" ||
@@ -1135,9 +1178,29 @@ export async function onRequest(context) {{
       }},
     }});
   }}
+  const reqUrl = new URL(request.url);
+  const normParams = extractNormalizedParams(reqUrl);
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
-  const rawTargetUrl = (hasDirectConfig ? envUrl : partnerConfig.defaultUrl).trim();
+  const forceNative = normParams.get("mode") === "native";
+  const hasDirectContract = Boolean(
+    !hasDirectConfig &&
+      !forceNative &&
+      partnerConfig.directContractUrl &&
+      partnerConfig.directContractUrl.trim().length > 0
+  );
+  const rawTargetUrl = (
+    hasDirectConfig
+      ? envUrl
+      : hasDirectContract
+      ? partnerConfig.directContractUrl
+      : partnerConfig.defaultUrl
+  ).trim();
+  const contractTier = hasDirectConfig
+    ? "direct_env_override"
+    : hasDirectContract
+    ? "direct_contract_upgraded"
+    : "direct_grc_partner";
   if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
     return new Response(null, {{
       status: 302,
@@ -1148,8 +1211,6 @@ export async function onRequest(context) {{
       }},
     }});
   }}
-  const reqUrl = new URL(request.url);
-  const normParams = extractNormalizedParams(reqUrl);
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
     const val = normParams.get(param);
@@ -1162,9 +1223,40 @@ export async function onRequest(context) {{
   const phTier = normParams.get("ph_tier") || "";
   const effectiveSubid =
     normParams.get("subid") ||
-    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || "");
+    (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || `${{rawPartner}}_edge`);
   if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
     targetObj.searchParams.set("subid", effectiveSubid);
+  }}
+  const targetHost = targetObj.hostname.toLowerCase();
+  if (
+    effectiveSubid &&
+    IMPACT_DOMAINS.some((d) => targetHost === d || targetHost.endsWith(`.${{d}}`))
+  ) {{
+    if (!targetObj.searchParams.has("subId1")) {{
+      targetObj.searchParams.set("subId1", effectiveSubid);
+    }}
+    if ((sourceTool || rawPartner) && !targetObj.searchParams.has("sharedid")) {{
+      targetObj.searchParams.set("sharedid", sourceTool || rawPartner);
+    }}
+  }}
+  if (
+    effectiveSubid &&
+    CJ_DOMAINS.some((d) => targetHost === d || targetHost.endsWith(`.${{d}}`)) &&
+    !targetObj.searchParams.has("sid")
+  ) {{
+    targetObj.searchParams.set("sid", effectiveSubid);
+  }}
+  if (
+    effectiveSubid &&
+    (targetObj.searchParams.has("fpr") ||
+      targetObj.searchParams.has("fp_ref") ||
+      targetObj.searchParams.has("via")) &&
+    !targetObj.searchParams.has("fp_sid")
+  ) {{
+    const fpSid = effectiveSubid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+    if (fpSid) {{
+      targetObj.searchParams.set("fp_sid", fpSid);
+    }}
   }}
   if (!targetObj.searchParams.has("utm_source")) {{
     targetObj.searchParams.set("utm_source", "gainhelm");
@@ -1172,13 +1264,23 @@ export async function onRequest(context) {{
   if (!targetObj.searchParams.has("utm_medium")) {{
     targetObj.searchParams.set("utm_medium", "affiliate");
   }}
-  if (sourceTool && !targetObj.searchParams.has("utm_campaign")) {{
-    targetObj.searchParams.set("utm_campaign", sourceTool);
+  if ((sourceTool || rawPartner) && !targetObj.searchParams.has("utm_campaign")) {{
+    targetObj.searchParams.set("utm_campaign", sourceTool || rawPartner);
   }}
   if ((effectiveSubid || ctaSlot) && !targetObj.searchParams.has("utm_content")) {{
     targetObj.searchParams.set("utm_content", effectiveSubid || ctaSlot);
   }}
   const finalRedirectUrl = targetObj.toString();
+  if (!isSafeAndCompliantUrl(finalRedirectUrl)) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
   const isSyntheticProbe =
     request.headers.get("x-pseofactory-test") === "1" ||
     reqUrl.searchParams.get("synthetic_test") === "1";
@@ -1197,6 +1299,7 @@ export async function onRequest(context) {{
       subid: effectiveSubid || `${{rawPartner}}_edge`,
       value_tier: phTier || "standard",
       ph_tier: phTier || "standard",
+      contract_tier: contractTier,
       path: reqUrl.pathname,
       destination_url: finalRedirectUrl,
       timestamp: new Date().toISOString(),
@@ -1210,7 +1313,8 @@ export async function onRequest(context) {{
       "X-Robots-Tag": "noindex, nofollow",
       "X-Edge-Partner": rawPartner,
       "X-Edge-Subid": effectiveSubid || "default",
-      "X-Edge-Contract-Tier": hasDirectConfig ? "direct_env_override" : "direct_grc_partner",
+      "X-Edge-Contract-Tier": contractTier,
+      "X-Edge-Native-Destination": partnerConfig.defaultUrl,
       "X-Edge-Telemetry": isSyntheticProbe ? "synthetic_suppressed" : "recorded",
       ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
     }},
@@ -2491,12 +2595,12 @@ const CORS_HEADERS = {
 };
 
 const PARTNER_ROUTES = {
-  vanta_security: "https://www.vanta.com/",
-  drata_compliance: "https://drata.com/",
-  sprinto_compliance: "https://sprinto.com/",
-  thoropass_audit: "https://thoropass.com/",
-  coalition_cyber_insurance: "https://www.coalitioninc.com/",
-  cobalt_pentest: "https://www.cobalt.io/",
+  vanta_security: "https://join.ramp.com/c/7932737/3981015/51436",
+  drata_compliance: "https://join.ramp.com/c/7932737/3981015/51436",
+  sprinto_compliance: "https://www.jdoqocy.com/click-101906407-16985242",
+  thoropass_audit: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+  coalition_cyber_insurance: "https://www.jdoqocy.com/click-101906407-16985242",
+  cobalt_pentest: "https://join.ramp.com/c/7932737/3981015/51436",
 };
 
 const GAINHELM_TOOLKIT_OFFERS = {
@@ -2663,7 +2767,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const fulfillmentUrl = bundle ? bundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = "arif.coskun@profithelm.com";
+  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@gainhelm.com";
   const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
@@ -2917,13 +3021,37 @@ export async function onRequestGet(context) {
   );
 }
 
+function isSyntheticProbeRequest(request, body, email) {
+  try {
+    if (request && request.headers && typeof request.headers.get === "function") {
+      if (request.headers.get("x-pseofactory-test") === "1") return true;
+    }
+    if (request && request.url) {
+      const u = new URL(request.url);
+      if (u.searchParams.get("synthetic_test") === "1") return true;
+    }
+  } catch (_) {}
+  if (body && body.synthetic_test === true) return true;
+  const e = String(email || "").toLowerCase();
+  return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    const body = await request.json();
-    const email = String(body.email || "").trim().toLowerCase();
-    const state = String(body.state || "DE").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "DE";
-    const toolSlug = String(body.tool_slug || body.source_tool || "soc-2-audit-cost-calculator")
+    const reqUrl = new URL(request.url);
+    const body = await request.json().catch(() => ({}));
+    const rawEmail = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
+    const state = String(body.state || reqUrl.searchParams.get("state") || "DE").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "DE";
+    const toolSlug = String(
+      body.tool_slug ||
+      body.slug ||
+      body.source_tool ||
+      body.source ||
+      reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("slug") ||
+      "soc-2-audit-cost-calculator"
+    )
       .trim()
       .toLowerCase()
       .replace(/^\\/+|\\/+$/g, "")
@@ -2932,16 +3060,44 @@ export async function onRequestPost(context) {
     const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, reqPartner)
       ? reqPartner
       : "vanta_security";
-    const isSynth =
-      request.headers.get("x-pseofactory-test") === "1" ||
-      Boolean(body.synthetic_test === true) ||
-      email.endsWith("@example.com");
+    const isSynth = isSyntheticProbeRequest(request, body, rawEmail);
+    const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
+    const isCheckoutMode = reqUrl.searchParams.get("checkout") === "1" || body.checkout === true || modeParam === "checkout";
+    const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
 
-    const rawAmount = Number(body.calculated_amount !== undefined ? body.calculated_amount : 48500);
+    const rawAmount = Number(
+      body.calculated_amount !== undefined
+        ? body.calculated_amount
+        : reqUrl.searchParams.get("amount") || 48500
+    );
     const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 48500;
     const thresholdUsd = 25000;
+    const offer = selectOfferForSlug(toolSlug, body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "");
+    const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_gainhelm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
-    if (body.calculated_amount !== undefined && calculatedAmount < thresholdUsd) {
+    if (isFulfillMode) {
+      const ffRecord = { lead_id: leadId, tool_slug: toolSlug, calculated_amount: calculatedAmount, state };
+      const ffBundle = buildGainHelmWorkpaperBundle(ffRecord, offer);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSynth,
+          status: "toolkit_fulfilled",
+          ...ffBundle,
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
+
+    if (!isCheckoutMode && body.calculated_amount !== undefined && calculatedAmount < thresholdUsd) {
       return new Response(
         JSON.stringify({
           ok: true,
@@ -2962,6 +3118,7 @@ export async function onRequestPost(context) {
       );
     }
 
+    const email = rawEmail || (isCheckoutMode ? "ciso@gainhelm.com" : "");
     if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid work email address." }),
@@ -2970,8 +3127,9 @@ export async function onRequestPost(context) {
     }
 
     const hasQuoteFields =
-      body.calculated_amount !== undefined ||
-      body.partner_sharing_consent !== undefined;
+      !isCheckoutMode &&
+      (body.calculated_amount !== undefined ||
+        body.partner_sharing_consent !== undefined);
 
     if (hasQuoteFields && body.partner_sharing_consent !== true) {
       return new Response(
@@ -2984,10 +3142,20 @@ export async function onRequestPost(context) {
       );
     }
 
-    const offer = selectOfferForSlug(toolSlug, body.sku || body.offer_sku || "");
-    const leadId = `lead_gainhelm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount));
-    const redirectUrl = `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=partner_quote_intake&lead_id=${encodeURIComponent(leadId)}`;
+    const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
+    const qs = new URLSearchParams({
+      source_tool: toolSlug,
+      cta_slot: "partner_quote_intake",
+      subid,
+      state,
+      capital_band: capitalBand,
+      amount: String(Math.round(calculatedAmount)),
+      lead_id: leadId,
+    }).toString();
+    const redirectUrl = `/r/${partnerKey}?${qs}`;
+    const liveBase = PARTNER_ROUTES[partnerKey];
+    const liveDestinationUrl = `${liveBase}${liveBase.includes("?") ? "&" : "?"}${qs}`;
     const record = {
       lead_id: leadId,
       property_id: "gainhelm",
@@ -3004,18 +3172,21 @@ export async function onRequestPost(context) {
       partner_key: partnerKey,
       partner_rep_desk: "Enterprise GRC & C3PAO / CPA Audit Desk",
       redirect_url: redirectUrl,
+      live_destination_url: liveDestinationUrl,
       action_bus_dispatched: calculatedAmount >= 50000,
+      monetization_strategy: hasQuoteFields ? "dual_partner_and_checkout" : "playbook_to_toolkit_checkout",
       offer_sku: offer.sku,
       offer_title: offer.title,
       offer_price_usd: offer.price_usd,
       captured_at: new Date().toISOString(),
     };
     const bundle = buildGainHelmWorkpaperBundle(record, offer);
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
     record.reconciliation_schedule = bundle.reconciliation_schedule;
     record.sensitivity_matrix = bundle.sensitivity_matrix;
-    record.checkout_url = bundle.checkout_url;
     record.fulfillment_url = bundle.fulfillment_url;
     record.csv_fulfillment_url = bundle.csv_fulfillment_url;
+    Object.assign(record, stripeOffer);
 
     if (!isSynth) {
       const buf = getMemoryBuffer();
@@ -3031,7 +3202,7 @@ export async function onRequestPost(context) {
       JSON.stringify({
         ok: true,
         success: true,
-        status: hasQuoteFields ? "captured" : "playbook_subscribed",
+        status: isCheckoutMode ? "checkout_session_ready" : (hasQuoteFields ? "captured" : "playbook_subscribed"),
         persisted: !isSynth,
         synthetic_test: isSynth,
         ...record,

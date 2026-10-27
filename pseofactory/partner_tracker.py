@@ -1210,7 +1210,11 @@ class PartnerTrackingEngine:
                     "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
                 }
                 if prop_id == "profithelm"
-                else {}
+                else (
+                    self.hub.get_direct_contract_upgrades("gainhelm")
+                    if prop_id == "gainhelm"
+                    else {}
+                )
             )
 
             if dist_path and os.path.isdir(dist_path):
@@ -1379,6 +1383,30 @@ class PartnerTrackingEngine:
                 "edge_destination_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                 "approved_advertiser": "Xendoo (Impact #16354 - $500 CPA + $25 Lead)",
             },
+            "vanta_security": {
+                "edge_destination_url": "https://join.ramp.com/c/7932737/3981015/51436",
+                "approved_advertiser": "Ramp Corporate Spend & Vendor Security Procurement (Impact #51436 - $100-$4,000 Closed Won / $50-$2,000 SQL)",
+            },
+            "drata_compliance": {
+                "edge_destination_url": "https://join.ramp.com/c/7932737/3981015/51436",
+                "approved_advertiser": "Ramp Corporate Spend & Vendor Security Procurement (Impact #51436 - $100-$4,000 Closed Won / $50-$2,000 SQL)",
+            },
+            "sprinto_compliance": {
+                "edge_destination_url": "https://www.jdoqocy.com/click-101906407-16985242",
+                "approved_advertiser": "LawDepot Commercial Security Policies, NDAs & DPAs (CJ #4544498 - 30% to 40% CPA + $6.50 Lead)",
+            },
+            "thoropass_audit": {
+                "edge_destination_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                "approved_advertiser": "Xendoo CPA Audit & Financial Compliance (Impact #16354 - $500 CPA + $25 Lead)",
+            },
+            "coalition_cyber_insurance": {
+                "edge_destination_url": "https://www.jdoqocy.com/click-101906407-16985242",
+                "approved_advertiser": "LawDepot Commercial Security Policies & Incident Response Agreements (CJ #4544498 - 30% to 40% CPA)",
+            },
+            "cobalt_pentest": {
+                "edge_destination_url": "https://join.ramp.com/c/7932737/3981015/51436",
+                "approved_advertiser": "Ramp Corporate Spend & Vendor Security Procurement (Impact #51436 - $100-$4,000 Closed Won / $50-$2,000 SQL)",
+            },
         }
 
         properties_report: Dict[str, Any] = {}
@@ -1406,12 +1434,20 @@ class PartnerTrackingEngine:
                 net = str(v_entry.get("network") or p_obj.network or "")
                 v_url = str(v_entry.get("url") or p_obj.default_url or "")
 
-                # Extract live edge defaultUrl from generated Cloudflare Pages Function
+                # Extract live edge directContractUrl or defaultUrl from generated Cloudflare Pages Function
+                direct_match = re.search(
+                    rf'\b{re.escape(p_key)}:\s*\{{[^}}]*directContractUrl:\s*"([^"]+)"',
+                    edge_js,
+                )
                 edge_match = re.search(
                     rf'\b{re.escape(p_key)}:\s*\{{[^}}]*defaultUrl:\s*"([^"]+)"',
                     edge_js,
                 )
-                edge_default_url = edge_match.group(1) if edge_match else p_obj.default_url
+                edge_default_url = (
+                    direct_match.group(1)
+                    if direct_match
+                    else (edge_match.group(1) if edge_match else p_obj.default_url)
+                )
 
                 # Determine whether partnership is fully active on its native brand contract
                 is_native_active = (
@@ -1421,7 +1457,7 @@ class PartnerTrackingEngine:
                     )
                     or (
                         prop_id == "gainhelm"
-                        and p_obj.status == "live"
+                        and self._is_network_tracked_affiliate_url(v_url)
                     )
                 )
 
@@ -1496,7 +1532,7 @@ class PartnerTrackingEngine:
                     continue
 
                 # Categorize non-active partnerships into the 4 operational states (preserving 2026-10-20 baseline buckets)
-                if prop_id == "profithelm" and p_key in edge_upgraded_routes:
+                if prop_id in ("profithelm", "gainhelm") and p_key in edge_upgraded_routes:
                     op_state = "NEWLY_APPROVED_AND_WIRED_AT_EDGE"
                     up_info = edge_upgraded_routes[p_key]
                     reason = (
@@ -1551,6 +1587,8 @@ class PartnerTrackingEngine:
                     live_oct26_state = "DECLINED_COVERED_BY_FALLBACK"
                 elif prop_id == "profithelm" and p_key == "otr_solutions_factoring":
                     live_oct26_state = "PENDING_ADVERTISER_REVIEW_AND_WIRED_TO_RAMP_AT_EDGE"
+                elif prop_id == "gainhelm" and p_key in edge_upgraded_routes:
+                    live_oct26_state = "PENDING_ADVERTISER_REVIEW_AND_WIRED_TO_APPROVED_B2B_CONTRACT_AT_EDGE"
 
                 item = {
                     "partner_key": p_key,
@@ -6160,27 +6198,27 @@ def evaluate_lead_quote_threshold(
             vertical = "offensive_security_pentest"
             primary_partner_key = "cobalt_pentest"
             partner_rep_desk = "Cobalt Offensive Security PtaaS Desk"
-            live_destination_url = "https://www.cobalt.io/services/penetration-testing-services"
+            live_destination_url = "https://join.ramp.com/c/7932737/3981015/51436"
         elif any(tok in slug_clean for tok in ("cyber-liability", "insurance", "breach", "hipaa")):
             vertical = "cyber_liability_underwriting"
             primary_partner_key = "coalition_cyber_insurance"
             partner_rep_desk = "Coalition Active Cyber Insurance Underwriting Desk"
-            live_destination_url = "https://www.coalitioninc.com/cyber-insurance"
+            live_destination_url = "https://www.jdoqocy.com/click-101906407-16985242"
         elif any(tok in slug_clean for tok in ("cmmc", "nist-800-171", "sprs", "fedramp")):
             vertical = "federal_defense_grc"
             primary_partner_key = "drata_compliance"
             partner_rep_desk = "Drata Federal & CMMC GRC Automation Desk"
-            live_destination_url = "https://drata.com/product"
+            live_destination_url = "https://join.ramp.com/c/7932737/3981015/51436"
         elif any(tok in slug_clean for tok in ("hitrust", "iso-27001")):
             vertical = "enterprise_certification_audit"
             primary_partner_key = "thoropass_audit"
             partner_rep_desk = "Thoropass Integrated Audit & Compliance Desk"
-            live_destination_url = "https://thoropass.com/platform/"
+            live_destination_url = "https://xendoo.pxf.io/c/7932737/1357375/16354"
         else:
             vertical = "soc2_grc_automation"
             primary_partner_key = "vanta_security"
             partner_rep_desk = "Vanta Trust Management & SOC 2 Audit Desk"
-            live_destination_url = "https://www.vanta.com/products/soc-2"
+            live_destination_url = "https://join.ramp.com/c/7932737/3981015/51436"
     else:
         if any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
             threshold_usd = 50000.0

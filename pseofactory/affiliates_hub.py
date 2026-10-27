@@ -744,6 +744,17 @@ class MonetizationHub:
                     "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
                 }
             )
+        elif target_prop == "gainhelm":
+            upgrades.update(
+                {
+                    "vanta_security": "https://join.ramp.com/c/7932737/3981015/51436",
+                    "drata_compliance": "https://join.ramp.com/c/7932737/3981015/51436",
+                    "sprinto_compliance": "https://www.jdoqocy.com/click-101906407-16985242",
+                    "thoropass_audit": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                    "coalition_cyber_insurance": "https://www.jdoqocy.com/click-101906407-16985242",
+                    "cobalt_pentest": "https://join.ramp.com/c/7932737/3981015/51436",
+                }
+            )
         prop_section = self.vault_data.get("properties", {}).get(target_prop, {})
         partners_dict = prop_section.get("partners", {}) if isinstance(prop_section, dict) else {}
         for p_key, p_meta in partners_dict.items():
