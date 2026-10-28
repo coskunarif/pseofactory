@@ -1838,7 +1838,7 @@ class IndexingFeedbackLoop:
                 and str(self.base_dir.resolve()) in (
                     "/home/ubuntuadmin/projects/profithelm-platform",
                     "/home/ubuntuadmin/projects/prexvo",
-                    "/home/ubuntuadmin/projects/gainhelm",
+                    "/home/ubuntuadmin/projects/_archive/gainhelm",
                 )
             )
             overlays_dir = (
@@ -1992,7 +1992,7 @@ class IndexingFeedbackLoop:
             and str(self.base_dir.resolve()) in (
                 "/home/ubuntuadmin/projects/profithelm-platform",
                 "/home/ubuntuadmin/projects/prexvo",
-                "/home/ubuntuadmin/projects/gainhelm",
+                "/home/ubuntuadmin/projects/_archive/gainhelm",
             )
             and self.gitops_coordinator is None
         )
@@ -2357,7 +2357,7 @@ class IndexingFeedbackLoop:
             and str(self.base_dir.resolve()) in (
                 "/home/ubuntuadmin/projects/profithelm-platform",
                 "/home/ubuntuadmin/projects/prexvo",
-                "/home/ubuntuadmin/projects/gainhelm",
+                "/home/ubuntuadmin/projects/_archive/gainhelm",
             )
         )
         allow_worker_html_mutation = not is_prod_tenant_repo or enable_gitops or self.gitops_coordinator is not None

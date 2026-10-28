@@ -459,7 +459,7 @@ class AsyncFleetCoordinator:
         self.tenant_budgets: Dict[str, float] = (
             dict(tenant_budgets)
             if tenant_budgets is not None
-            else {"profithelm": 3600.0, "prexvo": 1800.0, "gainhelm": 1800.0}
+            else {"profithelm": 3600.0, "prexvo": 1800.0}
         )
 
     def get_tenant_budget(self, tenant_id: str) -> float:
@@ -1085,7 +1085,7 @@ class AutonomousLifecycleSupervisor:
                     not dry_run
                     and "PYTEST_CURRENT_TEST" not in os.environ
                     and getattr(a, "repo_path", None)
-                    and pid in ("profithelm", "prexvo", "gainhelm")
+                    and pid in ("profithelm", "prexvo")
                     and str(Path(a.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
                 ):
                     fl_path = Path(f"/tmp/{pid}_factory.lock")
@@ -1123,7 +1123,7 @@ class AutonomousLifecycleSupervisor:
                     t_repo = Path(a.repo_path)
                     if (
                         str(t_repo.resolve()).startswith("/home/ubuntuadmin/projects/")
-                        and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm")
+                        and t_repo.name in ("profithelm-platform", "prexvo")
                         and (t_repo / ".git").exists()
                     ):
                         lock_f = t_repo / "substrate_lock.json"

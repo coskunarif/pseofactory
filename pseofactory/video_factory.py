@@ -160,7 +160,7 @@ def _resolve_default_tenant_repo(property_id: str) -> Path:
     if prop == "prexvo":
         return Path("/home/ubuntuadmin/projects/prexvo")
     if prop == "gainhelm":
-        return Path("/home/ubuntuadmin/projects/gainhelm")
+        return Path("/home/ubuntuadmin/projects/_archive/gainhelm")
     return Path("/home/ubuntuadmin/projects/profithelm-platform")
 
 

@@ -111,7 +111,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     if property_id == "all":
         all_passed = True
         reports_dict: Dict[str, Any] = {}
-        for p_id in ("profithelm", "prexvo", "gainhelm"):
+        for p_id in ("profithelm", "prexvo"):
             adp = reg.get_adapter(p_id)
             rep = audit_property_assets(
                 property_id=p_id,
@@ -976,7 +976,6 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                     for prop_id, repo_p in (
                         ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
                         ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
-                        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
                     ):
                         if repo_p.is_dir():
                             try:
@@ -995,7 +994,7 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                 if args.json:
                     print(json.dumps(auto_report, indent=2))
                 else:
-                    print("Autonomous Monetization Sync Complete [profithelm, prexvo, gainhelm]")
+                    print("Autonomous Monetization Sync Complete [profithelm, prexvo]")
                     print(f"  Status:           {lifecycle_rep.get('status')}")
                     print(f"  Messages Polled:  {lifecycle_rep.get('ingested_messages_count')}")
                     print(f"  Classifications:  {lifecycle_rep.get('classifications_count')}")
@@ -2072,7 +2071,7 @@ def cmd_north_star(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
     cards = {}
     for p_id in props:
         cards[p_id] = evaluate_north_star_targets(property_id=p_id, persist=not dry_run)
@@ -2102,7 +2101,7 @@ def cmd_cohort_reflection(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
     reports = {}
     for p_id in props:
         reports[p_id] = evaluate_closed_loop_cohort_reflection(
@@ -2139,7 +2138,7 @@ def cmd_seo_workflows(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
     reports = {}
     for p_id in props:
         reports[p_id] = run_all_seo_growth_workflows(

@@ -1099,7 +1099,7 @@ class PartnerTrackingEngine:
         dist_dirs = {
             "profithelm": profithelm_dist_dir or "/home/ubuntuadmin/projects/profithelm-platform/dist",
             "prexvo": prexvo_dist_dir or "/home/ubuntuadmin/projects/prexvo/dist",
-            "gainhelm": gainhelm_dist_dir or "/home/ubuntuadmin/projects/gainhelm/dist",
+            "gainhelm": gainhelm_dist_dir or "/home/ubuntuadmin/projects/_archive/gainhelm/dist",
         }
 
         for prop_id, reg_dict in (
@@ -1673,17 +1673,18 @@ class PartnerTrackingEngine:
         endpoints = {
             "profithelm": "https://profithelm.com/api/telemetry?limit=1000",
             "prexvo": "https://prexvo.com/api/telemetry?limit=1000",
-            "gainhelm": "https://gainhelm.com/api/telemetry?limit=1000",
         }
         tenant_repos = {
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
-            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
         }
         base_ledger_dir = Path(ledger_dir) if ledger_dir is not None else None
         results: Dict[str, Dict[str, Any]] = {}
 
-        for prop_id in ("profithelm", "prexvo", "gainhelm"):
+        target_props = ["profithelm", "prexvo"]
+        if injected_events and "gainhelm" in injected_events and base_ledger_dir is not None:
+            target_props.append("gainhelm")
+        for prop_id in target_props:
             if base_ledger_dir is not None:
                 base_ledger_dir.mkdir(parents=True, exist_ok=True)
                 jsonl_path = base_ledger_dir / f"{prop_id}_telemetry_events.jsonl"
@@ -3069,7 +3070,7 @@ class PartnerTrackingEngine:
         dist_map = {
             "profithelm": Path(profithelm_dist_dir or "/home/ubuntuadmin/projects/profithelm-platform/dist"),
             "prexvo": Path(prexvo_dist_dir or "/home/ubuntuadmin/projects/prexvo/dist"),
-            "gainhelm": Path(gainhelm_dist_dir or "/home/ubuntuadmin/projects/gainhelm/dist"),
+            "gainhelm": Path(gainhelm_dist_dir or "/home/ubuntuadmin/projects/_archive/gainhelm/dist"),
         }
         domains = {
             "profithelm": "https://profithelm.com",
@@ -3084,7 +3085,7 @@ class PartnerTrackingEngine:
         required_governance_routes = ("/about/", "/privacy/", "/terms/", "/disclaimers/", "/methodology/")
 
         properties_to_audit: List[str] = ["profithelm", "prexvo"]
-        if gainhelm_dist_dir is not None or dist_map["gainhelm"].is_dir():
+        if gainhelm_dist_dir is not None:
             properties_to_audit.append("gainhelm")
 
         properties_audit: Dict[str, Any] = {}
@@ -3821,7 +3822,6 @@ class PartnerTrackingEngine:
             for prop_id, repo_p in (
                 ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
                 ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
-                ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
             ):
                 if repo_p.is_dir():
                     try:
@@ -3839,9 +3839,8 @@ class PartnerTrackingEngine:
                 ("profithelm", Path(profithelm_dist_dir or "/home/ubuntuadmin/projects/profithelm-platform/dist"), "https://profithelm.com"),
                 ("prexvo", Path(prexvo_dist_dir or "/home/ubuntuadmin/projects/prexvo/dist"), "https://prexvo.com"),
             ]
-            gh_candidate = Path(gainhelm_dist_dir or "/home/ubuntuadmin/projects/gainhelm/dist")
-            if gainhelm_dist_dir is not None or (profithelm_dist_dir is None and prexvo_dist_dir is None and gh_candidate.is_dir()):
-                heal_targets.append(("gainhelm", gh_candidate, "https://gainhelm.com"))
+            if gainhelm_dist_dir is not None:
+                heal_targets.append(("gainhelm", Path(gainhelm_dist_dir), "https://gainhelm.com"))
 
             for prop_id, d_dir, c_base in heal_targets:
                 if (d_dir / "index.html").is_file() and not (d_dir / "media-kit.json").is_file():

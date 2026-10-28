@@ -45,10 +45,10 @@ from pseofactory.tenant_facts import TenantFactStore
 def test_multi_engine_benchmarks_cover_profithelm_and_prexvo():
     """Verifies search positions and higher-ranked competitors across Google, Bing, and DuckDuckGo."""
     all_reports = benchmark_all_properties()
-    assert set(all_reports.keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert set(all_reports.keys()) == {"profithelm", "prexvo"}
 
     store = TenantFactStore.get_instance()
-    for prop in ("profithelm", "prexvo", "gainhelm"):
+    for prop in ("profithelm", "prexvo"):
         report = all_reports[prop]
         assert report["property_id"] == prop
         assert tuple(report["supported_engines"]) == SUPPORTED_SEARCH_ENGINES

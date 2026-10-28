@@ -56,7 +56,7 @@ def _resolve_tenant_repo_root(property_id: str = "profithelm", repo_root: Option
     if prop == "prexvo":
         return Path("/home/ubuntuadmin/projects/prexvo")
     if prop == "gainhelm":
-        return Path("/home/ubuntuadmin/projects/gainhelm")
+        return Path("/home/ubuntuadmin/projects/_archive/gainhelm")
     return Path("/home/ubuntuadmin/projects/profithelm-platform")
 
 

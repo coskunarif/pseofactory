@@ -1994,13 +1994,12 @@ def benchmark_multi_engine_rankings(
 def benchmark_all_properties() -> Dict[str, Dict[str, Any]]:
     """
     Benchmarks multi-engine search rankings and higher-ranked competitors across
-    profithelm, prexvo, and gainhelm, returning a domain-isolated comparison dictionary.
+    profithelm and prexvo, returning a domain-isolated comparison dictionary.
     Zero em-dashes. Zero en-dashes.
     """
     return {
         "profithelm": benchmark_multi_engine_rankings("profithelm"),
         "prexvo": benchmark_multi_engine_rankings("prexvo"),
-        "gainhelm": benchmark_multi_engine_rankings("gainhelm"),
     }
 
 
@@ -6131,11 +6130,11 @@ def diff_live_competitor_scratch_snapshots(
     ]
 
     if tenant_repo_root is None:
-        workspace_root = Path(__file__).resolve().parent.parent.parent
+        workspace_root = Path("/home/ubuntuadmin/projects")
         repo_map = {
             "profithelm": workspace_root / "profithelm-platform",
             "prexvo": workspace_root / "prexvo",
-            "gainhelm": workspace_root / "gainhelm",
+            "gainhelm": workspace_root / "_archive" / "gainhelm",
         }
         t_root = repo_map.get(prop_norm)
     else:
@@ -7052,11 +7051,11 @@ def run_agentic_free_tool_keyword_pipeline(
     eff_keywords = keyword_universe if keyword_universe is not None else default_bundle["keyword_universe"]
 
     if repo_root is None:
-        ws_root = Path(__file__).resolve().parent.parent.parent
+        ws_root = Path("/home/ubuntuadmin/projects")
         repo_map = {
             "profithelm": ws_root / "profithelm-platform",
             "prexvo": ws_root / "prexvo",
-            "gainhelm": ws_root / "gainhelm",
+            "gainhelm": ws_root / "_archive" / "gainhelm",
         }
         t_root = repo_map.get(prop)
     else:

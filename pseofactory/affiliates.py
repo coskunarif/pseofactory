@@ -7435,7 +7435,7 @@ def run_gsc_affiliate_placement_feedback_pass(
     elif dist_dir is not None:
         r_root = Path(dist_dir).resolve().parent
     else:
-        r_root = Path(f"/home/ubuntuadmin/projects/{'prexvo' if prop == 'prexvo' else ('gainhelm' if prop == 'gainhelm' else 'profithelm-platform')}")
+        r_root = Path(f"/home/ubuntuadmin/projects/{'prexvo' if prop == 'prexvo' else ('_archive/gainhelm' if prop == 'gainhelm' else 'profithelm-platform')}")
     d_dir = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
 
     if gsc_rows is None:

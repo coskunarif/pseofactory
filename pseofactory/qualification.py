@@ -3935,7 +3935,7 @@ def load_property_redirect_map(
         Path("/home/ubuntuadmin/projects/prexvo")
         if prop == "prexvo"
         else (
-            Path("/home/ubuntuadmin/projects/gainhelm")
+            Path("/home/ubuntuadmin/projects/_archive/gainhelm")
             if prop == "gainhelm"
             else Path("/home/ubuntuadmin/projects/profithelm-platform")
         )

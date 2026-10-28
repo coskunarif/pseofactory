@@ -2696,7 +2696,7 @@ def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand():
     """Verifies AssetIntegrityEvaluator audits GainHelm syndication youtube_metadata.json against brand 'GainHelm'."""
     from pseofactory.maintenance import AssetIntegrityEvaluator, WorkspacePropertyScanner
 
-    scanner = WorkspacePropertyScanner()
+    scanner = WorkspacePropertyScanner(workspace_root="/home/ubuntuadmin/projects/_archive")
     by_id = {p.property_id: p for p in scanner.discover_properties()}
     assert "gainhelm" in by_id
     evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)

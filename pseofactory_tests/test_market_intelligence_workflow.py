@@ -469,7 +469,7 @@ def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
 
     assert TenantFactStore.classify_domain_lifecycle("profithelm.com") == "ACTIVE_TENANT"
     assert TenantFactStore.classify_domain_lifecycle("prexvo.com") == "ACTIVE_TENANT"
-    assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "ACTIVE_TENANT"
+    assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "DECOMMISSIONED"
     assert TenantFactStore.classify_domain_lifecycle("arifcoskun.com") == "PERSONAL_INFRA"
     for retired in DECOMMISSIONED_RETIRED_DOMAINS:
         assert TenantFactStore.classify_domain_lifecycle(retired) == "DECOMMISSIONED"
@@ -480,17 +480,13 @@ def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
         with pytest.raises(ValueError, match="Personal infrastructure domain"):
             assert_candidate_domain_eligible(personal)
 
-    assert assert_candidate_domain_eligible("gainhelm.com") == "gainhelm.com"
-    assert "gainhelm.com" in STAGED_RESERVE_DOMAINS
-    gh_meta = STAGED_RESERVE_DOMAIN_METADATA["gainhelm.com"]
-    assert gh_meta["zone_id"] == "0a03264e19beb2cb17ba01860b701701"
-    assert gh_meta["registry_object_id"] == "3041507860_DOMAIN_COM-VRSN"
-    assert gh_meta["lifecycle_state"] == "HIBERNATED_RESERVE"
-    assert gh_meta["routing_records_count"] == 0
+    assert "gainhelm.com" in DECOMMISSIONED_RETIRED_DOMAINS
+    assert "gainhelm.com" not in STAGED_RESERVE_DOMAINS
+    assert STAGED_RESERVE_DOMAIN_METADATA == {}
 
     engine = MarketIntelligenceEngine(db_path=tmp_path / "lifecycle_check.db")
     report = engine.run_workflow(sync_db=False, simulate_three_cycle_confirmation=False)
-    assert any(d["domain"] == "gainhelm.com" for d in report["staged_reserve_domains"])
+    assert report["staged_reserve_domains"] == []
     for retired in DECOMMISSIONED_RETIRED_DOMAINS:
         assert retired in report["decommissioned_domains"]
 

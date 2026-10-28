@@ -185,7 +185,7 @@ class GainHelmBrowserAdapter(TenantBrowserAdapter):
 
     @property
     def dist_dir(self) -> Path:
-        return Path("/home/ubuntuadmin/projects/gainhelm/dist")
+        return Path("/home/ubuntuadmin/projects/_archive/gainhelm/dist")
 
     @property
     def canonical_domain(self) -> str:

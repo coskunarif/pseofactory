@@ -238,7 +238,7 @@ def test_retro_reflection_detects_unqualified_commercial_links_in_dist(tmp_path)
     tool_dir.mkdir(parents=True, exist_ok=True)
     # Build a synthetic tool page that satisfies all mechanics in audit_html_mechanics
     # except that its /r/ link with source_tool= lacks rel="noopener sponsored".
-    base_html = "/home/ubuntuadmin/projects/gainhelm/dist/tools/soc-2-audit-cost-calculator/index.html"
+    base_html = "/home/ubuntuadmin/projects/_archive/gainhelm/dist/tools/soc-2-audit-cost-calculator/index.html"
     import pathlib, re
 
     raw = pathlib.Path(base_html).read_text(encoding="utf-8")
