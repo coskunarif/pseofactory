@@ -228,6 +228,45 @@ def assert_x_post(text: str) -> bool:
     return True
 
 
+def assert_facebook_post(teaser_text: str, first_comment: str = "", context: str = "") -> bool:
+    """
+    Validates Facebook community distribution copy:
+    1. Teaser body length between 30 and 2200 characters.
+    2. Zero external links ('http://' or 'https://') inside teaser_text to prevent Facebook
+       group link-spam auto-moderation and feed suppression.
+    3. Zero forbidden dashes (\\u2014, \\u2013), zero prompt leakage, zero personal attribution,
+       and zero raw HTML title pipes (' | ').
+    4. When first_comment is provided, it must contain a parameterized canonical URL with
+       'utm_source=facebook' and 'utm_content=first_comment'.
+    """
+    ctx = f" ({context})" if context else ""
+    if not teaser_text or len(teaser_text.strip()) < 30:
+        raise ValueError(f"Facebook teaser text too short{ctx} ({len(teaser_text) if teaser_text else 0} chars, min 30)")
+    if len(teaser_text) > 2200:
+        raise ValueError(f"Facebook teaser text exceeds 2200 characters{ctx} ({len(teaser_text)} chars, max 2200)")
+    if "http://" in teaser_text or "https://" in teaser_text:
+        raise ValueError(
+            f"External URL detected in Facebook teaser body{ctx}; links must be placed in first_comment only"
+        )
+    if " | " in teaser_text:
+        raise ValueError(f"Raw HTML title pipe (' | ') is forbidden in Facebook teaser{ctx}")
+    assert_no_forbidden_dashes(teaser_text, context=f"Facebook teaser{ctx}")
+    assert_no_prompt_leakage(teaser_text, context=f"Facebook teaser{ctx}")
+    assert_no_personal_attribution(teaser_text, context=f"Facebook teaser{ctx}")
+
+    if first_comment:
+        assert_no_forbidden_dashes(first_comment, context=f"Facebook first_comment{ctx}")
+        assert_no_prompt_leakage(first_comment, context=f"Facebook first_comment{ctx}")
+        assert_no_personal_attribution(first_comment, context=f"Facebook first_comment{ctx}")
+        if "https://" not in first_comment and "http://" not in first_comment:
+            raise ValueError(f"Facebook first_comment must include canonical URL{ctx}")
+        if "utm_source=facebook" not in first_comment:
+            raise ValueError(f"Facebook first_comment must include 'utm_source=facebook'{ctx}")
+        if "utm_content=first_comment" not in first_comment:
+            raise ValueError(f"Facebook first_comment must include 'utm_content=first_comment'{ctx}")
+    return True
+
+
 def assert_youtube_title(title: str, context: str = "") -> bool:
     """
     Validates YouTube video title:

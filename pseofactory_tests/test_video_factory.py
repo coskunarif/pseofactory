@@ -473,3 +473,104 @@ def test_broadcast_quality_verification_and_keyframe_contact_sheet(tmp_path: Pat
     assert rec["privacyStatus"] == "public"
     assert rec["public_accessible"] is True
 
+
+def test_cross_platform_syndication_parity_and_public_visibility_verification(tmp_path: Path) -> None:
+    """
+    Verifies cross-platform syndication parity across LinkedIn, Facebook, and YouTube:
+    1. Facebook post contract (`assert_facebook_post`) forbids outbound links in teaser body
+       and enforces parameterized `utm_content=first_comment` canonical deep links in the first comment.
+    2. Word-boundary truncation (`_clean_tool_title_and_short`) eliminates mid-word slicing
+       (`"1031 Like Kind Exchange St"`, `"Section 1250 Re"`), and non-curated prediction-market / 1031
+       slugs route to domain-specific calculation proofs instead of `$4,349` tax variance fallback.
+    3. `verify_cross_platform_public_visibility` surfaces truthful public visibility across
+       LinkedIn (`PUBLIC_FEED_VERIFIED` vs `ADMIN_ACCESS_DENIED`), Facebook (`PUBLIC_PERMALINK_VERIFIED`
+       with zero body links and first-comment canonical URL), and YouTube (`PUBLIC_CAPTIONED_COMMENTED_VERIFIED`
+       with uploaded WebVTT captions and top-level canonical comment).
+    """
+    import pseofactory.contracts as contracts_mod
+    import pseofactory.distributor as dist_mod
+
+    assert hasattr(contracts_mod, "assert_facebook_post"), "assert_facebook_post missing in pseofactory.contracts"
+    assert hasattr(
+        dist_mod, "verify_cross_platform_public_visibility"
+    ), "verify_cross_platform_public_visibility missing in pseofactory.distributor"
+
+    # 1. Facebook zero-link body + first-comment canonical contract
+    with pytest.raises(ValueError, match="External URL detected in Facebook teaser body"):
+        contracts_mod.assert_facebook_post(
+            "Run the calculator at https://profithelm.com/tools/saas-runway-calculator/ to check your burn.",
+            "https://profithelm.com/tools/saas-runway-calculator/?utm_source=facebook&utm_medium=social&utm_campaign=saas-runway-calculator&utm_content=first_comment",
+            context="test_fb_inline_url",
+        )
+
+    with pytest.raises(ValueError, match="utm_content=first_comment"):
+        contracts_mod.assert_facebook_post(
+            "A 2026 audit of 500 seed-stage startups reveals a 6.4-month runway gap when net burn excludes deferred tax liabilities. How many months of true net runway does your model project?",
+            "https://profithelm.com/tools/saas-runway-calculator/?utm_source=facebook&utm_medium=social",
+            context="test_fb_missing_first_comment_utm",
+        )
+
+    fb_pack = dist_mod.generate_facebook_post("saas-runway-calculator")
+    assert "http://" not in fb_pack["teaser_content"]
+    assert "https://" not in fb_pack["teaser_content"]
+    assert "utm_source=facebook" in fb_pack["first_comment"]
+    assert "utm_content=first_comment" in fb_pack["first_comment"]
+    contracts_mod.assert_facebook_post(
+        fb_pack["teaser_content"],
+        fb_pack["first_comment"],
+        context="test_fb_pack_profithelm",
+    )
+
+    # 2. Word-boundary truncation & domain calculation proof routing
+    _, short_1031 = dist_mod._clean_tool_title_and_short(
+        "1031 Like Kind Exchange St Louis MO Calculator",
+        "1031-like-kind-exchange-st-louis-mo-calculator",
+    )
+    assert not short_1031.endswith(" St"), f"Dangling token in short_title: {short_1031!r}"
+    _, short_1250 = dist_mod._clean_tool_title_and_short(
+        "Section 1250 Recapture Calculator",
+        "section-1250-recapture-calculator",
+    )
+    assert not short_1250.endswith(" Re"), f"Mid-word truncation in short_title: {short_1250!r}"
+
+    pred_proof = dist_mod._resolve_tool_calculation_proof(
+        "what-is-implied-probability-in-prediction-markets-calculator",
+        property_id="profithelm",
+    )
+    assert pred_proof["published_output"] == 400.0
+    assert "4,349" not in pred_proof["published_output_formatted"]
+
+    exch_proof = dist_mod._resolve_tool_calculation_proof(
+        "1031-like-kind-exchange-st-louis-mo-calculator",
+        property_id="profithelm",
+    )
+    assert exch_proof["published_output"] == 292500.0
+    assert "4,349" not in exch_proof["published_output_formatted"]
+
+    # 3. Cross-platform public visibility verification across profithelm, prexvo, and gainhelm
+    for prop in ("profithelm", "prexvo", "gainhelm"):
+        vis = dist_mod.verify_cross_platform_public_visibility(property_id=prop)
+        assert set(vis["platforms"].keys()) == {"linkedin", "facebook", "youtube"}
+        assert vis["platforms"]["facebook"]["verification_status"] == "PUBLIC_PERMALINK_VERIFIED"
+        assert vis["platforms"]["facebook"]["post_mode"] == "zero_link_teaser_plus_first_comment"
+        assert vis["platforms"]["facebook"]["verified_public_posts_count"] >= 1
+        assert all(
+            p["outbound_urls_in_body"] == 0 and p["first_comment_verified"] is True
+            for p in vis["platforms"]["facebook"]["verified_public_permalinks"]
+        )
+        assert vis["platforms"]["youtube"]["verification_status"] == "PUBLIC_VIDEOS_CAPTIONS_AND_COMMENTS_VERIFIED"
+        assert vis["platforms"]["youtube"]["verified_public_videos_count"] >= 1
+        assert all(
+            v["has_captions"] is True and v["has_pinned_comment"] is True
+            for v in vis["platforms"]["youtube"]["verified_public_videos"]
+        )
+        if prop == "profithelm":
+            assert vis["platforms"]["linkedin"]["verification_status"] == "PUBLIC_FEED_VERIFIED"
+            assert vis["platforms"]["linkedin"]["admin_access_status"] == "VERIFIED_COMPANY_ADMIN"
+            assert vis["platforms"]["linkedin"]["verified_public_posts_count"] >= 5
+        else:
+            assert vis["platforms"]["linkedin"]["admin_access_status"] == "ADMIN_ACCESS_DENIED"
+            assert vis["platforms"]["linkedin"]["verification_status"] == "BLOCKED_COMPANY_PAGE_ADMIN_GRANT_REQUIRED"
+            assert vis["platforms"]["linkedin"]["credential_gap"] is not None
+
+

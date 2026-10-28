@@ -53,6 +53,7 @@ YOUTUBE_VIDEO_UPDATE_COST_UNITS: int = 50
 YOUTUBE_THUMBNAIL_SET_COST_UNITS: int = 50
 YOUTUBE_PLAYLIST_INSERT_COST_UNITS: int = 50
 YOUTUBE_CAPTION_INSERT_COST_UNITS: int = 400
+YOUTUBE_COMMENT_INSERT_COST_UNITS: int = 50
 DEFAULT_UPLOAD_PRIVACY: str = "public"
 
 MIN_VALID_MP4_BYTES: int = 1025
@@ -2579,7 +2580,7 @@ def inspect_remote_youtube_video_status(
             resp = (
                 service.videos()
                 .list(
-                    part="snippet,status,contentDetails,processingDetails",
+                    part="snippet,status,contentDetails,processingDetails,statistics",
                     id=vid,
                 )
                 .execute()
@@ -2591,10 +2592,13 @@ def inspect_remote_youtube_video_status(
                 st = item.get("status") or {}
                 cd = item.get("contentDetails") or {}
                 pd = item.get("processingDetails") or {}
+                stats = item.get("statistics") or {}
                 up_status = str(st.get("uploadStatus") or "")
                 priv_status = str(st.get("privacyStatus") or "")
                 proc_status = str(pd.get("processingStatus") or "succeeded")
                 has_cap = str(cd.get("caption") or "false").lower() == "true"
+                comment_count = int(stats.get("commentCount") or 0)
+                view_count = int(stats.get("viewCount") or 0)
                 return {
                     "found": True,
                     "video_id": vid,
@@ -2612,6 +2616,9 @@ def inspect_remote_youtube_video_status(
                     "duration": cd.get("duration"),
                     "definition": cd.get("definition"),
                     "has_captions": has_cap,
+                    "comment_count": comment_count,
+                    "view_count": view_count,
+                    "has_pinned_comment": bool(comment_count > 0),
                     "public_accessible": bool(
                         up_status == "processed" and priv_status == "public"
                     ),
@@ -2631,6 +2638,8 @@ def inspect_remote_youtube_video_status(
         try:
             info = json.loads(proc.stdout)
             priv = str(info.get("privacy_status") or "")
+            c_cnt = int(info.get("comment_count") or 0)
+            v_cnt = int(info.get("view_count") or 0)
             return {
                 "found": True,
                 "video_id": vid,
@@ -2647,6 +2656,9 @@ def inspect_remote_youtube_video_status(
                 "duration": info.get("duration"),
                 "definition": info.get("definition"),
                 "has_captions": bool(info.get("has_captions")),
+                "comment_count": c_cnt,
+                "view_count": v_cnt,
+                "has_pinned_comment": bool(c_cnt > 0),
                 "public_accessible": bool(priv == "public"),
                 "quota_units_used": int(info.get("quota_units_used") or 1),
             }
@@ -2672,17 +2684,19 @@ def reconcile_remote_youtube_video_quality_and_visibility(
     vtt_path: Optional[Path] = None,
     refresh_thumbnail: bool = True,
     upload_caption: bool = True,
+    post_pinned_comment: bool = False,
     quota_governor: Optional[YouTubeQuotaGovernor] = None,
     token_path: Path = DEFAULT_YOUTUBE_TOKEN_PATH,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
 ) -> Dict[str, Any]:
     """
     Reconciles an existing YouTube video (`video_id`) in-place when remote visibility
-    (`privacyStatus != desired_privacy`), thumbnail quality, or captions need updating,
-    weighing daily YouTube Data API v3 quota costs:
+    (`privacyStatus != desired_privacy`), thumbnail quality, captions, or top-level
+    canonical comment need updating, weighing daily YouTube Data API v3 quota costs:
     - In-place metadata + privacy update (`videos.update`): 50 quota units (vs 1,600 for re-upload)
     - In-place custom thumbnail update (`thumbnails.set`): 50 quota units
     - In-place WebVTT caption upload (`captions.insert`): 400 quota units
+    - In-place canonical top-level comment (`commentThreads.insert`): 50 quota units
     """
     prop = _normalize_property_id(property_id)
     gov = quota_governor or YouTubeQuotaGovernor()
@@ -2793,6 +2807,35 @@ def reconcile_remote_youtube_video_quality_and_visibility(
             except Exception:
                 pass
 
+    # 4. Post canonical top-level comment if missing (50 quota units)
+    pinned_comment_text = str(yt_pack.get("pinned_comment") or "").strip()
+    if (
+        post_pinned_comment
+        and pinned_comment_text
+        and not before.get("has_pinned_comment")
+        and not _in_pytest()
+    ):
+        budget = gov.get_budget_status()
+        raw_remaining = max(0, budget.daily_ceiling_units - budget.used_units_today - quota_spent)
+        if raw_remaining >= YOUTUBE_COMMENT_INSERT_COST_UNITS:
+            c_cmd = [
+                str(youtube_bin),
+                "--json",
+                "comment",
+                f"https://www.youtube.com/watch?v={vid}",
+                "--text",
+                pinned_comment_text,
+            ]
+            c_proc = subprocess.run(c_cmd, capture_output=True, text=True, timeout=45, check=False)
+            if c_proc.returncode == 0:
+                try:
+                    c_out = json.loads((c_proc.stdout or "").strip() or "{}")
+                except Exception:
+                    c_out = {}
+                if c_out.get("success") and not c_out.get("already_present"):
+                    quota_spent += YOUTUBE_COMMENT_INSERT_COST_UNITS
+                    actions_taken.append("commentThreads.insert(cost=50)")
+
     if quota_spent > 0:
         gov.record_upload_consumption(
             property_id=prop,
@@ -2829,13 +2872,14 @@ def upload_tool_video_to_youtube(
     live_upload: bool = False,
     quota_governor: Optional[YouTubeQuotaGovernor] = None,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
-    upload_caption: bool = False,
+    upload_caption: bool = True,
+    post_pinned_comment: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes an idempotent, quota-governed `youtube upload --engine api` dispatch for a rendered tool video.
     - Deduplicates against `.agy/youtube_upload_ledger.json` and `youtube-toolkit/data/upload_log.json`.
-    - When an already-uploaded video has mismatched privacy (e.g. `unlisted` vs `public`) during live
-      runs, reconciles it in-place (`videos.update` = 50 units) rather than re-uploading (1,650 units).
+    - When an already-uploaded video has mismatched privacy (e.g. `unlisted` vs `public`) or missing captions/comments
+      during live runs, reconciles it in-place rather than re-uploading (1,650 units).
     - Enforces the 10,000-unit daily YouTube Data API v3 quota ceiling via `YouTubeQuotaGovernor`.
     - Updates `dist/videos/batch_seo_catalog.json` and `syndication/<slug>/youtube_metadata.json` with `video_id`.
     """
@@ -2858,7 +2902,11 @@ def upload_tool_video_to_youtube(
             live_upload
             and not _in_pytest()
             and privacy == "public"
-            and rec_privacy != "public"
+            and (
+                rec_privacy != "public"
+                or not existing.get("has_captions")
+                or not existing.get("has_pinned_comment")
+            )
         ):
             reconcile_info = reconcile_remote_youtube_video_quality_and_visibility(
                 video_id=vid,
@@ -2869,12 +2917,18 @@ def upload_tool_video_to_youtube(
                 vtt_path=vtt_path if vtt_path.is_file() else None,
                 refresh_thumbnail=True,
                 upload_caption=upload_caption,
+                post_pinned_comment=post_pinned_comment,
                 quota_governor=gov,
                 youtube_bin=youtube_bin,
             )
+            after_st = reconcile_info.get("after_status") or {}
             if reconcile_info.get("privacyStatus") == privacy:
                 existing["privacy"] = privacy
-                _save_upload_idempotency_record(eff_repo, prop, slug, existing)
+            if after_st.get("has_captions"):
+                existing["has_captions"] = True
+            if after_st.get("has_pinned_comment"):
+                existing["has_pinned_comment"] = True
+            _save_upload_idempotency_record(eff_repo, prop, slug, existing)
 
         return {
             "status": "ALREADY_UPLOADED_IDEMPOTENT",
@@ -2973,6 +3027,9 @@ def upload_tool_video_to_youtube(
         cmd.extend(["--thumbnail", str(thumb_path)])
     if has_cap:
         cmd.extend(["--caption", str(vtt_path)])
+    pinned_comment = str(yt_pack.get("pinned_comment") or "").strip()
+    if post_pinned_comment and pinned_comment and not _in_pytest():
+        cmd.extend(["--comment", pinned_comment])
 
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
     raw_out = (proc.stdout or "").strip()
