@@ -1211,6 +1211,12 @@ class UnifiedBrowserAuditor:
         if targets_1440:
             defects["targets_under_44"].extend(targets_1440)
 
+        # 4a. Initial load & scroll CLS check before Emulation.setDeviceMetricsOverride resizes viewport
+        msg_counter[0] += 1
+        cls_val = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
+        if cls_val and cls_val > 0.0:
+            defects["cls_value"] = cls_val
+
         # 1b. Standard Desktop Viewport (1280x800)
         msg_counter[0] += 1
         await self._send_cdp(
@@ -1286,12 +1292,7 @@ class UnifiedBrowserAuditor:
                 if json.dumps(item, sort_keys=True) not in existing_t:
                     defects["targets_under_44"].append(item)
 
-        # 4. CLS check (PerformanceObserver layout-shift must be 0.0)
-        msg_counter[0] += 1
-        cls_val = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
-        if cls_val and cls_val > 0.0:
-            defects["cls_value"] = cls_val
-
+        # 4b. Interactive CLS check (PerformanceObserver layout-shift must be 0.0)
         msg_counter[0] += 1
         interaction_cls = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
         if interaction_cls and interaction_cls > defects["cls_value"]:
