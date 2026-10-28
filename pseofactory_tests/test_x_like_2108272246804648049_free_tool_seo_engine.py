@@ -433,7 +433,19 @@ def test_live_capability_matrix_and_tenant_readiness() -> None:
         assert tenant_rep["tool_pages_scanned"] >= 11
         assert tenant_rep["tool_page_count"] == tenant_rep["tool_pages_scanned"]
         assert tenant_rep["total_pages_scanned"] == tenant_rep["html_pages_scanned"]
+        assert tenant_rep["total_pages"] == tenant_rep["html_pages_scanned"]
         assert tenant_rep["zero_signup_instant_ux_issues"] == []
         assert tenant_rep["unnormalized_acronym_issues"] == []
         assert tenant_rep["duplicate_calculator_title_issues"] == []
     assert sum(tr["tool_page_count"] for tr in report["live_tenant_reports"].values()) >= 178
+
+    from pseofactory.affiliates import audit_callout_destination_message_match
+    from pseofactory.maintenance import TenantRegistry
+    reg = TenantRegistry.default()
+    for tid in ("profithelm", "prexvo", "gainhelm"):
+        adp = reg.get_adapter(tid)
+        r_rep = RetroReflectionEngine.audit_estate(adp.dist_dir, tid)
+        assert r_rep["total_pages"] == r_rep["pages_scanned"]
+        c_rep = audit_callout_destination_message_match(adp.dist_dir, tid)
+        assert c_rep["total_pages"] == c_rep["pages_audited"]
+        assert c_rep["total_callouts_checked"] == c_rep["callouts_audited"]

@@ -10334,7 +10334,7 @@ class RetroReflectionEngine:
         """Scans all tool/calculator pages in dist_dir and reports any pages missing upgraded engine mechanics."""
         d = Path(dist_dir).resolve()
         if not d.is_dir():
-            return {"status": "PASS", "pages_scanned": 0, "stale_pages": {}, "stale_count": 0}
+            return {"status": "PASS", "pages_scanned": 0, "total_pages": 0, "stale_pages": {}, "stale_count": 0}
 
         from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
 
@@ -10592,6 +10592,7 @@ class RetroReflectionEngine:
             "status": "PASS" if not stale_pages else "STALE",
             "property_id": property_id,
             "pages_scanned": scanned,
+            "total_pages": scanned,
             "stale_count": len(stale_pages),
             "stale_pages": stale_pages,
         }
@@ -10620,6 +10621,7 @@ class RetroReflectionEngine:
                 "status": "PASS",
                 "property_id": property_id,
                 "pages_scanned": 0,
+                "total_pages": 0,
                 "pages_retrofitted": 0,
                 "retrofitted_paths": [],
             }
@@ -11320,6 +11322,7 @@ class RetroReflectionEngine:
             "status": "PASS",
             "property_id": property_id,
             "pages_scanned": scanned,
+            "total_pages": scanned,
             "pages_retrofitted": len(retrofitted_paths),
             "retrofitted_paths": retrofitted_paths,
         }
