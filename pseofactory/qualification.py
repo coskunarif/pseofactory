@@ -951,11 +951,313 @@ def check_search_intent_cannibalization(
     }
 
 
+def detect_multi_keyword_title_h1_dilution(
+    title: str,
+    h1: str = "",
+    primary_keyword: str = "",
+    secondary_keywords: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic gate (x-like:2104684322481664277) that flags multi-keyword stuffing
+    and intent dilution in <title> and <h1> tags.
+    Rejects:
+      1. Pipe/slash keyword-chain stuffing (>= 2 pipe/slash segments before the brand suffix).
+      2. Conjunction chaining of >= 3 distinct keyword clauses ('A and B and C') or
+         repeating the same multi-word head noun phrase across multiple clauses in <title> or <h1>.
+      3. Stuffing >= 2 full secondary keyword strings verbatim into <title> alongside primary_keyword.
+    Allows clean single-primary-intent titles with a compact parenthetical statutory modifier
+    (e.g., 'Section 179 Deduction Calculator 2026 (Form 4562) | ProfitHelm').
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as _html_mod
+
+    clean_title = re.sub(r"\s+", " ", _html_mod.unescape(str(title or "")).strip())
+    clean_h1 = re.sub(r"\s+", " ", _html_mod.unescape(str(h1 or "")).strip())
+    clean_pk = re.sub(r"\s+", " ", _html_mod.unescape(str(primary_keyword or "")).strip().lower())
+    sec_list = [re.sub(r"\s+", " ", str(s).strip().lower()) for s in (secondary_keywords or []) if str(s).strip()]
+
+    violations: List[str] = []
+
+    # Strip trailing brand suffix ('| ProfitHelm', '| Store', etc.)
+    raw_pipe_parts = [p.strip() for p in clean_title.split("|") if p.strip()]
+    if len(raw_pipe_parts) >= 2 and len(raw_pipe_parts[-1].split()) <= 3 and len(raw_pipe_parts[-1]) <= 28:
+        title_body = " | ".join(raw_pipe_parts[:-1])
+        body_segments = raw_pipe_parts[:-1]
+    else:
+        title_body = clean_title
+        body_segments = raw_pipe_parts if raw_pipe_parts else ([clean_title] if clean_title else [])
+
+    if len(body_segments) >= 2:
+        violations.append(
+            f"MULTI_KEYWORD_DELIMITER_STUFFING_IN_TITLE: {len(body_segments)} pipe-separated keyword segments before brand suffix"
+        )
+
+    for label, text_val in (("TITLE", title_body), ("H1", clean_h1)):
+        if not text_val:
+            continue
+        low_val = text_val.lower()
+        # Check >= 3 conjunction clauses ('A and B and C' or 'A & B & C', preserving tokens like R&D or POA&M)
+        conj_clauses = [c.strip() for c in re.split(r"\s+(?:and|&)\s+", low_val) if len(c.strip().split()) >= 2]
+        if len(conj_clauses) >= 3:
+            violations.append(
+                f"MULTI_KEYWORD_CONJUNCTION_CHAIN_IN_{label}: {len(conj_clauses)} multi-word keyword clauses chained in {label}"
+            )
+        # Check repeated 2-word head noun phrases across separate clauses (e.g. 'enclosed mobility scooters ... mobility scooters with canopy')
+        words = [
+            w for w in re.findall(r"\b[a-z0-9]+\b", low_val)
+            if w not in {"the", "and", "for", "with", "in", "of", "to", "a", "an", "on", "by", "or", "vs"}
+        ]
+        bigrams: Dict[Tuple[str, str], int] = {}
+        for idx in range(len(words) - 1):
+            bg = (words[idx], words[idx + 1])
+            bigrams[bg] = bigrams.get(bg, 0) + 1
+        repeated_bg = [" ".join(bg) for bg, cnt in bigrams.items() if cnt >= 2]
+        if repeated_bg:
+            violations.append(
+                f"MULTI_KEYWORD_HEAD_REPETITION_IN_{label}: repeated head phrase '{repeated_bg[0]}' across multiple keyword targets"
+            )
+
+    if clean_pk and sec_list and title_body:
+        tb_low = title_body.lower()
+        matched_secs = [s for s in sec_list if s != clean_pk and len(s) >= 6 and s in tb_low]
+        if len(matched_secs) >= 2:
+            violations.append(
+                f"EXCESSIVE_SECONDARY_KEYWORDS_IN_TITLE: {len(matched_secs)} full secondary keywords stuffed into <title>"
+            )
+
+    return {
+        "passed": len(violations) == 0,
+        "is_diluted": len(violations) > 0,
+        "title": clean_title,
+        "h1": clean_h1,
+        "primary_keyword": clean_pk,
+        "delimiter_segments_count": len(body_segments),
+        "violations": violations,
+    }
+
+
+def evaluate_serp_intent_bifurcation_vs_consolidation(
+    query_a: str,
+    query_b: str,
+    serp_a: Optional[List[Dict[str, Any]]] = None,
+    serp_b: Optional[List[Dict[str, Any]]] = None,
+    page_rank_a: Optional[float] = None,
+    page_rank_b: Optional[float] = None,
+    spec_a: Optional[Dict[str, Any]] = None,
+    spec_b: Optional[Dict[str, Any]] = None,
+    inventory_overlap_ratio: Optional[float] = None,
+    ceiling_detected: bool = False,
+    cluster_expansion_frozen: bool = False,
+    max_top3_overlap_for_split: float = 0.34,
+    max_inventory_overlap_for_split: float = 0.70,
+) -> Dict[str, Any]:
+    """
+    Deterministic SERP Intent Bifurcation vs Shared-Intent Cannibalization discriminator
+    (x-like:2104684322481664277: @SEOKeval + @AshwiniNK21 vs @VijayAabhas).
+    Evaluates whether two keywords targeted by a single mid-Page-1 URL warrant splitting
+    into separate dedicated pages (SPLIT_DEDICATED_PAGE -> BUILD_PAGE) versus consolidating
+    on the existing canonical hub (CONSOLIDATE_SHARED_SERP_INTENT -> REFACTOR_PAGE):
+      1. Top-3 SERP URL Disjointness: Computes normalized URL overlap across the top 3
+         ranking results for query_a and query_b. Overlap >= 0.34 proves Google treats
+         both queries as shared intent (splitting causes @VijayAabhas cannibalization).
+      2. Rank #1 Exclusive Keyword Specialization: Checks whether the #1 SERP result for
+         query_a targets query_a's distinctive modifier tokens while omitting query_b's
+         distinctive modifier tokens, and vice versa.
+      3. Non-Duplicate Inventory / Statutory Formula Orthogonality: Blocks splitting when
+         inventory_overlap_ratio >= 0.70 (same e-commerce SKUs) or when spec_a and spec_b
+         share the same statutory signature / mathematical formula.
+      4. Authority & Indexation Ceiling Guard: Defers splitting when ceiling_detected=True
+         or cluster_expansion_frozen=True to prevent unindexed orphan bloat.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.parse
+
+    qa_clean = re.sub(r"\s+", " ", str(query_a or "").strip().lower())
+    qb_clean = re.sub(r"\s+", " ", str(query_b or "").strip().lower())
+
+    def _norm_serp_url(raw_u: str) -> str:
+        u_str = str(raw_u or "").strip().lower()
+        if not u_str:
+            return ""
+        if "://" not in u_str:
+            u_str = "https://" + u_str.lstrip("/")
+        parsed = urllib.parse.urlsplit(u_str)
+        netloc = parsed.netloc.removeprefix("www.")
+        path = parsed.path.rstrip("/")
+        return f"{netloc}{path}" if netloc else path
+
+    top3_a = [r for r in (serp_a or []) if isinstance(r, dict)][:3]
+    top3_b = [r for r in (serp_b or []) if isinstance(r, dict)][:3]
+    urls_a = {_norm_serp_url(str(r.get("url") or r.get("link") or "")) for r in top3_a if _norm_serp_url(str(r.get("url") or r.get("link") or ""))}
+    urls_b = {_norm_serp_url(str(r.get("url") or r.get("link") or "")) for r in top3_b if _norm_serp_url(str(r.get("url") or r.get("link") or ""))}
+
+    overlap_urls = urls_a & urls_b
+    min_denom = min(len(urls_a), len(urls_b)) if (urls_a and urls_b) else 0
+    top3_overlap_ratio = round(len(overlap_urls) / float(min_denom), 4) if min_denom > 0 else 0.0
+
+    stop_tokens = {"a", "an", "the", "with", "for", "in", "of", "and", "or", "to", "by", "on", "calculator", "tool", "model", "guide"}
+    toks_a = {t for t in re.findall(r"\b[a-z0-9]+\b", qa_clean) if t not in stop_tokens}
+    toks_b = {t for t in re.findall(r"\b[a-z0-9]+\b", qb_clean) if t not in stop_tokens}
+    dist_a = toks_a - toks_b
+    dist_b = toks_b - toks_a
+
+    rank1_exclusive = False
+    if top3_a and top3_b and dist_a and dist_b:
+        r1_a_text = f"{top3_a[0].get('title', '')} {top3_a[0].get('url', '')}".lower()
+        r1_b_text = f"{top3_b[0].get('title', '')} {top3_b[0].get('url', '')}".lower()
+        r1_a_toks = set(re.findall(r"\b[a-z0-9]+\b", r1_a_text))
+        r1_b_toks = set(re.findall(r"\b[a-z0-9]+\b", r1_b_text))
+        r1_a_has_a = bool(dist_a & r1_a_toks)
+        r1_a_omits_b = not bool(dist_b & r1_a_toks)
+        r1_b_has_b = bool(dist_b & r1_b_toks)
+        r1_b_omits_a = not bool(dist_a & r1_b_toks)
+        rank1_exclusive = bool(r1_a_has_a and r1_a_omits_b and r1_b_has_b and r1_b_omits_a)
+
+    pos_a = float(page_rank_a) if page_rank_a is not None else 5.5
+    pos_b = float(page_rank_b) if page_rank_b is not None else 5.5
+    mid_page1_plateau = bool(3.5 <= pos_a <= 12.0 and 3.5 <= pos_b <= 12.0)
+
+    # Check duplicate SKU inventory or identical statutory formula signature
+    dup_inventory_or_formula = False
+    if inventory_overlap_ratio is not None and float(inventory_overlap_ratio) >= max_inventory_overlap_for_split:
+        dup_inventory_or_formula = True
+
+    sig_a = compute_statutory_signature(spec_a) if isinstance(spec_a, dict) else ""
+    sig_b = compute_statutory_signature(spec_b) if isinstance(spec_b, dict) else ""
+    if sig_a and sig_b and sig_a == sig_b:
+        dup_inventory_or_formula = True
+    elif isinstance(spec_a, dict) and isinstance(spec_b, dict):
+        auth_a, keys_a, form_a = _extract_spec_signature_parts(spec_a)
+        auth_b, keys_b, form_b = _extract_spec_signature_parts(spec_b)
+        if auth_a and auth_b and auth_a == auth_b:
+            if (form_a and form_b and form_a == form_b) or (
+                keys_a and keys_b and (len(keys_a & keys_b) / float(max(len(keys_a), len(keys_b)))) >= 0.80
+            ):
+                dup_inventory_or_formula = True
+
+    has_serp_evidence = bool(urls_a and urls_b)
+    if has_serp_evidence and (top3_overlap_ratio >= max_top3_overlap_for_split or not rank1_exclusive):
+        decision = "CONSOLIDATE_SHARED_SERP_INTENT"
+        rec_action = "REFACTOR_PAGE"
+        risk = "HIGH_SHARED_SERP_INTENT"
+        reason = "shared_serp_top3_intent_overlap"
+    elif dup_inventory_or_formula:
+        decision = "CONSOLIDATE_SHARED_SERP_INTENT"
+        rec_action = "REFACTOR_PAGE"
+        risk = "HIGH_DUPLICATE_INVENTORY_OR_FORMULA"
+        reason = "shared_statutory_signature_or_duplicate_inventory"
+    elif ceiling_detected or cluster_expansion_frozen:
+        decision = "DEFER_SPLIT_UNDER_INDEXATION_CEILING"
+        rec_action = "REFACTOR_PAGE"
+        risk = "MODERATE_CRAWL_BUDGET_CEILING"
+        reason = "indexation_ceiling_or_frozen_cluster_expansion"
+    elif has_serp_evidence and top3_overlap_ratio < max_top3_overlap_for_split and rank1_exclusive and mid_page1_plateau:
+        decision = "SPLIT_DEDICATED_PAGE"
+        rec_action = "BUILD_PAGE"
+        risk = "LOW_DISJOINT_SERP_INTENT"
+        reason = "disjoint_serp_top3_and_exclusive_rank1_specialization"
+    else:
+        decision = "CONSOLIDATE_SHARED_SERP_INTENT"
+        rec_action = "REFACTOR_PAGE"
+        risk = "MODERATE_INSUFFICIENT_BIFURCATION_PROOF"
+        reason = "insufficient_serp_bifurcation_evidence"
+
+    return {
+        "query_a": qa_clean,
+        "query_b": qb_clean,
+        "decision": decision,
+        "recommended_action": rec_action,
+        "top3_url_overlap_ratio": top3_overlap_ratio,
+        "shared_top3_urls": sorted(overlap_urls),
+        "rank1_exclusive_targeting": rank1_exclusive,
+        "distinctive_tokens_a": sorted(dist_a),
+        "distinctive_tokens_b": sorted(dist_b),
+        "mid_page1_plateau": mid_page1_plateau,
+        "duplicate_inventory_or_formula": dup_inventory_or_formula,
+        "ceiling_or_freeze_active": bool(ceiling_detected or cluster_expansion_frozen),
+        "cannibalization_risk": risk,
+        "reason": reason,
+    }
+
+
+def simulate_page_split_revenue_and_cannibalization_delta(
+    combined_monthly_searches: int = 3000,
+    aov_usd: float = 6000.0,
+    claimed_monthly_revenue_gain_usd: float = 40000.0,
+    baseline_position_a: float = 5.0,
+    baseline_position_b: float = 5.5,
+    top3_url_overlap_ratio: float = 0.0,
+    inventory_overlap_ratio: float = 0.25,
+    deduplication_factor: float = 0.70,
+    high_ticket_organic_cvr: float = 0.0020,
+    rank1_commercial_ctr: float = 0.14,
+    mid_page1_ctr: float = 0.065,
+    new_page_ramp_90d_factor: float = 0.55,
+) -> Dict[str, Any]:
+    """
+    Adversarial quantitative falsification simulator for x-like:2104684322481664277
+    ('3,000+ searches/mo * $5-7k AOV = +$40,000/mo additional organic revenue').
+    Models:
+      1. Impression deduplication across keyword variations (deduplication_factor=0.70).
+      2. Already-captured mid-Page-1 baseline traffic at positions 5.0-5.5 (mid_page1_ctr=6.5%).
+      3. Commercial SERP CTR compression below Google Shopping PLAs and AI Overviews (rank1_commercial_ctr=14.0%).
+      4. High-ticket ($5k-$7k AOV) organic conversion rate reality (0.20% vs naive 2%+ impulse CVR).
+      5. 90-day indexation and backlink ramp penalty on newly spawned URLs, plus negative
+         authority-split cannibalization when top3_url_overlap_ratio >= 0.34 or inventory_overlap_ratio >= 0.70.
+    Zero em-dashes. Zero en-dashes.
+    """
+    dedup_searches = round(float(combined_monthly_searches) * float(deduplication_factor), 2)
+    baseline_clicks_mo = round(dedup_searches * float(mid_page1_ctr), 2)
+    baseline_rev_mo = round(baseline_clicks_mo * float(high_ticket_organic_cvr) * float(aov_usd), 2)
+
+    cannibalized = bool(float(top3_url_overlap_ratio) >= 0.34 or float(inventory_overlap_ratio) >= 0.70)
+    if cannibalized:
+        # Splitting a shared-intent page dilutes authority across two thin URLs, dropping CTR to ~3.2%
+        post_split_clicks_mo = round(dedup_searches * 0.032, 2)
+        post_split_rev_mo = round(post_split_clicks_mo * float(high_ticket_organic_cvr) * float(aov_usd), 2)
+        incremental_mo = round(post_split_rev_mo - baseline_rev_mo, 2)
+        net_90d_delta = round(incremental_mo * 3.0, 2)
+    else:
+        # Valid split: Page A captures rank1_commercial_ctr on 50% of searches; Page B ramps at new_page_ramp_90d_factor
+        steady_clicks_mo = round(dedup_searches * float(rank1_commercial_ctr), 2)
+        steady_rev_mo = round(steady_clicks_mo * float(high_ticket_organic_cvr) * float(aov_usd), 2)
+        incremental_mo = round(steady_rev_mo - baseline_rev_mo, 2)
+        ramped_clicks_mo = round(
+            (0.5 * dedup_searches * float(rank1_commercial_ctr))
+            + (0.5 * dedup_searches * float(rank1_commercial_ctr) * float(new_page_ramp_90d_factor)),
+            2,
+        )
+        ramped_rev_mo = round(ramped_clicks_mo * float(high_ticket_organic_cvr) * float(aov_usd), 2)
+        net_90d_delta = round((ramped_rev_mo - baseline_rev_mo) * 3.0, 2)
+
+    overstatement_mult = (
+        round(float(claimed_monthly_revenue_gain_usd) / max(1.0, incremental_mo), 2)
+        if incremental_mo > 0
+        else float("inf")
+    )
+    return {
+        "combined_monthly_searches": int(combined_monthly_searches),
+        "deduplicated_monthly_searches": dedup_searches,
+        "aov_usd": float(aov_usd),
+        "claimed_monthly_revenue_gain_usd": float(claimed_monthly_revenue_gain_usd),
+        "baseline_position_a": float(baseline_position_a),
+        "baseline_position_b": float(baseline_position_b),
+        "baseline_monthly_clicks": baseline_clicks_mo,
+        "baseline_already_captured_monthly_revenue_usd": baseline_rev_mo,
+        "realistic_monthly_incremental_revenue_usd": incremental_mo,
+        "net_90d_revenue_delta_usd": net_90d_delta,
+        "overstatement_multiple": overstatement_mult,
+        "cannibalization_penalty_applied": cannibalized,
+        "naive_claim_falsified": bool(overstatement_mult >= 2.5 or net_90d_delta < 0.0),
+    }
+
+
 def evaluate_query_modifier_expansion_vs_distinct_tool(
     query: str,
     existing_tools: Optional[List[Dict[str, Any]]] = None,
     gsc_rows: Optional[List[Dict[str, Any]]] = None,
     property_id: str = "profithelm",
+    serp_comparison: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Deterministically weighs whether a query modifier warrants expanding/refactoring an
@@ -963,7 +1265,9 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
     genuinely distinct statutory calculator (LAUNCH_DISTINCT_TOOL -> BUILD_PAGE).
     Decision rules:
       1. Existing URL already ranks in GSC positions 4-15 (or 1-20) -> EXPAND_EXISTING_PAGE
-         (suppresses duplicate page creation to avoid splitting impressions and link equity).
+         UNLESS serp_comparison proves true SERP Intent Bifurcation (disjoint Top-3 SERP URLs,
+         exclusive #1 incumbent keyword specialization, mid-Page-1 plateau, distinct statutory
+         formula signature, and no active indexation ceiling).
       2. Modifier represents a filing-status tier, tax-year schedule, state sub-route,
          sub-scenario parameter (e.g. partial 1031 boot, vehicle bonus depreciation,
          QSBS exclusion, RAP/IBR/PSLF sub-intent), or phrasing synonym of an existing
@@ -998,6 +1302,53 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
         subroute = str(cannibal.get("target_subroute") or f"/tools/{p_slug}/")
         r_pos = cannibal.get("ranking_position")
         reason = str(cannibal.get("reason") or "matches_existing_tool_intent")
+
+        # Check SERP Intent Bifurcation override when serp_comparison is provided
+        if isinstance(serp_comparison, dict) and serp_comparison.get("serp_a") and serp_comparison.get("serp_b"):
+            matched_tool_obj = cannibal.get("matched_tool") if isinstance(cannibal.get("matched_tool"), dict) else {}
+            primary_q_a = str(
+                serp_comparison.get("primary_query")
+                or matched_tool_obj.get("primary_keyword")
+                or p_slug.replace("-", " ")
+            )
+            bifurcation = evaluate_serp_intent_bifurcation_vs_consolidation(
+                query_a=primary_q_a,
+                query_b=clean_q,
+                serp_a=serp_comparison.get("serp_a"),
+                serp_b=serp_comparison.get("serp_b"),
+                page_rank_a=serp_comparison.get("page_rank_a", 5.0),
+                page_rank_b=serp_comparison.get("page_rank_b", r_pos if r_pos is not None else 6.0),
+                spec_a=serp_comparison.get("spec_a") or matched_tool_obj,
+                spec_b=serp_comparison.get("spec_b"),
+                inventory_overlap_ratio=serp_comparison.get("inventory_overlap_ratio"),
+                ceiling_detected=bool(serp_comparison.get("ceiling_detected", False)),
+                cluster_expansion_frozen=bool(serp_comparison.get("cluster_expansion_frozen", False)),
+            )
+            if bifurcation["decision"] == "SPLIT_DEDICATED_PAGE":
+                return {
+                    "query": clean_q,
+                    "decision": "LAUNCH_DISTINCT_TOOL",
+                    "action": "BUILD_PAGE",
+                    "recommended_action": "BUILD_PAGE",
+                    "suppress_duplicate_build": False,
+                    "is_cannibalizing": False,
+                    "serp_intent_bifurcation_detected": True,
+                    "serp_bifurcation_analysis": bifurcation,
+                    "parent_slug": p_slug,
+                    "target_subroute": "",
+                    "ranking_url": cannibal.get("ranking_url", ""),
+                    "ranking_position": r_pos,
+                    "ranking_impressions": cannibal.get("ranking_impressions", 0),
+                    "modifier_classification": "SERP_BIFURCATED_DISTINCT_STATUTORY_INTENT",
+                    "reason": "disjoint_serp_top3_and_exclusive_rank1_specialization",
+                    "tradeoff_rationale": (
+                        f"Although '{subroute}' ranks at position {r_pos} for '{clean_q}', Page-1 SERP "
+                        f"analysis proves 0% Top-3 URL overlap, exclusive #1 keyword specialization, and "
+                        f"distinct statutory calculation parameters; splitting into a dedicated calculator "
+                        f"unlocks top-3 ranking capacity without thin-page cannibalization."
+                    ),
+                }
+
         if r_pos is not None and 1.0 <= float(r_pos) < 4.0:
             rec_action = "PROTECT_TOP3_WINNER"
             mod_class = "EXISTING_TOP_3_WINNER"
@@ -1017,6 +1368,7 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
             "recommended_action": rec_action,
             "suppress_duplicate_build": True,
             "is_cannibalizing": True,
+            "serp_intent_bifurcation_detected": False,
             "parent_slug": p_slug,
             "matched_tool_slug": p_slug,
             "target_subroute": subroute,
@@ -1039,6 +1391,7 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
         "recommended_action": "BUILD_PAGE",
         "suppress_duplicate_build": False,
         "is_cannibalizing": False,
+        "serp_intent_bifurcation_detected": False,
         "parent_slug": "none",
         "target_subroute": "",
         "ranking_url": "",

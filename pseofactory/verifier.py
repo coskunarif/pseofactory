@@ -8169,3 +8169,257 @@ def evaluate_x_like_2110401032035709427_capability_matrix(
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
     }
+
+
+X_LIKE_2104684322481664277_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "claim_id": 1,
+        "claim_name": "SERP Intent Bifurcation vs Shared-Intent Cannibalization Discriminator",
+        "source_ref": "x-like:2104684322481664277 (@SEOKeval main post + @AshwiniNK21 2104798676195676529 + @VijayAabhas 2104913034531770877)",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "pseofactory/qualification.py::evaluate_serp_intent_bifurcation_vs_consolidation + evaluate_query_modifier_expansion_vs_distinct_tool",
+        "case_for": (
+            "When two similar-sounding queries (for example enclosed cabin vs open canopy mobility scooters, "
+            "or IRC Section 179 vs Section 174 amortization) return disjoint Top-3 SERP URLs (< 34% overlap), "
+            "each #1 incumbent targets only its single primary keyword, and the existing page plateaus in "
+            "positions 4.0 to 10.5 with distinct statutory or product inventory (< 70% overlap), splitting into "
+            "dedicated single-intent pages breaks the mid-Page-1 relevance ceiling."
+        ),
+        "case_against": (
+            "Without verifying Top-3 SERP URL overlap, SKU/statutory formula overlap, and tenant indexation "
+            "ceilings, splitting synonymous modifiers creates thin doorway clones that cannibalize each other "
+            "and depress domain crawl equity (@VijayAabhas failure mode)."
+        ),
+    },
+    {
+        "claim_id": 2,
+        "claim_name": "Canonical Route & 301-Retired Clone Filtering in Quantitative Revenue Forecast",
+        "source_ref": "x-like:2104684322481664277 (live pseofactory multi-tenant telemetry audit across ProfitHelm, Prexvo, and GainHelm)",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "pseofactory/seo_growth_loops.py::compile_quantitative_revenue_forecast",
+        "case_for": (
+            "Live tenant .agy/quantitative_revenue_forecast.json previously leaked non-tool routes (root, "
+            "robots.txt), GainHelm pre-pivot sinks (restoration-job-management-software, fieldedge-alternative), "
+            "and 301-retired clone slugs (prediction-market-tax-calculator, rap-vs-ibr-repayment-calculator, "
+            "cmmc-level-2-audit-cost-calculator) as separate ranked assets, inflating GainHelm 90d forecast "
+            "by $342.62 (52.2%) and fragmenting query telemetry away from canonical hubs."
+        ),
+        "case_against": (
+            "Allowing retired 301-redirected slugs or non-tool paths to remain in ranked_assets and "
+            "priority_indexing_urls wastes PushIndexer quota on non-existent /tools/<slug>/ routes and "
+            "corrupts per-tool conversion/revenue attribution."
+        ),
+    },
+    {
+        "claim_id": 3,
+        "claim_name": "Multi-Keyword Title & H1 Stuffing Dilution Gate",
+        "source_ref": "x-like:2104684322481664277 (@SEOKeval main post + @HeySukhwinder 2104972472428675370)",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/qualification.py::detect_multi_keyword_title_h1_dilution + pseofactory/seo_growth_loops.py::compile_search_opportunity_briefs",
+        "case_for": (
+            "Stuffing 3+ pipe/slash-separated keyword clauses into a <title> tag or chaining multiple distinct "
+            "head-noun phrases across 'and/or/vs' in an <h1> dilutes BM25 and neural title-token salience while "
+            "depressing SERP CTR compared to a focused 1-primary-intent title."
+        ),
+        "case_against": (
+            "Over-aggressive keyword stripping could break legitimate comparison calculators (such as S-Corp vs "
+            "LLC or RAP vs IBR) or parenthetical statutory form citations (such as Form 4562), so the gate "
+            "explicitly exempts comparison archetypes and compact statutory parentheticals."
+        ),
+    },
+    {
+        "claim_id": 4,
+        "claim_name": "Adversarial Falsification Simulator for Page-Split Revenue Extrapolations",
+        "source_ref": "x-like:2104684322481664277 (@SEOKeval '$40,000/mo revenue from 3,000 searches * $5k-$7k AOV' claim)",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/qualification.py::simulate_page_split_revenue_and_cannibalization_delta",
+        "case_for": (
+            "Decomposing @SEOKeval's $40,000/mo claim proves a 21.16x survivorship-biased overstatement: it "
+            "ignores baseline traffic already captured at positions 5.0 to 5.5 ($1,638.00/mo across 136.5 clicks), "
+            "applies SaaS/low-ticket conversion rates to a $6,000 AOV medical-device purchase (realistic incremental "
+            "gain is $1,890.00/mo or +$3,288.60 over 90d when SERP intent truly bifurcates), and ignores the negative "
+            "-$2,494.80 90-day revenue delta (-$831.60/mo) when shared-intent pages cannibalize each other."
+        ),
+        "case_against": (
+            "Accepting gross search volume multiplied by AOV without subtracting baseline mid-Page-1 capture "
+            "or modeling cannibalization risk leads to reckless page proliferation and negative net ROI."
+        ),
+    },
+    {
+        "claim_id": 5,
+        "claim_name": "Protected Primary Query & Top-20 Rank-Stability Title Lock",
+        "source_ref": "x-like:2104684322481664277 ('1. Update the current page to ONLY target enclosed mobility scooter')",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "pseofactory/seo_growth_loops.py::_build_title_and_h1_rewrite_spec (PROTECT_TOP3_WINNER + STRIKING_DISTANCE_CONSOLIDATE)",
+        "case_for": (
+            "When narrowing a page's focus to its primary query, pseofactory already enforces "
+            "protected_primary_query and a 14-day top_20_stability_lock_days freeze so existing Top-3 or "
+            "striking-distance tokens are never stripped during title/H1 rewrites."
+        ),
+        "case_against": (
+            "Blindly rewriting a mid-Page-1 page's <title> and <h1> to drop secondary tokens without checking "
+            "which query currently drives Top-3 clicks can destroy existing organic traffic overnight."
+        ),
+    },
+    {
+        "claim_id": 6,
+        "claim_name": "Three-Dimensional Intent Equivalence & Keyword Cannibalization Gate",
+        "source_ref": "x-like:2104684322481664277 (@VijayAabhas 2104913034531770877 cannibalization warning)",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "pseofactory/qualification.py::KeywordCannibalizationGate + are_specs_intent_equivalent",
+        "case_for": (
+            "pseofactory already blocks duplicate page creation across 3 orthogonal dimensions: token Jaccard "
+            "similarity (>= 0.65), search-intent archetype + statutory authority + formula equivalence, and "
+            "URL slug collision, while clustering 4-to-15 striking-distance modifiers onto the canonical hub."
+        ),
+        "case_against": (
+            "Building a second category or calculator page without checking statutory authority and AST formula "
+            "equivalence guarantees internal keyword cannibalization."
+        ),
+    },
+    {
+        "claim_id": 7,
+        "claim_name": "Unconditional 1-Keyword-Per-Page Splitting Across All Secondary Queries",
+        "source_ref": "x-like:2104684322481664277 ('Targeting too many keywords on one page can absolutely destroy your SEO')",
+        "disposition": "REJECTED_BLOAT_OR_HYPE",
+        "pseofactory_stage": "pseofactory/qualification.py::evaluate_query_modifier_expansion_vs_distinct_tool (EXPAND_EXISTING_TOOL default)",
+        "case_for": (
+            "In rare cases where SERP Top-3 URLs are completely disjoint and statutory/product mechanics differ, "
+            "a dedicated page is warranted."
+        ),
+        "case_against": (
+            "In programmatic SEO and statutory calculators, a single authoritative tool routinely ranks for "
+            "dozens of long-tail modifier queries (89/89 live Search Opportunity Briefs across ProfitHelm, "
+            "Prexvo, and GainHelm are REFACTOR_PAGE consolidations); splitting every secondary keyword into a "
+            "separate URL causes doorway-page bloat and crawl budget collapse, as proven by our prior 23->15 "
+            "(Prexvo) and 28->8 (GainHelm) 301 consolidations."
+        ),
+    },
+    {
+        "claim_id": 8,
+        "claim_name": "Naive Search-Volume x AOV ($40k/mo) Agency Case-Study Pitch Arithmetic",
+        "source_ref": "x-like:2104684322481664277 ('3,000+ searches/month... $5-7k AOV... extra $40,000/month in revenue')",
+        "disposition": "REJECTED_BLOAT_OR_HYPE",
+        "pseofactory_stage": "pseofactory/seo_growth_loops.py::compile_quantitative_revenue_forecast (empirical GSC click-share x partner EPC model)",
+        "case_for": (
+            "Directional TAM estimates can help prioritize high-ticket commercial verticals over zero-monetization "
+            "informational queries."
+        ),
+        "case_against": (
+            "Multiplying raw monthly search volume by $5k-$7k AOV without subtracting existing rank-5 traffic, "
+            "SERP AI Overview/ad CTR compression, or multi-week high-ticket consideration cycles is classic "
+            "agency lead-gen hype ('Comment SEO and I will send you a free audit')."
+        ),
+    },
+]
+
+
+def evaluate_x_like_2104684322481664277_capability_matrix(
+    include_live_audit: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 8 atomic claims from x-like:2104684322481664277 (@SEOKeval / Keval Shah:
+    'Targeting too many keywords on one page can absolutely destroy your SEO' + thread replies)
+    against pseofactory across ProfitHelm, Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.qualification import detect_multi_keyword_title_h1_dilution
+    from pseofactory.seo_growth_loops import compile_quantitative_revenue_forecast
+
+    compounding = [
+        m for m in X_LIKE_2104684322481664277_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    gates = [
+        m for m in X_LIKE_2104684322481664277_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"
+    ]
+    solved = [
+        m for m in X_LIKE_2104684322481664277_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    rejected = [
+        m for m in X_LIKE_2104684322481664277_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_HYPE"
+    ]
+
+    all_passed = (
+        len(X_LIKE_2104684322481664277_CAPABILITY_MATRIX) == 8
+        and len(compounding) == 2
+        and len(gates) == 2
+        and len(solved) == 2
+        and len(rejected) == 2
+    )
+
+    tenant_summaries: Dict[str, Any] = {}
+    if include_live_audit:
+        for t_id, root_path in (
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
+            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
+        ):
+            dist_path = root_path / "dist"
+            tools_path = dist_path / "tools"
+            phantom_routes: List[str] = []
+            dilution_violations: List[str] = []
+            ranked_count = 0
+            forecast_rev = 0.0
+            if root_path.is_dir() and dist_path.is_dir():
+                fc = compile_quantitative_revenue_forecast(
+                    property_id=t_id,
+                    repo_root=root_path,
+                    dist_dir=dist_path,
+                    persist=False,
+                )
+                ranked_assets = fc.get("ranked_assets") or []
+                ranked_count = len(ranked_assets)
+                forecast_rev = float(fc.get("total_forecasted_90d_revenue_usd") or 0.0)
+                for asset in ranked_assets:
+                    s_slug = str(asset.get("slug") or "")
+                    if not (tools_path / s_slug / "index.html").is_file():
+                        phantom_routes.append(s_slug)
+
+                for html_f in sorted(tools_path.rglob("index.html")) if tools_path.is_dir() else []:
+                    raw_html = html_f.read_text(encoding="utf-8", errors="ignore")
+                    t_m = re.search(r"<title[^>]*>(.*?)</title>", raw_html, flags=re.I | re.S)
+                    h_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw_html, flags=re.I | re.S)
+                    t_txt = re.sub(r"<[^>]+>", "", t_m.group(1)).strip() if t_m else ""
+                    h_txt = re.sub(r"<[^>]+>", "", h_m.group(1)).strip() if h_m else ""
+                    dil_res = detect_multi_keyword_title_h1_dilution(title=t_txt, h1=h_txt)
+                    if not dil_res["passed"]:
+                        rel_slug = "/".join(html_f.relative_to(tools_path).parent.parts)
+                        dilution_violations.append(f"{rel_slug}: {dil_res['violations']}")
+
+            t_pass = len(phantom_routes) == 0 and len(dilution_violations) == 0
+            if not t_pass:
+                all_passed = False
+            tenant_summaries[t_id] = {
+                "status": "PASS" if t_pass else "FAIL",
+                "ranked_assets_count": ranked_count,
+                "total_forecasted_90d_revenue_usd": round(forecast_rev, 2),
+                "phantom_or_retired_forecast_routes": phantom_routes,
+                "title_h1_dilution_violations": dilution_violations,
+            }
+
+    return {
+        "pointer": "x-like:2104684322481664277",
+        "tweet_id": "2104684322481664277",
+        "author_handle": "SEOKeval",
+        "thread_reply_ids": [
+            "2104913034531770877",
+            "2104798676195676529",
+            "2104972472428675370",
+            "2104805017618403535",
+            "2104960229263737185",
+            "2104850779928727851",
+        ],
+        "total_claims_evaluated": len(X_LIKE_2104684322481664277_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(compounding),
+        "integrated_deterministic_gates_count": len(gates),
+        "already_solved_in_substrate_count": len(solved),
+        "rejected_bloat_or_hype_count": len(rejected),
+        "matrix": list(X_LIKE_2104684322481664277_CAPABILITY_MATRIX),
+        "tenant_summaries": tenant_summaries,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }

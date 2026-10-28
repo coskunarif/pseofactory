@@ -3024,6 +3024,8 @@ def compile_search_opportunity_briefs(
             analyze_serp_social_vulnerability,
             expand_commercial_and_question_keywords,
         )
+        from pseofactory.qualification import detect_multi_keyword_title_h1_dilution
+
         est_kd = 70.0 if (best_pos > 15.0 and not ai_res["losing_to_weaker_domains"]) else 42.0
         kw_mix = expand_commercial_and_question_keywords(
             seed_query=primary_query or leaf_slug.replace("-", " "),
@@ -3036,6 +3038,11 @@ def compile_search_opportunity_briefs(
             for idx, dom_name in enumerate(ai_res.get("ai_cited_domains") or [])
         ]
         social_vuln = analyze_serp_social_vulnerability(synthetic_serp, target_query=primary_query)
+        dilution_audit = detect_multi_keyword_title_h1_dilution(
+            title=str(overlay_spec.get("title_rewrite") or ""),
+            h1=str(overlay_spec.get("h1_rewrite") or ""),
+            primary_keyword=primary_query,
+        )
 
         brief = {
             "brief_id": f"brief_{prop}_{overlay_file_stem}",
@@ -3049,6 +3056,17 @@ def compile_search_opportunity_briefs(
             "audience_problem_cluster": audience_problem_cluster,
             "differentiation_angle": differentiation_angle,
             "claims_requiring_verification": claims_requiring_verification,
+            "multi_keyword_dilution_and_split_guard": {
+                "title_h1_dilution_passed": bool(dilution_audit["passed"]),
+                "is_diluted": bool(dilution_audit["is_diluted"]),
+                "violations": list(dilution_audit["violations"]),
+                "cluster_intent_mode": (
+                    "DEDICATED_SINGLE_PRIMARY_INTENT"
+                    if dilution_audit["passed"]
+                    else "MULTI_KEYWORD_DILUTION_DETECTED"
+                ),
+                "grouped_queries_count": len(grouped_qs),
+            },
             "commercial_vs_question_keyword_mix": {
                 "mode": kw_mix["mode"],
                 "commercial_ratio": kw_mix["commercial_ratio"],
@@ -7507,11 +7525,39 @@ def compile_quantitative_revenue_forecast(
                 prop, repo_root=root, dist_dir=d_dir, consolidated_gsc=consolidated_gsc, persist=persist
             )
 
+    _retired_seeded_tool_slug_map: Dict[str, str] = {
+        "prediction-market-tax-calculator": "prediction-market-odds",
+        "prediction-market-odds-arbitrage-calculator": "prediction-market-odds",
+        "section-179-vehicle-equipment-deduction": "section-179-calculator",
+        "equipment-lease-tax-deduction": "equipment-lease-vs-buy-section-179-calculator",
+        "rap-vs-ibr-repayment-calculator": "rap-vs-ibr-calculator",
+        "mfs-vs-mfj-student-loan-tax-calculator": "married-filing-separately-student-loan-calculator",
+        "parent-plus-repayment-cutoff-calculator": "parent-plus-double-consolidation",
+        "cmmc-level-2-audit-cost-calculator": "cmmc-2-0-compliance-cost-calculator",
+    }
+    _non_tool_forecast_slugs: Set[str] = {
+        "tools",
+        "index",
+        "root",
+        "robots.txt",
+        "sitemap.xml",
+        "404",
+        "privacy",
+        "terms",
+        "about",
+        "contact",
+        "methodology",
+    }
+
     insp_by_path: Dict[str, Dict[str, Any]] = dict(
         ((multidim_telemetry or {}).get("url_inspection_summary") or {}).get("inspection_by_path") or {}
     )
     for seeded_rec in SEEDED_LIVE_GSC_URL_INSPECTIONS.get(prop, []):
         s_p = _normalize_gsc_path_key(str(seeded_rec.get("page_url") or ""))
+        if "/tools/" in s_p:
+            raw_seeded_slug = s_p.split("/tools/", 1)[1].strip("/")
+            mapped_seeded_slug = _retired_seeded_tool_slug_map.get(raw_seeded_slug, raw_seeded_slug)
+            s_p = f"/tools/{mapped_seeded_slug}"
         if s_p and s_p not in insp_by_path:
             insp_by_path[s_p] = dict(seeded_rec)
 
@@ -7546,12 +7592,15 @@ def compile_quantitative_revenue_forecast(
 
     # Discover all compiled tool routes in dist/tools/
     asset_slugs: Set[str] = set()
+    compiled_tool_slugs: Set[str] = set()
     tools_dir = d_dir / "tools"
     if tools_dir.is_dir():
         for html_f in sorted(tools_dir.rglob("index.html")):
             rel_parts = html_f.relative_to(tools_dir).parent.parts
             if rel_parts:
-                asset_slugs.add("/".join(rel_parts))
+                c_slug = "/".join(rel_parts)
+                asset_slugs.add(c_slug)
+                compiled_tool_slugs.add(c_slug)
 
     # Group undigested GSC query rows by canonical tool slug
     gsc_rows = list((consolidated_gsc or {}).get("current_rows") or [])
@@ -7561,14 +7610,19 @@ def compile_quantitative_revenue_forecast(
             continue
         raw_page = str(row.get("page") or row.get("target_url") or "")
         res_t = resolve_redirected_gsc_target(target_url=raw_page, property_id=prop, repo_root=root)
+        if res_t.get("is_off_topic_sink"):
+            continue
         canon_p = str(res_t.get("canonical_path") or _normalize_gsc_path_key(raw_page)).strip()
         if "/tools/" in canon_p:
             s_key = canon_p.split("/tools/", 1)[1].strip("/")
-        elif row.get("slug"):
+        elif not raw_page and row.get("slug"):
             s_key = str(row.get("slug")).strip("/")
         else:
             continue
-        if not s_key or s_key in ("tools", "index"):
+        s_key = _retired_seeded_tool_slug_map.get(s_key, s_key)
+        if not s_key or s_key in _non_tool_forecast_slugs or "." in s_key:
+            continue
+        if prop == "gainhelm" and any(term in s_key.lower() for term in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
             continue
         asset_slugs.add(s_key)
         queries_by_slug.setdefault(s_key, []).append(row)
@@ -7576,7 +7630,13 @@ def compile_quantitative_revenue_forecast(
     for seeded_rec in SEEDED_LIVE_GSC_URL_INSPECTIONS.get(prop, []):
         p_u = str(seeded_rec.get("page_url") or "")
         if "/tools/" in p_u:
-            asset_slugs.add(p_u.split("/tools/", 1)[1].strip("/"))
+            s_key = p_u.split("/tools/", 1)[1].strip("/")
+            s_key = _retired_seeded_tool_slug_map.get(s_key, s_key)
+            if not s_key or s_key in _non_tool_forecast_slugs:
+                continue
+            if compiled_tool_slugs and s_key not in compiled_tool_slugs:
+                continue
+            asset_slugs.add(s_key)
 
     ranked_assets: List[Dict[str, Any]] = []
     total_raw_impressions = 0
