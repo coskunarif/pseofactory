@@ -9792,7 +9792,7 @@ def dispatch_to_distribution_lead(
     synthesize_videos: Optional[bool] = None,
     live_video_upload: Optional[bool] = None,
     max_video_renders: int = 2,
-    video_privacy: str = "unlisted",
+    video_privacy: str = "public",
 ) -> Dict[str, Any]:
     """
     Standard framework dispatch to distribution_lead specialist:

@@ -348,3 +348,128 @@ def test_end_to_end_video_synthesis_and_idempotent_youtube_upload(tmp_path: Path
         )
         assert "youtube_video_factory" in dist_res
         assert dist_res["youtube_video_factory"]["per_slug_dispatch_status"][slug] == "ALREADY_UPLOADED_IDEMPOTENT"
+
+
+def test_broadcast_quality_verification_and_keyframe_contact_sheet(tmp_path: Path) -> None:
+    """
+    Verifies that rendered MP4 streams pass strict EBU R128 broadcast loudness (-14.0 +/- 2.2 LUFS),
+    audio-video duration sync (<= 0.08s), dynamic speech range (LRA >= 0.5 LU, never static sine tone),
+    zero black frames, zero silence gaps, and zero-defect 4-segment keyframe contact sheet extraction.
+    Also verifies quota-aware in-place remote YouTube reconciliation (50-unit videos.update instead
+    of 1,650-unit re-upload).
+    """
+    vf_mod = _require_video_factory_module()
+    assert hasattr(vf_mod, "verify_broadcast_stream_quality"), "verify_broadcast_stream_quality missing"
+    assert hasattr(vf_mod, "extract_keyframe_contact_sheet"), "extract_keyframe_contact_sheet missing"
+    assert hasattr(
+        vf_mod, "reconcile_remote_youtube_video_quality_and_visibility"
+    ), "reconcile_remote_youtube_video_quality_and_visibility missing"
+    assert vf_mod.DEFAULT_UPLOAD_PRIVACY == "public"
+
+    slug = "section-1031-calculator"
+    title = "Section 1031 Like-Kind Exchange Tax Deferral Calculator"
+    dist_dir = tmp_path / "dist"
+    tool_dir = dist_dir / "tools" / slug
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    (tool_dir / "index.html").write_text(
+        f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>{title}</title></head>"
+        f"<body><main><h1>{title}</h1><p>Statutory calculation under IRC Section 1031.</p></main></body></html>",
+        encoding="utf-8",
+    )
+
+    asset = vf_mod.synthesize_tool_video_asset(
+        tool={"slug": slug, "title": title},
+        property_id="profithelm",
+        dist_dir=dist_dir,
+        repo_root=tmp_path,
+        force_render=True,
+        use_headless_browser=False,
+        use_neural_tts=False,
+    )
+    mp4_path = Path(asset["video_file"])
+    thumb_path = Path(asset["thumbnail_file"])
+    vtt_path = Path(asset["vtt_file"])
+    assert mp4_path.is_file()
+    assert thumb_path.is_file()
+    assert vtt_path.is_file()
+
+    # 1. Broadcast stream quality telemetry check (ffprobe + ffmpeg ebur128/silencedetect/blackdetect)
+    bq = vf_mod.verify_broadcast_stream_quality(mp4_path)
+    assert bq["passed"] is True, f"Broadcast quality failed: {bq}"
+    assert bq["av_sync_ok"] is True
+    assert bq["av_sync_delta_seconds"] <= 0.08
+    assert bq["loudness_ok"] is True
+    assert -16.2 <= bq["integrated_lufs"] <= -11.8
+    assert bq["dynamic_speech_ok"] is True
+    assert bq["lra_lu"] >= 0.5
+    assert bq["probe"]["sample_rate"] == 48000
+    assert bq["probe"]["channels"] == 2
+    assert bq["black_frames_count"] == 0
+    assert bq["silence_gaps_count"] == 0
+
+    # 2. Keyframe contact sheet extraction across 4 segments
+    kf = vf_mod.extract_keyframe_contact_sheet(
+        mp4_path,
+        tmp_path / "keyframes",
+        label="test_1031",
+    )
+    assert kf["contact_sheet"] is not None
+    assert Path(kf["contact_sheet"]).is_file()
+    assert len(kf["segment_frames"]) == 4
+
+    # 3. Quota-aware in-place remote reconciliation (50 units vs 1,650-unit re-upload)
+    gov = vf_mod.YouTubeQuotaGovernor(
+        ledger_path=tmp_path / "quota_ledger.json",
+        upload_log_path=tmp_path / "upload_log.json",
+    )
+    real_run = subprocess.run
+    info_calls = {"count": 0}
+
+    def _mock_subproc(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and "info" in cmd:
+            info_calls["count"] += 1
+            priv = "unlisted" if info_calls["count"] == 1 else "public"
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = json.dumps(
+                {
+                    "video_id": "w-Kx_w7Yz7o",
+                    "title": "Section 1031 Calculator",
+                    "privacy_status": priv,
+                    "embeddable": True,
+                    "duration": "PT16S",
+                    "definition": "hd",
+                    "has_captions": True,
+                    "quota_units_used": 1,
+                }
+            )
+            m.stderr = ""
+            return m
+        if isinstance(cmd, list) and "update" in cmd:
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = json.dumps({"success": True, "video_id": "w-Kx_w7Yz7o", "privacy_status": "public"})
+            m.stderr = ""
+            return m
+        return real_run(cmd, *args, **kwargs)
+
+    with patch("pseofactory.video_factory.subprocess.run", side_effect=_mock_subproc):
+        rec = vf_mod.reconcile_remote_youtube_video_quality_and_visibility(
+            video_id="w-Kx_w7Yz7o",
+            slug=slug,
+            property_id="profithelm",
+            desired_privacy="public",
+            thumbnail_path=thumb_path,
+            vtt_path=vtt_path,
+            refresh_thumbnail=False,
+            upload_caption=False,
+            quota_governor=gov,
+        )
+    assert rec["quota_units_used"] == 50
+    assert rec["reupload_cost_avoided_units"] == 1600
+    assert rec["before_status"]["privacyStatus"] == "unlisted"
+    assert rec["after_status"]["privacyStatus"] == "public"
+    assert rec["uploadStatus"] == "processed"
+    assert rec["privacyStatus"] == "public"
+    assert rec["public_accessible"] is True
+

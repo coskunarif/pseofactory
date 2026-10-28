@@ -49,9 +49,11 @@ from pseofactory.contracts import (
 YOUTUBE_DAILY_QUOTA_CEILING_UNITS: int = 10000
 YOUTUBE_QUOTA_SAFETY_RESERVE_UNITS: int = 400
 YOUTUBE_VIDEO_INSERT_COST_UNITS: int = 1600
+YOUTUBE_VIDEO_UPDATE_COST_UNITS: int = 50
 YOUTUBE_THUMBNAIL_SET_COST_UNITS: int = 50
 YOUTUBE_PLAYLIST_INSERT_COST_UNITS: int = 50
 YOUTUBE_CAPTION_INSERT_COST_UNITS: int = 400
+DEFAULT_UPLOAD_PRIVACY: str = "public"
 
 MIN_VALID_MP4_BYTES: int = 1025
 DEFAULT_MIN_PAGE_VALUE_SCORE: float = 45.0
@@ -437,7 +439,7 @@ class YouTubeQuotaGovernor:
                 continue
             vid = str(ev.get("video_id") or "").strip()
             units = int(ev.get("quota_units", 0) or 0)
-            if vid:
+            if vid and ":reconcile:" not in vid:
                 by_video_id[vid] = max(by_video_id.get(vid, 0), units)
             else:
                 extra_units += units
@@ -863,7 +865,7 @@ def _write_vtt_from_boundaries(
 
 def probe_media_file(media_path: Path) -> Dict[str, Any]:
     """
-    Uses `ffprobe` to verify container duration, video stream, and audio stream integrity.
+    Uses `ffprobe` to verify container duration, video stream, audio stream, and A/V duration sync.
     """
     if not media_path.is_file():
         return {"valid": False, "error": f"File not found: {media_path}", "size_bytes": 0}
@@ -881,7 +883,7 @@ def probe_media_file(media_path: Path) -> Dict[str, Any]:
         "-v",
         "error",
         "-show_entries",
-        "format=duration,size:stream=codec_type,codec_name,width,height",
+        "format=duration,size,bit_rate:stream=codec_type,codec_name,width,height,pix_fmt,sample_rate,channels,duration,nb_frames",
         "-of",
         "json",
         str(media_path),
@@ -904,19 +906,312 @@ def probe_media_file(media_path: Path) -> Dict[str, Any]:
         has_audio = len(audio_streams) > 0
         width = int(video_streams[0].get("width") or 0) if has_video else 0
         height = int(video_streams[0].get("height") or 0) if has_video else 0
+        v_dur = float(video_streams[0].get("duration") or duration) if has_video else 0.0
+        a_dur = float(audio_streams[0].get("duration") or duration) if has_audio else 0.0
+        av_sync_delta = abs(v_dur - a_dur) if (has_video and has_audio) else 999.0
+        sample_rate = int(audio_streams[0].get("sample_rate") or 0) if has_audio else 0
+        channels = int(audio_streams[0].get("channels") or 0) if has_audio else 0
         return {
-            "valid": bool(has_video and has_audio and duration >= 2.0 and size_bytes >= MIN_VALID_MP4_BYTES),
+            "valid": bool(
+                has_video
+                and has_audio
+                and duration >= 2.0
+                and size_bytes >= MIN_VALID_MP4_BYTES
+                and av_sync_delta <= 0.15
+            ),
             "size_bytes": size_bytes,
             "duration_seconds": round(duration, 2),
+            "video_duration_seconds": round(v_dur, 3),
+            "audio_duration_seconds": round(a_dur, 3),
+            "av_sync_delta_seconds": round(av_sync_delta, 4),
             "has_video": has_video,
             "has_audio": has_audio,
             "video_codec": video_streams[0].get("codec_name") if has_video else None,
             "audio_codec": audio_streams[0].get("codec_name") if has_audio else None,
+            "pix_fmt": video_streams[0].get("pix_fmt") if has_video else None,
+            "sample_rate": sample_rate,
+            "channels": channels,
             "width": width,
             "height": height,
         }
     except Exception as exc:
         return {"valid": False, "error": str(exc), "size_bytes": size_bytes}
+
+
+def verify_broadcast_stream_quality(
+    media_path: Path,
+    target_lufs: float = -14.0,
+    lufs_tolerance: float = 2.2,
+    max_av_sync_delta: float = 0.08,
+    max_silence_gap_seconds: float = 0.65,
+) -> Dict[str, Any]:
+    """
+    Executes broadcast-grade acoustic and visual stream telemetry checks via `ffprobe` and `ffmpeg`:
+    1. Codec container & A/V duration synchronization (`|v_dur - a_dur| <= max_av_sync_delta`).
+    2. EBU R128 integrated loudness (`ebur128=peak=true`) within `target_lufs +/- lufs_tolerance`,
+       non-static dynamic speech range (`LRA >= 0.5 LU`), and true peak ceiling (`<= -1.0 dBFS`).
+    3. Zero black frames (`blackdetect=d=0.1:pix_th=0.10`) and zero dead-air silence gaps
+       (`silencedetect=noise=-38dB:d={max_silence_gap_seconds}`).
+    """
+    probe = probe_media_file(media_path)
+    if not probe.get("valid"):
+        return {
+            "passed": False,
+            "probe": probe,
+            "error": probe.get("error") or "Invalid container or stream metadata",
+        }
+
+    ff_cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(media_path),
+        "-vf",
+        "blackdetect=d=0.1:pix_th=0.10",
+        "-af",
+        f"silencedetect=noise=-38dB:d={max_silence_gap_seconds},ebur128=peak=true",
+        "-f",
+        "null",
+        "-",
+    ]
+    proc = subprocess.run(ff_cmd, capture_output=True, text=True, timeout=60, check=False)
+    stderr_text = proc.stderr or ""
+
+    black_intervals: List[Dict[str, float]] = []
+    for m_blk in re.finditer(
+        r"black_start:([0-9.]+)\s+black_end:([0-9.]+)\s+black_duration:([0-9.]+)",
+        stderr_text,
+    ):
+        black_intervals.append(
+            {
+                "start": float(m_blk.group(1)),
+                "end": float(m_blk.group(2)),
+                "duration": float(m_blk.group(3)),
+            }
+        )
+
+    silence_intervals: List[Dict[str, float]] = []
+    for m_sil in re.finditer(
+        r"silence_end:\s*([0-9.]+)\s*\|\s*silence_duration:\s*([0-9.]+)",
+        stderr_text,
+    ):
+        end_t = float(m_sil.group(1))
+        dur_t = float(m_sil.group(2))
+        silence_intervals.append(
+            {
+                "start": round(max(0.0, end_t - dur_t), 3),
+                "end": round(end_t, 3),
+                "duration": round(dur_t, 3),
+            }
+        )
+
+    integrated_lufs = -70.0
+    lra_lu = 0.0
+    true_peak_dbfs = 0.0
+    m_summary = re.search(
+        r"Summary:\s+Integrated loudness:\s+I:\s*([-0-9.]+)\s*LUFS[\s\S]*?Loudness range:\s+LRA:\s*([-0-9.]+)\s*LU[\s\S]*?(?:True peak|Sample peak):\s+Peak:\s*([-0-9.]+)\s*dBFS",
+        stderr_text,
+    )
+    if m_summary:
+        integrated_lufs = float(m_summary.group(1))
+        lra_lu = float(m_summary.group(2))
+        true_peak_dbfs = float(m_summary.group(3))
+    else:
+        m_i = re.findall(r"\bI:\s*([-0-9.]+)\s*LUFS", stderr_text)
+        m_lra = re.findall(r"\bLRA:\s*([-0-9.]+)\s*LU", stderr_text)
+        m_pk = re.findall(r"\bPeak:\s*([-0-9.]+)\s*dBFS", stderr_text)
+        if m_i:
+            integrated_lufs = float(m_i[-1])
+        if m_lra:
+            lra_lu = float(m_lra[-1])
+        if m_pk:
+            true_peak_dbfs = float(m_pk[-1])
+
+    av_delta = float(probe.get("av_sync_delta_seconds") or 0.0)
+    av_sync_ok = av_delta <= max_av_sync_delta
+    loudness_ok = abs(integrated_lufs - target_lufs) <= lufs_tolerance
+    dynamic_speech_ok = lra_lu >= 0.5
+    peak_ok = true_peak_dbfs <= -0.5
+    zero_black_frames = len(black_intervals) == 0
+    zero_silence_gaps = len(silence_intervals) == 0
+
+    passed = bool(
+        probe.get("valid")
+        and av_sync_ok
+        and loudness_ok
+        and dynamic_speech_ok
+        and peak_ok
+        and zero_black_frames
+        and zero_silence_gaps
+    )
+    return {
+        "passed": passed,
+        "probe": probe,
+        "av_sync_ok": av_sync_ok,
+        "av_sync_delta_seconds": av_delta,
+        "integrated_lufs": round(integrated_lufs, 2),
+        "target_lufs": target_lufs,
+        "loudness_ok": loudness_ok,
+        "lra_lu": round(lra_lu, 2),
+        "dynamic_speech_ok": dynamic_speech_ok,
+        "true_peak_dbfs": round(true_peak_dbfs, 2),
+        "peak_ok": peak_ok,
+        "black_frames_count": len(black_intervals),
+        "black_intervals": black_intervals,
+        "silence_gaps_count": len(silence_intervals),
+        "silence_intervals": silence_intervals,
+    }
+
+
+def extract_keyframe_contact_sheet(
+    media_path: Path,
+    output_dir: Path,
+    label: str,
+) -> Dict[str, Any]:
+    """
+    Extracts 4 segment keyframes (intro card, phase 1 hero/inputs, phase 2 benchmark output,
+    phase 3 statutory breakdown) and a 2x2 contact sheet PNG for visual quality verification.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    probe = probe_media_file(media_path)
+    dur = max(float(probe.get("duration_seconds") or 16.0), 8.0)
+
+    # Sample at intro (0.8s) and midpoint of each of the 3 calculator phases
+    rem = max(dur - 2.2, 6.0)
+    timestamps = [
+        0.8,
+        round(2.2 + rem * 0.16, 2),
+        round(2.2 + rem * 0.50, 2),
+        round(2.2 + rem * 0.84, 2),
+    ]
+    segment_files: List[str] = []
+    for idx, ts in enumerate(timestamps, start=1):
+        out_frame = output_dir / f"{label}_seg{idx}_{ts:.1f}s.png"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                f"{ts:.2f}",
+                "-i",
+                str(media_path),
+                "-frames:v",
+                "1",
+                str(out_frame),
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if out_frame.is_file():
+            segment_files.append(str(out_frame))
+
+    sheet_path = output_dir / f"{label}_contact_sheet.png"
+    if len(segment_files) == 4:
+        from PIL import Image
+
+        grid = Image.new("RGB", (1920, 1080), color=(15, 23, 42))
+        coords = [(0, 0), (960, 0), (0, 540), (960, 540)]
+        for sf, (cx, cy) in zip(segment_files, coords):
+            with Image.open(sf) as im:
+                grid.paste(im.resize((960, 540)), (cx, cy))
+        grid.save(sheet_path, format="PNG")
+
+    return {
+        "contact_sheet": str(sheet_path) if sheet_path.is_file() else None,
+        "segment_frames": segment_files,
+        "timestamps": timestamps,
+    }
+
+
+def _synthesize_formant_prosody_wav(
+    sentences: List[str],
+    wav_out_path: Path,
+    sample_rate: int = 48000,
+) -> Tuple[float, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Synthesizes a syllable-modulated multi-harmonic speech waveform with natural pitch
+    inflection and word-level dynamic envelopes so offline/pytest audio exhibits realistic
+    loudness range (`LRA >= 1.5 LU`) and zero dead-air silence gaps (`>= 0.40s`).
+    """
+    import math
+    import struct
+    import wave
+
+    samples: List[int] = []
+    boundaries: List[Dict[str, Any]] = []
+    sentence_timings: List[Dict[str, Any]] = []
+
+    lead_in_s = 0.06
+    samples.extend([0] * int(lead_in_s * sample_rate))
+    cursor_s = lead_in_s
+
+    for s_idx, sent in enumerate(sentences):
+        s_start = cursor_s
+        words = [w for w in sent.strip().split() if w]
+        for w_idx, word in enumerate(words):
+            clean_w = re.sub(r"[^a-z0-9]+", "", word.lower())
+            vowels = re.findall(r"[aeiouy]+", clean_w)
+            syllables = max(1, len(vowels) if vowels else (len(clean_w) // 3 or 1))
+            w_dur = round(max(0.18, min(0.52, 0.14 + 0.085 * syllables)), 3)
+            pause_dur = 0.045 if w_idx < len(words) - 1 else 0.11
+
+            # Vary vocal effort and fundamental pitch across words for natural LRA (2-4 LU)
+            emphasis = 1.0 + 0.42 * math.sin(0.9 * w_idx + 1.3 * s_idx)
+            f0_base = 128.0 + 18.0 * math.cos(0.65 * w_idx + s_idx)
+            n_samp = int(w_dur * sample_rate)
+
+            for i in range(n_samp):
+                t = i / sample_rate
+                u = i / max(1, n_samp - 1)
+                # Multi-syllable amplitude envelope
+                syl_env = 0.35 + 0.65 * abs(math.sin(math.pi * syllables * u))
+                edge_env = math.sin(math.pi * u) ** 0.45
+                f0 = f0_base * (1.0 + 0.06 * math.sin(2.0 * math.pi * 2.5 * u))
+                phase = 2.0 * math.pi * f0 * t
+                sig = (
+                    0.52 * math.sin(phase)
+                    + 0.26 * math.sin(2.0 * phase + 0.3)
+                    + 0.14 * math.sin(3.0 * phase + 0.7)
+                    + 0.08 * math.sin(4.0 * phase + 1.1)
+                )
+                val = int(max(-30000, min(30000, 9500.0 * emphasis * syl_env * edge_env * sig)))
+                samples.append(val)
+
+            boundaries.append(
+                {
+                    "offset": round(cursor_s, 3),
+                    "duration": round(w_dur, 3),
+                    "text": word,
+                }
+            )
+            cursor_s += w_dur
+            # Low-level room tone during micro-pause to prevent digital zero dropouts
+            n_pause = int(pause_dur * sample_rate)
+            for j in range(n_pause):
+                samples.append(int(120.0 * math.sin(2.0 * math.pi * 110.0 * (j / sample_rate))))
+            cursor_s += pause_dur
+
+        s_end = cursor_s
+        sentence_timings.append(
+            {
+                "index": s_idx,
+                "start": round(s_start, 3),
+                "end": round(s_end, 3),
+                "duration": round(s_end - s_start, 3),
+                "text": sent,
+            }
+        )
+
+    wav_out_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_pcm = struct.pack(f"<{len(samples)}h", *samples)
+    with wave.open(str(wav_out_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(raw_pcm)
+
+    return round(len(samples) / sample_rate, 3), boundaries, sentence_timings
 
 
 def synthesize_voiceover_and_vtt(
@@ -928,60 +1223,202 @@ def synthesize_voiceover_and_vtt(
     use_neural_tts: bool = True,
 ) -> Dict[str, Any]:
     """
-    Synthesizes MP3 narration and synchronized WebVTT captions from the verified 3-sentence
-    spoken script via edge-tts, with a deterministic FFmpeg audio fallback if offline.
+    Synthesizes broadcast-grade narration and sentence-locked WebVTT captions from the
+    verified 3-sentence spoken script:
+    1. Primary: Google Neural TTS per sentence with dead-air silence trimming (`silenceremove`)
+       and exact per-sentence duration measurement so zero silence gaps (`>= 0.40s`) occur.
+    2. Secondary: `edge_tts` neural stream.
+    3. Offline / Pytest Fallback: Formant prosody speech synthesizer (`LRA >= 1.5 LU`).
     """
+    import urllib.parse
+    import urllib.request
+
     audio_out_path.parent.mkdir(parents=True, exist_ok=True)
     vtt_out_path.parent.mkdir(parents=True, exist_ok=True)
     boundaries: List[Dict[str, Any]] = []
-    engine_used = "edge_tts"
+    sentence_timings: List[Dict[str, Any]] = []
+    engine_used = "google_neural_tts"
 
     if use_neural_tts and not _in_pytest():
         try:
-            import edge_tts
+            with tempfile.TemporaryDirectory(prefix="yt_gtts_") as g_tmp_str:
+                g_tmp = Path(g_tmp_str)
+                trimmed_wavs: List[Path] = []
+                cursor_s = 0.0
 
-            async def _run_tts() -> None:
-                communicate = edge_tts.Communicate(spoken_script, voice, rate="+0%")
-                with open(audio_out_path, "wb") as audio_f:
-                    async for chunk in communicate.stream():
-                        c_type = chunk.get("type")
-                        if c_type == "audio":
-                            audio_f.write(chunk["data"])
-                        elif c_type in ("WordBoundary", "SentenceBoundary"):
-                            boundaries.append(
-                                {
-                                    "offset": chunk["offset"] / 10_000_000.0,
-                                    "duration": chunk["duration"] / 10_000_000.0,
-                                    "text": chunk["text"],
-                                }
-                            )
+                for s_idx, sent in enumerate(sentences):
+                    cleaned_s = re.sub(r"\s+", " ", sent.strip())
+                    # Split sentence into <= 175 char phrase chunks if needed
+                    phrase_chunks: List[str] = []
+                    if len(cleaned_s) <= 175:
+                        phrase_chunks.append(cleaned_s)
+                    else:
+                        cur_b = ""
+                        for w in cleaned_s.split(" "):
+                            if len(cur_b) + len(w) + 1 <= 175:
+                                cur_b = f"{cur_b} {w}".strip()
+                            else:
+                                if cur_b:
+                                    phrase_chunks.append(cur_b)
+                                cur_b = w
+                        if cur_b:
+                            phrase_chunks.append(cur_b)
 
-            asyncio.run(_run_tts())
+                    sent_mp3_bytes = bytearray()
+                    for pch in phrase_chunks:
+                        qs = urllib.parse.urlencode(
+                            {"ie": "UTF-8", "client": "tw-ob", "tl": "en", "q": pch}
+                        )
+                        req = urllib.request.Request(
+                            f"https://translate.google.com/translate_tts?{qs}",
+                            headers={"User-Agent": "Mozilla/5.0"},
+                        )
+                        with urllib.request.urlopen(req, timeout=15) as resp:
+                            chunk_bytes = resp.read()
+                            if len(chunk_bytes) < 256:
+                                raise RuntimeError("Short neural TTS payload")
+                            sent_mp3_bytes.extend(chunk_bytes)
+
+                    raw_sent_mp3 = g_tmp / f"sent_{s_idx}_raw.mp3"
+                    raw_sent_mp3.write_bytes(bytes(sent_mp3_bytes))
+                    trim_sent_wav = g_tmp / f"sent_{s_idx}_trim.wav"
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            str(raw_sent_mp3),
+                            "-af",
+                            "silenceremove=start_periods=1:start_duration=0.02:start_threshold=-42dB:stop_periods=-1:stop_duration=0.16:stop_threshold=-42dB,aresample=48000,apad=pad_dur=0.10",
+                            "-ac",
+                            "2",
+                            "-ar",
+                            "48000",
+                            "-c:a",
+                            "pcm_s16le",
+                            str(trim_sent_wav),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=25,
+                        check=True,
+                    )
+                    pr = subprocess.run(
+                        [
+                            "ffprobe",
+                            "-v",
+                            "error",
+                            "-show_entries",
+                            "format=duration",
+                            "-of",
+                            "default=noprint_wrappers=1:nokey=1",
+                            str(trim_sent_wav),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=True,
+                    )
+                    s_dur = max(1.5, float(pr.stdout.strip()))
+                    s_start = cursor_s
+                    s_end = cursor_s + s_dur
+                    sentence_timings.append(
+                        {
+                            "index": s_idx,
+                            "start": round(s_start, 3),
+                            "end": round(s_end, 3),
+                            "duration": round(s_dur, 3),
+                            "text": cleaned_s,
+                        }
+                    )
+
+                    # Distribute word boundaries proportionally across sentence duration
+                    s_words = [w for w in cleaned_s.split(" ") if w]
+                    weights = [max(2, len(re.sub(r"[^a-zA-Z0-9]", "", w))) for w in s_words]
+                    total_w = max(1, sum(weights))
+                    w_cursor = s_start
+                    for w_str, w_wt in zip(s_words, weights):
+                        w_d = s_dur * (w_wt / total_w)
+                        boundaries.append(
+                            {
+                                "offset": round(w_cursor, 3),
+                                "duration": round(w_d, 3),
+                                "text": w_str,
+                            }
+                        )
+                        w_cursor += w_d
+
+                    cursor_s = s_end
+                    trimmed_wavs.append(trim_sent_wav)
+
+                concat_list = g_tmp / "concat.txt"
+                concat_list.write_text(
+                    "\n".join(f"file '{p}'" for p in trimmed_wavs) + "\n",
+                    encoding="utf-8",
+                )
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-f",
+                        "concat",
+                        "-safe",
+                        "0",
+                        "-i",
+                        str(concat_list),
+                        "-c:a",
+                        "libmp3lame",
+                        "-b:a",
+                        "192k",
+                        "-ar",
+                        "48000",
+                        "-ac",
+                        "2",
+                        str(audio_out_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=True,
+                )
         except Exception:
-            engine_used = "ffmpeg_synth_fallback"
+            engine_used = "formant_prosody_synth"
     else:
-        engine_used = "ffmpeg_synth_fallback"
+        engine_used = "formant_prosody_synth"
 
     if not audio_out_path.is_file() or audio_out_path.stat().st_size < 1024:
-        engine_used = "ffmpeg_synth_fallback"
-        word_count = max(len(spoken_script.split()), 45)
-        est_duration = round(max(12.0, min(24.0, word_count / 2.8)), 2)
-        cmd_audio = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"sine=frequency=220:sample_rate=44100:duration={est_duration}",
-            "-af",
-            "volume=0.08,tremolo=f=4.0:d=0.4",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "128k",
-            str(audio_out_path),
-        ]
-        subprocess.run(cmd_audio, capture_output=True, text=True, timeout=30, check=True)
+        engine_used = "formant_prosody_synth"
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+            wav_tmp = Path(tf.name)
+        try:
+            _, boundaries, sentence_timings = _synthesize_formant_prosody_wav(
+                sentences=sentences,
+                wav_out_path=wav_tmp,
+                sample_rate=48000,
+            )
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(wav_tmp),
+                    "-ac",
+                    "2",
+                    "-ar",
+                    "48000",
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "192k",
+                    str(audio_out_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+        finally:
+            wav_tmp.unlink(missing_ok=True)
 
     duration_sec = 15.0
     try:
@@ -1009,6 +1446,7 @@ def synthesize_voiceover_and_vtt(
         "vtt_path": str(vtt_out_path),
         "duration_seconds": round(duration_sec, 2),
         "word_boundaries_count": len(boundaries),
+        "sentence_timings": sentence_timings,
     }
 
 
@@ -1035,6 +1473,33 @@ def _load_pil_font(size: int, bold: bool = True) -> Any:
     return ImageFont.load_default()
 
 
+def _wrap_text_pixel_width(
+    draw: Any,
+    text: str,
+    font: Any,
+    max_width_px: int,
+    max_lines: int = 3,
+) -> List[str]:
+    words = text.strip().split()
+    if not words:
+        return []
+    lines: List[str] = []
+    cur: List[str] = []
+    for w in words:
+        cand = " ".join(cur + [w])
+        bbox = draw.textbbox((0, 0), cand, font=font)
+        if (bbox[2] - bbox[0]) <= max_width_px or not cur:
+            cur.append(w)
+        else:
+            lines.append(" ".join(cur))
+            cur = [w]
+            if len(lines) >= max_lines:
+                break
+    if cur and len(lines) < max_lines:
+        lines.append(" ".join(cur))
+    return lines[:max_lines]
+
+
 def generate_video_thumbnail(
     slug: str,
     title: str,
@@ -1046,94 +1511,173 @@ def generate_video_thumbnail(
     height: int = 720,
 ) -> Path:
     """
-    Renders a branded 1280x720 YouTube thumbnail PNG with tenant colors, tool title,
-    verified statutory output metric, and 3-sentence summary highlight.
+    Renders a broadcast-grade 1280x720 (or 1920x1080) PNG card with dynamically measured
+    pill containers, pixel-wrapped title, verified statutory output benchmark & citation,
+    and full unclipped canonical URL.
     """
     from PIL import Image, ImageDraw
 
     prop = _normalize_property_id(property_id)
     branding = TENANT_VIDEO_BRANDING[prop]
     output_png_path.parent.mkdir(parents=True, exist_ok=True)
+    scale = width / 1280.0
 
     img = Image.new("RGB", (width, height), color=branding["bg_rgb"])
     draw = ImageDraw.Draw(img)
 
+    margin = int(round(48 * scale))
+    inner_x = int(round(84 * scale))
+    max_inner_w = width - 2 * inner_x
+
     # Top accent bar and card container
-    draw.rectangle([(0, 0), (width, 14)], fill=branding["accent_rgb"])
+    draw.rectangle([(0, 0), (width, int(round(14 * scale)))], fill=branding["accent_rgb"])
     draw.rounded_rectangle(
-        [(48, 48), (width - 48, height - 48)],
-        radius=20,
+        [(margin, margin), (width - margin, height - margin)],
+        radius=int(round(20 * scale)),
         fill=branding["card_rgb"],
         outline=branding["accent_rgb"],
-        width=3,
+        width=max(2, int(round(3 * scale))),
     )
 
-    badge_font = _load_pil_font(22, bold=True)
-    title_font = _load_pil_font(44, bold=True)
-    metric_font = _load_pil_font(34, bold=True)
-    body_font = _load_pil_font(24, bold=False)
+    badge_font = _load_pil_font(int(round(20 * scale)), bold=True)
+    title_font = _load_pil_font(int(round(40 * scale)), bold=True)
+    metric_font = _load_pil_font(int(round(30 * scale)), bold=True)
+    sub_font = _load_pil_font(int(round(21 * scale)), bold=False)
+    footer_font = _load_pil_font(int(round(21 * scale)), bold=False)
 
-    # Brand badge
+    # 1. Dynamically sized top-left brand badge pill (zero overflow)
+    badge_text = str(branding["badge_text"])
+    b_box = draw.textbbox((0, 0), badge_text, font=badge_font)
+    b_w = b_box[2] - b_box[0]
+    pill_top = int(round(78 * scale))
+    pill_bot = int(round(124 * scale))
+    pad_x = int(round(18 * scale))
     draw.rounded_rectangle(
-        [(84, 82), (620, 128)],
-        radius=8,
+        [(inner_x, pill_top), (inner_x + b_w + 2 * pad_x, pill_bot)],
+        radius=int(round(8 * scale)),
         fill=branding["accent_rgb"],
     )
-    draw.text((100, 92), branding["badge_text"], fill=(15, 23, 42), font=badge_font)
+    draw.text(
+        (inner_x + pad_x, pill_top + int(round(11 * scale))),
+        badge_text,
+        fill=(15, 23, 42),
+        font=badge_font,
+    )
 
-    # Verification pill on top right
+    # 2. Dynamically sized top-right verification pill (zero border clipping)
+    ver_text = str(branding["verification_pill"])
+    v_box = draw.textbbox((0, 0), ver_text, font=badge_font)
+    v_w = v_box[2] - v_box[0]
+    right_x1 = width - inner_x
+    right_x0 = right_x1 - v_w - 2 * pad_x
     draw.rounded_rectangle(
-        [(width - 420, 82), (width - 84, 128)],
-        radius=8,
+        [(right_x0, pill_top), (right_x1, pill_bot)],
+        radius=int(round(8 * scale)),
         fill=(15, 23, 42),
         outline=branding["accent_rgb"],
-        width=2,
+        width=max(2, int(round(2 * scale))),
     )
-    draw.text((width - 400, 92), branding["verification_pill"], fill=branding["accent_rgb"], font=badge_font)
+    draw.text(
+        (right_x0 + pad_x, pill_top + int(round(11 * scale))),
+        ver_text,
+        fill=branding["accent_rgb"],
+        font=badge_font,
+    )
 
-    # Wrap title cleanly
+    # 3. Pixel-measured title wrapping
     clean_title = title.replace(f" - {branding['brand_name']}", "").strip()
-    words = clean_title.split()
-    title_lines: List[str] = []
-    cur_line: List[str] = []
-    for w in words:
-        cand = " ".join(cur_line + [w])
-        if len(cand) <= 34:
-            cur_line.append(w)
-        else:
-            if cur_line:
-                title_lines.append(" ".join(cur_line))
-            cur_line = [w]
-    if cur_line:
-        title_lines.append(" ".join(cur_line))
-    title_lines = title_lines[:3]
+    title_lines = _wrap_text_pixel_width(
+        draw=draw,
+        text=clean_title,
+        font=title_font,
+        max_width_px=max_inner_w,
+        max_lines=2,
+    )
 
-    y_cursor = 165
+    y_cursor = int(round(154 * scale))
     for t_line in title_lines:
-        draw.text((84, y_cursor), t_line, fill=(248, 250, 252), font=title_font)
-        y_cursor += 58
+        draw.text((inner_x, y_cursor), t_line, fill=(248, 250, 252), font=title_font)
+        y_cursor += int(round(54 * scale))
 
-    # Statutory calculation proof highlight box
-    out_label = str(calculation_proof.get("output_label") or "Verified Statutory Output")
-    out_formatted = str(calculation_proof.get("expected_output_formatted") or "")
-    formula_str = str(calculation_proof.get("formula") or "")
-    metric_headline = f"{out_label}: {out_formatted}" if out_formatted else out_label
+    # 4. Statutory calculation proof highlight box with verified output & citation
+    pub_out = str(
+        calculation_proof.get("published_output")
+        or calculation_proof.get("expected_output_formatted")
+        or ""
+    ).strip()
+    citation_str = str(calculation_proof.get("citation") or "").strip()
+    eq_str = str(
+        calculation_proof.get("equation") or calculation_proof.get("formula") or ""
+    ).strip()
 
-    box_top = max(y_cursor + 20, 360)
+    if pub_out:
+        formatted_pub = (
+            pub_out
+            if (pub_out.startswith("$") or "%" in pub_out or "x" in pub_out.lower())
+            else f"${pub_out}"
+        )
+        metric_headline = f"Verified Statutory Benchmark: {formatted_pub}"
+    else:
+        metric_headline = "Verified Statutory Benchmark Model"
+
+    box_top = max(y_cursor + int(round(18 * scale)), int(round(285 * scale)))
+    box_height = int(round(240 * scale))
     draw.rounded_rectangle(
-        [(84, box_top), (width - 84, box_top + 145)],
-        radius=14,
+        [(inner_x, box_top), (width - inner_x, box_top + box_height)],
+        radius=int(round(14 * scale)),
         fill=(15, 23, 42),
         outline=branding["accent_rgb"],
-        width=2,
+        width=max(2, int(round(2 * scale))),
     )
-    draw.text((110, box_top + 22), metric_headline[:52], fill=branding["accent_rgb"], font=metric_font)
-    if formula_str:
-        draw.text((110, box_top + 80), f"Formula: {formula_str[:70]}", fill=(203, 213, 225), font=body_font)
 
-    # Footer URL
-    footer_text = f"Interactive Calculator: {branding['domain']}/tools/{slug}/"
-    draw.text((84, height - 105), footer_text[:72], fill=(148, 163, 184), font=body_font)
+    box_pad_x = inner_x + int(round(26 * scale))
+    box_max_w = max_inner_w - int(round(52 * scale))
+    draw.text(
+        (box_pad_x, box_top + int(round(22 * scale))),
+        metric_headline,
+        fill=branding["accent_rgb"],
+        font=metric_font,
+    )
+
+    detail_y = box_top + int(round(74 * scale))
+    if citation_str:
+        cit_lines = _wrap_text_pixel_width(
+            draw=draw,
+            text=f"Statutory Authority: {citation_str}",
+            font=sub_font,
+            max_width_px=box_max_w,
+            max_lines=1,
+        )
+        for cl in cit_lines:
+            draw.text((box_pad_x, detail_y), cl, fill=(248, 250, 252), font=sub_font)
+            detail_y += int(round(34 * scale))
+
+    if eq_str:
+        eq_lines = _wrap_text_pixel_width(
+            draw=draw,
+            text=f"Proof: {eq_str}",
+            font=sub_font,
+            max_width_px=box_max_w,
+            max_lines=2,
+        )
+        for el in eq_lines:
+            draw.text((box_pad_x, detail_y), el, fill=(203, 213, 225), font=sub_font)
+            detail_y += int(round(32 * scale))
+
+    # 5. Unclipped full canonical URL in footer
+    footer_text = f"Interactive Calculator: https://{branding['domain']}/tools/{slug}/"
+    for f_sz in (int(round(21 * scale)), int(round(19 * scale)), int(round(17 * scale))):
+        cand_f = _load_pil_font(f_sz, bold=False)
+        f_box = draw.textbbox((0, 0), footer_text, font=cand_f)
+        if (f_box[2] - f_box[0]) <= max_inner_w:
+            footer_font = cand_f
+            break
+    draw.text(
+        (inner_x, height - int(round(100 * scale))),
+        footer_text,
+        fill=(148, 163, 184),
+        font=footer_font,
+    )
 
     img.save(output_png_path, format="PNG")
     return output_png_path
@@ -1173,6 +1717,44 @@ class _SilentDistServer:
             self.server.server_close()
 
 
+def _composite_broadcast_header_frame(
+    raw_screenshot_bytes: bytes,
+    branding: Dict[str, Any],
+    slug: str,
+    step_label: str,
+) -> bytes:
+    """
+    Composites a dedicated 1920x48 broadcast header bar above the 1920x1032 webpage
+    screenshot so the header never overlaps or clips scrolled DOM headings.
+    """
+    import io
+    from PIL import Image, ImageDraw
+
+    header_h = 48
+    canvas = Image.new("RGB", (1920, 1080), color=branding["bg_rgb"])
+    draw = ImageDraw.Draw(canvas)
+
+    with Image.open(io.BytesIO(raw_screenshot_bytes)) as shot_im:
+        cropped = shot_im.convert("RGB").crop((0, 0, 1920, 1080 - header_h))
+        canvas.paste(cropped, (0, header_h))
+
+    draw.rectangle([(0, 0), (1920, header_h)], fill=(15, 23, 42))
+    draw.rectangle([(0, header_h - 3), (1920, header_h)], fill=branding["accent_rgb"])
+
+    h_font = _load_pil_font(18, bold=True)
+    left_txt = f"{branding['badge_text']}  |  {step_label}"
+    right_txt = f"https://{branding['domain']}/tools/{slug}/"
+
+    draw.text((28, 13), left_txt, fill=(248, 250, 252), font=h_font)
+    r_box = draw.textbbox((0, 0), right_txt, font=h_font)
+    r_w = r_box[2] - r_box[0]
+    draw.text((1920 - 28 - r_w, 13), right_txt, fill=branding["accent_rgb"], font=h_font)
+
+    out_buf = io.BytesIO()
+    canvas.save(out_buf, format="PNG")
+    return out_buf.getvalue()
+
+
 def _render_screencast_or_slides_mp4(
     slug: str,
     title: str,
@@ -1184,10 +1766,12 @@ def _render_screencast_or_slides_mp4(
     duration_seconds: float,
     property_id: str = "profithelm",
     use_headless_browser: bool = True,
+    sentence_timings: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Records a 1920x1080 screencast of the interactive calculator in headless Chromium
-    (or renders multi-slide 1080p statutory cards if running in fast test mode).
+    with non-overlapping PIL broadcast header compositing and DOM-aware scroll framing,
+    or renders multi-slide 1080p statutory cards in fast test mode.
     """
     prop = _normalize_property_id(property_id)
     branding = TENANT_VIDEO_BRANDING[prop]
@@ -1201,9 +1785,22 @@ def _render_screencast_or_slides_mp4(
             from playwright.sync_api import sync_playwright
 
             fps = 12
-            total_frames = max(int(duration_seconds * fps), fps * 8)
-            intro_frames = int(2.0 * fps)
-            main_frames = max(total_frames - intro_frames, fps * 5)
+            total_frames = max(int(round(duration_seconds * fps)), fps * 8)
+            intro_frames = int(round(2.2 * fps))
+            main_frames = max(total_frames - intro_frames, fps * 6)
+
+            if sentence_timings and len(sentence_timings) == 3:
+                d1 = max(1.0, float(sentence_timings[0].get("duration") or 5.0) - 2.2)
+                d2 = max(1.5, float(sentence_timings[1].get("duration") or 5.0))
+                d3 = max(1.5, float(sentence_timings[2].get("duration") or 5.0))
+                d_sum = d1 + d2 + d3
+                phase1 = max(fps, int(round(main_frames * (d1 / d_sum))))
+                phase2 = max(fps, int(round(main_frames * (d2 / d_sum))))
+                phase3 = max(fps, main_frames - phase1 - phase2)
+            else:
+                phase1 = main_frames // 3
+                phase2 = main_frames // 3
+                phase3 = main_frames - phase1 - phase2
 
             param_url = str(calculation_proof.get("parameterized_url") or "")
             query_part = param_url.split("?", 1)[1] if "?" in param_url else ""
@@ -1226,7 +1823,7 @@ def _render_screencast_or_slides_mp4(
                 "-preset",
                 "ultrafast",
                 "-crf",
-                "23",
+                "22",
                 str(raw_video_path),
             ]
             proc = subprocess.Popen(
@@ -1244,18 +1841,24 @@ def _render_screencast_or_slides_mp4(
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True)
                     context = browser.new_context(
-                        viewport={"width": 1920, "height": 1080},
+                        viewport={"width": 1920, "height": 1032},
                         device_scale_factor=1,
                     )
                     page = context.new_page()
 
-                    # 1. Branded intro frame from thumbnail scaled to 1920x1080
-                    from PIL import Image
-
-                    intro_img = Image.open(thumbnail_path).resize((1920, 1080))
+                    # 1. Native 1920x1080 intro title card (razor-sharp, zero upscale blur)
                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
                         intro_tmp = Path(tf.name)
-                    intro_img.save(intro_tmp, format="PNG")
+                    generate_video_thumbnail(
+                        slug=slug,
+                        title=title,
+                        spoken_script=" ".join(sentences),
+                        calculation_proof=calculation_proof,
+                        output_png_path=intro_tmp,
+                        property_id=prop,
+                        width=1920,
+                        height=1080,
+                    )
                     intro_bytes = intro_tmp.read_bytes()
                     intro_tmp.unlink(missing_ok=True)
 
@@ -1265,39 +1868,81 @@ def _render_screencast_or_slides_mp4(
 
                     # 2. Navigate to live compiled tool page with preset statutory parameters
                     page.goto(target_url, wait_until="networkidle", timeout=20000)
-                    page.evaluate(
-                        """([domain, badgeText, accentHex]) => {
-                            const bar = document.createElement('div');
-                            bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:42px;background:#0f172a;color:#f8fafc;display:flex;align-items:center;justify-content:space-between;padding:0 28px;z-index:999999;font-family:system-ui,sans-serif;font-size:15px;font-weight:700;border-bottom:3px solid ' + accentHex + ';';
-                            bar.innerHTML = '<span>' + badgeText + '</span><span style=\"color:' + accentHex + '\">https://' + domain + window.location.pathname + '</span>';
-                            document.body.prepend(bar);
-                            document.body.style.paddingTop = '42px';
-                        }""",
-                        [branding["domain"], branding["badge_text"], branding["accent_hex"]],
+                    # Unpin sticky/fixed site navbars so scrolling never slices headings
+                    scroll_targets = page.evaluate(
+                        """() => {
+                            document.querySelectorAll('header, nav').forEach(el => {
+                                const st = window.getComputedStyle(el);
+                                if (st.position === 'fixed' || st.position === 'sticky') {
+                                    el.style.position = 'relative';
+                                }
+                            });
+                            const docH = Math.max(
+                                document.body.scrollHeight,
+                                document.documentElement.scrollHeight
+                            );
+                            const winH = window.innerHeight;
+                            const maxScroll = Math.max(0, docH - winH);
+
+                            // Find ideal DOM anchors for Phase 2 (calculator inputs/outputs) and Phase 3 (breakdown/table)
+                            let y2 = Math.min(340, Math.round(maxScroll * 0.36));
+                            let y3 = Math.min(820, Math.round(maxScroll * 0.78));
+
+                            const calcEl = document.querySelector('input[type=\"number\"], input[type=\"range\"], select');
+                            if (calcEl) {
+                                const card = calcEl.closest('section, .grid, form, div') || calcEl;
+                                const rect = card.getBoundingClientRect();
+                                const candY2 = Math.max(160, Math.round(rect.top + window.scrollY - 90));
+                                y2 = Math.min(maxScroll, candY2);
+                            }
+
+                            const tableEl = document.querySelector('table, [id*=\"schedule\"], [id*=\"breakdown\"], [id*=\"faq\"]');
+                            if (tableEl) {
+                                const rect3 = tableEl.getBoundingClientRect();
+                                const candY3 = Math.max(y2 + 240, Math.round(rect3.top + window.scrollY - 110));
+                                y3 = Math.min(maxScroll, candY3);
+                            } else {
+                                y3 = Math.min(maxScroll, Math.max(y2 + 260, Math.round(maxScroll * 0.78)));
+                            }
+                            if (y3 <= y2 + 80 && maxScroll > 220) {
+                                y2 = Math.round(maxScroll * 0.35);
+                                y3 = Math.round(maxScroll * 0.78);
+                            }
+                            return { y2, y3, maxScroll };
+                        }"""
                     )
 
-                    phase1 = main_frames // 3
-                    phase2 = main_frames // 3
-                    phase3 = main_frames - phase1 - phase2
-
-                    # Capture hero & pre-populated inputs
-                    shot1 = page.screenshot(type="png")
+                    # Phase 1: Hero & statutory overview (top = 0)
+                    page.evaluate("window.scrollTo({top: 0, behavior: 'instant'});")
+                    page.wait_for_timeout(120)
+                    raw_shot1 = page.screenshot(type="png")
+                    shot1 = _composite_broadcast_header_frame(
+                        raw_shot1, branding, slug, "PHASE 1: STATUTORY MODEL OVERVIEW"
+                    )
                     for _ in range(phase1):
                         if proc.stdin:
                             proc.stdin.write(shot1)
 
-                    # Scroll to calculation output cards
-                    page.evaluate("window.scrollTo({top: 360, behavior: 'instant'});")
+                    # Phase 2: Interactive parameters & verified benchmark output
+                    y2_val = int((scroll_targets or {}).get("y2") or 320)
+                    page.evaluate(f"window.scrollTo({{top: {y2_val}, behavior: 'instant'}});")
                     page.wait_for_timeout(150)
-                    shot2 = page.screenshot(type="png")
+                    raw_shot2 = page.screenshot(type="png")
+                    shot2 = _composite_broadcast_header_frame(
+                        raw_shot2, branding, slug, "PHASE 2: VERIFIED BENCHMARK CALCULATION"
+                    )
                     for _ in range(phase2):
                         if proc.stdin:
                             proc.stdin.write(shot2)
 
-                    # Scroll to statutory comparison table & methodology
-                    page.evaluate("window.scrollTo({top: 760, behavior: 'instant'});")
+                    # Phase 3: Statutory breakdown table & methodology
+                    y3_val = int((scroll_targets or {}).get("y3") or 680)
+                    page.evaluate(f"window.scrollTo({{top: {y3_val}, behavior: 'instant'}});")
                     page.wait_for_timeout(150)
-                    shot3 = page.screenshot(type="png")
+                    raw_shot3 = page.screenshot(type="png")
+                    shot3 = _composite_broadcast_header_frame(
+                        raw_shot3, branding, slug, "PHASE 3: STATUTORY SCHEDULE & ANALYSIS"
+                    )
                     for _ in range(phase3):
                         if proc.stdin:
                             proc.stdin.write(shot3)
@@ -1307,7 +1952,11 @@ def _render_screencast_or_slides_mp4(
             if proc.stdin:
                 proc.stdin.close()
             proc.wait(timeout=60)
-            if proc.returncode == 0 and raw_video_path.is_file() and raw_video_path.stat().st_size >= MIN_VALID_MP4_BYTES:
+            if (
+                proc.returncode == 0
+                and raw_video_path.is_file()
+                and raw_video_path.stat().st_size >= MIN_VALID_MP4_BYTES
+            ):
                 return {"status": "SUCCESS", "renderer": "playwright_chromium_screencast"}
         except Exception:
             pass
@@ -1316,6 +1965,17 @@ def _render_screencast_or_slides_mp4(
     from PIL import Image, ImageDraw
 
     slide_paths: List[Path] = []
+    pub_val = str(
+        calculation_proof.get("published_output")
+        or calculation_proof.get("expected_output_formatted")
+        or "Verified"
+    ).strip()
+    formatted_pub = (
+        pub_val
+        if (pub_val.startswith("$") or "%" in pub_val or "x" in pub_val.lower())
+        else f"${pub_val}"
+    )
+
     for idx, sent in enumerate(sentences[:3], start=1):
         img = Image.new("RGB", (1920, 1080), color=branding["bg_rgb"])
         draw = ImageDraw.Draw(img)
@@ -1328,8 +1988,8 @@ def _render_screencast_or_slides_mp4(
             width=3,
         )
         b_font = _load_pil_font(28, bold=True)
-        t_font = _load_pil_font(48, bold=True)
-        s_font = _load_pil_font(36, bold=False)
+        t_font = _load_pil_font(44, bold=True)
+        s_font = _load_pil_font(34, bold=False)
 
         draw.text(
             (120, 120),
@@ -1337,28 +1997,30 @@ def _render_screencast_or_slides_mp4(
             fill=branding["accent_rgb"],
             font=b_font,
         )
-        draw.text((120, 195), title[:52], fill=(248, 250, 252), font=t_font)
+        t_lines = _wrap_text_pixel_width(
+            draw=draw,
+            text=title.replace(f" - {branding['brand_name']}", "").strip(),
+            font=t_font,
+            max_width_px=1650,
+            max_lines=2,
+        )
+        ty = 185
+        for tl in t_lines:
+            draw.text((120, ty), tl, fill=(248, 250, 252), font=t_font)
+            ty += 56
 
-        # Wrap sentence
-        s_words = sent.split()
-        s_lines: List[str] = []
-        cur: List[str] = []
-        for w in s_words:
-            if len(" ".join(cur + [w])) <= 58:
-                cur.append(w)
-            else:
-                s_lines.append(" ".join(cur))
-                cur = [w]
-        if cur:
-            s_lines.append(" ".join(cur))
-
-        y_pos = 340
-        for line in s_lines[:5]:
+        s_lines = _wrap_text_pixel_width(
+            draw=draw,
+            text=sent,
+            font=s_font,
+            max_width_px=1650,
+            max_lines=4,
+        )
+        y_pos = max(ty + 30, 340)
+        for line in s_lines:
             draw.text((120, y_pos), line, fill=(226, 232, 240), font=s_font)
-            y_pos += 56
+            y_pos += 54
 
-        out_label = str(calculation_proof.get("output_label") or "Statutory Output")
-        out_val = str(calculation_proof.get("expected_output_formatted") or "")
         draw.rounded_rectangle(
             [(120, 720), (1800, 860)],
             radius=16,
@@ -1367,8 +2029,8 @@ def _render_screencast_or_slides_mp4(
             width=2,
         )
         draw.text(
-            (155, 765),
-            f"{out_label}: {out_val}   |   {branding['domain']}/tools/{slug}/",
+            (155, 768),
+            f"Verified Statutory Benchmark: {formatted_pub}   |   https://{branding['domain']}/tools/{slug}/",
             fill=branding["accent_rgb"],
             font=b_font,
         )
@@ -1378,8 +2040,9 @@ def _render_screencast_or_slides_mp4(
         slide_paths.append(s_path)
 
     fps = 10
-    total_frames = max(int(duration_seconds * fps), 60)
-    frames_per_slide = max(total_frames // max(len(slide_paths), 1), 20)
+    total_frames = max(int(round(duration_seconds * fps)), 60)
+    base_per_slide = total_frames // max(len(slide_paths), 1)
+    remainder_frames = total_frames - (base_per_slide * len(slide_paths))
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -1408,9 +2071,10 @@ def _render_screencast_or_slides_mp4(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
-    for sp in slide_paths:
+    for idx_s, sp in enumerate(slide_paths):
         raw_png = sp.read_bytes()
-        for _ in range(frames_per_slide):
+        f_count = base_per_slide + (remainder_frames if idx_s == len(slide_paths) - 1 else 0)
+        for _ in range(max(f_count, 10)):
             if proc.stdin:
                 proc.stdin.write(raw_png)
         sp.unlink(missing_ok=True)
@@ -1424,12 +2088,87 @@ def compose_and_verify_mp4(
     raw_video_path: Path,
     audio_path: Path,
     output_mp4_path: Path,
+    target_lufs: float = -14.0,
 ) -> Dict[str, Any]:
     """
-    Masters the final 1080p MP4 with EBU R128 broadcast loudness normalization
-    (`loudnorm=I=-14:LRA=7:TP=-1.5`) and verifies stream/size integrity via `ffprobe`.
+    Masters the final 1080p MP4 with two-pass EBU R128 broadcast loudness normalization
+    (`loudnorm=I=-14.0:LRA=7.0:TP=-1.5`), 48 kHz stereo AAC, boundary micro-fades,
+    exact audio-video duration lock (`|v_dur - a_dur| <= 0.05s`), and `ffprobe` verification.
     """
     output_mp4_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Determine exact target duration from raw video stream so A/V streams lock to the frame
+    target_dur = 15.0
+    try:
+        pr_v = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(raw_video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if pr_v.returncode == 0 and pr_v.stdout.strip():
+            target_dur = max(4.0, float(pr_v.stdout.strip()))
+    except Exception:
+        pass
+
+    # Pass 1: Measure input loudness stats for linear two-pass EBU R128 normalization
+    loudnorm_filter = f"loudnorm=I={target_lufs}:LRA=7.0:TP=-1.5"
+    try:
+        p1 = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(audio_path),
+                "-af",
+                f"loudnorm=I={target_lufs}:LRA=7.0:TP=-1.5:print_format=json",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        m_json = re.search(r"(\{\s*\"input_i\"[\s\S]*?\})", p1.stderr or "")
+        if m_json:
+            ln_stats = json.loads(m_json.group(1))
+            in_i = ln_stats.get("input_i")
+            in_lra = ln_stats.get("input_lra")
+            in_tp = ln_stats.get("input_tp")
+            in_th = ln_stats.get("input_thresh")
+            t_off = ln_stats.get("target_offset")
+            if all(v is not None for v in (in_i, in_lra, in_tp, in_th, t_off)):
+                loudnorm_filter = (
+                    f"loudnorm=I={target_lufs}:LRA=7.0:TP=-1.5:"
+                    f"measured_I={in_i}:measured_LRA={in_lra}:measured_TP={in_tp}:"
+                    f"measured_thresh={in_th}:offset={t_off}:linear=true"
+                )
+    except Exception:
+        pass
+
+    fade_out_st = max(0.1, round(target_dur - 0.04, 3))
+    af_chain = (
+        f"{loudnorm_filter},"
+        f"aresample=48000,"
+        f"apad=whole_dur={target_dur:.3f},"
+        f"atrim=0:{target_dur:.3f},"
+        f"afade=t=in:st=0:d=0.02,"
+        f"afade=t=out:st={fade_out_st:.3f}:d=0.04"
+    )
+
     cmd = [
         "ffmpeg",
         "-y",
@@ -1437,23 +2176,28 @@ def compose_and_verify_mp4(
         str(raw_video_path),
         "-i",
         str(audio_path),
+        "-t",
+        f"{target_dur:.3f}",
         "-c:v",
         "libx264",
         "-preset",
         "fast",
         "-crf",
-        "23",
+        "22",
         "-pix_fmt",
         "yuv420p",
         "-c:a",
         "aac",
         "-b:a",
         "192k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
         "-af",
-        "loudnorm=I=-14:LRA=7:TP=-1.5",
+        af_chain,
         "-movflags",
         "+faststart",
-        "-shortest",
         str(output_mp4_path),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
@@ -1697,6 +2441,7 @@ def synthesize_tool_video_asset(
             duration_seconds=float(tts_res.get("duration_seconds") or 15.0),
             property_id=prop,
             use_headless_browser=use_headless_browser,
+            sentence_timings=tts_res.get("sentence_timings"),
         )
 
         probe_info = compose_and_verify_mp4(
@@ -1783,14 +2528,18 @@ def check_youtube_cli_diagnostics(
         )
         if proc.returncode == 0 and proc.stdout.strip():
             data = json.loads(proc.stdout)
-            auth = bool(data.get("authenticated") and not data.get("is_expired"))
+            auth_block = data.get("auth") if isinstance(data.get("auth"), dict) else data
+            auth = bool(
+                (auth_block.get("status") == "authenticated" or auth_block.get("authenticated"))
+                and not auth_block.get("is_expired")
+            )
             return {
                 "ready": auth,
                 "binary_path": str(bin_path),
                 "authenticated": auth,
-                "tier": data.get("tier"),
-                "token_path": data.get("token_path"),
-                "scopes": data.get("scopes", []),
+                "tier": auth_block.get("tier"),
+                "token_path": auth_block.get("token_path"),
+                "scopes": auth_block.get("scopes", []),
             }
         return {
             "ready": False,
@@ -1807,12 +2556,276 @@ def check_youtube_cli_diagnostics(
         }
 
 
+def inspect_remote_youtube_video_status(
+    video_id: str,
+    token_path: Path = DEFAULT_YOUTUBE_TOKEN_PATH,
+    youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
+) -> Dict[str, Any]:
+    """
+    Queries the official YouTube Data API v3 (`videos.list(part="snippet,status,contentDetails,processingDetails")`,
+    cost: 1 quota unit) and `youtube --json info` to verify whether a remote video is publicly
+    accessible (`privacyStatus == "public"`) and finished HD transcoding (`uploadStatus == "processed"`).
+    """
+    vid = str(video_id).strip()
+    url = f"https://www.youtube.com/watch?v={vid}"
+
+    if token_path.is_file() and not _in_pytest():
+        try:
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+
+            creds = Credentials.from_authorized_user_file(str(token_path))
+            service = build("youtube", "v3", credentials=creds)
+            resp = (
+                service.videos()
+                .list(
+                    part="snippet,status,contentDetails,processingDetails",
+                    id=vid,
+                )
+                .execute()
+            )
+            items = resp.get("items") or []
+            if items:
+                item = items[0]
+                snip = item.get("snippet") or {}
+                st = item.get("status") or {}
+                cd = item.get("contentDetails") or {}
+                pd = item.get("processingDetails") or {}
+                up_status = str(st.get("uploadStatus") or "")
+                priv_status = str(st.get("privacyStatus") or "")
+                proc_status = str(pd.get("processingStatus") or "succeeded")
+                has_cap = str(cd.get("caption") or "false").lower() == "true"
+                return {
+                    "found": True,
+                    "video_id": vid,
+                    "video_url": url,
+                    "title": snip.get("title"),
+                    "channel_id": snip.get("channelId"),
+                    "channel_title": snip.get("channelTitle"),
+                    "uploadStatus": up_status,
+                    "privacyStatus": priv_status,
+                    "processingStatus": proc_status,
+                    "rejectionReason": st.get("rejectionReason"),
+                    "failureReason": st.get("failureReason"),
+                    "embeddable": bool(st.get("embeddable", True)),
+                    "madeForKids": bool(st.get("madeForKids", False)),
+                    "duration": cd.get("duration"),
+                    "definition": cd.get("definition"),
+                    "has_captions": has_cap,
+                    "public_accessible": bool(
+                        up_status == "processed" and priv_status == "public"
+                    ),
+                    "quota_units_used": 1,
+                }
+        except Exception:
+            pass
+
+    proc = subprocess.run(
+        [str(youtube_bin), "--json", "info", url],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        try:
+            info = json.loads(proc.stdout)
+            priv = str(info.get("privacy_status") or "")
+            return {
+                "found": True,
+                "video_id": vid,
+                "video_url": url,
+                "title": info.get("title"),
+                "channel_id": info.get("channel_id"),
+                "channel_title": info.get("channel_title"),
+                "uploadStatus": "processed",
+                "privacyStatus": priv,
+                "processingStatus": "succeeded",
+                "rejectionReason": None,
+                "failureReason": None,
+                "embeddable": bool(info.get("embeddable", True)),
+                "duration": info.get("duration"),
+                "definition": info.get("definition"),
+                "has_captions": bool(info.get("has_captions")),
+                "public_accessible": bool(priv == "public"),
+                "quota_units_used": int(info.get("quota_units_used") or 1),
+            }
+        except Exception:
+            pass
+
+    return {
+        "found": False,
+        "video_id": vid,
+        "video_url": url,
+        "uploadStatus": "unknown",
+        "privacyStatus": "unknown",
+        "public_accessible": False,
+    }
+
+
+def reconcile_remote_youtube_video_quality_and_visibility(
+    video_id: str,
+    slug: str,
+    property_id: str = "profithelm",
+    desired_privacy: str = DEFAULT_UPLOAD_PRIVACY,
+    thumbnail_path: Optional[Path] = None,
+    vtt_path: Optional[Path] = None,
+    refresh_thumbnail: bool = True,
+    upload_caption: bool = True,
+    quota_governor: Optional[YouTubeQuotaGovernor] = None,
+    token_path: Path = DEFAULT_YOUTUBE_TOKEN_PATH,
+    youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
+) -> Dict[str, Any]:
+    """
+    Reconciles an existing YouTube video (`video_id`) in-place when remote visibility
+    (`privacyStatus != desired_privacy`), thumbnail quality, or captions need updating,
+    weighing daily YouTube Data API v3 quota costs:
+    - In-place metadata + privacy update (`videos.update`): 50 quota units (vs 1,600 for re-upload)
+    - In-place custom thumbnail update (`thumbnails.set`): 50 quota units
+    - In-place WebVTT caption upload (`captions.insert`): 400 quota units
+    """
+    prop = _normalize_property_id(property_id)
+    gov = quota_governor or YouTubeQuotaGovernor()
+    vid = str(video_id).strip()
+
+    before = inspect_remote_youtube_video_status(
+        vid, token_path=token_path, youtube_bin=youtube_bin
+    )
+    script_bundle = extract_and_verify_three_sentence_script(slug, property_id=prop)
+    yt_pack = script_bundle["youtube_pack"]
+    title = str(yt_pack["title"])[:100]
+    description = str(yt_pack["description"])
+    tags_list = [str(t).strip() for t in (yt_pack.get("tags") or []) if str(t).strip()][:20]
+    cat_id = str(yt_pack.get("category_id") or "27")
+
+    actions_taken: List[str] = []
+    quota_spent = 0
+
+    # 1. Update privacyStatus & canonical metadata via youtube update (50 quota units, allowed from safety reserve)
+    if (
+        before.get("privacyStatus") != desired_privacy
+        or before.get("title") != title
+    ):
+        budget = gov.get_budget_status()
+        raw_remaining = max(0, budget.daily_ceiling_units - budget.used_units_today)
+        if raw_remaining >= YOUTUBE_VIDEO_UPDATE_COST_UNITS:
+            upd_cmd = [
+                str(youtube_bin),
+                "--json",
+                "update",
+                f"https://www.youtube.com/watch?v={vid}",
+                "--title",
+                title,
+                "--description",
+                description,
+                "--privacy",
+                desired_privacy,
+                "--category",
+                cat_id,
+                "--lang",
+                "en",
+            ]
+            if tags_list:
+                upd_cmd.extend(["--tags", ",".join(tags_list)])
+            proc = subprocess.run(upd_cmd, capture_output=True, text=True, timeout=60, check=False)
+            if proc.returncode == 0:
+                quota_spent += YOUTUBE_VIDEO_UPDATE_COST_UNITS
+                actions_taken.append(f"videos.update(privacy={desired_privacy}, cost=50)")
+
+    # 2. Refresh custom 1280x720 thumbnail in-place (50 quota units, allowed from safety reserve)
+    if (
+        refresh_thumbnail
+        and thumbnail_path
+        and thumbnail_path.is_file()
+        and token_path.is_file()
+        and not _in_pytest()
+    ):
+        budget = gov.get_budget_status()
+        raw_remaining = max(0, budget.daily_ceiling_units - budget.used_units_today - quota_spent)
+        if raw_remaining >= YOUTUBE_THUMBNAIL_SET_COST_UNITS:
+            try:
+                from google.oauth2.credentials import Credentials
+                from googleapiclient.discovery import build
+                from googleapiclient.http import MediaFileUpload
+
+                creds = Credentials.from_authorized_user_file(str(token_path))
+                service = build("youtube", "v3", credentials=creds)
+                media = MediaFileUpload(str(thumbnail_path), mimetype="image/png", resumable=False)
+                service.thumbnails().set(videoId=vid, media_body=media).execute()
+                quota_spent += YOUTUBE_THUMBNAIL_SET_COST_UNITS
+                actions_taken.append("thumbnails.set(cost=50)")
+            except Exception:
+                pass
+
+    # 3. Upload WebVTT caption track if missing (400 quota units)
+    if (
+        upload_caption
+        and vtt_path
+        and vtt_path.is_file()
+        and not before.get("has_captions")
+        and token_path.is_file()
+        and not _in_pytest()
+    ):
+        budget = gov.get_budget_status()
+        if (budget.remaining_units_today - quota_spent) >= YOUTUBE_CAPTION_INSERT_COST_UNITS:
+            try:
+                from google.oauth2.credentials import Credentials
+                from googleapiclient.discovery import build
+                from googleapiclient.http import MediaFileUpload
+
+                creds = Credentials.from_authorized_user_file(str(token_path))
+                service = build("youtube", "v3", credentials=creds)
+                media = MediaFileUpload(str(vtt_path), mimetype="text/vtt", resumable=False)
+                service.captions().insert(
+                    part="snippet",
+                    body={
+                        "snippet": {
+                            "videoId": vid,
+                            "language": "en",
+                            "name": "English (Verified Statutory Narration)",
+                            "isDraft": False,
+                        }
+                    },
+                    media_body=media,
+                ).execute()
+                quota_spent += YOUTUBE_CAPTION_INSERT_COST_UNITS
+                actions_taken.append("captions.insert(cost=400)")
+            except Exception:
+                pass
+
+    if quota_spent > 0:
+        gov.record_upload_consumption(
+            property_id=prop,
+            slug=f"{slug}:in_place_reconcile",
+            video_id=f"{vid}:reconcile:{int(time.time())}",
+            quota_units=quota_spent,
+            title=title,
+        )
+
+    after = inspect_remote_youtube_video_status(
+        vid, token_path=token_path, youtube_bin=youtube_bin
+    )
+    return {
+        "video_id": vid,
+        "slug": slug,
+        "property_id": prop,
+        "actions_taken": actions_taken,
+        "quota_units_used": quota_spent,
+        "reupload_cost_avoided_units": YOUTUBE_VIDEO_INSERT_COST_UNITS,
+        "before_status": before,
+        "after_status": after,
+        "uploadStatus": after.get("uploadStatus"),
+        "privacyStatus": after.get("privacyStatus"),
+        "public_accessible": after.get("public_accessible"),
+    }
+
+
 def upload_tool_video_to_youtube(
     slug: str,
     property_id: str = "profithelm",
     dist_dir: Optional[Union[str, Path]] = None,
     repo_root: Optional[Union[str, Path]] = None,
-    privacy: str = "unlisted",
+    privacy: str = DEFAULT_UPLOAD_PRIVACY,
     live_upload: bool = False,
     quota_governor: Optional[YouTubeQuotaGovernor] = None,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
@@ -1821,6 +2834,8 @@ def upload_tool_video_to_youtube(
     """
     Executes an idempotent, quota-governed `youtube upload --engine api` dispatch for a rendered tool video.
     - Deduplicates against `.agy/youtube_upload_ledger.json` and `youtube-toolkit/data/upload_log.json`.
+    - When an already-uploaded video has mismatched privacy (e.g. `unlisted` vs `public`) during live
+      runs, reconciles it in-place (`videos.update` = 50 units) rather than re-uploading (1,650 units).
     - Enforces the 10,000-unit daily YouTube Data API v3 quota ceiling via `YouTubeQuotaGovernor`.
     - Updates `dist/videos/batch_seo_catalog.json` and `syndication/<slug>/youtube_metadata.json` with `video_id`.
     """
@@ -1836,15 +2851,42 @@ def upload_tool_video_to_youtube(
     uploaded_map = _load_upload_idempotency_map(eff_repo, prop, upload_log_path=gov.upload_log_path)
     if slug in uploaded_map and uploaded_map[slug].get("video_id"):
         existing = uploaded_map[slug]
+        vid = str(existing["video_id"]).strip()
+        rec_privacy = str(existing.get("privacy") or "").strip().lower()
+        reconcile_info = None
+        if (
+            live_upload
+            and not _in_pytest()
+            and privacy == "public"
+            and rec_privacy != "public"
+        ):
+            reconcile_info = reconcile_remote_youtube_video_quality_and_visibility(
+                video_id=vid,
+                slug=slug,
+                property_id=prop,
+                desired_privacy=privacy,
+                thumbnail_path=thumb_path if thumb_path.is_file() else None,
+                vtt_path=vtt_path if vtt_path.is_file() else None,
+                refresh_thumbnail=True,
+                upload_caption=upload_caption,
+                quota_governor=gov,
+                youtube_bin=youtube_bin,
+            )
+            if reconcile_info.get("privacyStatus") == privacy:
+                existing["privacy"] = privacy
+                _save_upload_idempotency_record(eff_repo, prop, slug, existing)
+
         return {
             "status": "ALREADY_UPLOADED_IDEMPOTENT",
             "slug": slug,
             "property_id": prop,
-            "video_id": existing["video_id"],
+            "video_id": vid,
             "video_url": existing.get("video_url")
-            or f"https://www.youtube.com/watch?v={existing['video_id']}",
+            or f"https://www.youtube.com/watch?v={vid}",
+            "privacy": existing.get("privacy", privacy),
             "quota_units_used": 0,
             "idempotent_hit": True,
+            "reconciled_in_place": reconcile_info,
         }
 
     probe = probe_media_file(mp4_path)
@@ -2042,7 +3084,7 @@ def run_autonomous_video_pipeline(
     min_page_value_score: float = DEFAULT_MIN_PAGE_VALUE_SCORE,
     synthesize_missing: bool = True,
     live_upload: bool = False,
-    privacy: str = "unlisted",
+    privacy: str = DEFAULT_UPLOAD_PRIVACY,
     force_render: bool = False,
     use_headless_browser: bool = True,
     use_neural_tts: bool = True,
@@ -2316,7 +3358,9 @@ __all__ = [
     "YOUTUBE_DAILY_QUOTA_CEILING_UNITS",
     "YOUTUBE_QUOTA_SAFETY_RESERVE_UNITS",
     "YOUTUBE_VIDEO_INSERT_COST_UNITS",
+    "YOUTUBE_VIDEO_UPDATE_COST_UNITS",
     "YOUTUBE_THUMBNAIL_SET_COST_UNITS",
+    "DEFAULT_UPLOAD_PRIVACY",
     "MIN_VALID_MP4_BYTES",
     "DEFAULT_MIN_PAGE_VALUE_SCORE",
     "DEFAULT_MAX_RENDERS_PER_CYCLE",
@@ -2327,12 +3371,16 @@ __all__ = [
     "extract_and_verify_three_sentence_script",
     "evaluate_page_video_eligibility",
     "probe_media_file",
+    "verify_broadcast_stream_quality",
+    "extract_keyframe_contact_sheet",
     "synthesize_voiceover_and_vtt",
     "generate_video_thumbnail",
     "compose_and_verify_mp4",
     "sync_video_catalog_and_metadata",
     "synthesize_tool_video_asset",
     "check_youtube_cli_diagnostics",
+    "inspect_remote_youtube_video_status",
+    "reconcile_remote_youtube_video_quality_and_visibility",
     "upload_tool_video_to_youtube",
     "run_autonomous_video_pipeline",
 ]

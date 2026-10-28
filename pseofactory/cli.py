@@ -2006,7 +2006,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_vid.add_argument("--max-renders", type=int, default=2, help="Maximum video renders per property cycle (default: 2)")
     p_vid.add_argument("--min-score", type=float, default=45.0, help="Minimum page-value score threshold (default: 45.0)")
     p_vid.add_argument("--upload", action="store_true", help="Execute live idempotent YouTube Data API v3 upload within daily quota")
-    p_vid.add_argument("--privacy", type=str, choices=["unlisted", "public", "private"], default="unlisted", help="YouTube privacy status (default: unlisted)")
+    p_vid.add_argument("--privacy", type=str, choices=["unlisted", "public", "private"], default="public", help="YouTube privacy status (default: public)")
     p_vid.add_argument("--force", action="store_true", help="Force re-rendering even if valid MP4 exists")
     p_vid.add_argument("--dry-run", action="store_true", help="Evaluate eligibility and quota budget without rendering or uploading")
     p_vid.add_argument("--json", action="store_true", help="Output video pipeline telemetry as structured JSON")
@@ -2267,7 +2267,7 @@ def cmd_video(args: argparse.Namespace) -> int:
             min_page_value_score=float(getattr(args, "min_score", 45.0)),
             synthesize_missing=not dry_run,
             live_upload=bool(getattr(args, "upload", False) and not dry_run),
-            privacy=str(getattr(args, "privacy", "unlisted")),
+            privacy=str(getattr(args, "privacy", "public")),
             force_render=bool(getattr(args, "force", False)),
         )
         reports[p_id] = rep
