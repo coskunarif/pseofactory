@@ -9002,28 +9002,203 @@ UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
 )
 
 
+_URL_OR_HYPHENATED_SLUG_TOKEN_RE = re.compile(
+    r"(https?://[^\s\"'<>)\]]+|/[A-Za-z0-9][A-Za-z0-9/_-]*|\b[a-z0-9]+(?:-[a-z0-9]+)+\b)"
+)
+
+
+def tokenize_preserving_url_slugs(text: str) -> List[Tuple[bool, str]]:
+    """
+    Lexically separates URLs, path routes, and hyphenated URL-slug tokens from prose segments
+    so prose statutory acronym rules (e.g. 3pao -> 3PAO, C3pao -> C3PAO) never mutate
+    hyphenated URL slugs (e.g. fedramp-20x-3pao-assessment-cost-calculator).
+    Returns a list of (is_slug_or_url, segment_text) tuples.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    tokens: List[Tuple[bool, str]] = []
+    last_idx = 0
+    for match in _URL_OR_HYPHENATED_SLUG_TOKEN_RE.finditer(text):
+        start, end = match.span()
+        if start > last_idx:
+            tokens.append((False, text[last_idx:start]))
+        tokens.append((True, match.group(0)))
+        last_idx = end
+    if last_idx < len(text):
+        tokens.append((False, text[last_idx:]))
+    return tokens
+
+
 def normalize_statutory_acronym_casing(text: str) -> str:
     """
     Normalizes statutory and regulatory acronym casing across titles, headings,
-    table headers, and JSON-LD labels while deduplicating 'Calculator Calculator'.
+    table headers, and JSON-LD labels while deduplicating 'Calculator Calculator'
+    and lexically preserving hyphenated URL slugs and routes.
     Zero em-dashes. Zero en-dashes.
     """
     if not isinstance(text, str) or not text:
         return ""
-    cleaned = text
-    for pat, repl in UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS:
-        cleaned = pat.sub(repl, cleaned)
-    cleaned = re.sub(
-        r"(/tools/[a-zA-Z0-9_-]+/?)",
-        lambda m: m.group(0).lower(),
-        cleaned,
-    )
-    cleaned = re.sub(r"\bHITRUST\s+Csf\b", "HITRUST CSF", cleaned)
-    cleaned = re.sub(r"\bCSF\s+E1\s+I1\s+R2\b", "CSF e1, i1 & r2", cleaned)
-    cleaned = re.sub(r"\bE1\s+I1\s+R2\b", "e1, i1 & r2", cleaned)
-    cleaned = re.sub(r"\bCMMC\s+2\s+0\b", "CMMC 2.0", cleaned)
-    cleaned = re.sub(r"\bPCI\s+DSS\s+4\s+0\b", "PCI DSS 4.0", cleaned)
-    return cleaned
+    rebuilt: List[str] = []
+    for is_slug_or_url, segment in tokenize_preserving_url_slugs(text):
+        if is_slug_or_url:
+            if segment.lower().startswith("/tools/"):
+                rebuilt.append(segment.lower())
+            else:
+                rebuilt.append(segment)
+            continue
+        cleaned = segment
+        for pat, repl in UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS:
+            cleaned = pat.sub(repl, cleaned)
+        cleaned = re.sub(r"\bHITRUST\s+Csf\b", "HITRUST CSF", cleaned)
+        cleaned = re.sub(r"\bCSF\s+E1\s+I1\s+R2\b", "CSF e1, i1 & r2", cleaned)
+        cleaned = re.sub(r"\bE1\s+I1\s+R2\b", "e1, i1 & r2", cleaned)
+        cleaned = re.sub(r"\bCMMC\s+2\s+0\b", "CMMC 2.0", cleaned)
+        cleaned = re.sub(r"\bPCI\s+DSS\s+4\s+0\b", "PCI DSS 4.0", cleaned)
+        rebuilt.append(cleaned)
+    return "".join(rebuilt)
+
+
+class ZeroSignupInstantResultHTMLParser(HTMLParser):
+    """
+    AST-backed HTML and JSON-LD static contract parser enforcing zero-signup
+    instant-result UX, primary calculator form hygiene, SSR output readiness,
+    and visible surface / JSON-LD extraction.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.has_password_input: bool = False
+        self.has_paywall_gate: bool = False
+        self.has_required_email_in_primary_form: bool = False
+        self.has_ssr_result_element: bool = False
+        self.surface_segments: List[str] = []
+        self.jsonld_blocks: List[str] = []
+        self._in_primary_form: bool = False
+        self._active_surface_tag: Optional[str] = None
+        self._active_surface_buf: List[str] = []
+        self._in_jsonld_script: bool = False
+        self._jsonld_buf: List[str] = []
+        self._in_output_value_el: bool = False
+        self._output_value_buf: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        t_low = tag.lower()
+        attr_map = {k.lower(): (v or "") for k, v in attrs if k}
+        cls_tokens = set(attr_map.get("class", "").lower().split())
+        el_id = attr_map.get("id", "").lower()
+
+        if (
+            attr_map.get("data-paywall", "").lower() == "true"
+            or el_id in {"paywall-modal", "signup-gate", "login-wall"}
+            or bool(cls_tokens & {"paywall-gate", "signup-wall", "login-wall", "auth-gate-overlay"})
+        ):
+            self.has_paywall_gate = True
+
+        if t_low == "form":
+            combined_form_sig = f"{el_id} {' '.join(cls_tokens)} {attr_map.get('action', '').lower()}"
+            if not any(
+                sec_id in combined_form_sig
+                for sec_id in ("lead-capture-form", "partner-quote-intake-form", "newsletter")
+            ):
+                self._in_primary_form = True
+
+        if t_low == "input":
+            inp_type = attr_map.get("type", "text").lower()
+            if inp_type == "password":
+                self.has_password_input = True
+            if self._in_primary_form and inp_type == "email" and "required" in attr_map:
+                self.has_required_email_in_primary_form = True
+
+        if el_id == "calculation-manifest" or el_id.startswith(("res-", "sec179-res-", "sec1031-res-")):
+            self.has_ssr_result_element = True
+
+        if "output-value" in cls_tokens:
+            self._in_output_value_el = True
+            self._output_value_buf = []
+
+        if t_low in {"title", "h1", "h2", "th"}:
+            self._active_surface_tag = t_low
+            self._active_surface_buf = []
+
+        if t_low == "script" and "ld+json" in attr_map.get("type", "").lower():
+            self._in_jsonld_script = True
+            self._jsonld_buf = []
+
+    def handle_endtag(self, tag: str) -> None:
+        t_low = tag.lower()
+        if t_low == "form":
+            self._in_primary_form = False
+        if self._in_output_value_el and t_low in {"output", "span", "div", "strong", "p", "td"}:
+            if "".join(self._output_value_buf).strip():
+                self.has_ssr_result_element = True
+            self._in_output_value_el = False
+            self._output_value_buf = []
+        if self._active_surface_tag == t_low:
+            seg = " ".join("".join(self._active_surface_buf).split())
+            if seg:
+                self.surface_segments.append(seg)
+            self._active_surface_tag = None
+            self._active_surface_buf = []
+        if t_low == "script" and self._in_jsonld_script:
+            raw_j = "".join(self._jsonld_buf).strip()
+            if raw_j:
+                self.jsonld_blocks.append(raw_j)
+            self._in_jsonld_script = False
+            self._jsonld_buf = []
+
+    def handle_data(self, data: str) -> None:
+        if self._active_surface_tag is not None:
+            self._active_surface_buf.append(data)
+        if self._in_jsonld_script:
+            self._jsonld_buf.append(data)
+        if self._in_output_value_el:
+            self._output_value_buf.append(data)
+
+
+def _collect_jsonld_names_and_howto_issues(
+    jsonld_blocks: List[str],
+    rel_path: str,
+) -> Tuple[List[str], List[str]]:
+    """
+    Traverses parsed JSON-LD AST blocks to extract entity 'name' strings
+    and detect redundant 'How to Calculate ... Calculator' HowTo names.
+    Zero em-dashes. Zero en-dashes.
+    """
+    names: List[str] = []
+    howto_issues: List[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            n_val = node.get("name")
+            if isinstance(n_val, str) and n_val.strip():
+                names.append(n_val.strip())
+                n_type = node.get("@type")
+                is_howto = n_type == "HowTo" or (isinstance(n_type, list) and "HowTo" in n_type)
+                if is_howto or n_val.strip().lower().startswith("how to calculate "):
+                    if re.search(
+                        r"^How to Calculate\s+.+\bCalculator(?:\s+202\d|\s+Engine|\s+Model)?\s*$",
+                        n_val.strip(),
+                        re.IGNORECASE,
+                    ):
+                        howto_issues.append(
+                            f"Page {rel_path}: HowTo JSON-LD name contains redundant 'How to Calculate ... Calculator'"
+                        )
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    for raw_block in jsonld_blocks:
+        try:
+            parsed = json.loads(raw_block)
+            _walk(parsed)
+        except Exception:
+            for m in re.finditer(r'"name"\s*:\s*"([^"]+)"', raw_block):
+                names.append(m.group(1))
+    return names, howto_issues
 
 
 def detect_zero_signup_instant_result_issues(
@@ -9032,7 +9207,8 @@ def detect_zero_signup_instant_result_issues(
     require_ssr_output: bool = True,
 ) -> List[str]:
     """
-    Enforces the x-like:2108272246804648049 Free-Tool UX & SEO Contract:
+    Enforces the x-like:2108272246804648049 Free-Tool UX & SEO Contract using AST-backed
+    HTML/JSON-LD inspection and lexical URL-slug boundary tokenization:
     1. Zero forbidden em-dashes or en-dashes.
     2. Zero signup wall, login gate, password input, or paywall modal blocking tool execution.
     3. Instant server-rendered baseline calculation result without unhydrated Gate/Unlock placeholders.
@@ -9050,32 +9226,27 @@ def detect_zero_signup_instant_result_issues(
     if "\u2013" in html_text:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
+    parser = ZeroSignupInstantResultHTMLParser()
+    try:
+        parser.feed(html_text)
+    except Exception:
+        pass
+
     # 1. Zero password inputs or login/paywall gates
-    if re.search(r'<input\b[^>]*\btype=["\']password["\']', html_text, re.IGNORECASE):
+    if parser.has_password_input or re.search(r'<input\b[^>]*\btype=["\']password["\']', html_text, re.IGNORECASE):
         issues.append(f"Page {rel_path}: Free tool contains forbidden password input (<input type='password'>)")
 
-    if re.search(
+    if parser.has_paywall_gate or re.search(
         r'\b(?:data-paywall=["\']true["\']|id=["\'](?:paywall-modal|signup-gate|login-wall)["\']|class=["\'][^"\']*\b(?:paywall-gate|signup-wall|login-wall|auth-gate-overlay)\b)',
         html_text,
         re.IGNORECASE,
     ):
         issues.append(f"Page {rel_path}: Free tool contains forbidden signup/paywall gate overlay")
 
-    # Check primary calculator form does not require email to compute primary result
-    for form_m in re.finditer(r"<form\b([^>]*)>([\s\S]*?)</form>", html_text, re.IGNORECASE):
-        form_attrs = form_m.group(1) or ""
-        form_body = form_m.group(2) or ""
-        if any(
-            sec_id in form_attrs.lower()
-            for sec_id in ("lead-capture-form", "partner-quote-intake-form", "newsletter")
-        ):
-            continue
-        if re.search(r'<input\b[^>]*\btype=["\']email["\'][^>]*\brequired\b', form_body, re.IGNORECASE) or re.search(
-            r'<input\b[^>]*\brequired\b[^>]*\btype=["\']email["\']', form_body, re.IGNORECASE
-        ):
-            issues.append(
-                f"Page {rel_path}: Primary calculator form gates calculation behind a required email input"
-            )
+    if parser.has_required_email_in_primary_form:
+        issues.append(
+            f"Page {rel_path}: Primary calculator form gates calculation behind a required email input"
+        )
 
     if re.search(
         r"(?:sign\s+up\s+to\s+(?:view|unlock|see)\s+(?:your\s+)?(?:result|calculation)|enter\s+your\s+email\s+to\s+unlock\s+results)",
@@ -9086,7 +9257,7 @@ def detect_zero_signup_instant_result_issues(
 
     # 2. Instant SSR result readiness
     if require_ssr_output:
-        has_ssr_result = bool(
+        has_ssr_result = parser.has_ssr_result_element or bool(
             re.search(r'class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>\s*[^<\s]', html_text, re.IGNORECASE)
             or re.search(r'id=["\'](?:calculation-manifest|res-[a-z0-9_-]+|sec179-res-[a-z0-9_-]+|sec1031-res-[a-z0-9_-]+)["\']', html_text, re.IGNORECASE)
         )
@@ -9099,22 +9270,21 @@ def detect_zero_signup_instant_result_issues(
     if re.search(r"\bCalculator\s+Calculator\b", html_text, re.IGNORECASE):
         issues.append(f"Page {rel_path}: Contains duplicate 'Calculator Calculator' token")
 
-    if re.search(r'"name"\s*:\s*"How to Calculate [^"]*\bCalculator(?:\s+202\d|\s+Engine|\s+Model)?\s*"', html_text, re.IGNORECASE):
+    jsonld_names, howto_issues = _collect_jsonld_names_and_howto_issues(parser.jsonld_blocks, rel_path=rel_path)
+    if howto_issues:
+        issues.append(howto_issues[0])
+    elif re.search(r'"name"\s*:\s*"How to Calculate [^"]*\bCalculator(?:\s+202\d|\s+Engine|\s+Model)?\s*"', html_text, re.IGNORECASE):
         issues.append(f"Page {rel_path}: HowTo JSON-LD name contains redundant 'How to Calculate ... Calculator'")
 
     # Inspect visible <title>, <h1>, <h2>, <th>, and JSON-LD name fields for unnormalized statutory acronyms
-    surface_segments: List[str] = []
-    for tag_pat in (
-        r"<title[^>]*>([\s\S]*?)</title>",
-        r"<h1[^>]*>([\s\S]*?)</h1>",
-        r"<h2[^>]*>([\s\S]*?)</h2>",
-        r"<th\b[^>]*>([\s\S]*?)</th>",
-        r'"name"\s*:\s*"([^"]+)"',
-    ):
-        for m in re.finditer(tag_pat, html_text, re.IGNORECASE):
-            surface_segments.append(re.sub(r"<[^>]+>", " ", m.group(1)))
+    # while lexically excluding hyphenated URL slugs and routes
+    prose_only_chunks: List[str] = []
+    for raw_seg in [*parser.surface_segments, *jsonld_names]:
+        for is_slug_or_url, tok_seg in tokenize_preserving_url_slugs(raw_seg):
+            if not is_slug_or_url:
+                prose_only_chunks.append(tok_seg)
 
-    joined_surfaces = " | ".join(surface_segments)
+    joined_surfaces = " | ".join(prose_only_chunks)
     for bad_token, canonical_token in (
         ("Pslf", "PSLF"),
         ("Parent Plus", "Parent PLUS"),
@@ -9127,7 +9297,7 @@ def detect_zero_signup_instant_result_issues(
         ("Cmmc", "CMMC"),
         ("Tcja", "TCJA"),
     ):
-        if re.search(rf"\b{re.escape(bad_token)}\b", joined_surfaces):
+        if re.search(rf"(?<![-/])\b{re.escape(bad_token)}\b(?![-/])", joined_surfaces):
             issues.append(
                 f"Page {rel_path}: Contains unnormalized statutory acronym '{bad_token}' (expected '{canonical_token}')"
             )
@@ -9399,7 +9569,9 @@ __all__ = [
     "detect_asset_partner_roster_and_slot_issues",
     "assert_asset_partner_roster_and_slot_integrity",
     "UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS",
+    "tokenize_preserving_url_slugs",
     "normalize_statutory_acronym_casing",
+    "ZeroSignupInstantResultHTMLParser",
     "detect_zero_signup_instant_result_issues",
     "assert_zero_signup_instant_result_contract",
     "DatasetManifest",

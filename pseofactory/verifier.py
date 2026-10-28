@@ -8729,7 +8729,7 @@ def audit_free_tool_seo_and_instant_ux_readiness(
          detect_zero_signup_instant_result_issues (require_ssr_output=False).
       4. Zero 'Calculator Calculator' duplication and zero unnormalized statutory acronyms
          (Pslf, Parent Plus, Hipaa, Hitrust, Fedramp, 3pao, Cmmc, Tcja) across llms.txt,
-         llms-full.txt, catalog.json, and feed.xml.
+         llms-full.txt, catalog.json, and feed.xml (using lexical URL-slug boundary separation).
       5. 8-step agentic free-tool keyword discovery pipeline executes cleanly for the tenant.
     Zero em-dashes. Zero en-dashes.
     """
@@ -8737,6 +8737,7 @@ def audit_free_tool_seo_and_instant_ux_readiness(
     from pseofactory.contracts import (
         detect_free_web_application_schema_issues,
         detect_zero_signup_instant_result_issues,
+        tokenize_preserving_url_slugs,
     )
     from pseofactory.maintenance import RetroReflectionEngine
 
@@ -8752,13 +8753,27 @@ def audit_free_tool_seo_and_instant_ux_readiness(
         d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
 
     issues: List[str] = []
+    zero_signup_instant_ux_issues: List[str] = []
+    unnormalized_acronym_issues: List[str] = []
+    duplicate_calculator_title_issues: List[str] = []
+
     if not d_path.is_dir():
+        err_msg = f"Target dist directory does not exist: {d_path}"
         return {
             "status": "FAIL",
             "passed": False,
             "property_id": prop,
             "dist_dir": str(d_path),
-            "issues": [f"Target dist directory does not exist: {d_path}"],
+            "html_pages_scanned": 0,
+            "total_pages_scanned": 0,
+            "tool_pages_scanned": 0,
+            "tool_page_count": 0,
+            "zero_signup_verified_pages": 0,
+            "zero_signup_instant_ux_issues": [err_msg],
+            "unnormalized_acronym_issues": [],
+            "duplicate_calculator_title_issues": [],
+            "issues_count": 1,
+            "issues": [err_msg],
         }
 
     html_pages_scanned = 0
@@ -8776,10 +8791,7 @@ def audit_free_tool_seo_and_instant_ux_readiness(
         if 'name="robots" content="noindex' in raw_h.lower():
             continue
         html_pages_scanned += 1
-        is_tool = (
-            rel_p != "index.html"
-            and RetroReflectionEngine.is_tool_or_calculator_page(hf, d_path, raw_h)
-        )
+        is_tool = RetroReflectionEngine.is_tool_or_calculator_page(hf, d_path, raw_h)
         if is_tool:
             tool_pages_scanned += 1
         ux_issues = detect_zero_signup_instant_result_issues(
@@ -8789,13 +8801,21 @@ def audit_free_tool_seo_and_instant_ux_readiness(
         )
         if ux_issues:
             issues.extend(ux_issues[:3])
+            for u_iss in ux_issues:
+                if "unnormalized statutory acronym" in u_iss:
+                    unnormalized_acronym_issues.append(u_iss)
+                elif "Calculator Calculator" in u_iss or "How to Calculate ... Calculator" in u_iss:
+                    duplicate_calculator_title_issues.append(u_iss)
+                else:
+                    zero_signup_instant_ux_issues.append(u_iss)
         else:
             zero_signup_verified_pages += 1
 
-        if is_tool:
+        if is_tool and rel_p != "index.html":
             schema_issues = detect_free_web_application_schema_issues(raw_h, rel_path=rel_p)
             if schema_issues:
                 issues.extend(schema_issues[:2])
+                zero_signup_instant_ux_issues.extend(schema_issues[:2])
 
     for manifest_name in ("llms.txt", "llms-full.txt", "catalog.json", "feed.xml"):
         mf = d_path / manifest_name
@@ -8806,16 +8826,27 @@ def audit_free_tool_seo_and_instant_ux_readiness(
         except Exception:
             continue
         if "\u2014" in m_txt or "\u2013" in m_txt:
-            issues.append(f"Manifest {manifest_name}: Contains forbidden em-dash or en-dash")
+            d_msg = f"Manifest {manifest_name}: Contains forbidden em-dash or en-dash"
+            issues.append(d_msg)
+            zero_signup_instant_ux_issues.append(d_msg)
         if re.search(r"\bCalculator\s+Calculator\b", m_txt, re.IGNORECASE):
-            issues.append(f"Manifest {manifest_name}: Contains duplicate 'Calculator Calculator'")
+            c_msg = f"Manifest {manifest_name}: Contains duplicate 'Calculator Calculator'"
+            issues.append(c_msg)
+            duplicate_calculator_title_issues.append(c_msg)
+        prose_manifest = " ".join(
+            seg for is_slug_or_url, seg in tokenize_preserving_url_slugs(m_txt) if not is_slug_or_url
+        )
         for bad_tok in ("Pslf", "Parent Plus", "Grad Plus", "Hipaa", "Hitrust", "Fedramp", "3pao", "C3pao", "Cmmc", "Tcja"):
-            if re.search(rf"(?<![-/])\b{re.escape(bad_tok)}\b(?![-/])", m_txt):
-                issues.append(f"Manifest {manifest_name}: Contains unnormalized statutory acronym '{bad_tok}'")
+            if re.search(rf"(?<![-/])\b{re.escape(bad_tok)}\b(?![-/])", prose_manifest):
+                a_msg = f"Manifest {manifest_name}: Contains unnormalized statutory acronym '{bad_tok}'"
+                issues.append(a_msg)
+                unnormalized_acronym_issues.append(a_msg)
 
     pipeline_res = run_agentic_free_tool_keyword_pipeline(tenant_id=prop, repo_root=d_path.parent)
     if pipeline_res.get("status") != "PASS" or int(pipeline_res.get("ranked_clusters_count", 0)) < 1:
-        issues.append(f"Agentic free-tool keyword pipeline failed for {prop}")
+        p_msg = f"Agentic free-tool keyword pipeline failed for {prop}"
+        issues.append(p_msg)
+        zero_signup_instant_ux_issues.append(p_msg)
 
     passed = len(issues) == 0
     return {
@@ -8824,8 +8855,13 @@ def audit_free_tool_seo_and_instant_ux_readiness(
         "property_id": prop,
         "dist_dir": str(d_path),
         "html_pages_scanned": html_pages_scanned,
+        "total_pages_scanned": html_pages_scanned,
         "tool_pages_scanned": tool_pages_scanned,
+        "tool_page_count": tool_pages_scanned,
         "zero_signup_verified_pages": zero_signup_verified_pages,
+        "zero_signup_instant_ux_issues": zero_signup_instant_ux_issues,
+        "unnormalized_acronym_issues": unnormalized_acronym_issues,
+        "duplicate_calculator_title_issues": duplicate_calculator_title_issues,
         "agentic_clusters_discovered": int(pipeline_res.get("ranked_clusters_count", 0)),
         "issues_count": len(issues),
         "issues": issues,
@@ -8883,6 +8919,14 @@ def evaluate_x_like_2108272246804648049_capability_matrix(
                 if not rep.get("passed", False):
                     all_passed = False
 
+    total_claims = len(X_LIKE_2108272246804648049_CAPABILITY_MATRIX)
+    disposition_counts = {
+        "INTEGRATED_COMPOUNDING_UPGRADE": len(compounding),
+        "INTEGRATED_DETERMINISTIC_GATE": len(deterministic_gates),
+        "ALREADY_SOLVED_IN_SUBSTRATE": len(already_solved),
+        "REJECTED_BLOAT_OR_OFF_VERTICAL": len(rejected),
+    }
+
     return {
         "pointer": "x-like:2108272246804648049",
         "tweet_id": "2108272246804648049",
@@ -8898,13 +8942,18 @@ def evaluate_x_like_2108272246804648049_capability_matrix(
             "liftoff.so",
             "getmyfirstdollar.com",
         ],
-        "total_claims_evaluated": len(X_LIKE_2108272246804648049_CAPABILITY_MATRIX),
+        "total_claims_evaluated": total_claims,
+        "total_claims": total_claims,
+        "claim_count": total_claims,
         "integrated_compounding_upgrades_count": len(compounding),
         "integrated_deterministic_gates_count": len(deterministic_gates),
         "already_solved_in_substrate_count": len(already_solved),
         "rejected_bloat_or_off_vertical_count": len(rejected),
+        "disposition_counts": disposition_counts,
+        "dispositions": dict(disposition_counts),
         "matrix": list(X_LIKE_2108272246804648049_CAPABILITY_MATRIX),
         "tenant_readiness": tenant_readiness,
+        "live_tenant_reports": tenant_readiness,
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
     }

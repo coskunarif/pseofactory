@@ -33,9 +33,11 @@ from pseofactory.competitor import (
 )
 from pseofactory.contracts import (
     UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS,
+    ZeroSignupInstantResultHTMLParser,
     assert_zero_signup_instant_result_contract,
     detect_zero_signup_instant_result_issues,
     normalize_statutory_acronym_casing,
+    tokenize_preserving_url_slugs,
 )
 from pseofactory.gsc_remediation import (
     _normalize_title_50_60,
@@ -72,11 +74,18 @@ def test_capability_matrix_structure_and_dispositions() -> None:
 
 
 def test_normalize_statutory_acronym_casing_all_tenants() -> None:
-    """Verify multi-tenant statutory acronym casing normalization and Calculator deduplication."""
+    """Verify multi-tenant statutory acronym casing normalization, URL-slug boundary preservation, and Calculator deduplication."""
     raw = (
         "2026 Pslf Forgiveness Calculator & Parent Plus Double Consolidation "
-        "vs Grad Plus Tcja Sunset and Hipaa / Hitrust / Fedramp / 3pao / C3pao / Cmmc Calculator Calculator"
+        "vs Grad Plus Tcja Sunset and Hipaa / Hitrust / Fedramp / 3pao / C3pao / Cmmc Calculator Calculator "
+        "at https://gainhelm.com/tools/fedramp-20x-3pao-assessment-cost-calculator/ "
+        "and slug fedramp-20x-3pao-assessment-cost-calculator"
     )
+    tokens = tokenize_preserving_url_slugs(raw)
+    slug_tokens = [seg for is_slug, seg in tokens if is_slug]
+    assert "https://gainhelm.com/tools/fedramp-20x-3pao-assessment-cost-calculator/" in slug_tokens
+    assert "fedramp-20x-3pao-assessment-cost-calculator" in slug_tokens
+
     normalized = normalize_statutory_acronym_casing(raw)
     assert "PSLF" in normalized
     assert "Parent PLUS" in normalized
@@ -89,8 +98,11 @@ def test_normalize_statutory_acronym_casing_all_tenants() -> None:
     assert "C3PAO" in normalized
     assert "CMMC" in normalized
     assert "Calculator Calculator" not in normalized
+    assert "https://gainhelm.com/tools/fedramp-20x-3pao-assessment-cost-calculator/" in normalized
+    assert "fedramp-20x-3pao-assessment-cost-calculator" in normalized
+    prose_only = " ".join(seg for is_slug, seg in tokenize_preserving_url_slugs(normalized) if not is_slug)
     for pat, label in UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS:
-        assert not pat.search(normalized), f"Pattern {label} still matched in: {normalized}"
+        assert not pat.search(prose_only), f"Pattern {label} still matched in: {prose_only}"
 
 
 def test_gsc_remediation_title_and_overlay_hygiene() -> None:
@@ -394,12 +406,34 @@ def test_retro_reflection_heals_title_howto_and_acronyms(tmp_path: Path) -> None
 
 
 def test_live_capability_matrix_and_tenant_readiness() -> None:
-    """Verify evaluate_x_like_2108272246804648049_capability_matrix passes across live compiled tenants."""
+    """Verify evaluate_x_like_2108272246804648049_capability_matrix passes across live compiled tenants with normalized schema parity."""
+    parser = ZeroSignupInstantResultHTMLParser()
+    parser.feed("<html><head><title>FedRAMP 20x 3PAO Calculator</title></head><body><output id='res-1' class='output-value'>$12,000</output></body></html>")
+    assert parser.has_ssr_result_element is True
+    assert parser.has_password_input is False
+    assert parser.has_paywall_gate is False
+
     report = evaluate_x_like_2108272246804648049_capability_matrix(include_live_tenant_check=True)
     assert report["status"] == "PASS"
     assert report["passed"] is True
     assert report["total_claims_evaluated"] == 10
+    assert report["total_claims"] == 10
+    assert report["claim_count"] == 10
+    assert report["disposition_counts"] == {
+        "INTEGRATED_COMPOUNDING_UPGRADE": 3,
+        "INTEGRATED_DETERMINISTIC_GATE": 2,
+        "ALREADY_SOLVED_IN_SUBSTRATE": 3,
+        "REJECTED_BLOAT_OR_OFF_VERTICAL": 2,
+    }
+    assert report["dispositions"] == report["disposition_counts"]
+    assert set(report["live_tenant_reports"].keys()) == {"profithelm", "prexvo", "gainhelm"}
     for tenant_id, tenant_rep in report["tenant_readiness"].items():
         assert tenant_rep["status"] == "PASS", f"Tenant {tenant_id} failed readiness: {tenant_rep['issues']}"
         assert tenant_rep["issues_count"] == 0
-        assert tenant_rep["tool_pages_scanned"] >= 10
+        assert tenant_rep["tool_pages_scanned"] >= 11
+        assert tenant_rep["tool_page_count"] == tenant_rep["tool_pages_scanned"]
+        assert tenant_rep["total_pages_scanned"] == tenant_rep["html_pages_scanned"]
+        assert tenant_rep["zero_signup_instant_ux_issues"] == []
+        assert tenant_rep["unnormalized_acronym_issues"] == []
+        assert tenant_rep["duplicate_calculator_title_issues"] == []
+    assert sum(tr["tool_page_count"] for tr in report["live_tenant_reports"].values()) >= 178
