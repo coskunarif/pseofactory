@@ -8981,6 +8981,183 @@ def assert_asset_partner_roster_and_slot_integrity(
     return True
 
 
+UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
+    (re.compile(r"\bCalculator\s+Calculator\b", re.IGNORECASE), "Calculator"),
+    (re.compile(r"(?<![-/])\bPslf\b(?![-/])"), "PSLF"),
+    (re.compile(r"(?<![-/])\bParent\s+Plus\b(?![-/])"), "Parent PLUS"),
+    (re.compile(r"(?<![-/])\bGrad\s+Plus\b(?![-/])"), "Grad PLUS"),
+    (re.compile(r"(?<![-/])\bHipaa\b(?![-/])"), "HIPAA"),
+    (re.compile(r"(?<![-/])\bHitrust\s+Csf\b(?![-/])"), "HITRUST CSF"),
+    (re.compile(r"(?<![-/])\bHitrust\b(?![-/])"), "HITRUST"),
+    (re.compile(r"(?<![-/])\bFedramp\b(?![-/])"), "FedRAMP"),
+    (re.compile(r"(?<![-/])\bC3pao\b(?![-/])"), "C3PAO"),
+    (re.compile(r"(?<![-/])\b3pao\b(?![-/])"), "3PAO"),
+    (re.compile(r"(?<![-/])\bCmmc\b(?![-/])"), "CMMC"),
+    (re.compile(r"(?<![-/])\bTcja\b(?![-/])"), "TCJA"),
+    (re.compile(r"(?<![-/])\bQsbs\b(?![-/])"), "QSBS"),
+    (re.compile(r"(?<![-/])\bPci\s+Dss\b(?![-/])"), "PCI DSS"),
+    (re.compile(r"(?<![-/])\bNist\b(?![-/])"), "NIST"),
+    (re.compile(r"(?<![-/])\bSprs\b(?![-/])"), "SPRS"),
+    (re.compile(r"(?<![-/])\bDfars\b(?![-/])"), "DFARS"),
+)
+
+
+def normalize_statutory_acronym_casing(text: str) -> str:
+    """
+    Normalizes statutory and regulatory acronym casing across titles, headings,
+    table headers, and JSON-LD labels while deduplicating 'Calculator Calculator'.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(text, str) or not text:
+        return ""
+    cleaned = text
+    for pat, repl in UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS:
+        cleaned = pat.sub(repl, cleaned)
+    cleaned = re.sub(
+        r"(/tools/[a-zA-Z0-9_-]+/?)",
+        lambda m: m.group(0).lower(),
+        cleaned,
+    )
+    cleaned = re.sub(r"\bHITRUST\s+Csf\b", "HITRUST CSF", cleaned)
+    cleaned = re.sub(r"\bCSF\s+E1\s+I1\s+R2\b", "CSF e1, i1 & r2", cleaned)
+    cleaned = re.sub(r"\bE1\s+I1\s+R2\b", "e1, i1 & r2", cleaned)
+    cleaned = re.sub(r"\bCMMC\s+2\s+0\b", "CMMC 2.0", cleaned)
+    cleaned = re.sub(r"\bPCI\s+DSS\s+4\s+0\b", "PCI DSS 4.0", cleaned)
+    return cleaned
+
+
+def detect_zero_signup_instant_result_issues(
+    html_text: str,
+    rel_path: str = "index.html",
+    require_ssr_output: bool = True,
+) -> List[str]:
+    """
+    Enforces the x-like:2108272246804648049 Free-Tool UX & SEO Contract:
+    1. Zero forbidden em-dashes or en-dashes.
+    2. Zero signup wall, login gate, password input, or paywall modal blocking tool execution.
+    3. Instant server-rendered baseline calculation result without unhydrated Gate/Unlock placeholders.
+    4. Zero 'Calculator Calculator' duplication, zero 'How to Calculate ... Calculator' HowTo schema
+       redundancy, and zero unnormalized title-cased statutory acronyms (Pslf, Parent Plus, Hipaa,
+       Hitrust Csf, Fedramp, 3pao, Cmmc, Tcja) in visible headings, titles, or JSON-LD names.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues: List[str] = []
+    if not isinstance(html_text, str) or not html_text.strip():
+        return [f"Page {rel_path}: HTML content must be a non-empty string"]
+
+    if "\u2014" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
+    if "\u2013" in html_text:
+        issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
+
+    # 1. Zero password inputs or login/paywall gates
+    if re.search(r'<input\b[^>]*\btype=["\']password["\']', html_text, re.IGNORECASE):
+        issues.append(f"Page {rel_path}: Free tool contains forbidden password input (<input type='password'>)")
+
+    if re.search(
+        r'\b(?:data-paywall=["\']true["\']|id=["\'](?:paywall-modal|signup-gate|login-wall)["\']|class=["\'][^"\']*\b(?:paywall-gate|signup-wall|login-wall|auth-gate-overlay)\b)',
+        html_text,
+        re.IGNORECASE,
+    ):
+        issues.append(f"Page {rel_path}: Free tool contains forbidden signup/paywall gate overlay")
+
+    # Check primary calculator form does not require email to compute primary result
+    for form_m in re.finditer(r"<form\b([^>]*)>([\s\S]*?)</form>", html_text, re.IGNORECASE):
+        form_attrs = form_m.group(1) or ""
+        form_body = form_m.group(2) or ""
+        if any(
+            sec_id in form_attrs.lower()
+            for sec_id in ("lead-capture-form", "partner-quote-intake-form", "newsletter")
+        ):
+            continue
+        if re.search(r'<input\b[^>]*\btype=["\']email["\'][^>]*\brequired\b', form_body, re.IGNORECASE) or re.search(
+            r'<input\b[^>]*\brequired\b[^>]*\btype=["\']email["\']', form_body, re.IGNORECASE
+        ):
+            issues.append(
+                f"Page {rel_path}: Primary calculator form gates calculation behind a required email input"
+            )
+
+    if re.search(
+        r"(?:sign\s+up\s+to\s+(?:view|unlock|see)\s+(?:your\s+)?(?:result|calculation)|enter\s+your\s+email\s+to\s+unlock\s+results)",
+        html_text,
+        re.IGNORECASE,
+    ):
+        issues.append(f"Page {rel_path}: Free tool gates output behind signup/email unlock prompt")
+
+    # 2. Instant SSR result readiness
+    if require_ssr_output:
+        has_ssr_result = bool(
+            re.search(r'class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>\s*[^<\s]', html_text, re.IGNORECASE)
+            or re.search(r'id=["\'](?:calculation-manifest|res-[a-z0-9_-]+|sec179-res-[a-z0-9_-]+|sec1031-res-[a-z0-9_-]+)["\']', html_text, re.IGNORECASE)
+        )
+        if not has_ssr_result:
+            issues.append(
+                f"Page {rel_path}: Missing instant server-rendered baseline output (.output-value or #calculation-manifest)"
+            )
+
+    # 3. Anti-slop title/H1/HowTo/acronym hygiene
+    if re.search(r"\bCalculator\s+Calculator\b", html_text, re.IGNORECASE):
+        issues.append(f"Page {rel_path}: Contains duplicate 'Calculator Calculator' token")
+
+    if re.search(r'"name"\s*:\s*"How to Calculate [^"]*\bCalculator(?:\s+202\d|\s+Engine|\s+Model)?\s*"', html_text, re.IGNORECASE):
+        issues.append(f"Page {rel_path}: HowTo JSON-LD name contains redundant 'How to Calculate ... Calculator'")
+
+    # Inspect visible <title>, <h1>, <h2>, <th>, and JSON-LD name fields for unnormalized statutory acronyms
+    surface_segments: List[str] = []
+    for tag_pat in (
+        r"<title[^>]*>([\s\S]*?)</title>",
+        r"<h1[^>]*>([\s\S]*?)</h1>",
+        r"<h2[^>]*>([\s\S]*?)</h2>",
+        r"<th\b[^>]*>([\s\S]*?)</th>",
+        r'"name"\s*:\s*"([^"]+)"',
+    ):
+        for m in re.finditer(tag_pat, html_text, re.IGNORECASE):
+            surface_segments.append(re.sub(r"<[^>]+>", " ", m.group(1)))
+
+    joined_surfaces = " | ".join(surface_segments)
+    for bad_token, canonical_token in (
+        ("Pslf", "PSLF"),
+        ("Parent Plus", "Parent PLUS"),
+        ("Grad Plus", "Grad PLUS"),
+        ("Hipaa", "HIPAA"),
+        ("Hitrust", "HITRUST"),
+        ("Fedramp", "FedRAMP"),
+        ("3pao", "3PAO"),
+        ("C3pao", "C3PAO"),
+        ("Cmmc", "CMMC"),
+        ("Tcja", "TCJA"),
+    ):
+        if re.search(rf"\b{re.escape(bad_token)}\b", joined_surfaces):
+            issues.append(
+                f"Page {rel_path}: Contains unnormalized statutory acronym '{bad_token}' (expected '{canonical_token}')"
+            )
+
+    return issues
+
+
+def assert_zero_signup_instant_result_contract(
+    html_text: str,
+    context: str = "",
+    require_ssr_output: bool = True,
+) -> bool:
+    """
+    Contract assertion enforcing the x-like:2108272246804648049 zero-signup instant-result
+    free-tool UX and statutory acronym hygiene contract.
+    Raises ValueError on any violation.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues = detect_zero_signup_instant_result_issues(
+        html_text=html_text,
+        rel_path=context or "index.html",
+        require_ssr_output=require_ssr_output,
+    )
+    if issues:
+        ctx = f" ({context})" if context else ""
+        raise ValueError(f"Zero-signup instant-result tool contract violation{ctx}: {issues[0]}")
+    return True
+
+
+
 
 from pseofactory.qualification import (
     qualify_search_intent,
@@ -9221,6 +9398,10 @@ __all__ = [
     "assert_initialized_ssr_calculator_metrics",
     "detect_asset_partner_roster_and_slot_issues",
     "assert_asset_partner_roster_and_slot_integrity",
+    "UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS",
+    "normalize_statutory_acronym_casing",
+    "detect_zero_signup_instant_result_issues",
+    "assert_zero_signup_instant_result_contract",
     "DatasetManifest",
     "compute_file_sha256",
 ]

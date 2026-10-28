@@ -3204,6 +3204,9 @@ def compile_search_opportunity_briefs(
 
     briefs.sort(key=lambda x: (-float(x["roi_score"]), -int(x["total_impressions"]), x["canonical_path"]))
 
+    from pseofactory.competitor import run_agentic_free_tool_keyword_pipeline
+    tool_pipeline_res = run_agentic_free_tool_keyword_pipeline(tenant_id=prop, repo_root=root)
+
     report = {
         "workflow": "search_opportunities_to_content_briefs",
         "status": "PASS",
@@ -3218,6 +3221,9 @@ def compile_search_opportunity_briefs(
         "deterministic_math_briefs_count": sum(1 for b in briefs if b.get("needs_deterministic_math")),
         "overlays_compiled_count": overlays_compiled,
         "html_pages_injected_count": html_pages_injected,
+        "agentic_free_tool_clusters_count": int(tool_pipeline_res.get("ranked_clusters_count", 0)),
+        "agentic_free_tool_clusters": tool_pipeline_res.get("ranked_clusters", []),
+        "agentic_free_tool_build_briefs": tool_pipeline_res.get("top_build_briefs", []),
         "briefs": briefs[:40],
     }
 
@@ -4311,6 +4317,9 @@ def investigate_competitor_traffic_spikes(
                 if _apply_closed_loop_dom_mutation_to_dist_html(t_html, mut_spec, prop, d_dir):
                     closed_loop_mutations_applied.append(mut_slug)
 
+    from pseofactory.competitor import run_agentic_free_tool_keyword_pipeline
+    tool_pipeline_res = run_agentic_free_tool_keyword_pipeline(tenant_id=prop, repo_root=root)
+
     report = {
         "workflow": "investigate_competitor_traffic_spikes",
         "status": "PASS",
@@ -4321,6 +4330,9 @@ def investigate_competitor_traffic_spikes(
         "filtered_off_vertical_queries_count": len(filtered_off_vertical_queries),
         "live_dom_snapshots_evaluated": int(live_dom_diff_summary.get("snapshots_evaluated", 0)),
         "closed_loop_mutations_applied": closed_loop_mutations_applied,
+        "agentic_free_tool_clusters_count": int(tool_pipeline_res.get("ranked_clusters_count", 0)),
+        "agentic_free_tool_clusters": tool_pipeline_res.get("ranked_clusters", []),
+        "agentic_free_tool_build_briefs": tool_pipeline_res.get("top_build_briefs", []),
         "dom_structural_mutations": [
             {
                 "target_slug": m.get("target_slug"),

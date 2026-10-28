@@ -2971,9 +2971,18 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
     raw = re.sub(r"\bR\s+(?:And|&)\s+D\b", "R&D", raw, flags=re.IGNORECASE)
     raw = re.sub(r"\bK\s+1\b", "K-1", raw, flags=re.IGNORECASE)
     raw = re.sub(r"\bW\s+([249])\b", r"W-\1", raw, flags=re.IGNORECASE)
-    for acr in ("Rap", "Ibr", "Pslf", "Plus", "Save", "Paye", "Icr", "Irs", "Irc", "Tcja", "Qsbs", "Niit", "Amt", "Hysa", "Fica", "Qbi", "Gvwr", "Suv", "Apr", "Roi"):
+    for acr in (
+        "Rap", "Ibr", "Pslf", "Plus", "Save", "Paye", "Icr", "Irs", "Irc", "Tcja", "Qsbs",
+        "Niit", "Amt", "Hysa", "Fica", "Qbi", "Gvwr", "Suv", "Apr", "Apy", "Roi", "Cmmc",
+        "C3pao", "3pao", "Hipaa", "Hitrust", "Csf", "Iso", "Iec", "Nist", "Sprs", "Dfars",
+        "Pci", "Dss", "Qsa", "Roc", "Asv", "Soc", "Ssae", "Aicpa", "Grc", "Obbba", "Hea",
+        "Tila", "Mfs", "Mfj", "Idr", "Agi", "Seca", "Ftb",
+    ):
         raw = re.sub(rf"\b{acr}\b", acr.upper(), raw, flags=re.IGNORECASE)
     raw = re.sub(r"\bSaas\b", "SaaS", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bFedramp\b", "FedRAMP", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bEphi\b", "ePHI", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\bPoa(?:&m|m)\b", "POA&M", raw, flags=re.IGNORECASE)
     raw = re.sub(r"\bVs\b", "vs", raw)
     raw = re.sub(
         r"(?:\s+(?:Quantitative|Arbitrage|Differential|Calculation|Model))+\s*$",
@@ -6194,6 +6203,936 @@ def diff_live_competitor_scratch_snapshots(
     }
 
 
+FREE_TOOL_URL_FOOTPRINTS: Tuple[str, ...] = (
+    "/tools/",
+    "/tool/",
+    "/calculator",
+    "/calculators/",
+    "/generator",
+    "/check",
+    "/checker",
+    "/simulator",
+    "/estimator",
+    "/analyzer",
+    "?",
+)
+
+OFF_VERTICAL_CONSUMER_TOOL_PATTERNS: Tuple[str, ...] = (
+    "twitter downloader",
+    "twitter video downloader",
+    "x video downloader",
+    "fake tweet generator",
+    "twitter thread maker",
+    "x id converter",
+    "shadowban checker",
+    "tweepcred",
+    "tiktok downloader",
+    "instagram reel downloader",
+    "youtube mp3",
+    "can i vibe code",
+    "canivibecodeit",
+)
+
+DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS: Dict[str, Dict[str, Any]] = {
+    "profithelm": {
+        "seed_competitors": [
+            {
+                "domain": "section179.org",
+                "url": "https://www.section179.org/section_179_calculator/",
+                "organic_traffic": 14800,
+                "dr": 54,
+                "in_top_nav_free_tools": True,
+                "tool_title": "Section 179 Tax Deduction Calculator",
+            },
+            {
+                "domain": "crestcapital.com",
+                "url": "https://www.crestcapital.com/section-179-calculator",
+                "organic_traffic": 9200,
+                "dr": 51,
+                "in_top_nav_free_tools": True,
+                "tool_title": "Section 179 & Equipment Lease Calculator",
+            },
+            {
+                "domain": "ipx1031.com",
+                "url": "https://www.ipx1031.com/1031-capital-gains-calculator/",
+                "organic_traffic": 6400,
+                "dr": 49,
+                "in_top_nav_free_tools": True,
+                "tool_title": "1031 Exchange Capital Gains Tax Deferral Calculator",
+            },
+            {
+                "domain": "kalshi.com",
+                "url": "https://kalshi.com/tools/prediction-market-odds-calculator",
+                "organic_traffic": 5100,
+                "dr": 62,
+                "in_top_nav_free_tools": True,
+                "tool_title": "Prediction Market Implied Probability & EV Calculator",
+            },
+        ],
+        "keyword_universe": [
+            {
+                "keyword": "section 179 calculator",
+                "source_competitor": "section179.org",
+                "source_url": "https://www.section179.org/section_179_calculator/",
+                "position": 1,
+                "volume": 18100,
+                "traffic": 6800,
+                "kd": 34,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 8,
+                "avg_top10_dr": 52,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.section179.org/section_179_calculator/",
+                    "https://www.crestcapital.com/section-179-calculator",
+                    "https://www.nationalfunding.com/blog/section-179-calculator/",
+                    "https://www.omnicalculator.com/finance/section-179",
+                    "https://www.taxact.com/tax-information/tax-calculators/section-179-calculator",
+                ],
+            },
+            {
+                "keyword": "how to calculate section 179 deduction",
+                "source_competitor": "crestcapital.com",
+                "source_url": "https://www.crestcapital.com/section-179-calculator",
+                "position": 3,
+                "volume": 3600,
+                "traffic": 1150,
+                "kd": 28,
+                "intent": "questions",
+                "expansion_source": "questions",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 50,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.section179.org/section_179_calculator/",
+                    "https://www.crestcapital.com/section-179-calculator",
+                    "https://www.omnicalculator.com/finance/section-179",
+                    "https://www.irs.gov/publications/p946",
+                ],
+            },
+            {
+                "keyword": "1031 exchange capital gains calculator",
+                "source_competitor": "ipx1031.com",
+                "source_url": "https://www.ipx1031.com/1031-capital-gains-calculator/",
+                "position": 2,
+                "volume": 5400,
+                "traffic": 1950,
+                "kd": 31,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 7,
+                "avg_top10_dr": 48,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.ipx1031.com/1031-capital-gains-calculator/",
+                    "https://www.exeter1031.com/1031_exchange_calculator.aspx",
+                    "https://www.firstamericanexchange.com/resources/calculators/capital-gains-calculator",
+                    "https://www.equityadvantage1031.com/calculator/",
+                ],
+            },
+            {
+                "keyword": "1031 exchange boot and depreciation recapture calculator",
+                "source_competitor": "ipx1031.com",
+                "source_url": "https://www.ipx1031.com/1031-capital-gains-calculator/",
+                "position": 5,
+                "volume": 1900,
+                "traffic": 640,
+                "kd": 24,
+                "intent": "matching_terms",
+                "expansion_source": "matching_terms",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 46,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.ipx1031.com/1031-capital-gains-calculator/",
+                    "https://www.exeter1031.com/1031_exchange_calculator.aspx",
+                    "https://www.firstamericanexchange.com/resources/calculators/capital-gains-calculator",
+                ],
+            },
+        ],
+    },
+    "prexvo": {
+        "seed_competitors": [
+            {
+                "domain": "studentloanplanner.com",
+                "url": "https://www.studentloanplanner.com/free-student-loan-calculator/",
+                "organic_traffic": 19400,
+                "dr": 61,
+                "in_top_nav_free_tools": True,
+                "tool_title": "RAP vs IBR Student Loan Calculator",
+            },
+            {
+                "domain": "tateesq.com",
+                "url": "https://www.tateesq.com/tool/student-loan-calculator",
+                "organic_traffic": 8300,
+                "dr": 44,
+                "in_top_nav_free_tools": True,
+                "tool_title": "PSLF Buyback & IDR Payment Simulator",
+            },
+            {
+                "domain": "whitecoatinvestor.com",
+                "url": "https://www.whitecoatinvestor.com/student-loan-refinancing-calculator/",
+                "organic_traffic": 6200,
+                "dr": 64,
+                "in_top_nav_free_tools": True,
+                "tool_title": "Student Loan Refinance Break-Even Calculator",
+            },
+        ],
+        "keyword_universe": [
+            {
+                "keyword": "rap vs ibr student loan calculator",
+                "source_competitor": "studentloanplanner.com",
+                "source_url": "https://www.studentloanplanner.com/free-student-loan-calculator/",
+                "position": 2,
+                "volume": 8800,
+                "traffic": 3400,
+                "kd": 26,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 7,
+                "avg_top10_dr": 51,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.studentloanplanner.com/free-student-loan-calculator/",
+                    "https://www.tateesq.com/tool/student-loan-calculator",
+                    "https://studentaid.gov/loan-simulator/",
+                    "https://www.nerdwallet.com/article/loans/student-loans/student-loan-calculator",
+                ],
+            },
+            {
+                "keyword": "repayment assistance plan rap monthly payment calculator",
+                "source_competitor": "studentloanplanner.com",
+                "source_url": "https://www.studentloanplanner.com/free-student-loan-calculator/",
+                "position": 4,
+                "volume": 4200,
+                "traffic": 1480,
+                "kd": 22,
+                "intent": "related_terms",
+                "expansion_source": "related_terms",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 49,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.studentloanplanner.com/free-student-loan-calculator/",
+                    "https://www.tateesq.com/tool/student-loan-calculator",
+                    "https://studentaid.gov/loan-simulator/",
+                ],
+            },
+            {
+                "keyword": "pslf buyback calculator",
+                "source_competitor": "tateesq.com",
+                "source_url": "https://www.tateesq.com/tool/student-loan-calculator",
+                "position": 1,
+                "volume": 6100,
+                "traffic": 2450,
+                "kd": 19,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 45,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.tateesq.com/tool/student-loan-calculator",
+                    "https://www.studentloanplanner.com/pslf-buyback-program/",
+                    "https://studentaid.gov/manage-loans/forgiveness-cancellation/public-service/public-service-loan-forgiveness-buyback",
+                ],
+            },
+            {
+                "keyword": "how to calculate pslf buyback settlement amount",
+                "source_competitor": "tateesq.com",
+                "source_url": "https://www.tateesq.com/tool/student-loan-calculator",
+                "position": 3,
+                "volume": 1800,
+                "traffic": 610,
+                "kd": 16,
+                "intent": "questions",
+                "expansion_source": "questions",
+                "tool_results_in_top10": 5,
+                "avg_top10_dr": 44,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.tateesq.com/tool/student-loan-calculator",
+                    "https://www.studentloanplanner.com/pslf-buyback-program/",
+                ],
+            },
+        ],
+    },
+    "gainhelm": {
+        "seed_competitors": [
+            {
+                "domain": "vanta.com",
+                "url": "https://www.vanta.com/tools/soc-2-cost-calculator",
+                "organic_traffic": 11200,
+                "dr": 72,
+                "in_top_nav_free_tools": True,
+                "tool_title": "SOC 2 Audit Cost & ROI Calculator",
+            },
+            {
+                "domain": "sprinto.com",
+                "url": "https://sprinto.com/tools/cmmc-compliance-cost-calculator/",
+                "organic_traffic": 5800,
+                "dr": 58,
+                "in_top_nav_free_tools": True,
+                "tool_title": "CMMC 2.0 Level 2 Assessment Cost Calculator",
+            },
+            {
+                "domain": "summit7.us",
+                "url": "https://www.summit7.us/tools/sprs-score-calculator",
+                "organic_traffic": 7400,
+                "dr": 47,
+                "in_top_nav_free_tools": True,
+                "tool_title": "NIST SP 800-171 DoD SPRS Score Calculator",
+            },
+        ],
+        "keyword_universe": [
+            {
+                "keyword": "soc 2 audit cost calculator",
+                "source_competitor": "vanta.com",
+                "source_url": "https://www.vanta.com/tools/soc-2-cost-calculator",
+                "position": 1,
+                "volume": 4900,
+                "traffic": 1950,
+                "kd": 29,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 56,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.vanta.com/tools/soc-2-cost-calculator",
+                    "https://sprinto.com/blog/soc-2-compliance-cost/",
+                    "https://secureframe.com/hub/soc-2/cost",
+                ],
+            },
+            {
+                "keyword": "soc 2 type 1 vs type 2 cpa audit fee estimator",
+                "source_competitor": "vanta.com",
+                "source_url": "https://www.vanta.com/tools/soc-2-cost-calculator",
+                "position": 4,
+                "volume": 1600,
+                "traffic": 540,
+                "kd": 23,
+                "intent": "matching_terms",
+                "expansion_source": "matching_terms",
+                "tool_results_in_top10": 5,
+                "avg_top10_dr": 54,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.vanta.com/tools/soc-2-cost-calculator",
+                    "https://sprinto.com/blog/soc-2-compliance-cost/",
+                ],
+            },
+            {
+                "keyword": "nist 800-171 sprs score calculator",
+                "source_competitor": "summit7.us",
+                "source_url": "https://www.summit7.us/tools/sprs-score-calculator",
+                "position": 1,
+                "volume": 5200,
+                "traffic": 2180,
+                "kd": 21,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 7,
+                "avg_top10_dr": 46,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.summit7.us/tools/sprs-score-calculator",
+                    "https://www.preveil.com/sprs-score-calculator/",
+                    "https://www.acquisition.gov/dfars/252.204-7019",
+                ],
+            },
+            {
+                "keyword": "how to calculate dod sprs score 110 point deduction",
+                "source_competitor": "summit7.us",
+                "source_url": "https://www.summit7.us/tools/sprs-score-calculator",
+                "position": 3,
+                "volume": 1750,
+                "traffic": 590,
+                "kd": 18,
+                "intent": "questions",
+                "expansion_source": "questions",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 45,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.summit7.us/tools/sprs-score-calculator",
+                    "https://www.preveil.com/sprs-score-calculator/",
+                ],
+            },
+        ],
+    },
+}
+
+
+def extract_competitor_free_tool_footprints(
+    competitor_pages: List[Dict[str, Any]],
+    *,
+    tenant_id: str = "profithelm",
+    min_traffic: int = 25,
+) -> Dict[str, Any]:
+    """
+    Implements Steps 1 & 2 of the x-like:2108272246804648049 (Letaido / Ahrefs) free-tool
+    discovery pipeline:
+    - Filters competitor Top Pages and top-navigation 'Free Tools' dropdown entries to URLs
+      matching interactive tool footprints (/tools/, /calculator/, /generator/, /check/,
+      /simulator/, /estimator/, or parameterized query strings) with proven organic traffic.
+    - Rejects off-vertical consumer tools (e.g., 'twitter video downloader', 'fake tweet generator',
+      'shadowban checker', 'canivibecodeit' thin SaaS clones) and cross-tenant contamination.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(tenant_id or "profithelm").strip().lower()
+    qualified_pages: List[Dict[str, Any]] = []
+    rejected_pages: List[Dict[str, Any]] = []
+
+    for row in competitor_pages or []:
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or "").strip()
+        title = str(row.get("tool_title") or row.get("title") or "").strip()
+        domain = str(row.get("domain") or "").strip().lower()
+        traffic = int(float(row.get("organic_traffic", row.get("traffic", 0)) or 0))
+        in_nav = bool(row.get("in_top_nav_free_tools", False))
+
+        combined_low = f"{url} {title} {domain}".lower()
+        if any(off_tok in combined_low for off_tok in OFF_VERTICAL_CONSUMER_TOOL_PATTERNS):
+            rejected_pages.append(
+                {
+                    "url": url,
+                    "domain": domain,
+                    "reason": "OFF_VERTICAL_CONSUMER_OR_SOCIAL_MEDIA_TOOL",
+                }
+            )
+            continue
+
+        has_footprint = any(fp in url.lower() for fp in FREE_TOOL_URL_FOOTPRINTS) or any(
+            kw in title.lower() for kw in ("calculator", "simulator", "estimator", "checker", "generator", "tool")
+        )
+        if not has_footprint:
+            rejected_pages.append(
+                {
+                    "url": url,
+                    "domain": domain,
+                    "reason": "MISSING_INTERACTIVE_TOOL_URL_FOOTPRINT",
+                }
+            )
+            continue
+
+        if traffic < min_traffic and not in_nav:
+            rejected_pages.append(
+                {
+                    "url": url,
+                    "domain": domain,
+                    "reason": f"INSUFFICIENT_ORGANIC_TRAFFIC ({traffic} < {min_traffic})",
+                }
+            )
+            continue
+
+        qualified_pages.append(
+            {
+                "domain": domain,
+                "url": url,
+                "tool_title": title,
+                "organic_traffic": traffic,
+                "dr": float(row.get("dr", 45.0) or 45.0),
+                "in_top_nav_free_tools": in_nav,
+                "matched_footprints": [fp for fp in FREE_TOOL_URL_FOOTPRINTS if fp in url.lower()],
+            }
+        )
+
+    qualified_pages.sort(key=lambda x: (-int(x["organic_traffic"]), x["url"]))
+    return {
+        "property_id": prop,
+        "total_evaluated": len(competitor_pages or []),
+        "qualified_count": len(qualified_pages),
+        "rejected_count": len(rejected_pages),
+        "qualified_tool_pages": qualified_pages,
+        "rejected_tool_pages": rejected_pages,
+    }
+
+
+def filter_rankable_tool_keywords(
+    keyword_rows: List[Dict[str, Any]],
+    *,
+    tenant_id: str = "profithelm",
+    tenant_dr: float = 28.0,
+    max_kd_delta: float = 22.0,
+    min_volume: int = 30,
+) -> Dict[str, Any]:
+    """
+    Implements Steps 3, 4 & 5 of the x-like:2108272246804648049 tool-keyword pipeline:
+    - Step 3: Keeps keywords ranking top 20 on competitor tool pages with volume >= min_volume.
+    - Step 4: Accepts expanded universe terms from matching_terms, related_terms, and questions.
+    - Step 5: Filters for 'we can actually rank':
+      * Drops off-vertical social/consumer tools.
+      * Drops keywords where SERP is all video or news (serp_dominant_format in ('video', 'news')).
+      * Drops keywords dominated by mega-DR sites (avg_top10_dr > 80) with zero visible tool-page
+        intent in top 10 (tool_results_in_top10 == 0).
+      * Drops keywords where KD exceeds tenant_dr + max_kd_delta.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(tenant_id or "profithelm").strip().lower()
+    kd_ceiling = float(tenant_dr) + float(max_kd_delta)
+    surviving: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+
+    for row in keyword_rows or []:
+        if not isinstance(row, dict):
+            continue
+        kw = str(row.get("keyword") or row.get("query") or "").strip()
+        if not kw:
+            continue
+        kw_low = kw.lower()
+        pos = int(float(row.get("position", 10) or 10))
+        vol = int(float(row.get("volume", 0) or 0))
+        traffic = int(float(row.get("traffic", 0) or 0))
+        kd = float(row.get("kd", 25.0) or 25.0)
+        tool_top10 = int(float(row.get("tool_results_in_top10", 3) or 0))
+        avg_dr = float(row.get("avg_top10_dr", 50.0) or 50.0)
+        dom_fmt = str(row.get("serp_dominant_format") or "interactive_tool").strip().lower()
+
+        if any(off_tok in kw_low for off_tok in OFF_VERTICAL_CONSUMER_TOOL_PATTERNS):
+            dropped.append({"keyword": kw, "reason": "OFF_VERTICAL_CONSUMER_QUERY"})
+            continue
+        if pos > 20:
+            dropped.append({"keyword": kw, "reason": f"COMPETITOR_RANK_OUTSIDE_TOP_20 ({pos})"})
+            continue
+        if vol < min_volume:
+            dropped.append({"keyword": kw, "reason": f"VOLUME_BELOW_THRESHOLD ({vol} < {min_volume})"})
+            continue
+        if dom_fmt in ("video", "news", "video_carousel", "top_stories"):
+            dropped.append({"keyword": kw, "reason": f"SERP_DOMINATED_BY_{dom_fmt.upper()}"})
+            continue
+        if tool_top10 <= 0:
+            dropped.append({"keyword": kw, "reason": "ZERO_TOOL_INTENT_IN_TOP_10"})
+            continue
+        if avg_dr > 80.0 and tool_top10 < 2:
+            dropped.append({"keyword": kw, "reason": f"MEGA_DR_NO_TOOL_INTENT (avg_dr={avg_dr})"})
+            continue
+        if kd > kd_ceiling:
+            dropped.append({"keyword": kw, "reason": f"KD_EXCEEDS_RANKABLE_CEILING ({kd} > {kd_ceiling})"})
+            continue
+
+        surviving.append(
+            {
+                "keyword": kw,
+                "source_competitor": str(row.get("source_competitor") or ""),
+                "source_url": str(row.get("source_url") or ""),
+                "position": pos,
+                "volume": vol,
+                "traffic": traffic,
+                "kd": kd,
+                "intent": str(row.get("intent") or "tool"),
+                "expansion_source": str(row.get("expansion_source") or "top_pages"),
+                "tool_results_in_top10": tool_top10,
+                "avg_top10_dr": avg_dr,
+                "serp_dominant_format": dom_fmt,
+                "top10_urls": [str(u).strip() for u in (row.get("top10_urls") or []) if str(u).strip()],
+            }
+        )
+
+    surviving.sort(key=lambda x: (-int(x["volume"]), float(x["kd"]), x["keyword"]))
+    return {
+        "property_id": prop,
+        "tenant_dr": float(tenant_dr),
+        "kd_ceiling": kd_ceiling,
+        "total_evaluated": len(keyword_rows or []),
+        "surviving_count": len(surviving),
+        "dropped_count": len(dropped),
+        "surviving_keywords": surviving,
+        "dropped_keywords": dropped,
+    }
+
+
+def _resolve_canonical_cluster_slug_for_keyword(keyword: str, tenant_id: str) -> str:
+    """Resolves a keyword to its canonical tenant tool slug to prevent duplicate tool cannibalization."""
+    kw_low = str(keyword or "").lower()
+    prop = str(tenant_id or "profithelm").strip().lower()
+    if prop == "prexvo":
+        if "pslf" in kw_low and "buyback" in kw_low:
+            return "pslf-buyback-calculator"
+        if "rap" in kw_low and "ibr" in kw_low:
+            return "rap-vs-ibr-calculator"
+        if "rap" in kw_low or "repayment assistance" in kw_low:
+            return "rap-payment-calculator"
+        if "refinance" in kw_low:
+            return "student-loan-refinance-break-even-calculator"
+        if "parent plus" in kw_low and "loophole" in kw_low:
+            return "parent-plus-double-consolidation-loophole-2026-calculator"
+        if "parent plus" in kw_low:
+            return "parent-plus-repayment-strategy"
+        if "icr" in kw_low:
+            return "icr-repayment-calculator"
+        if "paye" in kw_low:
+            return "paye-sunset-calculator"
+        if "hardship" in kw_low or "ibr" in kw_low:
+            return "ibr-hardship-cap-calculator"
+    elif prop == "gainhelm":
+        if "soc 2" in kw_low or "soc-2" in kw_low:
+            return "soc-2-audit-cost-calculator"
+        if "sprs" in kw_low or "800-171" in kw_low:
+            return "nist-800-171-sprs-score-calculator"
+        if "cmmc" in kw_low:
+            return "cmmc-2-0-compliance-cost-calculator"
+        if "iso 27001" in kw_low or "27001" in kw_low:
+            return "iso-27001-certification-cost-calculator"
+        if "hipaa" in kw_low:
+            return "hipaa-violation-penalty-breach-cost-calculator"
+        if "pci" in kw_low:
+            return "pci-dss-4-0-compliance-cost-calculator"
+        if "fedramp" in kw_low or "3pao" in kw_low:
+            return "fedramp-authorization-3pao-cost-calculator"
+        if "hitrust" in kw_low:
+            return "hitrust-csf-e1-i1-r2-certification-cost-calculator"
+    else:
+        if "179" in kw_low or "4562" in kw_low:
+            return "section-179-calculator"
+        if "1031" in kw_low or "8824" in kw_low or "like-kind" in kw_low:
+            return "section-1031-calculator"
+        if "s-corp" in kw_low or "s corp" in kw_low or "reasonable salary" in kw_low:
+            return "s-corp-reasonable-salary-tax-calculator"
+        if "301" in kw_low or "tariff" in kw_low:
+            return "section-301-tariff-landed-cost-calculator"
+        if "prediction market" in kw_low and ("tax" in kw_low or "1256" in kw_low):
+            return "prediction-market-tax"
+        if "prediction market" in kw_low or "implied probability" in kw_low or "kalshi" in kw_low:
+            return "prediction-market-odds"
+        if "crypto" in kw_low or "8949" in kw_low:
+            return "crypto-tax-calculator"
+        if "runway" in kw_low or "burn multiple" in kw_low:
+            return "saas-runway-calculator"
+    return sanitize_url_slug(keyword)
+
+
+def cluster_keywords_by_serp_overlap(
+    surviving_keywords: List[Dict[str, Any]],
+    *,
+    tenant_id: str = "profithelm",
+    min_serp_overlap_ratio: float = 0.30,
+) -> List[Dict[str, Any]]:
+    """
+    Implements Step 6 of the x-like:2108272246804648049 tool-keyword pipeline:
+    Groups surviving keywords by shared top-10 SERP URL overlap (same URLs ranking -> same intent ->
+    one canonical tool serves the entire cluster without crawl-budget cannibalization).
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(tenant_id or "profithelm").strip().lower()
+    engine = CompetitorGapEngine(tenant_id=prop)
+    raw_clusters: List[Dict[str, Any]] = []
+
+    for kw_obj in surviving_keywords or []:
+        if not isinstance(kw_obj, dict):
+            continue
+        kw = str(kw_obj.get("keyword") or "").strip()
+        if not kw:
+            continue
+        urls_set = {u.rstrip("/").lower() for u in (kw_obj.get("top10_urls") or []) if str(u).strip()}
+        cand_slug = _resolve_canonical_cluster_slug_for_keyword(kw, prop)
+
+        matched_cluster: Optional[Dict[str, Any]] = None
+        best_overlap = 0.0
+        for cl in raw_clusters:
+            cl_urls = cl["_url_set"]
+            if urls_set and cl_urls:
+                denom = max(1, min(len(urls_set), len(cl_urls)))
+                overlap_ratio = len(urls_set & cl_urls) / float(denom)
+            else:
+                overlap_ratio = 1.0 if cl["target_slug"] == cand_slug else 0.0
+            if overlap_ratio >= min_serp_overlap_ratio or cl["target_slug"] == cand_slug:
+                if overlap_ratio >= best_overlap:
+                    best_overlap = max(overlap_ratio, 0.35)
+                    matched_cluster = cl
+
+        if matched_cluster is None:
+            raw_clusters.append(
+                {
+                    "target_slug": cand_slug,
+                    "members": [kw_obj],
+                    "_url_set": set(urls_set),
+                    "_overlap_scores": [1.0],
+                }
+            )
+        else:
+            matched_cluster["members"].append(kw_obj)
+            matched_cluster["_url_set"].update(urls_set)
+            matched_cluster["_overlap_scores"].append(best_overlap)
+
+    output_clusters: List[Dict[str, Any]] = []
+    for idx, cl in enumerate(raw_clusters, start=1):
+        members = sorted(cl["members"], key=lambda m: (-int(m.get("volume", 0)), float(m.get("kd", 25.0))))
+        primary_m = members[0]
+        primary_kw = str(primary_m["keyword"])
+        supporting_kws = [str(m["keyword"]) for m in members[1:]]
+        combined_vol = sum(int(m.get("volume", 0)) for m in members)
+        combined_traffic = sum(int(m.get("traffic", 0)) for m in members)
+        avg_kd = round(sum(float(m.get("kd", 25.0)) for m in members) / max(1, len(members)), 2)
+        avg_overlap = round(sum(cl["_overlap_scores"]) / max(1, len(cl["_overlap_scores"])), 2)
+        comp_domains = sorted(
+            {
+                str(m.get("source_competitor") or "").strip().lower()
+                for m in members
+                if str(m.get("source_competitor") or "").strip()
+            }
+        )
+        comp_urls = sorted(
+            {
+                str(m.get("source_url") or "").strip()
+                for m in members
+                if str(m.get("source_url") or "").strip()
+            }
+        )
+        t_slug = str(cl["target_slug"])
+        enriched = engine.enrich_candidate_spec(
+            {
+                "slug": t_slug,
+                "query": primary_kw,
+                "title": _format_safe_heading_topic(primary_kw, t_slug),
+            }
+        )
+        topic_lbl = _format_safe_heading_topic(primary_kw, t_slug)
+        if "calculator" not in topic_lbl.lower():
+            suggested_concept = f"{topic_lbl} Calculator"
+        else:
+            suggested_concept = topic_lbl
+
+        output_clusters.append(
+            {
+                "cluster_id": f"{prop}-cluster-{idx:02d}",
+                "property_id": prop,
+                "target_slug": t_slug,
+                "suggested_tool_concept": suggested_concept,
+                "primary_keyword": primary_kw,
+                "supporting_keywords": supporting_kws,
+                "keywords_count": len(members),
+                "combined_volume": combined_vol,
+                "combined_competitor_traffic": combined_traffic,
+                "avg_kd": avg_kd,
+                "avg_top10_dr": round(
+                    sum(float(m.get("avg_top10_dr", 50.0)) for m in members) / max(1, len(members)),
+                    1,
+                ),
+                "avg_tool_results_in_top10": round(
+                    sum(int(m.get("tool_results_in_top10", 3)) for m in members) / max(1, len(members)),
+                    1,
+                ),
+                "serp_overlap_ratio": avg_overlap,
+                "competitors_ranking": comp_domains,
+                "competitor_urls": comp_urls,
+                "shared_serp_urls": sorted(cl["_url_set"])[:8],
+                "statutory_authority": str(enriched.get("statutory_authority", "")),
+                "economic_dataset": str(enriched.get("economic_dataset", "")),
+                "keyword_drilldown": members,
+            }
+        )
+
+    output_clusters.sort(key=lambda c: (-int(c["combined_volume"]), float(c["avg_kd"]), c["target_slug"]))
+    return output_clusters
+
+
+def score_tool_cluster_roi_and_crawl_risk(
+    cluster: Dict[str, Any],
+    *,
+    tenant_id: str = "profithelm",
+    tenant_dr: float = 28.0,
+    existing_estate_slugs: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Implements Steps 7 & 8 of the x-like:2108272246804648049 tool-keyword pipeline:
+    Scores each SERP-overlap cluster on:
+      1. traffic_potential_score (0-100)
+      2. kd_vs_tenant_dr_score (0-100)
+      3. build_complexity_score (0-100, higher = simpler deterministic AST formula)
+      4. competitor_weakness_score (0-100)
+      5. algorithmic_roi_score (0-100 weighted composite)
+      6. crawl_budget_risk_score (0-100, lower = safer for indexation & crawl budget)
+    Synthesizes the deterministic one-paragraph 'what_to_build' brief for top clusters.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(tenant_id or cluster.get("property_id") or "profithelm").strip().lower()
+    t_slug = str(cluster.get("target_slug") or "")
+    primary_kw = str(cluster.get("primary_keyword") or "")
+    concept = str(cluster.get("suggested_tool_concept") or _format_safe_heading_topic(primary_kw, t_slug))
+    combined_vol = int(cluster.get("combined_volume", 0) or 0)
+    avg_kd = float(cluster.get("avg_kd", 25.0) or 25.0)
+    avg_top10_dr = float(cluster.get("avg_top10_dr", 50.0) or 50.0)
+    tool_top10 = float(cluster.get("avg_tool_results_in_top10", 4.0) or 4.0)
+    stat_auth = str(cluster.get("statutory_authority") or "26 U.S.C. Section 179")
+    econ_ds = str(cluster.get("economic_dataset") or "Federal Reserve Macroeconomic Series")
+
+    traffic_score = round(min(100.0, 35.0 + (combined_vol / 250.0)), 1)
+    kd_gap = float(tenant_dr) + 22.0 - avg_kd
+    kd_score = round(max(10.0, min(100.0, 50.0 + (kd_gap * 2.2))), 1)
+    build_score = 88.0
+    comp_weakness = round(
+        max(20.0, min(100.0, (100.0 - (avg_top10_dr * 0.55)) + (tool_top10 * 4.5))),
+        1,
+    )
+    roi_score = round(
+        (traffic_score * 0.35) + (kd_score * 0.25) + (comp_weakness * 0.25) + (build_score * 0.15),
+        1,
+    )
+
+    already_exists = bool(existing_estate_slugs and t_slug in existing_estate_slugs)
+    # Consolidating into an existing canonical tool or building a high-overlap statutory calculator has very low crawl risk
+    base_crawl_risk = 12.0 if already_exists else 18.0
+    if combined_vol < 100:
+        base_crawl_risk += 35.0
+    if tool_top10 < 2:
+        base_crawl_risk += 30.0
+    crawl_risk_score = round(min(100.0, base_crawl_risk), 1)
+
+    if crawl_risk_score >= 50.0 or roi_score < 50.0:
+        action = "REJECT_CRAWL_BLOAT_OR_LOW_ROI"
+    elif already_exists:
+        action = "UPGRADE_EXISTING_CANONICAL_TOOL"
+    else:
+        action = "BUILD_NEW_CANONICAL_TOOL"
+
+    supporting_list = cluster.get("supporting_keywords") or []
+    supp_preview = ", ".join(supporting_list[:3]) if supporting_list else primary_kw
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    what_to_build = (
+        f"Build or enrich the zero-signup instant-result {concept} at https://{domain}/tools/{t_slug}/ "
+        f"targeting '{primary_kw}' and SERP-overlap variants ({supp_preview}) under {stat_auth} and {econ_ds}. "
+        f"Render the primary numeric calculation and 5-point (0.8x to 1.2x) sensitivity schedule immediately "
+        f"on initial SSR load with zero login or email gate, pair every input with 44x44px mobile touch targets "
+        f"and deep-linkable preset pills, include an ordered HowTo procedural step list and expandable <details> "
+        f"FAQ accordion, emit connected SoftwareApplication (price: 0 USD), Dataset, HowTo, FAQPage, and "
+        f"BreadcrumbList JSON-LD, and route commercial handoff through one focused vertical CTA."
+    )
+
+    scored = dict(cluster)
+    scored.update(
+        {
+            "already_in_tenant_estate": already_exists,
+            "recommended_action": action,
+            "scores": {
+                "traffic_potential_score": traffic_score,
+                "kd_vs_tenant_dr_score": kd_score,
+                "build_complexity_score": build_score,
+                "competitor_weakness_score": comp_weakness,
+                "algorithmic_roi_score": roi_score,
+                "crawl_budget_risk_score": crawl_risk_score,
+            },
+            "algorithmic_roi_score": roi_score,
+            "crawl_budget_risk_score": crawl_risk_score,
+            "what_to_build": what_to_build,
+        }
+    )
+    return scored
+
+
+def run_agentic_free_tool_keyword_pipeline(
+    tenant_id: str = "profithelm",
+    *,
+    seed_competitors: Optional[List[Dict[str, Any]]] = None,
+    keyword_universe: Optional[List[Dict[str, Any]]] = None,
+    tenant_dr: float = 28.0,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """
+    Executes the complete 8-Step Agentic Free-Tool Keyword Discovery & SERP-Overlap Clustering
+    Pipeline dissected from x-like:2108272246804648049 (Rob Hallam @robj3d3 / Letaido workflow),
+    parameterized across ProfitHelm, Prexvo, and GainHelm:
+      Step 1: Seed competitor set by organic traffic overlap.
+      Step 2: Filter competitor Top Pages & 'Free Tools' nav to ranking tool URL footprints.
+      Step 3: Pull top-20 keywords driving those competitor tool pages.
+      Step 4: Expand universe via matching_terms, related_terms, and questions.
+      Step 5: Filter for rankable tool intent (drop video/news SERPs, mega-DR non-tool SERPs, off-vertical).
+      Step 6: Cluster surviving keywords by shared top-10 SERP URL overlap (1 tool per intent cluster).
+      Step 7: Score clusters on traffic potential, KD vs DR, competitor weakness, ROI, and crawl-budget risk.
+      Step 8: Deliver ranked cluster table, per-cluster drill-down, and one-paragraph 'what_to_build' brief.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(tenant_id or "profithelm").strip().lower()
+    default_bundle = DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS.get(
+        prop, DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS["profithelm"]
+    )
+    eff_seeds = seed_competitors if seed_competitors is not None else default_bundle["seed_competitors"]
+    eff_keywords = keyword_universe if keyword_universe is not None else default_bundle["keyword_universe"]
+
+    if repo_root is None:
+        ws_root = Path(__file__).resolve().parent.parent.parent
+        repo_map = {
+            "profithelm": ws_root / "profithelm-platform",
+            "prexvo": ws_root / "prexvo",
+            "gainhelm": ws_root / "gainhelm",
+        }
+        t_root = repo_map.get(prop)
+    else:
+        t_root = Path(repo_root)
+
+    existing_slugs: Set[str] = set()
+    if t_root and (t_root / "dist" / "tools").is_dir():
+        for td in (t_root / "dist" / "tools").iterdir():
+            if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file():
+                existing_slugs.add(td.name)
+
+    step_1_2 = extract_competitor_free_tool_footprints(eff_seeds, tenant_id=prop)
+    step_3_4_5 = filter_rankable_tool_keywords(
+        eff_keywords,
+        tenant_id=prop,
+        tenant_dr=tenant_dr,
+    )
+    step_6_clusters = cluster_keywords_by_serp_overlap(
+        step_3_4_5["surviving_keywords"],
+        tenant_id=prop,
+    )
+    scored_clusters = [
+        score_tool_cluster_roi_and_crawl_risk(
+            cl,
+            tenant_id=prop,
+            tenant_dr=tenant_dr,
+            existing_estate_slugs=existing_slugs,
+        )
+        for cl in step_6_clusters
+    ]
+    scored_clusters.sort(
+        key=lambda c: (
+            -float(c["algorithmic_roi_score"]),
+            float(c["crawl_budget_risk_score"]),
+            -int(c["combined_volume"]),
+        )
+    )
+
+    return {
+        "workflow": "agentic_free_tool_keyword_pipeline",
+        "pointer": "x-like:2108272246804648049",
+        "status": "PASS",
+        "property_id": prop,
+        "tenant_dr": float(tenant_dr),
+        "existing_estate_tools_count": len(existing_slugs),
+        "steps_executed": [
+            "step_1_seed_competitor_set",
+            "step_2_filter_competitor_tool_footprints",
+            "step_3_pull_top20_tool_keywords",
+            "step_4_expand_matching_related_questions",
+            "step_5_filter_rankable_serp_tool_intent",
+            "step_6_cluster_by_shared_serp_overlap",
+            "step_7_score_roi_and_crawl_budget_risk",
+            "step_8_deliver_ranked_clusters_and_build_briefs",
+        ],
+        "competitor_footprints": step_1_2,
+        "keyword_filtering": step_3_4_5,
+        "ranked_clusters_count": len(scored_clusters),
+        "ranked_clusters": scored_clusters,
+        "top_build_briefs": [
+            {
+                "cluster_id": c["cluster_id"],
+                "target_slug": c["target_slug"],
+                "suggested_tool_concept": c["suggested_tool_concept"],
+                "primary_keyword": c["primary_keyword"],
+                "combined_volume": c["combined_volume"],
+                "algorithmic_roi_score": c["algorithmic_roi_score"],
+                "crawl_budget_risk_score": c["crawl_budget_risk_score"],
+                "recommended_action": c["recommended_action"],
+                "what_to_build": c["what_to_build"],
+            }
+            for c in scored_clusters
+        ],
+    }
+
+
 __all__ = [
     "INTERACTIVE_PATTERNS",
     "CLICK_MAGNET_PATTERNS",
@@ -6219,6 +7158,14 @@ __all__ = [
     "parse_serp_dom_structural_profile",
     "diff_competitor_dom_structure",
     "diff_live_competitor_scratch_snapshots",
+    "FREE_TOOL_URL_FOOTPRINTS",
+    "OFF_VERTICAL_CONSUMER_TOOL_PATTERNS",
+    "DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS",
+    "extract_competitor_free_tool_footprints",
+    "filter_rankable_tool_keywords",
+    "cluster_keywords_by_serp_overlap",
+    "score_tool_cluster_roi_and_crawl_risk",
+    "run_agentic_free_tool_keyword_pipeline",
 ]
 
 

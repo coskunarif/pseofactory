@@ -217,6 +217,9 @@ from pseofactory.contracts import (
     detect_rate_limit_and_bot_shield_issues,
     assert_rate_limit_and_bot_shield,
     detect_interactive_touch_target_gaps,
+    normalize_statutory_acronym_casing,
+    detect_zero_signup_instant_result_issues,
+    assert_zero_signup_instant_result_contract,
     DatasetManifest,
     compute_file_sha256,
 )
@@ -558,6 +561,14 @@ from pseofactory.competitor import (
     benchmark_multi_engine_rankings,
     benchmark_all_properties,
     run_blind_spot_pass,
+    FREE_TOOL_URL_FOOTPRINTS,
+    OFF_VERTICAL_CONSUMER_TOOL_PATTERNS,
+    DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS,
+    extract_competitor_free_tool_footprints,
+    filter_rankable_tool_keywords,
+    cluster_keywords_by_serp_overlap,
+    score_tool_cluster_roi_and_crawl_risk,
+    run_agentic_free_tool_keyword_pipeline,
 )
 from pseofactory.audit import (
     ContentAccuracyAuditStage,
@@ -565,6 +576,9 @@ from pseofactory.audit import (
     ContentAccuracyAuditError,
     audit_rendered_asset,
     audit_code_slop_ratchet,
+    X_LIKE_2108272246804648049_CAPABILITY_MATRIX,
+    audit_free_tool_seo_and_instant_ux_readiness,
+    evaluate_x_like_2108272246804648049_capability_matrix,
 )
 from pseofactory.compiler import (
     verify_formula_boundary_fuzzing,
@@ -1096,6 +1110,20 @@ __all__ = [
     "parse_subprocess_envelope",
     "RetroReflectionEngine",
     "retrofit_tenant_estate",
+    "normalize_statutory_acronym_casing",
+    "detect_zero_signup_instant_result_issues",
+    "assert_zero_signup_instant_result_contract",
+    "FREE_TOOL_URL_FOOTPRINTS",
+    "OFF_VERTICAL_CONSUMER_TOOL_PATTERNS",
+    "DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS",
+    "extract_competitor_free_tool_footprints",
+    "filter_rankable_tool_keywords",
+    "cluster_keywords_by_serp_overlap",
+    "score_tool_cluster_roi_and_crawl_risk",
+    "run_agentic_free_tool_keyword_pipeline",
+    "X_LIKE_2108272246804648049_CAPABILITY_MATRIX",
+    "audit_free_tool_seo_and_instant_ux_readiness",
+    "evaluate_x_like_2108272246804648049_capability_matrix",
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses

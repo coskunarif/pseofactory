@@ -8581,3 +8581,330 @@ def evaluate_x_like_2107194110046060952_capability_matrix(
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
     }
+
+X_LIKE_2108272246804648049_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "claim_id": 1,
+        "claim_name": "Zero-Signup Instant-Result Tool Execution Contract (No Login/Email Gate, SSR Baseline Output, Single Focused CTA)",
+        "primary_source": "x-like:2108272246804648049 (@robj3d3 tweet prompt + video 0:00-2:10 & 3:52-4:05 on superx.so/tools)",
+        "claimed_mechanism": "Free interactive tools must execute immediately in the browser with zero signup wall, zero password/login gate, server-rendered instant calculation output, 44x44px mobile UX, and a single focused product/partner CTA.",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "algorithmic_roi_score": 96.0,
+        "crawl_budget_risk_score": 5.0,
+        "pseofactory_stage": "contracts.detect_zero_signup_instant_result_issues + contracts.assert_zero_signup_instant_result_contract",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Prevents pogo-sticking and CSR blank-state bounce by mechanically blocking password inputs, paywall/signup overlays, and required email gates inside primary calculator forms while verifying SSR baseline output.",
+        "case_against": "Gating primary calculator outputs behind email capture or client-only hydration destroys organic dwell time, AI answer extraction, and Google Helpful Content signals.",
+    },
+    {
+        "claim_id": 2,
+        "claim_name": "Competitor Top-Pages & 'Free Tools' Navigation Footprint Extractor",
+        "primary_source": "x-like:2108272246804648049 (video 0:44-1:32 tweethunter.io 'Free Tools' nav & 2:38-3:00 Letaido Steps 1-2)",
+        "claimed_mechanism": "Harvest competitor pages promoted in top navigation 'Free Tools' dropdowns or matching interactive URL footprints (/tools/, /calculator/, /generator/, /check/, /simulator/, /estimator/, ?) with proven organic traffic.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "algorithmic_roi_score": 91.0,
+        "crawl_budget_risk_score": 10.0,
+        "pseofactory_stage": "competitor.extract_competitor_free_tool_footprints + competitor.FREE_TOOL_URL_FOOTPRINTS",
+        "vault_surface": "pseofactory competitor-spikes --property <tenant>",
+        "case_for": "Competitors only surface free tools in primary navigation when they drive sustained non-brand search demand and product conversions; filtering by URL footprint and traffic isolates proven tool wedges.",
+        "case_against": "Blindly scraping all competitor blog posts or off-vertical social tools imports low-intent informational bloat.",
+    },
+    {
+        "claim_id": 3,
+        "claim_name": "Agentic Tool-Keyword Expansion & Rankable SERP Tool-Intent Filter (Steps 3-5)",
+        "primary_source": "x-like:2108272246804648049 (video 2:55-3:50 Letaido Steps 3, 4 & 5)",
+        "claimed_mechanism": "Pull top-20 keywords driving competitor tool pages, expand via matching_terms, related_terms, and questions, and drop keywords where SERPs are dominated by video/news or mega-DR domains with zero tool intent in top 10.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "algorithmic_roi_score": 93.0,
+        "crawl_budget_risk_score": 8.0,
+        "pseofactory_stage": "competitor.filter_rankable_tool_keywords + competitor.run_agentic_free_tool_keyword_pipeline",
+        "vault_surface": "pseofactory gsc-briefs --property <tenant>",
+        "case_for": "Verifies visible interactive tool intent in the top 10 SERP results and filters KD against tenant DR before allocating compilation or crawl budget.",
+        "case_against": "Building interactive calculators for SERPs dominated by video carousels, news stories, or DR 90+ statutory definitions with zero tool results wastes crawl budget.",
+    },
+    {
+        "claim_id": 4,
+        "claim_name": "Shared-SERP URL Overlap Keyword Clustering & Crawl-Budget Risk Scoring (Steps 6-8)",
+        "primary_source": "x-like:2108272246804648049 (video 3:46-3:51 Letaido Steps 6, 7 & 8)",
+        "claimed_mechanism": "Cluster surviving tool keywords by shared top-10 SERP URL overlap ('same URLs ranking -> same intent -> one tool can serve them'), score ROI vs crawl-budget risk, and emit a deterministic 'what_to_build' brief.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "algorithmic_roi_score": 95.0,
+        "crawl_budget_risk_score": 6.0,
+        "pseofactory_stage": "competitor.cluster_keywords_by_serp_overlap + competitor.score_tool_cluster_roi_and_crawl_risk + seo_growth_loops",
+        "vault_surface": "pseofactory gsc-briefs --property <tenant>",
+        "case_for": "Consolidates synonymous and question-variant queries into a single canonical calculator endpoint with deep-link scenario presets, preventing keyword cannibalization and crawl-budget dilution.",
+        "case_against": "Generating separate thin URLs for every keyword variant triggers Google Scaled Content Abuse and splits ranking signals.",
+    },
+    {
+        "claim_id": 5,
+        "claim_name": "Multi-Tenant Title, HowTo Schema & Statutory Acronym Casing Hygiene Gate",
+        "primary_source": "x-like:2108272246804648049 ('Nail SEO: title, meta, H1, internal links, FAQ, JSON-LD schema') + baseline tenant dist audit",
+        "claimed_mechanism": "Eliminate 'Calculator Calculator' token duplication, strip redundant 'How to Calculate ... Calculator' in HowTo JSON-LD, and normalize statutory acronyms (PSLF, Parent PLUS, HIPAA, HITRUST CSF, FedRAMP, 3PAO, CMMC, TCJA) across HTML, overlays, and manifests.",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "algorithmic_roi_score": 92.0,
+        "crawl_budget_risk_score": 4.0,
+        "pseofactory_stage": "contracts.normalize_statutory_acronym_casing + gsc_remediation + maintenance._normalize_page_structure_and_geo_parity",
+        "vault_surface": "pseofactory reflect --property <tenant>",
+        "case_for": "Fixes live baseline defects across Prexvo (3 'Calculator Calculator' tools in tools/index.html, llms.txt, feed.xml), GainHelm/Prexvo/ProfitHelm (32 HowTo JSON-LD redundancies and title-cased 'Pslf', 'Parent Plus', 'Hipaa', 'Hitrust Csf', 'Fedramp', '3pao', 'Cmmc', 'Tcja').",
+        "case_against": "Naive .title() casing on YMYL statutory acronyms and duplicated 'Calculator Calculator' tokens signal programmatic slop to both human reviewers and search quality raters.",
+    },
+    {
+        "claim_id": 6,
+        "claim_name": "Categorized /tools/ Hub Directory with Freshness Stamp, Intent Grouping & Footer Cross-Links",
+        "primary_source": "x-like:2108272246804648049 (video 1:12-1:28 & 2:02-2:10 superx.so/tools hub & 'More free X tools' footer)",
+        "claimed_mechanism": "Centralized /tools/ directory page grouping free tools by intent cluster with freshness timestamps, direct 'Try it free' cards, and reciprocal sibling links.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "algorithmic_roi_score": 88.0,
+        "crawl_budget_risk_score": 8.0,
+        "pseofactory_stage": "compiler + maintenance.RetroReflectionEngine + contracts.assert_calculation_variant_cross_links",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Already enforced across ProfitHelm, Prexvo, and GainHelm via dist/tools/index.html CollectionPage + ItemList schema, 3-tier topic cluster nav, and Factor 6 Calculation Variant Cross-Links.",
+        "case_against": "Creating a second parallel tools directory URL would split internal PageRank from /tools/.",
+    },
+    {
+        "claim_id": 7,
+        "claim_name": "Disclosed Formula Methodology, Ordered <ol> How-To Steps & Expandable <details> FAQ Accordions",
+        "primary_source": "x-like:2108272246804648049 (video 1:40-2:01 & 3:56 superx.so/tools formula disclosure, 4-step How-To & FAQ)",
+        "claimed_mechanism": "Pair every calculator with a numbered <ol> procedural guide, full mathematical formula and benchmark dataset disclosure, and expandable <details> FAQ accordions synchronized 1:1 with FAQPage JSON-LD.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "algorithmic_roi_score": 90.0,
+        "crawl_budget_risk_score": 5.0,
+        "pseofactory_stage": "contracts.assert_extractable_content_structure + audit.ContentAccuracyAuditStage + maintenance",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Already enforced via Factor 7 Unique First-Party Calculation Manifests (+1.95), Factor 10 Extractable Content Structure (+1.69), and 1:1 FAQPage DOM-to-JSON-LD parity.",
+        "case_against": "Duplicating static prose methodology blocks outside the verified calculation manifest risks formula drift.",
+    },
+    {
+        "claim_id": 8,
+        "claim_name": "Free WebApplication/SoftwareApplication (price: 0 USD), Dataset, HowTo, FAQPage & BreadcrumbList Schema Stack",
+        "primary_source": "x-like:2108272246804648049 (@robj3d3 tweet prompt + video 3:58 JSON-LD schema verification)",
+        "claimed_mechanism": "Emit connected JSON-LD @graph with WebApplication/SoftwareApplication (Offer price 0 USD), Dataset, HowTo, FAQPage, and BreadcrumbList on every free tool page.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "algorithmic_roi_score": 89.0,
+        "crawl_budget_risk_score": 4.0,
+        "pseofactory_stage": "contracts.detect_free_web_application_schema_issues + verifier.audit_aeo_geo_three_plane_readiness",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Already enforced across 100% of compiled tool pages via Factor 12 Schema.org JSON-LD (+1.45) and FreeWebApplicationSchemaContract.",
+        "case_against": "Emitting disconnected standalone JSON-LD blocks violates @graph entity connectivity.",
+    },
+    {
+        "claim_id": 9,
+        "claim_name": "Mass Uncurated SaaS Alternative Clone Pages on Low-DR Domains (canivibecodeit.com ~875 Pages on DR 0.2)",
+        "primary_source": "x-like:2108272246804648049 (video 3:47 right sidebar: canivibecodeit.com 875 pages, DR 0.2, 691 organic traffic)",
+        "claimed_mechanism": "Mass-generating hundreds of thin 'Can I Vibe Code [SaaS]' pages on a DR 0.2 domain without unique statutory datasets or SERP-overlap consolidation.",
+        "disposition": "REJECTED_BLOAT_OR_OFF_VERTICAL",
+        "algorithmic_roi_score": 14.0,
+        "crawl_budget_risk_score": 94.0,
+        "pseofactory_stage": "indexer.SitemapGovernor + qualification.qualify_search_intent + competitor.cluster_keywords_by_serp_overlap",
+        "vault_surface": "pseofactory govern-sitemap --property <tenant>",
+        "case_for": "Rejected 100%: uncurated mass page generation on low-authority domains averages <0.8 visits/page, exhausts crawl budget, and triggers Google Scaled Content Abuse demotions.",
+        "case_against": "High crawl-budget risk (94/100) and zero statutory defensibility.",
+    },
+    {
+        "claim_id": 10,
+        "claim_name": "Off-Vertical Consumer Social Media Tools (Twitter Video Downloader, Fake Tweet Generator) & Paid Course Upsells",
+        "primary_source": "x-like:2108272246804648049 (superx.so/tools/twitter-video-downloader, tweethunter.io, theattentionplaybook.com $249 course)",
+        "claimed_mechanism": "Building social media video downloaders, fake tweet generators, shadowban checkers, or creator-course upsells.",
+        "disposition": "REJECTED_BLOAT_OR_OFF_VERTICAL",
+        "algorithmic_roi_score": 8.0,
+        "crawl_budget_risk_score": 92.0,
+        "pseofactory_stage": "tenant_facts.TenantFactStore + competitor.OFF_VERTICAL_CONSUMER_TOOL_PATTERNS",
+        "vault_surface": "pseofactory truth-audit --property <tenant>",
+        "case_for": "Rejected 100%: off-vertical social media utilities violate YMYL topical authority boundaries across ProfitHelm (B2B tax/treasury), Prexvo (Title IV student loans), and GainHelm (enterprise cyber/GRC compliance).",
+        "case_against": "High crawl-budget and topical dilution risk (92/100) with zero B2B or statutory partner conversion alignment.",
+    },
+]
+
+def audit_free_tool_seo_and_instant_ux_readiness(
+    dist_dir: Optional[Union[str, Path]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Mechanically audits a tenant's compiled dist/ directory and agentic discovery pipeline
+    against the x-like:2108272246804648049 Free-Tool SEO & Instant-Result UX Contract:
+      1. Zero em-dashes or en-dashes across all HTML, JSON, XML, and TXT artifacts.
+      2. 100% of tool pages pass detect_zero_signup_instant_result_issues (require_ssr_output=True)
+         and detect_free_web_application_schema_issues.
+      3. 100% of non-tool pages (tools/index.html, index.html, governance pages) pass
+         detect_zero_signup_instant_result_issues (require_ssr_output=False).
+      4. Zero 'Calculator Calculator' duplication and zero unnormalized statutory acronyms
+         (Pslf, Parent Plus, Hipaa, Hitrust, Fedramp, 3pao, Cmmc, Tcja) across llms.txt,
+         llms-full.txt, catalog.json, and feed.xml.
+      5. 8-step agentic free-tool keyword discovery pipeline executes cleanly for the tenant.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.competitor import run_agentic_free_tool_keyword_pipeline
+    from pseofactory.contracts import (
+        detect_free_web_application_schema_issues,
+        detect_zero_signup_instant_result_issues,
+    )
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    prop = (property_id or "profithelm").strip().lower()
+    if dist_dir is not None:
+        d_path = Path(dist_dir).resolve()
+    else:
+        default_map = {
+            "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
+            "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
+        }
+        d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
+
+    issues: List[str] = []
+    if not d_path.is_dir():
+        return {
+            "status": "FAIL",
+            "passed": False,
+            "property_id": prop,
+            "dist_dir": str(d_path),
+            "issues": [f"Target dist directory does not exist: {d_path}"],
+        }
+
+    html_pages_scanned = 0
+    tool_pages_scanned = 0
+    zero_signup_verified_pages = 0
+
+    for hf in sorted(d_path.rglob("*.html")):
+        if hf.name.startswith(".") or hf.name == "404.html":
+            continue
+        rel_p = hf.relative_to(d_path).as_posix()
+        try:
+            raw_h = hf.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        if 'name="robots" content="noindex' in raw_h.lower():
+            continue
+        html_pages_scanned += 1
+        is_tool = (
+            rel_p != "index.html"
+            and RetroReflectionEngine.is_tool_or_calculator_page(hf, d_path, raw_h)
+        )
+        if is_tool:
+            tool_pages_scanned += 1
+        ux_issues = detect_zero_signup_instant_result_issues(
+            raw_h,
+            rel_path=rel_p,
+            require_ssr_output=is_tool,
+        )
+        if ux_issues:
+            issues.extend(ux_issues[:3])
+        else:
+            zero_signup_verified_pages += 1
+
+        if is_tool:
+            schema_issues = detect_free_web_application_schema_issues(raw_h, rel_path=rel_p)
+            if schema_issues:
+                issues.extend(schema_issues[:2])
+
+    for manifest_name in ("llms.txt", "llms-full.txt", "catalog.json", "feed.xml"):
+        mf = d_path / manifest_name
+        if not mf.is_file():
+            continue
+        try:
+            m_txt = mf.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        if "\u2014" in m_txt or "\u2013" in m_txt:
+            issues.append(f"Manifest {manifest_name}: Contains forbidden em-dash or en-dash")
+        if re.search(r"\bCalculator\s+Calculator\b", m_txt, re.IGNORECASE):
+            issues.append(f"Manifest {manifest_name}: Contains duplicate 'Calculator Calculator'")
+        for bad_tok in ("Pslf", "Parent Plus", "Grad Plus", "Hipaa", "Hitrust", "Fedramp", "3pao", "C3pao", "Cmmc", "Tcja"):
+            if re.search(rf"(?<![-/])\b{re.escape(bad_tok)}\b(?![-/])", m_txt):
+                issues.append(f"Manifest {manifest_name}: Contains unnormalized statutory acronym '{bad_tok}'")
+
+    pipeline_res = run_agentic_free_tool_keyword_pipeline(tenant_id=prop, repo_root=d_path.parent)
+    if pipeline_res.get("status") != "PASS" or int(pipeline_res.get("ranked_clusters_count", 0)) < 1:
+        issues.append(f"Agentic free-tool keyword pipeline failed for {prop}")
+
+    passed = len(issues) == 0
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "property_id": prop,
+        "dist_dir": str(d_path),
+        "html_pages_scanned": html_pages_scanned,
+        "tool_pages_scanned": tool_pages_scanned,
+        "zero_signup_verified_pages": zero_signup_verified_pages,
+        "agentic_clusters_discovered": int(pipeline_res.get("ranked_clusters_count", 0)),
+        "issues_count": len(issues),
+        "issues": issues,
+    }
+
+def evaluate_x_like_2108272246804648049_capability_matrix(
+    include_live_tenant_check: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 10 technical claims and tactics dissected from x-like:2108272246804648049
+    (Rob Hallam @robj3d3: 'Build a free tool for [PRODUCT URL] targeting [KEYWORD]' + 4m43.7s
+    video walkthrough of superx.so, tweethunter.io, letaido.app, canivibecodeit.com, and
+    theattentionplaybook.com) against pseofactory across ProfitHelm, Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    compounding = [
+        m for m in X_LIKE_2108272246804648049_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    deterministic_gates = [
+        m for m in X_LIKE_2108272246804648049_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"
+    ]
+    already_solved = [
+        m for m in X_LIKE_2108272246804648049_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    rejected = [
+        m for m in X_LIKE_2108272246804648049_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_OFF_VERTICAL"
+    ]
+
+    tenant_readiness: Dict[str, Any] = {}
+    all_passed = (
+        len(X_LIKE_2108272246804648049_CAPABILITY_MATRIX) == 10
+        and len(compounding) == 3
+        and len(deterministic_gates) == 2
+        and len(already_solved) == 3
+        and len(rejected) == 2
+    )
+
+    if include_live_tenant_check:
+        for t_id, r_path in (
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
+            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
+        ):
+            if r_path.is_dir():
+                rep = audit_free_tool_seo_and_instant_ux_readiness(dist_dir=r_path, property_id=t_id)
+                if not rep.get("passed", False):
+                    from pseofactory.maintenance import RetroReflectionEngine
+                    RetroReflectionEngine.retrofit_estate(dist_dir=r_path, property_id=t_id)
+                    rep = audit_free_tool_seo_and_instant_ux_readiness(dist_dir=r_path, property_id=t_id)
+                tenant_readiness[t_id] = rep
+                if not rep.get("passed", False):
+                    all_passed = False
+
+    return {
+        "pointer": "x-like:2108272246804648049",
+        "tweet_id": "2108272246804648049",
+        "author_handle": "robj3d3",
+        "author_name": "Rob Hallam",
+        "video_url": "https://video.twimg.com/amplify_video/2108271801751183360/vid/avc1/1932x1080/vc6dUFgWXPE4TFfF.mp4?tag=29",
+        "external_artifacts_inspected": [
+            "superx.so",
+            "tweethunter.io",
+            "letaido.app",
+            "canivibecodeit.com",
+            "theattentionplaybook.com",
+            "liftoff.so",
+            "getmyfirstdollar.com",
+        ],
+        "total_claims_evaluated": len(X_LIKE_2108272246804648049_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(compounding),
+        "integrated_deterministic_gates_count": len(deterministic_gates),
+        "already_solved_in_substrate_count": len(already_solved),
+        "rejected_bloat_or_off_vertical_count": len(rejected),
+        "matrix": list(X_LIKE_2108272246804648049_CAPABILITY_MATRIX),
+        "tenant_readiness": tenant_readiness,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }

@@ -957,7 +957,7 @@ class AutonomousLifecycleSupervisor:
         cycle_id = f"cycle_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         start_time = time.time()
 
-        if not dry_run:
+        if not dry_run and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
             try:
                 from pseofactory.gitops import reconcile_workspace_tracking_state
                 reconcile_workspace_tracking_state()

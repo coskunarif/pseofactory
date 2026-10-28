@@ -82,15 +82,22 @@ def _resolve_expected_title(candidate_spec: Dict[str, Any]) -> str:
     """
     Resolves the expected title exactly matching compiler.py title derivation.
     """
+    from pseofactory.contracts import normalize_statutory_acronym_casing
+
     title = str(candidate_spec.get("title") or "").strip()
     if not title:
         query = str(candidate_spec.get("query") or candidate_spec.get("primary_keyword") or "").strip()
         if query:
             words = [w.capitalize() for w in query.split() if w]
-            title = " ".join(words) + " Calculator and Statutory Analysis"
+            base_title = " ".join(words)
+            if re.search(r"\bCalculator$", base_title, flags=re.IGNORECASE):
+                title = f"{base_title} and Statutory Analysis"
+            else:
+                title = f"{base_title} Calculator and Statutory Analysis"
         else:
             title = "Proprietary Model Calculator and Statutory Analysis"
-    return title
+    title = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", title, flags=re.IGNORECASE)
+    return normalize_statutory_acronym_casing(title)
 
 
 def audit_rendered_asset(
@@ -1727,6 +1734,9 @@ __all__ = [
     "evaluate_x_like_2110401032035709427_capability_matrix",
     "X_LIKE_2107194110046060952_CAPABILITY_MATRIX",
     "evaluate_x_like_2107194110046060952_capability_matrix",
+    "X_LIKE_2108272246804648049_CAPABILITY_MATRIX",
+    "audit_free_tool_seo_and_instant_ux_readiness",
+    "evaluate_x_like_2108272246804648049_capability_matrix",
 ]
 
 
@@ -1742,6 +1752,22 @@ from pseofactory.verifier import (
     evaluate_x_like_2102328294410461564_capability_matrix,
     evaluate_x_like_2102358751290236980_capability_matrix,
     evaluate_x_like_2107194110046060952_capability_matrix,
+    evaluate_x_like_2109219955271196726_capability_matrix,
+    evaluate_x_like_2110401032035709427_capability_matrix,
+)
+
+from pseofactory.verifier import (
+    X_LIKE_2102328294410461564_CAPABILITY_MATRIX,
+    X_LIKE_2102358751290236980_CAPABILITY_MATRIX,
+    X_LIKE_2108272246804648049_CAPABILITY_MATRIX,
+    X_LIKE_2109219955271196726_CAPABILITY_MATRIX,
+    X_LIKE_2110401032035709427_CAPABILITY_MATRIX,
+    audit_aeo_geo_three_plane_readiness,
+    audit_estate_technical_seo_and_cannibalization,
+    audit_free_tool_seo_and_instant_ux_readiness,
+    evaluate_x_like_2102328294410461564_capability_matrix,
+    evaluate_x_like_2102358751290236980_capability_matrix,
+    evaluate_x_like_2108272246804648049_capability_matrix,
     evaluate_x_like_2109219955271196726_capability_matrix,
     evaluate_x_like_2110401032035709427_capability_matrix,
 )

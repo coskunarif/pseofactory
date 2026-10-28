@@ -1895,6 +1895,8 @@ def _normalize_title_50_60(
     clean = re.sub(r"\b(Section|Form)(\d+)\b", r"\1 \2", clean, flags=re.IGNORECASE)
     clean = re.sub(r"\s+", " ", clean)
     clean = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", clean, flags=re.IGNORECASE)
+    from pseofactory.contracts import normalize_statutory_acronym_casing
+    clean = normalize_statutory_acronym_casing(clean)
     suffix = f" | {brand}"
     if clean.lower().endswith(suffix.lower()):
         base = clean[: -len(suffix)].strip(" |-:")
@@ -4099,12 +4101,28 @@ def compile_remediation_overlay_spec(
     query_clean = re.sub(r"\bk[\s-]+1\b", "K-1", query_clean, flags=re.IGNORECASE)
     query_clean = re.sub(r"\bw[\s-]+([249])\b", r"W-\1", query_clean, flags=re.IGNORECASE)
 
-    _upper_tokens = {"irc", "irs", "rap", "ibr", "pslf", "paye", "icr", "agi", "saas", "gaap", "r&d", "roi", "ebitda", "cbam", "tcja", "qsbs", "gvwr", "suv", "ev", "awd", "4wd", "4x4", "xl", "xlt", "gmc"}
+    _upper_tokens = {
+        "irc", "irs", "rap", "ibr", "pslf", "paye", "icr", "agi", "saas", "gaap",
+        "r&d", "roi", "ebitda", "cbam", "tcja", "qsbs", "gvwr", "suv", "ev", "awd",
+        "4wd", "4x4", "xl", "xlt", "gmc", "cmmc", "c3pao", "3pao", "hipaa", "hitrust",
+        "csf", "iso", "iec", "nist", "sprs", "dfars", "pci", "dss", "qsa", "roc",
+        "asv", "soc", "ssae", "aicpa", "grc", "phi", "poa&m", "poam", "plus", "mfs",
+        "mfj", "idr", "obbba", "hea", "tila", "apr", "apy", "hysa", "fica", "seca",
+        "niit", "ftb",
+    }
 
     def _cap_word(w: str) -> str:
         wl = w.lower()
         if wl == "saas":
             return "SaaS"
+        if wl == "fedramp":
+            return "FedRAMP"
+        if wl == "ephi":
+            return "ePHI"
+        if wl in ("poa&m", "poam"):
+            return "POA&M"
+        if wl in ("e1", "i1", "r2", "v11"):
+            return wl
         if wl == "of":
             return "of"
         if wl in _upper_tokens:
@@ -4117,6 +4135,8 @@ def compile_remediation_overlay_spec(
     heading_label = " ".join(words) if words else ("Title IV Repayment Calculator" if resolved_tenant == "prexvo" else "Statutory Tax Calculator")
     heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
     heading_label = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", heading_label)
+    from pseofactory.contracts import normalize_statutory_acronym_casing
+    heading_label = normalize_statutory_acronym_casing(heading_label)
 
     grouped_queries_list: List[str] = []
     if original_raw_query and "site:" not in original_raw_query.lower():

@@ -1261,13 +1261,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         raw_slug = re.sub(r"[^a-z0-9]+", "-", str(slug_src).lower()).strip("-")
     slug = raw_slug
 
-    title = str(candidate_spec.get("title") or "").strip()
-    if not title:
-        if query:
-            words = [w.capitalize() for w in query.split() if w]
-            title = " ".join(words) + " Calculator and Statutory Analysis"
-        else:
-            title = "Proprietary Model Calculator and Statutory Analysis"
+    from pseofactory.audit import _resolve_expected_title
+    title = _resolve_expected_title(candidate_spec)
 
     model_name = str(
         candidate_spec.get("model_name")

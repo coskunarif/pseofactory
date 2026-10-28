@@ -3911,7 +3911,8 @@ class MaintenanceLifecycle:
                         sync_tenant_test_isolation_guards,
                     )
                     sync_tenant_test_isolation_guards(adapter.repo_path)
-                    reconcile_workspace_tracking_state(untrack_agy_runs=True)
+                    if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+                        reconcile_workspace_tracking_state(untrack_agy_runs=True)
                 except Exception:
                     pass
                 if (Path(adapter.repo_path) / "functions" / "r").is_dir():
@@ -5445,6 +5446,10 @@ def _needs_page_structure_geo_normalization(
             )
         ):
             return True
+
+    from pseofactory.contracts import detect_zero_signup_instant_result_issues
+    if detect_zero_signup_instant_result_issues(html_content, require_ssr_output=False):
+        return True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
     inferred_tenant = (
@@ -7001,6 +7006,43 @@ def _normalize_page_structure_and_geo_parity(
                         if is_tool_route and related_apps and not n.get("isRelatedTo"):
                             n["isRelatedTo"] = related_apps
                             mod_g = True
+                    if "HowTo" in nt_list:
+                        ht_name = str(n.get("name") or "")
+                        if re.search(r"^How to Calculate\s+.+\bCalculator(?:\s+202\d|\s+Engine|\s+Model|\s+Analysis\s+Model)?\s*$", ht_name, re.IGNORECASE):
+                            cleaned_ht_name = re.sub(
+                                r"\s+Calculator(?:\s+202\d|\s+Engine|\s+Model|\s+Analysis\s+Model)?\s*$",
+                                "",
+                                ht_name,
+                                flags=re.IGNORECASE,
+                            ).strip()
+                            if cleaned_ht_name and cleaned_ht_name != ht_name:
+                                n["name"] = cleaned_ht_name
+                                mod_g = True
+                        ht_desc = str(n.get("description") or "")
+                        if re.search(r"\bcomputing\s+[^.]*?\bCalculator\b", ht_desc, re.IGNORECASE):
+                            cleaned_ht_desc = re.sub(
+                                r"(\bcomputing\s+.+?)\s+Calculator(?:\s+202\d|\s+Engine|\s+Model)?(?=\s+under\b|\.)",
+                                r"\1",
+                                ht_desc,
+                                flags=re.IGNORECASE,
+                            )
+                            if cleaned_ht_desc != ht_desc:
+                                n["description"] = cleaned_ht_desc
+                                mod_g = True
+                    from pseofactory.contracts import normalize_statutory_acronym_casing
+                    for str_field in ("name", "headline", "description"):
+                        if isinstance(n.get(str_field), str):
+                            norm_f = normalize_statutory_acronym_casing(n[str_field])
+                            if norm_f != n[str_field]:
+                                n[str_field] = norm_f
+                                mod_g = True
+                    if isinstance(n.get("itemListElement"), list):
+                        for il_item in n["itemListElement"]:
+                            if isinstance(il_item, dict) and isinstance(il_item.get("name"), str):
+                                norm_il = normalize_statutory_acronym_casing(il_item["name"])
+                                if norm_il != il_item["name"]:
+                                    il_item["name"] = norm_il
+                                    mod_g = True
 
                 if not stamped_lang and isinstance(g_nodes[0], dict):
                     g_nodes[0]["inLanguage"] = "en-US"
@@ -7208,6 +7250,12 @@ def _normalize_page_structure_and_geo_parity(
         if disc_links:
             updated = updated.replace("</head>", "\n".join(disc_links) + "\n</head>", 1)
             changed = True
+
+    from pseofactory.contracts import normalize_statutory_acronym_casing
+    ac_updated = normalize_statutory_acronym_casing(updated)
+    if ac_updated != updated:
+        updated = ac_updated
+        changed = True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
     recon_html, recon_repairs = TruthReconciliationEngine.reconcile_html_truth(
@@ -9027,6 +9075,12 @@ class RetroReflectionEngine:
                 "loophole" in ov_s_low
                 and "repayment options comparing 10% idr" in m_val.lower()
             )
+            or bool(
+                re.search(
+                    r"\b(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b",
+                    ov_body_dump,
+                )
+            )
         ):
             return True
         return False
@@ -9405,6 +9459,8 @@ class RetroReflectionEngine:
                     or "refinance-break-even-calculator/): Calculate 2026 Student Loan Refinance Break-Even Calculator under 225%" in txt
                     or "icr-repayment-calculator/): Calculate 2026 ICR Repayment Calculator under 225%" in txt
                     or "ibr-hardship-cap-calculator/): Calculate 2026 IBR Hardship Cap & Partial Financial Hardship Calculator under 225%" in txt
+                    or "Calculator Calculator" in txt
+                    or bool(re.search(r"\b(?:Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b", txt))
                     or bool(detect_llms_txt_issues(txt))
                 ):
                     return True
@@ -9456,11 +9512,15 @@ class RetroReflectionEngine:
         canonical_base: Optional[str] = None,
     ) -> List[str]:
         """Synchronizes llms.txt, llms-full.txt, and catalog.json with actual retrofitted HTML tool titles, descriptions, and quick-answers."""
-        from pseofactory.contracts import detect_sentence_truncation_issues
+        from pseofactory.contracts import (
+            detect_sentence_truncation_issues,
+            normalize_statutory_acronym_casing,
+        )
 
         def _clean_non_math_dashes(val_str: str) -> str:
             s = val_str.replace("\u2014", ": ").replace("\u2013", " to ")
-            return re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", s).strip()
+            s = re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", s).strip()
+            return normalize_statutory_acronym_casing(s)
 
         updated_files: List[str] = []
         tools_dir = dist_dir / "tools"
@@ -9592,7 +9652,11 @@ class RetroReflectionEngine:
                 )
 
                 def _fix_llms_bullet(m: re.Match) -> str:
-                    b_title, b_url, b_sum = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+                    b_title, b_url, b_sum = (
+                        normalize_statutory_acronym_casing(m.group(1).strip()),
+                        m.group(2).strip(),
+                        normalize_statutory_acronym_casing(m.group(3).strip()),
+                    )
                     slug_m = re.search(r"/tools/([^/?#]+)/?$", b_url)
                     if slug_m:
                         s_key = slug_m.group(1)
@@ -9600,7 +9664,7 @@ class RetroReflectionEngine:
                             clean_d = tool_meta[s_key]["description"]
                             if clean_d:
                                 return f"- [{b_title}]({b_url}): {clean_d}"
-                    return m.group(0)
+                    return f"- [{b_title}]({b_url}): {b_sum}"
 
                 new_llms = re.sub(
                     r"^- \[([^\]]+)\]\(([^)]+)\):\s*(.+)$",
@@ -9870,6 +9934,19 @@ class RetroReflectionEngine:
                         )
             except Exception:
                 pass
+
+        for aux_rel in ("feed.xml", "tools/index.html"):
+            aux_p = dist_dir / aux_rel
+            if aux_p.is_file():
+                try:
+                    raw_aux = aux_p.read_text(encoding="utf-8", errors="ignore")
+                    norm_aux = normalize_statutory_acronym_casing(raw_aux)
+                    if norm_aux != raw_aux:
+                        aux_p.write_text(norm_aux, encoding="utf-8")
+                        if aux_rel not in updated_files:
+                            updated_files.append(aux_rel)
+                except Exception:
+                    pass
 
         return updated_files
 
