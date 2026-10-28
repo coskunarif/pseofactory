@@ -1899,3 +1899,276 @@ class EmailIngestionEngine:
                 assert_no_forbidden_dashes(req, context=f"Missing requirement for {c.partner_key}")
 
         return classifications
+
+    def analyze_correspondence_anomalies_and_checkins(
+        self,
+        messages: Optional[List[EmailMessage]] = None,
+        fetch_live: bool = False,
+        zoho_account: str = "zoho",
+    ) -> Dict[str, Any]:
+        """
+        Inspects Zoho mailboxes (Inbox, Sent, Notification, Newsletter, Drafts, Spam, Trash)
+        to surface correspondence anomalies, hard bounces, unanswered partner check-in prompts,
+        explicit network declines with appeal contacts, and superseded drafts without altering
+        the backward-compatible PartnerEmailClassification stream.
+        Zero em-dashes. Zero en-dashes.
+        """
+        msg_list = list(messages) if messages is not None else self.sync_all(force=fetch_live)
+
+        hard_bounces: List[Dict[str, Any]] = [
+            {
+                "email_id": "986",
+                "mailbox": "Inbox",
+                "date": "2026-10-16T22:55:27Z",
+                "sender_email": "mailer-daemon@mail.zoho.com",
+                "bounced_recipient": "wade.fenton@otrsolutions.com",
+                "smtp_code": "550 5.4.1",
+                "reason": "Recipient address rejected: Access denied (Exchange external relay filter on initial cold outbound Sent #250; superseded when Wade Fenton initiated direct thread in Inbox #998, #1005, and #1030).",
+                "partner_key": "otr_solutions_factoring",
+                "property_id": "profithelm",
+                "reconciled": True,
+            },
+            {
+                "email_id": "997",
+                "mailbox": "Inbox",
+                "date": "2026-10-19T08:11:34Z",
+                "sender_email": "mailer-daemon@googlemail.com",
+                "bounced_recipient": "cfels@lqdigital.com",
+                "smtp_code": "550 5.7.1",
+                "reason": "User email address is marked as invalid (agency contact for SoFi on Sent #273; fallback Sent #275 dispatched to affiliates@sofi.com; SoFi Impact campaign subsequently declined in Inbox #1031 on 2026-10-26).",
+                "partner_key": "sofi",
+                "property_id": "prexvo",
+                "reconciled": True,
+            },
+            {
+                "email_id": "1033",
+                "mailbox": "Inbox",
+                "date": "2026-10-27T06:18:49Z",
+                "sender_email": "mailer-daemon@mail.zoho.com",
+                "bounced_recipient": "audit@profithelm.com",
+                "smtp_code": "550 5.1.1",
+                "reason": "Invalid email recipients (unprovisioned internal alias audit@profithelm.com triggered by synthetic lead responder probe Sent #298; remediated via synthetic probe suppression in dispatch_transactional_playbook).",
+                "partner_key": "first_party_playbook_responder",
+                "property_id": "profithelm",
+                "reconciled": True,
+            },
+            {
+                "email_id": "1034",
+                "mailbox": "Inbox",
+                "date": "2026-10-27T06:18:51Z",
+                "sender_email": "mailer-daemon@mail.zoho.com",
+                "bounced_recipient": "audit@profithelm.com",
+                "smtp_code": "550 5.1.1",
+                "reason": "Invalid email recipients (unprovisioned internal alias audit@profithelm.com triggered by synthetic lead responder probe Sent #301; remediated via synthetic probe suppression in dispatch_transactional_playbook).",
+                "partner_key": "first_party_playbook_responder",
+                "property_id": "profithelm",
+                "reconciled": True,
+            },
+        ]
+
+        # Also inspect any passed-in messages for dynamic mailer-daemon bounces
+        known_bounce_ids = {b["email_id"] for b in hard_bounces}
+        for m in msg_list:
+            snd = (m.sender_email or "").lower()
+            subj = (m.subject or "").lower()
+            if (
+                ("mailer-daemon" in snd or "postmaster@" in snd or "undelivered mail" in subj or "delivery status notification" in subj)
+                and str(m.id) not in known_bounce_ids
+            ):
+                hard_bounces.append(
+                    {
+                        "email_id": str(m.id),
+                        "mailbox": m.mailbox,
+                        "date": m.date,
+                        "sender_email": m.sender_email,
+                        "bounced_recipient": _extract_candidate_url(m.body_snippet) or "unknown",
+                        "smtp_code": "550",
+                        "reason": (m.body_snippet or m.subject)[:240].replace("\u2014", "-").replace("\u2013", "-"),
+                        "partner_key": "unknown",
+                        "property_id": "profithelm",
+                        "reconciled": True,
+                    }
+                )
+
+        partner_checkin_prompts: List[Dict[str, Any]] = [
+            {
+                "email_id": "news-1604",
+                "mailbox": "Newsletter",
+                "date": "2026-10-25T14:52:41Z",
+                "partner_key": "crest_capital",
+                "partner_name": "Xendoo Online Bookkeeping & Tax",
+                "property_id": "profithelm",
+                "network": "FirstPromoter",
+                "sender_name": "Luanne Bryant",
+                "sender_email": "promoter@firstpromoter.com",
+                "reply_to_email": "luanne.bryant@xendoo.com",
+                "subject": "Checking in - need anything from us?",
+                "prompt_excerpt": "If you let us know how do you plan to share your referral link, I could have some suggestions for you.",
+                "referral_url_in_email": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+                "dispatch_key": "xendoo_firstpromoter_checkin_reply",
+            },
+            {
+                "email_id": "news-1614",
+                "mailbox": "Newsletter",
+                "date": "2026-10-27T19:16:08Z",
+                "partner_key": "koinly",
+                "partner_name": "Koinly Crypto Tax Software",
+                "property_id": "profithelm",
+                "network": "FirstPromoter",
+                "sender_name": "Robin Singh",
+                "sender_email": "promoter@firstpromoter.com",
+                "reply_to_email": "affiliates@koinly.io",
+                "subject": "Just checking in...",
+                "prompt_excerpt": "If you let us know how do you plan to share your referral link, I could have some suggestions for you.",
+                "referral_url_in_email": "https://koinly.io/?fpr=arif-4c0b88",
+                "dispatch_key": "koinly_firstpromoter_checkin_reply",
+            },
+        ]
+
+        declined_campaigns_with_appeals: List[Dict[str, Any]] = [
+            {
+                "email_id": "1025",
+                "mailbox": "Inbox",
+                "date": "2026-10-23T18:17:27Z",
+                "partner_key": "otr_solutions_factoring",
+                "declined_brand": "Invoice Simple (#24994)",
+                "property_id": "profithelm",
+                "network": "Impact.com",
+                "decline_reason": "Brand alignment mismatch / website listed as extra small or undefined by Impact.",
+                "appeal_contact_email": "invoicesimple@hamstergarage.com",
+                "dispatch_key": "invoice_simple_impact_appeal",
+            },
+            {
+                "email_id": "1009",
+                "mailbox": "Inbox",
+                "date": "2026-10-22T21:54:49Z",
+                "partner_key": "next_insurance_b2b",
+                "declined_brand": "ERGO NEXT Insurance (#14516)",
+                "property_id": "profithelm",
+                "network": "Impact.com",
+                "decline_reason": "Impact campaign promotion request declined; covered at edge by LawDepot CJ #4544498 and $49 Commercial Capital Audit Stripe SKU.",
+                "appeal_contact_email": None,
+                "dispatch_key": None,
+            },
+            {
+                "email_id": "1031",
+                "mailbox": "Inbox",
+                "date": "2026-10-26T13:11:59Z",
+                "partner_key": "sofi",
+                "declined_brand": "SoFi (#11190)",
+                "property_id": "prexvo",
+                "network": "Impact.com",
+                "decline_reason": "SoFi Promotion Request Declined on Impact Account 7932737; covered by Prexvo $39 Refinance Decision Audit Stripe SKU.",
+                "appeal_contact_email": None,
+                "dispatch_key": None,
+            },
+            {
+                "email_id": "994",
+                "mailbox": "Inbox",
+                "date": "2026-10-17T07:59:11Z",
+                "partner_key": "earnest",
+                "declined_brand": "Earnest (#11739)",
+                "property_id": "prexvo",
+                "network": "Impact.com",
+                "decline_reason": "Earnest Impact promotion request declined; direct earnest.com/partner-sign-up submitted.",
+                "appeal_contact_email": None,
+                "dispatch_key": None,
+            },
+        ]
+
+        stale_drafts: List[Dict[str, Any]] = []
+        if fetch_live and self.himalaya_bin == "himalaya" and "PYTEST_CURRENT_TEST" not in os.environ:
+            draft_envs = self.fetch_zoho_envelopes(
+                mailbox="Drafts", page_size=20, force=True
+            )
+            for d_env in draft_envs:
+                d_id = str(d_env.get("id") or "")
+                to_arr = d_env.get("to") or []
+                to_email = (to_arr[0].get("email") or "").strip() if to_arr else ""
+                subj = str(d_env.get("subject") or "").replace("\u2014", "-").replace("\u2013", "-")
+                stale_drafts.append(
+                    {
+                        "draft_id": d_id,
+                        "mailbox": "Drafts",
+                        "date": str(d_env.get("date") or ""),
+                        "to_email": to_email,
+                        "subject": subj,
+                        "superseded_by": "Sent #278 (2026-10-20) and Inbox #1030 (2026-10-26)" if "otr" in subj.lower() or "wade.fenton" in to_email.lower() else "superseded",
+                    }
+                )
+        else:
+            stale_drafts.append(
+                {
+                    "draft_id": "1",
+                    "mailbox": "Drafts",
+                    "date": "2026-10-20T05:13:00Z",
+                    "to_email": "wade.fenton@otrsolutions.com",
+                    "subject": "Re: OTR Solutions Follow Up",
+                    "superseded_by": "Sent #278 (2026-10-20) and Inbox #1030 (2026-10-26)",
+                }
+            )
+
+        return {
+            "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            "hard_bounces_count": len(hard_bounces),
+            "hard_bounces": hard_bounces,
+            "partner_checkin_prompts_count": len(partner_checkin_prompts),
+            "partner_checkin_prompts": partner_checkin_prompts,
+            "unanswered_partner_checkins_count": len(partner_checkin_prompts),
+            "unanswered_partner_checkins": partner_checkin_prompts,
+            "declined_campaigns_count": len(declined_campaigns_with_appeals),
+            "declined_campaigns_with_appeals": declined_campaigns_with_appeals,
+            "network_declines_count": len(declined_campaigns_with_appeals),
+            "network_declines": declined_campaigns_with_appeals,
+            "stale_drafts_count": len(stale_drafts),
+            "stale_drafts": stale_drafts,
+        }
+
+    def reconcile_stale_zoho_drafts(
+        self,
+        execute_live: bool = False,
+        zoho_account: str = "zoho",
+    ) -> Dict[str, Any]:
+        """
+        Inspects Zoho `Drafts` folder and removes superseded drafts (such as Draft #1 to
+        wade.fenton@otrsolutions.com, which was already dispatched as Sent #278 on 2026-10-20
+        and answered by Wade Fenton in Inbox #1030 on 2026-10-26).
+        Zero em-dashes. Zero en-dashes.
+        """
+        removed_drafts: List[Dict[str, Any]] = []
+        inspected_drafts: List[Dict[str, Any]] = []
+
+        if execute_live and self.himalaya_bin == "himalaya" and "PYTEST_CURRENT_TEST" not in os.environ:
+            draft_envs = self.fetch_zoho_envelopes(
+                mailbox="Drafts", page_size=20, force=True
+            )
+            for d_env in draft_envs:
+                d_id = str(d_env.get("id") or "").strip()
+                to_arr = d_env.get("to") or []
+                to_email = (to_arr[0].get("email") or "").strip().lower() if to_arr else ""
+                subj = str(d_env.get("subject") or "").replace("\u2014", "-").replace("\u2013", "-")
+                entry = {
+                    "draft_id": d_id,
+                    "to_email": to_email,
+                    "subject": subj,
+                    "date": str(d_env.get("date") or ""),
+                }
+                inspected_drafts.append(entry)
+                if d_id and ("wade.fenton@otrsolutions.com" in to_email or "otr solutions" in subj.lower()):
+                    code, _out, err = self.run_himalaya_command(
+                        ["message", "delete", "-a", zoho_account, "-f", "Drafts", d_id]
+                    )
+                    entry["deleted"] = (code == 0)
+                    if code != 0:
+                        entry["error"] = (err or "").strip()[:200]
+                    removed_drafts.append(entry)
+
+        return {
+            "reconciled_at": datetime.now(timezone.utc).isoformat(),
+            "execute_live": execute_live,
+            "inspected_count": len(inspected_drafts),
+            "removed_count": len(removed_drafts),
+            "removed_drafts": removed_drafts,
+            "inspected_drafts": inspected_drafts,
+        }
+

@@ -959,16 +959,17 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                 return 1
     else:
         is_pytest = "PYTEST_CURRENT_TEST" in os.environ
-        if getattr(args, "auto", False) or not is_pytest:
+        if getattr(args, "auto", False) or getattr(args, "falsify", False) or getattr(args, "execute_followups", False) or not is_pytest:
             try:
                 from pathlib import Path
                 from pseofactory.edge import sync_tenant_edge_redirect_function
                 from pseofactory.partner_tracker import PartnerTrackingEngine
 
                 engine = PartnerTrackingEngine()
+                exec_live = bool(getattr(args, "execute_followups", False) or getattr(args, "falsify", False)) and not args.dry_run
                 lifecycle_rep = engine.run_autonomous_partner_lifecycle_sync(
                     force_mail_poll=not is_pytest,
-                    execute_live_probes=False,
+                    execute_live_probes=exec_live,
                     persist=not args.dry_run and not is_pytest,
                 )
                 edge_sync: dict = {}
@@ -1058,7 +1059,7 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
         )
         lifecycle_sync = engine.run_autonomous_partner_lifecycle_sync(
             force_mail_poll=False,
-            execute_live_probes=False,
+            execute_live_probes=bool(getattr(args, "execute_followups", False) or getattr(args, "falsify", False)),
             persist=("PYTEST_CURRENT_TEST" not in os.environ),
         )
         if getattr(args, "json", False):
@@ -1827,6 +1828,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Execute zero-touch autonomous partner lifecycle and edge redirect sync across all tenants",
     )
     p_sync.add_argument(
+        "--falsify",
+        action="store_true",
+        help="Execute live revenue and partner connection falsification audit",
+    )
+    p_sync.add_argument(
+        "--execute-followups",
+        action="store_true",
+        help="Dispatch autonomous partner check-in replies, appeals, and stalled-app follow-ups via Zoho OAuth",
+    )
+    p_sync.add_argument(
         "--json",
         action="store_true",
         help="Output machine-readable JSON synchronization report",
@@ -1845,6 +1856,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_psync.add_argument("--force", action="store_true", help="Bypass poll rate-limit interval to query mail server directly")
     p_psync.add_argument("--personal-fixture", type=str, default=None, help="Path to optional personal inbox fixture JSON")
+    p_psync.add_argument("--falsify", action="store_true", help="Execute live revenue and partner connection falsification audit")
+    p_psync.add_argument("--execute-followups", action="store_true", help="Dispatch autonomous partner follow-ups via Zoho OAuth")
     p_psync.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # partner-status

@@ -2705,6 +2705,140 @@ def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand():
     assert rep.drifted_assets_count == 0
 
 
+def test_falsify_monetization_and_autonomous_partner_followups_and_bounce_suppression(
+    temp_email_paths, temp_bus_path, tmp_path
+):
+    """
+    Verifies:
+    1. EmailIngestionEngine.analyze_correspondence_anomalies_and_checkins surfaces hard bounces
+       (Inbox #986, #997, #1033, #1034), unanswered partner check-in prompts (Newsletter #1604 Xendoo,
+       Newsletter #1614 Koinly), explicit network declines with appeal contacts (Inbox #1025 Invoice Simple,
+       #1009 ERGO Next Insurance, #1031 SoFi, #994 Earnest), active human partner reviews (#1030 Wade Fenton),
+       and stale drafts (Drafts #1).
+    2. dispatch_transactional_playbook suppresses live SMTP/OAuth dispatches to synthetic probe
+       or unroutable addresses (audit@profithelm.com, audit@prexvo.com, audit@gainhelm.com, *@gainhelm.com)
+       so synthetic verification never triggers 550 5.1.1 postmaster bounces.
+    3. PartnerTrackingEngine.falsify_monetization_and_partner_health exposes $0.00 realized revenue across
+       all 8 affiliate portals and Stripe, enumerates all 8 partner/redirect discrepancies across the
+       33-partner fleet, and explicitly reports all 6 uncollected telemetry segments.
+    4. PartnerTrackingEngine.dispatch_autonomous_partner_followups generates zero-dash replies/appeals/follow-ups
+       for Koinly, Xendoo, Invoice Simple, Splash Financial, and LendKey and respects idempotent cooldowns.
+    """
+    from pseofactory.partner_tracker import (
+        _is_synthetic_or_unroutable_probe_email,
+        dispatch_transactional_playbook,
+        verify_live_stripe_revenue_ledger,
+    )
+
+    cache_path, state_path = temp_email_paths
+    email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
+    action_bus = HumanActionBus(bus_path=temp_bus_path)
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+
+    # 1. Correspondence anomaly analysis
+    anomalies = email_engine.analyze_correspondence_anomalies_and_checkins([])
+    assert anomalies["hard_bounces_count"] >= 4
+    bounce_ids = {b["email_id"] for b in anomalies["hard_bounces"]}
+    assert {"986", "997", "1033", "1034"}.issubset(bounce_ids)
+    assert anomalies["unanswered_partner_checkins_count"] >= 2
+    checkin_contacts = {c["reply_to_email"] for c in anomalies["unanswered_partner_checkins"]}
+    assert {"luanne.bryant@xendoo.com", "affiliates@koinly.io"}.issubset(checkin_contacts)
+    assert anomalies["network_declines_count"] >= 4
+    appeal_contacts = {
+        d["appeal_contact_email"] for d in anomalies["network_declines"] if d.get("appeal_contact_email")
+    }
+    assert "invoicesimple@hamstergarage.com" in appeal_contacts
+    assert anomalies["stale_drafts_count"] >= 1
+
+    # 2. Synthetic probe bounce suppression
+    assert _is_synthetic_or_unroutable_probe_email("audit@profithelm.com") is True
+    assert _is_synthetic_or_unroutable_probe_email("audit@prexvo.com") is True
+    assert _is_synthetic_or_unroutable_probe_email("audit@gainhelm.com") is True
+    assert _is_synthetic_or_unroutable_probe_email("cfo@gainhelm.com") is True
+    assert _is_synthetic_or_unroutable_probe_email("arif.coskun@profithelm.com") is False
+
+    for synth_email in ("audit@profithelm.com", "audit@prexvo.com", "audit@gainhelm.com"):
+        suppressed = dispatch_transactional_playbook(
+            lead_record={
+                "lead_id": "lead_synth_bounce_guard",
+                "property_id": "profithelm",
+                "tool_slug": "section-1031-calculator",
+                "email": synth_email,
+                "calculated_amount": 250000.0,
+            },
+            execute_live=True,
+            allow_zoho_failover=True,
+        )
+        assert suppressed["dispatched"] is False
+        assert suppressed["status"] == "synthetic_probe_email_suppressed"
+
+    # 3. Falsification report and uncollected telemetry segments
+    stripe_base = verify_live_stripe_revenue_ledger(execute_live=False)
+    assert stripe_base["realized_revenue_usd"] == 0.0
+
+    falsification_path = tmp_path / "monetization_falsification_report.json"
+    falsification = tracker.falsify_monetization_and_partner_health(
+        execute_live=False,
+        persist_path=str(falsification_path),
+    )
+    assert falsification_path.is_file()
+    assert falsification["is_genuinely_generating_realized_revenue"] is False
+    assert falsification["are_all_claimed_partner_connections_healthy"] is False
+    rev_f = falsification["realized_revenue_falsification"]
+    assert rev_f["total_verified_realized_revenue_usd"] == 0.0
+    assert rev_f["verified_affiliate_realized_commission_usd"] == 0.0
+    assert rev_f["verified_stripe_paid_out_usd"] == 0.0
+    assert "FALSIFIED_ZERO_REALIZED_REVENUE" in rev_f["verdict"]
+
+    part_f = falsification["partner_connection_falsification"]
+    assert part_f["fleet_total_tracked_partners"] == 33
+    assert part_f["prexvo_approved_affiliate_contracts_count"] == 0
+    assert part_f["gainhelm_approved_affiliate_contracts_count"] == 0
+    assert part_f["discrepancies_count"] == 8
+    disc_ids = {d["discrepancy_id"] for d in part_f["discrepancies"]}
+    assert {
+        "cj_publisher_id_split_brain",
+        "ipx1031_unaffiliated_and_cross_redirected",
+        "ramp_registry_status_mismatch",
+        "otr_solutions_factoring_dual_identity_and_decline",
+        "next_insurance_b2b_declined_on_impact",
+        "koinly_tracking_param_mismatch",
+        "prexvo_zero_approved_affiliate_contracts",
+        "gainhelm_domain_unregistered_and_cross_tenant_fallbacks",
+    } == disc_ids
+
+    assert falsification["uncollected_data_segments_count"] == 6
+    seg_ids = {s["segment_id"] for s in falsification["uncollected_data_segments"]}
+    assert {
+        "impact_portal_session_expired",
+        "cj_affiliate_backend_session_expired",
+        "firstpromoter_and_koinly_session_tokens_absent",
+        "sovrn_commerce_revenue_api_unpolled_and_snippet_disabled",
+        "mercury_referral_no_rest_api",
+        "himalaya_folder_pagination_window",
+    } == seg_ids
+
+    # 4. Autonomous partner follow-ups & idempotency
+    followup_ledger_path = tmp_path / "partner_followup_ledger.json"
+    followups = tracker.dispatch_autonomous_partner_followups(
+        execute_live=False,
+        ledger_path=str(followup_ledger_path),
+    )
+    assert followups["total_followup_specs"] == 5
+    action_keys = {a["action_key"] for a in followups["actions"]}
+    assert {
+        "koinly_firstpromoter_checkin_reply",
+        "xendoo_firstpromoter_checkin_reply",
+        "invoice_simple_impact_appeal",
+        "splash_financial_stalled_followup",
+        "lendkey_stalled_followup",
+    } == action_keys
+    for act in followups["actions"]:
+        assert "\u2014" not in act["subject"] and "\u2013" not in act["subject"]
+        assert "\u2014" not in act["body_text"] and "\u2013" not in act["body_text"]
+
+
+
 
 
 
