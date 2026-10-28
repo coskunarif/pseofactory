@@ -237,6 +237,32 @@ class TrendPipeline:
             remaining_budget = max(0.0, self.cycle_budget - elapsed)
 
             raw_meta = cand.metadata or {}
+            if (
+                self.db is not None
+                and hasattr(self.db, "get_connection")
+                and "longitudinal_series" not in raw_meta
+                and "five_year_series" not in raw_meta
+            ):
+                try:
+                    conn = self.db.get_connection()
+                    obs_rows = conn.execute(
+                        """
+                        SELECT observed_velocity FROM raw_crawl_observations
+                        WHERE normalized_query = ?
+                        ORDER BY observed_at ASC
+                        LIMIT 12;
+                        """,
+                        (norm_q,),
+                    ).fetchall()
+                    series_vals = [float(r["observed_velocity"]) for r in obs_rows]
+                    if len(series_vals) >= 2:
+                        if abs(series_vals[-1] - float(cand.velocity)) > 0.01:
+                            series_vals.append(float(cand.velocity))
+                        if len(series_vals) >= 3:
+                            raw_meta["longitudinal_series"] = series_vals
+                            cand.metadata = raw_meta
+                except Exception:
+                    pass
 
             # Upfront search intent cannibalization screening against existing catalog and GSC rankings
             cannibal_info = check_search_intent_cannibalization(

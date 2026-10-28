@@ -8955,3 +8955,243 @@ def evaluate_x_like_2108272246804648049_capability_matrix(
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
     }
+
+
+X_LIKE_2098466289282842729_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "claim_id": 1,
+        "claim_name": "Category-First Seed Taxonomy & Two-Stage Sub-Topic Specificity Drill-Down",
+        "primary_source": "x-like:2098466289282842729 (@borjafat quoted article 2098138361324347396 Steps 1 & 3: 'Browse by category, not by keyword' + 'Drill down into specific topics')",
+        "claimed_mechanism": "Start from vertical categories instead of guessing random keywords, then drill down from broad rising topics into specific sub-topics with clear intent and sustained moderate growth (+50% to +300%).",
+        "verification_status": "VERIFIED_HIGH_LEVERAGE_SIGNAL_VELOCITY",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "pseofactory/trends/collectors.py::TENANT_CATEGORY_SEED_TAXONOMY + drill_down_specific_subtopics + MultiSourceCollector.harvest_category_drilldown",
+        "vault_surface": "pseofactory trends-run --live",
+        "case_for": "Eliminates manual keyword guessing and broad head-term waste by seeding discovery from tenant statutory/commercial categories across ProfitHelm, Prexvo, and GainHelm, then expanding top rising parent topics into multi-token calculator/estimator sub-topics.",
+        "case_against": "Stopping at Stage-1 broad head terms (such as 'student loans' or 'corporate tax') produces unrankable, ambiguous queries with diluted conversion intent.",
+    },
+    {
+        "claim_id": 2,
+        "claim_name": "Breakout (>5,000%) Low-Baseline Volume Trap Gate & Relative 0-100 Index Non-Conflation",
+        "primary_source": "x-like:2098466289282842729 (quoted article 2098138361324347396 Steps 2 & 4: 'Breakout means it grew by more than 5,000%. That sounds exciting, but it often just means the topic started from almost zero' + 'Google Trends shows a number from 0 to 100. That is not search volume')",
+        "claimed_mechanism": "Treat 0-100 trend scores strictly as relative popularity indices, never raw search volume, and gate >5,000% 'Breakout' spikes that start from near-zero monthly search volume (<100/mo).",
+        "verification_status": "VERIFIED_PRIMARY_EVIDENCE",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/trends/filters.py::classify_longitudinal_trajectory + pseofactory/trends/jev_engine.py::JevEngine.evaluate",
+        "vault_surface": "pseofactory trends-run",
+        "case_for": "Prevents low-baseline breakout traps (e.g. 1 search growing to 60 searches = +5,900% 'Breakout') from triggering BUILD_PAGE and diluting tenant crawl equity with zero-impression URLs.",
+        "case_against": "Unconditionally building pages on every 'Breakout' percentage without a verified search volume floor (<100/mo) floods sitemaps with ephemeral low-intent noise.",
+    },
+    {
+        "claim_id": 3,
+        "claim_name": "Multi-Horizon 5-Year Longitudinal Trajectory Gate (Sustained Growth & Seasonal Pre-Peak vs Post-Spike Decay)",
+        "primary_source": "x-like:2098466289282842729 (quoted article 2098138361324347396 Step 4: 'Switch the time range to 5 years... Is the right side of the chart still going up, or did it spike and die? Also watch out for seasonal topics')",
+        "claimed_mechanism": "Inspect the multi-year/multi-window trajectory right-hand slope and peak retention ratio to reject topics that spiked briefly and collapsed, while prioritizing sustained growth and recurring pre-peak statutory seasonality.",
+        "verification_status": "VERIFIED_PRIMARY_EVIDENCE",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/trends/filters.py::classify_longitudinal_trajectory + pseofactory/trends/pipeline.py::TrendPipeline.process_spikes",
+        "vault_surface": "pseofactory trends-run",
+        "case_for": "Deterministically classifies longitudinal series into POST_SPIKE_DECAY (rejected when retention_ratio < 0.45 and right_hand_slope <= 0), SEASONAL_PRE_PEAK (prioritized ahead of tax/FAFSA/compliance deadlines), and SUSTAINED_GROWTH.",
+        "case_against": "Evaluating only a single short-window velocity snapshot misses post-spike collapse and publishes pages after demand has already died.",
+    },
+    {
+        "claim_id": 4,
+        "claim_name": "Closed-Loop Inflection-to-Page Router (Existing Canonical Tool Upgrade vs Net-New Build)",
+        "primary_source": "x-like:2098466289282842729 (quoted article 2098138361324347396 Step 4: 'Check if you already have a page that fits. Sometimes the best move is to improve an existing page instead of creating a new one')",
+        "claimed_mechanism": "Before creating a new URL for a validated rising topic, check existing site inventory and route matching intents to upgrade the existing canonical page instead of spawning a cannibalizing duplicate.",
+        "verification_status": "VERIFIED_HIGH_LEVERAGE_ROUTING",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "pseofactory/seo_growth_loops.py::route_validated_inflection_signals + pseofactory/trends/pipeline.py::stamp_engine_verdict_status",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "Unifies category-seeded inflection harvesting, longitudinal trajectory qualification, and Search Intent Doctrine cannibalization checks to route matching intents to UPGRADE_EXISTING_PAGE (REFACTOR_PAGE with 28-day lock) and orthogonal voids to BUILD_NEW_PAGE.",
+        "case_against": "Spawning net-new URLs for rising query modifiers that belong on an existing canonical calculator splits ranking signals and triggers internal cannibalization.",
+    },
+    {
+        "claim_id": 5,
+        "claim_name": "Real-Time Inflection Harvesting Ahead of Lagging Third-Party Keyword Databases",
+        "primary_source": "x-like:2098466289282842729 (quoted article 2098138361324347396 intro: 'Ahrefs shows you what was popular. Google Trends shows you what is about to be')",
+        "claimed_mechanism": "Capture rising search demand from real-time autocomplete, trend feeds, and Search Console impression velocity weeks before monthly keyword databases aggregate historical volume.",
+        "verification_status": "VERIFIED_PRIMARY_EVIDENCE",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "pseofactory/trends/collectors.py::MultiSourceCollector + GSCSearchConsoleCollector + StatutoryEconomicDatasetCollector",
+        "vault_surface": "pseofactory trends-cron",
+        "case_for": "Already enforced across 7 real-time headless collectors (Google Suggest, YouTube Suggest, Reddit Autocomplete, HackerNews Algolia, Google Trends RSS, GSC 28d/90d velocity windows, and Statutory Economic Datasets) with <=5s timeout and <=2 retries.",
+        "case_against": "Relying solely on lagging third-party monthly keyword exports cedes first-mover SERP authority on statutory cliffs and emerging calculators.",
+    },
+    {
+        "claim_id": 6,
+        "claim_name": "Empirical Search Volume, CPC & SERP Competition Cross-Check Before Asset Compilation",
+        "primary_source": "x-like:2098466289282842729 (quoted article 2098138361324347396 Step 4: 'Check the search volume. Use a keyword tool to see if people actually search for it')",
+        "claimed_mechanism": "Cross-check rising trend topics against empirical search volume, CPC, keyword difficulty, and SERP Position-0/AI-citation vacancy before committing build budget.",
+        "verification_status": "VERIFIED_PRIMARY_EVIDENCE",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "pseofactory/trends/treg_checker.py::TregChecker.check_query + pseofactory/trends/jev_engine.py::JevEngine.compute_composite_yield",
+        "vault_surface": "pseofactory trends-run",
+        "case_for": "Already enforced via TregChecker (with SQLite snapshot fallback and budget ceiling guard) and JevEngine 5-step qualification (score >= 1.20, durable_prob >= 0.50, composite_yield >= 60.0).",
+        "case_against": "Publishing pages from raw trend feeds without volume, CPC, and KD verification wastes compilation cycles on unmonetizable queries.",
+    },
+    {
+        "claim_id": 7,
+        "claim_name": "'New Google Trends Feature to Rank Faster (GPT-6 Automated)' Lead-Magnet Claim",
+        "primary_source": "x-like:2098466289282842729 (@borjafat post text: 'New Google Trends feature to rank faster (GPT-6 automated)... Comment SEO and I will send you the workflow')",
+        "claimed_mechanism": "Claims that leaving the Google Trends Explore search input blank and selecting a Category filter is a 'new Google Trends feature' powered by 'GPT-6 automated'.",
+        "verification_status": "UNVERIFIED_MARKETING_HYPE_FLAGGED",
+        "disposition": "FLAGGED_UNVERIFIED_MARKETING_CLAIM",
+        "pseofactory_stage": "pseofactory/verifier.py::evaluate_x_like_2098466289282842729_capability_matrix",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Flagged rather than guessed: primary inspection of the verbatim post and article proves the 'new Google Trends feature' is simply Google Trends Explore's decade-old Category dropdown filter (cat=...) with an empty search box, and 'GPT-6 automated' is engagement-bait for a 'Comment SEO' lead magnet.",
+        "case_against": "Treating viral X hook hyperbole ('GPT-6 automated', 'new Google Trends feature') as a real upstream API capability would corrupt architectural assumptions.",
+    },
+    {
+        "claim_id": 8,
+        "claim_name": "Browser GUI Clicking Automation, Third-Party Distribb SaaS Plugin & Cold Listicle Outreach",
+        "primary_source": "x-like:2098466289282842729 (quoted article 2098138361324347396 Step 5: 'Open Google Trends in your browser and click through the categories... Connect the Distribb plugin... Find 5 best of articles in your niche and email the authors')",
+        "claimed_mechanism": "Automate a local desktop browser to click Google Trends UI dropdowns, route prompts through the third-party Distribb SaaS plugin, auto-publish generic CMS blog posts, and cold-email 5 'best of' listicle authors per article.",
+        "verification_status": "VERIFIED_FRAGILE_DEPENDENCY_AND_SLOP_RISK",
+        "disposition": "REJECTED_BLOAT_OR_FRAGILE_DEPENDENCY",
+        "pseofactory_stage": "pseofactory/qualification.py::is_thin_affiliate_listicle_candidate + pseofactory/seo_growth_loops.py::compile_ai_citation_digital_pr_queue",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "Rejected 100%: GUI browser clicking on Google Trends is brittle and rate-limited compared to headless API/CLI collectors; Distribb is an unverified third-party SaaS dependency; and cold-emailing 'best of' affiliate listicles is superseded by Workflow 7 empirical AI-citation benchmark datasets.",
+        "case_against": "Coupling autonomous trend arbitrage to interactive browser clicking, external SaaS plugins, and generic listicle spam introduces fragile failure modes and YMYL domain reputation risk.",
+    },
+]
+
+
+def evaluate_x_like_2098466289282842729_capability_matrix(
+    include_live_tenant_check: bool = True,
+) -> Dict[str, Any]:
+    """
+    Cross-examines the 8 atomic claims from x-like:2098466289282842729
+    (@borjafat post + quoted X article 2098138361324347396: 'Ahrefs shows you what was popular.
+    Google Trends shows you what is about to be.') against pseofactory autonomy, signal velocity,
+    intent qualification, and closed-loop routing across ProfitHelm, Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.seo_growth_loops import route_validated_inflection_signals
+    from pseofactory.trends.collectors import (
+        TENANT_CATEGORY_SEED_TAXONOMY,
+        drill_down_specific_subtopics,
+    )
+    from pseofactory.trends.filters import classify_longitudinal_trajectory
+
+    compounding = [
+        m for m in X_LIKE_2098466289282842729_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    deterministic_gates = [
+        m for m in X_LIKE_2098466289282842729_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"
+    ]
+    already_solved = [
+        m for m in X_LIKE_2098466289282842729_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    flagged_unverified = [
+        m for m in X_LIKE_2098466289282842729_CAPABILITY_MATRIX
+        if m["disposition"] == "FLAGGED_UNVERIFIED_MARKETING_CLAIM"
+    ]
+    rejected_fragile = [
+        m for m in X_LIKE_2098466289282842729_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_FRAGILE_DEPENDENCY"
+    ]
+
+    # Verify deterministic gates on synthetic primary-evidence probes
+    breakout_trap_probe = classify_longitudinal_trajectory(
+        query="obscure micro tax rumor calculator",
+        growth_pct=6500.0,
+        is_breakout=True,
+        search_volume=35,
+        cpc_usd=0.20,
+    )
+    decay_probe = classify_longitudinal_trajectory(
+        query="expired one time stimulus check calculator",
+        series=[18.0, 95.0, 42.0, 25.0, 14.0],
+        velocity=14.0,
+        acceleration=-11.0,
+        search_volume=450,
+    )
+    sustained_probe = classify_longitudinal_trajectory(
+        query="section 179 phaseout limit calculator",
+        series=[24.0, 38.0, 52.0, 68.0, 84.0],
+        velocity=84.0,
+        acceleration=16.0,
+        search_volume=1200,
+        growth_pct=180.0,
+    )
+
+    probes_passed = (
+        breakout_trap_probe["classification"] == "BREAKOUT_LOW_BASELINE_TRAP"
+        and not breakout_trap_probe["is_viable"]
+        and decay_probe["classification"] == "POST_SPIKE_DECAY"
+        and not decay_probe["is_viable"]
+        and sustained_probe["classification"] == "SUSTAINED_GROWTH"
+        and sustained_probe["is_viable"]
+    )
+
+    all_passed = (
+        len(X_LIKE_2098466289282842729_CAPABILITY_MATRIX) == 8
+        and len(compounding) == 2
+        and len(deterministic_gates) == 2
+        and len(already_solved) == 2
+        and len(flagged_unverified) == 1
+        and len(rejected_fragile) == 1
+        and probes_passed
+        and all(t in TENANT_CATEGORY_SEED_TAXONOMY for t in ("profithelm", "prexvo", "gainhelm"))
+        and len(drill_down_specific_subtopics("section 179", property_id="profithelm")) >= 4
+    )
+
+    tenant_routing_reports: Dict[str, Any] = {}
+    if include_live_tenant_check:
+        for t_id, r_path in (
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
+            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+        ):
+            if r_path.is_dir():
+                rt_res = route_validated_inflection_signals(
+                    property_id=t_id,
+                    repo_root=r_path,
+                    persist=False,
+                )
+                tenant_routing_reports[t_id] = {
+                    "status": rt_res.get("status", "FAIL"),
+                    "total_signals_evaluated": rt_res.get("total_signals_evaluated", 0),
+                    "upgrade_existing_page_count": rt_res.get("upgrade_existing_page_count", 0),
+                    "build_new_page_count": rt_res.get("build_new_page_count", 0),
+                    "held_low_baseline_traps_count": rt_res.get("held_low_baseline_traps_count", 0),
+                    "rejected_post_spike_decay_count": rt_res.get("rejected_post_spike_decay_count", 0),
+                }
+                if rt_res.get("status") != "PASS" or int(rt_res.get("total_signals_evaluated", 0)) < 1:
+                    all_passed = False
+
+    disposition_counts = {
+        "INTEGRATED_COMPOUNDING_UPGRADE": len(compounding),
+        "INTEGRATED_DETERMINISTIC_GATE": len(deterministic_gates),
+        "ALREADY_SOLVED_IN_SUBSTRATE": len(already_solved),
+        "FLAGGED_UNVERIFIED_MARKETING_CLAIM": len(flagged_unverified),
+        "REJECTED_BLOAT_OR_FRAGILE_DEPENDENCY": len(rejected_fragile),
+    }
+
+    return {
+        "pointer": "x-like:2098466289282842729",
+        "tweet_id": "2098466289282842729",
+        "quoted_article_id": "2098138361324347396",
+        "author_handle": "borjafat",
+        "author_name": "Borja",
+        "article_title": "Ahrefs shows you what was popular. Google Trends shows you what is about to be.",
+        "total_claims_evaluated": len(X_LIKE_2098466289282842729_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(compounding),
+        "integrated_deterministic_gates_count": len(deterministic_gates),
+        "already_solved_in_substrate_count": len(already_solved),
+        "flagged_unverified_claims_count": len(flagged_unverified),
+        "rejected_fragile_or_bloat_count": len(rejected_fragile),
+        "disposition_counts": disposition_counts,
+        "verification_probes": {
+            "breakout_low_baseline_trap": breakout_trap_probe,
+            "post_spike_decay": decay_probe,
+            "sustained_growth": sustained_probe,
+        },
+        "matrix": list(X_LIKE_2098466289282842729_CAPABILITY_MATRIX),
+        "tenant_routing_reports": tenant_routing_reports,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }

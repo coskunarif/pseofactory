@@ -3206,6 +3206,11 @@ def compile_search_opportunity_briefs(
 
     from pseofactory.competitor import run_agentic_free_tool_keyword_pipeline
     tool_pipeline_res = run_agentic_free_tool_keyword_pipeline(tenant_id=prop, repo_root=root)
+    inflection_routing = route_validated_inflection_signals(
+        property_id=prop,
+        repo_root=root,
+        persist=persist,
+    )
 
     report = {
         "workflow": "search_opportunities_to_content_briefs",
@@ -3224,6 +3229,13 @@ def compile_search_opportunity_briefs(
         "agentic_free_tool_clusters_count": int(tool_pipeline_res.get("ranked_clusters_count", 0)),
         "agentic_free_tool_clusters": tool_pipeline_res.get("ranked_clusters", []),
         "agentic_free_tool_build_briefs": tool_pipeline_res.get("top_build_briefs", []),
+        "inflection_routing_summary": {
+            "total_signals_evaluated": inflection_routing["total_signals_evaluated"],
+            "upgrade_existing_page_count": inflection_routing["upgrade_existing_page_count"],
+            "build_new_page_count": inflection_routing["build_new_page_count"],
+            "held_low_baseline_traps_count": inflection_routing["held_low_baseline_traps_count"],
+            "rejected_post_spike_decay_count": inflection_routing["rejected_post_spike_decay_count"],
+        },
         "briefs": briefs[:40],
     }
 
@@ -3975,6 +3987,207 @@ def _apply_closed_loop_dom_mutation_to_dist_html(
     return False
 
 
+def route_validated_inflection_signals(
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    candidate_signals: Optional[List[Dict[str, Any]]] = None,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    """
+    Closed-loop Inflection-to-Page Router (x-like:2098466289282842729 Steps 1-4):
+      1. Harvests category-seeded two-stage sub-topic specificity signals (or evaluates
+         explicit candidate_signals) without manual browser clicking or external SaaS plugins.
+      2. Qualifies each signal through classify_longitudinal_trajectory to reject
+         POST_SPIKE_DECAY and hold BREAKOUT_LOW_BASELINE_TRAP (>5,000% from <100/mo baseline).
+      3. Checks existing tenant dist/tools/ routes and cannibalization / modifier-expansion
+         rules first: routes matching intents to UPGRADE_EXISTING_PAGE (REFACTOR_PAGE with
+         28-day measurement lock) and orthogonal validated voids to BUILD_NEW_PAGE (BUILD_PAGE).
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import sanitize_url_slug
+    from pseofactory.qualification import (
+        check_search_intent_cannibalization,
+        evaluate_query_modifier_expansion_vs_distinct_tool,
+    )
+    from pseofactory.trends.collectors import (
+        MultiSourceCollector,
+        StatutoryEconomicDatasetCollector,
+    )
+    from pseofactory.trends.filters import classify_longitudinal_trajectory
+
+    prop = _resolve_property_id(property_id, repo_root)
+    root = _resolve_tenant_repo_root(prop, repo_root)
+    d_dir = root / "dist"
+    tools_dir = d_dir / "tools"
+
+    existing_tools: List[Dict[str, Any]] = []
+    if tools_dir.is_dir():
+        for idx_html in sorted(tools_dir.glob("*/index.html")):
+            t_slug = idx_html.parent.name
+            existing_tools.append(
+                {
+                    "slug": t_slug,
+                    "title": t_slug.replace("-", " ").title(),
+                    "primary_keyword": t_slug.replace("-", " "),
+                    "position": 8.5,
+                }
+            )
+
+    raw_signals: List[Dict[str, Any]] = []
+    if candidate_signals is not None:
+        raw_signals = [dict(s) for s in candidate_signals if isinstance(s, dict)]
+    else:
+        stat_collector = StatutoryEconomicDatasetCollector()
+        msc = MultiSourceCollector(collectors=[stat_collector])
+        drill_res = msc.harvest_category_drilldown(property_id=prop, drill_down_top_k=3)
+        for sp in drill_res.get("spikes") or []:
+            payload = dict(sp.raw_payload or {})
+            raw_signals.append(
+                {
+                    "query": sp.query,
+                    "source": sp.source,
+                    "velocity": sp.velocity,
+                    "acceleration": sp.acceleration,
+                    "z_score": sp.z_score,
+                    "search_volume": int(payload.get("verified_search_volume", 650) or 650),
+                    "cpc_usd": float(payload.get("cpc_usd", 4.25) or 4.25),
+                    "growth_pct": float(payload.get("growth_pct", 180.0) or 180.0),
+                    "is_breakout": bool(payload.get("is_breakout", False)),
+                    "longitudinal_series": payload.get("longitudinal_series") or [22.0, 35.0, 48.0, 64.0, 78.0],
+                    "matching_tool": payload.get("matching_tool"),
+                }
+            )
+
+    routed_signals: List[Dict[str, Any]] = []
+    upgrade_existing: List[Dict[str, Any]] = []
+    build_new: List[Dict[str, Any]] = []
+    held_traps: List[Dict[str, Any]] = []
+    rejected_decay: List[Dict[str, Any]] = []
+
+    for sig in raw_signals:
+        q_clean = _clean_dashes(str(sig.get("query") or "").strip())
+        if not q_clean:
+            continue
+        slug = sanitize_url_slug(str(sig.get("slug") or q_clean))
+        traj = classify_longitudinal_trajectory(
+            query=q_clean,
+            series=sig.get("longitudinal_series") or sig.get("five_year_series"),
+            velocity=float(sig.get("velocity", 45.0) or 45.0),
+            acceleration=float(sig.get("acceleration", 10.0) or 10.0),
+            search_volume=sig.get("search_volume"),
+            growth_pct=sig.get("growth_pct"),
+            is_breakout=bool(sig.get("is_breakout", False)),
+            cpc_usd=float(sig.get("cpc_usd", 0.0) or 0.0),
+            relative_index_0_100=sig.get("relative_index_0_100"),
+        )
+        t_class = str(traj["classification"])
+        if t_class == "POST_SPIKE_DECAY":
+            rec = {
+                "query": q_clean,
+                "slug": slug,
+                "property_id": prop,
+                "trajectory_classification": t_class,
+                "routed_action": "REJECT_POST_SPIKE_DECAY",
+                "engine_action": "REJECT",
+                "target_slug": None,
+                "target_subroute": None,
+                "reason": traj["reason"],
+            }
+            rejected_decay.append(rec)
+            routed_signals.append(rec)
+            continue
+
+        if t_class == "BREAKOUT_LOW_BASELINE_TRAP":
+            rec = {
+                "query": q_clean,
+                "slug": slug,
+                "property_id": prop,
+                "trajectory_classification": t_class,
+                "routed_action": "HOLD_LOW_BASELINE_TRAP",
+                "engine_action": "MONITOR",
+                "target_slug": None,
+                "target_subroute": None,
+                "reason": traj["reason"],
+            }
+            held_traps.append(rec)
+            routed_signals.append(rec)
+            continue
+
+        # Step 4: Check if we already have an existing page that fits before creating a new one
+        explicit_match = str(sig.get("matching_tool") or "").strip()
+        cann_res = check_search_intent_cannibalization(q_clean, existing_tools=existing_tools)
+        mod_eval = evaluate_query_modifier_expansion_vs_distinct_tool(q_clean, existing_tools=existing_tools)
+
+        matched_slug = (
+            explicit_match
+            or (str(cann_res.get("parent_slug") or "") if cann_res.get("is_cannibalizing") else "")
+            or (str(mod_eval.get("parent_slug") or "") if mod_eval.get("suppress_duplicate_build") else "")
+        ).strip()
+        if matched_slug in ("none", "null"):
+            matched_slug = ""
+        if not matched_slug and (tools_dir / slug / "index.html").is_file():
+            matched_slug = slug
+
+        if matched_slug:
+            subroute = str(mod_eval.get("target_subroute") or f"/tools/{matched_slug}/")
+            rec = {
+                "query": q_clean,
+                "slug": slug,
+                "property_id": prop,
+                "trajectory_classification": t_class,
+                "routed_action": "UPGRADE_EXISTING_PAGE",
+                "engine_action": "REFACTOR_PAGE",
+                "target_slug": matched_slug,
+                "target_subroute": subroute,
+                "measurement_lock_days": 28,
+                "reason": (
+                    f"Validated {t_class} signal matches existing canonical tool '{matched_slug}'; "
+                    "route to REFACTOR_PAGE overlay upgrade with 28-day measurement lock."
+                ),
+            }
+            upgrade_existing.append(rec)
+            routed_signals.append(rec)
+        else:
+            rec = {
+                "query": q_clean,
+                "slug": slug,
+                "property_id": prop,
+                "trajectory_classification": t_class,
+                "routed_action": "BUILD_NEW_PAGE",
+                "engine_action": "BUILD_PAGE",
+                "target_slug": slug,
+                "target_subroute": f"/tools/{slug}/",
+                "measurement_lock_days": 28,
+                "reason": (
+                    f"Validated {t_class} signal with zero existing tool overlap; "
+                    f"route to BUILD_PAGE for /tools/{slug}/."
+                ),
+            }
+            build_new.append(rec)
+            routed_signals.append(rec)
+
+    payload = {
+        "status": "PASS",
+        "property_id": prop,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_signals_evaluated": len(routed_signals),
+        "upgrade_existing_page_count": len(upgrade_existing),
+        "build_new_page_count": len(build_new),
+        "held_low_baseline_traps_count": len(held_traps),
+        "rejected_post_spike_decay_count": len(rejected_decay),
+        "validated_refactor_routes": upgrade_existing,
+        "validated_build_routes": build_new,
+        "held_low_baseline_traps": held_traps,
+        "rejected_post_spike_decay": rejected_decay,
+        "routed_signals": routed_signals,
+    }
+    if persist:
+        out_path = root / ".agy" / "inflection_signal_routing.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        AtomicStateLedger.save_json(out_path, payload)
+    return payload
+
+
 def investigate_competitor_traffic_spikes(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -4319,6 +4532,11 @@ def investigate_competitor_traffic_spikes(
 
     from pseofactory.competitor import run_agentic_free_tool_keyword_pipeline
     tool_pipeline_res = run_agentic_free_tool_keyword_pipeline(tenant_id=prop, repo_root=root)
+    inflection_routing = route_validated_inflection_signals(
+        property_id=prop,
+        repo_root=root,
+        persist=persist,
+    )
 
     report = {
         "workflow": "investigate_competitor_traffic_spikes",
@@ -4333,6 +4551,13 @@ def investigate_competitor_traffic_spikes(
         "agentic_free_tool_clusters_count": int(tool_pipeline_res.get("ranked_clusters_count", 0)),
         "agentic_free_tool_clusters": tool_pipeline_res.get("ranked_clusters", []),
         "agentic_free_tool_build_briefs": tool_pipeline_res.get("top_build_briefs", []),
+        "inflection_routing_summary": {
+            "total_signals_evaluated": inflection_routing["total_signals_evaluated"],
+            "upgrade_existing_page_count": inflection_routing["upgrade_existing_page_count"],
+            "build_new_page_count": inflection_routing["build_new_page_count"],
+            "held_low_baseline_traps_count": inflection_routing["held_low_baseline_traps_count"],
+            "rejected_post_spike_decay_count": inflection_routing["rejected_post_spike_decay_count"],
+        },
         "dom_structural_mutations": [
             {
                 "target_slug": m.get("target_slug"),

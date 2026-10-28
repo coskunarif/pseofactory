@@ -1124,6 +1124,12 @@ __all__ = [
     "X_LIKE_2108272246804648049_CAPABILITY_MATRIX",
     "audit_free_tool_seo_and_instant_ux_readiness",
     "evaluate_x_like_2108272246804648049_capability_matrix",
+    "X_LIKE_2098466289282842729_CAPABILITY_MATRIX",
+    "evaluate_x_like_2098466289282842729_capability_matrix",
+    "TENANT_CATEGORY_SEED_TAXONOMY",
+    "drill_down_specific_subtopics",
+    "classify_longitudinal_trajectory",
+    "route_validated_inflection_signals",
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses
@@ -1138,4 +1144,14 @@ from pseofactory.indexer import (
     submit_gsc_sitemaps,
 )
 from pseofactory.indexing.feedback_loop import SectionExclusionClassifier
+from pseofactory.seo_growth_loops import route_validated_inflection_signals
+from pseofactory.trends.collectors import (
+    TENANT_CATEGORY_SEED_TAXONOMY,
+    drill_down_specific_subtopics,
+)
+from pseofactory.trends.filters import classify_longitudinal_trajectory
+from pseofactory.verifier import (
+    X_LIKE_2098466289282842729_CAPABILITY_MATRIX,
+    evaluate_x_like_2098466289282842729_capability_matrix,
+)
 

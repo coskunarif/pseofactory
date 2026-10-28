@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 
 from pseofactory.affiliates import qualify_monetization_opportunity
 from pseofactory.contracts import assert_no_forbidden_dashes, assert_url_safe_slug
+from pseofactory.trends.filters import classify_longitudinal_trajectory
 from pseofactory.trends.models import TrendCandidate, TregDurabilityResult, JevDecisionResult
 
 
@@ -396,6 +397,50 @@ class JevEngine:
                 evaluated_at=now_iso,
             )
 
+        # Step 1.5: Multi-Horizon 5-Year Trajectory & Breakout Low-Baseline Trap Gate (x-like:2098466289282842729)
+        cand_meta = candidate.metadata or {}
+        raw_series = cand_meta.get("longitudinal_series") or cand_meta.get("five_year_series")
+        traj_eval = classify_longitudinal_trajectory(
+            query=clean_q,
+            series=raw_series if isinstance(raw_series, list) else None,
+            velocity=candidate.velocity,
+            acceleration=candidate.acceleration,
+            search_volume=treg_result.search_volume,
+            growth_pct=cand_meta.get("growth_pct"),
+            is_breakout=bool(cand_meta.get("is_breakout", False)),
+            cpc_usd=treg_result.cpc_usd,
+            intent_cluster=candidate.intent_cluster,
+            relative_index_0_100=cand_meta.get("relative_index_0_100"),
+        )
+        if traj_eval["classification"] == "POST_SPIKE_DECAY":
+            return JevDecisionResult(
+                query=clean_q,
+                slug=slug,
+                action="REJECT",
+                jev_score=jev_score,
+                durable_prob=durable_prob,
+                composite_profit_yield=0.0,
+                cannibalization_risk=c_cannibal,
+                target_asset_type="none",
+                decision_reason=str(traj_eval["reason"]),
+                passed_thresholds=False,
+                evaluated_at=now_iso,
+            )
+        if traj_eval["classification"] == "BREAKOUT_LOW_BASELINE_TRAP":
+            return JevDecisionResult(
+                query=clean_q,
+                slug=slug,
+                action="MONITOR",
+                jev_score=jev_score,
+                durable_prob=durable_prob,
+                composite_profit_yield=composite_yield,
+                cannibalization_risk=c_cannibal,
+                target_asset_type="none",
+                decision_reason=str(traj_eval["reason"]),
+                passed_thresholds=False,
+                evaluated_at=now_iso,
+            )
+
         # Step 2: Jev Durability Threshold Gate
         if durable_prob < self.min_durable_prob or jev_score < self.min_score:
             reason = f"Failed Jev durability invariant threshold (score {jev_score:.2f} < {self.min_score:.2f} or durable_prob {durable_prob:.2f} < {self.min_durable_prob:.2f})"
@@ -414,7 +459,6 @@ class JevEngine:
             )
 
         # Step 3: Cannibalization Triage Gate
-        cand_meta = candidate.metadata or {}
         gsc_meta = cand_meta.get("gsc_telemetry")
         stat_matrix = cand_meta.get("statutory_economic_matrix")
         corrob_sources = list(cand_meta.get("corroborating_sources") or [])
@@ -431,6 +475,7 @@ class JevEngine:
                     "property_id": monetization.get("property_id", ""),
                     "intent_tier": monetization.get("intent_tier", ""),
                     "recommended_partners": monetization.get("recommended_partners", []),
+                    "trajectory_classification": traj_eval,
                 }
                 if isinstance(gsc_meta, dict) and gsc_meta:
                     overlay_spec["gsc_telemetry"] = dict(gsc_meta)
@@ -563,6 +608,7 @@ class JevEngine:
                 "partner_alignment_verified": monetization.get("partner_alignment_verified", True),
                 "mandatory_disclosures": monetization.get("disclosures_required", {}),
                 "monetization_qualification": monetization,
+                "trajectory_classification": traj_eval,
             }
             if isinstance(gsc_meta, dict) and gsc_meta:
                 candidate_spec["gsc_telemetry"] = dict(gsc_meta)
