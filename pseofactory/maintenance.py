@@ -9077,8 +9077,8 @@ class RetroReflectionEngine:
             )
             or bool(
                 re.search(
-                    r"\b(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b",
-                    ov_body_dump,
+                    r"(?<![/-])\b(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b(?![/-])",
+                    f"{t_val} {m_val} {qa_str} {raw_ov.get('h1_rewrite') or ''}",
                 )
             )
         ):
@@ -9460,7 +9460,7 @@ class RetroReflectionEngine:
                     or "icr-repayment-calculator/): Calculate 2026 ICR Repayment Calculator under 225%" in txt
                     or "ibr-hardship-cap-calculator/): Calculate 2026 IBR Hardship Cap & Partial Financial Hardship Calculator under 225%" in txt
                     or "Calculator Calculator" in txt
-                    or bool(re.search(r"\b(?:Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b", txt))
+                    or bool(re.search(r"(?<![/-])\b(?:Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b(?![/-])", txt))
                     or bool(detect_llms_txt_issues(txt))
                 ):
                     return True
