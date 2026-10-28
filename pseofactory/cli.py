@@ -1997,6 +1997,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_lm.add_argument("--verify-providers", action="store_true", help="Execute live provider probes against ZeptoMail/Zoho Mail and Stripe Checkout APIs")
     p_lm.add_argument("--json", action="store_true", help="Output lead monitoring report as structured JSON")
 
+    p_vid = subparsers.add_parser(
+        "video",
+        help="Execute autonomous page-value gated video synthesis and quota-aware YouTube CLI distribution",
+    )
+    p_vid.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, gainhelm, or all)")
+    p_vid.add_argument("--slug", type=str, default=None, help="Target a specific tool slug")
+    p_vid.add_argument("--max-renders", type=int, default=2, help="Maximum video renders per property cycle (default: 2)")
+    p_vid.add_argument("--min-score", type=float, default=45.0, help="Minimum page-value score threshold (default: 45.0)")
+    p_vid.add_argument("--upload", action="store_true", help="Execute live idempotent YouTube Data API v3 upload within daily quota")
+    p_vid.add_argument("--privacy", type=str, choices=["unlisted", "public", "private"], default="unlisted", help="YouTube privacy status (default: unlisted)")
+    p_vid.add_argument("--force", action="store_true", help="Force re-rendering even if valid MP4 exists")
+    p_vid.add_argument("--dry-run", action="store_true", help="Evaluate eligibility and quota budget without rendering or uploading")
+    p_vid.add_argument("--json", action="store_true", help="Output video pipeline telemetry as structured JSON")
+
     return parser
 
 
@@ -2226,9 +2240,55 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_cohort_reflection(args)
     elif args.command == "lead-monitor":
         return cmd_lead_monitor(args)
+    elif args.command == "video":
+        return cmd_video(args)
     else:
         parser.print_help()
         return 1
+
+
+def cmd_video(args: argparse.Namespace) -> int:
+    """
+    Executes autonomous page-value gated video synthesis and quota-aware YouTube CLI distribution.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.video_factory import run_autonomous_video_pipeline
+
+    prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
+    dry_run = bool(getattr(args, "dry_run", False))
+    props = ["profithelm", "prexvo"] if prop_arg == "all" else [prop_arg]
+    reports = {}
+    all_ok = True
+    for p_id in props:
+        rep = run_autonomous_video_pipeline(
+            property_id=p_id,
+            target_slug=getattr(args, "slug", None),
+            max_renders=int(getattr(args, "max_renders", 2)),
+            min_page_value_score=float(getattr(args, "min_score", 45.0)),
+            synthesize_missing=not dry_run,
+            live_upload=bool(getattr(args, "upload", False) and not dry_run),
+            privacy=str(getattr(args, "privacy", "unlisted")),
+            force_render=bool(getattr(args, "force", False)),
+        )
+        reports[p_id] = rep
+        if rep.get("status") != "PASS":
+            all_ok = False
+
+    out = reports[props[0]] if len(props) == 1 else {"status": "PASS" if all_ok else "BLACKOUT_DETECTED", "properties": reports}
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2))
+    else:
+        for p_id, rep in reports.items():
+            qb = rep.get("quota_budget", {})
+            print(
+                f"[{rep.get('status', 'PASS')}] Video Factory ({p_id}): "
+                f"eligible={rep.get('eligible_tools_count', 0)}/{rep.get('total_tools_evaluated', 0)} | "
+                f"rendered_on_disk={rep.get('rendered_videos_on_disk_count', 0)} | "
+                f"newly_synthesized={rep.get('newly_synthesized_count', 0)} | "
+                f"uploaded={rep.get('uploaded_live_count', 0)} (idempotent={rep.get('idempotent_uploaded_count', 0)}) | "
+                f"quota_remaining={qb.get('remaining_units_today', 0)}/{qb.get('daily_ceiling_units', 10000)}"
+            )
+    return 0 if all_ok else 1
 
 
 if __name__ == "__main__":

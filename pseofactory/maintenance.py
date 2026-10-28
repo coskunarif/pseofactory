@@ -2924,6 +2924,10 @@ class AssetIntegrityEvaluator:
                             vf_path = Path(vf_str) if vf_str else (videos_dir / f"{item.get('slug', '')}.mp4")
                             if not vf_path.is_absolute():
                                 vf_path = adapter.dist_dir.parent / vf_path
+                            if not vf_path.is_file() and item.get("slug"):
+                                cand_local_vf = videos_dir / f"{item.get('slug', '')}.mp4"
+                                if cand_local_vf.is_file():
+                                    vf_path = cand_local_vf
                             sz = int(item.get("size_bytes", 0) or 0)
                             if sz <= 1024 or (vf_path.exists() and vf_path.stat().st_size <= 1024):
                                 stub_video_details.append(
@@ -10970,6 +10974,61 @@ class RetroReflectionEngine:
                                 valid_cat.append(item)
                             else:
                                 purged_any_stub = True
+                        seen_cat_slugs = {
+                            str(it.get("slug") or "").strip()
+                            for it in valid_cat
+                            if isinstance(it, dict) and it.get("slug")
+                        }
+                        for mp4_on_disk in sorted(videos_dir.glob("*.mp4")):
+                            if mp4_on_disk.is_file() and mp4_on_disk.stat().st_size > 1024:
+                                disk_slug = mp4_on_disk.stem
+                                if disk_slug and disk_slug not in seen_cat_slugs:
+                                    try:
+                                        from pseofactory.video_factory import (
+                                            _load_upload_idempotency_map,
+                                            extract_and_verify_three_sentence_script,
+                                            probe_media_file,
+                                        )
+                                        sb = extract_and_verify_three_sentence_script(
+                                            disk_slug, property_id=property_id
+                                        )
+                                        yt_p = sb["youtube_pack"]
+                                        pr_info = probe_media_file(mp4_on_disk)
+                                        up_map = _load_upload_idempotency_map(d.parent, property_id)
+                                        up_rec = up_map.get(disk_slug, {})
+                                        valid_cat.append(
+                                            {
+                                                "slug": disk_slug,
+                                                "property_id": property_id,
+                                                "title": yt_p.get("title", disk_slug),
+                                                "youtube_title": yt_p.get("title", disk_slug),
+                                                "description": yt_p.get("description", ""),
+                                                "youtube_description": yt_p.get("description", ""),
+                                                "pinned_comment": yt_p.get("pinned_comment", ""),
+                                                "tags": yt_p.get("tags", []),
+                                                "transcript": yt_p.get("transcript", []),
+                                                "category_id": str(yt_p.get("category_id", "27")),
+                                                "video_file": str(mp4_on_disk),
+                                                "vtt_file": str(videos_dir / f"{disk_slug}.vtt"),
+                                                "thumbnail_file": str(videos_dir / f"{disk_slug}-thumb.png"),
+                                                "size_bytes": mp4_on_disk.stat().st_size,
+                                                "duration_seconds": float(
+                                                    pr_info.get("duration_seconds") or 15.0
+                                                ),
+                                                "spoken_script": sb["spoken_script"],
+                                                "sentence_count": sb["sentence_count"],
+                                                "word_count": sb["word_count"],
+                                                "status": "UPLOADED"
+                                                if up_rec.get("video_id")
+                                                else "RENDERED_STAGED",
+                                                "video_id": up_rec.get("video_id"),
+                                                "youtube_url": up_rec.get("video_url"),
+                                            }
+                                        )
+                                        seen_cat_slugs.add(disk_slug)
+                                        cat_updated = True
+                                    except Exception:
+                                        pass
                         if len(valid_cat) != len(raw_cat) or purged_any_stub or cat_updated:
                             cat_file.write_text(json.dumps(valid_cat, indent=2), encoding="utf-8")
                             purged_any_stub = True
@@ -11254,6 +11313,20 @@ def _has_pending_downstream_work(
     except Exception:
         return True
 
+    # 2b. Check YouTube video synthesis catalog on production tenant repositories
+    if (
+        str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
+        and repo_root.name in ("profithelm-platform", "prexvo")
+    ):
+        videos_dir_chk = Path(dist_dir) / "videos"
+        valid_mp4s = (
+            [p for p in videos_dir_chk.glob("*.mp4") if p.is_file() and p.stat().st_size > 1024]
+            if videos_dir_chk.is_dir()
+            else []
+        )
+        if not valid_mp4s:
+            return True
+
     # 3. Check index push ledger
     idx_ledger_file = repo_root / ".agy" / "index_push_ledger.json"
     if not idx_ledger_file.is_file():
@@ -11400,6 +11473,14 @@ def _execute_autonomous_downstream_chain(
         )
         summary["syndication_status"] = dist_res.get("status", "SUCCESS")
         summary["syndication_tools_count"] = len(dist_res.get("all_assets", {}))
+        yt_vf = dist_res.get("youtube_video_factory")
+        if isinstance(yt_vf, dict):
+            summary["youtube_video_factory_status"] = yt_vf.get("status", "PASS")
+            summary["youtube_rendered_videos_count"] = int(yt_vf.get("rendered_videos_on_disk_count", 0) or 0)
+            summary["youtube_uploaded_videos_count"] = int(
+                (yt_vf.get("uploaded_live_count", 0) or 0) + (yt_vf.get("idempotent_uploaded_count", 0) or 0)
+            )
+            summary["youtube_blackout_detected"] = bool(yt_vf.get("blackout_detected", False))
     except Exception as dist_err:
         summary["syndication_status"] = "EXCEPTION_ROUTED"
         act = bus.route_stage_exception(

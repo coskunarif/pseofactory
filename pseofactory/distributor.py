@@ -9789,6 +9789,10 @@ def dispatch_to_distribution_lead(
     dry_run: bool = False,
     dist_dir: Optional[Union[str, Path]] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
+    synthesize_videos: Optional[bool] = None,
+    live_video_upload: Optional[bool] = None,
+    max_video_renders: int = 2,
+    video_privacy: str = "unlisted",
 ) -> Dict[str, Any]:
     """
     Standard framework dispatch to distribution_lead specialist:
@@ -10018,6 +10022,16 @@ def dispatch_to_distribution_lead(
         elif adapter and getattr(adapter, "dist_dir", None):
             repo_dir = Path(adapter.dist_dir).resolve().parent
 
+        eff_dist_path: Optional[Path] = (
+            Path(dist_dir).resolve()
+            if dist_dir
+            else (
+                Path(adapter.dist_dir).resolve()
+                if (adapter and getattr(adapter, "dist_dir", None))
+                else (repo_dir / "dist" if repo_dir else None)
+            )
+        )
+
         prioritized_queue = prioritize_distribution_queue_by_referral_yield(
             property_id=property_id,
             tools=target_tools,
@@ -10028,6 +10042,57 @@ def dispatch_to_distribution_lead(
             "106482194"
             if _normalize_property_id(property_id) == "prexvo"
             else ("106482195" if _normalize_property_id(property_id) == "gainhelm" else "143884102")
+        )
+
+        in_pytest_ctx = bool("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)
+        eff_synth_videos = (
+            bool(synthesize_videos)
+            if synthesize_videos is not None
+            else bool(not dry_run and not in_pytest_ctx)
+        )
+        eff_live_yt = (
+            bool(live_video_upload)
+            if live_video_upload is not None
+            else bool(
+                not dry_run
+                and not in_pytest_ctx
+                and os.getenv("PSEUFACTORY_DISABLE_YOUTUBE_UPLOAD") != "1"
+            )
+        )
+        video_telemetry: Dict[str, Any] = {}
+        try:
+            from pseofactory.video_factory import run_autonomous_video_pipeline
+
+            video_telemetry = run_autonomous_video_pipeline(
+                property_id=property_id,
+                tools=[
+                    t if isinstance(t, dict) else _resolve_tool(str(t))
+                    for t in target_tools
+                ],
+                dist_dir=eff_dist_path,
+                repo_root=repo_dir,
+                max_renders=max_video_renders,
+                synthesize_missing=eff_synth_videos,
+                live_upload=eff_live_yt,
+                privacy=video_privacy,
+            )
+        except Exception as vf_exc:
+            video_telemetry = {
+                "status": "ERROR",
+                "property_id": _normalize_property_id(property_id),
+                "error": str(vf_exc),
+                "per_slug_dispatch_status": {},
+            }
+
+        yt_status_by_slug: Dict[str, str] = dict(
+            video_telemetry.get("per_slug_dispatch_status") or {}
+        )
+        yt_upload_results: Dict[str, Any] = (
+            (video_telemetry.get("stages") or {})
+            .get("4_youtube_distribution", {})
+            .get("results", {})
+            if isinstance(video_telemetry.get("stages"), dict)
+            else {}
         )
 
         # Sync tenant broadcast_ledger.json and corporate LinkedIn schedule queue when not dry_run
@@ -10065,6 +10130,14 @@ def dispatch_to_distribution_lead(
                                     dispatches_map.pop("reddit", None)
                                     dispatches_map.setdefault("ghost", "STAGED")
                                     dispatches_map.setdefault("github_gist", "STAGED")
+                                    if e_slug in yt_status_by_slug:
+                                        dispatches_map["youtube"] = yt_status_by_slug[e_slug]
+                                    else:
+                                        dispatches_map.setdefault("youtube", "STAGED")
+                                u_info = yt_upload_results.get(e_slug)
+                                if isinstance(u_info, dict) and u_info.get("video_id"):
+                                    e["youtube_video_id"] = u_info["video_id"]
+                                    e["youtube_url"] = u_info.get("video_url")
                                 if e_slug in all_assets:
                                     e["post_url"] = all_assets[e_slug].get("parameterized_url") or all_assets[e_slug].get("url") or e.get("post_url")
                                     e["first_comment"] = all_assets[e_slug].get("first_comment")
@@ -10082,7 +10155,9 @@ def dispatch_to_distribution_lead(
                 )
                 for slug, pack_obj in all_assets.items():
                     if slug not in seen_slugs:
-                        existing_entries.append({
+                        yt_st = yt_status_by_slug.get(slug, "STAGED")
+                        u_info = yt_upload_results.get(slug) if isinstance(yt_upload_results, dict) else None
+                        new_entry: Dict[str, Any] = {
                             "slug": slug,
                             "timestamp": now_iso,
                             "mode": "SYNDICATED_STAGED",
@@ -10095,7 +10170,7 @@ def dispatch_to_distribution_lead(
                                 "x": "STAGED",
                                 "linkedin": "STAGED",
                                 "facebook": "STAGED",
-                                "youtube": "STAGED",
+                                "youtube": yt_st,
                                 "ghost": "STAGED",
                                 "github_gist": "STAGED",
                                 "quora": "STAGED",
@@ -10105,7 +10180,11 @@ def dispatch_to_distribution_lead(
                                 "outreach_pitch": "STAGED",
                             },
                             "metrics": None,
-                        })
+                        }
+                        if isinstance(u_info, dict) and u_info.get("video_id"):
+                            new_entry["youtube_video_id"] = u_info["video_id"]
+                            new_entry["youtube_url"] = u_info.get("video_url")
+                        existing_entries.append(new_entry)
                         seen_slugs.add(slug)
                 existing_entries.sort(key=lambda item: (-float(item.get("priority_score", 0.0) or 0.0), str(item.get("slug", ""))))
                 b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
@@ -10177,6 +10256,7 @@ def dispatch_to_distribution_lead(
         "budget_before": budget_before,
         "budget_after": budget_after,
         "voice_check_passed": voice_ok,
+        "youtube_video_factory": video_telemetry,
         "release_commands": [
             f'x-cli post "{sample_draft}"',
             f'linkedin-cli post "{sample_li_teaser}" --company-id {corp_company_id}',
