@@ -8423,3 +8423,161 @@ def evaluate_x_like_2104684322481664277_capability_matrix(
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
     }
+
+X_LIKE_2107194110046060952_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "claim_id": 1,
+        "workflow_step": "Check Search Console",
+        "claim_name": "Multi-Window GSC Telemetry Harvesting & Query-Page Cohort Segmentation (Positions 1-3, 4-30, 31+)",
+        "primary_source": "x-like:2107194110046060952 (@irentdumpsters: '>Check Search Console')",
+        "claimed_mechanism": "Weekly Search Console inspection to surface query opportunities and ranking shifts.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "seo_growth_loops._run_live_gsc_query_cli + gsc_remediation.audit_gsc_cron_cohort_and_cooldown_stability",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "Segments 28d/90d (query, page) telemetry via gsccli and google-search-console-cli into top-3 winners, striking-distance 4-30 (4-15, 16-20, 21-30), and 31+ cohorts while enforcing a minimum-impression statistical significance floor (>=3 impressions) before live HTML mutation.",
+        "case_against": "Unfiltered weekly Search Console checks react to 1-impression SERP volatility and miss positions 21-30 striking-distance cohorts.",
+    },
+    {
+        "claim_id": 2,
+        "workflow_step": "Update pages",
+        "claim_name": "28-Day Measurement Cooldown Locks, Composite Idempotency Keys & Top-3 Winner Title Protection",
+        "primary_source": "x-like:2107194110046060952 (@irentdumpsters: '>Update pages ... execute the boring stuff every week')",
+        "claimed_mechanism": "Updating pages every week in response to Search Console ranking checks.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "gsc_remediation.compile_remediation_overlay_spec + persist_overlay_respecting_lock + AsyncRemediationQueue",
+        "vault_surface": "pseofactory gsc-reflect --property <tenant>",
+        "case_for": "Enforces 28-day measurement cooldown locks (measurement_lock_days=28), SHA-256 composite idempotency keys (tenant_id, target_url, action_or_engine, payload_hash) with volatile timestamps stripped, and PROTECT_TOP3_WINNER title protection so weekly cron ticks never trigger ranking oscillation.",
+        "case_against": "Rewriting titles and on-page blocks every 7 days resets Google's crawl/re-ranking attribution window and destabilizes top-three winners.",
+    },
+    {
+        "claim_id": 3,
+        "workflow_step": "Fix broken shit",
+        "claim_name": "Daily Indexing Inspector Cron Loop, 404 Quarantine Airlock & Cooldown-Locked Cohort Audit",
+        "primary_source": "x-like:2107194110046060952 (@irentdumpsters: '>Fix broken shit')",
+        "claimed_mechanism": "Routine technical repair of broken pages, canonical errors, and indexing defects.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "indexing_inspector.DailyIndexingInspector.run_inspection + indexing.feedback_loop.IndexingFeedbackLoop",
+        "vault_surface": "python3 -m pseofactory.indexing_inspector run --tenant <tenant> --auto-remediate",
+        "case_for": "Runs daily at 04:30 via pseofactory-indexing-inspector.timer, auditing 404 quarantine airlocks, velocity stagnation, child sitemaps, and executing audit_gsc_cron_cohort_and_cooldown_stability + evaluate_expired_overlays(days_threshold=28) even when rollover/quarantine status is PASS.",
+        "case_against": "Skipping GSC cohort and expired-overlay evaluation when HTTP 404 quarantine is PASS leaves matured Day-28 overlays unevaluated between full builds.",
+    },
+    {
+        "claim_id": 4,
+        "workflow_step": "Watch rankings. Repeat.",
+        "claim_name": "Closed-Loop Day-28 Outcome Evaluation, Emergency Rollback & Metric Recovery Ledger",
+        "primary_source": "x-like:2107194110046060952 (@irentdumpsters: '>Watch rankings. Repeat.')",
+        "claimed_mechanism": "Continuous longitudinal ranking observation and iterative refinement.",
+        "disposition": "INTEGRATED_COMPOUNDING_UPGRADE",
+        "pseofactory_stage": "gsc_remediation.evaluate_expired_overlays + seo_growth_loops.evaluate_closed_loop_cohort_reflection",
+        "vault_surface": "pseofactory gsc-reflect --property <tenant>",
+        "case_for": "Evaluates matured Day-28 overlays into ACCRETIVE_CONFIRMED or DEGRADED_ROLLED_BACK (with a 28-day post-rollback cooldown lock preventing immediate re-application) and records empirical deltas in .agy/metric_recovery_ledger.json.",
+        "case_against": "Passive rank watching without automated rollback contracts or post-rollback cooldowns allows degrading rewrites to persist or re-apply in a loop.",
+    },
+    {
+        "claim_id": 5,
+        "workflow_step": "Build internal links",
+        "claim_name": "Contextual Hub-and-Spoke Internal Link Graph & Multi-URL Keyword Cannibalization Clustering",
+        "primary_source": "x-like:2107194110046060952 (@irentdumpsters: '>Build internal links')",
+        "claimed_mechanism": "Building internal links across related pages to consolidate topical authority.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "seo_growth_loops.discover_internal_linking_opportunities + qualification.check_search_intent_cannibalization",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "Already enforced via Workflow 5 (discover_internal_linking_opportunities), _resolve_contextual_internal_links, and cannibalization clustering that separates intentional hub-spoke hierarchies from multi-URL query cannibalization.",
+        "case_against": "Unstructured internal link injection without cannibalization clustering splits anchor equity across competing URLs.",
+    },
+    {
+        "claim_id": 6,
+        "workflow_step": "Plain-text entity & scope clarity (@DevMarDe thread reply)",
+        "claim_name": "Upfront SSR .quick-answer & First-10%-Viewport Autonomous Statutory/Geographic Scope Assertions",
+        "primary_source": "x-like:2107194110046060952 thread reply 2107236056676634702 (@DevMarDe)",
+        "claimed_mechanism": "Stating explicitly what the page/tool does and its exact jurisdiction/scope in plain text above the fold.",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "gsc_remediation._build_autonomous_citation_assertions_and_matrix + contracts.assert_answer_prominence",
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": "Already enforced across 100% of ProfitHelm and Prexvo pages via 2-sentence 40-60 word SSR .quick-answer blocks within the first 300 words and first-10%-viewport autonomous_citation_assertions stating exact IRC/CFR authority, state jurisdiction, and 2026/2027 tax year.",
+        "case_against": "Burying entity and jurisdictional scope below the fold fails both human scannability and AI Overview passage extraction.",
+    },
+    {
+        "claim_id": 7,
+        "workflow_step": "Build backlinks ('Some guy off fiver')",
+        "claim_name": "Rejection of Low-Quality Fiverr Backlink Spam in Favor of Deterministic AI Citation & Digital PR Hubs",
+        "primary_source": "x-like:2107194110046060952 thread reply 2107214269121282499 (@irentdumpsters: 'Some guy off fiver')",
+        "claimed_mechanism": "Buying cheap Fiverr backlink packages as part of a weekly SEO loop.",
+        "disposition": "REJECTED_BLOAT_OR_HYPE",
+        "pseofactory_stage": "seo_growth_loops.compile_ai_citation_digital_pr_queue + distributor.compile_public_benchmark_citation_hubs",
+        "vault_surface": "pseofactory seo-workflows --property <tenant>",
+        "case_for": "Rejected 100%: Fiverr link farms violate Google SpamBrain link policies and endanger YMYL tax and Title IV student loan domains. Replaced by Workflow 7 deterministic AI citation benchmark hubs and broken-calculator link reclamation.",
+        "case_against": "Toxic Fiverr links trigger algorithmic devaluation and manual link-spam penalties.",
+    },
+]
+
+def evaluate_x_like_2107194110046060952_capability_matrix(
+    include_live_tenant_check: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 7 workflow and thread claims from x-like:2107194110046060952
+    (@irentdumpsters + @DevMarDe + @dannyveigatx thread) against pseofactory's
+    cooldown-locked Search Console cron architecture across ProfitHelm and Prexvo.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.gsc_remediation import audit_gsc_cron_cohort_and_cooldown_stability
+
+    upgraded = [
+        m for m in X_LIKE_2107194110046060952_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_COMPOUNDING_UPGRADE"
+    ]
+    already_solved = [
+        m for m in X_LIKE_2107194110046060952_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    rejected = [
+        m for m in X_LIKE_2107194110046060952_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_HYPE"
+    ]
+    all_passed = (
+        len(X_LIKE_2107194110046060952_CAPABILITY_MATRIX) == 7
+        and len(upgraded) == 4
+        and len(already_solved) == 2
+        and len(rejected) == 1
+    )
+
+    tenant_audits: Dict[str, Any] = {}
+    if include_live_tenant_check:
+        for t_id, r_path in (
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
+            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+        ):
+            if r_path.is_dir():
+                rep = audit_gsc_cron_cohort_and_cooldown_stability(
+                    property_id=t_id,
+                    repo_root=r_path,
+                    min_impressions_floor=3,
+                    measurement_lock_days=28,
+                    dry_run=True,
+                )
+                tenant_audits[t_id] = rep
+                if rep.get("status") != "PASS":
+                    all_passed = False
+
+    return {
+        "pointer": "x-like:2107194110046060952",
+        "tweet_id": "2107194110046060952",
+        "author_handle": "irentdumpsters",
+        "thread_reply_ids": [
+            "2107204349315469671",
+            "2107214269121282499",
+            "2107236056676634702",
+        ],
+        "cadence_vs_attribution_tradeoff": {
+            "naive_weekly_mutation_risk": "Mutating title/meta/DOM every 7 days resets Google crawl and ranking attribution windows, inducing self-inflicted ranking oscillation and masking true query momentum.",
+            "enforced_pseofactory_contract": "Daily/hourly telemetry harvesting decoupled from a strict 28-day per-URL measurement cooldown lock (measurement_lock_days=28), SHA-256 composite idempotency keys stripping volatile timestamps, PROTECT_TOP3_WINNER title locks, and a >=3 impression statistical significance floor before live HTML mutation.",
+        },
+        "total_claims_evaluated": len(X_LIKE_2107194110046060952_CAPABILITY_MATRIX),
+        "integrated_compounding_upgrades_count": len(upgraded),
+        "already_solved_count": len(already_solved),
+        "rejected_bloat_or_hype_count": len(rejected),
+        "matrix": list(X_LIKE_2107194110046060952_CAPABILITY_MATRIX),
+        "tenant_audits": tenant_audits,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }

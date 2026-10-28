@@ -105,67 +105,48 @@ def harvest_and_sync_gsc_daily_timeline(
                     )
 
     if not records and live_gsc:
-        gsccli_bin = shutil.which("gsccli") or "/home/ubuntuadmin/.npm-global/bin/gsccli"
-        if Path(gsccli_bin).is_file():
-            try:
-                proc = subprocess.run(
-                    [
-                        gsccli_bin,
-                        "query",
-                        "run",
-                        "-s",
-                        site_uri,
-                        "-d",
-                        "date",
-                        "--start-date",
-                        f"{int(days)}daysAgo",
-                        "--data-state",
-                        "all",
-                        "-f",
-                        "json",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
+        try:
+            rows = _run_live_gsc_query_cli(
+                site_uri=site_uri,
+                dimensions=["date"],
+                start_date=f"{int(days)}daysAgo",
+                end_date="today",
+                timeout=20,
+            )
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                dt_str = str(r.get("date") or "").strip()
+                if not dt_str and isinstance(r.get("keys"), list) and r["keys"]:
+                    dt_str = str(r["keys"][0] or "").strip()
+                if not dt_str or not re.match(r"^\d{4}-\d{2}-\d{2}$", dt_str):
+                    continue
+                records.append(
+                    GSCDailyMetricRecord(
+                        property_id=prop,
+                        date=dt_str,
+                        clicks=max(0, int(float(r.get("clicks", 0) or 0))),
+                        impressions=max(0, int(float(r.get("impressions", 0) or 0))),
+                        ctr=max(0.0, float(r.get("ctr", 0.0) or 0.0)),
+                        position=max(0.0, float(r.get("position", 0.0) or 0.0)),
+                        recorded_at=now_iso,
+                    )
                 )
-                if proc.returncode == 0 and proc.stdout.strip():
-                    raw = proc.stdout
-                    s_i, e_i = raw.find("{"), raw.rfind("}")
-                    if s_i != -1 and e_i > s_i:
-                        rows = json.loads(raw[s_i : e_i + 1]).get("data", [])
-                        for r in rows:
-                            if not isinstance(r, dict):
-                                continue
-                            dt_str = str(r.get("date") or "").strip()
-                            if not dt_str and isinstance(r.get("keys"), list) and r["keys"]:
-                                dt_str = str(r["keys"][0] or "").strip()
-                            if not dt_str or not re.match(r"^\d{4}-\d{2}-\d{2}$", dt_str):
-                                continue
-                            records.append(
-                                GSCDailyMetricRecord(
-                                    property_id=prop,
-                                    date=dt_str,
-                                    clicks=max(0, int(float(r.get("clicks", 0) or 0))),
-                                    impressions=max(0, int(float(r.get("impressions", 0) or 0))),
-                                    ctr=max(0.0, float(r.get("ctr", 0.0) or 0.0)),
-                                    position=max(0.0, float(r.get("position", 0.0) or 0.0)),
-                                    recorded_at=now_iso,
-                                )
-                            )
-                        records.sort(key=lambda x: x.date)
-                        today_local = datetime.now().strftime("%Y-%m-%d")
-                        while len(records) > 7 and any(x.impressions > 0 for x in records[:-1]):
-                            last_r = records[-1]
-                            prior_slice = records[-8:-1]
-                            prior_avg = sum(x.impressions for x in prior_slice) / float(len(prior_slice))
-                            if (last_r.clicks == 0 and last_r.impressions == 0) or (
-                                last_r.date >= today_local and prior_avg > 0 and last_r.impressions < (prior_avg * 0.5)
-                            ):
-                                records.pop()
-                            else:
-                                break
-            except Exception:
-                pass
+            if records:
+                records.sort(key=lambda x: x.date)
+                today_local = datetime.now().strftime("%Y-%m-%d")
+                while len(records) > 7 and any(x.impressions > 0 for x in records[:-1]):
+                    last_r = records[-1]
+                    prior_slice = records[-8:-1]
+                    prior_avg = sum(x.impressions for x in prior_slice) / float(len(prior_slice))
+                    if (last_r.clicks == 0 and last_r.impressions == 0) or (
+                        last_r.date >= today_local and prior_avg > 0 and last_r.impressions < (prior_avg * 0.5)
+                    ):
+                        records.pop()
+                    else:
+                        break
+        except Exception:
+            pass
 
     # Fallback 1: TrendHistoryDB existing records
     try:
@@ -277,7 +258,24 @@ def _normalize_gsc_path_key(url_or_path: str) -> str:
     return (path.rstrip("/") or "/").lower()
 
 
-def _parse_gsccli_json_rows(stdout_text: str) -> List[Dict[str, Any]]:
+def _resolve_gsc_date_token(token: str) -> str:
+    t_str = str(token or "today").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", t_str):
+        return t_str
+    now_dt = datetime.now(timezone.utc)
+    if t_str.lower() == "today":
+        return now_dt.strftime("%Y-%m-%d")
+    m_ago = re.match(r"^(\d+)daysAgo$", t_str, flags=re.I)
+    if m_ago:
+        days_back = int(m_ago.group(1))
+        return (now_dt - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    return now_dt.strftime("%Y-%m-%d")
+
+
+def _parse_gsccli_json_rows(
+    stdout_text: str,
+    dimensions: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     if not stdout_text:
         return []
     s_i, e_i = stdout_text.find("{"), stdout_text.rfind("}")
@@ -286,9 +284,78 @@ def _parse_gsccli_json_rows(stdout_text: str) -> List[Dict[str, Any]]:
     try:
         payload = json.loads(stdout_text[s_i : e_i + 1])
         rows = payload.get("data", [])
-        return [r for r in rows if isinstance(r, dict)]
+        if not rows and isinstance(payload.get("rows"), list):
+            rows = payload.get("rows", [])
+        parsed_rows: List[Dict[str, Any]] = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            item = dict(r)
+            keys = item.get("keys")
+            if isinstance(keys, list) and dimensions:
+                for idx, dim_name in enumerate(dimensions):
+                    if idx < len(keys) and not item.get(dim_name):
+                        item[dim_name] = str(keys[idx] or "")
+            parsed_rows.append(item)
+        return parsed_rows
     except Exception:
         return []
+
+
+def _run_live_gsc_query_cli(
+    site_uri: str,
+    dimensions: List[str],
+    start_date: str = "90daysAgo",
+    end_date: str = "today",
+    timeout: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    Queries live Google Search Console analytics via gsccli with automatic fallback
+    to google-search-console-cli (normalizing both 'data' and 'rows'/'keys' schemas).
+    """
+    gsccli_bin = shutil.which("gsccli") or "/home/ubuntuadmin/.npm-global/bin/gsccli"
+    if Path(gsccli_bin).is_file():
+        try:
+            cmd = [gsccli_bin, "query", "run", "-s", site_uri]
+            for d_name in dimensions:
+                cmd.extend(["-d", d_name])
+            cmd.extend(["--start-date", start_date])
+            if end_date and end_date != "today":
+                cmd.extend(["--end-date", end_date])
+            cmd.extend(["--data-state", "all", "-f", "json"])
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if proc.returncode == 0 and proc.stdout.strip():
+                rows = _parse_gsccli_json_rows(proc.stdout, dimensions=dimensions)
+                if rows:
+                    return rows
+        except Exception:
+            pass
+
+    gsc_alt_bin = shutil.which("google-search-console-cli") or "/home/ubuntuadmin/.local/bin/google-search-console-cli"
+    if Path(gsc_alt_bin).is_file():
+        try:
+            s_iso = _resolve_gsc_date_token(start_date)
+            e_iso = _resolve_gsc_date_token(end_date)
+            cmd_alt = [
+                gsc_alt_bin,
+                "query",
+                site_uri,
+                "--start-date",
+                s_iso,
+                "--end-date",
+                e_iso,
+                "--dimensions",
+                ",".join(dimensions),
+            ]
+            proc_alt = subprocess.run(cmd_alt, capture_output=True, text=True, timeout=timeout)
+            if proc_alt.returncode == 0 and proc_alt.stdout.strip():
+                rows = _parse_gsccli_json_rows(proc_alt.stdout, dimensions=dimensions)
+                if rows:
+                    return rows
+        except Exception:
+            pass
+
+    return []
 
 
 SEEDED_LIVE_GSC_URL_INSPECTIONS: Dict[str, List[Dict[str, Any]]] = {
@@ -790,26 +857,116 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                     )
                 )
 
-    # 2. Query live gsccli when outside pytest and fixture_payload was not provided
+    # 2. Query live GSC CLI (gsccli or google-search-console-cli) when outside pytest and fixture_payload was not provided
     if not fixture_payload and live_gsc:
-        gsccli_bin = shutil.which("gsccli") or "/home/ubuntuadmin/.npm-global/bin/gsccli"
-        if Path(gsccli_bin).is_file():
-            # 2a. Property-level device splits (90d)
-            try:
-                proc_dev = subprocess.run(
-                    [gsccli_bin, "query", "run", "-s", site_uri, "-d", "device", "--start-date", "90daysAgo", "--data-state", "all", "-f", "json"],
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
+        # 2a. Property-level device splits (90d)
+        try:
+            dev_rows = _run_live_gsc_query_cli(
+                site_uri=site_uri,
+                dimensions=["device"],
+                start_date="90daysAgo",
+                end_date="today",
+                timeout=20,
+            )
+            for r in dev_rows:
+                dev_str = str(r.get("device") or (r["keys"][0] if isinstance(r.get("keys"), list) and r["keys"] else "DESKTOP")).strip().upper()
+                device_records.append(
+                    GSCDeviceMetricRecord(
+                        property_id=prop,
+                        device=dev_str,
+                        page="",
+                        query="",
+                        window_key="recent_90d",
+                        clicks=max(0, int(float(r.get("clicks", 0) or 0))),
+                        impressions=max(0, int(float(r.get("impressions", 0) or 0))),
+                        ctr=max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0))),
+                        position=max(0.0, float(r.get("position", 0.0) or 0.0)),
+                        recorded_at=now_iso,
+                    )
                 )
-                for r in _parse_gsccli_json_rows(proc_dev.stdout if proc_dev.returncode == 0 else ""):
-                    dev_str = str(r.get("device") or (r["keys"][0] if isinstance(r.get("keys"), list) and r["keys"] else "DESKTOP")).strip().upper()
+        except Exception:
+            pass
+
+        # 2b. Query + Page + Device splits (90d) + Page + Device rollups
+        try:
+            qpd_rows = _run_live_gsc_query_cli(
+                site_uri=site_uri,
+                dimensions=["query", "page", "device"],
+                start_date="90daysAgo",
+                end_date="today",
+                timeout=25,
+            )
+            page_dev_agg: Dict[Tuple[str, str], Dict[str, float]] = {}
+            for r in qpd_rows:
+                q_txt = _clean_dashes(str(r.get("query") or "")).strip()
+                p_txt = _clean_dashes(str(r.get("page") or "")).strip()
+                dev_str = str(r.get("device") or "DESKTOP").strip().upper()
+                clk = max(0, int(float(r.get("clicks", 0) or 0)))
+                imp = max(0, int(float(r.get("impressions", 0) or 0)))
+                ctr_v = max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0)))
+                pos_v = max(0.0, float(r.get("position", 0.0) or 0.0))
+                if q_txt or p_txt:
                     device_records.append(
                         GSCDeviceMetricRecord(
                             property_id=prop,
                             device=dev_str,
-                            page="",
-                            query="",
+                            page=p_txt,
+                            query=q_txt,
+                            window_key="recent_90d",
+                            clicks=clk,
+                            impressions=imp,
+                            ctr=ctr_v,
+                            position=pos_v,
+                            recorded_at=now_iso,
+                        )
+                    )
+                if p_txt:
+                    pd_bucket = page_dev_agg.setdefault(
+                        (p_txt, dev_str),
+                        {"clicks": 0.0, "impressions": 0.0, "w_pos": 0.0},
+                    )
+                    pd_bucket["clicks"] += clk
+                    pd_bucket["impressions"] += imp
+                    pd_bucket["w_pos"] += pos_v * max(1, imp)
+            for (p_txt, dev_str), agg in page_dev_agg.items():
+                tot_i = int(agg["impressions"])
+                tot_c = int(agg["clicks"])
+                avg_p = round(agg["w_pos"] / float(max(1, tot_i)), 2)
+                device_records.append(
+                    GSCDeviceMetricRecord(
+                        property_id=prop,
+                        device=dev_str,
+                        page=p_txt,
+                        query="",
+                        window_key="recent_90d",
+                        clicks=tot_c,
+                        impressions=tot_i,
+                        ctr=round(tot_c / float(tot_i), 4) if tot_i > 0 else 0.0,
+                        position=avg_p,
+                        recorded_at=now_iso,
+                    )
+                )
+        except Exception:
+            pass
+
+        # 2c. Rich-result searchAppearance metrics (90d)
+        try:
+            sa_rows = _run_live_gsc_query_cli(
+                site_uri=site_uri,
+                dimensions=["searchAppearance"],
+                start_date="90daysAgo",
+                end_date="today",
+                timeout=20,
+            )
+            for r in sa_rows:
+                sa_str = _clean_dashes(
+                    str(r.get("searchAppearance") or (r["keys"][0] if isinstance(r.get("keys"), list) and r["keys"] else ""))
+                ).strip().upper()
+                if sa_str:
+                    appearance_records.append(
+                        GSCSearchAppearanceRecord(
+                            property_id=prop,
+                            search_appearance=sa_str,
                             window_key="recent_90d",
                             clicks=max(0, int(float(r.get("clicks", 0) or 0))),
                             impressions=max(0, int(float(r.get("impressions", 0) or 0))),
@@ -818,182 +975,43 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                             recorded_at=now_iso,
                         )
                     )
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-            # 2b. Query + Page + Device splits (90d) + Page + Device rollups
+        # 2d. Time-windowed query+page snapshots: recent_28d vs prior_28d_baseline
+        for win_key, s_date, e_date in (
+            ("recent_28d", "28daysAgo", "today"),
+            ("prior_28d_baseline", "56daysAgo", "29daysAgo"),
+        ):
             try:
-                proc_qpd = subprocess.run(
-                    [
-                        gsccli_bin,
-                        "query",
-                        "run",
-                        "-s",
-                        site_uri,
-                        "-d",
-                        "query",
-                        "-d",
-                        "page",
-                        "-d",
-                        "device",
-                        "--start-date",
-                        "90daysAgo",
-                        "--data-state",
-                        "all",
-                        "-f",
-                        "json",
-                    ],
-                    capture_output=True,
-                    text=True,
+                w_rows = _run_live_gsc_query_cli(
+                    site_uri=site_uri,
+                    dimensions=["query", "page"],
+                    start_date=s_date,
+                    end_date=e_date,
                     timeout=25,
                 )
-                qpd_rows = _parse_gsccli_json_rows(proc_qpd.stdout if proc_qpd.returncode == 0 else "")
-                page_dev_agg: Dict[Tuple[str, str], Dict[str, float]] = {}
-                for r in qpd_rows:
+                for r in w_rows:
                     q_txt = _clean_dashes(str(r.get("query") or "")).strip()
                     p_txt = _clean_dashes(str(r.get("page") or "")).strip()
-                    dev_str = str(r.get("device") or "DESKTOP").strip().upper()
-                    clk = max(0, int(float(r.get("clicks", 0) or 0)))
-                    imp = max(0, int(float(r.get("impressions", 0) or 0)))
-                    ctr_v = max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0)))
-                    pos_v = max(0.0, float(r.get("position", 0.0) or 0.0))
                     if q_txt or p_txt:
-                        device_records.append(
-                            GSCDeviceMetricRecord(
+                        window_records.append(
+                            GSCQueryPageWindowRecord(
                                 property_id=prop,
-                                device=dev_str,
-                                page=p_txt,
+                                window_key=win_key,
                                 query=q_txt,
-                                window_key="recent_90d",
-                                clicks=clk,
-                                impressions=imp,
-                                ctr=ctr_v,
-                                position=pos_v,
-                                recorded_at=now_iso,
-                            )
-                        )
-                    if p_txt:
-                        pd_bucket = page_dev_agg.setdefault(
-                            (p_txt, dev_str),
-                            {"clicks": 0.0, "impressions": 0.0, "w_pos": 0.0},
-                        )
-                        pd_bucket["clicks"] += clk
-                        pd_bucket["impressions"] += imp
-                        pd_bucket["w_pos"] += pos_v * max(1, imp)
-                for (p_txt, dev_str), agg in page_dev_agg.items():
-                    tot_i = int(agg["impressions"])
-                    tot_c = int(agg["clicks"])
-                    avg_p = round(agg["w_pos"] / float(max(1, tot_i)), 2)
-                    device_records.append(
-                        GSCDeviceMetricRecord(
-                            property_id=prop,
-                            device=dev_str,
-                            page=p_txt,
-                            query="",
-                            window_key="recent_90d",
-                            clicks=tot_c,
-                            impressions=tot_i,
-                            ctr=round(tot_c / float(tot_i), 4) if tot_i > 0 else 0.0,
-                            position=avg_p,
-                            recorded_at=now_iso,
-                        )
-                    )
-            except Exception:
-                pass
-
-            # 2c. Rich-result searchAppearance metrics (90d)
-            try:
-                proc_sa = subprocess.run(
-                    [
-                        gsccli_bin,
-                        "query",
-                        "run",
-                        "-s",
-                        site_uri,
-                        "-d",
-                        "searchAppearance",
-                        "--start-date",
-                        "90daysAgo",
-                        "--data-state",
-                        "all",
-                        "-f",
-                        "json",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
-                )
-                for r in _parse_gsccli_json_rows(proc_sa.stdout if proc_sa.returncode == 0 else ""):
-                    sa_str = _clean_dashes(
-                        str(r.get("searchAppearance") or (r["keys"][0] if isinstance(r.get("keys"), list) and r["keys"] else ""))
-                    ).strip().upper()
-                    if sa_str:
-                        appearance_records.append(
-                            GSCSearchAppearanceRecord(
-                                property_id=prop,
-                                search_appearance=sa_str,
-                                window_key="recent_90d",
+                                page=p_txt,
                                 clicks=max(0, int(float(r.get("clicks", 0) or 0))),
                                 impressions=max(0, int(float(r.get("impressions", 0) or 0))),
                                 ctr=max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0))),
                                 position=max(0.0, float(r.get("position", 0.0) or 0.0)),
+                                window_start_date=s_date,
+                                window_end_date=e_date,
                                 recorded_at=now_iso,
                             )
                         )
             except Exception:
                 pass
-
-            # 2d. Time-windowed query+page snapshots: recent_28d vs prior_28d_baseline
-            for win_key, s_date, e_date in (
-                ("recent_28d", "28daysAgo", "today"),
-                ("prior_28d_baseline", "56daysAgo", "29daysAgo"),
-            ):
-                try:
-                    proc_w = subprocess.run(
-                        [
-                            gsccli_bin,
-                            "query",
-                            "run",
-                            "-s",
-                            site_uri,
-                            "-d",
-                            "query",
-                            "-d",
-                            "page",
-                            "--start-date",
-                            s_date,
-                            "--end-date",
-                            e_date,
-                            "--data-state",
-                            "all",
-                            "-f",
-                            "json",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=25,
-                    )
-                    for r in _parse_gsccli_json_rows(proc_w.stdout if proc_w.returncode == 0 else ""):
-                        q_txt = _clean_dashes(str(r.get("query") or "")).strip()
-                        p_txt = _clean_dashes(str(r.get("page") or "")).strip()
-                        if q_txt or p_txt:
-                            window_records.append(
-                                GSCQueryPageWindowRecord(
-                                    property_id=prop,
-                                    window_key=win_key,
-                                    query=q_txt,
-                                    page=p_txt,
-                                    clicks=max(0, int(float(r.get("clicks", 0) or 0))),
-                                    impressions=max(0, int(float(r.get("impressions", 0) or 0))),
-                                    ctr=max(0.0, min(1.0, float(r.get("ctr", 0.0) or 0.0))),
-                                    position=max(0.0, float(r.get("position", 0.0) or 0.0)),
-                                    window_start_date=s_date,
-                                    window_end_date=e_date,
-                                    recorded_at=now_iso,
-                                )
-                            )
-                except Exception:
-                    pass
 
     # 3. Load or enrich URL inspection records from .agy/indexing_health_report.json, .agy/indexing_audit_log.json, and TrendHistoryDB
     idx_report_file = root / ".agy" / "indexing_health_report.json"
@@ -1538,50 +1556,28 @@ def load_consolidated_gsc_query_rows(
         raw_current_rows = [dict(r) for r in live_queries if isinstance(r, dict)]
     else:
         if live_gsc or (not snapshot_latest_rows and "PYTEST_CURRENT_TEST" not in os.environ):
-            gsccli_bin = shutil.which("gsccli") or "/home/ubuntuadmin/.npm-global/bin/gsccli"
-            if Path(gsccli_bin).is_file():
-                try:
-                    proc = subprocess.run(
-                        [
-                            gsccli_bin,
-                            "query",
-                            "run",
-                            "-s",
-                            site_uri,
-                            "-d",
-                            "query",
-                            "-d",
-                            "page",
-                            "--start-date",
-                            "90daysAgo",
-                            "--data-state",
-                            "all",
-                            "-f",
-                            "json",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=20,
-                    )
-                    if proc.returncode == 0 and proc.stdout.strip():
-                        raw = proc.stdout
-                        s_i, e_i = raw.find("{"), raw.rfind("}")
-                        if s_i != -1 and e_i > s_i:
-                            gsc_data = json.loads(raw[s_i : e_i + 1]).get("data", [])
-                            for r in gsc_data:
-                                if isinstance(r, dict):
-                                    raw_current_rows.append(
-                                        {
-                                            "query": str(r.get("query") or ""),
-                                            "page": str(r.get("page") or ""),
-                                            "impressions": int(float(r.get("impressions", 0) or 0)),
-                                            "clicks": int(float(r.get("clicks", 0) or 0)),
-                                            "ctr": float(r.get("ctr", 0.0) or 0.0),
-                                            "position": float(r.get("position", 100.0) or 100.0),
-                                        }
-                                    )
-                except Exception:
-                    pass
+            try:
+                gsc_data = _run_live_gsc_query_cli(
+                    site_uri=site_uri,
+                    dimensions=["query", "page"],
+                    start_date="90daysAgo",
+                    end_date="today",
+                    timeout=20,
+                )
+                for r in gsc_data:
+                    if isinstance(r, dict):
+                        raw_current_rows.append(
+                            {
+                                "query": str(r.get("query") or ""),
+                                "page": str(r.get("page") or ""),
+                                "impressions": int(float(r.get("impressions", 0) or 0)),
+                                "clicks": int(float(r.get("clicks", 0) or 0)),
+                                "ctr": float(r.get("ctr", 0.0) or 0.0),
+                                "position": float(r.get("position", 100.0) or 100.0),
+                            }
+                        )
+            except Exception:
+                pass
 
         # Also merge 28-day query-by-page windows from TrendHistoryDB when not in synthetic unit test isolation
         if "PYTEST_CURRENT_TEST" not in os.environ or not (root / "profithelm" / "data" / "statutory.db").is_file():
@@ -2725,6 +2721,7 @@ def compile_search_opportunity_briefs(
     consolidated_gsc: Optional[Dict[str, Any]] = None,
     apply_overlays: bool = True,
     persist: bool = True,
+    min_impressions_floor: int = 3,
 ) -> Dict[str, Any]:
     """
     Workflow 4: Harvests striking-distance and high-impression Search Console query clusters
@@ -2885,20 +2882,34 @@ def compile_search_opportunity_briefs(
             for x in dedup_p_rows
             if 15.0 < float(x.get("position", 100.0) or 100.0) <= 20.0
         ]
+        striking_16_30_rows = [
+            x
+            for x in dedup_p_rows
+            if 15.0 < float(x.get("position", 100.0) or 100.0) <= 30.0
+        ]
+        striking_4_30_rows = [
+            x
+            for x in dedup_p_rows
+            if 4.0 <= float(x.get("position", 100.0) or 100.0) <= 30.0
+        ]
 
-        # Prioritize genuine position 4-15 striking-distance queries over position 21-100 noise
+        # Prioritize genuine position 4-30 striking-distance queries over position 31-100 noise
         if striking_4_15_rows:
             primary = striking_4_15_rows[0]
         elif top_3_rows:
             primary = top_3_rows[0]
         elif striking_16_20_rows:
             primary = striking_16_20_rows[0]
+        elif striking_16_30_rows:
+            primary = striking_16_30_rows[0]
         else:
             primary = dedup_p_rows[0]
 
         protected_primary_query = _clean_dashes(str(top_3_rows[0].get("query") or "")) if top_3_rows else ""
         top_3_winner_queries = [_clean_dashes(str(x.get("query") or "")) for x in top_3_rows if str(x.get("query") or "").strip()]
         striking_4_15_queries = [_clean_dashes(str(x.get("query") or "")) for x in striking_4_15_rows if str(x.get("query") or "").strip()]
+        striking_16_30_queries = [_clean_dashes(str(x.get("query") or "")) for x in striking_16_30_rows if str(x.get("query") or "").strip()]
+        striking_4_30_queries = [_clean_dashes(str(x.get("query") or "")) for x in striking_4_30_rows if str(x.get("query") or "").strip()]
 
         tot_impr = sum(int(float(x.get("impressions", 0) or 0)) for x in dedup_p_rows)
         tot_clicks = sum(int(float(x.get("clicks", 0) or 0)) for x in dedup_p_rows)
@@ -2911,6 +2922,11 @@ def compile_search_opportunity_briefs(
             min(float(x.get("position", 15.0) or 15.0) for x in striking_4_15_rows)
             if striking_4_15_rows
             else best_pos
+        )
+        best_striking_4_30_pos = (
+            min(float(x.get("position", 30.0) or 30.0) for x in striking_4_30_rows)
+            if striking_4_30_rows
+            else None
         )
         w_pos = (
             sum(
@@ -2929,7 +2945,7 @@ def compile_search_opportunity_briefs(
         leaf_slug = _slug_from_url_or_query(target_url=target_url, query=primary_query)
         grouped_qs = []
         seen_q: Set[str] = set()
-        for pr in (striking_4_15_rows + top_3_rows + striking_16_20_rows + dedup_p_rows):
+        for pr in (striking_4_15_rows + top_3_rows + striking_16_30_rows + dedup_p_rows):
             q_str = _clean_dashes(str(pr.get("query") or "").strip())
             if q_str and q_str.lower() not in seen_q:
                 grouped_qs.append(q_str)
@@ -2952,6 +2968,8 @@ def compile_search_opportunity_briefs(
             "grouped_queries": grouped_qs[:15],
             "top_3_winner_queries": top_3_winner_queries[:5],
             "striking_4_15_queries": striking_4_15_queries[:10],
+            "striking_16_30_queries": striking_16_30_queries[:10],
+            "striking_4_30_queries": striking_4_30_queries[:15],
             "protected_primary_query": protected_primary_query,
             "impressions": tot_impr,
             "clicks": tot_clicks,
@@ -2964,6 +2982,7 @@ def compile_search_opportunity_briefs(
             "missing_ai_overview": ai_res["missing_ai_overview"],
             "citation_gap_status": ai_res["citation_gap_status"],
             "needs_deterministic_math": math_info["needs_deterministic_math"],
+            "min_impressions_floor": min_impressions_floor,
         }
         roi_eval = calculate_candidate_roi(candidate_payload, tenant_id=prop)
         overlay_spec = compile_remediation_overlay_spec(candidate_payload, tenant_id=prop)
@@ -2972,7 +2991,7 @@ def compile_search_opportunity_briefs(
         opportunity_class = (
             "STRIKING_DISTANCE_PAGE_1"
             if (best_pos <= 10.0 or bool(striking_4_15_rows))
-            else ("STRIKING_DISTANCE_PAGE_2" if best_pos <= 25.0 else "EARLY_INDEXATION_EXPANSION")
+            else ("STRIKING_DISTANCE_PAGE_2" if (best_pos <= 30.0 or bool(striking_16_30_rows)) else "EARLY_INDEXATION_EXPANSION")
         )
         ai_math_boost = (
             1.35
@@ -3086,6 +3105,8 @@ def compile_search_opportunity_briefs(
             "title_protection_mode": overlay_spec.get("title_protection_mode", "STANDARD_NORMALIZE"),
             "top_3_winner_queries": top_3_winner_queries[:5],
             "striking_4_15_queries": striking_4_15_queries[:10],
+            "striking_16_30_queries": striking_16_30_queries[:10],
+            "striking_4_30_queries": striking_4_30_queries[:15],
             "supporting_queries": [q for q in grouped_qs if q != primary_query][:9],
             "ai_fan_out_queries": fan_out_queries[:10],
             "is_ai_fan_out_cluster": bool(primary_fan_out["is_ai_fan_out"] or len(fan_out_queries) > 0),
@@ -3094,14 +3115,18 @@ def compile_search_opportunity_briefs(
             "total_clicks": tot_clicks,
             "best_position": round(best_pos, 2),
             "best_striking_4_15_position": round(best_striking_pos, 2) if striking_4_15_rows else None,
+            "best_striking_4_30_position": round(best_striking_4_30_pos, 2) if best_striking_4_30_pos is not None else None,
             "weighted_position": round(w_pos, 2),
             "current_ctr": curr_ctr,
             "target_ctr": target_ctr,
             "ctr_shortfall": ctr_gap,
             "roi_score": roi_score,
             "conversion_slot_weight": round(conv_slot_mult, 3),
-            "top_20_stability_lock_days": overlay_spec.get("top_20_stability_lock_days", 14),
+            "measurement_lock_days": int(overlay_spec.get("measurement_lock_days", 28)),
+            "top_20_stability_lock_days": overlay_spec.get("top_20_stability_lock_days", 28),
             "rank_stability_freeze_active": bool(overlay_spec.get("rank_stability_freeze_active", False)),
+            "statistical_significance_floor": min_impressions_floor,
+            "statistical_significance_met": bool(tot_impr >= min_impressions_floor),
             "ai_citation_vacant": ai_res["ai_citation_vacant"],
             "ai_cited_domains": ai_res["ai_cited_domains"],
             "weaker_cited_domains": ai_res["weaker_cited_domains"],
@@ -3123,23 +3148,27 @@ def compile_search_opportunity_briefs(
                 "faq_questions": [f.get("question") for f in (overlay_spec.get("faq_entries") or []) if isinstance(f, dict)],
                 "hub_links": overlay_spec.get("hub_links", []),
             },
-            "execution_status": "COMPILED_READY",
+            "execution_status": (
+                "DEFERRED_BELOW_SIGNIFICANCE_FLOOR"
+                if (apply_overlays and tot_impr < min_impressions_floor)
+                else "COMPILED_READY"
+            ),
         }
 
-        if apply_overlays and (tot_impr >= 3 or best_pos <= 25.0):
+        if apply_overlays and tot_impr >= min_impressions_floor:
             try:
                 is_prod_repo = (
                     str(root.resolve()).startswith("/home/ubuntuadmin/projects/")
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
                 content_ov_path = root / "content" / "overlays" / f"{overlay_file_stem}.json"
-                if not is_prod_repo:
-                    persist_overlay_respecting_lock(content_ov_path, overlay_spec)
                 agy_ov_path = root / ".agy" / "overlays" / f"{overlay_file_stem}.json"
                 if not agy_ov_path.is_file() and content_ov_path.is_file():
                     effective_ov, _ = persist_overlay_respecting_lock(content_ov_path, overlay_spec)
                 else:
                     effective_ov, _ = persist_overlay_respecting_lock(agy_ov_path, overlay_spec)
+                    if not is_prod_repo:
+                        persist_overlay_respecting_lock(content_ov_path, effective_ov)
                 overlays_compiled += 1
 
                 html_rel = c_path.strip("/")

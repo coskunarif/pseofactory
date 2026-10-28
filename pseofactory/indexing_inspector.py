@@ -1053,6 +1053,42 @@ class DailyIndexingInspector:
                     "error": str(rem_err),
                 }
 
+        # Cooldown-locked GSC query-page cohort & Day-28 expired overlay evaluation
+        try:
+            from pseofactory.gsc_remediation import (
+                audit_gsc_cron_cohort_and_cooldown_stability,
+                evaluate_expired_overlays,
+            )
+
+            cohort_audit = audit_gsc_cron_cohort_and_cooldown_stability(
+                property_id=self.tenant_id,
+                repo_root=self.base_dir,
+                min_impressions_floor=3,
+                measurement_lock_days=28,
+                dry_run=dry_run or not auto_remediate,
+            )
+            has_existing_overlays = (
+                (self.base_dir / ".agy" / "overlays").is_dir()
+                or (self.base_dir / "content" / "overlays").is_dir()
+            )
+            if auto_remediate and has_existing_overlays:
+                expired_eval = evaluate_expired_overlays(
+                    site_url=f"sc-domain:{self.tenant_id}.com",
+                    days_threshold=28,
+                    base_dir=self.base_dir,
+                    persist=not dry_run,
+                )
+                cohort_audit["expired_overlays_evaluation"] = {
+                    "total_evaluated": int(expired_eval.get("total_evaluated", 0) or 0),
+                    "summary": expired_eval.get("summary", {}),
+                }
+            report["gsc_cooldown_cohort_audit"] = cohort_audit
+        except Exception as cohort_err:
+            report["gsc_cooldown_cohort_audit"] = {
+                "status": "FAILED",
+                "error": str(cohort_err),
+            }
+
         if vertex_diagnose:
             try:
                 report["vertex_diagnosis"] = self.diagnose_anomalies_via_vertex(

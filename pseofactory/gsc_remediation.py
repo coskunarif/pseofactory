@@ -1361,7 +1361,7 @@ def compute_composite_idempotency_key(
 
 
 def expected_ctr_for_position(position: float) -> float:
-    """Returns benchmark expected CTR for a given SERP position (1..20+)."""
+    """Returns benchmark expected CTR for a given SERP position (1..30+)."""
     if position <= 0:
         return 0.045
     pos_int = int(round(position))
@@ -1373,7 +1373,9 @@ def expected_ctr_for_position(position: float) -> float:
         return {11: 0.017, 12: 0.016, 13: 0.015, 14: 0.014, 15: 0.013}.get(pos_int, 0.015)
     if pos_int <= 20:
         return 0.012
-    return 0.01
+    if pos_int <= 30:
+        return 0.010
+    return 0.008
 
 
 def calculate_candidate_roi(
@@ -1505,9 +1507,9 @@ def calculate_candidate_roi(
             anomaly_type = "IMPRESSION_GAINING_DISTRIBUTION_GAP"
         elif 1.0 <= position <= 5.0 and actual_ctr < expected_ctr_for_position(position) - 0.005:
             anomaly_type = "HIGH_IMPRESSION_CTR_SHORTFALL"
-        elif 4.0 <= position <= 20.0:
+        elif 4.0 <= position <= 30.0:
             anomaly_type = "STRIKING_DISTANCE_QUERY"
-        elif position > 20.0:
+        elif position > 30.0:
             anomaly_type = "CONTENT_QUALITY_OR_ANSWER_DEFICIENCY"
         else:
             anomaly_type = "CRAWL_BUDGET_SIGNAL_LAG"
@@ -1544,7 +1546,7 @@ def calculate_candidate_roi(
         severity_factor = 1.5
         action_type = "REWRITE_TITLE_META_AND_SCHEMA"
     elif "STRIKING" in anomaly_type:
-        severity_factor = 1.35 if (4.0 <= position <= 15.0) else 1.25
+        severity_factor = 1.35 if (4.0 <= position <= 15.0) else (1.25 if position <= 20.0 else 1.15)
         action_type = "INJECT_STRIKING_DISTANCE_OVERLAY"
     elif anomaly_type in (
         "CONTENT_QUALITY_OR_ANSWER_DEFICIENCY",
@@ -1685,6 +1687,12 @@ def calculate_candidate_roi(
         "distribution_gap_detected": distribution_gap,
         "yield_optimization_needed": yield_opt_needed,
         "striking_distance_4_15": bool(4.0 <= position <= 15.0),
+        "striking_distance_16_30": bool(15.0 < position <= 30.0),
+        "striking_distance_4_30": bool(4.0 <= position <= 30.0),
+        "statistical_significance_floor": int(data.get("min_impressions_floor") or data.get("statistical_significance_floor") or 3),
+        "statistical_significance_met": bool(
+            impressions >= int(data.get("min_impressions_floor") or data.get("statistical_significance_floor") or 3)
+        ),
         "position": position,
         "impressions": impressions,
         "clicks": clicks,
@@ -3989,15 +3997,23 @@ def _append_query_subintent_blocks(
 def compile_remediation_overlay_spec(
     candidate: Dict[str, Any],
     tenant_id: Optional[str] = None,
-    lock_days: int = 14,
+    lock_days: int = 28,
 ) -> Dict[str, Any]:
     """
     Compiles a complete, domain-isolated, non-destructive remediation overlay
     specification with 50-60 char title_rewrite, 120-155 char meta_description,
     40-60 word quick_answer, interactive calculator preset_scenarios,
     comparison_rows, and FAQPage JSON-LD schema.
+    Enforces a 28-day measurement cooldown lock by default to prevent
+    self-inflicted ranking oscillation.
     Zero em-dashes. Zero en-dashes.
     """
+    effective_lock_days = (
+        int(candidate.get("measurement_lock_days") or candidate.get("lock_days") or lock_days or 28)
+        if lock_days == 28
+        else int(lock_days)
+    )
+    lock_days = effective_lock_days
     resolved_tenant = str(
         tenant_id
         or candidate.get("tenant_id")
@@ -5714,7 +5730,7 @@ def evaluate_variance_threshold(
     if current_position is not None and current_impressions is not None:
         curr_pos = float(current_position)
         curr_impr = int(float(current_impressions))
-        is_striking = 4.0 <= curr_pos <= 20.0
+        is_striking = 4.0 <= curr_pos <= 30.0
         has_demand = curr_impr >= dynamic_floor and curr_impr > 0
         if is_striking and has_demand:
             if cycles >= 2:
@@ -5727,6 +5743,7 @@ def evaluate_variance_threshold(
                     "current_position": curr_pos,
                     "current_impressions": curr_impr,
                     "dynamic_floor": dynamic_floor,
+                    "statistical_significance_met": True,
                     "reason": f"Sustained striking demand over {cycles} cycles (pos {curr_pos:.1f}, impr {curr_impr} >= {dynamic_floor}).",
                 }
             return {
@@ -5735,7 +5752,22 @@ def evaluate_variance_threshold(
                 "cycles": cycles,
                 "current_position": curr_pos,
                 "current_impressions": curr_impr,
+                "dynamic_floor": dynamic_floor,
+                "statistical_significance_met": True,
                 "reason": f"Striking demand observed (pos {curr_pos:.1f}, impr {curr_impr}), awaiting cycle 2 confirmation.",
+            }
+        if is_striking and not has_demand and curr_impr > 0 and abs(pos_delta) <= 2.0 and abs(impr_pct_delta) <= 15.0:
+            return {
+                "classification": "BELOW_STATISTICAL_SIGNIFICANCE_FLOOR",
+                "action": "NO_ACTION",
+                "cycles": cycles,
+                "pos_delta": round(pos_delta, 2),
+                "impr_pct_delta": round(impr_pct_delta, 2),
+                "current_position": curr_pos,
+                "current_impressions": curr_impr,
+                "dynamic_floor": dynamic_floor,
+                "statistical_significance_met": False,
+                "reason": f"Striking position {curr_pos:.1f} observed with {curr_impr} impressions below statistical significance floor ({dynamic_floor}). Mutation blocked.",
             }
 
     if abs(pos_delta) <= 2.0 and abs(impr_pct_delta) <= 15.0:
@@ -5822,7 +5854,7 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                 rolled_back = datetime.fromisoformat(str(existing.get("rolled_back_at")).replace("Z", "+00:00"))
                 if rolled_back.tzinfo is None:
                     rolled_back = rolled_back.replace(tzinfo=timezone.utc)
-                cooldown_days = int(existing.get("measurement_lock_days") or existing.get("lock_days") or 14)
+                cooldown_days = int(existing.get("measurement_lock_days") or existing.get("lock_days") or 28)
                 if datetime.now(timezone.utc) < rolled_back + timedelta(days=cooldown_days):
                     return existing, False
             except (TypeError, ValueError):
@@ -7584,6 +7616,46 @@ class AsyncRemediationQueue:
     def _save_state(self, state: Dict[str, Any]) -> None:
         AtomicStateLedger.save_json(self.queue_path, state)
 
+    @staticmethod
+    def compute_payload_sha256(payload: Any) -> str:
+        """
+        Computes a deterministic SHA-256 hash over a candidate or overlay_spec payload
+        after stripping volatile timestamp and queue-state fields.
+        """
+        _volatile_keys = frozenset({
+            "locked_until",
+            "lock_until",
+            "top_20_stability_locked_until",
+            "created_at",
+            "updated_at",
+            "enqueued_at",
+            "completed_at",
+            "timestamp",
+            "recorded_at",
+            "evaluated_at",
+            "idempotency_key",
+            "content_sha256",
+            "attempt_count",
+            "next_attempt_at",
+        })
+
+        def _strip_volatile(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {
+                    k: _strip_volatile(v)
+                    for k, v in obj.items()
+                    if k not in _volatile_keys
+                }
+            if isinstance(obj, list):
+                return [_strip_volatile(x) for x in obj]
+            return obj
+
+        target_obj = payload.get("overlay_spec") if (isinstance(payload, dict) and payload.get("overlay_spec")) else payload
+        norm_payload = _strip_volatile(target_obj)
+        return hashlib.sha256(
+            json.dumps(norm_payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
     def enqueue(
         self,
         candidate: Dict[str, Any],
@@ -7644,37 +7716,7 @@ class AsyncRemediationQueue:
             ).strip().upper()
             payload_hash = str(cand.get("content_sha256") or "").strip()
             if not payload_hash:
-                _volatile_keys = frozenset({
-                    "locked_until",
-                    "lock_until",
-                    "created_at",
-                    "updated_at",
-                    "enqueued_at",
-                    "completed_at",
-                    "timestamp",
-                    "recorded_at",
-                    "evaluated_at",
-                    "idempotency_key",
-                    "content_sha256",
-                    "attempt_count",
-                    "next_attempt_at",
-                })
-
-                def _strip_volatile(obj: Any) -> Any:
-                    if isinstance(obj, dict):
-                        return {
-                            k: _strip_volatile(v)
-                            for k, v in obj.items()
-                            if k not in _volatile_keys
-                        }
-                    if isinstance(obj, list):
-                        return [_strip_volatile(x) for x in obj]
-                    return obj
-
-                norm_payload = _strip_volatile(cand.get("overlay_spec") or cand)
-                payload_hash = hashlib.sha256(
-                    json.dumps(norm_payload, sort_keys=True).encode("utf-8")
-                ).hexdigest()
+                payload_hash = self.compute_payload_sha256(cand)
 
             idemp_key = str(cand.get("idempotency_key") or "").strip() or compute_composite_idempotency_key(
                 tenant_id=eff_tenant,
@@ -7812,10 +7854,17 @@ class AsyncRemediationQueue:
                 res_status = str((res or {}).get("status", "COMPLETED")).upper()
                 if res_status in ("COMPLETED", "SUCCESS"):
                     done_now = datetime.now(timezone.utc)
+                    lock_days_val = int(
+                        task.get("measurement_lock_days")
+                        or task.get("lock_days")
+                        or (task.get("overlay_spec") or {}).get("measurement_lock_days")
+                        or 28
+                    )
                     task["status"] = "COMPLETED"
                     task["completed_at"] = done_now.isoformat()
                     task["updated_at"] = done_now.isoformat()
-                    task["locked_until"] = (done_now + timedelta(days=14)).isoformat()
+                    task["measurement_lock_days"] = lock_days_val
+                    task["locked_until"] = (done_now + timedelta(days=lock_days_val)).isoformat()
                     completed_count += 1
                     self._save_state(state)
                 else:
@@ -7853,6 +7902,278 @@ class AsyncRemediationQueue:
             "halted_reason": halted_reason,
             "elapsed_seconds": round(time.monotonic() - start_ts, 4),
         }
+
+
+def audit_gsc_cron_cohort_and_cooldown_stability(
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    live_queries: Optional[List[Dict[str, Any]]] = None,
+    min_impressions_floor: int = 3,
+    measurement_lock_days: int = 28,
+    dry_run: bool = True,
+) -> Dict[str, Any]:
+    """
+    Executes Search Console query-page cohort segmentation, striking-distance CTR
+    anomaly detection (positions 4-30), keyword cannibalization clustering,
+    minimum-impression statistical significance floor gating, and 28-day cooldown-locked
+    state-machine verification (x-like:2107194110046060952).
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(property_id or "profithelm").strip().lower()
+    if prop.startswith("sc-domain:"):
+        prop = prop.split("sc-domain:", 1)[1].split(".", 1)[0].strip().lower()
+    if repo_root is not None:
+        root = Path(repo_root).resolve()
+    else:
+        default_roots = {
+            "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
+            "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
+        }
+        root = default_roots.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform"))
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+
+    if live_queries is not None:
+        raw_rows = [dict(r) for r in live_queries if isinstance(r, dict)]
+    else:
+        try:
+            from pseofactory.seo_growth_loops import load_consolidated_gsc_query_rows
+            consolidated = load_consolidated_gsc_query_rows(prop, repo_root=root, live_gsc=False)
+            raw_rows = list(consolidated.get("current_rows") or [])
+        except Exception:
+            raw_rows = []
+
+    top_3_winners: List[Dict[str, Any]] = []
+    striking_4_15: List[Dict[str, Any]] = []
+    striking_16_20: List[Dict[str, Any]] = []
+    striking_21_30: List[Dict[str, Any]] = []
+    striking_4_30_all: List[Dict[str, Any]] = []
+    early_indexation_31_plus: List[Dict[str, Any]] = []
+    statistically_significant_striking: List[Dict[str, Any]] = []
+    sub_floor_suppressed_rows: List[Dict[str, Any]] = []
+    ctr_anomalies_4_30: List[Dict[str, Any]] = []
+    query_to_pages: Dict[str, List[Dict[str, Any]]] = {}
+
+    for r in raw_rows:
+        q_str = _strip_forbidden_dashes(str(r.get("query") or "")).strip()
+        p_str = _strip_forbidden_dashes(str(r.get("page") or r.get("canonical_path") or "")).strip()
+        if not q_str or "site:" in q_str.lower():
+            continue
+        pos = float(r.get("position", 100.0) or 100.0)
+        impr = int(float(r.get("impressions", 0) or 0))
+        clicks = int(float(r.get("clicks", 0) or 0))
+        ctr = float(r.get("ctr", 0.0) or (round(clicks / float(impr), 4) if impr > 0 else 0.0))
+        exp_ctr = expected_ctr_for_position(pos)
+        ctr_def = round(max(0.0, exp_ctr - ctr), 4)
+
+        norm_row = {
+            "query": q_str,
+            "page": p_str,
+            "impressions": impr,
+            "clicks": clicks,
+            "ctr": round(ctr, 4),
+            "position": round(pos, 2),
+            "expected_ctr": round(exp_ctr, 4),
+            "ctr_deficit": ctr_def,
+            "statistical_significance_met": bool(impr >= min_impressions_floor),
+        }
+        if p_str:
+            query_to_pages.setdefault(q_str.lower(), []).append(norm_row)
+
+        if 0.0 < pos < 4.0:
+            top_3_winners.append(norm_row)
+        elif 4.0 <= pos <= 30.0:
+            striking_4_30_all.append(norm_row)
+            if pos <= 15.0:
+                striking_4_15.append(norm_row)
+            elif pos <= 20.0:
+                striking_16_20.append(norm_row)
+            else:
+                striking_21_30.append(norm_row)
+
+            if impr >= min_impressions_floor:
+                statistically_significant_striking.append(norm_row)
+                if ctr_def >= 0.008:
+                    ctr_anomalies_4_30.append(norm_row)
+            else:
+                sub_floor_suppressed_rows.append(norm_row)
+        else:
+            early_indexation_31_plus.append(norm_row)
+
+    # Keyword cannibalization clustering across multi-URL queries
+    cannibalization_clusters: List[Dict[str, Any]] = []
+    for q_low, q_rows in sorted(query_to_pages.items()):
+        distinct_pages: Dict[str, Dict[str, Any]] = {}
+        for qr in q_rows:
+            pk = qr["page"].rstrip("/").lower() or "/"
+            if pk not in distinct_pages or qr["impressions"] > distinct_pages[pk]["impressions"]:
+                distinct_pages[pk] = qr
+        if len(distinct_pages) < 2:
+            continue
+        sorted_pages = sorted(
+            distinct_pages.values(),
+            key=lambda x: (-int(x["clicks"]), -int(x["impressions"]), float(x["position"])),
+        )
+        winner = sorted_pages[0]
+        competing = sorted_pages[1:]
+        paths = [ urllib.parse.urlparse(x["page"]).path.rstrip("/") for x in sorted_pages ]
+        is_hub_spoke_pair = (
+            len(paths) == 2
+            and (paths[0].startswith(paths[1] + "/") or paths[1].startswith(paths[0] + "/"))
+        )
+        cannibalization_clusters.append({
+            "query": winner["query"],
+            "urls_count": len(sorted_pages),
+            "total_impressions": sum(int(x["impressions"]) for x in sorted_pages),
+            "total_clicks": sum(int(x["clicks"]) for x in sorted_pages),
+            "canonical_winner_url": winner["page"],
+            "canonical_winner_position": winner["position"],
+            "competing_urls": [x["page"] for x in competing],
+            "cluster_type": "INTENTIONAL_HUB_SPOKE_HIERARCHY" if is_hub_spoke_pair else "MULTI_URL_CANNIBALIZATION",
+            "remediation_action": "PRESERVE_HUB_SPOKE_HIERARCHY" if is_hub_spoke_pair else "CONSOLIDATE_TO_CANONICAL_WINNER",
+        })
+
+    cannibalization_clusters.sort(key=lambda c: (-int(c["total_impressions"]), -int(c["urls_count"]), c["query"]))
+
+    # Audit overlay state machine and 28-day cooldown locks
+    overlay_dirs = [root / ".agy" / "overlays", root / "content" / "overlays"]
+    seen_ov_stems: Set[str] = set()
+    total_overlays = 0
+    active_locked_count = 0
+    accretive_confirmed_count = 0
+    degraded_rolled_back_count = 0
+    expired_pending_eval_count = 0
+    lock_28d_compliant_count = 0
+    legacy_14d_upgraded_count = 0
+
+    for ov_dir in overlay_dirs:
+        if not ov_dir.is_dir():
+            continue
+        for ov_file in sorted(ov_dir.glob("*.json")):
+            if ov_file.stem in seen_ov_stems:
+                continue
+            seen_ov_stems.add(ov_file.stem)
+            try:
+                ov_data = json.loads(ov_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(ov_data, dict):
+                continue
+            total_overlays += 1
+            st_val = str(ov_data.get("status") or "ACTIVE_LOCKED").upper()
+            cur_lock_days = int(ov_data.get("measurement_lock_days") or ov_data.get("lock_days") or measurement_lock_days)
+            if cur_lock_days < measurement_lock_days and not dry_run and st_val == "ACTIVE_LOCKED":
+                ov_data["measurement_lock_days"] = measurement_lock_days
+                ov_data["lock_days"] = measurement_lock_days
+                try:
+                    c_dt = datetime.fromisoformat(str(ov_data.get("created_at") or "").replace("Z", "+00:00"))
+                    if c_dt.tzinfo is None:
+                        c_dt = c_dt.replace(tzinfo=timezone.utc)
+                    new_until = (c_dt + timedelta(days=measurement_lock_days)).isoformat()
+                    ov_data["locked_until"] = new_until
+                    ov_data["lock_until"] = new_until
+                except Exception:
+                    pass
+                ov_file.write_text(json.dumps(ov_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                cur_lock_days = measurement_lock_days
+                legacy_14d_upgraded_count += 1
+            if cur_lock_days >= measurement_lock_days:
+                lock_28d_compliant_count += 1
+
+            if st_val == "ACCRETIVE_CONFIRMED":
+                accretive_confirmed_count += 1
+            elif st_val == "DEGRADED_ROLLED_BACK":
+                degraded_rolled_back_count += 1
+            elif is_overlay_locked(ov_data):
+                active_locked_count += 1
+            else:
+                expired_pending_eval_count += 1
+
+    # Verify composite idempotency key and non-oscillating state machine determinism in memory/temp
+    sample_query = (
+        statistically_significant_striking[0]["query"]
+        if statistically_significant_striking
+        else ("ca tax brackets 2027" if prop == "profithelm" else "rap calculator")
+    )
+    sample_url = (
+        statistically_significant_striking[0]["page"]
+        if statistically_significant_striking and statistically_significant_striking[0]["page"]
+        else f"https://{domain}/tools/{'irs-2027-tax-brackets/california' if prop == 'profithelm' else 'rap-payment-calculator'}/"
+    )
+    spec_tick_1 = compile_remediation_overlay_spec(
+        {
+            "slug": _slug_from_url_or_query(sample_url, sample_query),
+            "tenant_id": prop,
+            "target_url": sample_url,
+            "query": sample_query,
+            "position": 8.5,
+            "impressions": max(min_impressions_floor, 12),
+            "clicks": 0,
+        },
+        tenant_id=prop,
+        lock_days=measurement_lock_days,
+    )
+    hash_1 = AsyncRemediationQueue.compute_payload_sha256({"overlay_spec": spec_tick_1})
+    spec_tick_2 = dict(
+        spec_tick_1,
+        created_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        locked_until=(datetime.now(timezone.utc) + timedelta(days=measurement_lock_days, minutes=5)).isoformat(),
+    )
+    hash_2 = AsyncRemediationQueue.compute_payload_sha256({"overlay_spec": spec_tick_2})
+    idemp_key_1 = compute_composite_idempotency_key(prop, sample_url, "INJECT_STRIKING_DISTANCE_OVERLAY", hash_1)
+    idemp_key_2 = compute_composite_idempotency_key(prop, sample_url, "INJECT_STRIKING_DISTANCE_OVERLAY", hash_2)
+    idempotent_zero_oscillation_verified = bool(
+        idemp_key_1 == idemp_key_2
+        and int(spec_tick_1.get("measurement_lock_days", 0)) == measurement_lock_days
+    )
+
+    return {
+        "status": "PASS" if idempotent_zero_oscillation_verified else "FAIL",
+        "property_id": prop,
+        "domain": domain,
+        "dry_run": dry_run,
+        "measurement_lock_days": measurement_lock_days,
+        "min_impressions_floor": min_impressions_floor,
+        "cohorts": {
+            "total_rows_analyzed": len(raw_rows),
+            "top_3_winners_count": len(top_3_winners),
+            "striking_distance_4_30_count": len(striking_4_30_all),
+            "striking_4_15_count": len(striking_4_15),
+            "striking_16_20_count": len(striking_16_20),
+            "striking_21_30_count": len(striking_21_30),
+            "early_indexation_31_plus_count": len(early_indexation_31_plus),
+            "statistically_significant_striking_count": len(statistically_significant_striking),
+            "sub_floor_suppressed_count": len(sub_floor_suppressed_rows),
+            "ctr_anomalies_4_30_count": len(ctr_anomalies_4_30),
+            "top_3_winners": top_3_winners[:10],
+            "striking_distance_4_30_top": sorted(
+                statistically_significant_striking,
+                key=lambda x: (-int(x["impressions"]), float(x["position"])),
+            )[:15],
+            "sub_floor_suppressed_sample": sub_floor_suppressed_rows[:10],
+        },
+        "cannibalization": {
+            "multi_url_queries_count": len(cannibalization_clusters),
+            "true_cannibalization_count": sum(
+                1 for c in cannibalization_clusters if c["cluster_type"] == "MULTI_URL_CANNIBALIZATION"
+            ),
+            "intentional_hub_spoke_count": sum(
+                1 for c in cannibalization_clusters if c["cluster_type"] == "INTENTIONAL_HUB_SPOKE_HIERARCHY"
+            ),
+            "clusters": cannibalization_clusters[:15],
+        },
+        "cooldown_state_machine": {
+            "total_overlays_inspected": total_overlays,
+            "active_locked_count": active_locked_count,
+            "accretive_confirmed_count": accretive_confirmed_count,
+            "degraded_rolled_back_count": degraded_rolled_back_count,
+            "expired_pending_eval_count": expired_pending_eval_count,
+            "lock_28d_compliant_count": lock_28d_compliant_count,
+            "legacy_14d_upgraded_count": legacy_14d_upgraded_count,
+            "idempotent_zero_oscillation_verified": idempotent_zero_oscillation_verified,
+            "sample_composite_idempotency_key": idemp_key_1,
+        },
+    }
 
 
 from pseofactory.seo_growth_loops import (  # noqa: E402

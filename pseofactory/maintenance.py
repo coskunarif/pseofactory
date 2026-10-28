@@ -9083,6 +9083,22 @@ class RetroReflectionEngine:
                                 tenant=property_id,
                                 slug=ov_s,
                             )
+                            if (
+                                str(raw_ov.get("status") or "ACTIVE_LOCKED").upper() == "ACTIVE_LOCKED"
+                                and int(raw_ov.get("measurement_lock_days") or raw_ov.get("lock_days") or 28) < 28
+                            ):
+                                raw_ov["measurement_lock_days"] = 28
+                                raw_ov["lock_days"] = 28
+                                try:
+                                    c_dt = datetime.fromisoformat(str(raw_ov.get("created_at") or "").replace("Z", "+00:00"))
+                                    if c_dt.tzinfo is None:
+                                        c_dt = c_dt.replace(tzinfo=timezone.utc)
+                                    new_lock = (c_dt + timedelta(days=28)).isoformat()
+                                    raw_ov["locked_until"] = new_lock
+                                    raw_ov["lock_until"] = new_lock
+                                except Exception:
+                                    pass
+                                ov_reconciled = True
                             if ov_reconciled:
                                 ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                             if cls._overlay_spec_needs_heal(ov_s, raw_ov):
