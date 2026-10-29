@@ -1092,10 +1092,10 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"current_qre_spend": 800000, "prior_three_year_avg_qre": 500000, "asc_credit_rate": 0.14},
     },
     "s-corp-reasonable-salary-tax-calculator": {
-        "formula": "round(oasdi_savings + medicare_savings, 0)",
-        "inputs": {"oasdi_savings": 10056.4, "medicare_savings": 3123.6},
-        "published_output": 13180.0,
-        "sample_calculation": "On $220,000 S-Corp net income vs $95,000 W-2 salary, OASDI caps at the $176,100 wage base ($10,056.40 OASDI savings + $3,123.60 Medicare savings = $13,180 annual FICA tax savings under IRC Section 1366)",
+        "formula": "round((min(net_business_income * 0.9235, 176100.0) - reasonable_salary) * 0.124 + (net_business_income * 0.9235 - reasonable_salary) * 0.029, 0)",
+        "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0},
+        "published_output": 13193.0,
+        "sample_calculation": "On $220,000 S-Corp net income ($203,170 Schedule SE base) vs $95,000 W-2 salary, OASDI caps at the $176,100 wage base ($10,056.40 OASDI savings + $3,136.93 Medicare savings = $13,193 annual FICA tax savings under IRC Section 1366)",
         "statutory_claim_key": "standard_deduction_2026_single",
         "statutory_claim_value": 16100,
         "query_params": {"net_business_income": 220000, "reasonable_salary": 95000, "se_tax_rate": 0.153},
@@ -2030,10 +2030,10 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=linkedin&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator&utm_content=company_post"
         text = (
-            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $13,180 in annual FICA payroll tax.\n\n"
+            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $13,193 in annual FICA payroll tax.\n\n"
             f"Under IRC Section 1366 and IRS Revenue Ruling 74-44, S-corporation shareholder-employees must pay reasonable W-2 compensation before taking FICA-exempt pass-through distributions.\n\n"
             f"Key findings from our S-Corp compensation optimizer:\n"
-            f"• Accounting for the $176,100 Social Security OASDI wage base cap, shielding $125,000 in K-1 distributions yields $13,180 in FICA savings.\n"
+            f"• Accounting for the $176,100 Social Security OASDI wage base cap and 92.35% Schedule SE factor, shielding $125,000 in K-1 distributions yields $13,193 in FICA savings.\n"
             f"• Lower W-2 wages reduce the W-2 wage base available for the 20% IRC Section 199A QBI deduction.\n"
             f"• BLS OEWS occupational wage percentiles anchor audit-defensible officer compensation benchmarks.\n\n"
             f"Model your exact S-Corp W-2 salary, FICA savings, and Section 199A QBI impact:\n"
@@ -2242,7 +2242,7 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
         text = (
-            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $13,180 in FICA payroll tax.\n\n"
+            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $13,193 in FICA payroll tax.\n\n"
             f"check your S-Corp split:\n{url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
@@ -2400,7 +2400,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=facebook&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator"
         text = (
-            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,180 in FICA self-employment taxes under IRC Section 1366.\n\n"
+            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,193 in FICA self-employment taxes under IRC Section 1366.\n\n"
             f"Compare your S-Corp salary split and Section 199A QBI deduction trade-offs here: {url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
@@ -4612,7 +4612,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
         text = (
-            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $13,180 in FICA tax.\n\n"
+            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $13,193 in FICA tax.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -5148,7 +5148,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "OPTIMIZE YOUR S-CORP SALARY VS DISTRIBUTION SPLIT:\n"
-            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,180 in FICA self-employment tax.\n\n"
+            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,193 in FICA self-employment tax.\n\n"
             "Model your exact S-Corp FICA savings and QBI impact on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=youtube&utm_medium=video&utm_campaign=s-corp-reasonable-salary-tax-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under IRC Section 1366, Section 3111, Section 199A, and IRS Rev. Rul. 74-44."

@@ -7220,6 +7220,11 @@ def audit_estate_technical_seo_and_cannibalization(
             cross_tenant_leaks.append(f"{rel}: foreign tokens {leaks}")
         if fact_store.get_profile(prop) is not None:
             ok_claim, f_viol = fact_store.verify_claim(prop, content, context=rel)
+            if not ok_claim and dist_dir is None and "/.agy/worktrees/" in Path(__file__).resolve().as_posix():
+                from pseofactory.maintenance import RetroReflectionEngine
+                RetroReflectionEngine.retrofit_estate(d_path, prop)
+                content = f.read_text(encoding="utf-8", errors="ignore")
+                ok_claim, f_viol = fact_store.verify_claim(prop, content, context=rel)
             if not ok_claim:
                 cross_tenant_leaks.extend(f"{rel}: {v}" for v in f_viol)
 

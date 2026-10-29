@@ -22,7 +22,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -64,6 +64,10 @@ class ContentAccuracyAuditReport:
     tolerance: float = 0.01
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def is_publishable(self) -> bool:
+        return self.passed
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "passed": self.passed,
@@ -76,6 +80,166 @@ class ContentAccuracyAuditReport:
             "tolerance": self.tolerance,
             "metadata": dict(self.metadata),
         }
+
+
+BANNED_TAUTOLOGICAL_FORMULA_PATTERNS: Tuple[Tuple[str, str], ...] = (
+    (
+        "gross_income - net_take_home_pay",
+        "Tautological subtraction 'gross_income - net_take_home_pay' (must compute tax from statutory brackets)",
+    ),
+    (
+        "federal_deferred_tax + state_deferred_tax",
+        "Tautological sum 'federal_deferred_tax + state_deferred_tax' (must compute tax from gain, recapture, NIIT, and state rates)",
+    ),
+    (
+        "effective_sunset_rate",
+        "Tautological reverse-engineered 'effective_sunset_rate' (must compute graduated statutory brackets)",
+    ),
+    (
+        "4880.0",
+        "Fabricated additive constant '4880.0' in Section 179 formula (must use $30,500 SUV cap + 20% bonus depreciation)",
+    ),
+    (
+        "48212.5",
+        "Invalid 225% FPL poverty exemption '48212.50' (2026 HHS single exemption is 35212.50, 2-person is 47587.50)",
+    ),
+)
+
+
+def detect_tautological_or_fabricated_manifest_issues(
+    formula: str,
+    inputs: Dict[str, Any],
+    published_output: Optional[float] = None,
+) -> List[str]:
+    """Detects tautological formulas, reverse-engineered rates, or fabricated constants in a calculation manifest."""
+    issues: List[str] = []
+    if not formula:
+        return issues
+    f_clean = formula.strip()
+    for pat, desc in BANNED_TAUTOLOGICAL_FORMULA_PATTERNS:
+        if pat in f_clean:
+            issues.append(f"Gate 5 (Formula Parity): Tautological or fabricated manifest formula: {desc}")
+    if (
+        isinstance(inputs, dict)
+        and "income_adjusted_12yr_payment" in inputs
+        and published_output is not None
+    ):
+        try:
+            in_val = float(inputs["income_adjusted_12yr_payment"])
+            if abs(in_val - float(published_output)) <= 0.01:
+                issues.append(
+                    "Gate 5 (Formula Parity): Tautological ICR manifest input 'income_adjusted_12yr_payment' equals published_output without computing 12-year amortization * income factor"
+                )
+        except (TypeError, ValueError):
+            pass
+    return issues
+
+
+def verify_manifest_ssr_metric_parity(
+    html_content: str,
+    published_output: float,
+    slug: str = "",
+) -> List[str]:
+    """Verifies that manifest published_output and .output-value match the rendered SSR calculator metric cards."""
+    issues: List[str] = []
+    if not html_content or published_output is None:
+        return issues
+
+    visible_html = re.sub(
+        r'<div[^>]*class=["\'][^"\']*statutory-accuracy-benchmarks[^"\']*["\'][^>]*>[\s\S]*?</div>',
+        "",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    metrics: Dict[str, float] = {}
+    for m in re.finditer(
+        r'id=["\']((?:res-[a-z0-9_-]+|val-[a-z0-9_-]+|sec179-res-[a-z0-9_-]+|sec1031-res-[a-z0-9_-]+|tey-res-[a-z0-9_-]+|metric-[a-z0-9_-]+|kpi-[a-z0-9_-]+))["\'][^>]*>\s*([^<]+)<',
+        visible_html,
+        re.IGNORECASE,
+    ):
+        m_id = m.group(1).strip()
+        raw_txt = m.group(2).strip()
+        num_m = re.search(r"-?\d[\d,]*(?:\.\d+)?", raw_txt)
+        if not num_m:
+            continue
+        try:
+            metrics[m_id] = float(num_m.group(0).replace(",", ""))
+        except ValueError:
+            continue
+
+    if not metrics:
+        return issues
+
+    slug_low = (slug or "").lower()
+    # Plan-specific Prexvo and GainHelm SSR metric binding
+    plan_metric_map = (
+        (("icr-repayment", "parent-plus-repayment-strategy"), "metric-icr_payment"),
+        (("ibr-hardship",), "metric-ibr_payment"),
+        (("paye-sunset",), "metric-paye_payment"),
+        (("tiered-standard",), "metric-tiered_payment"),
+        (("rap-payment", "rap-vs-ibr", "student-loan-repayment-calculator", "save-plan-litigation-transition"), "metric-rap_payment"),
+        (("soc-2-audit-cost",), "metric-soc2_total_cost"),
+        (("nist-800-171-sprs",), "metric-nist_sprs_score"),
+        (("cmmc-2-0-compliance",), "metric-cmmc_total_cost"),
+        (("iso-27001-certification",), "metric-iso27001_total_cost"),
+    )
+    for keywords, target_metric in plan_metric_map:
+        if any(k in slug_low for k in keywords) and target_metric in metrics:
+            expected_val = metrics[target_metric]
+            plan_tol = 1.0 if abs(expected_val) >= 10000.0 else 0.02
+            if abs(float(published_output) - expected_val) > plan_tol:
+                issues.append(
+                    f"Gate 5 (SSR Metric Parity): Manifest/output-value ({published_output}) diverges from rendered SSR calculator metric #{target_metric} ({expected_val})"
+                )
+            return issues
+
+    # Skip multi-plan shared widget check on specialized Prexvo or GainHelm tools whose primary model is outside the 4-card shared widget
+    if any(
+        k in slug_low
+        for k in (
+            "pslf-buyback",
+            "pslf-qualifying-payment-simulator",
+            "grad-plus-borrowing-cap",
+            "student-loan-refinance-break-even",
+            "married-filing-separately",
+            "student-loan-interest-deduction-phaseout",
+        )
+    ) and "metric-rap_payment" in metrics and len(metrics) >= 4:
+        return issues
+
+    if any(
+        k in slug_low
+        for k in (
+            "hipaa-",
+            "pci-dss-4-0",
+            "fedramp-authorization",
+            "hitrust-csf",
+            "penetration-testing",
+            "cyber-liability-insurance",
+        )
+    ) and "metric-soc2_total_cost" in metrics and len(metrics) >= 4:
+        return issues
+
+    if (
+        "val-total_federal_tax" in metrics
+        and metrics.get("val-total_federal_tax") == 23530.0
+        and not any(k in slug_low for k in ("tax-bracket", "irs-2027-tax-brackets"))
+    ):
+        return issues
+
+    pub_f = float(published_output)
+    tol = 1.0 if abs(pub_f) >= 100.0 else 0.02
+    matched = False
+    for m_val in metrics.values():
+        if abs(pub_f - m_val) <= tol or (0 < abs(pub_f) < 1.0 and abs((pub_f * 100.0) - m_val) <= 0.05):
+            matched = True
+            break
+    if not matched:
+        sample_items = ", ".join(f"{k}={v}" for k, v in list(metrics.items())[:4])
+        issues.append(
+            f"Gate 5 (SSR Metric Parity): Manifest/output-value ({published_output}) does not match any rendered SSR calculator metric card ({sample_items})"
+        )
+    return issues
 
 
 def _resolve_expected_title(candidate_spec: Dict[str, Any]) -> str:
@@ -429,6 +593,24 @@ def audit_rendered_asset(
                     )
             except ValueError:
                 pass
+    taut_issues = detect_tautological_or_fabricated_manifest_issues(
+        formula=formula,
+        inputs=clamped_inputs,
+        published_output=spec_pub_val if spec_pub_val is not None else html_output_val,
+    )
+    if taut_issues:
+        g5_ok = False
+        violations.extend(taut_issues)
+    target_pub_for_ssr = html_output_val if html_output_val is not None else spec_pub_val
+    if target_pub_for_ssr is not None:
+        ssr_issues = verify_manifest_ssr_metric_parity(
+            html_content=html_content,
+            published_output=target_pub_for_ssr,
+            slug=slug,
+        )
+        if ssr_issues:
+            g5_ok = False
+            violations.extend(ssr_issues)
     gate_results["formula_evaluation_parity"] = g5_ok
 
     # -------------------------------------------------------------

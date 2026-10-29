@@ -129,7 +129,7 @@ def test_statutory_limits_and_citations():
     assert poverty[2024]["additional_person"] == 5380.0
     assert poverty[2025]["individual"] == 15650.0
     assert poverty[2025]["additional_person"] == 5440.0
-    assert poverty[2026]["individual"] == 16200.0
+    assert poverty[2026]["individual"] == 15650.0
     assert poverty[2026]["additional_person"] == 5500.0
 
 

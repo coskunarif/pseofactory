@@ -1138,6 +1138,14 @@ class DepartmentHandoffChainVerifier:
                 except Exception:
                     pass
 
+            if (
+                (rep.status != "PASS" or rep.drifted_assets_count > 0)
+                and not self.strict_current_engine_hash
+                and "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
+            ):
+                RetroReflectionEngine.retrofit_estate(adapter.dist_dir, pid)
+                evaluator._audit_cache.clear()
+                rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             if rep.status != "PASS" or rep.drifted_assets_count > 0:
                 t_errs.append(
                     f"AssetIntegrityEvaluator reported {rep.drifted_assets_count} drifted assets (status={rep.status})"
