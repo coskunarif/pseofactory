@@ -403,6 +403,26 @@ class ShipperQueue:
             f.flush()
             os.fsync(f.fileno())
 
+    def list_dlq(self, property_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not self.dlq_file.exists():
+            return []
+        items: List[Dict[str, Any]] = []
+        try:
+            for line in self.dlq_file.read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    rec = json.loads(s)
+                    if property_id and rec.get("property_id") != _normalize_property_id(property_id):
+                        continue
+                    items.append(rec)
+                except Exception:
+                    continue
+        except Exception:
+            return []
+        return items
+
 
 WALQueue = ShipperQueue
 
@@ -2719,7 +2739,7 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             old_pid_echo = 'echo "$$" > "$PID_FILE"'
             new_pid_echo = (
                 'echo "$$" > "$PID_FILE"\n'
-                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then\n'
+                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ]; }; then\n'
                 '    exec 201>"/tmp/pseofactory_supervisor.lock"\n'
                 '    if ! flock -w "${LOCK_WAIT_TIMEOUT:-60}" 201; then\n'
                 '        echo "Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL)." >&2\n'
@@ -2733,9 +2753,12 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 rf_new = rf_new.replace(old_pid_echo, new_pid_echo, 1)
 
             old_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
-            new_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
+            old_lock_cond_v2 = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
+            new_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ]; }; then'
             if old_lock_cond in rf_new:
                 rf_new = rf_new.replace(old_lock_cond, new_lock_cond, 1)
+            elif old_lock_cond_v2 in rf_new:
+                rf_new = rf_new.replace(old_lock_cond_v2, new_lock_cond, 1)
 
             old_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@"\n'
             new_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@" </dev/null 200>&-\n'

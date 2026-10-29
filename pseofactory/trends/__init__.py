@@ -24,6 +24,7 @@ from pseofactory.trends.collectors import (
     HackerNewsCollector,
     GoogleTrendsRSSCollector,
     MultiSourceCollector,
+    StatutoryEconomicDatasetCollector,
 )
 from pseofactory.trends.filters import (
     NoiseFilter,

@@ -2173,7 +2173,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
     q_words = [w for w in _strip_forbidden_dashes(query_label).split() if w.strip()]
     short_label = _clean_short_label(q_words, max_chars=28)
     if not short_label:
-        short_label = "Title IV student loan repayment" if tenant_id == "prexvo" else "statutory tax liability"
+        if tenant_id == "prexvo":
+            short_label = "Title IV student loan repayment"
+        elif tenant_id == "gainhelm":
+            short_label = "enterprise security compliance"
+        else:
+            short_label = "statutory tax liability"
     q_low = f"{query_label.lower()} {short_label.lower()}"
 
     has_meta_defect = bool(
@@ -2471,6 +2476,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                 f"and Section 168(k) bonus depreciation on IRS Form 4562.",
                 " Grounded in IRC Section 179 and IRS Form 4562 schedules.",
             )
+        if "irs interest" in q_low or "irs-interest" in q_low or "6621" in q_low or "underpayment" in q_low:
+            return (
+                f"Calculate {lbl} liability under IRC Section 6621 and Section 6622 daily compounding "
+                f"rules, plus Section 6651(a)(2) failure-to-pay penalty caps.",
+                " Grounded in IRC Section 6621 quarterly IRS Revenue Rulings.",
+            )
         if "2027" in q_low or "bracket" in q_low or "tcja" in q_low:
             return (
                 f"Calculate {lbl} liability under IRC Section 1(j), comparing marginal rates (10% to 37%), "
@@ -2487,7 +2498,9 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
     while len(default_meta) > 155 and len(q_words) > 2:
         q_words.pop()
         short_label = _clean_short_label(q_words, max_chars=24) or (
-            "Title IV loan repayment" if tenant_id == "prexvo" else "statutory tax liability"
+            "Title IV loan repayment"
+            if tenant_id == "prexvo"
+            else ("cyber compliance audit" if tenant_id == "gainhelm" else "statutory tax liability")
         )
         default_meta, tail_pad = _build_default_meta(short_label)
 
@@ -2530,7 +2543,15 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     q_words = [w for w in clean_q.split() if w.strip()][:5]
     while len(q_words) > 1 and q_words[-1].lower().rstrip(".,;:-") in _TRAILING_LABEL_STOPWORDS:
         q_words.pop()
-    short_q = " ".join(q_words) if q_words else ("repayment options" if tenant_id == "prexvo" else "tax deductions")
+    short_q = (
+        " ".join(q_words)
+        if q_words
+        else (
+            "repayment options"
+            if tenant_id == "prexvo"
+            else ("compliance audit costs" if tenant_id == "gainhelm" else "tax deductions")
+        )
+    )
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
     if tenant_id == "gainhelm":
@@ -2771,6 +2792,17 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         filler_pool = [
             "Verified", "against", "IRS", "Revenue", "Ruling", "55-540",
             "true", "lease", "criteria", "and", "ASC", "842.",
+        ]
+    elif any(k in combined_low for k in ("irs-interest", "irs interest", "6621", "6651", "underpayment", "failure-to-pay")):
+        base_words = (
+            f"Under IRC Section 6621(a)(2) and Section 6622 daily compounding schedules, {short_q} "
+            f"computes statutory IRS tax underpayment interest (federal short-term rate plus 3 percentage "
+            f"points, or plus 5 percentage points for large corporate underpayments under Section 6621(c)) "
+            f"alongside IRC Section 6651(a)(2) monthly failure-to-pay penalties."
+        ).split()
+        filler_pool = [
+            "Verified", "against", "quarterly", "IRS", "Revenue", "Rulings",
+            "and", "IRC", "Section", "6651", "statutory", "caps.",
         ]
     elif any(k in combined_low for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr")):
         clean_179_q = re.sub(
@@ -3678,6 +3710,72 @@ def _build_vertical_profithelm_overlay_blocks(
                 },
             ],
         }
+    if any(k in comb for k in ("irs-interest", "irs interest", "6621", "6651", "underpayment", "failure-to-pay")):
+        return {
+            "h2_headings": [
+                f"{heading_label}: IRC Section 6621 Quarterly Rates & Section 6622 Daily Compounding",
+                f"Audit-Ready {heading_label} Underpayment & Failure-to-Pay Penalty Scenarios",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-irs-interest-standard",
+                    "label": f"{heading_label} Standard Underpayment ($50k Balance, 180 Days, 7% Rate)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"underpayment_usd": 50000, "days_delinquent": 180, "annual_rate_pct": 7.0},
+                    "description": "Individual or pass-through underpayment accruing daily compounded interest under IRC Section 6621(a)(2) and Section 6622.",
+                },
+                {
+                    "id": "preset-irs-interest-corporate",
+                    "label": f"{heading_label} Large Corporate Underpayment ($250k Balance, Section 6621(c) +5% Spread)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"underpayment_usd": 250000, "days_delinquent": 365, "annual_rate_pct": 9.0},
+                    "description": "C-Corporation underpayment exceeding $100,000 subject to the federal short-term rate plus 5 percentage points under IRC Section 6621(c).",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "$50,000 Tax Underpayment Held 180 Days (7% Section 6621 Rate)",
+                    "baseline": "$3,256 Unmitigated Interest + 0.5%/Mo Section 6651 Penalty",
+                    "optimized": "$1,756 Interest Only via First-Time Penalty Abatement (IRM 20.1.1.3.3.2.1)",
+                    "delta": "+$1,500 Failure-to-Pay Penalty Abated",
+                    "authority": "IRC Section 6621(a)(2), Section 6622 & Section 6651(a)(2)",
+                },
+                {
+                    "scenario": "$250,000 C-Corp Deficiency Exceeding $100k Threshold (30-Day Letter)",
+                    "baseline": "Accrues at 9% Large Corporate Underpayment Rate (+5% Spread)",
+                    "optimized": "IRC Section 6603 Cash Bond Deposit Halts Daily Compounding",
+                    "delta": "Eliminates Ongoing Section 6621(c) Interest Accrual",
+                    "authority": "IRC Section 6621(c) & IRC Section 6603",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": "How is IRS underpayment interest calculated under IRC Section 6621 and Section 6622?",
+                    "answer": (
+                        "Under IRC Section 6621(a)(2), the IRS sets the standard underpayment interest rate each calendar quarter "
+                        "at the federal short-term rate plus 3 percentage points (or plus 5 percentage points for large corporate "
+                        "underpayments exceeding $100,000 under Section 6621(c)), compounded daily under IRC Section 6622."
+                    ),
+                },
+                {
+                    "question": "Can IRS underpayment interest be abated like failure-to-pay penalties?",
+                    "answer": (
+                        "While IRC Section 6651(a)(2) failure-to-pay penalties (0.5% per month up to 25%) qualify for First-Time "
+                        "Penalty Abatement or reasonable cause relief, statutory interest under IRC Section 6404(e) can only be "
+                        "abated when attributable to an unreasonable ministerial or managerial error by an IRS officer."
+                    ),
+                },
+            ],
+        }
+    is_179_comb = any(k in comb for k in ("179", "equipment", "macrs", "depreciation", "vehicle", "gvwr"))
+    default_auth_1 = "IRC Section 179 & Section 168(k)" if is_179_comb else "IRC Section 1(j) & Section 63(c)"
+    default_auth_2 = "IRC Section 1, Section 179 & Form 4562" if is_179_comb else "IRC Section 1(h) & Section 1411"
     return {
         "h2_headings": [
             f"{heading_label}: 2026 IRC Statutory Rules & Thresholds",
@@ -3711,14 +3809,14 @@ def _build_vertical_profithelm_overlay_blocks(
                 "baseline": "$16,000 Year-1 Straight-Line Deduction",
                 "optimized": "$80,000 Immediate Year-1 Tax Shield",
                 "delta": "+$64,000 Accelerated Cash Flow",
-                "authority": "IRC Section 179 & Section 168(k)",
+                "authority": default_auth_1,
             },
             {
                 "scenario": "$850,000 High-Earner Statutory Tax Scenario (37% Bracket)",
                 "baseline": "$202,300 Unoptimized Statutory Tax Liability",
                 "optimized": "$138,300 Optimized After Statutory Elections",
                 "delta": "+$64,000 Working Capital Preserved",
-                "authority": "IRC Section 1, Section 179 & Form 4562",
+                "authority": default_auth_2,
             },
         ],
         "faq_entries": [
@@ -4132,7 +4230,15 @@ def compile_remediation_overlay_spec(
         return w.capitalize()
 
     words = [_cap_word(w) for w in query_clean.split() if w]
-    heading_label = " ".join(words) if words else ("Title IV Repayment Calculator" if resolved_tenant == "prexvo" else "Statutory Tax Calculator")
+    heading_label = (
+        " ".join(words)
+        if words
+        else (
+            "Title IV Repayment Calculator"
+            if resolved_tenant == "prexvo"
+            else ("Enterprise Compliance Calculator" if resolved_tenant == "gainhelm" else "Statutory Tax Calculator")
+        )
+    )
     heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
     heading_label = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", heading_label)
     from pseofactory.contracts import normalize_statutory_acronym_casing
@@ -7801,7 +7907,11 @@ class AsyncRemediationQueue:
                 default_slug=str(cand.get("slug") or ""),
             )
             if not target_url:
-                domain = "prexvo.com" if eff_tenant == "prexvo" else "profithelm.com"
+                domain = (
+                    "prexvo.com"
+                    if eff_tenant == "prexvo"
+                    else ("gainhelm.com" if eff_tenant == "gainhelm" else "profithelm.com")
+                )
                 target_url = f"https://{domain}/tools/{slug}/"
 
             action_or_engine = str(
@@ -8183,15 +8293,25 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
                 expired_pending_eval_count += 1
 
     # Verify composite idempotency key and non-oscillating state machine determinism in memory/temp
+    default_sample_query = (
+        "ca tax brackets 2027"
+        if prop == "profithelm"
+        else ("soc 2 audit cost calculator" if prop == "gainhelm" else "rap calculator")
+    )
+    default_sample_slug = (
+        "irs-2027-tax-brackets/california"
+        if prop == "profithelm"
+        else ("soc-2-audit-cost-calculator" if prop == "gainhelm" else "rap-payment-calculator")
+    )
     sample_query = (
         statistically_significant_striking[0]["query"]
         if statistically_significant_striking
-        else ("ca tax brackets 2027" if prop == "profithelm" else "rap calculator")
+        else default_sample_query
     )
     sample_url = (
         statistically_significant_striking[0]["page"]
         if statistically_significant_striking and statistically_significant_striking[0]["page"]
-        else f"https://{domain}/tools/{'irs-2027-tax-brackets/california' if prop == 'profithelm' else 'rap-payment-calculator'}/"
+        else f"https://{domain}/tools/{default_sample_slug}/"
     )
     spec_tick_1 = compile_remediation_overlay_spec(
         {

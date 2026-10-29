@@ -45,6 +45,9 @@ def __getattr__(name: str):
     if name == "DailyIndexingInspector":
         from pseofactory.indexing_inspector import DailyIndexingInspector
         return DailyIndexingInspector
+    if name in ("IndexingPreflightEngine", "PreflightReport", "PreflightURLRecord"):
+        from pseofactory.indexing import preflight
+        return getattr(preflight, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

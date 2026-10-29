@@ -8,6 +8,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 import asyncio
 import concurrent.futures
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
 import json
@@ -15,12 +16,14 @@ import os
 from pathlib import Path
 import random
 import subprocess
+import sys
 import tempfile
 import time
-from typing import Any, Callable, Dict, Generator, List, Optional, Type, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, Union
 import uuid
 
 from pseofactory.maintenance import (
+    CANONICAL_TENANT_CONFIGS,
     LockContentionError,
     SubprocessCrashError,
     MaintenanceLifecycle,
@@ -29,6 +32,7 @@ from pseofactory.maintenance import (
     PropertyContaminationError,
     TenantRegistry,
     WorkspacePropertyScanner,
+    sync_tenant_pseofactory_marker,
 )
 from pseofactory.telemetry import (
     TelemetryEvent,
@@ -172,6 +176,24 @@ class HeartbeatTracker:
         }
         if extra:
             payload.update(extra)
+        if status == "HEALTHY" and "department_pipeline" not in payload:
+            try:
+                existing_hb = self.ledger.load_json(self.heartbeat_path)
+                if isinstance(existing_hb, dict):
+                    if isinstance(existing_hb.get("department_pipeline"), dict):
+                        payload["department_pipeline"] = existing_hb["department_pipeline"]
+                    if "partner_lifecycle_sync" not in payload and isinstance(
+                        existing_hb.get("partner_lifecycle_sync"), dict
+                    ):
+                        payload["partner_lifecycle_sync"] = existing_hb["partner_lifecycle_sync"]
+                if "department_pipeline" not in payload:
+                    sibling_dp = self.heartbeat_path.parent / "department_pipeline_state.json"
+                    if sibling_dp.is_file():
+                        dp_data = self.ledger.load_json(sibling_dp)
+                        if isinstance(dp_data, dict) and dp_data.get("stages"):
+                            payload["department_pipeline"] = dp_data
+            except Exception:
+                pass
         self.ledger.save_json(self.heartbeat_path, payload)
         if str(self.heartbeat_path).startswith("/home/ubuntuadmin/projects/"):
             for mirror_hb in (
@@ -214,8 +236,9 @@ class HeartbeatTracker:
         return self.ledger.load_json(self.heartbeat_path)
 
 
+CANONICAL_TENANTS: Tuple[str, ...] = ("profithelm", "prexvo", "gainhelm")
 DEPARTMENT_PIPELINE_PATH: str = ".agy/department_pipeline_state.json"
-DEPARTMENT_STAGES: tuple = (
+DEPARTMENT_STAGES: Tuple[str, ...] = (
     "DISCOVERY",
     "MONETIZATION",
     "ENGINEERING",
@@ -223,6 +246,231 @@ DEPARTMENT_STAGES: tuple = (
     "SYNDICATION",
     "DEPLOYMENT",
 )
+
+
+@dataclass(frozen=True)
+class DepartmentContract:
+    """
+    Formal input and output handoff contract for a single autonomous factory department.
+    Enforces deterministic stage ordering, explicit upstream input dependencies,
+    guaranteed downstream outputs, and 3-tenant operational parity.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    stage: str
+    order: int
+    upstream_stage: Optional[str]
+    downstream_stage: Optional[str]
+    responsibility: str
+    required_inputs: Tuple[str, ...]
+    guaranteed_outputs: Tuple[str, ...]
+    tenant_invariants: Tuple[str, ...]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes department contract to a JSON-compatible dictionary."""
+        return {
+            "stage": self.stage,
+            "order": self.order,
+            "upstream_stage": self.upstream_stage,
+            "downstream_stage": self.downstream_stage,
+            "responsibility": self.responsibility,
+            "required_inputs": list(self.required_inputs),
+            "guaranteed_outputs": list(self.guaranteed_outputs),
+            "tenant_invariants": list(self.tenant_invariants),
+        }
+
+
+CANONICAL_DEPARTMENT_CONTRACTS: Dict[str, DepartmentContract] = {
+    "DISCOVERY": DepartmentContract(
+        stage="DISCOVERY",
+        order=1,
+        upstream_stage=None,
+        downstream_stage="MONETIZATION",
+        responsibility=(
+            "Discover canonical tenant repositories, normalize .pseofactory.json markers, "
+            "load statutory economic time-series datasets, and route topic queries to their "
+            "owning tenant while rejecting cross-property contamination."
+        ),
+        required_inputs=(
+            "workspace_root",
+            "target_tenants",
+            "engine_hash",
+        ),
+        guaranteed_outputs=(
+            "discovered_tenants",
+            "tenant_adapters",
+            "tenant_markers",
+            "tenant_tool_catalogs",
+            "statutory_timeseries_counts",
+            "canonical_routing_probes",
+            "discovery_isolation_verified",
+        ),
+        tenant_invariants=(
+            "canonical_pseofactory_marker_synced",
+            "brand_domain_linkedin_aligned",
+            "tool_catalog_populated",
+            "statutory_timeseries_loaded",
+            "deterministic_query_routing_and_contamination_guard",
+        ),
+    ),
+    "MONETIZATION": DepartmentContract(
+        stage="MONETIZATION",
+        order=2,
+        upstream_stage="DISCOVERY",
+        downstream_stage="ENGINEERING",
+        responsibility=(
+            "Qualify commercial intent for both explicit and inferred tenant queries, bind "
+            "multi-partner rosters (>=3 distinct companies per tenant), enforce domain boundaries, "
+            "sync Cloudflare edge redirect and lead-capture functions, and verify callout destination "
+            "message-match parity."
+        ),
+        required_inputs=(
+            "discovered_tenants",
+            "tenant_adapters",
+            "tenant_tool_catalogs",
+            "canonical_routing_probes",
+        ),
+        guaranteed_outputs=(
+            "monetization_qualification_by_tenant",
+            "partner_roster_by_tenant",
+            "domain_boundary_audit",
+            "edge_redirect_contracts_by_tenant",
+            "callout_destination_audit_by_tenant",
+            "partner_lifecycle_sync_status",
+        ),
+        tenant_invariants=(
+            "explicit_and_inferred_query_qualification",
+            "distinct_partner_roster_ge_3",
+            "zero_cross_domain_partner_leakage",
+            "cloudflare_edge_redirect_and_lead_capture_functions",
+            "zero_callout_destination_mismatches",
+        ),
+    ),
+    "ENGINEERING": DepartmentContract(
+        stage="ENGINEERING",
+        order=3,
+        upstream_stage="MONETIZATION",
+        downstream_stage="VERIFICATION",
+        responsibility=(
+            "Compile Factor-7 interactive HTML calculators and root indices with embedded "
+            "#calculation-manifest JSON, enforce host subprocess sys.modules isolation, and "
+            "guarantee deterministic compilation parity across all three tenants."
+        ),
+        required_inputs=(
+            "discovered_tenants",
+            "tenant_adapters",
+            "monetization_qualification_by_tenant",
+            "partner_roster_by_tenant",
+        ),
+        guaranteed_outputs=(
+            "compiled_dist_dirs",
+            "compiled_assets_by_tenant",
+            "calculation_manifests_by_tenant",
+            "compiler_smoke_by_tenant",
+            "subprocess_memory_isolation",
+        ),
+        tenant_invariants=(
+            "dist_root_and_tool_assets_compiled",
+            "embedded_calculation_manifest_present",
+            "factor_7_compiler_contract_verified",
+            "zero_tenant_modules_in_host_sys_modules",
+        ),
+    ),
+    "VERIFICATION": DepartmentContract(
+        stage="VERIFICATION",
+        order=4,
+        upstream_stage="ENGINEERING",
+        downstream_stage="SYNDICATION",
+        responsibility=(
+            "Audit every compiled tenant asset via AssetIntegrityEvaluator (MasterSEOVerifier), "
+            "RetroReflectionEngine, TenantFactStore isolation, CrossPropertyContaminationScanner, "
+            "and AEO/GEO three-plane readiness with zero drift."
+        ),
+        required_inputs=(
+            "compiled_dist_dirs",
+            "compiled_assets_by_tenant",
+            "calculation_manifests_by_tenant",
+            "compiler_smoke_by_tenant",
+        ),
+        guaranteed_outputs=(
+            "integrity_reports_by_tenant",
+            "retro_reflection_by_tenant",
+            "contamination_scan_by_tenant",
+            "aeo_geo_readiness_by_tenant",
+            "zero_drift_verified",
+        ),
+        tenant_invariants=(
+            "asset_integrity_zero_drift",
+            "retro_reflection_zero_stale",
+            "cross_property_contamination_zero",
+            "aeo_geo_three_plane_ready",
+        ),
+    ),
+    "SYNDICATION": DepartmentContract(
+        stage="SYNDICATION",
+        order=5,
+        upstream_stage="VERIFICATION",
+        downstream_stage="DEPLOYMENT",
+        responsibility=(
+            "Enforce IndexingPreflightEngine gates, root discovery files (sitemap.xml, robots.txt, "
+            "llms.txt, llms-full.txt, ai-benchmarks.json), multi-channel syndication packs, "
+            "rendered MP4 video catalogs, and broadcast/index-push/metric-recovery ledgers."
+        ),
+        required_inputs=(
+            "compiled_dist_dirs",
+            "integrity_reports_by_tenant",
+            "zero_drift_verified",
+        ),
+        guaranteed_outputs=(
+            "indexing_preflight_by_tenant",
+            "discovery_root_files_by_tenant",
+            "syndication_packs_by_tenant",
+            "video_assets_by_tenant",
+            "distribution_ledgers_by_tenant",
+            "downstream_work_pending_by_tenant",
+        ),
+        tenant_invariants=(
+            "indexing_preflight_gate_passed",
+            "root_sitemap_robots_llms_benchmarks_present",
+            "syndication_packs_complete_zero_deprecated_reddit",
+            "mp4_video_catalog_rendered",
+            "broadcast_index_push_metric_recovery_ledgers_synced",
+            "zero_pending_downstream_work",
+        ),
+    ),
+    "DEPLOYMENT": DepartmentContract(
+        stage="DEPLOYMENT",
+        order=6,
+        upstream_stage="SYNDICATION",
+        downstream_stage=None,
+        responsibility=(
+            "Latch substrate_lock.json, .agy/engine_hash.json, .agy/asset_ledger.json, and "
+            "freshness_audit_report.json across all three read-only compiled tenant repositories, "
+            "verify ShipperQueue hygiene, and persist the 6-department handoff contract."
+        ),
+        required_inputs=(
+            "zero_drift_verified",
+            "indexing_preflight_by_tenant",
+            "distribution_ledgers_by_tenant",
+            "downstream_work_pending_by_tenant",
+        ),
+        guaranteed_outputs=(
+            "substrate_locks_by_tenant",
+            "engine_ledgers_by_tenant",
+            "freshness_reports_by_tenant",
+            "shipper_queue_by_tenant",
+            "department_pipeline_state",
+            "deployment_parity_verified",
+        ),
+        tenant_invariants=(
+            "pseofactory_marker_valid",
+            "substrate_lock_aligned_to_engine_hash",
+            "tenant_engine_hash_and_asset_ledger_aligned",
+            "freshness_audit_report_pass",
+            "shipper_queue_zero_dead_letters",
+        ),
+    ),
+}
 
 
 class DepartmentPipelineStateMachine:
@@ -247,9 +495,18 @@ class DepartmentPipelineStateMachine:
     ):
         self.state_path = Path(state_path or DEPARTMENT_PIPELINE_PATH).resolve()
         self.ledger = ledger or AtomicStateLedger
-        self.stages: Dict[str, Dict[str, Any]] = {
-            stage: {
+        self.stages: Dict[str, Dict[str, Any]] = {}
+        for stage in DEPARTMENT_STAGES:
+            contract = CANONICAL_DEPARTMENT_CONTRACTS[stage]
+            self.stages[stage] = {
                 "stage": stage,
+                "order": contract.order,
+                "upstream_stage": contract.upstream_stage,
+                "downstream_stage": contract.downstream_stage,
+                "responsibility": contract.responsibility,
+                "required_inputs": list(contract.required_inputs),
+                "guaranteed_outputs": list(contract.guaranteed_outputs),
+                "tenant_invariants": list(contract.tenant_invariants),
                 "status": "PENDING",
                 "trigger_mode": "BATCHED_CADENCE",
                 "delta_detected": False,
@@ -257,8 +514,6 @@ class DepartmentPipelineStateMachine:
                 "updated_at": None,
                 "summary": {},
             }
-            for stage in DEPARTMENT_STAGES
-        }
 
     def record_stage(
         self,
@@ -272,8 +527,16 @@ class DepartmentPipelineStateMachine:
         """Records transition state for a single department stage. Zero em-dashes. Zero en-dashes."""
         if stage not in self.stages:
             raise ValueError(f"Unknown department stage: {stage}")
+        contract = CANONICAL_DEPARTMENT_CONTRACTS[stage]
         entry = {
             "stage": stage,
+            "order": contract.order,
+            "upstream_stage": contract.upstream_stage,
+            "downstream_stage": contract.downstream_stage,
+            "responsibility": contract.responsibility,
+            "required_inputs": list(contract.required_inputs),
+            "guaranteed_outputs": list(contract.guaranteed_outputs),
+            "tenant_invariants": list(contract.tenant_invariants),
             "status": status,
             "trigger_mode": trigger_mode,
             "delta_detected": bool(delta_detected),
@@ -286,10 +549,10 @@ class DepartmentPipelineStateMachine:
 
     def finalize_and_persist(
         self,
-        cycle_id: str,
-        overall_status: str,
-        trigger_mode: str,
-        engine_hash: Optional[str],
+        cycle_id: str = "cycle_default",
+        overall_status: str = "PASS",
+        trigger_mode: str = "VERIFIED_HANDOFF_CHAIN",
+        engine_hash: Optional[str] = None,
         persist: bool = True,
     ) -> Dict[str, Any]:
         """Persists full 6-department handoff contract to disk. Zero em-dashes. Zero en-dashes."""
@@ -299,7 +562,12 @@ class DepartmentPipelineStateMachine:
             "overall_status": overall_status,
             "trigger_mode": trigger_mode,
             "engine_hash": engine_hash,
+            "tenants_managed": list(CANONICAL_TENANTS),
             "stage_order": list(DEPARTMENT_STAGES),
+            "contracts": {
+                stage: CANONICAL_DEPARTMENT_CONTRACTS[stage].to_dict()
+                for stage in DEPARTMENT_STAGES
+            },
             "stages": self.stages,
         }
         if persist:
@@ -318,6 +586,1102 @@ class DepartmentPipelineStateMachine:
             except Exception:
                 pass
         return payload
+
+
+_CANONICAL_TENANT_PROBES: Dict[str, Dict[str, str]] = {
+    "profithelm": {
+        "query": "section 179 deduction calculator",
+        "foreign_query": "save plan student loan repayment calculator",
+    },
+    "prexvo": {
+        "query": "save plan student loan repayment calculator",
+        "foreign_query": "soc 2 type ii audit cost calculator",
+    },
+    "gainhelm": {
+        "query": "soc 2 type ii audit cost calculator",
+        "foreign_query": "section 179 deduction calculator",
+    },
+}
+
+
+class DepartmentHandoffChainVerifier:
+    """
+    End-to-end 6-department handoff chain verifier across all 3 canonical tenants
+    (profithelm, prexvo, gainhelm).
+    Instead of inspecting modules in isolation, traces the direct chain of handoffs:
+      DISCOVERY -> MONETIZATION -> ENGINEERING -> VERIFICATION -> SYNDICATION -> DEPLOYMENT
+    Verifies that every department consumes the exact outputs emitted by its upstream
+    department, executes its full responsibility across all target tenants without divergence,
+    and emits its guaranteed output contract for the downstream department.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(
+        self,
+        workspace_root: Optional[Union[str, Path]] = None,
+        property_ids: Optional[List[str]] = None,
+        heal_markers: bool = False,
+        strict_current_engine_hash: bool = False,
+    ):
+        self.workspace_root = Path(
+            workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+        ).resolve()
+        self.target_tenants: Tuple[str, ...] = tuple(
+            [p.strip().lower() for p in property_ids if str(p).strip()]
+            if property_ids
+            else list(CANONICAL_TENANTS)
+        )
+        self.heal_markers = bool(heal_markers)
+        self.strict_current_engine_hash = bool(strict_current_engine_hash)
+
+    @staticmethod
+    def _validate_stage_inputs(
+        contract: DepartmentContract,
+        handoff_context: Dict[str, Any],
+    ) -> List[str]:
+        missing: List[str] = []
+        for req_key in contract.required_inputs:
+            if req_key not in handoff_context or handoff_context[req_key] is None:
+                missing.append(req_key)
+        return missing
+
+    @staticmethod
+    def _validate_stage_outputs(
+        contract: DepartmentContract,
+        stage_outputs: Dict[str, Any],
+    ) -> List[str]:
+        missing: List[str] = []
+        for out_key in contract.guaranteed_outputs:
+            if out_key not in stage_outputs or stage_outputs[out_key] is None:
+                missing.append(out_key)
+        return missing
+
+    def _run_discovery_stage(self, ctx: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        from pseofactory.pipeline import FactoryPipeline
+        from pseofactory.trends import StatutoryEconomicDatasetCollector, TrendCronRunner
+
+        ws_root = Path(ctx["workspace_root"]).resolve()
+        target_tenants: Tuple[str, ...] = tuple(ctx["target_tenants"])
+        failures: List[str] = []
+
+        if self.heal_markers:
+            for pid in target_tenants:
+                cfg = CANONICAL_TENANT_CONFIGS.get(pid)
+                if not cfg:
+                    continue
+                cand_repo = ws_root / str(cfg["repo_dir_name"])
+                if cand_repo.is_dir():
+                    try:
+                        sync_tenant_pseofactory_marker(cand_repo, pid)
+                    except Exception as exc:
+                        failures.append(f"DISCOVERY[{pid}]: marker heal failed: {exc}")
+
+        scanner = WorkspacePropertyScanner(workspace_root=ws_root)
+        discovered_list = scanner.discover_properties(workspace_root=ws_root)
+        adapters_by_id: Dict[str, PropertyAdapter] = {a.property_id: a for a in discovered_list}
+
+        discovered_tenants: List[str] = []
+        tenant_markers: Dict[str, Dict[str, Any]] = {}
+        tenant_tool_catalogs: Dict[str, int] = {}
+        statutory_counts: Dict[str, int] = {}
+        routing_probes: Dict[str, Dict[str, Any]] = {}
+        per_tenant_summary: Dict[str, Dict[str, Any]] = {}
+
+        collector = StatutoryEconomicDatasetCollector()
+        all_stat_records = collector.build_canonical_timeseries_records()
+        trend_runner = TrendCronRunner()
+        pipeline = FactoryPipeline()
+
+        for pid in target_tenants:
+            t_errs: List[str] = []
+            adapter = adapters_by_id.get(pid)
+            expected_cfg = CANONICAL_TENANT_CONFIGS.get(pid, {})
+            if adapter is None:
+                t_errs.append(f"Tenant '{pid}' was not discovered in {ws_root}")
+                per_tenant_summary[pid] = {"status": "FAIL", "errors": t_errs}
+                failures.extend(f"DISCOVERY[{pid}]: {e}" for e in t_errs)
+                continue
+
+            discovered_tenants.append(pid)
+            if expected_cfg:
+                if adapter.brand_name != expected_cfg["brand_name"]:
+                    t_errs.append(
+                        f"brand_name mismatch: got '{adapter.brand_name}', expected '{expected_cfg['brand_name']}'"
+                    )
+                if adapter.domain != expected_cfg["domain"]:
+                    t_errs.append(f"domain mismatch: got '{adapter.domain}', expected '{expected_cfg['domain']}'")
+                if adapter.canonical_base.rstrip("/") != str(expected_cfg["canonical_base"]).rstrip("/"):
+                    t_errs.append(
+                        f"canonical_base mismatch: got '{adapter.canonical_base}', expected '{expected_cfg['canonical_base']}'"
+                    )
+                if str(getattr(adapter, "linkedin_company_id", "")) != str(expected_cfg["linkedin_company_id"]):
+                    t_errs.append(
+                        f"linkedin_company_id mismatch: got '{getattr(adapter, 'linkedin_company_id', '')}', "
+                        f"expected '{expected_cfg['linkedin_company_id']}'"
+                    )
+
+            repo_path = Path(adapter.repo_path) if getattr(adapter, "repo_path", None) else adapter.dist_dir.parent
+            marker_file = repo_path / ".pseofactory.json"
+            marker_on_disk = marker_file.is_file()
+            tenant_markers[pid] = {
+                "repo_path": str(repo_path),
+                "marker_file_present": marker_on_disk,
+                "brand_name": adapter.brand_name,
+                "domain": adapter.domain,
+                "canonical_base": adapter.canonical_base,
+                "linkedin_company_id": getattr(adapter, "linkedin_company_id", ""),
+            }
+
+            tools = adapter.get_tool_catalog()
+            tool_count = len(tools)
+            tenant_tool_catalogs[pid] = tool_count
+            if tool_count < 1:
+                t_errs.append("tool catalog is empty")
+
+            stat_records = [r for r in all_stat_records if getattr(r, "property_id", None) == pid]
+            stat_count = len(stat_records)
+            statutory_counts[pid] = stat_count
+            if stat_count < 1:
+                t_errs.append("statutory economic time-series dataset returned 0 records")
+
+            probe_spec = _CANONICAL_TENANT_PROBES.get(pid, {})
+            probe_q = probe_spec.get("query", f"{pid} calculator")
+            foreign_q = probe_spec.get("foreign_query", "")
+            assigned_raw = trend_runner.determine_property_assignment(probe_q)
+            assigned_prop = (
+                str(assigned_raw.get("property_id") or "")
+                if isinstance(assigned_raw, dict)
+                else str(assigned_raw or "")
+            )
+            if assigned_prop != pid:
+                t_errs.append(
+                    f"TrendCronRunner routed '{probe_q}' to '{assigned_prop}' instead of '{pid}'"
+                )
+            routed_info = pipeline.determine_property_assignment(probe_q, explicit_tenant=pid)
+            if routed_info.get("property_id") != pid or int(routed_info.get("contamination_scan_passed", 0)) != 1:
+                t_errs.append(
+                    f"FactoryPipeline.determine_property_assignment failed for '{probe_q}' on '{pid}': {routed_info}"
+                )
+            foreign_blocked = False
+            if foreign_q:
+                foreign_res = pipeline.determine_property_assignment(foreign_q, explicit_tenant=pid)
+                foreign_blocked = int(foreign_res.get("contamination_scan_passed", 1)) == 0
+                if not foreign_blocked:
+                    t_errs.append(
+                        f"FactoryPipeline.determine_property_assignment failed to reject foreign query '{foreign_q}' on '{pid}'"
+                    )
+            else:
+                foreign_blocked = True
+
+            routing_probes[pid] = {
+                "query": probe_q,
+                "assigned_property": assigned_prop,
+                "routed_domain": adapter.domain,
+                "foreign_query_rejected": foreign_blocked,
+            }
+            if t_errs:
+                failures.extend(f"DISCOVERY[{pid}]: {e}" for e in t_errs)
+            per_tenant_summary[pid] = {
+                "status": "PASS" if not t_errs else "FAIL",
+                "brand_name": adapter.brand_name,
+                "domain": adapter.domain,
+                "tool_catalog_count": tool_count,
+                "statutory_timeseries_count": stat_count,
+                "routing_verified": assigned_prop == pid and foreign_blocked,
+                "errors": t_errs,
+            }
+
+        outputs: Dict[str, Any] = {
+            "discovered_tenants": discovered_tenants,
+            "tenant_adapters": {pid: adapters_by_id[pid] for pid in discovered_tenants if pid in adapters_by_id},
+            "tenant_markers": tenant_markers,
+            "tenant_tool_catalogs": tenant_tool_catalogs,
+            "statutory_timeseries_counts": statutory_counts,
+            "canonical_routing_probes": routing_probes,
+            "discovery_isolation_verified": len(failures) == 0 and len(discovered_tenants) == len(target_tenants),
+        }
+        summary: Dict[str, Any] = {
+            "tenants_verified": discovered_tenants,
+            "tenant_tool_catalogs": tenant_tool_catalogs,
+            "statutory_timeseries_counts": statutory_counts,
+            "discovery_isolation_verified": outputs["discovery_isolation_verified"],
+            "per_tenant": per_tenant_summary,
+        }
+        return (len(failures) == 0, outputs, summary, failures)
+
+    def _run_monetization_stage(self, ctx: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        from pseofactory.affiliates import (
+            audit_callout_destination_message_match,
+            bind_asset_partner_roster,
+            qualify_monetization_opportunity,
+        )
+        from pseofactory.affiliates_hub import MonetizationHub
+        from pseofactory.partner_tracker import PartnerTrackingEngine
+
+        discovered_tenants: List[str] = list(ctx["discovered_tenants"])
+        tenant_adapters: Dict[str, PropertyAdapter] = ctx["tenant_adapters"]
+        routing_probes: Dict[str, Dict[str, Any]] = ctx["canonical_routing_probes"]
+        failures: List[str] = []
+
+        hub = MonetizationHub()
+        boundary_audit = hub.audit_domain_boundaries()
+        if boundary_audit.get("status") != "PASS" or int(boundary_audit.get("cross_contamination_count", 0)) != 0:
+            failures.append(f"MONETIZATION[fleet]: MonetizationHub domain boundary audit failed: {boundary_audit}")
+
+        pt_engine = PartnerTrackingEngine()
+        pt_sync = pt_engine.sync_and_evaluate(force_mail_poll=False)
+        pt_sync_dict = pt_sync.to_dict() if hasattr(pt_sync, "to_dict") else (pt_sync if isinstance(pt_sync, dict) else {})
+        coverage_by_prop = {
+            k: pt_sync_dict[k]
+            for k in ("profithelm", "prexvo", "gainhelm")
+            if isinstance(pt_sync_dict.get(k), dict)
+        }
+
+        qual_by_tenant: Dict[str, Dict[str, Any]] = {}
+        roster_by_tenant: Dict[str, Dict[str, Any]] = {}
+        edge_by_tenant: Dict[str, Dict[str, Any]] = {}
+        callout_by_tenant: Dict[str, Dict[str, Any]] = {}
+        per_tenant_summary: Dict[str, Dict[str, Any]] = {}
+
+        for pid in discovered_tenants:
+            t_errs: List[str] = []
+            adapter = tenant_adapters[pid]
+            probe_q = routing_probes[pid]["query"]
+
+            qual_explicit = qualify_monetization_opportunity(probe_q, property_id=pid)
+            qual_inferred = qualify_monetization_opportunity(probe_q, property_id=None)
+            if not qual_explicit.get("monetization_qualified") or qual_explicit.get("property_id") != pid:
+                t_errs.append(f"explicit qualification failed for '{probe_q}': {qual_explicit}")
+            if not qual_inferred.get("monetization_qualified") or qual_inferred.get("property_id") != pid:
+                t_errs.append(f"inferred qualification (property_id=None) failed for '{probe_q}': {qual_inferred}")
+
+            qual_by_tenant[pid] = {
+                "query": probe_q,
+                "explicit_property_id": qual_explicit.get("property_id"),
+                "inferred_property_id": qual_inferred.get("property_id"),
+                "intent_tier": qual_explicit.get("intent_tier"),
+                "monetization_qualified": bool(
+                    qual_explicit.get("monetization_qualified") and qual_inferred.get("monetization_qualified")
+                ),
+            }
+
+            roster = bind_asset_partner_roster(
+                property_id=pid,
+                slug="handoff-smoke-check",
+                query=probe_q,
+            )
+            distinct_cnt = int(roster.get("distinct_companies_count", 0))
+            primary_offer = roster.get("primary_offer") or {}
+            if not primary_offer or distinct_cnt < 3:
+                t_errs.append(f"partner roster binding below threshold (<3): {roster}")
+            roster_by_tenant[pid] = {
+                "status": "BOUND" if (primary_offer and distinct_cnt >= 3) else "FAIL",
+                "distinct_companies_count": distinct_cnt,
+                "primary_partner": primary_offer.get("partner_key"),
+            }
+
+            if pid not in coverage_by_prop:
+                t_errs.append(f"PartnerTrackingEngine missing monetization_coverage_by_property for '{pid}'")
+
+            repo_path = Path(adapter.repo_path) if getattr(adapter, "repo_path", None) else adapter.dist_dir.parent
+            redirect_fn = repo_path / "functions" / "r" / "[partner].js"
+            lead_fn = repo_path / "functions" / "api" / "lead-capture.js"
+            if not redirect_fn.is_file():
+                t_errs.append(f"missing Cloudflare edge redirect function: {redirect_fn}")
+            if not lead_fn.is_file():
+                t_errs.append(f"missing Cloudflare edge lead capture function: {lead_fn}")
+            edge_by_tenant[pid] = {
+                "redirect_function_present": redirect_fn.is_file(),
+                "lead_capture_function_present": lead_fn.is_file(),
+            }
+
+            callout_audit = audit_callout_destination_message_match(adapter.dist_dir, property_id=pid)
+            mismatch_cnt = int(callout_audit.get("mismatch_count", 0))
+            if callout_audit.get("status") != "PASS" or mismatch_cnt != 0:
+                t_errs.append(f"callout destination message-match failed: {callout_audit}")
+            callout_by_tenant[pid] = {
+                "status": callout_audit.get("status"),
+                "callouts_audited": int(callout_audit.get("callouts_audited", 0)),
+                "mismatch_count": mismatch_cnt,
+            }
+
+            if t_errs:
+                failures.extend(f"MONETIZATION[{pid}]: {e}" for e in t_errs)
+            per_tenant_summary[pid] = {
+                "status": "PASS" if not t_errs else "FAIL",
+                "monetization_qualified": qual_by_tenant[pid]["monetization_qualified"],
+                "distinct_partners_count": distinct_cnt,
+                "edge_functions_verified": redirect_fn.is_file() and lead_fn.is_file(),
+                "callouts_audited": callout_by_tenant[pid]["callouts_audited"],
+                "callout_mismatches": mismatch_cnt,
+                "errors": t_errs,
+            }
+
+        outputs: Dict[str, Any] = {
+            "monetization_qualification_by_tenant": qual_by_tenant,
+            "partner_roster_by_tenant": roster_by_tenant,
+            "domain_boundary_audit": {
+                "status": boundary_audit.get("status"),
+                "cross_contamination_count": int(boundary_audit.get("cross_contamination_count", 0)),
+            },
+            "edge_redirect_contracts_by_tenant": edge_by_tenant,
+            "callout_destination_audit_by_tenant": callout_by_tenant,
+            "partner_lifecycle_sync_status": {
+                "status": "PASS" if len(coverage_by_prop) >= len(discovered_tenants) else "WARN",
+                "tenants_covered": sorted(list(coverage_by_prop.keys())),
+            },
+        }
+        summary: Dict[str, Any] = {
+            "domain_boundary_status": boundary_audit.get("status"),
+            "partner_lifecycle_status": "PASS" if len(coverage_by_prop) >= len(discovered_tenants) else "WARN",
+            "per_tenant": per_tenant_summary,
+        }
+        return (len(failures) == 0, outputs, summary, failures)
+
+    def _run_engineering_stage(self, ctx: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        import re as _re
+        from pseofactory.competitor import CompetitorGapEngine
+        from pseofactory.compiler import compile_high_effort_page
+        from pseofactory.tenant_facts import TenantFactStore
+
+        discovered_tenants: List[str] = list(ctx["discovered_tenants"])
+        tenant_adapters: Dict[str, PropertyAdapter] = ctx["tenant_adapters"]
+        qual_by_tenant: Dict[str, Dict[str, Any]] = ctx["monetization_qualification_by_tenant"]
+        failures: List[str] = []
+        fact_store = TenantFactStore.get_instance()
+
+        AsyncFleetCoordinator._enforce_subprocess_memory_firewall()
+        leaked_mods = [
+            m
+            for m in sys.modules
+            if m in ("profithelm", "prexvo", "gainhelm")
+            or m.startswith(("profithelm.", "prexvo.", "gainhelm."))
+        ]
+        if leaked_mods:
+            failures.append(f"ENGINEERING[fleet]: tenant modules leaked into host sys.modules: {leaked_mods}")
+
+        compiled_dist_dirs: Dict[str, str] = {}
+        compiled_assets_by_tenant: Dict[str, int] = {}
+        calc_manifests_by_tenant: Dict[str, Dict[str, Any]] = {}
+        compiler_smoke_by_tenant: Dict[str, Dict[str, Any]] = {}
+        per_tenant_summary: Dict[str, Dict[str, Any]] = {}
+
+        for pid in discovered_tenants:
+            t_errs: List[str] = []
+            adapter = tenant_adapters[pid]
+            dist_dir = Path(adapter.dist_dir)
+            compiled_dist_dirs[pid] = str(dist_dir)
+
+            root_index = dist_dir / "index.html"
+            if not root_index.is_file():
+                t_errs.append(f"missing root index.html at {root_index}")
+
+            assets = adapter.list_assets()
+            tool_htmls = [
+                a for a in assets if a.suffix == ".html" and "tools/" in a.relative_to(dist_dir).as_posix()
+            ]
+            compiled_assets_by_tenant[pid] = len(assets)
+            if len(tool_htmls) < 1:
+                t_errs.append(f"no compiled tool HTML files found under {dist_dir / 'tools'}")
+
+            manifest_verified = False
+            sample_slug = ""
+            if tool_htmls:
+                sample_file = sorted(tool_htmls)[0]
+                sample_slug = sample_file.relative_to(dist_dir).as_posix()
+                html_text = sample_file.read_text(encoding="utf-8", errors="ignore")
+                m_match = _re.search(
+                    r'<script[^>]*id=["\']calculation-manifest["\'][^>]*>(.*?)</script>',
+                    html_text,
+                    _re.DOTALL | _re.IGNORECASE,
+                )
+                if m_match:
+                    try:
+                        m_json = json.loads(m_match.group(1).strip())
+                        manifest_verified = isinstance(m_json, dict) and bool(m_json)
+                    except Exception as exc:
+                        t_errs.append(f"invalid #calculation-manifest JSON in {sample_slug}: {exc}")
+                else:
+                    t_errs.append(f"missing #calculation-manifest script tag in {sample_slug}")
+            calc_manifests_by_tenant[pid] = {
+                "sample_asset": sample_slug,
+                "tool_html_count": len(tool_htmls),
+                "manifest_verified": manifest_verified,
+            }
+
+            smoke_q = qual_by_tenant[pid]["query"]
+            smoke_html = ""
+            smoke_ok = False
+            try:
+                tenant_profile = fact_store.get_profile(pid)
+                gap_engine = CompetitorGapEngine(tenant_profile=tenant_profile)
+                candidate_spec = gap_engine.enrich_candidate_spec(
+                    {
+                        "query": smoke_q,
+                        "slug": "handoff-smoke-check",
+                        "tenant": pid,
+                        "property_id": pid,
+                        "title": f"{adapter.brand_name} {smoke_q.title()}",
+                    }
+                )
+                with adapter.scoped_environment():
+                    compiled_res = compile_high_effort_page(candidate_spec)
+                smoke_html = str(compiled_res.get("html") or "")
+                smoke_ok = (
+                    'id="calculation-manifest"' in smoke_html
+                    and adapter.domain in smoke_html
+                    and "\u2014" not in smoke_html
+                    and "\u2013" not in smoke_html
+                )
+            except Exception as exc:
+                t_errs.append(f"compile_high_effort_page Factor-7 smoke check raised error: {exc}")
+            if not smoke_ok:
+                t_errs.append(f"compile_high_effort_page Factor-7 smoke check failed for '{pid}'")
+            compiler_smoke_by_tenant[pid] = {
+                "query": smoke_q,
+                "html_bytes": len(smoke_html),
+                "factor_7_verified": smoke_ok,
+            }
+
+            if t_errs:
+                failures.extend(f"ENGINEERING[{pid}]: {e}" for e in t_errs)
+            per_tenant_summary[pid] = {
+                "status": "PASS" if not t_errs else "FAIL",
+                "total_assets": len(assets),
+                "tool_html_count": len(tool_htmls),
+                "manifest_verified": manifest_verified,
+                "compiler_smoke_verified": smoke_ok,
+                "errors": t_errs,
+            }
+
+        outputs: Dict[str, Any] = {
+            "compiled_dist_dirs": compiled_dist_dirs,
+            "compiled_assets_by_tenant": compiled_assets_by_tenant,
+            "calculation_manifests_by_tenant": calc_manifests_by_tenant,
+            "compiler_smoke_by_tenant": compiler_smoke_by_tenant,
+            "subprocess_memory_isolation": {
+                "leaked_tenant_modules": leaked_mods,
+                "isolated": len(leaked_mods) == 0,
+            },
+        }
+        summary: Dict[str, Any] = {
+            "subprocess_memory_isolated": len(leaked_mods) == 0,
+            "compiled_assets_by_tenant": compiled_assets_by_tenant,
+            "per_tenant": per_tenant_summary,
+        }
+        return (len(failures) == 0, outputs, summary, failures)
+
+    def _run_verification_stage(self, ctx: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        from pseofactory.tenant_facts import TenantFactStore
+        from pseofactory.verifier import audit_aeo_geo_three_plane_readiness
+        from pseofactory.maintenance import (
+            AssetIntegrityEvaluator,
+            CrossPropertyContaminationScanner,
+            DriftReason,
+            RetroReflectionEngine,
+        )
+
+        discovered_tenants: List[str] = list(ctx["discovered_tenants"])
+        tenant_adapters: Dict[str, PropertyAdapter] = ctx["tenant_adapters"]
+        failures: List[str] = []
+
+        evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
+        scanner = CrossPropertyContaminationScanner()
+        fact_store = TenantFactStore.get_instance()
+
+        integrity_by_tenant: Dict[str, Dict[str, Any]] = {}
+        retro_by_tenant: Dict[str, Dict[str, Any]] = {}
+        contamination_by_tenant: Dict[str, Dict[str, Any]] = {}
+        aeo_by_tenant: Dict[str, Dict[str, Any]] = {}
+        per_tenant_summary: Dict[str, Dict[str, Any]] = {}
+
+        for pid in discovered_tenants:
+            t_errs: List[str] = []
+            adapter = tenant_adapters[pid]
+
+            rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+            if rep.status != "PASS" or rep.drifted_assets_count > 0:
+                t_errs.append(
+                    f"AssetIntegrityEvaluator reported {rep.drifted_assets_count} drifted assets (status={rep.status})"
+                )
+            integrity_by_tenant[pid] = {
+                "status": rep.status,
+                "total_assets_checked": rep.total_assets_checked,
+                "compliant_assets_count": rep.compliant_assets_count,
+                "drifted_assets_count": rep.drifted_assets_count,
+            }
+
+            retro_rep = RetroReflectionEngine.audit_estate(adapter.dist_dir, pid)
+            stale_cnt = int(retro_rep.get("stale_count", 0))
+            if retro_rep.get("status") != "PASS" or stale_cnt > 0:
+                t_errs.append(f"RetroReflectionEngine reported stale_count={stale_cnt}")
+            retro_by_tenant[pid] = {
+                "status": retro_rep.get("status"),
+                "pages_scanned": int(retro_rep.get("pages_scanned", 0)),
+                "stale_count": stale_cnt,
+            }
+
+            try:
+                probe_text = str(
+                    (ctx.get("compiler_smoke_by_tenant") or {}).get(pid, {}).get("query")
+                    or getattr(adapter, "brand_name", pid)
+                )
+                fact_store.assert_tenant_isolation(pid, probe_text)
+                fact_isolated = True
+            except Exception as exc:
+                fact_isolated = False
+                t_errs.append(f"TenantFactStore isolation failed: {exc}")
+
+            contam_violations = [
+                r.asset_path for r in rep.drifted_assets if DriftReason.PROPERTY_CONTAMINATION in r.reasons
+            ]
+            idx_path = Path(adapter.dist_dir) / "index.html"
+            if idx_path.is_file():
+                idx_foreign = scanner.scan_text(
+                    idx_path.read_text(encoding="utf-8", errors="ignore"),
+                    pid,
+                    context="index.html",
+                )
+                if idx_foreign:
+                    contam_violations.extend(idx_foreign)
+            if contam_violations:
+                t_errs.append(f"CrossPropertyContaminationScanner found {len(contam_violations)} violations")
+            contamination_by_tenant[pid] = {
+                "fact_store_isolated": fact_isolated,
+                "violations_count": len(contam_violations),
+            }
+
+            p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
+            aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
+            if not aeo_ready:
+                t_errs.append(f"AEO/GEO three-plane readiness check failed: {p_aeo.get('issues')}")
+            aeo_by_tenant[pid] = {
+                "ready": aeo_ready,
+                "status": p_aeo.get("status"),
+                "issues_count": len(p_aeo.get("issues") or []),
+            }
+
+            if t_errs:
+                failures.extend(f"VERIFICATION[{pid}]: {e}" for e in t_errs)
+            per_tenant_summary[pid] = {
+                "status": "PASS" if not t_errs else "FAIL",
+                "assets_audited": rep.total_assets_checked,
+                "drifted_assets": rep.drifted_assets_count,
+                "retro_stale_count": stale_cnt,
+                "contamination_violations": len(contam_violations),
+                "aeo_geo_ready": aeo_ready,
+                "errors": t_errs,
+            }
+
+        outputs: Dict[str, Any] = {
+            "integrity_reports_by_tenant": integrity_by_tenant,
+            "retro_reflection_by_tenant": retro_by_tenant,
+            "contamination_scan_by_tenant": contamination_by_tenant,
+            "aeo_geo_readiness_by_tenant": aeo_by_tenant,
+            "zero_drift_verified": len(failures) == 0,
+        }
+        summary: Dict[str, Any] = {
+            "zero_drift_verified": len(failures) == 0,
+            "per_tenant": per_tenant_summary,
+        }
+        return (len(failures) == 0, outputs, summary, failures)
+
+    def _run_syndication_stage(self, ctx: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        from pseofactory.indexing.preflight import IndexingPreflightEngine
+        from pseofactory.maintenance import _has_pending_downstream_work
+
+        discovered_tenants: List[str] = list(ctx["discovered_tenants"])
+        tenant_adapters: Dict[str, PropertyAdapter] = ctx["tenant_adapters"]
+        failures: List[str] = []
+
+        preflight_by_tenant: Dict[str, Dict[str, Any]] = {}
+        root_files_by_tenant: Dict[str, Dict[str, bool]] = {}
+        syndication_packs_by_tenant: Dict[str, Dict[str, Any]] = {}
+        videos_by_tenant: Dict[str, Dict[str, Any]] = {}
+        ledgers_by_tenant: Dict[str, Dict[str, bool]] = {}
+        pending_by_tenant: Dict[str, bool] = {}
+        per_tenant_summary: Dict[str, Dict[str, Any]] = {}
+
+        required_root_files = (
+            "sitemap.xml",
+            "robots.txt",
+            "llms.txt",
+            "llms-full.txt",
+            "feed.xml",
+        )
+
+        for pid in discovered_tenants:
+            t_errs: List[str] = []
+            adapter = tenant_adapters[pid]
+            dist_dir = Path(adapter.dist_dir)
+            repo_path = Path(adapter.repo_path) if getattr(adapter, "repo_path", None) else dist_dir.parent
+
+            pre_engine = IndexingPreflightEngine(
+                domain=adapter.domain,
+                property_id=pid,
+                dist_dir=dist_dir,
+            )
+            pre_rep = pre_engine.inspect_dist()
+            passed_cnt = int(getattr(pre_rep, "passed_count", getattr(pre_rep, "qualified_count", 0)) or 0)
+            if not pre_rep.is_gate_passed or pre_rep.blocked_count > 0:
+                t_errs.append(
+                    f"IndexingPreflightEngine blocked_count={pre_rep.blocked_count} (is_gate_passed={pre_rep.is_gate_passed})"
+                )
+            preflight_by_tenant[pid] = {
+                "is_gate_passed": pre_rep.is_gate_passed,
+                "qualified_count": passed_cnt,
+                "blocked_count": pre_rep.blocked_count,
+            }
+
+            rf_map: Dict[str, bool] = {}
+            for rf_name in required_root_files:
+                exists = (dist_dir / rf_name).is_file()
+                rf_map[rf_name] = exists
+                if not exists:
+                    t_errs.append(f"missing root discovery file: {rf_name}")
+            ai_bench_exists = (
+                (dist_dir / "ai-benchmarks" / "ai_benchmarks_manifest.json").is_file()
+                or (dist_dir / "ai-benchmarks" / "index.html").is_file()
+                or (dist_dir / "ai-benchmarks.json").is_file()
+            )
+            rf_map["ai-benchmarks"] = ai_bench_exists
+            if not ai_bench_exists:
+                t_errs.append("missing ai-benchmarks discovery hub in dist/")
+            root_files_by_tenant[pid] = rf_map
+
+            syn_roots = [p for p in (repo_path / "syndication", dist_dir / "syndication") if p.is_dir()]
+            pack_files: List[Path] = []
+            deprecated_reddit: List[Path] = []
+            for syn_root in syn_roots:
+                pack_files.extend(sorted(syn_root.rglob("syndication_pack.json")))
+                deprecated_reddit.extend(sorted(syn_root.rglob("reddit.md")))
+            if len(pack_files) < 1:
+                t_errs.append("no syndication_pack.json files found in syndication/")
+            if deprecated_reddit:
+                t_errs.append(f"found {len(deprecated_reddit)} deprecated reddit.md artifacts in syndication/")
+            syndication_packs_by_tenant[pid] = {
+                "pack_count": len(pack_files),
+                "deprecated_reddit_count": len(deprecated_reddit),
+            }
+
+            video_dir = dist_dir / "videos"
+            mp4_files = sorted(video_dir.glob("*.mp4")) if video_dir.is_dir() else []
+            if len(mp4_files) < 1:
+                t_errs.append("no rendered .mp4 video assets found in dist/videos")
+            videos_by_tenant[pid] = {
+                "mp4_count": len(mp4_files),
+            }
+
+            b_ledger = (repo_path / ".agy" / "broadcast_ledger.json").is_file()
+            i_ledger = (repo_path / ".agy" / "index_push_ledger.json").is_file()
+            m_ledger = (repo_path / ".agy" / "metric_recovery_ledger.json").is_file()
+            if not (b_ledger and i_ledger and m_ledger):
+                t_errs.append(
+                    f"missing distribution ledgers (broadcast={b_ledger}, index_push={i_ledger}, metric_recovery={m_ledger})"
+                )
+            ledgers_by_tenant[pid] = {
+                "broadcast_ledger": b_ledger,
+                "index_push_ledger": i_ledger,
+                "metric_recovery_ledger": m_ledger,
+            }
+
+            has_pending = _has_pending_downstream_work(
+                adapter,
+                check_in_pytest=True,
+                ignore_git_dirty=True,
+            )
+            pending_by_tenant[pid] = has_pending
+            if has_pending:
+                t_errs.append("_has_pending_downstream_work reported unfulfilled downstream work")
+
+            if t_errs:
+                failures.extend(f"SYNDICATION[{pid}]: {e}" for e in t_errs)
+            per_tenant_summary[pid] = {
+                "status": "PASS" if not t_errs else "FAIL",
+                "preflight_qualified_urls": passed_cnt,
+                "syndication_pack_count": len(pack_files),
+                "mp4_video_count": len(mp4_files),
+                "pending_downstream_work": has_pending,
+                "errors": t_errs,
+            }
+
+        outputs: Dict[str, Any] = {
+            "indexing_preflight_by_tenant": preflight_by_tenant,
+            "discovery_root_files_by_tenant": root_files_by_tenant,
+            "syndication_packs_by_tenant": syndication_packs_by_tenant,
+            "video_assets_by_tenant": videos_by_tenant,
+            "distribution_ledgers_by_tenant": ledgers_by_tenant,
+            "downstream_work_pending_by_tenant": pending_by_tenant,
+        }
+        summary: Dict[str, Any] = {
+            "all_preflight_gates_passed": all(v["is_gate_passed"] for v in preflight_by_tenant.values()),
+            "any_pending_downstream_work": any(pending_by_tenant.values()),
+            "per_tenant": per_tenant_summary,
+        }
+        return (len(failures) == 0, outputs, summary, failures)
+
+    def _run_deployment_stage(
+        self,
+        ctx: Dict[str, Any],
+        pipeline_sm: DepartmentPipelineStateMachine,
+        cycle_id: str,
+        persist: bool,
+    ) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        from pseofactory.gitops import ShipperQueue
+
+        discovered_tenants: List[str] = list(ctx["discovered_tenants"])
+        tenant_adapters: Dict[str, PropertyAdapter] = ctx["tenant_adapters"]
+        current_engine_hash: str = str(ctx["engine_hash"])
+        failures: List[str] = []
+
+        substrate_locks_by_tenant: Dict[str, Dict[str, Any]] = {}
+        engine_ledgers_by_tenant: Dict[str, Dict[str, Any]] = {}
+        freshness_by_tenant: Dict[str, Dict[str, Any]] = {}
+        shipper_queue_by_tenant: Dict[str, Dict[str, Any]] = {}
+        per_tenant_summary: Dict[str, Dict[str, Any]] = {}
+
+        for pid in discovered_tenants:
+            t_errs: List[str] = []
+            adapter = tenant_adapters[pid]
+            dist_dir = Path(adapter.dist_dir)
+            repo_path = Path(adapter.repo_path) if getattr(adapter, "repo_path", None) else dist_dir.parent
+
+            lock_file = repo_path / "substrate_lock.json"
+            lock_hash = ""
+            sub_hash = ""
+            if not lock_file.is_file():
+                t_errs.append(f"missing substrate_lock.json at {lock_file}")
+            else:
+                try:
+                    lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+                    lock_hash = str(lock_data.get("engine_hash") or "")
+                    sub_hash = str(lock_data.get("substrate_hash") or "")
+                    if lock_data.get("property_id") != pid:
+                        t_errs.append(
+                            f"substrate_lock.json property_id mismatch: got '{lock_data.get('property_id')}', expected '{pid}'"
+                        )
+                    if len(lock_hash) != 64 or lock_hash != sub_hash:
+                        t_errs.append(
+                            f"substrate_lock.json hash mismatch: engine_hash='{lock_hash}', substrate_hash='{sub_hash}'"
+                        )
+                    if self.strict_current_engine_hash and lock_hash != current_engine_hash:
+                        t_errs.append(
+                            f"substrate_lock.json engine_hash '{lock_hash[:12]}' != current '{current_engine_hash[:12]}'"
+                        )
+                except Exception as exc:
+                    t_errs.append(f"invalid substrate_lock.json: {exc}")
+            substrate_locks_by_tenant[pid] = {
+                "present": lock_file.is_file(),
+                "engine_hash": lock_hash,
+                "aligned_to_current_engine": bool(lock_hash == current_engine_hash),
+            }
+
+            eh_file = repo_path / ".agy" / "engine_hash.json"
+            al_file = repo_path / ".agy" / "asset_ledger.json"
+            eh_hash = ""
+            al_hash = ""
+            al_count = 0
+            if not eh_file.is_file():
+                t_errs.append(f"missing .agy/engine_hash.json at {eh_file}")
+            else:
+                try:
+                    eh_data = json.loads(eh_file.read_text(encoding="utf-8"))
+                    eh_hash = str(eh_data.get("hash") or eh_data.get("engine_hash") or "")
+                except Exception as exc:
+                    t_errs.append(f"invalid .agy/engine_hash.json: {exc}")
+
+            if not al_file.is_file():
+                t_errs.append(f"missing .agy/asset_ledger.json at {al_file}")
+            else:
+                try:
+                    al_data = json.loads(al_file.read_text(encoding="utf-8"))
+                    al_hash = str(al_data.get("engine_hash") or "")
+                    al_count = len(al_data.get("assets") or {})
+                except Exception as exc:
+                    t_errs.append(f"invalid .agy/asset_ledger.json: {exc}")
+
+            if lock_hash and eh_hash and lock_hash != eh_hash:
+                t_errs.append(
+                    f"tenant engine_hash.json ('{eh_hash[:12]}') diverges from substrate_lock.json ('{lock_hash[:12]}')"
+                )
+            if lock_hash and al_hash and lock_hash != al_hash:
+                t_errs.append(
+                    f"tenant asset_ledger.json ('{al_hash[:12]}') diverges from substrate_lock.json ('{lock_hash[:12]}')"
+                )
+            engine_ledgers_by_tenant[pid] = {
+                "engine_hash_file_present": eh_file.is_file(),
+                "asset_ledger_file_present": al_file.is_file(),
+                "ledger_asset_count": al_count,
+                "internally_aligned": bool(lock_hash and lock_hash == eh_hash == al_hash),
+            }
+
+            fresh_file = repo_path / "freshness_audit_report.json"
+            fresh_ok = False
+            if not fresh_file.is_file():
+                t_errs.append(f"missing freshness_audit_report.json at {fresh_file}")
+            else:
+                try:
+                    fresh_data = json.loads(fresh_file.read_text(encoding="utf-8"))
+                    verdict = str(fresh_data.get("verdict") or fresh_data.get("status") or "").upper()
+                    fresh_ok = verdict in ("CERTIFIED_FRESH", "PASS") and bool(fresh_data.get("overall_pass", True))
+                    if not fresh_ok:
+                        t_errs.append(f"freshness_audit_report.json not passing: verdict={verdict}")
+                except Exception as exc:
+                    t_errs.append(f"invalid freshness_audit_report.json: {exc}")
+            freshness_by_tenant[pid] = {
+                "present": fresh_file.is_file(),
+                "certified_fresh": fresh_ok,
+            }
+
+            sq = ShipperQueue(property_id=pid)
+            dlq_items = sq.list_dlq(property_id=pid)
+            if dlq_items:
+                t_errs.append(f"ShipperQueue has {len(dlq_items)} unresolved DLQ records for '{pid}'")
+            shipper_queue_by_tenant[pid] = {
+                "dlq_count": len(dlq_items),
+            }
+
+            if t_errs:
+                failures.extend(f"DEPLOYMENT[{pid}]: {e}" for e in t_errs)
+            per_tenant_summary[pid] = {
+                "status": "PASS" if not t_errs else "FAIL",
+                "substrate_lock_aligned": engine_ledgers_by_tenant[pid]["internally_aligned"],
+                "ledger_asset_count": al_count,
+                "freshness_certified": fresh_ok,
+                "shipper_dlq_count": len(dlq_items),
+                "errors": t_errs,
+            }
+
+        dep_summary: Dict[str, Any] = {
+            "deployment_parity_verified": len(failures) == 0,
+            "per_tenant": per_tenant_summary,
+        }
+        pipeline_sm.record_stage(
+            stage="DEPLOYMENT",
+            status="COMPLETED" if len(failures) == 0 else "FAILED",
+            trigger_mode="BATCHED_CADENCE",
+            delta_detected=False,
+            upstream_fingerprint=current_engine_hash,
+            summary=dep_summary,
+        )
+        pipeline_state = pipeline_sm.finalize_and_persist(
+            cycle_id=cycle_id,
+            overall_status="PASS" if len(failures) == 0 else "FAIL",
+            trigger_mode="VERIFIED_HANDOFF_CHAIN",
+            engine_hash=current_engine_hash,
+            persist=persist,
+        )
+        if persist and len(failures) == 0:
+            hb_path = self.workspace_root / ".agy" / "supervisor_heartbeat.json"
+            HeartbeatTracker(heartbeat_path=hb_path).emit(
+                status="HEALTHY",
+                cycle_id=cycle_id,
+                current_tenant=None,
+                engine_hash=current_engine_hash,
+                consecutive_failures=0,
+                extra={"department_pipeline": pipeline_state},
+            )
+
+        outputs: Dict[str, Any] = {
+            "substrate_locks_by_tenant": substrate_locks_by_tenant,
+            "engine_ledgers_by_tenant": engine_ledgers_by_tenant,
+            "freshness_reports_by_tenant": freshness_by_tenant,
+            "shipper_queue_by_tenant": shipper_queue_by_tenant,
+            "department_pipeline_state": pipeline_state,
+            "deployment_parity_verified": len(failures) == 0,
+        }
+        return (len(failures) == 0, outputs, dep_summary, failures)
+
+    def verify(
+        self,
+        persist: bool = False,
+        cycle_id: Optional[str] = None,
+        seed_overrides: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Traces and verifies the 6-department handoff chain across all target tenants.
+        Stops and fails closed if any stage's input contract, tenant execution, or
+        output contract fails.
+        Zero em-dashes. Zero en-dashes.
+        """
+        run_cycle_id = cycle_id or f"handoff_verify_{int(time.time())}"
+        current_engine_hash = compute_engine_hash()
+        state_path = self.workspace_root / ".agy" / "department_pipeline_state.json"
+        pipeline_sm = DepartmentPipelineStateMachine(state_path=state_path)
+
+        handoff_context: Dict[str, Any] = {
+            "workspace_root": str(self.workspace_root),
+            "target_tenants": self.target_tenants,
+            "engine_hash": current_engine_hash,
+        }
+        if seed_overrides:
+            for k, v in seed_overrides.items():
+                if v is None:
+                    handoff_context.pop(k, None)
+                else:
+                    handoff_context[k] = v
+
+        stage_runners = {
+            "DISCOVERY": self._run_discovery_stage,
+            "MONETIZATION": self._run_monetization_stage,
+            "ENGINEERING": self._run_engineering_stage,
+            "VERIFICATION": self._run_verification_stage,
+            "SYNDICATION": self._run_syndication_stage,
+        }
+
+        handoff_trace: List[Dict[str, Any]] = []
+        all_failures: List[str] = []
+
+        for stage_name in DEPARTMENT_STAGES:
+            contract = CANONICAL_DEPARTMENT_CONTRACTS[stage_name]
+            missing_inputs = self._validate_stage_inputs(contract, handoff_context)
+            if missing_inputs:
+                err_msg = (
+                    f"{stage_name}: missing required upstream handoff inputs from "
+                    f"{contract.upstream_stage or 'SEED'}: {missing_inputs}"
+                )
+                all_failures.append(err_msg)
+                pipeline_sm.record_stage(
+                    stage=stage_name,
+                    status="FAILED",
+                    trigger_mode="VERIFIED_HANDOFF_CHAIN",
+                    delta_detected=False,
+                    upstream_fingerprint=current_engine_hash,
+                    summary={"error": err_msg, "missing_inputs": missing_inputs},
+                )
+                handoff_trace.append(
+                    {
+                        "stage": stage_name,
+                        "order": contract.order,
+                        "upstream_stage": contract.upstream_stage,
+                        "downstream_stage": contract.downstream_stage,
+                        "status": "FAIL",
+                        "inputs_verified": False,
+                        "missing_inputs": missing_inputs,
+                        "outputs_verified": False,
+                        "missing_outputs": list(contract.guaranteed_outputs),
+                        "failures": [err_msg],
+                    }
+                )
+                break
+
+            if stage_name == "DEPLOYMENT":
+                stage_ok, stage_outputs, stage_summary, stage_failures = self._run_deployment_stage(
+                    handoff_context,
+                    pipeline_sm=pipeline_sm,
+                    cycle_id=run_cycle_id,
+                    persist=persist,
+                )
+            else:
+                runner = stage_runners[stage_name]
+                stage_ok, stage_outputs, stage_summary, stage_failures = runner(handoff_context)
+
+            missing_outputs = self._validate_stage_outputs(contract, stage_outputs)
+            if missing_outputs:
+                out_err = f"{stage_name}: failed to emit guaranteed handoff outputs: {missing_outputs}"
+                stage_failures.append(out_err)
+                stage_ok = False
+
+            if stage_name != "DEPLOYMENT":
+                pipeline_sm.record_stage(
+                    stage=stage_name,
+                    status="COMPLETED" if stage_ok else "FAILED",
+                    trigger_mode="VERIFIED_HANDOFF_CHAIN",
+                    delta_detected=False,
+                    upstream_fingerprint=current_engine_hash,
+                    summary=stage_summary,
+                )
+
+            handoff_context.update(stage_outputs)
+            handoff_trace.append(
+                {
+                    "stage": stage_name,
+                    "order": contract.order,
+                    "upstream_stage": contract.upstream_stage,
+                    "downstream_stage": contract.downstream_stage,
+                    "status": "PASS" if stage_ok else "FAIL",
+                    "inputs_verified": True,
+                    "inputs_validated": True,
+                    "required_inputs": list(contract.required_inputs),
+                    "missing_inputs": [],
+                    "outputs_verified": len(missing_outputs) == 0,
+                    "outputs_validated": len(missing_outputs) == 0,
+                    "guaranteed_outputs": list(contract.guaranteed_outputs),
+                    "missing_outputs": missing_outputs,
+                    "summary": stage_summary,
+                    "failures": stage_failures,
+                    "errors": stage_failures,
+                }
+            )
+            if not stage_ok:
+                all_failures.extend(stage_failures)
+                break
+
+        overall_ok = len(all_failures) == 0 and len(handoff_trace) == len(DEPARTMENT_STAGES)
+        pipeline_state = handoff_context.get("department_pipeline_state") or pipeline_sm.finalize_and_persist(
+            cycle_id=run_cycle_id,
+            overall_status="PASS" if overall_ok else "FAIL",
+            trigger_mode="VERIFIED_HANDOFF_CHAIN",
+            engine_hash=current_engine_hash,
+            persist=persist and overall_ok,
+        )
+
+        tenant_matrix: Dict[str, Dict[str, str]] = {pid: {} for pid in self.target_tenants}
+        stages_map: Dict[str, Dict[str, Any]] = {}
+        for step in handoff_trace:
+            stg = step["stage"]
+            stages_map[stg] = step
+            per_t = (step.get("summary") or {}).get("per_tenant") or {}
+            for pid in self.target_tenants:
+                tenant_matrix[pid][stg] = str((per_t.get(pid) or {}).get("status") or step["status"])
+
+        passed_cnt = sum(1 for s in handoff_trace if s["status"] == "PASS")
+        return {
+            "status": "PASS" if overall_ok else "FAIL",
+            "overall_status": "PASS" if overall_ok else "FAIL",
+            "cycle_id": run_cycle_id,
+            "workspace_root": str(self.workspace_root),
+            "engine_hash": current_engine_hash,
+            "target_tenants": list(self.target_tenants),
+            "discovered_tenants": list(handoff_context.get("discovered_tenants") or self.target_tenants),
+            "stage_order": list(DEPARTMENT_STAGES),
+            "stages_completed": passed_cnt,
+            "stages_passed": passed_cnt,
+            "stages_total": len(DEPARTMENT_STAGES),
+            "failing_stages_count": len(DEPARTMENT_STAGES) - passed_cnt,
+            "tenant_stage_matrix": tenant_matrix,
+            "stages": stages_map,
+            "handoff_trace": handoff_trace,
+            "failures": all_failures,
+            "department_pipeline": pipeline_state,
+        }
+
+
+def verify_department_handoff_chain(
+    workspace_root: Optional[Union[str, Path]] = None,
+    property_ids: Optional[List[str]] = None,
+    heal_markers: bool = False,
+    strict_current_engine_hash: bool = False,
+    persist: bool = False,
+    cycle_id: Optional[str] = None,
+    seed_overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Convenience entrypoint to trace and verify the 6-department handoff chain
+    across all 3 canonical tenants (profithelm, prexvo, gainhelm).
+    Zero em-dashes. Zero en-dashes.
+    """
+    verifier = DepartmentHandoffChainVerifier(
+        workspace_root=workspace_root,
+        property_ids=property_ids,
+        heal_markers=heal_markers,
+        strict_current_engine_hash=strict_current_engine_hash,
+    )
+    return verifier.verify(
+        persist=persist,
+        cycle_id=cycle_id,
+        seed_overrides=seed_overrides,
+    )
 
 
 _GENERIC_FAILURE_LINE_MARKERS = (

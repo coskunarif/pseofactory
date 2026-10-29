@@ -525,6 +525,19 @@ class PropertyAdapter(ABC):
         """List of tool catalog definitions."""
         return []
 
+    def get_tool_catalog(self) -> List[Dict[str, Any]]:
+        """Returns explicit tool catalog or discovers compiled tool directories under dist_dir/tools."""
+        if self.tools:
+            return list(self.tools)
+        tools_dir = self.dist_dir / "tools"
+        if not tools_dir.is_dir():
+            return []
+        return [
+            {"slug": p.parent.name, "path": str(p)}
+            for p in sorted(tools_dir.glob("*/index.html"))
+            if p.is_file()
+        ]
+
     def get_statutory_tokens(self) -> Set[str]:
         """Domain-specific statutory and regulatory keywords."""
         return set()
@@ -1304,6 +1317,72 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 
 
 
+CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {
+    "profithelm": {
+        "property_id": "profithelm",
+        "domain": "profithelm.com",
+        "canonical_base": "https://profithelm.com",
+        "brand_name": "ProfitHelm",
+        "package_name": "profithelm",
+        "dist_dir": "dist",
+        "linkedin_company_id": "143884102",
+    },
+    "prexvo": {
+        "property_id": "prexvo",
+        "domain": "prexvo.com",
+        "canonical_base": "https://prexvo.com",
+        "brand_name": "Prexvo",
+        "package_name": "prexvo",
+        "dist_dir": "dist",
+        "linkedin_company_id": "106482194",
+    },
+    "gainhelm": {
+        "property_id": "gainhelm",
+        "domain": "gainhelm.com",
+        "canonical_base": "https://gainhelm.com",
+        "brand_name": "GainHelm",
+        "package_name": "gainhelm",
+        "dist_dir": "dist",
+        "linkedin_company_id": "112842663",
+    },
+}
+
+
+def sync_tenant_pseofactory_marker(repo_path: Union[str, Path], property_id: str) -> bool:
+    """
+    Ensures a canonical .pseofactory.json marker file is present and aligned across
+    compiled tenant repositories (profithelm-platform, prexvo, gainhelm) so all three
+    tenants share an identical discovery contract.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = str(property_id or "").strip().lower()
+    if prop == "profithelm-platform":
+        prop = "profithelm"
+    cfg = CANONICAL_TENANT_CONFIGS.get(prop)
+    if not cfg:
+        return False
+    rp = Path(repo_path).resolve()
+    if not rp.is_dir():
+        return False
+    marker_path = rp / ".pseofactory.json"
+    desired_payload = {
+        "property_id": cfg["property_id"],
+        "domain": cfg["domain"],
+        "canonical_base": cfg["canonical_base"],
+        "brand_name": cfg["brand_name"],
+        "package_name": cfg["package_name"],
+        "dist_dir": cfg["dist_dir"],
+    }
+    desired_text = json.dumps(desired_payload, indent=2) + "\n"
+    try:
+        if marker_path.is_file() and marker_path.read_text(encoding="utf-8") == desired_text:
+            return False
+        marker_path.write_text(desired_text, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 class WorkspacePropertyScanner:
     """
     Discovers property adapters dynamically by convention without hardcoding tenant packages:
@@ -1349,10 +1428,13 @@ class WorkspacePropertyScanner:
                 return None
             repo_path = config_file.parent
             property_id = str(data.get("property_id") or repo_path.name).lower()
-            brand_name = str(data.get("brand_name") or property_id.capitalize())
-            domain = str(data.get("domain") or f"{property_id}.com")
-            canonical_base = str(data.get("canonical_base") or f"https://{domain}").rstrip("/")
-            raw_dist = data.get("dist_dir") or "dist"
+            if property_id == "profithelm-platform":
+                property_id = "profithelm"
+            canon_cfg = CANONICAL_TENANT_CONFIGS.get(property_id, {})
+            brand_name = str(data.get("brand_name") or canon_cfg.get("brand_name") or property_id.capitalize())
+            domain = str(data.get("domain") or canon_cfg.get("domain") or f"{property_id}.com")
+            canonical_base = str(data.get("canonical_base") or canon_cfg.get("canonical_base") or f"https://{domain}").rstrip("/")
+            raw_dist = data.get("dist_dir") or canon_cfg.get("dist_dir") or "dist"
             dist_dir = (
                 (repo_path / raw_dist).resolve()
                 if not Path(raw_dist).is_absolute()
@@ -1363,6 +1445,7 @@ class WorkspacePropertyScanner:
             build_asset_cmd = data.get("build_asset_command")
             foreign_tokens = set(data.get("foreign_tokens", []))
             statutory_tokens = set(data.get("statutory_tokens", []))
+            linkedin_id = str(data.get("linkedin_company_id") or canon_cfg.get("linkedin_company_id") or "") or None
 
             return SubprocessPropertyAdapter(
                 property_id=property_id,
@@ -1376,6 +1459,7 @@ class WorkspacePropertyScanner:
                 statutory_tokens=statutory_tokens,
                 build_command=build_cmd,
                 build_asset_command=build_asset_cmd,
+                linkedin_company_id=linkedin_id,
             )
         except Exception:
             return None
@@ -1389,7 +1473,10 @@ class WorkspacePropertyScanner:
             canonical_base = m.group(1).rstrip("/")
             domain = m.group(2)
             prop_id = domain.split(".")[0].lower() if "." in domain else repo_path.name.lower()
-            brand_name = prop_id.capitalize()
+            if prop_id == "profithelm-platform":
+                prop_id = "profithelm"
+            canon_cfg = CANONICAL_TENANT_CONFIGS.get(prop_id, {})
+            brand_name = str(canon_cfg.get("brand_name") or prop_id.capitalize())
             dist_dir = sitemap_file.parent
 
             return SubprocessPropertyAdapter(
@@ -1399,6 +1486,7 @@ class WorkspacePropertyScanner:
                 canonical_base=canonical_base,
                 dist_dir=dist_dir,
                 repo_path=repo_path,
+                linkedin_company_id=canon_cfg.get("linkedin_company_id"),
             )
         except Exception:
             return None
@@ -1414,8 +1502,12 @@ class WorkspacePropertyScanner:
             if not dist_dir.is_dir():
                 return None
 
-            domain = f"{name}.com"
-            canonical_base = f"https://{domain}"
+            prop_id = name.lower()
+            if prop_id == "profithelm-platform":
+                prop_id = "profithelm"
+            canon_cfg = CANONICAL_TENANT_CONFIGS.get(prop_id, {})
+            domain = str(canon_cfg.get("domain") or f"{prop_id}.com")
+            canonical_base = str(canon_cfg.get("canonical_base") or f"https://{domain}")
             sitemap_path = dist_dir / "sitemap.xml"
             if sitemap_path.is_file():
                 sm_adapter = self._parse_sitemap_xml(sitemap_path, repo_path)
@@ -1424,12 +1516,13 @@ class WorkspacePropertyScanner:
                     domain = sm_adapter.domain
 
             return SubprocessPropertyAdapter(
-                property_id=name.lower(),
-                brand_name=name.capitalize(),
+                property_id=prop_id,
+                brand_name=str(canon_cfg.get("brand_name") or name.capitalize()),
                 domain=domain,
                 canonical_base=canonical_base,
                 dist_dir=dist_dir,
                 repo_path=repo_path,
+                linkedin_company_id=canon_cfg.get("linkedin_company_id"),
             )
         except Exception:
             return None
@@ -11412,7 +11505,7 @@ def _has_pending_downstream_work(
     # 2b. Check YouTube video synthesis catalog on production tenant repositories
     if (
         str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
-        and repo_root.name in ("profithelm-platform", "prexvo")
+        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm")
     ):
         videos_dir_chk = Path(dist_dir) / "videos"
         valid_mp4s = (
@@ -12048,11 +12141,20 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Warning: Edge redirect sync error for '{p_id}': {edge_err}")
 
+        is_unmerged_worktree_early = (
+            "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
+            and scanner.workspace_root == Path("/home/ubuntuadmin/projects").resolve()
+        )
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
             and not is_foreign_pytest
+            and not is_unmerged_worktree_early
         ):
+            try:
+                sync_tenant_pseofactory_marker(adapter.repo_path, adapter.property_id)
+            except Exception:
+                pass
             try:
                 from pseofactory.gitops import sync_tenant_test_isolation_guards
                 sync_tenant_test_isolation_guards(adapter.repo_path)
@@ -12648,48 +12750,40 @@ def reflect_and_recompile_all_assets(
                                 push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
                     except Exception:
                         pass
-                    if adapter.property_id == "profithelm" and not is_unmerged_worktree:
+                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm") and not is_unmerged_worktree:
                         try:
-                            import sqlite3
-                            jev_db = adapter.dist_dir.parent / ".agy" / "jev_decision_cache.db"
-                            if jev_db.is_file():
-                                with sqlite3.connect(str(jev_db)) as conn:
-                                    conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
-                                    conn.commit()
-                            from profithelm.freshness import run_freshness_audit
-                            from profithelm.seo_verifier import compute_dist_digest
-                            cached_seo = (
-                                {"status": "PASS", "_dist_digest": compute_dist_digest(adapter.dist_dir)}
-                                if build_verified.status == "PASS"
-                                else None
-                            )
-                            run_freshness_audit(
-                                dist_dir=adapter.dist_dir,
-                                in_pipeline=True,
-                                cached_seo_summary=cached_seo,
-                            )
+                            if adapter.property_id == "profithelm":
+                                import sqlite3
+                                jev_db = adapter.dist_dir.parent / ".agy" / "jev_decision_cache.db"
+                                if jev_db.is_file():
+                                    with sqlite3.connect(str(jev_db)) as conn:
+                                        conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
+                                        conn.commit()
+                                from profithelm.freshness import run_freshness_audit
+                                from profithelm.seo_verifier import compute_dist_digest
+                                cached_seo = (
+                                    {"status": "PASS", "_dist_digest": compute_dist_digest(adapter.dist_dir)}
+                                    if build_verified.status == "PASS"
+                                    else None
+                                )
+                                run_freshness_audit(
+                                    dist_dir=adapter.dist_dir,
+                                    in_pipeline=True,
+                                    cached_seo_summary=cached_seo,
+                                )
+                            else:
+                                import importlib
+                                fresh_mod = importlib.import_module(f"{adapter.property_id}.freshness")
+                                t_rep = fresh_mod.run_freshness_audit(dist_dir=adapter.dist_dir)
+                                t_rep_text = json.dumps(t_rep, indent=2) + "\n"
+                                t_rep_file = adapter.dist_dir.parent / "freshness_audit_report.json"
+                                if not t_rep_file.is_file() or t_rep_file.read_text(encoding="utf-8") != t_rep_text:
+                                    t_rep_file.write_text(t_rep_text, encoding="utf-8")
                         except Exception:
                             pass
-                    elif adapter.property_id == "prexvo" and not is_unmerged_worktree:
-                        try:
-                            from prexvo.freshness import run_freshness_audit as run_prexvo_freshness_audit
-                            px_rep = run_prexvo_freshness_audit(dist_dir=adapter.dist_dir)
-                            px_rep_text = json.dumps(px_rep, indent=2) + "\n"
-                            px_rep_file = adapter.dist_dir.parent / "freshness_audit_report.json"
-                            if not px_rep_file.is_file() or px_rep_file.read_text(encoding="utf-8") != px_rep_text:
-                                px_rep_file.write_text(px_rep_text, encoding="utf-8")
-                        except Exception:
-                            pass
-                    elif adapter.property_id == "gainhelm" and not is_unmerged_worktree:
-                        try:
-                            from gainhelm.freshness import run_freshness_audit as run_gainhelm_freshness_audit
-                            gh_rep = run_gainhelm_freshness_audit(dist_dir=adapter.dist_dir)
-                            gh_rep_text = json.dumps(gh_rep, indent=2) + "\n"
-                            gh_rep_file = adapter.dist_dir.parent / "freshness_audit_report.json"
-                            if not gh_rep_file.is_file() or gh_rep_file.read_text(encoding="utf-8") != gh_rep_text:
-                                gh_rep_file.write_text(gh_rep_text, encoding="utf-8")
-                        except Exception:
-                            pass
+                        finally:
+                            if hasattr(adapter, "_enforce_sys_modules_isolation"):
+                                adapter._enforce_sys_modules_isolation()
 
                     # Clear stale factory failure markers and streak counters upon verified reflection recovery
                     for agy_dir in (adapter.dist_dir.parent / ".agy", scanner.workspace_root / ".agy"):
@@ -12807,6 +12901,18 @@ def reflect_and_recompile_all_assets(
             )
         except Exception:
             pass
+        if results.get("status") == "PASS":
+            try:
+                from pseofactory.supervisor import verify_department_handoff_chain
+                handoff_res = verify_department_handoff_chain(
+                    workspace_root=scanner.workspace_root,
+                    property_ids=list(results.get("property_reports", {}).keys()) or None,
+                    persist=True,
+                    cycle_id="reflect_sync",
+                )
+                results["department_pipeline"] = handoff_res.get("department_pipeline")
+            except Exception:
+                pass
 
     return results
 
@@ -12822,7 +12928,9 @@ __all__ = [
     "PropertyContaminationError",
     "LockContentionError",
     "CrossPropertyContaminationScanner",
+    "CANONICAL_TENANT_CONFIGS",
     "DEFAULT_TENANT_LINKEDIN_IDS",
+    "sync_tenant_pseofactory_marker",
     "PropertyAdapter",
     "SubprocessPropertyAdapter",
     "WorkspacePropertyScanner",

@@ -663,12 +663,113 @@ def test_supervisor_overlay_rollback_reconcile_and_streak_extraction(tmp_path):
     cascade.route_to_dlq("profithelm", drift_rec, "Simulated quarantine")
     assert len(cascade.list_dlq(property_id="profithelm")) == 1
 
-    # 4. Verify generated edge functions for profithelm and prexvo have zero cross-tenant KV token contamination
+    # 4. Verify generated edge functions for profithelm, prexvo, and gainhelm have zero cross-tenant KV token contamination
     from pseofactory.edge import generate_edge_redirect_function, generate_edge_telemetry_function
     from pseofactory.maintenance import CrossPropertyContaminationScanner
     scanner = CrossPropertyContaminationScanner()
-    for pid in ("profithelm", "prexvo"):
+    for pid in ("profithelm", "prexvo", "gainhelm"):
         assert scanner.scan_text(generate_edge_redirect_function(property_id=pid), pid) == []
         assert scanner.scan_text(generate_edge_telemetry_function(property_id=pid), pid) == []
+
+
+def test_department_handoff_contracts_and_three_tenant_unification(tmp_path: Path):
+    """
+    Verifies formal DepartmentContract definitions across all 6 stages
+    (DISCOVERY -> MONETIZATION -> ENGINEERING -> VERIFICATION -> SYNDICATION -> DEPLOYMENT),
+    heartbeat preservation, and unified 3-tenant routing across profithelm, prexvo, and gainhelm.
+    """
+    from pseofactory.supervisor import (
+        CANONICAL_DEPARTMENT_CONTRACTS,
+        CANONICAL_TENANTS,
+        DEPARTMENT_STAGES,
+        DepartmentPipelineStateMachine,
+        HeartbeatTracker,
+    )
+    from pseofactory.affiliates import (
+        audit_partnership_model_coverage,
+        qualify_monetization_opportunity,
+    )
+    from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+    from pseofactory.maintenance import sync_tenant_pseofactory_marker
+
+    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm")
+    assert tuple(CANONICAL_DEPARTMENT_CONTRACTS.keys()) == DEPARTMENT_STAGES
+
+    for idx, stage_name in enumerate(DEPARTMENT_STAGES, start=1):
+        contract = CANONICAL_DEPARTMENT_CONTRACTS[stage_name]
+        assert contract.stage == stage_name
+        assert contract.order == idx
+        assert len(contract.required_inputs) >= 3
+        assert len(contract.guaranteed_outputs) >= 3
+        assert len(contract.tenant_invariants) >= 3
+        serialized = json.dumps(contract.to_dict())
+        assert "\u2014" not in serialized
+        assert "\u2013" not in serialized
+
+    sm = DepartmentPipelineStateMachine(state_path=tmp_path / "dept_pipeline.json")
+    for stage_name in DEPARTMENT_STAGES:
+        sm.record_stage(stage_name, status="PASS", summary={"verified": True})
+    sm_dict = sm.finalize_and_persist(
+        cycle_id="test-handoff-cycle",
+        overall_status="PASS",
+        trigger_mode="BATCHED_CADENCE",
+        engine_hash="abc123",
+        persist=True,
+    )
+    assert sm_dict["overall_status"] == "PASS"
+    assert sm_dict["tenants_managed"] == ["profithelm", "prexvo", "gainhelm"]
+    assert set(sm_dict["contracts"].keys()) == set(DEPARTMENT_STAGES)
+
+    hb_path = tmp_path / "heartbeat.json"
+    hb = HeartbeatTracker(heartbeat_path=hb_path)
+    hb.emit(
+        status="HEALTHY",
+        cycle_id="cycle-1",
+        extra={
+            "department_pipeline": sm_dict,
+            "partner_lifecycle_sync": {"status": "SYNCED"},
+        },
+    )
+    hb2 = hb.emit(status="HEALTHY", cycle_id="cycle-2", extra={"note": "fast_check"})
+    assert "department_pipeline" in hb2
+    assert hb2["partner_lifecycle_sync"] == {"status": "SYNCED"}
+
+    # Verify GainHelm monetization qualification and partnership coverage parity
+    gh_qual = qualify_monetization_opportunity("soc 2 audit cost calculator", property_id=None)
+    assert gh_qual["monetization_qualified"] is True
+    assert gh_qual["property_id"] == "gainhelm"
+
+    px_reject = qualify_monetization_opportunity("soc 2 audit cost calculator", property_id="prexvo")
+    assert px_reject["monetization_qualified"] is False
+
+    gh_cov = audit_partnership_model_coverage(property_id="gainhelm")
+    assert gh_cov["status"] == "PASS"
+    assert gh_cov["verticals_audited_count"] >= 1
+    assert "b2b_cyber_compliance" in gh_cov["vertical_coverage"]
+
+    # Verify GainHelm GSC remediation overlay spec uses gainhelm.com
+    gh_ov = compile_remediation_overlay_spec(
+        {"slug": "soc-2-audit-cost-calculator", "query": "soc 2 audit cost calculator"},
+        tenant_id="gainhelm",
+    )
+    assert "gainhelm.com" in gh_ov["target_url"]
+    assert "profithelm.com" not in json.dumps(gh_ov)
+
+    # Verify .pseofactory.json marker normalization across all 3 tenants
+    for pid, expected_brand in (
+        ("profithelm", "ProfitHelm"),
+        ("prexvo", "Prexvo"),
+        ("gainhelm", "GainHelm"),
+    ):
+        t_dir = tmp_path / pid
+        t_dir.mkdir(parents=True, exist_ok=True)
+        wrote = sync_tenant_pseofactory_marker(t_dir, pid)
+        assert wrote is True
+        assert (t_dir / ".pseofactory.json").is_file()
+        marker = json.loads((t_dir / ".pseofactory.json").read_text(encoding="utf-8"))
+        assert marker["property_id"] == pid
+        assert marker["brand_name"] == expected_brand
+        assert marker["domain"] == f"{pid}.com"
+
 
 

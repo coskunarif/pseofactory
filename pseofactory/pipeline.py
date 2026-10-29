@@ -1226,7 +1226,7 @@ class FactoryPipeline:
                     from pseofactory.indexing.preflight import IndexingPreflightEngine
                     engine = IndexingPreflightEngine(
                         property_id=tenant,
-                        domain=adapter.domain if adapter else "profithelm.com",
+                        domain=adapter.domain if adapter else f"{tenant}.com",
                         dist_dir=target_dist,
                     )
                     pre_report = engine.inspect_dist(target_dist)
@@ -1315,8 +1315,8 @@ class FactoryPipeline:
                     try:
                         from pseofactory.indexer import PushIndexer
                         indexer = PushIndexer(
-                            domain=t_adapter.domain if t_adapter else "profithelm.com",
-                            canonical_base=t_adapter.canonical_base if t_adapter else "https://profithelm.com",
+                            domain=t_adapter.domain if t_adapter else f"{t}.com",
+                            canonical_base=t_adapter.canonical_base if t_adapter else f"https://{t}.com",
                             dist_dir=t_dist,
                         )
                         t_pre = preflight_reports.get(t)
@@ -1460,3 +1460,13 @@ def arbitrate_actions(
         return ("BUILD_PAGE", spikes[0])
 
     return ("NO_OP", None)
+
+
+from pseofactory.supervisor import (  # noqa: E402
+    CANONICAL_DEPARTMENT_CONTRACTS,
+    CANONICAL_TENANTS,
+    DepartmentContract,
+    DepartmentHandoffChainVerifier,
+    verify_department_handoff_chain,
+)
+

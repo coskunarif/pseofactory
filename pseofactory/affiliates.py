@@ -3921,10 +3921,39 @@ def qualify_monetization_opportunity(
     is_b2b = is_commercial_b2b_slug(s_clean) or any(tok in combined for tok in COMMERCIAL_B2B_INTENT_TOKENS)
     is_consumer_fin = (s_clean in RETAIL_TAX_SLUGS) or any(tok in combined for tok in CONSUMER_FINANCIAL_INTENT_TOKENS)
     has_tool_signal = any(tok in combined for tok in PROSPECTIVE_NICHE_TOOL_TOKENS)
+    is_gainhelm = any(
+        tok in combined
+        for tok in (
+            "ssae 18",
+            "soc 2",
+            "soc-2",
+            "soc2",
+            "cmmc",
+            "c3pao",
+            "32 cfr part 170",
+            "nist 800-171",
+            "nist-800-171",
+            "sprs score",
+            "sprs-score",
+            "iso 27001",
+            "iso-27001",
+            "iso 27006",
+            "45 cfr 160.404",
+            "hipaa",
+            "hitrust",
+            "fedramp",
+            "pci dss",
+            "pci-dss",
+            "penetration testing",
+            "penetration-testing",
+            "cyber liability insurance",
+            "cyber-liability-insurance",
+        )
+    )
 
     # 2. Enforce strict cross-tenant isolation when property_id is explicitly bound
     if prop_explicit == "prexvo":
-        if is_b2b or any(
+        if is_b2b or is_gainhelm or any(
             b2b_kw in combined
             for b2b_kw in ("section 179", "section-179", "1031", "saas", "runway", "burn rate", "qsbs", "corporate amt", "mercury", "ramp", "rippling", "gusto")
         ):
@@ -4007,7 +4036,7 @@ def qualify_monetization_opportunity(
     greenfield_meta: Dict[str, Any] = {}
 
     # 3. Route to canonical intent tier and property
-    if prop_explicit == "gainhelm":
+    if prop_explicit == "gainhelm" or (not prop_explicit and is_gainhelm and not is_student_loan):
         resolved_prop = "gainhelm"
         intent_tier = "enterprise_cyber_compliance_grc"
         primary_obj = resolve_optimal_partner_for_slug("gainhelm", s_clean, vault_overrides=vault_overrides)
@@ -7664,7 +7693,12 @@ def audit_partnership_model_coverage(
 
     vertical_coverage: Dict[str, Dict[str, Any]] = {}
     for v_fam in VERTICAL_DIVERSIFIED_PARTNER_ROSTERS:
-        v_prop = "prexvo" if v_fam == "student_loan_refinancing" else "profithelm"
+        if v_fam == "student_loan_refinancing":
+            v_prop = "prexvo"
+        elif v_fam in ("b2b_cyber_compliance", "cyber_compliance_grc") and prop_filter == "gainhelm":
+            v_prop = "gainhelm"
+        else:
+            v_prop = "profithelm"
         if prop_filter and prop_filter != v_prop:
             continue
         roster = bind_asset_partner_roster(

@@ -46,6 +46,27 @@ def cmd_audit(args: argparse.Namespace) -> int:
     Returns 0 if all assets are compliant (status PASS), 1 if drift detected or error.
     Zero em-dashes. Zero en-dashes.
     """
+    if getattr(args, "department_handoffs", False):
+        from pseofactory.supervisor import verify_department_handoff_chain
+
+        rep = verify_department_handoff_chain(persist=False)
+        if getattr(args, "json", False):
+            print(json.dumps(rep, indent=2))
+        else:
+            print(
+                f"[{rep['status']}] Department Handoff Chain Audit: "
+                f"stages={rep['stages_passed']}/{rep['stages_total']} | "
+                f"tenants={','.join(rep['tenants_verified'])} | "
+                f"failing_stages={rep['failing_stages_count']}"
+            )
+            for st_name, st_info in rep.get("stages", {}).items():
+                print(
+                    f"  - [{st_info['status']}] {st_info['order']}. {st_name} "
+                    f"({st_info['upstream_stage']} -> {st_info['downstream_stage']}): "
+                    f"inputs_verified={st_info['inputs_verified']} outputs_verified={st_info['outputs_verified']}"
+                )
+        return 0 if rep.get("status") == "PASS" else 1
+
     if getattr(args, "browser", False):
         from pseofactory.browser_verifier import (
             UnifiedBrowserAuditor,
@@ -530,7 +551,26 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     4. Writes atomic heartbeat records (HWL-1231, HWL-1349)
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.supervisor import AutonomousLifecycleSupervisor
+    from pseofactory.supervisor import AutonomousLifecycleSupervisor, verify_department_handoff_chain
+
+    if getattr(args, "verify_handoffs", False):
+        rep = verify_department_handoff_chain(persist=not getattr(args, "dry_run", False))
+        if getattr(args, "json", False):
+            print(json.dumps(rep, indent=2))
+        else:
+            print(
+                f"[{rep['status']}] Supervisor Department Handoff Chain: "
+                f"stages={rep['stages_passed']}/{rep['stages_total']} | "
+                f"tenants={','.join(rep['tenants_verified'])} | "
+                f"failing_stages={rep['failing_stages_count']}"
+            )
+            for st_name, st_info in rep.get("stages", {}).items():
+                print(
+                    f"  - [{st_info['status']}] {st_info['order']}. {st_name} "
+                    f"({st_info['upstream_stage']} -> {st_info['downstream_stage']}): "
+                    f"inputs_verified={st_info['inputs_verified']} outputs_verified={st_info['outputs_verified']}"
+                )
+        return 0 if rep.get("status") == "PASS" else 1
 
     interval = getattr(args, "interval", 3600.0)
     daemon = getattr(args, "daemon", False)
@@ -1683,13 +1723,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # audit
     p_audit = subparsers.add_parser("audit", help="Audit static assets against engine baselines")
-    p_audit.add_argument("--property", type=str, default=None, help="Property ID (e.g. prexvo, profithelm)")
+    p_audit.add_argument("--property", type=str, default=None, help="Property ID (e.g. prexvo, profithelm, gainhelm)")
     p_audit.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory to audit")
     p_audit.add_argument("--browser", action="store_true", help="Audit static distribution using live Chrome DevTools Protocol (CDP)")
     p_audit.add_argument("--sample", type=int, default=None, help="Sample N routes for fast browser audit")
     p_audit.add_argument("--cdp-port", type=int, default=9222, help="Chrome DevTools Protocol port (default: 9222)")
     p_audit.add_argument("--fail-closed", action="store_true", help="Fail closed if Chrome CDP port is unreachable")
     p_audit.add_argument("--check-engine-drift", action="store_true", help="Audit engine hash drift against state file")
+    p_audit.add_argument("--department-handoffs", action="store_true", help="Verify end-to-end 6-department handoff contracts across all 3 tenants")
     p_audit.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # maintain
@@ -1921,6 +1962,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--property", type=str, default=None, help="Restrict supervisor to specific property ID")
     p_sup.add_argument("--force", action="store_true", help="Force rebuild and verification regardless of drift")
     p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
+    p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 3 tenants")
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
     p_sup.add_argument("--budget", type=float, default=float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0")), help="Execution budget in seconds (default: 2400)")

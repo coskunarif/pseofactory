@@ -254,8 +254,8 @@ def audit_active_zone_dns_hygiene(
     timeout_seconds: int = 15,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
-    Verifies DNS hygiene across the 3 active/personal zones (profithelm.com,
-    prexvo.com, arifcoskun.com):
+    Verifies DNS hygiene across the 4 active/personal zones (profithelm.com,
+    prexvo.com, gainhelm.com, arifcoskun.com):
     - Proxied root and www CNAME records pointing to expected *.pages.dev target.
     - SPF (v=spf1) and DMARC (v=DMARC1; p=reject) TXT records present.
     Zero em-dashes. Zero en-dashes.
@@ -339,12 +339,11 @@ def audit_hibernated_and_retired_dns_isolation(
 ) -> Tuple[bool, str]:
     """
     Asserts strict DNS hygiene and Registrar lifecycle compliance across all 8 Cloudflare zones:
-    1. Zero routing records (A, AAAA, CNAME, MX) on hibernated gainhelm.com and on all 4
-       decommissioned domains (adspendguardian.com, heyjunto.com, thecoachloop.com, viraljacker.com).
-    2. Preserved google-site-verification TXT on gainhelm.com and anti-spoofing SPF/DMARC TXT
-       on non-routable zones when TXT records are present.
+    1. Zero routing records (A, AAAA, CNAME, MX) on all 4 decommissioned domains
+       (adspendguardian.com, heyjunto.com, thecoachloop.com, viraljacker.com).
+    2. Anti-spoofing SPF/DMARC TXT on non-routable zones when TXT records are present.
     3. Proxied Cloudflare Pages CNAMEs + SPF/DMARC on active zones (profithelm.com, prexvo.com,
-       arifcoskun.com) when auditing the full live portfolio.
+       gainhelm.com, arifcoskun.com) when auditing the full live portfolio.
     4. Verified Registrar renewal, transfer-lock (locked=True), WHOIS redaction, and sunset windows.
     Zero em-dashes. Zero en-dashes.
     """

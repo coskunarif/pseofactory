@@ -2500,9 +2500,71 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
     assert gh_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 6
 
 
+def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_path):
+    """
+    Verifies the direct 6-department handoff chain:
+      DISCOVERY -> MONETIZATION -> ENGINEERING -> VERIFICATION -> SYNDICATION -> DEPLOYMENT
+    across all 3 canonical live tenants (profithelm, prexvo, gainhelm).
+    Confirms every department validates its upstream inputs, executes its full responsibility
+    for all three tenants without divergence, and emits its guaranteed output contract.
+    """
+    from pseofactory.supervisor import (
+        CANONICAL_DEPARTMENT_CONTRACTS,
+        CANONICAL_TENANTS,
+        DepartmentPipelineStateMachine,
+        verify_department_handoff_chain,
+    )
 
+    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm")
+    assert len(CANONICAL_DEPARTMENT_CONTRACTS) == 6
 
+    report = verify_department_handoff_chain(
+        workspace_root="/home/ubuntuadmin/projects",
+        property_ids=["profithelm", "prexvo", "gainhelm"],
+        persist=False,
+        heal_markers=False,
+        strict_current_engine_hash=False,
+    )
+    assert report["overall_status"] == "PASS", f"Handoff chain failed: {report.get('failures')}"
+    assert report["stages_total"] == 6
+    assert report["stages_passed"] == 6
+    assert report["failing_stages_count"] == 0
+    assert report["target_tenants"] == ["profithelm", "prexvo", "gainhelm"]
+    assert report["discovered_tenants"] == ["profithelm", "prexvo", "gainhelm"]
 
+    expected_order = (
+        "DISCOVERY",
+        "MONETIZATION",
+        "ENGINEERING",
+        "VERIFICATION",
+        "SYNDICATION",
+        "DEPLOYMENT",
+    )
+    for idx, stage_name in enumerate(expected_order, start=1):
+        s_rep = report["stages"][stage_name]
+        assert s_rep["order"] == idx
+        assert s_rep["status"] == "PASS", f"Stage {stage_name} failed: {s_rep.get('errors')}"
+        assert s_rep["inputs_validated"] is True
+        assert s_rep["outputs_validated"] is True
+        assert s_rep["missing_inputs"] == []
+        assert s_rep["missing_outputs"] == []
+        per_tenant = s_rep["summary"].get("per_tenant") or {}
+        for pid in CANONICAL_TENANTS:
+            assert pid in per_tenant, f"Stage {stage_name} missing tenant summary for {pid}"
+            assert per_tenant[pid]["status"] == "PASS", (
+                f"Stage {stage_name} tenant {pid} failed: {per_tenant[pid]}"
+            )
+
+    # Verify isolated state persistence via DepartmentPipelineStateMachine
+    state_file = tmp_path / "department_pipeline.json"
+    sm = DepartmentPipelineStateMachine(state_path=state_file)
+    for stage_name in expected_order:
+        sm.record_stage(stage_name, "PASS", report["stages"][stage_name]["summary"])
+    persisted = sm.finalize_and_persist(cycle_id="test_e2e_handoff_chain", overall_status="PASS")
+    assert state_file.is_file()
+    assert persisted["overall_status"] == "PASS"
+    assert persisted["tenants_managed"] == ["profithelm", "prexvo", "gainhelm"]
+    assert set(persisted["contracts"].keys()) == set(expected_order)
 
 
 

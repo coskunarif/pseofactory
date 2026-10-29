@@ -1130,9 +1130,21 @@ __all__ = [
     "drill_down_specific_subtopics",
     "classify_longitudinal_trajectory",
     "route_validated_inflection_signals",
+    "CANONICAL_TENANTS",
+    "DepartmentContract",
+    "CANONICAL_DEPARTMENT_CONTRACTS",
+    "DepartmentHandoffChainVerifier",
+    "verify_department_handoff_chain",
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses
+from pseofactory.supervisor import (
+    CANONICAL_DEPARTMENT_CONTRACTS,
+    CANONICAL_TENANTS,
+    DepartmentContract,
+    DepartmentHandoffChainVerifier,
+    verify_department_handoff_chain,
+)
 from pseofactory.indexer import (
     ChildSitemapPushLedger,
     TEMPLATE_SITEMAP_SECTIONS,

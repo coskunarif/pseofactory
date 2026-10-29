@@ -3087,6 +3087,10 @@ def generate_headless_brand_article_from_transcript(
             brand_name = "Prexvo"
             canonical_base = "https://prexvo.com"
             company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("prexvo", "106482194")
+        elif prop_id == "gainhelm":
+            brand_name = "GainHelm"
+            canonical_base = "https://gainhelm.com"
+            company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("gainhelm", "112842663")
         else:
             brand_name = "ProfitHelm"
             canonical_base = "https://profithelm.com"
@@ -3102,12 +3106,22 @@ def generate_headless_brand_article_from_transcript(
     if stat_cites and isinstance(stat_cites, list):
         stat_cite = ", ".join(stat_cites)
     else:
-        stat_cite = "Title IV Higher Education Act (34 CFR Part 685)" if prop_id == "prexvo" else "Internal Revenue Code Section 1 (26 U.S.C. Section 1)"
+        if prop_id == "prexvo":
+            stat_cite = "Title IV Higher Education Act (34 CFR Part 685)"
+        elif prop_id == "gainhelm":
+            stat_cite = "AICPA SSAE 18 (AT-C Section 205) and 32 CFR Part 170 (CMMC 2.0)"
+        else:
+            stat_cite = "Internal Revenue Code Section 1 (26 U.S.C. Section 1)"
     stat_cite = _sanitize_distribution_text(stat_cite)
 
     econ_cite = transcript_data.get("economic_source")
     if not econ_cite:
-        econ_cite = "HHS Federal Poverty Guidelines and Federal Student Aid Data" if prop_id == "prexvo" else "Federal Reserve FRED Economic Data"
+        if prop_id == "prexvo":
+            econ_cite = "HHS Federal Poverty Guidelines and Federal Student Aid Data"
+        elif prop_id == "gainhelm":
+            econ_cite = "BLS OEWS SOC 15-1212 Information Security Wage Data"
+        else:
+            econ_cite = "Federal Reserve FRED Economic Data"
     econ_cite = _sanitize_distribution_text(str(econ_cite))
 
     # Princeton GEO 40-60 word definition core
@@ -3141,6 +3155,12 @@ def generate_headless_brand_article_from_transcript(
                 "RAP protects income up to 225% of HHS Poverty Guidelines.",
                 "100% unpaid interest subsidy stops negative loan amortization.",
                 "IBR retains statutory standard payment caps while RAP calculates payments without an upper ceiling.",
+            ]
+        elif prop_id == "gainhelm":
+            defaults = [
+                "AICPA SSAE 18 Type II audit fees scale with control scope, employee headcount, and observation period.",
+                "32 CFR Part 170 CMMC Level 2 requires 110 NIST SP 800-171 controls with a minimum 88 SPRS conditional score.",
+                "Automated GRC evidence collection reduces internal security engineering audit preparation hours.",
             ]
         else:
             defaults = [
