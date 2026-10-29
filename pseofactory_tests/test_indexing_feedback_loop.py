@@ -1489,6 +1489,176 @@ def test_gsc_unknown_url_and_sitemap_data_schema_and_indexnow_hygiene(tmp_path):
     assert res_in["urls_submitted"] == 1
 
 
+def test_domain_health_pacing_and_unindexed_first_submission_governance(tmp_path):
+    """
+    Verifies PushIndexer.evaluate_domain_health_pacing and submit_gsc_indexing:
+    1. Computes real indexation ratio from GSC URL inspection telemetry across domain health tiers
+       (CONSERVATIVE_RECOVERY < 70%, GRADUATED_GROWTH 70-90%, HEALTHY_AUTHORITY >= 90%).
+    2. Prioritizes unindexed GSC URLs ahead of already-indexed URLs in submit_gsc_indexing.
+    3. Throttles outbound GSC batch size according to domain health tier and only rolls over
+       unindexed overflow URLs (never dumping already-indexed PASS URLs into gsc_rollover_queue.json).
+    """
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+
+    urls = [f"https://gainhelm.com/tools/calc-{i}/" for i in range(15)]
+    url_states = {}
+    # 6 indexed, 6 unindexed -> 50% indexation ratio -> CONSERVATIVE_RECOVERY (batch cap = 10)
+    for i in range(6):
+        url_states[urls[i]] = {
+            "verdict": "PASS",
+            "coverageState": "Submitted and indexed",
+            "pageFetchState": "SUCCESSFUL",
+        }
+    for i in range(6, 12):
+        url_states[urls[i]] = {
+            "verdict": "NEUTRAL",
+            "coverageState": "Discovered - currently not indexed",
+            "pageFetchState": "PAGE_FETCH_STATE_UNSPECIFIED",
+        }
+
+    (agy_dir / "gsc_lifecycle_telemetry.json").write_text(
+        json.dumps({"url_states": url_states}),
+        encoding="utf-8",
+    )
+
+    indexer = PushIndexer(
+        domain="gainhelm.com",
+        canonical_base="https://gainhelm.com",
+        base_dir=tmp_path,
+        dist_dir=dist_dir,
+        ledger_path=agy_dir / "index_push_ledger.json",
+        rollover_queue_path=agy_dir / "gsc_rollover_queue.json",
+        tenant_id="gainhelm",
+    )
+
+    health = indexer.evaluate_domain_health_pacing(candidate_urls=urls)
+    assert health["domain_health_tier"] == "CONSERVATIVE_RECOVERY"
+    assert health["inspected_count"] == 12
+    assert health["indexed_count"] == 6
+    assert health["unindexed_count"] == 6
+    assert health["indexed_ratio"] == 0.5
+    assert health["paced_gsc_batch_cap"] == 10
+    assert health["sitemap_exposure_cap"] == 50
+
+    with patch("shutil.which", return_value="/mock/bin/gsccli"), \
+         patch("subprocess.run", return_value=subprocess.CompletedProcess(["gsccli"], 0, stdout="ACCEPTED")):
+        sub_res = indexer.submit_gsc_indexing(urls=urls, live=True, hubs_only=True, drain_rollover=False)
+    assert sub_res["urls_submitted"] == 10
+    assert sub_res["domain_health_pacing"]["domain_health_tier"] == "CONSERVATIVE_RECOVERY"
+    # First 6 submitted must be the 6 unindexed URLs (calc-6 through calc-11)
+    submitted_first_6 = sub_res["submitted_urls"][:6]
+    assert set(submitted_first_6) == set(urls[6:12])
+    # Overflow (5 URLs) contains 1 uninspected URL (calc-14) and 4 already-indexed PASS URLs;
+    # only the uninspected/unindexed URL may enter rollover queue (already-indexed PASS URLs are not queued)
+    rollover_saved = indexer.load_gsc_rollover_queue()
+    for r_u in rollover_saved:
+        assert r_u not in set(urls[:6])
+
+
+def test_exact_gsc_signals_embedded_in_ai_repair_prompt_and_merged_into_locked_overlay(tmp_path):
+    """
+    Verifies:
+    1. GSCRootCauseClassifier.classify synthesizes a clear, unambiguous ai_repair_prompt
+       containing exact Search Console exclusion signals (coverage_state, verdict, page_fetch_state,
+       user_canonical, google_canonical, last_crawl_time, word_count) and tenant-specific statutory
+       citations across profithelm, prexvo, and gainhelm with zero forbidden dashes.
+    2. When an existing overlay is locked for a striking-distance query, diagnosing an unindexed
+       GSC exclusion on that same route merges ai_repair_prompt and gsc_exclusion_context into the
+       locked overlay without resetting created_at, locked_until, or baseline_position.
+    """
+    from datetime import datetime, timezone, timedelta
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    from pseofactory.gsc_remediation import (
+        compile_remediation_overlay_spec,
+        persist_overlay_respecting_lock,
+    )
+
+    diag_gainhelm = GSCRootCauseClassifier.classify({
+        "url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+        "coverageState": "Discovered - currently not indexed",
+        "verdict": "NEUTRAL",
+        "pageFetchState": "PAGE_FETCH_STATE_UNSPECIFIED",
+        "indexingState": "INDEXING_STATE_UNSPECIFIED",
+        "userCanonical": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+        "googleCanonical": "",
+        "sitemaps": ["https://gainhelm.com/sitemap-hubs.xml"],
+    })
+    assert diag_gainhelm.classification == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
+    assert "Discovered - currently not indexed" in diag_gainhelm.ai_repair_prompt
+    assert "PAGE_FETCH_STATE_UNSPECIFIED" in diag_gainhelm.ai_repair_prompt
+    assert "AICPA SSAE 18" in diag_gainhelm.ai_repair_prompt
+    assert "CRAWL_BUDGET_SIGNAL_LAG" in diag_gainhelm.ai_repair_prompt
+    assert_no_forbidden_dashes(diag_gainhelm.ai_repair_prompt, "gainhelm ai_repair_prompt")
+
+    diag_prexvo = GSCRootCauseClassifier.classify({
+        "url": "https://prexvo.com/tools/tiered-standard-calculator/",
+        "coverageState": "Crawled - currently not indexed",
+        "verdict": "NEUTRAL",
+        "pageFetchState": "SUCCESSFUL",
+        "lastCrawlTime": "2026-10-25T10:00:00Z",
+        "word_count": 410,
+    })
+    assert diag_prexvo.classification == RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value
+    assert "Crawled - currently not indexed" in diag_prexvo.ai_repair_prompt
+    assert "34 CFR Part 685" in diag_prexvo.ai_repair_prompt
+    assert "2026-10-25T10:00:00Z" in diag_prexvo.ai_repair_prompt
+    assert_no_forbidden_dashes(diag_prexvo.ai_repair_prompt, "prexvo ai_repair_prompt")
+
+    # Verify locked overlay preserves lock while merging GSC exclusion context and ai_repair_prompt
+    ov_file = tmp_path / "soc-2-audit-cost-calculator.json"
+    future_lock = (datetime.now(timezone.utc) + timedelta(days=25)).isoformat()
+    initial_spec = compile_remediation_overlay_spec(
+        {
+            "tenant_id": "gainhelm",
+            "slug": "soc-2-audit-cost-calculator",
+            "target_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+            "query": "soc 2 audit cost calculator",
+            "anomaly_type": "STRIKING_DISTANCE_QUERY",
+            "position": 9.4,
+            "impressions": 120,
+        },
+        tenant_id="gainhelm",
+    )
+    initial_spec["created_at"] = "2026-10-01T00:00:00+00:00"
+    initial_spec["locked_until"] = future_lock
+    initial_spec["lock_until"] = future_lock
+    eff1, written1 = persist_overlay_respecting_lock(ov_file, initial_spec)
+    assert written1 is True
+    assert "ai_repair_prompt" not in eff1
+
+    exclusion_spec = compile_remediation_overlay_spec(
+        {
+            "tenant_id": "gainhelm",
+            "slug": "soc-2-audit-cost-calculator",
+            "target_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+            "anomaly_type": diag_gainhelm.classification,
+            "reason": diag_gainhelm.reason,
+            "remediation_action": diag_gainhelm.remediation_action,
+            "ai_repair_prompt": diag_gainhelm.ai_repair_prompt,
+            "coverage_state": "Discovered - currently not indexed",
+            "verdict": "NEUTRAL",
+            "page_fetch_state": "PAGE_FETCH_STATE_UNSPECIFIED",
+        },
+        tenant_id="gainhelm",
+    )
+    eff2, written2 = persist_overlay_respecting_lock(ov_file, exclusion_spec)
+    assert written2 is True
+    assert eff2["created_at"] == "2026-10-01T00:00:00+00:00"
+    assert eff2["locked_until"] == future_lock
+    assert eff2["baseline_position"] == 9.4
+    assert eff2["ai_repair_prompt"] == diag_gainhelm.ai_repair_prompt
+    assert eff2["gsc_exclusion_context"]["coverage_state"] == "Discovered - currently not indexed"
+    assert eff2["gsc_exclusion_context"]["anomaly_type"] == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
+
+    # Re-submitting identical exclusion_spec on the next tick is a strict no-op
+    eff3, written3 = persist_overlay_respecting_lock(ov_file, exclusion_spec)
+    assert written3 is False
+
+
+
 
 
 

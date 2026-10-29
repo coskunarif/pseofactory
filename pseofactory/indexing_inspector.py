@@ -143,15 +143,28 @@ class DailyIndexingInspector:
         queue_size = len(tenant_urls)
         backlog_exceeded = queue_size > 200
 
-        # Scan recent telemetry events newest-first for active 429 quota exhaustion
+        # Scan recent telemetry events newest-first for active 429 quota exhaustion within the current UTC day
         quota_exhausted = False
         quota_reasons = []
+        now_utc = datetime.now(timezone.utc)
         try:
             recent_events = self.telemetry_logger.read_recent(limit=50, tenant_id=self.tenant_id)
             for ev in recent_events:
+                if (ev.event_type or "").upper() == "INDEXING_ANOMALY":
+                    continue
                 act = (ev.action_taken or "").upper()
                 if act in ("AUTO_REMEDIATED", "QUOTA_GOVERNOR_DEFERRED"):
                     break
+                ev_ts_raw = getattr(ev, "timestamp", "") or ""
+                if ev_ts_raw:
+                    try:
+                        ev_dt = datetime.fromisoformat(str(ev_ts_raw).replace("Z", "+00:00"))
+                        if ev_dt.tzinfo is None:
+                            ev_dt = ev_dt.replace(tzinfo=timezone.utc)
+                        if ev_dt.date() < now_utc.date() or (now_utc - ev_dt).total_seconds() >= 86400.0:
+                            continue
+                    except Exception:
+                        pass
                 msg = (ev.error_message or "").lower()
                 tail = (ev.stderr_tail or "").lower()
                 if "429" in msg or "quota" in msg or "429" in tail or "quota" in tail:
@@ -262,6 +275,7 @@ class DailyIndexingInspector:
             "total_quarantined": tenant_count,
             "breakdown": {k: len(v) for k, v in categories.items()},
             "details": {k: v[:5] for k, v in categories.items() if v},
+            "all_details": {k: v for k, v in categories.items() if v},
             "ledger_path": str(q_path),
         }
 
@@ -500,7 +514,123 @@ class DailyIndexingInspector:
                 f'agy /goal "Investigate and reverse {abs(traffic.get("drop_percentage", 0))}% weekly search impression drop in {tenant}"'
             )
 
+        # 5. Specific GSC Exclusion & Unindexed Section Coverage Prompts
+        if not omit_auto_remediated:
+            child_sitemaps = audit_summary.get("child_sitemaps", {})
+            section_cov = child_sitemaps.get("section_coverage", {}) if isinstance(child_sitemaps, dict) else {}
+            unindexed_count = int(section_cov.get("unindexed_count", 0) or 0)
+            if unindexed_count > 0:
+                sec_breakdown = section_cov.get("sections", {}) if isinstance(section_cov.get("sections"), dict) else {}
+                sample_urls: List[str] = []
+                cause_counts: Dict[str, int] = {}
+                affected_sitemaps: List[str] = []
+                for sec_name, sec_data in sec_breakdown.items():
+                    if not isinstance(sec_data, dict) or int(sec_data.get("unindexed", 0) or 0) <= 0:
+                        continue
+                    c_sm = str(sec_data.get("child_sitemap") or "")
+                    if c_sm and c_sm not in affected_sitemaps:
+                        affected_sitemaps.append(c_sm)
+                    for cause_k, cause_v in (sec_data.get("exclusions_by_cause") or {}).items():
+                        cause_counts[str(cause_k)] = cause_counts.get(str(cause_k), 0) + int(cause_v or 0)
+                    for su in (sec_data.get("sample_unindexed_urls") or []):
+                        if su and su not in sample_urls and len(sample_urls) < 4:
+                            sample_urls.append(str(su))
+                causes_str = ", ".join(f"{k}:{v}" for k, v in sorted(cause_counts.items())) or "UNINDEXED_GSC"
+                urls_str = ", ".join(sample_urls)
+                sm_str = ", ".join(affected_sitemaps) or "sitemap.xml"
+                prompts.append(
+                    f'agy /goal "Resolve {unindexed_count} GSC unindexed routes in {tenant} ({causes_str}) across {sm_str} targeting {urls_str}"'
+                )
+
         return prompts
+
+    def _load_tenant_gsc_coverage_records(self) -> List[Dict[str, Any]]:
+        """
+        Loads real Google Search Console URL inspection states for self.tenant_id from
+        TrendHistoryDB and .agy/gsc_lifecycle_telemetry.json, filtered to active routes in
+        dist/sitemap.xml when present.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules:
+            return []
+
+        records: List[Dict[str, Any]] = []
+        seen_norm: set = set()
+        valid_sitemap_set: set = set()
+        sitemap_path = self.base_dir / "dist" / "sitemap.xml"
+        if sitemap_path.is_file():
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(sitemap_path)
+                root = tree.getroot()
+                ns = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+                locs = [elem.text.strip() for elem in root.findall(".//ns:loc", ns) if elem.text]
+                if not locs:
+                    locs = [elem.text.strip() for elem in root.findall(".//loc") if elem.text]
+                valid_sitemap_set = {u.rstrip("/") for u in locs if u}
+            except Exception:
+                valid_sitemap_set = set()
+
+        try:
+            from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+            if DEFAULT_DB_PATH.is_file():
+                with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
+                    for rec in tdb.get_gsc_url_inspection_states(self.tenant_id):
+                        p_url = str(rec.page_url or "").strip()
+                        if not p_url or not self._url_belongs_to_tenant(p_url):
+                            continue
+                        norm_u = p_url.rstrip("/")
+                        if valid_sitemap_set and norm_u not in valid_sitemap_set:
+                            continue
+                        if norm_u in seen_norm:
+                            continue
+                        seen_norm.add(norm_u)
+                        records.append({
+                            "url": p_url,
+                            "coverage_state": str(rec.coverage_state or ""),
+                            "verdict": str(rec.verdict or ""),
+                            "indexing_state": str(getattr(rec, "indexing_state", "") or ""),
+                            "page_fetch_state": str(getattr(rec, "page_fetch_state", "") or ""),
+                            "robots_txt_state": str(getattr(rec, "robots_txt_state", "") or ""),
+                            "user_canonical": str(getattr(rec, "user_canonical", "") or ""),
+                            "google_canonical": str(getattr(rec, "google_canonical", "") or ""),
+                            "last_crawl_time": str(getattr(rec, "last_crawl_time", "") or ""),
+                        })
+        except Exception:
+            pass
+
+        telem_path = self.base_dir / ".agy" / "gsc_lifecycle_telemetry.json"
+        if telem_path.is_file():
+            try:
+                t_data = json.loads(telem_path.read_text(encoding="utf-8"))
+                url_states = t_data.get("url_states", {}) if isinstance(t_data, dict) else {}
+                for u_key, st in url_states.items():
+                    if not isinstance(st, dict):
+                        continue
+                    p_url = str(u_key or "").strip()
+                    if not p_url or not self._url_belongs_to_tenant(p_url):
+                        continue
+                    norm_u = p_url.rstrip("/")
+                    if valid_sitemap_set and norm_u not in valid_sitemap_set:
+                        continue
+                    if norm_u in seen_norm:
+                        continue
+                    seen_norm.add(norm_u)
+                    records.append({
+                        "url": p_url,
+                        "coverage_state": str(st.get("coverageState") or st.get("coverage_state") or ""),
+                        "verdict": str(st.get("verdict") or ""),
+                        "indexing_state": str(st.get("indexingState") or st.get("indexing_state") or ""),
+                        "page_fetch_state": str(st.get("pageFetchState") or st.get("page_fetch_state") or ""),
+                        "robots_txt_state": str(st.get("robotsTxtState") or st.get("robots_txt_state") or ""),
+                        "user_canonical": str(st.get("userCanonical") or st.get("user_canonical") or ""),
+                        "google_canonical": str(st.get("googleCanonical") or st.get("google_canonical") or ""),
+                        "last_crawl_time": str(st.get("lastCrawlTime") or st.get("last_crawl_time") or ""),
+                    })
+            except Exception:
+                pass
+
+        return records
 
     def diagnose_anomalies_via_vertex(
         self,
@@ -518,6 +648,7 @@ class DailyIndexingInspector:
         """
         from pseofactory.content_angles import _sanitize_contract_text, call_stateless_vertex_json
         from pseofactory.contracts import assert_no_forbidden_dashes
+        from pseofactory.indexing.feedback_loop import GSCRootCauseClassifier
 
         traffic = audit_summary.get("traffic", {})
         quarantine = audit_summary.get("quarantine", {})
@@ -539,6 +670,20 @@ class DailyIndexingInspector:
                 "diagnoses": [],
             }
 
+        enriched_unindexed_sample: List[Dict[str, Any]] = []
+        canonical_base = f"https://{self.tenant_id}.com"
+        for raw_u in (unindexed_urls or [])[:15]:
+            try:
+                diag_res = GSCRootCauseClassifier.classify(raw_u, canonical_base=canonical_base)
+                u_dict = dict(raw_u) if isinstance(raw_u, dict) else {"url": str(raw_u)}
+                u_dict["classification"] = diag_res.classification
+                u_dict["reason"] = diag_res.reason
+                u_dict["remediation_action"] = diag_res.remediation_action
+                u_dict["ai_repair_prompt"] = diag_res.ai_repair_prompt
+                enriched_unindexed_sample.append(u_dict)
+            except Exception:
+                enriched_unindexed_sample.append(raw_u if isinstance(raw_u, dict) else {"url": str(raw_u)})
+
         context_bundle = {
             "tenant_id": self.tenant_id,
             "search_traffic": {
@@ -553,19 +698,20 @@ class DailyIndexingInspector:
                 for r in velocity.get("stalled_routes", [])[:10]
                 if isinstance(r, dict)
             ],
-            "unindexed_sample": (unindexed_urls or [])[:15],
+            "unindexed_sample": enriched_unindexed_sample,
         }
 
         prompt = (
             "You are a stateless technical SEO and statutory freshness diagnostic engine.\n"
-            "Given the pre-assembled local indexing telemetry JSON below (and external Google Search grounding "
-            "for current statutory thresholds, tax/regulatory changes, or SERP intent shifts), return ONLY a "
-            "valid JSON array of diagnosis objects.\n"
+            "Given the pre-assembled local indexing telemetry JSON below (including exact Google Search Console "
+            "coverage_state, verdict, page_fetch_state, classification, and ai_repair_prompt directives, plus "
+            "external Google Search grounding for current statutory thresholds, tax/regulatory changes, or SERP "
+            "intent shifts), return ONLY a valid JSON array of diagnosis objects.\n"
             "Each object in the JSON array MUST contain:\n"
-            "- target (URL, slug, or tenant section)\n"
-            "- root_cause (concise explanation of the indexing or impression anomaly)\n"
+            "- target (exact URL, slug, or tenant section)\n"
+            "- root_cause (concise explanation grounded in the exact GSC coverage_state and classification)\n"
             "- external_serp_signal (what external SERP or statutory freshness signal explains the gap)\n"
-            "- recommended_context_update (specific data table, formula, or schema field to update locally)\n"
+            "- recommended_context_update (exact data table, formula, quick-answer block, hub link, or schema field to update locally)\n"
             "Strict rules: Output raw JSON only. Use standard ASCII hyphens only (zero em-dashes, zero en-dashes).\n\n"
             f"CONTEXT_JSON:\n{json.dumps(context_bundle, ensure_ascii=True)}"
         )
@@ -620,21 +766,33 @@ class DailyIndexingInspector:
 
         records_to_attribute: List[Any] = list(coverage_records) if coverage_records else []
         if not records_to_attribute:
+            seen_cov_urls: set = set()
+            for gsc_rec in self._load_tenant_gsc_coverage_records():
+                u_gsc = str(gsc_rec.get("url") or "").strip()
+                if u_gsc and u_gsc.rstrip("/") not in seen_cov_urls:
+                    seen_cov_urls.add(u_gsc.rstrip("/"))
+                    records_to_attribute.append(gsc_rec)
             q_audit = self.audit_airlock_quarantine()
-            for cat, items in q_audit.get("details", {}).items():
+            for cat, items in (q_audit.get("all_details") or q_audit.get("details", {})).items():
                 for it in items:
-                    records_to_attribute.append({
-                        "url": it.get("url"),
-                        "error": it.get("reason") or it.get("code") or cat,
-                        "status": "QUARANTINED",
-                    })
+                    u_q = str(it.get("url") or "").strip()
+                    if u_q and u_q.rstrip("/") not in seen_cov_urls:
+                        seen_cov_urls.add(u_q.rstrip("/"))
+                        records_to_attribute.append({
+                            "url": u_q,
+                            "error": it.get("reason") or it.get("code") or cat,
+                            "status": "QUARANTINED",
+                        })
             r_audit = self.audit_gsc_rollover_queue()
             for u in r_audit.get("sample_urls", []):
-                records_to_attribute.append({
-                    "url": u,
-                    "coverage_state": "Discovered - currently not indexed",
-                    "status": "ROLLOVER_PENDING",
-                })
+                u_r = str(u or "").strip()
+                if u_r and u_r.rstrip("/") not in seen_cov_urls:
+                    seen_cov_urls.add(u_r.rstrip("/"))
+                    records_to_attribute.append({
+                        "url": u_r,
+                        "coverage_state": "Discovered - currently not indexed",
+                        "status": "ROLLOVER_PENDING",
+                    })
 
         canonical_base = f"https://{self.tenant_id}.com"
         section_cov = SectionExclusionClassifier.attribute_coverage_by_section(
@@ -922,14 +1080,16 @@ class DailyIndexingInspector:
         }
 
         has_pending_rollover = int(rollover_report.get("queue_size", 0) or 0) > 0
+        has_unindexed_gsc = int(child_sitemaps_report.get("section_coverage", {}).get("unindexed_count", 0) or 0) > 0
         synthesized_unindexed: List[Dict[str, Any]] = []
         if (auto_remediate or vertex_diagnose) and (
-            overall_status in ("WARN", "FAIL") or coverage_records or has_pending_rollover
+            overall_status in ("WARN", "FAIL") or coverage_records or has_pending_rollover or has_unindexed_gsc
         ):
             from pseofactory.indexing.feedback_loop import SectionExclusionClassifier
 
             seen_u: set = set()
-            for c_rec in (coverage_records or []):
+            source_cov = coverage_records if coverage_records is not None else self._load_tenant_gsc_coverage_records()
+            for c_rec in (source_cov or []):
                 if not SectionExclusionClassifier._is_record_indexed(c_rec):
                     u_val = c_rec.get("url") if isinstance(c_rec, dict) else str(c_rec)
                     if u_val and u_val not in seen_u:
@@ -938,7 +1098,7 @@ class DailyIndexingInspector:
                             c_rec if isinstance(c_rec, dict) else {"url": str(c_rec), "coverage_state": "Crawled - currently not indexed"}
                         )
 
-            q_details = quarantine_report.get("details", {})
+            q_details = quarantine_report.get("all_details") or quarantine_report.get("details", {})
             for cat, items in (q_details.items() if isinstance(q_details, dict) else []):
                 for it in items:
                     u_val = it.get("url")
@@ -964,7 +1124,7 @@ class DailyIndexingInspector:
 
         # Closed-loop autonomous remediation bridge when auto_remediate=True
         if auto_remediate and (
-            overall_status in ("WARN", "FAIL") or coverage_records or has_pending_rollover
+            overall_status in ("WARN", "FAIL") or coverage_records or has_pending_rollover or has_unindexed_gsc
         ):
             try:
                 from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
@@ -1119,7 +1279,8 @@ class DailyIndexingInspector:
                 error_message=err_msg,
                 action_taken=action,
             )
-            self.telemetry_logger.log(event)
+            if not dry_run:
+                self.telemetry_logger.log(event)
             if rem_ok:
                 rollover_report = self.audit_gsc_rollover_queue()
                 quarantine_report = self.audit_airlock_quarantine()

@@ -1028,8 +1028,10 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
             try:
                 aud_data = json.loads(idx_audit_file.read_text(encoding="utf-8"))
                 oracle_block = aud_data.get("gsc_inspection_oracle") if isinstance(aud_data, dict) else {}
-                if isinstance(oracle_block, dict):
-                    raw_insp_items.extend(oracle_block.get("inspections", []) or [])
+                if isinstance(oracle_block, dict) and str(oracle_block.get("mode") or "").upper() != "SIMULATED":
+                    for o_item in (oracle_block.get("inspections", []) or []):
+                        if isinstance(o_item, dict) and str(o_item.get("status") or "").upper() != "SIMULATED":
+                            raw_insp_items.append(o_item)
             except Exception:
                 pass
         if live_gsc and "PYTEST_CURRENT_TEST" not in os.environ and target_db_path.is_file():

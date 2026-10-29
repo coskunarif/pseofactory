@@ -343,3 +343,67 @@ def test_vertex_anomaly_diagnosis_and_zero_benefit_guard(tmp_path):
         assert_no_forbidden_dashes(val, "vertex diagnosis field")
 
 
+def test_inspector_ignores_stale_prior_day_429_quota_events_and_synthesizes_gsc_exclusion_prompts(tmp_path):
+    """
+    Verifies:
+    1. DailyIndexingInspector.audit_gsc_rollover_queue ignores stale HTTP 429 quota events
+       from prior UTC calendar days (>24h ago) after Google's daily quota has reset.
+    2. synthesize_remediation_prompts includes exact GSC exclusion counts, causes, child sitemaps,
+       and sample URLs when child_sitemaps.section_coverage reports unindexed routes.
+    """
+    telemetry_path = tmp_path / "telemetry.jsonl"
+    logger = AtomicTelemetryLogger(log_path=telemetry_path)
+    rollover_path = tmp_path / "gsc_rollover_queue.json"
+    rollover_path.write_text(json.dumps([]), encoding="utf-8")
+
+    # Log a stale 429 event from 2 days ago
+    stale_dt = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    stale_event = TelemetryEvent(
+        timestamp=stale_dt,
+        event_type="SUBPROCESS_CRASH",
+        tenant_id="gainhelm",
+        error_type="GoogleIndexingQuotaExhausted",
+        error_message="HTTP 429: Daily quota of 200 submissions reached",
+        action_taken="RECORDED",
+    )
+    logger.log(stale_event)
+
+    inspector = DailyIndexingInspector(
+        tenant_id="gainhelm",
+        rollover_queue_path=rollover_path,
+        telemetry_logger=logger,
+    )
+    res_roll = inspector.audit_gsc_rollover_queue()
+    assert res_roll["quota_exhausted"] is False
+    assert res_roll["status"] == "PASS"
+
+    audit_summary = {
+        "gsc_rollover": res_roll,
+        "quarantine": {"breakdown": {}},
+        "velocity": {"stalled_routes_count": 0},
+        "traffic": {"traffic_drop_detected": False},
+        "child_sitemaps": {
+            "section_coverage": {
+                "unindexed_count": 3,
+                "sections": {
+                    "products": {
+                        "unindexed": 3,
+                        "child_sitemap": "sitemap-hubs.xml",
+                        "exclusions_by_cause": {"CRAWL_BUDGET_SIGNAL_LAG": 3},
+                        "sample_unindexed_urls": [
+                            "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+                            "https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/",
+                        ],
+                    }
+                },
+            }
+        },
+    }
+    prompts = inspector.synthesize_remediation_prompts(audit_summary)
+    assert len(prompts) == 1
+    assert "CRAWL_BUDGET_SIGNAL_LAG:3" in prompts[0]
+    assert "sitemap-hubs.xml" in prompts[0]
+    assert "https://gainhelm.com/tools/soc-2-audit-cost-calculator/" in prompts[0]
+
+
+

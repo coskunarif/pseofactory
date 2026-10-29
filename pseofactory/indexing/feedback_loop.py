@@ -106,8 +106,8 @@ UNKNOWN_OR_UNCLASSIFIED = RootCauseClassification.UNKNOWN_OR_UNCLASSIFIED
 class DiagnosisResult:
     """
     Structured diagnosis classification and actionable remediation recommendation,
-    including template section and child-sitemap attribution for isolated
-    'Submitted pages only' GSC coverage diagnostics.
+    including template section, child-sitemap attribution, and an unambiguous
+    AI repair prompt carrying exact Google Search Console exclusion and quality signals.
     Zero em-dashes. Zero en-dashes.
     """
     url: str
@@ -121,11 +121,33 @@ class DiagnosisResult:
     child_sitemap_url: str = ""
     date_bucket: Optional[str] = None
     submitted_pages_only_scope: str = "Submitted pages only (sitemap-products.xml)"
+    ai_repair_prompt: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.ai_repair_prompt:
+            self.ai_repair_prompt = GSCRootCauseClassifier.build_ai_repair_prompt(
+                url=self.url,
+                classification=str(
+                    self.classification.value
+                    if hasattr(self.classification, "value")
+                    else self.classification
+                ),
+                reason=self.reason,
+                remediation_action=self.remediation_action,
+                section=self.section,
+                child_sitemap=self.child_sitemap,
+                metadata=self.metadata,
+            )
 
     def to_dict(self) -> Dict[str, Any]:
+        cls_val = (
+            self.classification.value
+            if hasattr(self.classification, "value")
+            else str(self.classification)
+        )
         return {
             "url": self.url,
-            "classification": self.classification,
+            "classification": cls_val,
             "reason": self.reason,
             "remediation_action": self.remediation_action,
             "reflection_path": self.reflection_path,
@@ -134,6 +156,7 @@ class DiagnosisResult:
             "child_sitemap_url": self.child_sitemap_url,
             "date_bucket": self.date_bucket,
             "submitted_pages_only_scope": self.submitted_pages_only_scope,
+            "ai_repair_prompt": self.ai_repair_prompt,
             "metadata": self.metadata,
         }
 
@@ -142,9 +165,154 @@ class GSCRootCauseClassifier:
     """
     Classifies unindexed search console pages, quarantine anomalies,
     and crawler rejections into deterministic root-cause classifications,
-    template section attribution, and mechanical repair actions.
+    template section attribution, mechanical repair actions, and unambiguous
+    AI repair prompts grounded in exact GSC exclusion/quality signals.
     Zero em-dashes. Zero en-dashes.
     """
+
+    @classmethod
+    def build_ai_repair_prompt(
+        cls,
+        url: str,
+        classification: str,
+        reason: str,
+        remediation_action: str,
+        section: str = "products",
+        child_sitemap: str = "sitemap-products.xml",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Synthesizes a clear, unambiguous AI repair prompt feeding the exact
+        Google Search Console exclusion or quality signal, canonical/fetch/crawl
+        telemetry, and tenant statutory authority into concrete repair instructions.
+        Zero em-dashes. Zero en-dashes.
+        """
+        meta = dict(metadata or {})
+        url_str = str(url or "").strip()
+        url_low = url_str.lower()
+        if "prexvo" in url_low or str(meta.get("tenant_id") or "").lower() == "prexvo":
+            tenant = "prexvo"
+            statutory_framework = "Title IV Higher Education Act (20 U.S.C. 1087a et seq.), 34 CFR Part 685 (RAP, IBR, PAYE, ICR, PSLF 685.219, Tiered Standard 685.208), and IRC Section 108(f)"
+        elif "gainhelm" in url_low or str(meta.get("tenant_id") or "").lower() == "gainhelm":
+            tenant = "gainhelm"
+            statutory_framework = "AICPA SSAE 18 (SOC 2 Trust Services Criteria), 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2/3 (DFARS 252.204-7012), HIPAA 45 CFR Part 164, ISO/IEC 27001:2022, and PCI DSS v4.0"
+        else:
+            tenant = "profithelm"
+            statutory_framework = "Internal Revenue Code Sections 1(j), 162, 168(k), 174, 179, 199A, 1031, 1250, 1401, and IRS Rev. Proc. 2025-2026 inflation-adjusted schedules"
+
+        cov_state = str(meta.get("coverage_state") or "Unknown").strip()
+        verdict = str(meta.get("verdict") or "NEUTRAL").strip()
+        fetch_state = str(meta.get("page_fetch_state") or "PAGE_FETCH_STATE_UNSPECIFIED").strip()
+        idx_state = str(meta.get("indexing_state") or "INDEXING_STATE_UNSPECIFIED").strip()
+        robots_state = str(meta.get("robots_txt_state") or "ROBOTS_TXT_STATE_UNSPECIFIED").strip()
+        u_canon = str(meta.get("user_canonical") or url_str).strip()
+        g_canon = str(meta.get("google_canonical") or url_str).strip()
+        last_crawl = str(meta.get("last_crawl_time") or "never").strip()
+        word_count = meta.get("word_count")
+        rich_verdict = str(meta.get("rich_results_verdict") or "VERDICT_UNSPECIFIED").strip()
+        rich_issues = meta.get("rich_results_issues") or []
+        mob_verdict = str(meta.get("mobile_usability_verdict") or "VERDICT_UNSPECIFIED").strip()
+        sitemaps = meta.get("sitemaps") or [child_sitemap]
+        referring = meta.get("referring_urls") or []
+
+        cls_up = str(classification or "").upper()
+        signal_parts = [
+            f"tenant={tenant}",
+            f"url={url_str}",
+            f"classification={cls_up}",
+            f"gsc_coverage_state='{cov_state}'",
+            f"gsc_verdict={verdict}",
+            f"page_fetch_state={fetch_state}",
+            f"indexing_state={idx_state}",
+            f"robots_txt_state={robots_state}",
+            f"user_canonical={u_canon}",
+            f"google_canonical={g_canon}",
+            f"last_crawl_time={last_crawl}",
+            f"section={section}",
+            f"child_sitemap={child_sitemap}",
+        ]
+        if word_count is not None:
+            signal_parts.append(f"word_count={word_count}")
+        if rich_verdict not in ("", "VERDICT_UNSPECIFIED"):
+            signal_parts.append(f"rich_results_verdict={rich_verdict}")
+        if rich_issues:
+            signal_parts.append(f"rich_results_issues={json.dumps(rich_issues)[:240]}")
+        if mob_verdict not in ("", "VERDICT_UNSPECIFIED"):
+            signal_parts.append(f"mobile_usability_verdict={mob_verdict}")
+        if sitemaps:
+            signal_parts.append(f"sitemaps={','.join(str(s) for s in sitemaps[:3])}")
+        if referring:
+            signal_parts.append(f"referring_urls={','.join(str(r) for r in referring[:3])}")
+
+        if "CONTENT_QUALITY" in cls_up or "ANSWER_DEFICIENCY" in cls_up:
+            directive = (
+                f"RESOLVE 'Crawled - currently not indexed' QUALITY EXCLUSION: Google crawled {url_str} "
+                f"(last_crawl_time={last_crawl}, page_fetch_state={fetch_state}) but withheld indexation due to "
+                f"insufficient unique information gain or answer prominence. Inject a 40-55 word .quick-answer "
+                f"block in the first 10% of the DOM with concrete 2026-2027 dollar/percentage figures cited to "
+                f"{statutory_framework}, add a differentiated 3-row Statutory Decision-Branch Matrix "
+                f"(data-ai-decision-matrix='true'), add 2 interactive data-calc-preset scenario cards with "
+                f"non-tautological statutory prose, and ensure H1/title uniqueness (50-60 chars)."
+            )
+        elif "CONTENT_DEPTH" in cls_up:
+            directive = (
+                f"RESOLVE THIN CONTENT DEPTH DEFICIT: Measured body depth ({word_count if word_count is not None else '<150'} words) "
+                f"failed the 150-word preflight floor (target >= 600 words). Expand {url_str} with worked dollar "
+                f"comparison tables, statutory threshold breakdowns under {statutory_framework}, interactive "
+                f"calculator presets, and 2-4 FAQPage JSON-LD Q&A blocks."
+            )
+        elif "CANONICAL" in cls_up:
+            directive = (
+                f"RESOLVE CANONICAL / DUPLICATE EXCLUSION: GSC reported coverage_state='{cov_state}' with "
+                f"user_canonical='{u_canon}' vs google_canonical='{g_canon}'. Align <link rel='canonical'>, "
+                f"og:url, JSON-LD @id/url, and {child_sitemap} <loc> to the single trailing-slash canonical URL, "
+                f"and differentiate H1, <title>, and .quick-answer copy so Google does not fold this route into a duplicate cluster."
+            )
+        elif "CRAWL_BUDGET" in cls_up:
+            directive = (
+                f"RESOLVE '{cov_state}' DISCOVERY / CRAWL SIGNAL LAG: {url_str} is registered in {child_sitemap} "
+                f"(referring_urls={len(referring)}) but awaits Googlebot crawl prioritization. Inject contextual "
+                f"internal .cluster-link anchor links from indexed Tier-1 hubs (/ and /tools/), sharpen <title> "
+                f"(50-60 chars) and .quick-answer (40-55 words) under {statutory_framework}, verify inclusion in "
+                f"{child_sitemap}, and dispatch paced Google Indexing API + IndexNow push."
+            )
+        elif "DEAD_ROUTE" in cls_up:
+            directive = (
+                f"RESOLVE HTTP 404/410 OR SOFT-404 DEAD ROUTE: {url_str} reported page_fetch_state={fetch_state} "
+                f"(reason='{reason}'). Quarantine the dead route in indexing_quarantine_ledger.json, prune it from "
+                f"dist/sitemap.xml and dist/{child_sitemap}, or map a 301 redirect in _redirects to the matching canonical calculator."
+            )
+        elif "ROBOTS_OR_NOINDEX" in cls_up:
+            directive = (
+                f"RESOLVE ROBOTS / NOINDEX BLOCK: {url_str} is blocked from indexation "
+                f"(coverage_state='{cov_state}', robots_txt_state={robots_state}, indexing_state={idx_state}). "
+                f"If the route is an active public calculator or guide, strip unintended meta noindex and robots.txt "
+                f"Disallow rules; if intentionally retired, remove from dist/sitemap.xml and dist/{child_sitemap}."
+            )
+        elif "RICH_RESULT" in cls_up or "MOBILE_USABILITY" in cls_up:
+            directive = (
+                f"RESOLVE RICH RESULT / MOBILE USABILITY FAILURE: {url_str} reported rich_results_verdict={rich_verdict} "
+                f"and mobile_usability_verdict={mob_verdict} (issues={json.dumps(rich_issues)[:200]}). Repair JSON-LD "
+                f"schema (@graph FAQPage, SoftwareApplication, Dataset, HowTo, BreadcrumbList) and enforce >=44x44px "
+                f".touch-target interactive controls with zero horizontal overflow."
+            )
+        elif "ALGORITHMIC_EXPANSION_FREEZE" in cls_up:
+            directive = (
+                f"ENFORCE ALGORITHMIC CEILING DAMPENING on {tenant}: Freeze net-new URL expansion and restrict "
+                f"remediation to high-intent quality and CTR upgrades on existing indexed routes under {statutory_framework}."
+            )
+        else:
+            directive = (
+                f"RESOLVE GSC INDEXING ANOMALY on {url_str}: Reason='{reason}'. Action='{remediation_action}'. "
+                f"Verify preflight airlock stages 1-6 and statutory accuracy under {statutory_framework}."
+            )
+
+        clean_prompt = (
+            f"[GSC_SIGNAL: {' | '.join(signal_parts)}] {directive}"
+            .replace("\u2014", " - ")
+            .replace("\u2013", "-")
+        )
+        return clean_prompt
 
     @classmethod
     def classify(
@@ -224,6 +392,27 @@ class GSCRootCauseClassifier:
             "date_bucket": date_bucket,
             "submitted_pages_only_scope": submitted_scope,
         }
+        optional_gsc_fields = {
+            "coverage_state": eff_cov,
+            "verdict": eff_verdict,
+            "indexing_state": data.get("indexing_state") or data.get("indexingState") or "",
+            "page_fetch_state": data.get("page_fetch_state") or data.get("pageFetchState") or "",
+            "robots_txt_state": data.get("robots_txt_state") or data.get("robotsTxtState") or "",
+            "user_canonical": data.get("user_canonical") or data.get("userCanonical") or "",
+            "google_canonical": data.get("google_canonical") or data.get("googleCanonical") or "",
+            "last_crawl_time": data.get("last_crawl_time") or data.get("lastCrawlTime") or "",
+            "crawled_as": data.get("crawled_as") or data.get("crawledAs") or "",
+            "rich_results_verdict": data.get("rich_results_verdict") or "",
+            "rich_results_types": data.get("rich_results_types") or [],
+            "rich_results_issues": data.get("rich_results_issues") or [],
+            "mobile_usability_verdict": data.get("mobile_usability_verdict") or "",
+            "referring_urls": data.get("referring_urls") or data.get("referringUrls") or [],
+            "sitemaps": data.get("sitemaps") or [],
+            "word_count": eff_words,
+        }
+        for k_opt, v_opt in optional_gsc_fields.items():
+            if v_opt not in ("", None, [], {}):
+                base_meta[k_opt] = v_opt
 
         # Thin Content (< 150 words) takes precedence when word_count < 150 is explicitly measured
         is_thin = (
@@ -978,7 +1167,7 @@ class IndexingFeedbackLoop:
         # 1. Inspection quarantine ledger
         try:
             q_audit = self.inspector.audit_airlock_quarantine()
-            details = q_audit.get("details", {})
+            details = q_audit.get("all_details") or q_audit.get("details", {})
             for cat, items in details.items():
                 for it in items:
                     u = it.get("url")
@@ -988,6 +1177,7 @@ class IndexingFeedbackLoop:
                             "url": u,
                             "error": it.get("reason") or it.get("code") or cat,
                             "code": it.get("code"),
+                            "stage": it.get("stage"),
                             "status": "QUARANTINED",
                         })
         except Exception as e:
@@ -1025,11 +1215,12 @@ class IndexingFeedbackLoop:
                     pass
 
         db_unindexed_records: List[Dict[str, Any]] = []
+        db_seen_norm: Set[str] = set()
         if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+            valid_set = {u.rstrip("/") for u in sitemap_locs}
             try:
                 from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
                 if DEFAULT_DB_PATH.is_file():
-                    valid_set = {u.rstrip("/") for u in sitemap_locs}
                     with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
                         for rec in tdb.get_gsc_url_inspection_states(self.property_id):
                             p_url = str(rec.page_url or "").strip()
@@ -1037,11 +1228,25 @@ class IndexingFeedbackLoop:
                                 continue
                             if valid_set and p_url.rstrip("/") not in valid_set:
                                 continue
+                            db_seen_norm.add(p_url.rstrip("/"))
                             if rec.verdict != "PASS" or "not indexed" in str(rec.coverage_state).lower():
                                 db_unindexed_records.append({
                                     "url": p_url,
                                     "coverage_state": rec.coverage_state,
                                     "verdict": rec.verdict,
+                                    "indexing_state": getattr(rec, "indexing_state", ""),
+                                    "page_fetch_state": getattr(rec, "page_fetch_state", ""),
+                                    "robots_txt_state": getattr(rec, "robots_txt_state", ""),
+                                    "user_canonical": getattr(rec, "user_canonical", ""),
+                                    "google_canonical": getattr(rec, "google_canonical", ""),
+                                    "last_crawl_time": getattr(rec, "last_crawl_time", ""),
+                                    "crawled_as": getattr(rec, "crawled_as", ""),
+                                    "rich_results_verdict": getattr(rec, "rich_results_verdict", ""),
+                                    "rich_results_types": getattr(rec, "rich_results_types", []),
+                                    "rich_results_issues": getattr(rec, "rich_results_issues", []),
+                                    "mobile_usability_verdict": getattr(rec, "mobile_usability_verdict", ""),
+                                    "referring_urls": getattr(rec, "referring_urls", []),
+                                    "sitemaps": getattr(rec, "sitemaps", []),
                                     "status": "UNINDEXED_GSC",
                                 })
                                 if not sample_urls and p_url not in target_sample:
@@ -1049,10 +1254,53 @@ class IndexingFeedbackLoop:
             except Exception as db_err:
                 logger.warning("Failed reading TrendHistoryDB inspection states: %s", db_err)
 
-        if not sample_urls and not db_unindexed_records and sitemap_locs:
-            for loc_u in sitemap_locs[:5]:
-                if loc_u not in target_sample:
+            if self.base_dir:
+                telem_path = self.base_dir / ".agy" / "gsc_lifecycle_telemetry.json"
+                if telem_path.is_file():
+                    try:
+                        telem_data = json.loads(telem_path.read_text(encoding="utf-8"))
+                        url_states = telem_data.get("url_states", {}) if isinstance(telem_data, dict) else {}
+                        for t_url, st in url_states.items():
+                            if not isinstance(st, dict):
+                                continue
+                            p_url = str(t_url or "").strip()
+                            if not p_url or (self.domain and self.domain.lower() not in p_url.lower()):
+                                continue
+                            if valid_set and p_url.rstrip("/") not in valid_set:
+                                continue
+                            if p_url.rstrip("/") in db_seen_norm:
+                                continue
+                            verdict = str(st.get("verdict") or "").strip().upper()
+                            cov = str(st.get("coverageState") or st.get("coverage_state") or "").strip()
+                            if (verdict and verdict != "PASS") or "not indexed" in cov.lower() or "unknown to google" in cov.lower():
+                                db_seen_norm.add(p_url.rstrip("/"))
+                                db_unindexed_records.append({
+                                    "url": p_url,
+                                    "coverage_state": cov,
+                                    "verdict": verdict,
+                                    "indexing_state": str(st.get("indexingState") or st.get("indexing_state") or ""),
+                                    "page_fetch_state": str(st.get("pageFetchState") or st.get("page_fetch_state") or ""),
+                                    "robots_txt_state": str(st.get("robotsTxtState") or st.get("robots_txt_state") or ""),
+                                    "user_canonical": str(st.get("userCanonical") or st.get("user_canonical") or ""),
+                                    "google_canonical": str(st.get("googleCanonical") or st.get("google_canonical") or ""),
+                                    "last_crawl_time": str(st.get("lastCrawlTime") or st.get("last_crawl_time") or ""),
+                                    "status": "UNINDEXED_GSC",
+                                })
+                                if not sample_urls and p_url not in target_sample:
+                                    target_sample.append(p_url)
+                    except Exception as t_err:
+                        logger.warning("Failed reading gsc_lifecycle_telemetry states: %s", t_err)
+
+        if not sample_urls and sitemap_locs:
+            for loc_u in sitemap_locs:
+                if len(target_sample) >= 5:
+                    break
+                if loc_u.rstrip("/") not in db_seen_norm and loc_u not in target_sample:
                     target_sample.append(loc_u)
+            if not target_sample:
+                for loc_u in sitemap_locs[:5]:
+                    if loc_u not in target_sample:
+                        target_sample.append(loc_u)
 
         inspected_map: Dict[str, Dict[str, Any]] = {}
         if target_sample:
@@ -1075,6 +1323,19 @@ class IndexingFeedbackLoop:
                             "url": u,
                             "coverage_state": cov,
                             "verdict": verdict,
+                            "indexing_state": insp.get("indexing_state", ""),
+                            "page_fetch_state": insp.get("page_fetch_state", ""),
+                            "robots_txt_state": insp.get("robots_txt_state", ""),
+                            "user_canonical": insp.get("user_canonical", ""),
+                            "google_canonical": insp.get("google_canonical", ""),
+                            "last_crawl_time": insp.get("last_crawl_time", ""),
+                            "crawled_as": insp.get("crawled_as", ""),
+                            "rich_results_verdict": insp.get("rich_results_verdict", ""),
+                            "rich_results_types": insp.get("rich_results_types", []),
+                            "rich_results_issues": insp.get("rich_results_issues", []),
+                            "mobile_usability_verdict": insp.get("mobile_usability_verdict", ""),
+                            "referring_urls": insp.get("referring_urls", []),
+                            "sitemaps": insp.get("sitemaps", []),
                             "status": "UNINDEXED_GSC",
                         })
             except Exception as e:
@@ -1083,8 +1344,28 @@ class IndexingFeedbackLoop:
         for db_item in db_unindexed_records:
             u = db_item["url"]
             live_check = inspected_map.get(u.rstrip("/"))
-            if live and live_check and live_check.get("verdict") == "PASS":
-                continue
+            if live and live_check:
+                if live_check.get("verdict") == "PASS":
+                    continue
+                for k_field in (
+                    "coverage_state",
+                    "verdict",
+                    "indexing_state",
+                    "page_fetch_state",
+                    "robots_txt_state",
+                    "user_canonical",
+                    "google_canonical",
+                    "last_crawl_time",
+                    "crawled_as",
+                    "rich_results_verdict",
+                    "rich_results_types",
+                    "rich_results_issues",
+                    "mobile_usability_verdict",
+                    "referring_urls",
+                    "sitemaps",
+                ):
+                    if live_check.get(k_field) not in ("", None, [], {}):
+                        db_item[k_field] = live_check[k_field]
             if u not in seen_urls:
                 seen_urls.add(u)
                 candidates.append(db_item)
@@ -1944,34 +2225,38 @@ class IndexingFeedbackLoop:
                     continue
                 ov_stem_d = d_slug.replace("/", "-")
                 overlay_file = overlays_dir / f"{ov_stem_d}.json"
-                if overlay_file.exists():
-                    try:
-                        spec = json.loads(overlay_file.read_text(encoding="utf-8"))
-                    except Exception:
-                        spec = None
-                else:
-                    spec = None
-                if not isinstance(spec, dict):
-                    spec = compile_remediation_overlay_spec(
-                        {
-                            "tenant_id": self.property_id,
-                            "slug": d_slug,
-                            "target_url": d_url,
-                            "anomaly_type": d.classification,
-                            "section": d.section,
-                            "child_sitemap": d.child_sitemap,
-                            "action_type": (
-                                "HUB_LINK_INJECTION"
-                                if d.classification == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
-                                else "REFACTOR_PAGE"
-                            ),
-                        },
-                        tenant_id=self.property_id,
-                    )
-                    overlay_file.parent.mkdir(parents=True, exist_ok=True)
-                    overlay_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
-                    if d_slug not in overlays_written:
-                        overlays_written.append(d_slug)
+                d_meta = d.metadata if isinstance(d.metadata, dict) else {}
+                compiled_spec = compile_remediation_overlay_spec(
+                    {
+                        "tenant_id": self.property_id,
+                        "slug": d_slug,
+                        "target_url": d_url,
+                        "anomaly_type": d.classification,
+                        "section": d.section,
+                        "child_sitemap": d.child_sitemap,
+                        "reason": d.reason,
+                        "remediation_action": d.remediation_action,
+                        "ai_repair_prompt": d.ai_repair_prompt,
+                        "coverage_state": d_meta.get("coverage_state", ""),
+                        "verdict": d_meta.get("verdict", ""),
+                        "page_fetch_state": d_meta.get("page_fetch_state", ""),
+                        "indexing_state": d_meta.get("indexing_state", ""),
+                        "robots_txt_state": d_meta.get("robots_txt_state", ""),
+                        "user_canonical": d_meta.get("user_canonical", ""),
+                        "google_canonical": d_meta.get("google_canonical", ""),
+                        "last_crawl_time": d_meta.get("last_crawl_time", ""),
+                        "word_count": d_meta.get("word_count"),
+                        "action_type": (
+                            "HUB_LINK_INJECTION"
+                            if d.classification == RootCauseClassification.CRAWL_BUDGET_SIGNAL_LAG.value
+                            else "REFACTOR_PAGE"
+                        ),
+                    },
+                    tenant_id=self.property_id,
+                )
+                spec, written_d = persist_overlay_respecting_lock(overlay_file, compiled_spec)
+                if written_d and d_slug not in overlays_written:
+                    overlays_written.append(d_slug)
                 if allow_html_mutation and d_slug not in repaired_slugs and self._apply_html_repairs_for_slug(d_slug, d_url, spec):
                     repaired_slugs.add(d_slug)
                     html_files_repaired += 1
@@ -2168,8 +2453,16 @@ class IndexingFeedbackLoop:
                         skipped.remove(u)
                     try:
                         self.indexer.purge_pushed_urls([u], engine="indexnow")
+                        self.indexer.purge_pushed_urls([u], engine="google")
                     except Exception:
                         pass
+
+        domain_health_pacing: Dict[str, Any] = {}
+        if hasattr(self.indexer, "evaluate_domain_health_pacing"):
+            try:
+                domain_health_pacing = self.indexer.evaluate_domain_health_pacing(candidate_urls=urls)
+            except Exception:
+                domain_health_pacing = {}
 
         if not to_push:
             sitemap_reg: Dict[str, Any] = {"status": "IDEMPOTENT_NO_OP", "submissions": []}
@@ -2185,6 +2478,7 @@ class IndexingFeedbackLoop:
                 "urls_targeted": len(urls),
                 "child_sitemap_submissions": sitemap_reg.get("submissions", []),
                 "sitemap_registration": sitemap_reg,
+                "domain_health_pacing": domain_health_pacing,
                 "details": "All candidate URLs match persistent push ledger content hashes",
             }
 
@@ -2205,6 +2499,11 @@ class IndexingFeedbackLoop:
             if isinstance(push_res, dict)
             else None
         ) or {"status": "SIMULATED", "submissions": []}
+        eff_pacing = (
+            push_res.get("domain_health_pacing")
+            if isinstance(push_res, dict) and isinstance(push_res.get("domain_health_pacing"), dict)
+            else domain_health_pacing
+        )
 
         return {
             "status": push_res.get("status", "SUCCESS") if isinstance(push_res, dict) else "SUCCESS",
@@ -2213,6 +2512,7 @@ class IndexingFeedbackLoop:
             "urls_skipped": len(skipped),
             "child_sitemap_submissions": sitemap_reg.get("submissions", []),
             "sitemap_registration": sitemap_reg,
+            "domain_health_pacing": eff_pacing,
             "push_results": push_res,
         }
 
@@ -2476,6 +2776,7 @@ class IndexingFeedbackLoop:
             "section_coverage_attribution": section_coverage,
             "child_sitemap_submissions": push_summary.get("child_sitemap_submissions", []),
             "sitemap_registration": push_summary.get("sitemap_registration"),
+            "domain_health_pacing": push_summary.get("domain_health_pacing", {}),
             "impression_gap_audit": impression_gap_audit,
             "outbound_engagement_summary": eff_engagement,
             "conversion_gaps_closed": repair_summary.get("conversion_gaps_closed", []),

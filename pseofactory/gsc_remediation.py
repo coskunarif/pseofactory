@@ -4438,9 +4438,63 @@ def compile_remediation_overlay_spec(
         "search_appearances",
         "time_window_trajectory",
         "coverage_state",
+        "ai_repair_prompt",
+        "gsc_exclusion_context",
     ):
         if ai_key in candidate:
             spec_out[ai_key] = candidate[ai_key]
+
+    cov_st = str(candidate.get("coverage_state") or candidate.get("coverageState") or "").strip()
+    ai_prompt = str(candidate.get("ai_repair_prompt") or "").strip()
+    is_exclusion_anomaly = (
+        anomaly_type not in ("STRIKING_DISTANCE_QUERY", "INDEXED_HEALTHY", "")
+        or bool(ai_prompt)
+        or ("not indexed" in cov_st.lower() or "unknown to google" in cov_st.lower())
+    )
+    if is_exclusion_anomaly and not ai_prompt:
+        try:
+            from pseofactory.indexing.feedback_loop import GSCRootCauseClassifier
+            ai_prompt = GSCRootCauseClassifier.build_ai_repair_prompt(
+                url=target_url,
+                classification=anomaly_type,
+                reason=str(candidate.get("reason") or f"GSC exclusion anomaly: {anomaly_type}"),
+                remediation_action=str(candidate.get("remediation_action") or action_type),
+                section=sec_name,
+                child_sitemap=child_sm,
+                metadata={
+                    "coverage_state": cov_st,
+                    "verdict": candidate.get("verdict", ""),
+                    "page_fetch_state": candidate.get("page_fetch_state", ""),
+                    "indexing_state": candidate.get("indexing_state", ""),
+                    "robots_txt_state": candidate.get("robots_txt_state", ""),
+                    "user_canonical": candidate.get("user_canonical", ""),
+                    "google_canonical": candidate.get("google_canonical", ""),
+                    "last_crawl_time": candidate.get("last_crawl_time", ""),
+                    "word_count": candidate.get("word_count"),
+                },
+            )
+        except Exception:
+            ai_prompt = ""
+    if is_exclusion_anomaly:
+        if ai_prompt:
+            spec_out["ai_repair_prompt"] = ai_prompt
+        if cov_st:
+            spec_out["coverage_state"] = cov_st
+        spec_out["gsc_exclusion_context"] = {
+            "anomaly_type": anomaly_type,
+            "action_type": action_type,
+            "coverage_state": cov_st,
+            "verdict": str(candidate.get("verdict") or ""),
+            "page_fetch_state": str(candidate.get("page_fetch_state") or ""),
+            "indexing_state": str(candidate.get("indexing_state") or ""),
+            "robots_txt_state": str(candidate.get("robots_txt_state") or ""),
+            "user_canonical": str(candidate.get("user_canonical") or ""),
+            "google_canonical": str(candidate.get("google_canonical") or ""),
+            "last_crawl_time": str(candidate.get("last_crawl_time") or ""),
+            "reason": str(candidate.get("reason") or ""),
+            "remediation_action": str(candidate.get("remediation_action") or action_type),
+        }
+
     spec_out.setdefault("device_focus", str(candidate.get("device_focus") or "BALANCED"))
     spec_out.setdefault("search_appearances", list(candidate.get("search_appearances") or []))
     spec_out.setdefault(
@@ -5884,13 +5938,32 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
             existing_qs_lower = {q.lower() for q in existing_qs}
             incoming_qs = _extract_overlay_queries(spec)
             new_qs = [q for q in incoming_qs if q.lower() not in existing_qs_lower]
+            has_new_queries = bool(existing_qs and new_qs)
 
-            if not existing_qs or not new_qs:
+            incoming_prompt = str(spec.get("ai_repair_prompt") or "").strip()
+            existing_prompt = str(existing.get("ai_repair_prompt") or "").strip()
+            incoming_excl = spec.get("gsc_exclusion_context") if isinstance(spec.get("gsc_exclusion_context"), dict) else None
+            existing_excl = existing.get("gsc_exclusion_context") if isinstance(existing.get("gsc_exclusion_context"), dict) else None
+            has_new_exclusion_context = bool(
+                (incoming_prompt and incoming_prompt != existing_prompt)
+                or (incoming_excl and incoming_excl != existing_excl)
+            )
+
+            if not has_new_queries and not has_new_exclusion_context:
                 return existing, False
 
-            # Merge new distinct queries into the locked overlay without resetting its lock or baseline
+            # Merge new distinct queries or GSC exclusion repair context into the locked overlay without resetting its lock or baseline
             merged = dict(existing)
-            merged["grouped_queries"] = existing_qs + new_qs
+            if has_new_queries:
+                merged["grouped_queries"] = existing_qs + new_qs
+            if incoming_prompt:
+                merged["ai_repair_prompt"] = incoming_prompt
+            if incoming_excl:
+                merged["gsc_exclusion_context"] = incoming_excl
+                if incoming_excl.get("coverage_state"):
+                    merged["coverage_state"] = incoming_excl["coverage_state"]
+            if spec.get("hub_links") and not merged.get("hub_links"):
+                merged["hub_links"] = list(spec["hub_links"])
 
             # Merge h2_headings
             merged_h2 = list(merged.get("h2_headings") or [])
