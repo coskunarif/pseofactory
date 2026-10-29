@@ -1040,6 +1040,71 @@ def generate_edge_redirect_function(
                 f'    status: "{status_val}",\n'
                 f'  }},'
             )
+        gainhelm_aliases = {
+            "vanta": (
+                "https://www.vanta.com/products/soc-2",
+                "AFFILIATE_VANTA_SECURITY_URL",
+                "AFFILIATE_VANTA_SECURITY_STATUS",
+                "vanta_security",
+            ),
+            "vanta_compliance": (
+                "https://www.vanta.com/products/soc-2",
+                "AFFILIATE_VANTA_SECURITY_URL",
+                "AFFILIATE_VANTA_SECURITY_STATUS",
+                "vanta_security",
+            ),
+            "drata": (
+                "https://drata.com/",
+                "AFFILIATE_DRATA_COMPLIANCE_URL",
+                "AFFILIATE_DRATA_COMPLIANCE_STATUS",
+                "drata_compliance",
+            ),
+            "sprinto": (
+                "https://sprinto.com/",
+                "AFFILIATE_SPRINTO_COMPLIANCE_URL",
+                "AFFILIATE_SPRINTO_COMPLIANCE_STATUS",
+                "sprinto_compliance",
+            ),
+            "sprinto_grc": (
+                "https://sprinto.com/",
+                "AFFILIATE_SPRINTO_COMPLIANCE_URL",
+                "AFFILIATE_SPRINTO_COMPLIANCE_STATUS",
+                "sprinto_compliance",
+            ),
+            "thoropass": (
+                "https://www.thoropass.com/solutions",
+                "AFFILIATE_THOROPASS_AUDIT_URL",
+                "AFFILIATE_THOROPASS_AUDIT_STATUS",
+                "thoropass_audit",
+            ),
+            "coalition": (
+                "https://www.coalitioninc.com/cyber-insurance",
+                "AFFILIATE_COALITION_CYBER_INSURANCE_URL",
+                "AFFILIATE_COALITION_CYBER_INSURANCE_STATUS",
+                "coalition_cyber_insurance",
+            ),
+            "cobalt": (
+                "https://www.cobalt.io/",
+                "AFFILIATE_COBALT_PENTEST_URL",
+                "AFFILIATE_COBALT_PENTEST_STATUS",
+                "cobalt_pentest",
+            ),
+        }
+        for alias_k, (alias_url, alias_env, alias_status_env, canonical_k) in gainhelm_aliases.items():
+            if alias_k not in GAINHELM_AFFILIATES:
+                gh_alias_contract = gh_direct_upgrades.get(alias_k) or gh_direct_upgrades.get(canonical_k) or ""
+                gh_alias_extra = (
+                    f'    directContractUrl: "{gh_alias_contract}",\n' if gh_alias_contract else ""
+                )
+                gainhelm_catalog_entries.append(
+                    f'  {alias_k}: {{\n'
+                    f'    defaultUrl: "{alias_url}",\n'
+                    f'{gh_alias_extra}'
+                    f'    envVar: "{alias_env}",\n'
+                    f'    statusEnvVar: "{alias_status_env}",\n'
+                    f'    status: "live",\n'
+                    f'  }},'
+                )
         gainhelm_catalog_block = "\n".join(gainhelm_catalog_entries)
         gainhelm_js = f"""/**
  * Cloudflare Pages Function: GainHelm Outbound Enterprise GRC & Security Audit Redirect Handler

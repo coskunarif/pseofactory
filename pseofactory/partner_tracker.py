@@ -4250,10 +4250,13 @@ class PartnerTrackingEngine:
                     "in monetization_vault.json."
                 ),
                 "empirical_reality": (
-                    "gainhelm.com is not registered/resolvable in public DNS (NXDOMAIN), and partners@sprinto.com "
-                    "hard-bounced (Inbox #997, 550 5.1.1). All 6 GainHelm routes in DIRECT_CONTRACT_UPGRADES "
-                    "cross-redirect to ProfitHelm corporate card/legal/tax links (Ramp, LawDepot, Xendoo) "
-                    "rather than GRC or cybersecurity affiliate contracts."
+                    "While gainhelm.com and www.gainhelm.com now resolve HTTP 200 on Cloudflare Pages "
+                    "(zone 0a03264e19beb2cb17ba01860b701701 -> gainhelm.pages.dev), decoupled from the retired "
+                    "legacy ai-field-service-dispatcher and Amazon Appstore profit analysis projects, "
+                    "partners@sprinto.com hard-bounced (Inbox #997, 550 5.1.1) and zero dedicated GRC affiliate "
+                    "contracts are approved. All 6 canonical GainHelm routes (and 8 shorthand aliases) in "
+                    "DIRECT_CONTRACT_UPGRADES yield-gate to verified ProfitHelm B2B contracts (Ramp, LawDepot, Xendoo) "
+                    "rather than native GRC or cybersecurity affiliate contracts."
                 ),
             },
         ]
@@ -4401,14 +4404,17 @@ class PartnerTrackingEngine:
                 "prexvo_dead_end_404_routes_count": 0,
                 "gainhelm_verified_active_contracts_count": 0,
                 "gainhelm_total_catalog_routes": 6,
+                "gainhelm_alias_routes_count": 8,
                 "gainhelm_yield_gated_to_b2b_contracts_count": 6,
                 "gainhelm_unapproved_external_leaks_count": 0,
+                "gainhelm_dead_end_404_routes_count": 0,
                 "direct_checkout_browser_redirect_enabled": True,
                 "remediated_gaps": [
                     "Prexvo /r/<partner> routes (splash_financial, sofi, sofi_student_refi, earnest, earnest_student_refi, lendkey, lendkey_refi, credible, credible_student_loans, laurel_road, juno, edvestin) are strictly yield-gated to https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1 unless an approved lender tracking contract is configured.",
                     "ProfitHelm 8 canonical vault keys (taxact_business, file_com_tax, legalzoom, bluevine_checking, bench_accounting, collective_scorp, avaliable_1031, madison_specs_cost_seg) added to edge PARTNER_CATALOG and mapped to verified active contracts (zero HTTP 404 dead-ends).",
                     "ProfitHelm 19 Sovrn-wrapped catalog keys (wealthfront, guideline, stripe_tax, avalara, public_com, eztaxreturn, taxact, hiscox, surepayroll, tax1099, alt_lending, viva_finance, dlp_capital, groundfloor, stax_payments, capitalize, valley_bank, quontic_bank, zacks, moby) upgraded to verified active direct contracts while Sovrn Commerce account #2624365 remains unapproved.",
                     "ProfitHelm /r/koinly upgraded from legacy ?via=A4FABF09 to FirstPromoter-approved https://koinly.io/?fpr=arif-4c0b88.",
+                    "GainHelm restored on Cloudflare Pages (gainhelm.com and www.gainhelm.com -> gainhelm.pages.dev) with 6 canonical GRC routes and 8 shorthand aliases (vanta, vanta_compliance, drata, sprinto, sprinto_grc, thoropass, coalition, cobalt) yield-gated to verified B2B contracts (zero HTTP 404 dead-ends).",
                     "GET /api/lead-capture?checkout=1 across ProfitHelm, Prexvo, and GainHelm now executes an HTTP 302 redirect to live Stripe Checkout (https://checkout.stripe.com/c/pay/cs_live_...) on browser navigation (Accept: text/html) or redirect=1.",
                 ],
             },

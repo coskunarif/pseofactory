@@ -2968,7 +2968,9 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
 
       const ghKeys = [
         "vanta_security", "drata_compliance", "sprinto_compliance",
-        "thoropass_audit", "coalition_cyber_insurance", "cobalt_pentest"
+        "thoropass_audit", "coalition_cyber_insurance", "cobalt_pentest",
+        "vanta", "vanta_compliance", "drata", "sprinto", "sprinto_grc",
+        "thoropass", "coalition", "cobalt"
       ];
       for (const k of ghKeys) {{
         const res = await ghRedirect.onRequest({{
@@ -3081,7 +3083,9 @@ def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
     yg = fals_rep["yield_gated_routing_enforcement"]
     assert yg["status"] == "ENFORCED_ZERO_UNAPPROVED_CLICKS"
     assert yg["gainhelm_total_catalog_routes"] == 6
+    assert yg["gainhelm_alias_routes_count"] == 8
     assert yg["gainhelm_unapproved_external_leaks_count"] == 0
+    assert yg["gainhelm_dead_end_404_routes_count"] == 0
     assert yg["direct_checkout_browser_redirect_enabled"] is True
 
     # 5. Syndication & video factory parity
