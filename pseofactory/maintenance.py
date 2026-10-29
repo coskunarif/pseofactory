@@ -12445,26 +12445,31 @@ def reflect_and_recompile_all_assets(
         if will_run_downstream:
             try:
                 downstream_executed = True
-                dist_html_sig_before = tuple(
-                    sorted(
-                        (str(f), f.stat().st_mtime_ns, f.stat().st_size)
-                        for f in adapter.dist_dir.rglob("*.html")
-                        if not f.name.startswith(".")
-                    )
-                ) if adapter.dist_dir.is_dir() else ()
+                def _compute_estate_and_overlay_sig() -> tuple:
+                    sig_items = []
+                    if adapter.dist_dir.is_dir():
+                        for f in adapter.dist_dir.rglob("*.html"):
+                            if not f.name.startswith("."):
+                                sig_items.append((str(f), f.stat().st_mtime_ns, f.stat().st_size))
+                    repo_root_p = getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
+                    if repo_root_p:
+                        for ov_rel in (".agy/overlays", "content/overlays"):
+                            ov_d = Path(repo_root_p) / ov_rel
+                            if ov_d.is_dir():
+                                for ov_f in ov_d.glob("*.json"):
+                                    if not ov_f.name.startswith("."):
+                                        sig_items.append((str(ov_f), ov_f.stat().st_mtime_ns, ov_f.stat().st_size))
+                    return tuple(sorted(sig_items))
+
+                dist_html_sig_before = _compute_estate_and_overlay_sig()
                 downstream_summary = _execute_autonomous_downstream_chain(
                     adapter,
                     dry_run=False,
                     defer_live_indexing=defer_live_indexing,
                 )
-                dist_html_sig_after = tuple(
-                    sorted(
-                        (str(f), f.stat().st_mtime_ns, f.stat().st_size)
-                        for f in adapter.dist_dir.rglob("*.html")
-                        if not f.name.startswith(".")
-                    )
-                ) if adapter.dist_dir.is_dir() else ()
-                if dist_html_sig_after != dist_html_sig_before:
+                dist_html_sig_after = _compute_estate_and_overlay_sig()
+                post_ds_audit = RetroReflectionEngine.audit_estate(adapter.dist_dir, adapter.property_id)
+                if dist_html_sig_after != dist_html_sig_before or post_ds_audit.get("stale_count", 0) > 0:
                     ds_retro = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
                         property_id=adapter.property_id,
