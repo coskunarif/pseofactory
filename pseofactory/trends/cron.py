@@ -414,7 +414,7 @@ class TrendCronRunner:
                 )
 
                 reg = TenantRegistry.default()
-                for p_id in ("prexvo", "profithelm"):
+                for p_id in ("prexvo", "profithelm", "gainhelm"):
                     try:
                         adapter = reg.get_adapter(p_id)
                         existing_tools_map[p_id] = [dict(t) for t in (getattr(adapter, "tools", []) or [])]
@@ -438,7 +438,7 @@ class TrendCronRunner:
 
             gsc_rows_by_prop: Dict[str, List[Dict[str, Any]]] = {"prexvo": [], "profithelm": [], "gainhelm": []}
             try:
-                for p_id in ("prexvo", "profithelm"):
+                for p_id in ("prexvo", "profithelm", "gainhelm"):
                     if total_site_impressions == 500:
                         daily_m = db.get_gsc_daily_metrics(p_id, days=28)
                         if daily_m:

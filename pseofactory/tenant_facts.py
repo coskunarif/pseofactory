@@ -747,7 +747,6 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
 
 STAGED_RESERVE_TENANT_DOMAINS: Tuple[str, ...] = ()
 DECOMMISSIONED_TENANT_DOMAINS: Tuple[str, ...] = (
-    "gainhelm.com",
     "adspendguardian.com",
     "heyjunto.com",
     "thecoachloop.com",
@@ -798,10 +797,10 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
     },
     "gainhelm.com": {
         "domain": "gainhelm.com",
-        "lifecycle_tier": "DECOMMISSIONED",
+        "lifecycle_tier": "ACTIVE_TENANT",
         "zone_id": "0a03264e19beb2cb17ba01860b701701",
         "registry_object_id": "3041507860_DOMAIN_COM-VRSN",
-        "auto_renew": False,
+        "auto_renew": True,
         "locked": True,
         "privacy": True,
         "privacy_mode": "redaction",
@@ -810,9 +809,9 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
         "expires_at": "2026-11-24T00:24:57.000Z",
         "payment_expires_at": "2026-11-24T00:24:57.000Z",
         "renewal_fee_usd": 10.46,
-        "effective_annual_exposure_usd": 0.0,
-        "expected_cname_target": None,
-        "routing_records_allowed": False,
+        "effective_annual_exposure_usd": 10.46,
+        "expected_cname_target": "gainhelm.pages.dev",
+        "routing_records_allowed": True,
     },
     "arifcoskun.com": {
         "domain": "arifcoskun.com",
@@ -946,7 +945,7 @@ class TenantFactStore:
         if not raw:
             return "UNMAPPED"
         norm = raw if "." in raw else f"{raw}.com"
-        if norm in ("profithelm.com", "prexvo.com"):
+        if norm in ("profithelm.com", "prexvo.com", "gainhelm.com"):
             return "ACTIVE_TENANT"
         if norm in STAGED_RESERVE_TENANT_DOMAINS:
             return "STAGED_RESERVE"

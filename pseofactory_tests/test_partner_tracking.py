@@ -2698,7 +2698,7 @@ def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand():
     """Verifies AssetIntegrityEvaluator audits GainHelm syndication youtube_metadata.json against brand 'GainHelm'."""
     from pseofactory.maintenance import AssetIntegrityEvaluator, WorkspacePropertyScanner
 
-    scanner = WorkspacePropertyScanner(workspace_root="/home/ubuntuadmin/projects/_archive")
+    scanner = WorkspacePropertyScanner()
     by_id = {p.property_id: p for p in scanner.discover_properties()}
     assert "gainhelm" in by_id
     evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
@@ -2868,6 +2868,7 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
     gh_r = (gh_dir / "functions" / "r" / "[partner].js").as_uri()
     ph_lc = (ph_dir / "functions" / "api" / "lead-capture.js").as_uri()
     px_lc = (px_dir / "functions" / "api" / "lead-capture.js").as_uri()
+    gh_lc = (gh_dir / "functions" / "api" / "lead-capture.js").as_uri()
 
     node_script = f"""
     (async () => {{
@@ -2876,6 +2877,7 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
       const ghRedirect = await import({json.dumps(gh_r)});
       const phLead = await import({json.dumps(ph_lc)});
       const pxLead = await import({json.dumps(px_lc)});
+      const ghLead = await import({json.dumps(gh_lc)});
 
       const approvedProfitHelmHosts = new Set([
         "join.ramp.com",
@@ -3002,11 +3004,90 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
       }});
       if (pxNavRes.status !== 302) process.exit(31);
 
+      const ghNavRes = await ghLead.onRequestGet({{
+        request: new Request("https://gainhelm.com/api/lead-capture?checkout=1&sku=gh_soc2_cmmc_audit_workpapers&redirect=1&synthetic_test=1", {{
+          headers: {{ Accept: "text/html,application/xhtml+xml", "x-pseofactory-test": "1" }}
+        }}),
+        env: {{}}
+      }});
+      if (ghNavRes.status !== 302) process.exit(32);
+
       process.exit(0);
     }})().catch(err => {{ console.error(err); process.exit(99); }});
     """
     proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, f"Yield-gated routing Node test failed (exit {proc.returncode}): {proc.stderr}"
+
+
+def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
+    """
+    Verifies that the active gainhelm (gainhelm.com) pseofactory tenant is strictly
+    decoupled from the retired legacy field-service dispatcher (ai-field-service-dispatcher)
+    and Amazon Appstore profit analysis projects (ProfitHelm / BooksAmazon-App), and enjoys
+    full 3-tenant parity across enrichment, compilation, quality gates, monetization, and syndication.
+    """
+    from pathlib import Path
+    from pseofactory.competitor import benchmark_all_properties
+    from pseofactory.infra_audit import ACTIVE_TENANT_DOMAINS, DECOMMISSIONED_DOMAINS, DEFAULT_ENDPOINTS
+    from pseofactory.maintenance import TenantRegistry, WorkspacePropertyScanner
+    from pseofactory.market_intel import ACTIVE_REVENUE_TENANT_DOMAINS, DECOMMISSIONED_RETIRED_DOMAINS, MarketIntelligenceEngine
+    from pseofactory.tenant_facts import TenantFactStore
+    from pseofactory.video_factory import run_autonomous_video_pipeline
+
+    # 1. Retired legacy projects remain archived while active gainhelm tenant lives in workspace root
+    assert Path("/home/ubuntuadmin/projects/gainhelm/.git").exists()
+    assert not Path("/home/ubuntuadmin/projects/_archive/gainhelm").exists()
+    assert Path("/home/ubuntuadmin/projects/_archive/ai-field-service-dispatcher").is_dir()
+    assert Path("/home/ubuntuadmin/projects/_archive/gainhelm-archived-skills").is_dir()
+    assert Path("/home/ubuntuadmin/projects/_archive/BooksAmazon-App").is_dir()
+
+    # 2. Data enrichment & domain lifecycle parity
+    assert "gainhelm.com" in ACTIVE_TENANT_DOMAINS
+    assert "gainhelm.com" not in DECOMMISSIONED_DOMAINS
+    assert "https://gainhelm.com" in DEFAULT_ENDPOINTS
+    assert "gainhelm.com" in ACTIVE_REVENUE_TENANT_DOMAINS
+    assert "gainhelm.com" not in DECOMMISSIONED_RETIRED_DOMAINS
+    assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "ACTIVE_TENANT"
+
+    comp_reports = benchmark_all_properties()
+    assert set(comp_reports.keys()) == {"profithelm", "prexvo", "gainhelm"}
+
+    mi_report = MarketIntelligenceEngine(db_path=tmp_path / "mi_parity.db").run_workflow(
+        sync_db=False, simulate_three_cycle_confirmation=False
+    )
+    active_tenant_ids = {t["tenant_id"] for t in mi_report["existing_tenants"]}
+    assert active_tenant_ids == {"profithelm", "prexvo", "gainhelm"}
+
+    # 3. Compilation, registry & workspace discovery parity
+    scanner = WorkspacePropertyScanner()
+    discovered_ids = {p.property_id for p in scanner.discover_properties()}
+    assert {"profithelm", "prexvo", "gainhelm"}.issubset(discovered_ids)
+
+    reg = TenantRegistry.default()
+    for p_id in ("profithelm", "prexvo", "gainhelm"):
+        adp = reg.get_adapter(p_id)
+        assert adp.dist_dir.is_dir()
+        assert (adp.dist_dir / "index.html").is_file()
+        assert (Path(adp.repo_path) / "functions" / "r" / "[partner].js").is_file()
+        assert (Path(adp.repo_path) / "functions" / "api" / "lead-capture.js").is_file()
+
+    # 4. Monetization & publisher prerequisite parity
+    engine = PartnerTrackingEngine()
+    pub_audit = engine.audit_publisher_prerequisites_and_compliance()
+    assert pub_audit["status"] == "PASS"
+    assert set(pub_audit["properties"].keys()) == {"profithelm", "prexvo", "gainhelm"}
+
+    fals_rep = engine.falsify_monetization_and_partner_health(execute_live=False)
+    yg = fals_rep["yield_gated_routing_enforcement"]
+    assert yg["status"] == "ENFORCED_ZERO_UNAPPROVED_CLICKS"
+    assert yg["gainhelm_total_catalog_routes"] == 6
+    assert yg["gainhelm_unapproved_external_leaks_count"] == 0
+    assert yg["direct_checkout_browser_redirect_enabled"] is True
+
+    # 5. Syndication & video factory parity
+    vid_rep = run_autonomous_video_pipeline(property_id="gainhelm", synthesize_missing=False, live_upload=False)
+    assert vid_rep["status"] == "PASS"
+    assert vid_rep["eligible_tools_count"] == 10
 
 
 

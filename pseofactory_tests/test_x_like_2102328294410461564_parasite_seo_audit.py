@@ -68,7 +68,7 @@ def test_x_like_2102328294410461564_capability_matrix_and_live_estate() -> None:
     assert report["passed"] is True
     assert report["status"] == "PASS"
 
-    for tenant in ("profithelm", "prexvo"):
+    for tenant in ("profithelm", "prexvo", "gainhelm"):
         t_sum = report["tenant_summaries"][tenant]
         assert t_sum["status"] == "PASS"
         assert t_sum["estate_issues_count"] == 0

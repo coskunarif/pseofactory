@@ -262,16 +262,18 @@ CLOUDFLARE_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
 ACTIVE_REVENUE_TENANT_DOMAINS: Tuple[str, ...] = (
     "profithelm.com",
     "prexvo.com",
+    "gainhelm.com",
 )
 
-STAGED_RESERVE_DOMAINS: Tuple[str, ...] = ()
+STAGED_RESERVE_DOMAINS: Tuple[str, ...] = (
+    "gainhelm.com",
+)
 
 PERSONAL_INFRASTRUCTURE_DOMAINS: Tuple[str, ...] = (
     "arifcoskun.com",
 )
 
 DECOMMISSIONED_RETIRED_DOMAINS: Tuple[str, ...] = (
-    "gainhelm.com",
     "adspendguardian.com",
     "heyjunto.com",
     "thecoachloop.com",
@@ -282,7 +284,34 @@ NON_DEPLOYABLE_CANDIDATE_DOMAINS: Tuple[str, ...] = (
     PERSONAL_INFRASTRUCTURE_DOMAINS + DECOMMISSIONED_RETIRED_DOMAINS
 )
 
-STAGED_RESERVE_DOMAIN_METADATA: Dict[str, Dict[str, Any]] = {}
+STAGED_RESERVE_DOMAIN_METADATA: Dict[str, Dict[str, Any]] = {
+    "gainhelm.com": {
+        "domain": "gainhelm.com",
+        "tenant_id_candidate": "gainhelm",
+        "brand_name": "GainHelm",
+        "zone_id": "0a03264e19beb2cb17ba01860b701701",
+        "registry_object_id": "3041507860_DOMAIN_COM-VRSN",
+        "auto_renew": True,
+        "locked": True,
+        "privacy": True,
+        "privacy_mode": "redaction",
+        "registry_statuses": "clienttransferprohibited",
+        "registered_at": "2025-11-24T00:24:57.459Z",
+        "expires_at": "2026-11-24T00:24:57.000Z",
+        "renewal_fee_usd": 10.46,
+        "lifecycle_state": "HIBERNATED_RESERVE",
+        "active_tenant_profile_wired": False,
+        "routing_records_count": 0,
+        "gsc_property": "sc-domain:gainhelm.com",
+        "search_ownership_txt_preserved": True,
+        "eligible_for_third_tenant_promotion": True,
+        "architectural_boundary_note": (
+            "Registered in market-intelligence reserve metadata rather than active TenantFactStore "
+            "profiles while hibernated so empty-zone GSC sitemaps and unprovisioned Pages/KV edges "
+            "never trigger false infrastructure failures."
+        ),
+    }
+}
 
 
 def assert_candidate_domain_eligible(domain: str) -> str:
@@ -1880,7 +1909,7 @@ class MarketIntelligenceEngine:
 
         raw_rec_domain = v_match["recommended_domain"] if v_match else f"{slug.split('-')[0]}.com"
         if raw_rec_domain.strip().lower() in NON_DEPLOYABLE_CANDIDATE_DOMAINS:
-            rec_domain = f"{slug.split('-')[0]}-calc.com"
+            rec_domain = "gainhelm.com"
         else:
             rec_domain = assert_candidate_domain_eligible(raw_rec_domain)
 
@@ -1891,7 +1920,7 @@ class MarketIntelligenceEngine:
             "recommended_tenant_id": v_match["tenant_id"] if v_match else f"tenant-{slug[:16]}",
             "recommended_brand_name": v_match["brand_name"] if v_match else slug.split("-")[0].capitalize(),
             "recommended_domain": rec_domain,
-            "staged_reserve_domain": None,
+            "staged_reserve_domain": "gainhelm.com",
             "search_volume": vol,
             "cpc_usd": round(cpc, 2),
             "keyword_difficulty": round(kd, 2),
@@ -1990,7 +2019,7 @@ class MarketIntelligenceEngine:
                 "tenant_id": q_eval["recommended_tenant_id"],
                 "brand_name": q_eval["recommended_brand_name"],
                 "recommended_domain": q_eval["recommended_domain"],
-                "staged_reserve_domain": None,
+                "staged_reserve_domain": "gainhelm.com",
                 "vertical_id": q_eval["vertical_id"],
                 "scaffold_recommended": True,
                 "proposed_at": now_iso,
@@ -2316,8 +2345,16 @@ class MarketIntelligenceEngine:
                     "domain": "prexvo.com",
                     "scope": "Federal Title IV (34 CFR Part 685) Student Loan Repayment, PSLF & Refinance Calculators",
                 },
+                {
+                    "tenant_id": "gainhelm",
+                    "brand_name": "GainHelm",
+                    "domain": "gainhelm.com",
+                    "scope": "Enterprise Cyber Compliance & Audit Scoping Calculators (SOC 2, CMMC 2.0, NIST 800-171 SPRS, ISO 27001, HIPAA, PCI DSS)",
+                },
             ],
-            "staged_reserve_domains": [],
+            "staged_reserve_domains": [
+                dict(STAGED_RESERVE_DOMAIN_METADATA["gainhelm.com"]),
+            ],
             "decommissioned_domains": list(DECOMMISSIONED_RETIRED_DOMAINS),
             "personal_infrastructure_domains": list(PERSONAL_INFRASTRUCTURE_DOMAINS),
             "total_new_tenant_candidates_evaluated": len(candidates),

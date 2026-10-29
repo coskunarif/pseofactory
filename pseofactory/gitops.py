@@ -76,6 +76,7 @@ DEFAULT_GITOPS_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/gitops_i
 CANONICAL_PRODUCTION_PROPERTIES = {
     "profithelm",
     "prexvo",
+    "gainhelm",
     "pseofactory",
     "profithelm-platform",
     "factory",
@@ -947,7 +948,7 @@ class GitOpsCoordinator:
             backoffs = [1.0, 2.0, 4.0]
 
         # Refresh Wrangler OAuth token into GitHub Secrets prior to pushing tenant repos
-        if self.repo_path.name in ("profithelm-platform", "prexvo") and shutil.which("gh"):
+        if self.repo_path.name in ("profithelm-platform", "prexvo", "gainhelm") and shutil.which("gh"):
             wrangler_cfg = Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml")
             if wrangler_cfg.is_file():
                 try:
@@ -3056,7 +3057,7 @@ def reconcile_workspace_tracking_state(
         )
     )
 
-    canonical_queue_Owner_ids = {"profithelm", "prexvo", "pseofactory", "factory", "default"}
+    canonical_queue_Owner_ids = {"profithelm", "prexvo", "gainhelm", "pseofactory", "factory", "default"}
     pruned_queue_files = 0
     reconciled_wal_events = 0
     pruned_ledger_tokens = 0
@@ -3181,7 +3182,7 @@ def reconcile_workspace_tracking_state(
     # 3. Discover current HEAD SHAs for canonical production repositories
     heads: Dict[str, str] = dict(repo_heads or {})
     if not heads and not in_test:
-        for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
+        for repo_name in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm"):
             rp = Path("/home/ubuntuadmin/projects") / repo_name
             if (rp / ".git").exists():
                 try:
@@ -3208,7 +3209,7 @@ def reconcile_workspace_tracking_state(
             if tr_runs not in runs_dirs_to_scan:
                 runs_dirs_to_scan.append(tr_runs)
     elif not in_test and not is_explicit:
-        for repo_name in ("pseofactory", "profithelm-platform", "prexvo"):
+        for repo_name in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm"):
             tr_runs = Path("/home/ubuntuadmin/projects") / repo_name / ".agy" / "runs"
             if tr_runs not in runs_dirs_to_scan:
                 runs_dirs_to_scan.append(tr_runs)
@@ -3285,7 +3286,7 @@ def reconcile_workspace_tracking_state(
                             if p_id == "prexvo":
                                 synth_proj = "/home/ubuntuadmin/projects/prexvo"
                             elif p_id == "gainhelm":
-                                synth_proj = "/home/ubuntuadmin/projects/_archive/gainhelm"
+                                synth_proj = "/home/ubuntuadmin/projects/gainhelm"
                             elif p_id == "profithelm" and run_dir.name.isdigit():
                                 synth_proj = "/home/ubuntuadmin/projects/profithelm-platform"
                     cur_h = heads.get(synth_proj) or heads.get(Path(synth_proj).name) or ""
@@ -3378,7 +3379,7 @@ def reconcile_workspace_tracking_state(
     elif not in_test and not is_explicit:
         target_repo_paths = [
             Path("/home/ubuntuadmin/projects") / rn
-            for rn in ("pseofactory", "profithelm-platform", "prexvo")
+            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm")
         ]
 
     if not in_test and not is_explicit:
@@ -3439,7 +3440,7 @@ def reconcile_workspace_tracking_state(
                     )
                     healed_tenant_trees += 1
 
-            if repo_name in ("profithelm-platform", "prexvo") or tenant_repos is not None:
+            if repo_name in ("profithelm-platform", "prexvo", "gainhelm") or tenant_repos is not None:
                 lock_name = (
                     "profithelm_factory.lock"
                     if "profithelm" in repo_name

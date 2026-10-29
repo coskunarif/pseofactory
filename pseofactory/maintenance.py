@@ -4359,7 +4359,7 @@ class MaintenanceLifecycle:
             substrate_lock_existed = False
             if not dry_run and getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
-                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                     try:
                         substrate_lock_path = t_repo / "substrate_lock.json"
                         if substrate_lock_path.is_file():
@@ -4529,7 +4529,7 @@ class MaintenanceLifecycle:
                     recon_rep = partner_engine.reconcile_edge_clicks_with_portals(
                         engagement_by_property={
                             p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                            for p_id in ("profithelm", "prexvo")
+                            for p_id in ("profithelm", "prexvo", "gainhelm")
                         }
                     )
                     if not dry_run and not in_pytest:
@@ -10308,6 +10308,9 @@ class RetroReflectionEngine:
             Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
                 "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
             ),
+            Path("/home/ubuntuadmin/projects/gainhelm/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist"
+            ),
         }
         runner_dist = runner_dist_map.get(d)
         if runner_dist and runner_dist.is_dir():
@@ -11304,6 +11307,9 @@ class RetroReflectionEngine:
             Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
                 "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
             ),
+            Path("/home/ubuntuadmin/projects/gainhelm/dist"): Path(
+                "/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist"
+            ),
         }
         runner_dist = runner_dist_map.get(d)
         if runner_dist and runner_dist.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ:
@@ -11446,7 +11452,7 @@ def _has_pending_downstream_work(
     if (
         not ignore_git_dirty
         and str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
-        and repo_root.name in ("profithelm-platform", "prexvo")
+        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm")
         and (repo_root / ".git").exists()
     ):
         try:
@@ -11840,7 +11846,7 @@ def _execute_autonomous_downstream_chain(
         recon_rep = tracker.reconcile_edge_clicks_with_portals(
             engagement_by_property={
                 p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                for p_id in ("profithelm", "prexvo")
+                for p_id in ("profithelm", "prexvo", "gainhelm")
             }
         )
         if not dry_run:
@@ -12488,7 +12494,7 @@ def reflect_and_recompile_all_assets(
         substrate_lock_stale = False
         if getattr(adapter, "repo_path", None) and not is_unmerged_worktree:
             t_repo = Path(adapter.repo_path)
-            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                 lock_file = t_repo / "substrate_lock.json"
                 if not lock_file.is_file():
                     substrate_lock_stale = True
@@ -12511,7 +12517,7 @@ def reflect_and_recompile_all_assets(
         ):
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
-                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo"):
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                     try:
                         cur_sub_hash = compute_engine_hash()
                         dist_fp_hasher = hashlib.sha256()

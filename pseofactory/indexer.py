@@ -1381,8 +1381,8 @@ class PushIndexer:
             _default_base = Path(dist_dir).resolve().parent
         elif "prexvo" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/prexvo").exists():
             _default_base = Path("/home/ubuntuadmin/projects/prexvo")
-        elif "gainhelm" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/_archive/gainhelm").exists():
-            _default_base = Path("/home/ubuntuadmin/projects/_archive/gainhelm")
+        elif "gainhelm" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/gainhelm").exists():
+            _default_base = Path("/home/ubuntuadmin/projects/gainhelm")
         else:
             _default_base = DEFAULT_BASE_DIR
         self.base_dir = Path(base_dir) if base_dir else _default_base
@@ -1576,7 +1576,7 @@ class PushIndexer:
                     if alt_dist.exists():
                         u_dist = alt_dist
                 elif "gainhelm.com" in u_host and "gainhelm" not in str(eff_dist).lower():
-                    alt_dist = Path("/home/ubuntuadmin/projects/_archive/gainhelm/dist")
+                    alt_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
                     if alt_dist.exists():
                         u_dist = alt_dist
                 elif "profithelm.com" in u_host and "profithelm" not in str(eff_dist).lower():
@@ -3017,7 +3017,7 @@ class PushIndexer:
         elif self.domain == "prexvo.com":
             search_dirs.append(Path("/home/ubuntuadmin/projects/prexvo/dist"))
         elif self.domain == "gainhelm.com":
-            search_dirs.append(Path("/home/ubuntuadmin/projects/_archive/gainhelm/dist"))
+            search_dirs.append(Path("/home/ubuntuadmin/projects/gainhelm/dist"))
 
         for cand_dist in search_dirs:
             if discovered:

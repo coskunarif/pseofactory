@@ -7074,7 +7074,7 @@ def _resolve_tenant_dist_and_domain(
         default_dist = Path("/home/ubuntuadmin/projects/prexvo/dist")
     elif prop == "gainhelm":
         domain = "https://gainhelm.com"
-        default_dist = Path("/home/ubuntuadmin/projects/_archive/gainhelm/dist")
+        default_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
     else:
         prop = "profithelm"
         domain = "https://profithelm.com"
@@ -7392,7 +7392,7 @@ def evaluate_x_like_2109219955271196726_capability_matrix(
     tenant_reports: Dict[str, Any] = {}
     all_passed = True
     if include_live_estate_audit:
-        for t_id in ("profithelm", "prexvo"):
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
             rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             tenant_reports[t_id] = rep
             if not rep["passed"]:
@@ -7525,7 +7525,7 @@ def evaluate_x_like_2102358751290236980_capability_matrix(
             compile_ai_citation_digital_pr_queue,
             discover_internal_linking_opportunities,
         )
-        for t_id in ("profithelm", "prexvo"):
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
             link_rep = discover_internal_linking_opportunities(property_id=t_id, persist=False)
             pr_rep = compile_ai_citation_digital_pr_queue(property_id=t_id, persist=False)
             t_ok = link_rep.get("status") in ("PASS", "SKIPPED_NO_DIST") and pr_rep.get("status") == "PASS"
@@ -7690,8 +7690,9 @@ def evaluate_x_like_2102328294410461564_capability_matrix(
         sample_seeds = {
             "profithelm": "section 179 calculator",
             "prexvo": "rap payment calculator",
+            "gainhelm": "cmmc 2.0 compliance cost calculator",
         }
-        for t_id in ("profithelm", "prexvo"):
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
             est_rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             kw_std = expand_commercial_and_question_keywords(
                 seed_query=sample_seeds[t_id],
@@ -7907,7 +7908,7 @@ def audit_aeo_geo_three_plane_readiness(
         default_map = {
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
-            "gainhelm": Path("/home/ubuntuadmin/projects/_archive/gainhelm/dist"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
         }
         d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
 
@@ -8144,6 +8145,7 @@ def evaluate_x_like_2110401032035709427_capability_matrix(
         for t_id, r_path in (
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
         ):
             if r_path.is_dir():
                 rep = audit_aeo_geo_three_plane_readiness(dist_dir=r_path, property_id=t_id)
@@ -8354,6 +8356,7 @@ def evaluate_x_like_2104684322481664277_capability_matrix(
         for t_id, root_path in (
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
         ):
             dist_path = root_path / "dist"
             tools_path = dist_path / "tools"
@@ -8745,7 +8748,7 @@ def audit_free_tool_seo_and_instant_ux_readiness(
         default_map = {
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
-            "gainhelm": Path("/home/ubuntuadmin/projects/_archive/gainhelm/dist"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
         }
         d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
 
@@ -8906,6 +8909,7 @@ def evaluate_x_like_2108272246804648049_capability_matrix(
         for t_id, r_path in (
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
         ):
             if r_path.is_dir():
                 rep = audit_free_tool_seo_and_instant_ux_readiness(dist_dir=r_path, property_id=t_id)

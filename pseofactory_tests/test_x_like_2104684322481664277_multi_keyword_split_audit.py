@@ -66,7 +66,7 @@ def test_x_like_2104684322481664277_capability_matrix_and_live_estate() -> None:
     assert report["passed"] is True
     assert report["status"] == "PASS"
 
-    for tenant in ("profithelm", "prexvo"):
+    for tenant in ("profithelm", "prexvo", "gainhelm"):
         t_sum = report["tenant_summaries"][tenant]
         assert t_sum["status"] == "PASS"
         assert t_sum["phantom_or_retired_forecast_routes"] == []
@@ -276,6 +276,7 @@ def test_quantitative_revenue_forecast_eliminates_phantom_and_retired_routes_acr
     tenant_roots = {
         "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
         "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
+        "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
     }
     forbidden_slugs = {
         "root",

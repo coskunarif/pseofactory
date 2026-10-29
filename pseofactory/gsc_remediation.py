@@ -7948,7 +7948,7 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
         default_roots = {
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
-            "gainhelm": Path("/home/ubuntuadmin/projects/_archive/gainhelm"),
+            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
         }
         root = default_roots.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform"))
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
