@@ -772,4 +772,71 @@ def test_department_handoff_contracts_and_three_tenant_unification(tmp_path: Pat
         assert marker["domain"] == f"{pid}.com"
 
 
+def test_verify_department_handoff_chain_heal_markers_and_cli_contract(tmp_path: Path):
+    """
+    Regression test for fleet maintenance handoff verification and marker healing:
+    1. CANONICAL_TENANT_CONFIGS defines repo_dir_name for profithelm, prexvo, and gainhelm.
+    2. verify_department_handoff_chain(heal_markers=True) heals .pseofactory.json markers
+       across tenant repo directories without raising KeyError: 'repo_dir_name'.
+    3. verify_department_handoff_chain returns 'tenants_verified' at top level so CLI
+       supervisor --verify-handoffs and audit --department-handoffs succeed.
+    4. _clear_stale_autojob_failure_markers removes stale FAILED.pseofactory-fleet-maintenance
+       markers on unscoped non-dry-run supervisor completion while preserving them on dry_run or scoped runs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import CANONICAL_TENANT_CONFIGS
+    from pseofactory.supervisor import (
+        AutonomousLifecycleSupervisor,
+        verify_department_handoff_chain,
+    )
+
+    assert CANONICAL_TENANT_CONFIGS["profithelm"]["repo_dir_name"] == "profithelm-platform"
+    assert CANONICAL_TENANT_CONFIGS["prexvo"]["repo_dir_name"] == "prexvo"
+    assert CANONICAL_TENANT_CONFIGS["gainhelm"]["repo_dir_name"] == "gainhelm"
+
+    ws_dir = tmp_path / "workspace"
+    for pid, repo_name in (
+        ("profithelm", "profithelm-platform"),
+        ("prexvo", "prexvo"),
+        ("gainhelm", "gainhelm"),
+    ):
+        r_dir = ws_dir / repo_name
+        (r_dir / "dist").mkdir(parents=True, exist_ok=True)
+        (r_dir / "dist" / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+
+    rep = verify_department_handoff_chain(
+        workspace_root=ws_dir,
+        heal_markers=True,
+        persist=False,
+    )
+    assert "tenants_verified" in rep
+    assert set(rep["tenants_verified"]) == {"profithelm", "prexvo", "gainhelm"}
+    for repo_name in ("profithelm-platform", "prexvo", "gainhelm"):
+        assert (ws_dir / repo_name / ".pseofactory.json").is_file()
+
+    # Verify autojob failure marker clearing helper
+    autojob_dir = tmp_path / "autojobs"
+    autojob_dir.mkdir(parents=True, exist_ok=True)
+    failed_maint = autojob_dir / "FAILED.pseofactory-fleet-maintenance"
+    failed_sup = autojob_dir / "FAILED.pseofactory_supervisor"
+    unrelated_marker = autojob_dir / "FAILED.other_job"
+    failed_maint.write_text("", encoding="utf-8")
+    failed_sup.write_text("", encoding="utf-8")
+    unrelated_marker.write_text("", encoding="utf-8")
+
+    sup = AutonomousLifecycleSupervisor(workspace_root=ws_dir)
+    assert sup._clear_stale_autojob_failure_markers(dry_run=True, scoped=False, state_dir=autojob_dir) == []
+    assert failed_maint.exists()
+    assert sup._clear_stale_autojob_failure_markers(dry_run=False, scoped=True, state_dir=autojob_dir) == []
+    assert failed_maint.exists()
+
+    cleared = sup._clear_stale_autojob_failure_markers(dry_run=False, scoped=False, state_dir=autojob_dir)
+    assert "FAILED.pseofactory-fleet-maintenance" in cleared
+    assert "FAILED.pseofactory_supervisor" in cleared
+    assert not failed_maint.exists()
+    assert not failed_sup.exists()
+    assert unrelated_marker.exists()
+
+
+
 

@@ -1320,6 +1320,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {
     "profithelm": {
         "property_id": "profithelm",
+        "repo_dir_name": "profithelm-platform",
         "domain": "profithelm.com",
         "canonical_base": "https://profithelm.com",
         "brand_name": "ProfitHelm",
@@ -1329,6 +1330,7 @@ CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {
     },
     "prexvo": {
         "property_id": "prexvo",
+        "repo_dir_name": "prexvo",
         "domain": "prexvo.com",
         "canonical_base": "https://prexvo.com",
         "brand_name": "Prexvo",
@@ -1338,6 +1340,7 @@ CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {
     },
     "gainhelm": {
         "property_id": "gainhelm",
+        "repo_dir_name": "gainhelm",
         "domain": "gainhelm.com",
         "canonical_base": "https://gainhelm.com",
         "brand_name": "GainHelm",

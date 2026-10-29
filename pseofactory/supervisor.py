@@ -669,7 +669,8 @@ class DepartmentHandoffChainVerifier:
                 cfg = CANONICAL_TENANT_CONFIGS.get(pid)
                 if not cfg:
                     continue
-                cand_repo = ws_root / str(cfg["repo_dir_name"])
+                repo_dir_name = str(cfg.get("repo_dir_name") or ("profithelm-platform" if pid == "profithelm" else pid))
+                cand_repo = ws_root / repo_dir_name
                 if cand_repo.is_dir():
                     try:
                         sync_tenant_pseofactory_marker(cand_repo, pid)
@@ -1636,6 +1637,7 @@ class DepartmentHandoffChainVerifier:
                 tenant_matrix[pid][stg] = str((per_t.get(pid) or {}).get("status") or step["status"])
 
         passed_cnt = sum(1 for s in handoff_trace if s["status"] == "PASS")
+        verified_tenants = list(handoff_context.get("discovered_tenants") or self.target_tenants)
         return {
             "status": "PASS" if overall_ok else "FAIL",
             "overall_status": "PASS" if overall_ok else "FAIL",
@@ -1643,7 +1645,8 @@ class DepartmentHandoffChainVerifier:
             "workspace_root": str(self.workspace_root),
             "engine_hash": current_engine_hash,
             "target_tenants": list(self.target_tenants),
-            "discovered_tenants": list(handoff_context.get("discovered_tenants") or self.target_tenants),
+            "discovered_tenants": verified_tenants,
+            "tenants_verified": verified_tenants,
             "stage_order": list(DEPARTMENT_STAGES),
             "stages_completed": passed_cnt,
             "stages_passed": passed_cnt,
@@ -2292,6 +2295,49 @@ class AutonomousLifecycleSupervisor:
                 pass
         return escalations
 
+    def _clear_stale_autojob_failure_markers(
+        self,
+        dry_run: bool,
+        scoped: bool = False,
+        state_dir: Optional[Union[str, Path]] = None,
+    ) -> List[str]:
+        """
+        Clears stale autojob failure markers for pseofactory fleet maintenance and supervisor
+        when a full unscoped production supervisor cycle completes cleanly.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if dry_run or scoped:
+            return []
+        if state_dir is None:
+            if (
+                "PYTEST_CURRENT_TEST" in os.environ
+                or "pytest" in sys.modules
+                or str(self.workspace_root) != "/home/ubuntuadmin/projects"
+            ):
+                return []
+            state_dir = Path(
+                os.environ.get("AUTOJOB_STATE_DIR")
+                or (Path.home() / ".local" / "state" / "autojobs")
+            )
+        else:
+            state_dir = Path(state_dir)
+        cleared: List[str] = []
+        if not state_dir.is_dir():
+            return cleared
+        for marker_name in (
+            "FAILED.pseofactory-fleet-maintenance",
+            "FAILED.pseofactory_supervisor",
+            "FAILED.pseofactory-supervisor",
+        ):
+            marker_path = state_dir / marker_name
+            if marker_path.exists():
+                try:
+                    marker_path.unlink(missing_ok=True)
+                    cleared.append(marker_name)
+                except OSError:
+                    pass
+        return cleared
+
     def compute_backoff(self, consecutive_failures: int) -> float:
         """
         Computes bounded exponential backoff with jitter (HWL-1231).
@@ -2537,6 +2583,7 @@ class AutonomousLifecycleSupervisor:
                 duration = time.time() - start_time
                 self.consecutive_failures = 0
                 self._record_failure_streak(True, {}, cycle_id, dry_run, scoped=bool(property_ids))
+                self._clear_stale_autojob_failure_markers(dry_run, scoped=bool(property_ids))
                 hb_extra: Dict[str, Any] = {"department_pipeline": pipeline_state}
                 if partner_sync_summary:
                     hb_extra["partner_lifecycle_sync"] = partner_sync_summary
@@ -2604,6 +2651,7 @@ class AutonomousLifecycleSupervisor:
                         dry_run,
                         scoped=bool(property_ids),
                     )
+                    self._clear_stale_autojob_failure_markers(dry_run, scoped=bool(property_ids))
                 if not dry_run and not any_deferred:
                     from pseofactory.maintenance import RefactorCascadeEngine
                     cascade_replayer = RefactorCascadeEngine()
