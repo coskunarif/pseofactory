@@ -518,22 +518,34 @@ class DailyIndexingInspector:
         if not omit_auto_remediated:
             child_sitemaps = audit_summary.get("child_sitemaps", {})
             section_cov = child_sitemaps.get("section_coverage", {}) if isinstance(child_sitemaps, dict) else {}
-            unindexed_count = int(section_cov.get("unindexed_count", 0) or 0)
+            unindexed_count = int(
+                section_cov.get("total_unindexed")
+                or section_cov.get("unindexed_count")
+                or 0
+            )
             if unindexed_count > 0:
                 sec_breakdown = section_cov.get("sections", {}) if isinstance(section_cov.get("sections"), dict) else {}
                 sample_urls: List[str] = []
                 cause_counts: Dict[str, int] = {}
                 affected_sitemaps: List[str] = []
                 for sec_name, sec_data in sec_breakdown.items():
-                    if not isinstance(sec_data, dict) or int(sec_data.get("unindexed", 0) or 0) <= 0:
+                    if not isinstance(sec_data, dict):
                         continue
-                    c_sm = str(sec_data.get("child_sitemap") or "")
-                    if c_sm and c_sm not in affected_sitemaps:
-                        affected_sitemaps.append(c_sm)
-                    for cause_k, cause_v in (sec_data.get("exclusions_by_cause") or {}).items():
+                    sec_unindexed = int(sec_data.get("unindexed_count") or sec_data.get("unindexed") or 0)
+                    if sec_unindexed <= 0:
+                        continue
+                    c_sms = sec_data.get("child_sitemaps") or (
+                        [sec_data["child_sitemap"]] if sec_data.get("child_sitemap") else []
+                    )
+                    for c_sm in c_sms:
+                        if c_sm and str(c_sm) not in affected_sitemaps:
+                            affected_sitemaps.append(str(c_sm))
+                    excl_map = sec_data.get("exclusion_breakdown") or sec_data.get("exclusions_by_cause") or {}
+                    for cause_k, cause_v in excl_map.items():
                         cause_counts[str(cause_k)] = cause_counts.get(str(cause_k), 0) + int(cause_v or 0)
-                    for su in (sec_data.get("sample_unindexed_urls") or []):
-                        if su and su not in sample_urls and len(sample_urls) < 4:
+                    dropped_list = sec_data.get("dropped_urls") or sec_data.get("sample_unindexed_urls") or []
+                    for su in dropped_list:
+                        if su and str(su) not in sample_urls and len(sample_urls) < 4:
                             sample_urls.append(str(su))
                 causes_str = ", ".join(f"{k}:{v}" for k, v in sorted(cause_counts.items())) or "UNINDEXED_GSC"
                 urls_str = ", ".join(sample_urls)
@@ -573,8 +585,13 @@ class DailyIndexingInspector:
 
         try:
             from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
-            if DEFAULT_DB_PATH.is_file():
-                with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
+            target_db = (
+                DEFAULT_DB_PATH
+                if DEFAULT_DB_PATH.is_file()
+                else Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
+            )
+            if target_db.is_file():
+                with TrendHistoryDB(target_db) as tdb:
                     for rec in tdb.get_gsc_url_inspection_states(self.tenant_id):
                         p_url = str(rec.page_url or "").strip()
                         if not p_url or not self._url_belongs_to_tenant(p_url):
@@ -603,11 +620,20 @@ class DailyIndexingInspector:
         if telem_path.is_file():
             try:
                 t_data = json.loads(telem_path.read_text(encoding="utf-8"))
-                url_states = t_data.get("url_states", {}) if isinstance(t_data, dict) else {}
-                for u_key, st in url_states.items():
-                    if not isinstance(st, dict):
-                        continue
-                    p_url = str(u_key or "").strip()
+                combined_states: List[Tuple[str, Dict[str, Any]]] = []
+                if isinstance(t_data, dict):
+                    url_states = t_data.get("url_states")
+                    if isinstance(url_states, dict):
+                        for u_key, st in url_states.items():
+                            if isinstance(st, dict):
+                                combined_states.append((str(u_key or ""), st))
+                    by_path = (t_data.get("url_inspection_summary") or {}).get("inspection_by_path")
+                    if isinstance(by_path, dict):
+                        for _, st in by_path.items():
+                            if isinstance(st, dict):
+                                combined_states.append((str(st.get("page_url") or st.get("url") or ""), st))
+                for u_key, st in combined_states:
+                    p_url = str(st.get("page_url") or st.get("url") or u_key or "").strip()
                     if not p_url or not self._url_belongs_to_tenant(p_url):
                         continue
                     norm_u = p_url.rstrip("/")
@@ -1080,7 +1106,12 @@ class DailyIndexingInspector:
         }
 
         has_pending_rollover = int(rollover_report.get("queue_size", 0) or 0) > 0
-        has_unindexed_gsc = int(child_sitemaps_report.get("section_coverage", {}).get("unindexed_count", 0) or 0) > 0
+        sec_cov_blk = child_sitemaps_report.get("section_coverage", {})
+        has_unindexed_gsc = int(
+            sec_cov_blk.get("total_unindexed")
+            or sec_cov_blk.get("unindexed_count")
+            or 0
+        ) > 0
         synthesized_unindexed: List[Dict[str, Any]] = []
         if (auto_remediate or vertex_diagnose) and (
             overall_status in ("WARN", "FAIL") or coverage_records or has_pending_rollover or has_unindexed_gsc

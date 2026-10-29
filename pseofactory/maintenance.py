@@ -11888,6 +11888,26 @@ def _execute_autonomous_downstream_chain(
                     )
                 except Exception:
                     pass
+                try:
+                    from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
+
+                    fb_loop = IndexingFeedbackLoop(
+                        property_id=adapter.property_id,
+                        base_dir=repo_root,
+                        dist_dir=adapter.dist_dir,
+                        inspector=inspector,
+                    )
+                    unindexed_cands = fb_loop.audit_unindexed_pages(live=False)
+                    if unindexed_cands:
+                        unindexed_diags = fb_loop.diagnose_unindexed_pages(unindexed_cands)
+                        fb_loop.execute_engine_repairs(
+                            unindexed_diags,
+                            dry_run=dry_run,
+                            skip_recompile=True,
+                        )
+                        summary["gsc_unindexed_overlays_enriched_count"] = len(unindexed_diags)
+                except Exception:
+                    pass
             summary["overlay_evaluations_count"] = overlay_eval_res.get("total_evaluated", 0)
         summary["visibility_status"] = insp_report.get("overall_status", "PASS")
     except Exception as vis_err:

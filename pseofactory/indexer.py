@@ -8,6 +8,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 import re
 import os
+import sys
 import json
 import shutil
 import subprocess
@@ -2669,7 +2670,12 @@ class PushIndexer:
         if not is_pytest or custom_db_path is not None:
             try:
                 from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
-                target_db = Path(custom_db_path) if custom_db_path else DEFAULT_DB_PATH
+                if custom_db_path:
+                    target_db = Path(custom_db_path)
+                elif DEFAULT_DB_PATH.is_file():
+                    target_db = DEFAULT_DB_PATH
+                else:
+                    target_db = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
                 if target_db.is_file():
                     with TrendHistoryDB(target_db) as tdb:
                         db_rows = list(tdb.get_gsc_url_inspection_states(eff_tenant))
@@ -3203,8 +3209,13 @@ class PushIndexer:
                                 sitemaps=list(item.get("sitemaps") or idx_res.get("sitemap") or []),
                             )
                         )
-                if db_records and DEFAULT_DB_PATH.parent.is_dir():
-                    with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
+                target_db = (
+                    DEFAULT_DB_PATH
+                    if DEFAULT_DB_PATH.is_file()
+                    else Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
+                )
+                if db_records and target_db.parent.is_dir():
+                    with TrendHistoryDB(target_db) as tdb:
                         tdb.upsert_gsc_url_inspection_states(db_records)
             except Exception:
                 pass

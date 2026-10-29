@@ -1043,9 +1043,13 @@ class SectionExclusionClassifier:
             idx_c = sm_data["indexed_count"]
             sm_data["indexation_rate_pct"] = round((idx_c / tot * 100.0), 2) if tot > 0 else 100.0
 
+        total_indexed_all = sum(int(s.get("indexed_count", 0) or 0) for s in sections_report.values())
         return {
             "tenant_id": eff_tenant,
             "total_records": len(records),
+            "indexed_count": total_indexed_all,
+            "total_indexed": total_indexed_all,
+            "unindexed_count": len(unindexed_to_sitemap_map),
             "total_unindexed": len(unindexed_to_sitemap_map),
             "sections": sections_report,
             "by_child_sitemap": by_child_sitemap,
@@ -1220,8 +1224,13 @@ class IndexingFeedbackLoop:
             valid_set = {u.rstrip("/") for u in sitemap_locs}
             try:
                 from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
-                if DEFAULT_DB_PATH.is_file():
-                    with TrendHistoryDB(DEFAULT_DB_PATH) as tdb:
+                target_db = (
+                    DEFAULT_DB_PATH
+                    if DEFAULT_DB_PATH.is_file()
+                    else Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
+                )
+                if target_db.is_file():
+                    with TrendHistoryDB(target_db) as tdb:
                         for rec in tdb.get_gsc_url_inspection_states(self.property_id):
                             p_url = str(rec.page_url or "").strip()
                             if not p_url or (self.domain and self.domain.lower() not in p_url.lower()):
@@ -1259,11 +1268,20 @@ class IndexingFeedbackLoop:
                 if telem_path.is_file():
                     try:
                         telem_data = json.loads(telem_path.read_text(encoding="utf-8"))
-                        url_states = telem_data.get("url_states", {}) if isinstance(telem_data, dict) else {}
-                        for t_url, st in url_states.items():
-                            if not isinstance(st, dict):
-                                continue
-                            p_url = str(t_url or "").strip()
+                        combined_telem_states: List[Tuple[str, Dict[str, Any]]] = []
+                        if isinstance(telem_data, dict):
+                            url_states = telem_data.get("url_states")
+                            if isinstance(url_states, dict):
+                                for t_url, st in url_states.items():
+                                    if isinstance(st, dict):
+                                        combined_telem_states.append((str(t_url or ""), st))
+                            by_path = (telem_data.get("url_inspection_summary") or {}).get("inspection_by_path")
+                            if isinstance(by_path, dict):
+                                for _, st in by_path.items():
+                                    if isinstance(st, dict):
+                                        combined_telem_states.append((str(st.get("page_url") or st.get("url") or ""), st))
+                        for t_url, st in combined_telem_states:
+                            p_url = str(st.get("page_url") or st.get("url") or t_url or "").strip()
                             if not p_url or (self.domain and self.domain.lower() not in p_url.lower()):
                                 continue
                             if valid_set and p_url.rstrip("/") not in valid_set:
@@ -1284,6 +1302,9 @@ class IndexingFeedbackLoop:
                                     "user_canonical": str(st.get("userCanonical") or st.get("user_canonical") or ""),
                                     "google_canonical": str(st.get("googleCanonical") or st.get("google_canonical") or ""),
                                     "last_crawl_time": str(st.get("lastCrawlTime") or st.get("last_crawl_time") or ""),
+                                    "crawled_as": str(st.get("crawledAs") or st.get("crawled_as") or ""),
+                                    "referring_urls": list(st.get("referringUrls") or st.get("referring_urls") or []),
+                                    "sitemaps": list(st.get("sitemap") or st.get("sitemaps") or []),
                                     "status": "UNINDEXED_GSC",
                                 })
                                 if not sample_urls and p_url not in target_sample:
