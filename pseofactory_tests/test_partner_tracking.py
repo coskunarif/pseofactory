@@ -3094,6 +3094,213 @@ def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
     assert vid_rep["eligible_tools_count"] == 10
 
 
+def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path):
+    """
+    Verifies the unified Post-Calculation Workpaper Export & Tailored Statutory Data Pack
+    monetization model across profithelm, prexvo, and gainhelm:
+    1. resolve_post_calculation_upgrade_spec maps each tenant's structured statutory truth,
+       SKU catalog, and longitudinal trend series (2024 to 2030), while returning None on
+       Prexvo restricted YMYL public-service pages.
+    2. synthesize_personalized_audit_workpaper generates statutory_data_pack (pseo-datapack-v1)
+       and datapack_url across all 6 SKUs.
+    3. render_serp_incumbent_depth_upgrade_block and normalize_html_visual_primitives embed
+       #post-calculation-upgrade-drawer inside #saveable-decision-blueprint with zero paywall
+       violations, zero consecutive CTA violations, and full idempotency.
+    4. Edge /api/lead-capture?fulfill=1&format=datapack serves downloadable JSON statutory
+       data packs across all 3 tenants in Node.js.
+    """
+    import re
+    import subprocess
+    from pseofactory.competitor import (
+        render_post_calculation_upgrade_drawer_html,
+        render_serp_incumbent_depth_upgrade_block,
+    )
+    from pseofactory.contracts import ZeroSignupInstantResultHTMLParser, assert_no_forbidden_dashes
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.partner_tracker import (
+        audit_end_to_end_monetization_and_fulfillment,
+        resolve_post_calculation_upgrade_spec,
+        synthesize_personalized_audit_workpaper,
+    )
+    from pseofactory.visual_primitives import (
+        _count_max_consecutive_cta_callouts,
+        normalize_html_visual_primitives,
+    )
+
+    # 1. Verify resolve_post_calculation_upgrade_spec across all 3 tenants + YMYL exclusion
+    ph_spec = resolve_post_calculation_upgrade_spec("profithelm", "section-1031-calculator")
+    assert ph_spec is not None
+    assert ph_spec["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+    assert ph_spec["offer_price_usd"] == 79.0
+    assert ph_spec["trend_series_count"] >= 3
+    assert "format=datapack" in ph_spec["datapack_url"]
+
+    px_spec = resolve_post_calculation_upgrade_spec(
+        "prexvo", "student-loan-refinance-break-even-calculator"
+    )
+    assert px_spec is not None
+    assert px_spec["offer_sku"] == "px_refi_amortization_decision_audit"
+    assert px_spec["offer_price_usd"] == 39.0
+    assert px_spec["trend_series_count"] >= 3
+
+    gh_spec = resolve_post_calculation_upgrade_spec("gainhelm", "soc-2-audit-cost-calculator")
+    assert gh_spec is not None
+    assert gh_spec["offer_sku"] == "gh_soc2_cmmc_audit_workpapers"
+    assert gh_spec["offer_price_usd"] == 79.0
+    assert gh_spec["trend_series_count"] >= 3
+
+    for restricted_slug in (
+        "pslf-qualifying-payment-simulator",
+        "ibr-hardship-cap-calculator",
+        "save-plan-litigation-transition",
+        "disclaimers",
+        "methodology",
+    ):
+        assert resolve_post_calculation_upgrade_spec("prexvo", restricted_slug) is None
+        assert (
+            render_post_calculation_upgrade_drawer_html(restricted_slug, property_id="prexvo")
+            == ""
+        )
+
+    # 2. Verify synthesize_personalized_audit_workpaper & E2E monetization audit
+    for prop_id, slug, amt in (
+        ("profithelm", "section-179-calculator", 185000.0),
+        ("prexvo", "student-loan-refinance-break-even-calculator", 92000.0),
+        ("gainhelm", "soc-2-audit-cost-calculator", 64000.0),
+    ):
+        wp = synthesize_personalized_audit_workpaper(
+            property_id=prop_id,
+            tool_slug=slug,
+            lead_record={
+                "lead_id": f"lead_{prop_id}_dp_test",
+                "calculated_amount": amt,
+                "scenario_inputs": {"primary_amount": amt},
+                "scenario_outputs": {"net_benefit": amt * 0.22},
+            },
+        )
+        assert "format=datapack" in wp["datapack_url"]
+        dp = wp["statutory_data_pack"]
+        assert dp["schema_version"] == "pseo-datapack-v1"
+        assert dp["property_id"] == prop_id
+        assert len(dp["reconciliation_schedule"]) >= 3
+        assert len(dp["sensitivity_matrix"]) >= 3
+        assert len(dp["longitudinal_benchmark_series"]) >= 3
+        assert "Download Statutory Data Pack (JSON)" in wp["html_report"]
+        assert_no_forbidden_dashes(json.dumps(dp), context=f"datapack_{prop_id}")
+
+    e2e_audit = audit_end_to_end_monetization_and_fulfillment(execute_live=False)
+    assert e2e_audit["status"] == "PASS"
+    assert len(e2e_audit["catalog_skus"]) == 6
+
+    # 3. Verify workbench HTML rendering, zero-signup compliance, and RetroReflection retrofit
+    for prop_id, slug, domain in (
+        ("profithelm", "section-1031-calculator", "https://profithelm.com"),
+        ("prexvo", "student-loan-refinance-break-even-calculator", "https://prexvo.com"),
+        ("gainhelm", "soc-2-audit-cost-calculator", "https://gainhelm.com"),
+    ):
+        wb_html = render_serp_incumbent_depth_upgrade_block(
+            slug=slug,
+            title=f"{slug} Calculator",
+            property_id=prop_id,
+            canonical_base=domain,
+        )
+        assert 'id="post-calculation-upgrade-drawer"' in wb_html
+        assert 'data-mechanic="post_calculation_workpaper_upgrade"' in wb_html
+        assert 'id="btn-post-calc-upgrade-checkout"' in wb_html
+        assert 'id="btn-preview-post-calc-workpaper"' in wb_html
+        assert_no_forbidden_dashes(wb_html, context=f"wb_{prop_id}")
+
+        parser = ZeroSignupInstantResultHTMLParser()
+        parser.feed(wb_html)
+        assert not parser.has_paywall_gate
+        assert not parser.has_password_input
+        assert not parser.has_required_email_in_primary_form
+        assert _count_max_consecutive_cta_callouts(wb_html) <= 2
+
+        # Strip #post-calculation-upgrade-drawer and verify RetroReflectionEngine + normalize_html_visual_primitives self-heals it
+        stripped_wb = re.sub(
+            r'\s*<div id="post-calculation-upgrade-drawer"[\s\S]*?<div id="post-calc-workpaper-preview-slot"[^>]*></div>\s*</div>',
+            "",
+            wb_html,
+        )
+        stripped_doc = (
+            f"<!DOCTYPE html><html><head><title>Test</title></head><body><main>"
+            f'<div class="result-box"><div class="output-value">$24,500</div></div>'
+            + stripped_wb
+            + "</main></body></html>"
+        )
+        assert 'id="post-calculation-upgrade-drawer"' not in stripped_doc
+        missing_mechs = RetroReflectionEngine.audit_html_mechanics(stripped_doc)
+        assert "deterministic_visual_primitives" in missing_mechs
+
+        healed_doc, repairs = normalize_html_visual_primitives(stripped_doc)
+        assert "post_calculation_workpaper_upgrade" in repairs
+        assert 'id="post-calculation-upgrade-drawer"' in healed_doc
+        healed_again, repairs_second = normalize_html_visual_primitives(healed_doc)
+        assert repairs_second == []
+        assert healed_again == healed_doc
+
+    # 4. Verify Node.js Edge /api/lead-capture?fulfill=1&format=datapack across all 3 tenants
+    ph_dir = tmp_path / "profithelm_dp"
+    px_dir = tmp_path / "prexvo_dp"
+    gh_dir = tmp_path / "gainhelm_dp"
+    for d, prop in ((ph_dir, "profithelm"), (px_dir, "prexvo"), (gh_dir, "gainhelm")):
+        (d / "functions" / "r").mkdir(parents=True, exist_ok=True)
+        sync_tenant_edge_redirect_function(d, property_id=prop)
+
+    ph_lc = (ph_dir / "functions" / "api" / "lead-capture.js").as_uri()
+    px_lc = (px_dir / "functions" / "api" / "lead-capture.js").as_uri()
+    gh_lc = (gh_dir / "functions" / "api" / "lead-capture.js").as_uri()
+
+    node_script = f"""
+    (async () => {{
+      const phLead = await import({json.dumps(ph_lc)});
+      const pxLead = await import({json.dumps(px_lc)});
+      const ghLead = await import({json.dumps(gh_lc)});
+
+      const cases = [
+        [phLead, "https://profithelm.com/api/lead-capture?fulfill=1&sku=ph_1031_boot_replacement_workpapers&tool_slug=section-1031-calculator&amount=450000&format=datapack&synthetic_test=1", "profithelm"],
+        [pxLead, "https://prexvo.com/api/lead-capture?fulfill=1&sku=px_refi_amortization_decision_audit&tool_slug=student-loan-refinance-break-even-calculator&amount=85000&format=datapack&synthetic_test=1", "prexvo"],
+        [ghLead, "https://gainhelm.com/api/lead-capture?fulfill=1&sku=gh_soc2_cmmc_audit_workpapers&tool_slug=soc-2-audit-cost-calculator&amount=62000&format=datapack&synthetic_test=1", "gainhelm"],
+      ];
+
+      for (const [mod, url, prop] of cases) {{
+        const res = await mod.onRequestGet({{
+          request: new Request(url, {{ headers: {{ "x-pseofactory-test": "1" }} }}),
+          env: {{}}
+        }});
+        if (res.status !== 200) {{
+          console.error("Non-200 datapack for", prop, res.status);
+          process.exit(10);
+        }}
+        const disp = res.headers.get("Content-Disposition") || "";
+        if (!disp.includes("datapack_") || !disp.endsWith('.json"')) {{
+          console.error("Bad Content-Disposition for", prop, disp);
+          process.exit(11);
+        }}
+        const payload = await res.json();
+        if (payload.schema_version !== "pseo-datapack-v1" || payload.property_id !== prop) {{
+          console.error("Bad schema/property for", prop, payload);
+          process.exit(12);
+        }}
+        if (!Array.isArray(payload.reconciliation_schedule) || payload.reconciliation_schedule.length < 3) {{
+          console.error("Missing reconciliation_schedule for", prop);
+          process.exit(13);
+        }}
+        if (!Array.isArray(payload.longitudinal_benchmark_series) || payload.longitudinal_benchmark_series.length < 3) {{
+          console.error("Missing longitudinal_benchmark_series for", prop);
+          process.exit(14);
+        }}
+      }}
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Edge datapack Node test failed (exit {proc.returncode}): {proc.stderr}"
+
+
+
 
 
 

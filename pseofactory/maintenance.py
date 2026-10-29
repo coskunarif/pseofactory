@@ -8200,6 +8200,11 @@ class RetroReflectionEngine:
             or "renderPlaybookAndFulfillmentDrawer" not in html_content
             or "qThreshAmt" not in html_content
             or ('id="partner-quote-intake-step"' in html_content and 'id="lead-capture-form"' not in html_content)
+            or (
+                'id="partner-quote-intake-step"' in html_content
+                and 'id="saveable-decision-blueprint"' in html_content
+                and 'id="post-calculation-upgrade-drawer"' not in html_content
+            )
             or "data-checkout-trigger" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or "window.location.protocol === 'file:'" in html_content

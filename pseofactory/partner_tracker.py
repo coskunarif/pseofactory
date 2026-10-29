@@ -4792,6 +4792,7 @@ def resolve_lead_monetization_offer(
     playbook_url = f"/api/lead-capture?{playbook_query}"
     fulfillment_url = f"/api/lead-capture?{fulfill_query}"
     csv_fulfillment_url = f"{fulfillment_url}&format=csv"
+    datapack_url = f"{fulfillment_url}&format=datapack"
     price_id_env = os.environ.get(f"STRIPE_PRICE_ID_{offer_sku.upper()}", "").strip()
 
     return {
@@ -4814,10 +4815,102 @@ def resolve_lead_monetization_offer(
         "live_fulfillment_endpoint": f"{canonical_domain}{fulfillment_url}",
         "csv_fulfillment_url": csv_fulfillment_url,
         "live_csv_fulfillment_endpoint": f"{canonical_domain}{csv_fulfillment_url}",
+        "datapack_url": datapack_url,
+        "live_datapack_endpoint": f"{canonical_domain}{datapack_url}",
         "checkout_session_id": f"cs_edge_{eff_lead_id}",
         "checkout_mode": "edge_checkout_rail",
         "success_url": f"{canonical_domain}{tool_path}?checkout_status=success&lead_id={eff_lead_id}&sku={offer_sku}",
         "cancel_url": f"{canonical_domain}{tool_path}?checkout_status=cancelled&lead_id={eff_lead_id}&sku={offer_sku}",
+    }
+
+
+def resolve_post_calculation_upgrade_spec(
+    property_id: str,
+    tool_slug: str,
+    statutory_authority: str = "",
+    economic_dataset: str = "",
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolves the unified Post-Calculation Workpaper Export & Tailored Statutory Data Pack
+    upgrade specification for a tenant calculator page directly from TenantFactStore,
+    resolve_lead_monetization_offer, and longitudinal statutory_economic_timeseries.
+    Strictly returns None for restricted YMYL public-service pages on Prexvo.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import is_restricted_public_service_slug
+
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    slug_clean = str(tool_slug or "general").strip().strip("/").lower() or "general"
+    if slug_clean.startswith("tools/"):
+        slug_clean = slug_clean[len("tools/") :]
+
+    if slug_clean in {"index", "about", "privacy", "terms", "disclaimers", "methodology"}:
+        return None
+
+    if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
+        return None
+
+    try:
+        offer = resolve_lead_monetization_offer(
+            property_id=prop_clean,
+            tool_slug=slug_clean,
+            lead_id=f"lead_{prop_clean}_blueprint",
+        )
+    except ValueError:
+        return None
+
+    regulator_name = "Internal Revenue Service (IRS)"
+    controlling_statute = offer["statutory_authority"]
+    effective_tax_year = "2026"
+    default_econ_ds = "FRED 10-Year Treasury (DGS10) and BLS CPI-U Series"
+    try:
+        from pseofactory.tenant_facts import TenantFactStore
+
+        st_truth = TenantFactStore.get_statutory_truth(prop_clean)
+        regulator_name = st_truth.regulator_name
+        controlling_statute = st_truth.controlling_statute
+        effective_tax_year = st_truth.effective_tax_year
+    except Exception:
+        if prop_clean == "prexvo":
+            regulator_name = "U.S. Department of Education (Federal Student Aid)"
+            default_econ_ds = "Federal Reserve G.19 Consumer Credit and Title IV Rate Series"
+        elif prop_clean == "gainhelm":
+            regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
+            default_econ_ds = "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Benchmarks"
+
+    trend_series = _resolve_trend_statutory_timeseries_for_workpaper(
+        property_id=prop_clean,
+        tool_slug=slug_clean,
+        offer_sku=offer["offer_sku"],
+    )
+    eff_stat = str(statutory_authority or offer["statutory_authority"]).strip()
+    eff_econ = str(economic_dataset or default_econ_ds).strip()
+
+    return {
+        "property_id": prop_clean,
+        "tool_slug": slug_clean,
+        "offer_sku": offer["offer_sku"],
+        "offer_title": offer["offer_title"],
+        "offer_price_usd": offer["offer_price_usd"],
+        "offer_price_cents": offer["offer_price_cents"],
+        "statutory_authority": eff_stat,
+        "economic_dataset": eff_econ,
+        "regulator_name": regulator_name,
+        "controlling_statute": controlling_statute,
+        "effective_tax_year": effective_tax_year,
+        "deliverables": list(offer["deliverables"]),
+        "workpaper_formats": [
+            "Print-Ready Board & Advisor Audit Workpaper (HTML/PDF)",
+            "Line-Coded Statutory Reconciliation & Sensitivity Schedule (CSV)",
+            "Tailored 2024 to 2030 Multi-Dataset Statutory Data Pack (JSON/CSV)",
+        ],
+        "trend_series_count": len(trend_series),
+        "trend_series_labels": [str(ts.get("metric_label") or "") for ts in trend_series],
+        "checkout_url": offer["checkout_url"],
+        "fulfillment_url": offer["fulfillment_url"],
+        "csv_fulfillment_url": offer["csv_fulfillment_url"],
+        "datapack_url": offer["datapack_url"],
+        "playbook_url": offer["playbook_url"],
     }
 
 
@@ -5601,6 +5694,40 @@ def synthesize_personalized_audit_workpaper(
         if mode == "paid_toolkit"
         else "PERSONALIZED SCENARIO PLAYBOOK & WORKSHEET"
     )
+    regulator_name = "Internal Revenue Service (IRS)"
+    controlling_statute = offer["statutory_authority"]
+    effective_tax_year = "2026"
+    try:
+        from pseofactory.tenant_facts import TenantFactStore
+
+        st_truth = TenantFactStore.get_statutory_truth(prop_clean)
+        regulator_name = st_truth.regulator_name
+        controlling_statute = st_truth.controlling_statute
+        effective_tax_year = st_truth.effective_tax_year
+    except Exception:
+        if prop_clean == "prexvo":
+            regulator_name = "U.S. Department of Education (Federal Student Aid)"
+        elif prop_clean == "gainhelm":
+            regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
+
+    statutory_data_pack = {
+        "pack_id": f"dp_{lead_id}",
+        "schema_version": "pseo-datapack-v1",
+        "property_id": prop_clean,
+        "tool_slug": slug_clean,
+        "offer_sku": offer["offer_sku"],
+        "offer_title": offer["offer_title"],
+        "statutory_authority": offer["statutory_authority"],
+        "regulator_name": regulator_name,
+        "controlling_statute": controlling_statute,
+        "effective_tax_year": effective_tax_year,
+        "modeled_scenario_summary": custom_parameter_ledger,
+        "reconciliation_schedule": reconciliation_schedule,
+        "sensitivity_matrix": sensitivity_matrix,
+        "longitudinal_benchmark_series": statutory_trend_timeseries,
+    }
+    datapack_url = str(offer.get("datapack_url") or f"{offer['fulfillment_url']}&format=datapack")
+
     html_report = (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         f"<title>{offer['offer_title']} ({lead_id})</title>"
@@ -5617,9 +5744,10 @@ def synthesize_personalized_audit_workpaper(
         f"<h1 style='margin:4px 0 6px;font-size:22px;'>{offer['offer_title']}</h1>"
         f"<div style='font-size:12px;color:#475569;'>Authority: {offer['statutory_authority']} | Tool: {slug_clean} | Jurisdiction: {state_code}</div>"
         "</div>"
-        "<div class='no-print' style='display:flex;gap:8px;'>"
+        "<div class='no-print' style='display:flex;gap:8px;flex-wrap:wrap;'>"
         "<button onclick='window.print()' style='background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;'>Print / Save PDF</button>"
         f"<a href='{offer['csv_fulfillment_url']}' style='background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download CSV Schedule</a>"
+        f"<a href='{datapack_url}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download Statutory Data Pack (JSON)</a>"
         "</div></div>"
         f"<div style='font-size:13px;color:#334155;margin-bottom:14px;'>Reference ID: <strong>{lead_id}</strong> | Prepared For: <strong>{email}</strong> | Modeled Principal: <strong>${base_amount:,.2f}</strong> (Band: <strong>{capital_band}</strong>)</div>"
         f"{inputs_summary_html}"
@@ -5661,12 +5789,14 @@ def synthesize_personalized_audit_workpaper(
         "scenario_outputs": raw_outputs,
         "custom_parameter_ledger": custom_parameter_ledger,
         "statutory_trend_timeseries": statutory_trend_timeseries,
+        "statutory_data_pack": statutory_data_pack,
         "reconciliation_schedule": reconciliation_schedule,
         "sensitivity_matrix": sensitivity_matrix,
         "deliverables": offer["deliverables"],
         "playbook_url": offer["playbook_url"],
         "fulfillment_url": offer["fulfillment_url"],
         "csv_fulfillment_url": offer["csv_fulfillment_url"],
+        "datapack_url": datapack_url,
         "checkout_url": offer["checkout_url"],
         "csv_content": csv_content,
         "html_report": html_report,
@@ -7443,11 +7573,17 @@ def audit_end_to_end_monetization_and_fulfillment(
             and "/tools/" in offer["success_url"]
             and "/tools/" in direct_sku_offer["success_url"]
         )
+        upgrade_spec = resolve_post_calculation_upgrade_spec(prop_id, canon_slug)
+        dp_obj = wp.get("statutory_data_pack") if isinstance(wp.get("statutory_data_pack"), dict) else {}
         fulfillment_ok = (
             wp["offer_sku"] == sku_id
             and len(wp.get("reconciliation_schedule") or []) >= 4
             and len(wp.get("sensitivity_matrix") or []) >= 3
             and len(wp.get("statutory_trend_timeseries") or []) >= 3
+            and dp_obj.get("schema_version") == "pseo-datapack-v1"
+            and len(dp_obj.get("longitudinal_benchmark_series") or []) >= 3
+            and isinstance(upgrade_spec, dict)
+            and upgrade_spec.get("offer_sku") == sku_id
             and "<!DOCTYPE html>" in str(wp.get("html_report") or "")
             and "window.print()" in str(wp.get("html_report") or "")
             and "Line Code,Statutory Line Item,Authority" in str(wp.get("csv_content") or "")
@@ -7486,9 +7622,12 @@ def audit_end_to_end_monetization_and_fulfillment(
             "price_usd": expected_price,
             "checkout_ready": checkout_ok,
             "fulfillment_ready": fulfillment_ok,
+            "datapack_ready": dp_obj.get("schema_version") == "pseo-datapack-v1",
+            "post_calc_upgrade_ready": isinstance(upgrade_spec, dict) and upgrade_spec.get("offer_sku") == sku_id,
             "success_url": offer["success_url"],
             "fulfillment_url": offer["fulfillment_url"],
             "csv_fulfillment_url": offer["csv_fulfillment_url"],
+            "datapack_url": offer["datapack_url"],
             "reconciliation_rows": len(wp.get("reconciliation_schedule") or []),
             "trend_series_count": len(wp.get("statutory_trend_timeseries") or []),
             "live_edge_probe": live_edge_probe,

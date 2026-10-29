@@ -3016,7 +3016,28 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
   const playbookUrl = `/api/lead-capture?${playQs.toString()}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}&state=${encodeURIComponent(stateCode)}`;
+  const statutoryDataPack = {
+    pack_id: `dp_${leadId}`,
+    schema_version: "pseo-datapack-v1",
+    property_id: "gainhelm",
+    tool_slug: toolSlug,
+    offer_sku: offer.sku,
+    offer_title: offer.title,
+    statutory_authority: offer.statutory_authority,
+    regulator_name: "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
+    effective_tax_year: "2026",
+    modeled_scenario_summary: {
+      calculated_amount: baseAmount,
+      state: stateCode,
+      inputs: customInputs,
+      outputs: customOutputs,
+    },
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    longitudinal_benchmark_series: statutoryTrendTimeseries,
+  };
   const csvRows = [
     "Line Code,Statutory Line Item,Authority,Baseline Value,Optimized Value,Delta Impact",
     ...reconciliationSchedule.map(
@@ -3070,6 +3091,7 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   <div class="actions">
     <button class="btn btn-primary" onclick="window.print()">Print / Save Workpaper as PDF</button>
     <a class="btn btn-secondary" href="${csvFulfillmentUrl}">Download CSV Reconciliation Schedule</a>
+    <a class="btn btn-secondary" href="${datapackUrl}">Download Statutory Data Pack (JSON)</a>
   </div>
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Unautomated Audit Scope</div><div class="kpi-val">${fmtUsd(baseAmount)}</div></div>
@@ -3126,6 +3148,7 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     reconciliation_schedule: reconciliationSchedule,
     sensitivity_matrix: sensitivityMatrix,
     statutory_trend_timeseries: statutoryTrendTimeseries,
+    statutory_data_pack: statutoryDataPack,
     custom_parameter_ledger: {
       inputs: customInputs,
       outputs: customOutputs,
@@ -3133,6 +3156,7 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     fulfillment_url: fulfillmentUrl,
     playbook_url: playbookUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
     checkout_url: checkoutUrl,
     csv_content: csvContent,
     html_report: htmlReport,
@@ -3144,6 +3168,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const playbookUrl = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const fulfillmentUrl = bundle ? bundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
+  const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@gainhelm.com";
   const stripeDisplayName = "CoachOS";
@@ -3196,6 +3221,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
           playbook_url: playbookUrl,
           fulfillment_url: fulfillmentUrl,
           csv_fulfillment_url: csvFulfillmentUrl,
+          datapack_url: datapackUrl,
           success_url: successUrl,
           cancel_url: cancelUrl,
           checkout_session_id: data.id || `cs_live_${leadId}`,
@@ -3226,6 +3252,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
     success_url: successUrl,
     cancel_url: cancelUrl,
     checkout_session_id: `cs_edge_${leadId}`,
@@ -3295,6 +3322,17 @@ export async function onRequestGet(context) {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="gainhelm_${offer.sku}_${leadId}.csv"`,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    if (fmt === "datapack" || fmt === "datapack_json") {
+      return new Response(JSON.stringify(bundle.statutory_data_pack, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="gainhelm_${offer.sku}_datapack_${leadId}.json"`,
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
           ...CORS_HEADERS,
         },
@@ -3856,6 +3894,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   const playbookUrl = `/api/lead-capture?${playbookQs.toString()}`;
   const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
 
   const statutoryTrendTimeseries = [
@@ -3933,7 +3972,8 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${PREXVO_TOOLKIT_OFFER.title}</h1>` +
     `<div style="font-size:12px;color:#475569;">Authority: ${PREXVO_TOOLKIT_OFFER.statutory_authority} | Tool: ${toolSlug} | State: ${stateCode}</div></div>` +
     `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
-    `<a href="${csvFulfillmentUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a></div></div>` +
+    `<a href="${csvFulfillmentUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a>` +
+    `<a href="${datapackUrl}" style="background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download Statutory Data Pack (JSON)</a></div></div>` +
     `<div style="font-size:13px;color:#334155;margin-bottom:14px;">Reference ID: <strong>${leadId}</strong> | Borrower: <strong>${email}</strong> | Modeled Balance: <strong>${fmtUsd(baseAmount)}</strong> (Band: <strong>${capitalBand}</strong>)</div>` +
     `<h2 style="font-size:16px;margin:18px 0 8px;">1. Personalized Amortization &amp; Protection Reconciliation Schedule</h2>` +
     `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
@@ -3943,6 +3983,20 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     `<table><thead><tr><th>Statutory Benchmark &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${trendHtml}</tbody></table>` +
     `<h2 style="font-size:16px;margin:18px 0 8px;">4. Included Audit Deliverables &amp; Verification Checklist</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
     `</div></body></html>`;
+
+  const statutoryDataPack = {
+    pack_id: `dp_${leadId}`,
+    schema_version: "pseo-datapack-v1",
+    property_id: "prexvo",
+    tool_slug: toolSlug,
+    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
+    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+    effective_tax_year: "2026",
+    modeled_scenario_summary: customParameterLedger,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    longitudinal_benchmark_series: statutoryTrendTimeseries,
+  };
 
   return {
     workpaper_id: `wp_${leadId}`,
@@ -3963,10 +4017,12 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     reconciliation_schedule: reconciliationSchedule,
     sensitivity_matrix: sensitivityMatrix,
     statutory_trend_timeseries: statutoryTrendTimeseries,
+    statutory_data_pack: statutoryDataPack,
     deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
     checkout_url: checkoutUrl,
     csv_content: csvContent,
     html_report: htmlReport,
@@ -4067,6 +4123,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = "arif.coskun@profithelm.com";
   const stripeDisplayName = "CoachOS";
@@ -4093,6 +4150,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       playbook_url: playbookUrl,
       fulfillment_url: fulfillmentUrl,
       csv_fulfillment_url: csvFulfillmentUrl,
+      datapack_url: datapackUrl,
       success_url: successUrl,
       cancel_url: cancelUrl,
       checkout_session_id: `cs_edge_${leadId}`,
@@ -4164,6 +4222,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         playbook_url: playbookUrl,
         fulfillment_url: fulfillmentUrl,
         csv_fulfillment_url: csvFulfillmentUrl,
+        datapack_url: datapackUrl,
         success_url: successUrl,
         cancel_url: cancelUrl,
         checkout_session_id: data.id || `cs_live_${leadId}`,
@@ -4207,6 +4266,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
     success_url: successUrl,
     cancel_url: cancelUrl,
     checkout_session_id: `cs_edge_${leadId}`,
@@ -4433,6 +4493,17 @@ export async function onRequestGet(context) {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="prexvo_${bundle.offer_sku}_${leadId}.csv"`,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    if (fmt === "datapack" || fmt === "datapack_json") {
+      return new Response(JSON.stringify(bundle.statutory_data_pack, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="prexvo_datapack_${bundle.offer_sku}_${leadId}.json"`,
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
           ...CORS_HEADERS,
         },
@@ -5247,6 +5318,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   const playbookUrl = `/api/lead-capture?${playbookQs.toString()}`;
   const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
 
   let statutoryTrendTimeseries = [];
@@ -5396,7 +5468,8 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${effSpec.offerTitle}</h1>` +
     `<div style="font-size:12px;color:#475569;">Authority: ${effSpec.statutoryAuthority} | Tool: ${toolSlug} | Jurisdiction: ${stateCode}</div></div>` +
     `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
-    `<a href="${csvFulfillmentUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a></div></div>` +
+    `<a href="${csvFulfillmentUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a>` +
+    `<a href="${datapackUrl}" style="background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download Statutory Data Pack (JSON)</a></div></div>` +
     `<div style="font-size:13px;color:#334155;margin-bottom:14px;">Reference ID: <strong>${leadId}</strong> | Prepared For: <strong>${email}</strong> | Modeled Principal: <strong>${fmtUsd(baseAmount)}</strong> (Band: <strong>${capitalBand}</strong>)</div>` +
     `<h2 style="font-size:16px;margin:18px 0 8px;">1. Personalized Statutory Reconciliation Schedule</h2>` +
     `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
@@ -5406,6 +5479,20 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     `<table><thead><tr><th>Statutory Benchmark &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${trendHtml}</tbody></table>` +
     `<h2 style="font-size:16px;margin:18px 0 8px;">4. Included Audit Workpaper Deliverables &amp; Next Actions</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
     `</div></body></html>`;
+
+  const statutoryDataPack = {
+    pack_id: `dp_${leadId}`,
+    schema_version: "pseo-datapack-v1",
+    property_id: "profithelm",
+    tool_slug: toolSlug,
+    offer_sku: effSpec.offerSku,
+    statutory_authority: effSpec.statutoryAuthority,
+    effective_tax_year: "2026",
+    modeled_scenario_summary: customParameterLedger,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    longitudinal_benchmark_series: statutoryTrendTimeseries,
+  };
 
   return {
     workpaper_id: `wp_${leadId}`,
@@ -5426,10 +5513,12 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     reconciliation_schedule: reconciliationSchedule,
     sensitivity_matrix: sensitivityMatrix,
     statutory_trend_timeseries: statutoryTrendTimeseries,
+    statutory_data_pack: statutoryDataPack,
     deliverables: effSpec.deliverables,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
     checkout_url: checkoutUrl,
     csv_content: csvContent,
     html_report: htmlReport,
@@ -5530,6 +5619,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
+  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = "arif.coskun@profithelm.com";
   const stripeDisplayName = "CoachOS";
@@ -5556,6 +5646,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       playbook_url: playbookUrl,
       fulfillment_url: fulfillmentUrl,
       csv_fulfillment_url: csvFulfillmentUrl,
+      datapack_url: datapackUrl,
       success_url: successUrl,
       cancel_url: cancelUrl,
       checkout_session_id: `cs_edge_${leadId}`,
@@ -5627,6 +5718,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         playbook_url: playbookUrl,
         fulfillment_url: fulfillmentUrl,
         csv_fulfillment_url: csvFulfillmentUrl,
+        datapack_url: datapackUrl,
         success_url: successUrl,
         cancel_url: cancelUrl,
         checkout_session_id: data.id || `cs_live_${leadId}`,
@@ -5670,6 +5762,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
     success_url: successUrl,
     cancel_url: cancelUrl,
     checkout_session_id: `cs_edge_${leadId}`,
@@ -5894,6 +5987,17 @@ export async function onRequestGet(context) {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="profithelm_${bundle.offer_sku}_${leadId}.csv"`,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
+    if (fmt === "datapack" || fmt === "datapack_json") {
+      return new Response(JSON.stringify(bundle.statutory_data_pack, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="profithelm_datapack_${bundle.offer_sku}_${leadId}.json"`,
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
           ...CORS_HEADERS,
         },

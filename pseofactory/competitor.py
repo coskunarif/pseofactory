@@ -4430,6 +4430,130 @@ def render_partner_quote_intake_html(
     )
 
 
+def render_post_calculation_upgrade_drawer_html(
+    slug: str,
+    property_id: str = "profithelm",
+    topic_label: str = "",
+    statutory_authority: str = "",
+    economic_dataset: str = "",
+    baseline_amount: Optional[float] = None,
+) -> str:
+    """
+    Renders the unified, non-intrusive Post-Calculation Workpaper Export & Tailored Statutory Data Pack
+    upgrade drawer (#post-calculation-upgrade-drawer) inside the post-calculation Decision Blueprint.
+    Strictly returns an empty string on restricted YMYL public-service pages (PSLF, IBR hardship,
+    SAVE litigation, disclaimers, methodology) so public-service pages stay 100% free of commercial
+    checkout triggers.
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    from pseofactory.partner_tracker import resolve_post_calculation_upgrade_spec
+
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    slug_clean = str(slug or "index").strip().strip("/").lower() or "index"
+    spec = resolve_post_calculation_upgrade_spec(
+        property_id=prop_clean,
+        tool_slug=slug_clean,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+    )
+    if not spec:
+        return ""
+
+    default_amt = baseline_amount
+    if default_amt is None:
+        if prop_clean == "prexvo":
+            default_amt = 68500.0
+        elif prop_clean == "gainhelm":
+            default_amt = 58200.0
+        elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
+            default_amt = 85000.0
+        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
+            default_amt = 450000.0
+        else:
+            default_amt = 125000.0
+
+    amt_int = int(round(float(default_amt)))
+    amt_fmt = f"${amt_int:,}"
+    offer_sku = str(spec["offer_sku"])
+    offer_title = str(spec["offer_title"])
+    price_int = int(round(float(spec["offer_price_usd"])))
+    eff_stat = str(spec["statutory_authority"])
+    regulator_name = str(spec["regulator_name"])
+    trend_count = int(spec["trend_series_count"])
+    trend_labels = [lbl for lbl in spec.get("trend_series_labels", []) if lbl]
+    trend_preview = ", ".join(trend_labels[:2]) if trend_labels else "2024 to 2030 Statutory Benchmark Series"
+    checkout_url = (
+        f'/api/lead-capture?checkout=1&amp;sku={offer_sku}'
+        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
+    )
+    datapack_url = (
+        f'/api/lead-capture?fulfill=1&amp;sku={offer_sku}'
+        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;format=datapack'
+    )
+    deliverables = list(spec.get("deliverables") or [])
+    deliv_1 = deliverables[0] if len(deliverables) > 0 else "Line-coded statutory reconciliation schedule (HTML/PDF & CSV)"
+    deliv_2 = deliverables[1] if len(deliverables) > 1 else "Multi-scenario stress-test sensitivity matrix"
+
+    if prop_clean == "prexvo":
+        is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
+        if not is_explicit_refi:
+            offer_title = "Prexvo Title IV Repayment & Amortization Decision Audit Kit"
+        badge_text = "Post-Calculation Borrower & Advisor Deliverable"
+        pillar_1_title = "1. Personalized Loan Audit Workpaper (HTML/PDF + CSV)"
+        pillar_2_title = f"2. Tailored Title IV & Rate Data Pack ({trend_count} Series, 2024 to 2030)"
+    elif prop_clean == "gainhelm":
+        badge_text = "Post-Calculation Board, CISO & Assessor Deliverable"
+        pillar_1_title = "1. Personalized Audit Readiness Workpaper (HTML/PDF + CSV)"
+        pillar_2_title = f"2. Tailored Multi-Framework Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
+    else:
+        badge_text = "Post-Calculation CPA, CFO & Tax Committee Deliverable"
+        pillar_1_title = "1. Personalized Statutory Tax Workpaper (HTML/PDF + CSV)"
+        pillar_2_title = f"2. Tailored IRS & Macroeconomic Data Pack ({trend_count} Series, 2024 to 2030)"
+
+    return (
+        f'        <div id="post-calculation-upgrade-drawer" class="post-calc-upgrade-drawer" '
+        f'data-mechanic="post_calculation_workpaper_upgrade" '
+        f'data-property-id="{prop_clean}" '
+        f'data-tool-slug="{slug_clean}" '
+        f'data-offer-sku="{offer_sku}" '
+        f'data-offer-price="{price_int}" '
+        f'data-calculated-amount="{amt_int}" '
+        f'data-datapack-url="{datapack_url}">\n'
+        f'          <div class="post-calc-upgrade-header">\n'
+        f'            <span class="post-calc-upgrade-badge">{badge_text}</span>\n'
+        f'            <h4 class="post-calc-upgrade-title">{offer_title} (${price_int} One-Time Package)</h4>\n'
+        f'            <p id="post-calc-upgrade-live-summary" class="post-calc-upgrade-summary">'
+        f'Package your active <strong>{amt_fmt}</strong> scenario into a board-ready audit workpaper and machine-readable '
+        f'statutory data pack cited to <strong>{eff_stat}</strong> ({regulator_name}).</p>\n'
+        f'          </div>\n'
+        f'          <div class="post-calc-upgrade-pillars">\n'
+        f'            <div class="post-calc-upgrade-pillar">\n'
+        f'              <div class="post-calc-pillar-heading">{pillar_1_title}</div>\n'
+        f'              <p class="post-calc-pillar-copy">{deliv_1}; {deliv_2}; bound directly to your live calculator inputs.</p>\n'
+        f'            </div>\n'
+        f'            <div class="post-calc-upgrade-pillar">\n'
+        f'              <div class="post-calc-pillar-heading">{pillar_2_title}</div>\n'
+        f'              <p class="post-calc-pillar-copy">Structured JSON and CSV statutory tables covering {trend_preview} for offline spreadsheet modeling.</p>\n'
+        f'            </div>\n'
+        f'          </div>\n'
+        f'          <div class="post-calc-upgrade-actions" role="group" aria-label="Post-Calculation Workpaper and Data Pack Actions">\n'
+        f'            <a id="btn-post-calc-upgrade-checkout" href="{checkout_url}" '
+        f'class="touch-target btn-primary post-calc-upgrade-btn" '
+        f'data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{price_int}" '
+        f'data-cta-slot="post_calc_workpaper_upgrade_cta" '
+        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; padding: 10px 18px; border-radius: 8px; font-weight: 700; font-size: 14px; text-decoration: none; cursor: pointer;">'
+        f'Export Audit Workpaper &amp; Statutory Data Pack (${price_int})</a>\n'
+        f'            <button type="button" id="btn-preview-post-calc-workpaper" '
+        f'class="touch-target btn-preset serp-blueprint-btn" '
+        f'data-blueprint-action="preview_workpaper" data-cta-slot="preview_workpaper_cta" '
+        f'style="min-height: 48px; min-width: 48px; padding: 10px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer;">'
+        f'Preview Personalized Schedule &amp; Data Pack</button>\n'
+        f'          </div>\n'
+        f'          <div id="post-calc-workpaper-preview-slot" class="post-calc-preview-slot" aria-live="polite"></div>\n'
+        f'        </div>'
+    )
+
+
 def _render_saveable_decision_blueprint_html(
     slug: str,
     topic_label: str = "",
@@ -4437,17 +4561,29 @@ def _render_saveable_decision_blueprint_html(
     economic_dataset: str = "",
     is_prexvo: bool = False,
     is_gainhelm: bool = False,
+    property_id: str = "",
 ) -> str:
-    """Renders the saveable decision blueprint bar with localStorage persistence, deep-link URL sync, and JSON export."""
+    """Renders the saveable decision blueprint bar with localStorage persistence, deep-link URL sync, JSON export, and post-calculation workpaper upgrade drawer."""
     if is_prexvo:
         reviewer_label = "borrower or financial aid review"
         eff_stat = statutory_authority or "34 CFR Part 685 and Higher Education Act Title IV"
+        eff_prop = property_id or "prexvo"
     elif is_gainhelm:
         reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
         eff_stat = statutory_authority or "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
+        eff_prop = property_id or "gainhelm"
     else:
         reviewer_label = "CPA or advisor review"
         eff_stat = statutory_authority or "26 U.S.C. Internal Revenue Code"
+        eff_prop = property_id or "profithelm"
+    upgrade_drawer_html = render_post_calculation_upgrade_drawer_html(
+        slug=slug,
+        property_id=eff_prop,
+        topic_label=topic_label,
+        statutory_authority=eff_stat,
+        economic_dataset=economic_dataset,
+    )
+    upgrade_block = f"\n{upgrade_drawer_html}" if upgrade_drawer_html else ""
     return (
         f'      <div id="saveable-decision-blueprint" class="serp-decision-blueprint" data-mechanic="saveable_decision_blueprint" data-blueprint-slug="{slug}">\n'
         f'        <h3 style="margin-top: 20px; margin-bottom: 8px;">Saveable Decision Blueprint &amp; Audit-Ready State Export</h3>\n'
@@ -4457,7 +4593,8 @@ def _render_saveable_decision_blueprint_html(
         f'          <button type="button" id="btn-copy-blueprint-link" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="share_blueprint_cta" data-blueprint-action="share">Copy Shareable Blueprint Link</button>\n'
         f'          <button type="button" id="btn-export-blueprint-json" class="touch-target btn-preset serp-blueprint-btn" data-cta-slot="export_blueprint_cta" data-blueprint-action="export">Export JSON Decision Blueprint</button>\n'
         f'        </div>\n'
-        f'        <div id="blueprint-status-readout" class="serp-blueprint-status" aria-live="polite" style="font-size: 13px; color: var(--text-secondary, #64748b); margin-top: 8px;">Blueprint state ready: deterministic server-rendered baseline loaded ({topic_label}).</div>\n'
+        f'        <div id="blueprint-status-readout" class="serp-blueprint-status" aria-live="polite" style="font-size: 13px; color: var(--text-secondary, #64748b); margin-top: 8px;">Blueprint state ready: deterministic server-rendered baseline loaded ({topic_label}).</div>'
+        f'{upgrade_block}\n'
         f'      </div>'
     )
 

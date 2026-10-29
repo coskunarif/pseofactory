@@ -864,6 +864,69 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       color: var(--accent);
       margin-bottom: 4px;
     }
+    .post-calc-upgrade-drawer {
+      margin-top: 14px;
+      padding: 16px 18px;
+      border-radius: 10px;
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      border-left: 4px solid var(--accent);
+      max-width: 100%;
+    }
+    .post-calc-upgrade-drawer[data-upgrade-highlighted="true"] {
+      border-color: var(--accent);
+    }
+    .post-calc-upgrade-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .post-calc-upgrade-title {
+      margin: 4px 0 6px 0;
+      font-size: 15px !important;
+      font-weight: 700 !important;
+      color: var(--text);
+    }
+    .post-calc-upgrade-summary {
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--text-secondary, #475569);
+      margin: 0 0 12px 0;
+    }
+    .post-calc-upgrade-pillars {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .post-calc-upgrade-pillar {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background-color: var(--bg-inset);
+      border: 1px solid var(--border);
+    }
+    .post-calc-pillar-heading {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .post-calc-pillar-copy {
+      font-size: 12.5px;
+      line-height: 1.45;
+      color: var(--text-secondary, #475569);
+      margin: 0;
+    }
+    .post-calc-upgrade-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
     @media (max-width: 640px) {
       body {
         padding-left: 12px;
@@ -1766,6 +1829,29 @@ def _render_runtime_sync_events_js() -> str:
             if (qNote) qNote.style.display = "block";
           }
         }
+        var upgradeDrawer = document.getElementById("post-calculation-upgrade-drawer");
+        if (upgradeDrawer) {
+          var uBaseAmt = (!isNaN(numVal) && numVal > 0) ? Math.round(numVal) : (parseInt(upgradeDrawer.getAttribute("data-calculated-amount") || "0", 10) || 0);
+          if (uBaseAmt > 0) {
+            upgradeDrawer.setAttribute("data-calculated-amount", String(uBaseAmt));
+            var uSku = upgradeDrawer.getAttribute("data-offer-sku") || "";
+            var uSlug = upgradeDrawer.getAttribute("data-tool-slug") || slug;
+            var uChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
+            if (uChkBtn && uSku) {
+              uChkBtn.setAttribute("href", "/api/lead-capture?checkout=1&sku=" + encodeURIComponent(uSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&redirect=1");
+            }
+            if (uSku) {
+              upgradeDrawer.setAttribute("data-datapack-url", "/api/lead-capture?fulfill=1&sku=" + encodeURIComponent(uSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&format=datapack");
+            }
+            var uSumEl = document.getElementById("post-calc-upgrade-live-summary");
+            if (uSumEl) {
+              var firstStrong = uSumEl.querySelector("strong");
+              if (firstStrong && firstStrong.textContent && firstStrong.textContent.indexOf("$") === 0) {
+                firstStrong.textContent = "$" + uBaseAmt.toLocaleString("en-US");
+              }
+            }
+          }
+        }
       } catch (err) {}
     }
 
@@ -1992,6 +2078,15 @@ def _render_runtime_sync_events_js() -> str:
           csvLink.textContent = "Download CSV Reconciliation Schedule";
           linksRow.appendChild(csvLink);
         }
+        var dpUrl = data.datapack_url ? String(data.datapack_url) : (data.fulfillment_url ? (String(data.fulfillment_url) + "&format=datapack") : "");
+        if (dpUrl) {
+          var dpLink = document.createElement("a");
+          dpLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-datapack-link" : "playbook-datapack-link";
+          dpLink.href = dpUrl;
+          dpLink.style.cssText = "font-weight:700;color:#7c3aed;text-decoration:underline;";
+          dpLink.textContent = "Download Statutory Data Pack (JSON)";
+          linksRow.appendChild(dpLink);
+        }
         panel.appendChild(linksRow);
         parentContainer.appendChild(panel);
       } catch (e) {}
@@ -2005,12 +2100,17 @@ def _render_runtime_sync_events_js() -> str:
         var leadId = qs.get("lead_id") || "lead_verified";
         var sku = qs.get("sku") || "";
         var slug = resolveCurrentToolSlug();
-        var hostTarget = document.getElementById("partner-quote-intake-step") || document.getElementById("lead-capture-form") || document.querySelector("main");
+        var hostTarget = document.getElementById("partner-quote-intake-step") || document.getElementById("post-calculation-upgrade-drawer") || document.getElementById("lead-capture-form") || document.querySelector("main");
         if (!hostTarget) return;
+        var upgDrawer = document.getElementById("post-calculation-upgrade-drawer");
+        if (upgDrawer) {
+          upgDrawer.setAttribute("data-checkout-status", "fulfilled");
+        }
         var fulfillBase = "/api/lead-capture?fulfill=1&lead_id=" + encodeURIComponent(leadId) + "&sku=" + encodeURIComponent(sku) + "&tool_slug=" + encodeURIComponent(slug);
         renderPlaybookAndFulfillmentDrawer(hostTarget, {
           fulfillment_url: fulfillBase,
           csv_fulfillment_url: fulfillBase + "&format=csv",
+          datapack_url: fulfillBase + "&format=datapack",
           reconciliation_schedule: []
         }, "checkout_fulfill");
         if (typeof fetch === "function") {
@@ -2021,6 +2121,7 @@ def _render_runtime_sync_events_js() -> str:
                 renderPlaybookAndFulfillmentDrawer(hostTarget, {
                   fulfillment_url: data.fulfillment_url || fulfillBase,
                   csv_fulfillment_url: data.csv_fulfillment_url || (fulfillBase + "&format=csv"),
+                  datapack_url: data.datapack_url || (fulfillBase + "&format=datapack"),
                   reconciliation_schedule: data.reconciliation_schedule
                 }, "checkout_fulfill");
               }
@@ -2220,7 +2321,7 @@ def _render_runtime_sync_events_js() -> str:
                 chkBtn.setAttribute("data-checkout-session-id", sessId);
                 chkBtn.setAttribute("data-checkout-mode", cMode);
                 chkBtn.textContent = "Checkout Ready (" + sessId + ")";
-                var parentStep = chkBtn.closest("#partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
+                var parentStep = chkBtn.closest("#post-calculation-upgrade-drawer, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                   parentStep.setAttribute("data-checkout-session-id", sessId);
@@ -2335,6 +2436,52 @@ def _render_runtime_sync_events_js() -> str:
             if (statusEl) {
               statusEl.textContent = "Blueprint Status: Exported audit-ready JSON decision blueprint (" + bpState.slug + "-decision-blueprint.json).";
             }
+          } else if (act === "preview_workpaper") {
+            var upgRoot = document.getElementById("post-calculation-upgrade-drawer");
+            var previewHost = document.getElementById("post-calc-workpaper-preview-slot") || upgRoot || bpRoot;
+            var uSku = upgRoot ? (upgRoot.getAttribute("data-offer-sku") || "") : "";
+            var uAmt = bpState.calculated_amount > 0 ? Math.round(bpState.calculated_amount) : (upgRoot ? (parseInt(upgRoot.getAttribute("data-calculated-amount") || "100000", 10) || 100000) : 100000);
+            var pbBase = "/api/lead-capture?playbook=1&tool_slug=" + encodeURIComponent(bpState.slug) + "&amount=" + encodeURIComponent(String(uAmt));
+            var ffBase = "/api/lead-capture?fulfill=1&sku=" + encodeURIComponent(uSku) + "&tool_slug=" + encodeURIComponent(bpState.slug) + "&amount=" + encodeURIComponent(String(uAmt));
+            if (bpState.inputs && Object.keys(bpState.inputs).length > 0) {
+              var inpEnc = encodeURIComponent(JSON.stringify(bpState.inputs).slice(0, 600));
+              pbBase += "&inputs_json=" + inpEnc;
+              ffBase += "&inputs_json=" + inpEnc;
+            }
+            if (previewHost) {
+              renderPlaybookAndFulfillmentDrawer(previewHost, {
+                playbook_url: pbBase,
+                fulfillment_url: ffBase,
+                csv_fulfillment_url: ffBase + "&format=csv",
+                datapack_url: ffBase + "&format=datapack",
+                reconciliation_schedule: []
+              }, "playbook");
+            }
+            if (typeof window.fetch === "function") {
+              var pbHeaders = { "Accept": "application/json" };
+              if (window.__PSEO_SYNTHETIC_TEST__) pbHeaders["X-Pseofactory-Test"] = "1";
+              window.fetch(pbBase, { method: "GET", headers: pbHeaders })
+                .then(function(r) { return r && r.ok ? r.json() : null; })
+                .then(function(pData) {
+                  if (pData && previewHost) {
+                    renderPlaybookAndFulfillmentDrawer(previewHost, {
+                      playbook_url: pData.playbook_url || pbBase,
+                      fulfillment_url: pData.fulfillment_url || ffBase,
+                      csv_fulfillment_url: pData.csv_fulfillment_url || (ffBase + "&format=csv"),
+                      datapack_url: pData.datapack_url || (ffBase + "&format=datapack"),
+                      reconciliation_schedule: Array.isArray(pData.reconciliation_schedule) ? pData.reconciliation_schedule : []
+                    }, "playbook");
+                  }
+                })
+                .catch(function() {});
+            }
+            if (statusEl) {
+              statusEl.textContent = "Blueprint Status: Personalized workpaper schedule and statutory data pack preview loaded.";
+            }
+          }
+          var upgHighlight = document.getElementById("post-calculation-upgrade-drawer");
+          if (upgHighlight) {
+            upgHighlight.setAttribute("data-upgrade-highlighted", "true");
           }
           syncOutboundAffiliateLinks();
           emitWorkbenchEngagementBeacon("blueprint_" + act, "calculator_result_inline", { blueprint_action: act, param_count: Object.keys(bpState.inputs).length });
@@ -3739,6 +3886,65 @@ def _repair_html_tags_pass(updated: str) -> Tuple[str, set[str]]:
     return re.sub(r"<([a-zA-Z0-9]+)\b[^>]*>", _repair_html_tag, updated), tag_repairs
 
 
+def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]:
+    """
+    Injects #post-calculation-upgrade-drawer inside #saveable-decision-blueprint
+    on eligible commercial calculator pages that have #partner-quote-intake-step.
+    Strictly preserves YMYL public-service pages free of commercial offers.
+    """
+    if (
+        'id="partner-quote-intake-step"' not in updated
+        or 'id="saveable-decision-blueprint"' not in updated
+        or 'id="post-calculation-upgrade-drawer"' in updated
+    ):
+        return updated, False
+
+    from pseofactory.competitor import render_post_calculation_upgrade_drawer_html
+
+    q_match = re.search(r'<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*>', updated, re.IGNORECASE)
+    q_tag = q_match.group(0) if q_match else ""
+    prop_id = (_extract_attr(q_tag, "data-property-id") or "").strip().lower()
+    if not prop_id:
+        if "https://prexvo.com" in updated or "prexvo.com" in updated:
+            prop_id = "prexvo"
+        elif "https://gainhelm.com" in updated or "gainhelm.com" in updated:
+            prop_id = "gainhelm"
+        else:
+            prop_id = "profithelm"
+
+    bp_match = re.search(r'<div\b[^>]*id=["\']saveable-decision-blueprint["\'][^>]*>', updated, re.IGNORECASE)
+    bp_tag = bp_match.group(0) if bp_match else ""
+    tool_slug = (
+        _extract_attr(q_tag, "data-tool-slug")
+        or _extract_attr(bp_tag, "data-blueprint-slug")
+        or "index"
+    ).strip().lower()
+    raw_amt = _extract_attr(q_tag, "data-calculated-amount") or ""
+    try:
+        calc_amt: Optional[float] = float(raw_amt) if raw_amt else None
+    except ValueError:
+        calc_amt = None
+
+    drawer_html = render_post_calculation_upgrade_drawer_html(
+        slug=tool_slug,
+        property_id=prop_id,
+        baseline_amount=calc_amt,
+    )
+    if not drawer_html:
+        return updated, False
+
+    injected, n_sub = re.subn(
+        r'(<div\b[^>]*id=["\']blueprint-status-readout["\'][^>]*>[\s\S]*?</div>)',
+        lambda m: m.group(1) + "\n" + drawer_html,
+        updated,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if n_sub > 0 and injected != updated:
+        return injected, True
+    return updated, False
+
+
 def normalize_html_visual_primitives(
     html_content: str,
     is_tenant_porcelain: Optional[bool] = None,
@@ -3812,6 +4018,7 @@ def normalize_html_visual_primitives(
             or any(tok not in prim_body for tok in REQUIRED_PRIMITIVE_TOKENS)
             or ".serp-depth-workbench" not in prim_body
             or ".partner-quote-intake-drawer" not in prim_body
+            or ".post-calc-upgrade-drawer" not in prim_body
             or ".tool-header.hero-section" not in prim_body
             or has_token_inversion
         )
@@ -4015,6 +4222,11 @@ def normalize_html_visual_primitives(
         )
         repaired.append("playbook_lead_capture_form")
 
+    # 5h2. Ensure every commercial calculator page with #partner-quote-intake-step and #saveable-decision-blueprint exposes #post-calculation-upgrade-drawer
+    updated, injected_post_calc_upgrade = _inject_post_calc_workpaper_upgrade_drawer(updated)
+    if injected_post_calc_upgrade:
+        repaired.append("post_calculation_workpaper_upgrade")
+
     # 5i. Surface above-the-fold scenario preset chips (<=680px viewport salience) when buried below fold
     if 'data-above-fold-presets="true"' not in updated and "data-calc-preset" in updated:
         main_pos = updated.find("<main")
@@ -4100,6 +4312,7 @@ def normalize_html_visual_primitives(
                 or "renderPlaybookAndFulfillmentDrawer" not in sync_body
                 or "qThreshAmt" not in sync_body
                 or "data-checkout-trigger" not in sync_body
+                or "post-calculation-upgrade-drawer" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
                 or "remBasis * 0.80" in sync_body
