@@ -8546,6 +8546,7 @@ def evaluate_x_like_2107194110046060952_capability_matrix(
         for t_id, r_path in (
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
         ):
             if r_path.is_dir():
                 rep = audit_gsc_cron_cohort_and_cooldown_stability(

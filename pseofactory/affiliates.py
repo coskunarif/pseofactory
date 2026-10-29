@@ -5205,7 +5205,31 @@ def normalize_html_callout_message_match(
     def _effective_dom_status(pk: str, p_obj: Optional[AffiliatePartner]) -> str:
         if (
             (p_obj and p_obj.status == "live")
-            or pk in ("crest_capital", "rippling", "mercury", "gusto", "coinledger", "koinly", "kalshi", "ipx1031", "turbotax", "taxslayer", "suretybonds_direct", "splash_financial", "sofi", "earnest", "credible", "lendkey")
+            or pk in (
+                "crest_capital",
+                "rippling",
+                "mercury",
+                "gusto",
+                "coinledger",
+                "koinly",
+                "kalshi",
+                "ipx1031",
+                "turbotax",
+                "taxslayer",
+                "suretybonds_direct",
+                "splash_financial",
+                "sofi",
+                "earnest",
+                "credible",
+                "lendkey",
+                "vanta_security",
+                "drata_compliance",
+                "sprinto_compliance",
+                "thoropass_audit",
+                "secureframe_grc",
+                "coalition_cyber_insurance",
+                "cobalt_pentest",
+            )
             or SOVRN_VERIFIED_PAYING_MERCHANTS.get(pk, {}).get("is_direct")
         ):
             return "live"

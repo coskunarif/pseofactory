@@ -2931,6 +2931,56 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 if ci_yml_path.read_text(encoding="utf-8") != desired_px_ci:
                     ci_yml_path.write_text(desired_px_ci, encoding="utf-8")
                     updated_files.append(str(ci_yml_path))
+            elif (repo / "gainhelm").is_dir():
+                desired_gh_ci = (
+                    "name: GainHelm CI Quality Gate\n\n"
+                    "on:\n"
+                    "  push:\n"
+                    "    branches: [ master, main ]\n"
+                    "  pull_request:\n"
+                    "    branches: [ master, main ]\n"
+                    "  workflow_dispatch:\n\n"
+                    "concurrency:\n"
+                    "  group: ${{ github.workflow }}-${{ github.ref }}\n"
+                    "  cancel-in-progress: true\n\n"
+                    "jobs:\n"
+                    "  test_and_audit:\n"
+                    "    name: Build, Test & Craftsmanship Audit\n"
+                    "    runs-on: self-hosted\n\n"
+                    "    steps:\n"
+                    "      - name: Checkout Repository\n"
+                    "        uses: actions/checkout@v4\n\n"
+                    "      - name: Verify Compiled Static Distribution & Statutory Audit\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                    "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
+                    "          if [ -d /home/ubuntuadmin/projects/gainhelm/dist ] && [ -f /home/ubuntuadmin/projects/gainhelm/dist/catalog.json ]; then\n"
+                    "            cp -rf /home/ubuntuadmin/projects/gainhelm/dist/. dist/\n"
+                    "          elif [ ! -f dist/index.html ]; then\n"
+                    "            python3 -m gainhelm.cli build\n"
+                    "          elif [ ! -f dist/catalog.json ]; then\n"
+                    "            python3 -m gainhelm.cli build\n"
+                    "          fi\n"
+                    "          python3 -m gainhelm.cli audit\n\n"
+                    "      - name: Execute Full Test Suite\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
+                    "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
+                    "          pytest tests/ -q\n\n"
+                    "      - name: Deploy to Cloudflare Pages Edge\n"
+                    "        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')\n"
+                    "        env:\n"
+                    "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
+                    "        run: |\n"
+                    "          export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          if [ -f /home/ubuntuadmin/.config/.wrangler/config/default.toml ]; then\n"
+                    "            unset CLOUDFLARE_API_TOKEN\n"
+                    "          fi\n"
+                    "          npx wrangler pages deploy dist --project-name gainhelm --branch main --commit-dirty=true\n"
+                )
+                if ci_yml_path.read_text(encoding="utf-8") != desired_gh_ci:
+                    ci_yml_path.write_text(desired_gh_ci, encoding="utf-8")
+                    updated_files.append(str(ci_yml_path))
             if (
                 (repo / ".git").exists()
                 and (repo / "dist" / "catalog.json").is_file()

@@ -2705,6 +2705,33 @@ _B2B_ADJACENT_TOOL_METADATA: Dict[str, Dict[str, str]] = {
     },
 }
 
+GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
+    "cmmc-level-2-audit-cost-calculator": {
+        "canonical_slug": "cmmc-2-0-compliance-cost-calculator",
+        "redirect_target": "/tools/cmmc-2-0-compliance-cost-calculator/",
+    },
+    "penetration-testing-cost-estimator": {
+        "canonical_slug": "penetration-testing-scoping-cost-calculator",
+        "redirect_target": "/tools/penetration-testing-scoping-cost-calculator/",
+    },
+    "cyber-liability-insurance-premium-calculator": {
+        "canonical_slug": "cyber-liability-insurance-breach-exposure-calculator",
+        "redirect_target": "/tools/cyber-liability-insurance-breach-exposure-calculator/",
+    },
+    "fedramp-authorization-cost-calculator": {
+        "canonical_slug": "fedramp-authorization-3pao-cost-calculator",
+        "redirect_target": "/tools/fedramp-authorization-3pao-cost-calculator/",
+    },
+    "pci-dss-4-0-compliance-audit-cost-calculator": {
+        "canonical_slug": "pci-dss-4-0-compliance-cost-calculator",
+        "redirect_target": "/tools/pci-dss-4-0-compliance-cost-calculator/",
+    },
+    "hitrust-certification-cost-roi-calculator": {
+        "canonical_slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+        "redirect_target": "/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/",
+    },
+}
+
 
 def is_retired_or_consolidated_slug(slug: str, property_id: Optional[str] = None) -> bool:
     """Returns True if slug is a consolidated clone, retired redirect source, or synthetic test fixture."""
@@ -2716,6 +2743,10 @@ def is_retired_or_consolidated_slug(slug: str, property_id: Optional[str] = None
     prop = str(property_id or "").strip().lower()
     if prop == "prexvo":
         return s in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP or s == "loans"
+    if prop == "gainhelm":
+        return s in GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP or any(
+            t in s for t in _GAINHELM_PRE_PIVOT_TERMS
+        )
     if prop == "profithelm":
         return (
             s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
@@ -2725,6 +2756,7 @@ def is_retired_or_consolidated_slug(slug: str, property_id: Optional[str] = None
     return (
         s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
         or s in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        or s in GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
         or f"/tools/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
         or f"/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
     )
@@ -3400,13 +3432,21 @@ def reconcile_tenant_topical_authority_and_cannibalization(
     clone_map = (
         PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
         if prop == "prexvo"
-        else CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        else (
+            GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+            if prop == "gainhelm"
+            else CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        )
     )
 
     if prop != "profithelm":
-        prexvo_purge_slugs = set(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | {"query-two-buildable", "loans"}
+        tenant_purge_slugs = (
+            (set(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | {"query-two-buildable", "loans"})
+            if prop == "prexvo"
+            else (set(GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP.keys()) | {"query-two-buildable"})
+        )
         if eff_dist.is_dir():
-            for purge_slug in sorted(prexvo_purge_slugs):
+            for purge_slug in sorted(tenant_purge_slugs):
                 if purge_slug == "loans":
                     continue
                 stale_tool_dir = eff_dist / "tools" / purge_slug
@@ -3422,7 +3462,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
         summary["stale_syndication_removed"] += _clean_syndication_directories_and_ledgers(
             root=root,
             prop=prop,
-            slugs_to_purge=prexvo_purge_slugs,
+            slugs_to_purge=tenant_purge_slugs,
         )
         agy_ov = root / ".agy" / "overlays"
         cnt_ov = root / "content" / "overlays"
@@ -3434,7 +3474,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
             for ov_dir in (agy_ov, cnt_ov):
                 if not ov_dir.is_dir():
                     continue
-                for purge_slug in sorted(prexvo_purge_slugs):
+                for purge_slug in sorted(tenant_purge_slugs):
                     ov_f = ov_dir / f"{purge_slug}.json"
                     if ov_f.is_file():
                         try:
@@ -3875,11 +3915,11 @@ _DEFAULT_GAINHELM_CORE_TOOLS: List[Dict[str, Any]] = [
     {"slug": "nist-800-171-sprs-score-calculator", "primary_keyword": "nist 800-171 sprs score calculator"},
     {"slug": "iso-27001-certification-cost-calculator", "primary_keyword": "iso 27001 certification cost calculator"},
     {"slug": "hipaa-violation-penalty-breach-cost-calculator", "primary_keyword": "hipaa violation penalty breach cost calculator"},
-    {"slug": "penetration-testing-cost-estimator", "primary_keyword": "penetration testing cost estimator"},
-    {"slug": "cyber-liability-insurance-premium-calculator", "primary_keyword": "cyber liability insurance premium calculator"},
-    {"slug": "fedramp-authorization-cost-calculator", "primary_keyword": "fedramp authorization cost calculator"},
-    {"slug": "pci-dss-4-0-compliance-audit-cost-calculator", "primary_keyword": "pci dss 4.0 compliance audit cost calculator"},
-    {"slug": "hitrust-certification-cost-roi-calculator", "primary_keyword": "hitrust certification cost roi calculator"},
+    {"slug": "penetration-testing-scoping-cost-calculator", "primary_keyword": "penetration testing scoping cost calculator"},
+    {"slug": "cyber-liability-insurance-breach-exposure-calculator", "primary_keyword": "cyber liability insurance breach exposure calculator"},
+    {"slug": "fedramp-authorization-3pao-cost-calculator", "primary_keyword": "fedramp authorization 3pao cost calculator"},
+    {"slug": "pci-dss-4-0-compliance-cost-calculator", "primary_keyword": "pci dss 4.0 compliance cost calculator"},
+    {"slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator", "primary_keyword": "hitrust csf e1 i1 r2 certification cost calculator"},
 ]
 
 
@@ -5757,6 +5797,120 @@ def sync_tenant_redirect_rollup_adapters(
 
             if px_txt != px_orig:
                 prexvo_fac.write_text(px_txt, encoding="utf-8")
+                updated_files += 1
+
+        gainhelm_freshness = root / "gainhelm" / "freshness.py"
+        if gainhelm_freshness.is_file():
+            gf_txt = gainhelm_freshness.read_text(encoding="utf-8")
+            old_gf_report = """    report = {
+        "verdict": verdict,
+        "total_score": max(0.0, score),
+        "mathematical_determinism": math_audit,
+        "statutory_oracle": oracle_audit,
+        "compliance_gate": comp_gate,
+        "seo_checklist": seo_audit,
+        "affiliate_routes": affiliate_audit,
+        "merkle_drift": merkle_drift,
+        "dataset_provenance": dataset_provenance,
+        "dataset_provenance_verified": dataset_provenance_verified,
+    }"""
+            new_gf_report = """    redirect_rollup_meta: Dict[str, Any] = {
+        "redirected_rows_count": 0,
+        "rolled_up_impressions": 0,
+        "rolled_up_clicks": 0,
+        "ignored_off_topic_rows_count": 0,
+        "canonical_targets_summary": {},
+    }
+    internal_link_graph_meta: Dict[str, Any] = {"status": "PASS", "total_pages": 0, "orphaned_pages": [], "orphaned_count": 0}
+    zero_impression_meta: Dict[str, Any] = {"status": "PASS", "max_age_days": 30.0, "pages_audited": 0, "zero_impression_candidates": [], "flagged_count": 0}
+    try:
+        from pseofactory.seo_growth_loops import (
+            discover_internal_linking_opportunities,
+            evaluate_content_portfolio_decisions,
+        )
+        il_rep = discover_internal_linking_opportunities(
+            property_id="gainhelm",
+            repo_root=target_dir.parent,
+            dist_dir=target_dir,
+            persist=False,
+        )
+        internal_link_graph_meta = dict(il_rep.get("internal_link_graph") or internal_link_graph_meta)
+        pf_rep = evaluate_content_portfolio_decisions(
+            property_id="gainhelm",
+            repo_root=target_dir.parent,
+            dist_dir=target_dir,
+            persist=False,
+        )
+        zero_impression_meta = {
+            "status": "PASS",
+            "max_age_days": 30.0,
+            "pages_audited": int(pf_rep.get("pages_audited", 0)),
+            "zero_impression_candidates": list(pf_rep.get("zero_impression_candidates") or []),
+            "flagged_count": int(pf_rep.get("flagged_count", 0)),
+            "noindexed_count": 0,
+            "action_taken": "FLAGGED_ONLY",
+        }
+    except Exception:
+        pass
+
+    report = {
+        "verdict": verdict,
+        "total_score": max(0.0, score),
+        "mathematical_determinism": math_audit,
+        "statutory_oracle": oracle_audit,
+        "compliance_gate": comp_gate,
+        "seo_checklist": seo_audit,
+        "affiliate_routes": affiliate_audit,
+        "merkle_drift": merkle_drift,
+        "dataset_provenance": dataset_provenance,
+        "dataset_provenance_verified": dataset_provenance_verified,
+        "redirect_signal_rollup": redirect_rollup_meta,
+        "internal_link_graph": internal_link_graph_meta,
+        "zero_impression_handling": zero_impression_meta,
+    }"""
+            if old_gf_report in gf_txt and "internal_link_graph_meta" not in gf_txt:
+                gf_txt = gf_txt.replace(old_gf_report, new_gf_report, 1)
+                gainhelm_freshness.write_text(gf_txt, encoding="utf-8")
+                updated_files += 1
+
+        gainhelm_gsc = root / "gainhelm" / "gsc_adapter.py"
+        if gainhelm_gsc.is_file():
+            gg_txt = gainhelm_gsc.read_text(encoding="utf-8")
+            old_gg_stub = """def load_page_overlay(slug: str, base_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    return None
+
+
+def inject_overlay_into_html(html_content: str, overlay: Dict[str, Any]) -> str:
+    return html_content"""
+            new_gg_impl = """def get_overlay_path(slug: str, base_dir: Optional[Path] = None) -> Path:
+    from gainhelm.config import BASE_DIR
+    root = Path(base_dir) if base_dir else BASE_DIR
+    return root / "content" / "overlays" / f"{slug}.json"
+
+
+def load_page_overlay(slug: str, base_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    import json
+    from gainhelm.config import BASE_DIR
+    path = get_overlay_path(slug, base_dir=base_dir)
+    root = Path(base_dir) if base_dir else BASE_DIR
+    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        if alt_path.is_file():
+            path = alt_path
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def inject_overlay_into_html(html_content: str, overlay: Dict[str, Any]) -> str:
+    from pseofactory.gsc_remediation import inject_overlay_into_html as _shared_inject
+    return _shared_inject(html_content, overlay)"""
+            if old_gg_stub in gg_txt and "_shared_inject" not in gg_txt:
+                gg_txt = gg_txt.replace(old_gg_stub, new_gg_impl, 1)
+                gainhelm_gsc.write_text(gg_txt, encoding="utf-8")
                 updated_files += 1
 
     return updated_files

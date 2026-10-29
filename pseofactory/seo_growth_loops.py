@@ -182,7 +182,11 @@ def harvest_and_sync_gsc_daily_timeline(
 
     # Fallback 2: Synthesize daily series from statutory.db gsc_performance_snapshots if available
     if not records:
-        stat_db = root / "profithelm" / "data" / "statutory.db"
+        stat_db = (
+            (root / prop / "data" / "statutory.db")
+            if (root / prop / "data" / "statutory.db").is_file()
+            else (root / "profithelm" / "data" / "statutory.db")
+        )
         if not stat_db.is_file() and prop == "profithelm" and "PYTEST_CURRENT_TEST" not in os.environ:
             alt_db = Path("/home/ubuntuadmin/projects/profithelm-platform/profithelm/data/statutory.db")
             if alt_db.is_file():
@@ -1451,7 +1455,11 @@ def load_consolidated_gsc_query_rows(
     latest_recorded_at = ""
 
     # 1. Check statutory.db gsc_performance_snapshots for longitudinal baseline vs latest snapshot
-    stat_db = root / "profithelm" / "data" / "statutory.db"
+    stat_db = (
+        (root / prop / "data" / "statutory.db")
+        if (root / prop / "data" / "statutory.db").is_file()
+        else (root / "profithelm" / "data" / "statutory.db")
+    )
     if not stat_db.is_file() and prop == "profithelm" and "PYTEST_CURRENT_TEST" not in os.environ:
         alt_db = Path("/home/ubuntuadmin/projects/profithelm-platform/profithelm/data/statutory.db")
         if alt_db.is_file():
@@ -4235,7 +4243,11 @@ def investigate_competitor_traffic_spikes(
     filtered_off_vertical_queries: List[str] = []
 
     # 0. Check local statutory.db trend_velocity_history first
-    stat_db = root / "profithelm" / "data" / "statutory.db"
+    stat_db = (
+        (root / prop / "data" / "statutory.db")
+        if (root / prop / "data" / "statutory.db").is_file()
+        else (root / "profithelm" / "data" / "statutory.db")
+    )
     if not stat_db.is_file() and prop == "profithelm" and "PYTEST_CURRENT_TEST" not in os.environ:
         alt_db = Path("/home/ubuntuadmin/projects/profithelm-platform/profithelm/data/statutory.db")
         if alt_db.is_file():
@@ -4370,7 +4382,7 @@ def investigate_competitor_traffic_spikes(
                     "velocity_delta": 95.0,
                     "acceleration": 47.5,
                     "consecutive_cycles": 4,
-                    "target_url": f"https://profithelm.com/tools/{mut_slug}/",
+                    "target_url": f"https://{prop}.com/tools/{mut_slug}/",
                     "current_position": 9.5,
                 }
             )

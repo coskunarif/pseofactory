@@ -90,6 +90,7 @@ TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = {
     "prexvo": "106482194",
     "gainhelm": "106482195",
 }
+DEFAULT_TENANT_LINKEDIN_IDS: Dict[str, str] = TENANT_LINKEDIN_COMPANY_IDS
 
 
 def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[str, str]:
@@ -3090,7 +3091,7 @@ def generate_headless_brand_article_from_transcript(
         elif prop_id == "gainhelm":
             brand_name = "GainHelm"
             canonical_base = "https://gainhelm.com"
-            company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("gainhelm", "112842663")
+            company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("gainhelm", "106482195")
         else:
             brand_name = "ProfitHelm"
             canonical_base = "https://profithelm.com"

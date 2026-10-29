@@ -838,5 +838,120 @@ def test_verify_department_handoff_chain_heal_markers_and_cli_contract(tmp_path:
     assert unrelated_marker.exists()
 
 
+def test_three_tenant_uniform_lifecycle_contract_alignment(tmp_path: Path):
+    """
+    Verifies uniform 3-tenant registration and contract parity across profithelm, prexvo,
+    and gainhelm in package exports, MonetizationHub routing and domain boundary audits,
+    topical authority & cannibalization reconciliation, LinkedIn company ID alignment,
+    and LLMs manifest / retro-reflection isolation.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import pseofactory
+    from pseofactory.affiliates_hub import (
+        GAINHELM_DIRECT_SLUGS,
+        PREXVO_DIRECT_SLUGS,
+        PROFITHELM_DIRECT_SLUGS,
+        MonetizationHub,
+    )
+    from pseofactory.distributor import DEFAULT_TENANT_LINKEDIN_IDS
+    from pseofactory.maintenance import (
+        CANONICAL_TENANT_CONFIGS,
+        RetroReflectionEngine,
+    )
+    from pseofactory.qualification import (
+        _DEFAULT_GAINHELM_CORE_TOOLS,
+        GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
+        is_retired_or_consolidated_slug,
+        reconcile_tenant_topical_authority_and_cannibalization,
+    )
+
+    # 1. Package-level affiliate & disclosure exports parity
+    for attr in (
+        "PROFITHELM_AFFILIATES",
+        "PREXVO_AFFILIATES",
+        "GAINHELM_AFFILIATES",
+        "PROFITHELM_DISCLOSURES",
+        "PREXVO_DISCLOSURES",
+        "GAINHELM_DISCLOSURES",
+        "B2B_PARTNER_KEYS",
+        "STUDENT_LOAN_PARTNER_KEYS",
+        "GAINHELM_PARTNER_KEYS",
+    ):
+        assert hasattr(pseofactory, attr), f"Missing top-level export: {attr}"
+
+    # 2. LinkedIn company ID parity across CANONICAL_TENANT_CONFIGS and DEFAULT_TENANT_LINKEDIN_IDS
+    for pid in ("profithelm", "prexvo", "gainhelm"):
+        assert CANONICAL_TENANT_CONFIGS[pid]["linkedin_company_id"] == DEFAULT_TENANT_LINKEDIN_IDS[pid]
+    assert CANONICAL_TENANT_CONFIGS["gainhelm"]["linkedin_company_id"] == "106482195"
+
+    # 3. MonetizationHub direct tool detection, route enrichment, and domain boundary audit
+    assert len(PROFITHELM_DIRECT_SLUGS) > 0
+    assert len(PREXVO_DIRECT_SLUGS) > 0
+    assert len(GAINHELM_DIRECT_SLUGS) == 10
+
+    hub = MonetizationHub(vault_path=str(tmp_path / "nonexistent_vault.json"))
+    assert hub._is_direct_gainhelm_tool("soc-2-audit-cost-calculator") is True
+    assert hub._is_direct_gainhelm_tool("penetration-testing-scoping-cost-calculator") is True
+    assert hub._is_direct_gainhelm_tool("section-179-calculator") is False
+
+    gh_route = hub.get_route("gainhelm", "soc-2-audit-cost-calculator")
+    assert gh_route["property_id"] == "gainhelm"
+    assert gh_route["is_fallback"] is False
+    assert "bounty_est" in gh_route
+    assert "bounty_score" in gh_route
+    assert gh_route.get("disclosure")
+    assert gh_route.get("ymyl_warning")
+
+    boundary_audit = hub.audit_domain_boundaries()
+    assert boundary_audit["status"] == "PASS", f"Domain boundary violations: {boundary_audit['violations']}"
+
+    # 4. Canonical GainHelm core tools & cannibalizing clone consolidation parity
+    core_slugs = {t["slug"] for t in _DEFAULT_GAINHELM_CORE_TOOLS}
+    assert core_slugs == GAINHELM_DIRECT_SLUGS
+    for alias_slug in GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP:
+        assert is_retired_or_consolidated_slug(alias_slug, property_id="gainhelm") is True
+    assert is_retired_or_consolidated_slug("soc-2-audit-cost-calculator", property_id="gainhelm") is False
+    assert is_retired_or_consolidated_slug("rap-payment-calculator", property_id="gainhelm") is False
+
+    # Verify reconcile_tenant_topical_authority_and_cannibalization purges GainHelm clone dirs on gainhelm
+    gh_repo = tmp_path / "gainhelm"
+    gh_dist = gh_repo / "dist"
+    stale_clone_dir = gh_dist / "tools" / "cmmc-level-2-audit-cost-calculator"
+    canonical_dir = gh_dist / "tools" / "cmmc-2-0-compliance-cost-calculator"
+    stale_clone_dir.mkdir(parents=True, exist_ok=True)
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    (stale_clone_dir / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    (canonical_dir / "index.html").write_text(
+        '<!DOCTYPE html><html><head><title>CMMC 2.0 Compliance Cost Calculator | GainHelm</title>'
+        '<meta name="description" content="Calculate 2026 CMMC 2.0 Level 2 C3PAO audit and NIST SP 800-171 remediation costs.">'
+        '<link rel="canonical" href="https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/"></head>'
+        '<body><h1>CMMC 2.0 Compliance Cost Calculator</h1></body></html>',
+        encoding="utf-8",
+    )
+
+    rec_summary = reconcile_tenant_topical_authority_and_cannibalization(
+        repo_root=gh_repo,
+        property_id="gainhelm",
+        dist_dir=gh_dist,
+    )
+    assert rec_summary["stale_dist_dirs_removed"] == 1
+    assert not stale_clone_dir.exists()
+    assert canonical_dir.exists()
+
+    # 5. Verify RetroReflectionEngine.sync_tenant_llms_manifests produces clean GainHelm manifest with zero ProfitHelm spoke leakage
+    (gh_dist / "llms-full.txt").write_text("# Stale Manifest\n", encoding="utf-8")
+    llms_updated = RetroReflectionEngine.sync_tenant_llms_manifests(
+        dist_dir=gh_dist,
+        property_id="gainhelm",
+        canonical_base="https://gainhelm.com",
+    )
+    assert "llms-full.txt" in llms_updated
+    llms_full = (gh_dist / "llms-full.txt").read_text(encoding="utf-8")
+    assert "GainHelm" in llms_full
+    assert "Section 179" not in llms_full
+    assert "ProfitHelm" not in llms_full
+
+
+
 
 

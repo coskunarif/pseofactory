@@ -1572,8 +1572,8 @@ def calculate_candidate_roi(
     effective_impressions = max(impressions, 60 if severity_factor >= 0.85 else 30)
     expected_click_lift = round(max(0.5, effective_impressions * ctr_deficit * severity_factor), 4)
 
-    default_cpc = 8.0 if resolved_tenant == "prexvo" else 10.5
-    default_erpm = 75.0 if resolved_tenant == "prexvo" else 85.0
+    default_cpc = 8.0 if resolved_tenant == "prexvo" else (14.5 if resolved_tenant == "gainhelm" else 10.5)
+    default_erpm = 75.0 if resolved_tenant == "prexvo" else (95.0 if resolved_tenant == "gainhelm" else 85.0)
     cpc = float(data.get("cpc", default_cpc) or default_cpc)
     erpm_usd = float(data.get("erpm_usd", data.get("empirical_erpm_usd", default_erpm)) or default_erpm)
 
@@ -1961,7 +1961,11 @@ def _normalize_title_50_60(
         base = (
             "Title IV Student Loan Repayment Calculator"
             if tenant_id == "prexvo"
-            else "Statutory Tax and Financial Model Calculator"
+            else (
+                "Enterprise Cyber Compliance and GRC Audit Cost Calculator"
+                if tenant_id == "gainhelm"
+                else "Statutory Tax and Financial Model Calculator"
+            )
         )
 
     max_base = 60 - len(suffix)

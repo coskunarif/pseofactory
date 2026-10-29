@@ -121,6 +121,9 @@ PREXVO_DIRECT_SLUGS: Set[str] = {
     "rap-vs-ibr-calculator",
 }
 
+# Slugs recognized as direct high-bounty cyber compliance & GRC tools for GainHelm
+GAINHELM_DIRECT_SLUGS: Set[str] = set(GAINHELM_MONETIZED_CALCULATOR_SLUGS)
+
 
 class MonetizationHub:
     """
@@ -215,6 +218,10 @@ class MonetizationHub:
                 "prexvo": {
                     "fallback_enabled": False,
                     "standing_restriction": PREXVO_STANDING_RESTRICTION,
+                },
+                "gainhelm": {
+                    "fallback_enabled": False,
+                    "default_fallback_url": "https://gainhelm.com",
                 },
             },
         }
@@ -830,6 +837,21 @@ class MonetizationHub:
                 return True
         return False
 
+    def _is_direct_gainhelm_tool(self, tool_slug: str) -> bool:
+        """Determines if a tool slug is explicitly mapped to a direct GainHelm cyber compliance/GRC partner."""
+        s = (tool_slug or "").strip().lower()
+        if not s:
+            return False
+        if s in GAINHELM_DIRECT_SLUGS:
+            return True
+        for p in GAINHELM_AFFILIATES.values():
+            if s in p.target_tools:
+                return True
+        for pattern in GAINHELM_TOOL_PATTERNS:
+            if pattern in s:
+                return True
+        return False
+
     def get_route(
         self,
         property_id: str,
@@ -928,7 +950,12 @@ class MonetizationHub:
 
         # GainHelm routing
         if prop_clean == "gainhelm":
-            if key_clean in STUDENT_LOAN_PARTNER_KEYS or key_clean in B2B_PARTNER_KEYS:
+            if (
+                key_clean in STUDENT_LOAN_PARTNER_KEYS
+                or key_clean in B2B_PARTNER_KEYS
+                or key_clean in PROFITHELM_AFFILIATES
+                or key_clean in PREXVO_AFFILIATES
+            ):
                 raise ValueError(
                     f"Strict isolation violation: Foreign tenant partner '{key_clean}' is prohibited on GainHelm."
                 )
@@ -938,10 +965,34 @@ class MonetizationHub:
                 partner_key=key_clean or None,
                 value_tier=value_tier,
             )
+            partner_obj = GAINHELM_AFFILIATES.get(route["partner"])
+
+            gh_override = prop_vault_overrides.get(route["partner"])
+            if isinstance(gh_override, dict) and gh_override.get("status") in ("active_direct", "live"):
+                ov_url = gh_override.get("url") or gh_override.get("direct_url")
+                if ov_url:
+                    route["url"] = ov_url
+                    route["status"] = gh_override["status"]
+            gh_categories = self.vault_data.get("properties", {}).get("gainhelm", {}).get("categories", {})
+            for cat_k, cat_v in gh_categories.items():
+                if cat_v.get("primary_partner") == route["partner"]:
+                    if cat_v.get("status") in ("active_direct", "live") and cat_v.get("direct_url"):
+                        route["url"] = cat_v["direct_url"]
+                        route["status"] = cat_v["status"]
+                    break
+
+            if partner_obj:
+                route["bounty_est"] = partner_obj.bounty_est
+                route["bounty_score"] = score_partner_yield(partner_obj, route["status"])
             route["is_live"] = route.get("status") in ("live", "active_direct")
             route["calculator_slug"] = slug_clean
             route["partner_name"] = route["name"]
             route["is_fallback"] = False
+            route["disclosure"] = GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
+            route["ymyl_warning"] = GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer", "")
+
+            assert_no_forbidden_dashes(route["cta_text"], context="CTA text for GainHelm route")
+            assert_no_forbidden_dashes(route["name"], context="Name for GainHelm route")
             return route
 
         # ProfitHelm / Exchange1031 routing
@@ -1184,13 +1235,31 @@ class MonetizationHub:
             route = self.get_route("prexvo", slug)
             partner = route.get("partner", "")
             url_lower = (route.get("url") or "").lower()
-            if partner in ENTERPRISE_B2B_PARTNERS or partner in B2B_PARTNER_KEYS:
+            if partner in ENTERPRISE_B2B_PARTNERS or partner in B2B_PARTNER_KEYS or partner in GAINHELM_PARTNER_KEYS:
                 violations.append(
-                    f"Enterprise B2B partner '{partner}' routed to Prexvo borrower slug '{slug}'"
+                    f"Enterprise B2B or foreign partner '{partner}' routed to Prexvo borrower slug '{slug}'"
                 )
             if any(agg in url_lower for agg in aggregators):
                 violations.append(
                     f"Sub-affiliate aggregator detected in Prexvo route URL for '{slug}': '{route.get('url')}'"
+                )
+
+        for slug in sorted(GAINHELM_DIRECT_SLUGS):
+            route = self.get_route("gainhelm", slug)
+            partner = route.get("partner", "")
+            url_lower = (route.get("url") or "").lower()
+            if (
+                partner in ENTERPRISE_B2B_PARTNERS
+                or partner in B2B_PARTNER_KEYS
+                or partner in STUDENT_LOAN_PARTNER_KEYS
+                or partner in RETAIL_TAX_PARTNERS
+            ):
+                violations.append(
+                    f"Foreign tenant partner '{partner}' routed to GainHelm cyber compliance slug '{slug}'"
+                )
+            if any(agg in url_lower for agg in aggregators):
+                violations.append(
+                    f"Sub-affiliate aggregator detected in GainHelm route URL for '{slug}': '{route.get('url')}'"
                 )
 
         for p_key, p_obj in AFFILIATE_REGISTRY.items():

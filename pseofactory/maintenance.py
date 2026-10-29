@@ -874,6 +874,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
+                env["GAINHELM_TARGET"] = slug
                 if target_file:
                     env["FACTORY_TARGET_FILE"] = str(target_file)
 
@@ -957,6 +958,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
+                env["GAINHELM_TARGET"] = slug
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
                 if res.returncode == 75:
                     raise LockContentionError(
@@ -1270,6 +1272,8 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PREXVO_CHECK_QUEUE"] = "0"
                 env["PROFITHELM_AUTO_LIVE"] = "0"
                 env["PROFITHELM_CHECK_QUEUE"] = "0"
+                env["GAINHELM_AUTO_LIVE"] = "0"
+                env["GAINHELM_CHECK_QUEUE"] = "0"
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
                     return True
@@ -1346,7 +1350,7 @@ CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {
         "brand_name": "GainHelm",
         "package_name": "gainhelm",
         "dist_dir": "dist",
-        "linkedin_company_id": "112842663",
+        "linkedin_company_id": "106482195",
     },
 }
 
@@ -5482,6 +5486,7 @@ def _needs_page_structure_geo_normalization(
         and '"BreadcrumbList"' in html_content
         and '"https://profithelm.com/tools/"' not in html_content
         and '"https://prexvo.com/tools/"' not in html_content
+        and '"https://gainhelm.com/tools/"' not in html_content
     ):
         return True
 
@@ -5766,7 +5771,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
         if comm_changed:
             changed = True
 
-    if slug == "tools-directory" and property_id.lower() != "prexvo":
+    if slug == "tools-directory" and property_id.lower() in ("profithelm", "gainhelm"):
         qa_dir_pat = re.compile(
             r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
             re.IGNORECASE,
@@ -5780,12 +5785,19 @@ def _normalize_spoke_and_synthesized_body_bloat(
             )
             qb_txt = re.sub(r"<[^>]+>", " ", qb_dir_m.group(1) if qb_dir_m else qa_dir_m.group(2)).strip()
             if len(qb_txt.split()) < 40 or "9 institutional" in qb_txt:
-                dir_qa = (
-                    "ProfitHelm provides a deterministic directory of 21 institutional commercial tax and financial "
-                    "modeling engines alongside 127 programmatic state and vehicle schedules. Each calculator computes "
-                    "federal and state statutory liabilities under active 2026 IRC rules and projected 2027 TCJA "
-                    "sunset schedules with zero AI hallucinations."
-                )
+                if property_id.lower() == "gainhelm":
+                    dir_qa = (
+                        "GainHelm provides a deterministic directory of 10 institutional cyber compliance, GRC audit, "
+                        "and statutory penalty calculators anchored to AICPA SSAE 18, 32 CFR Part 170, NIST SP 800-171, "
+                        "45 CFR Part 160, and BLS OEWS SOC 15-1212 wage benchmarks with zero AI hallucinations."
+                    )
+                else:
+                    dir_qa = (
+                        "ProfitHelm provides a deterministic directory of 21 institutional commercial tax and financial "
+                        "modeling engines alongside 127 programmatic state and vehicle schedules. Each calculator computes "
+                        "federal and state statutory liabilities under active 2026 IRC rules and projected 2027 TCJA "
+                        "sunset schedules with zero AI hallucinations."
+                    )
                 updated = qa_dir_pat.sub(
                     rf'\g<1>\n  <div class="quick-answer-title">Key Finding: Statutory Verification Standard</div>\n  <div class="quick-answer-body"><p>{dir_qa}</p></div>\n\g<3>',
                     updated,
@@ -7222,6 +7234,7 @@ def _normalize_page_structure_and_geo_parity(
             and len([seg for seg in (canonical_url or "").split("/tools/", 1)[1].strip("/").split("/") if seg]) >= 2
             and '"https://profithelm.com/tools/"' not in updated
             and '"https://prexvo.com/tools/"' not in updated
+            and '"https://gainhelm.com/tools/"' not in updated
         )
     ):
         def _inject_breadcrumb_graph(m_bc: re.Match) -> str:
@@ -9511,7 +9524,7 @@ class RetroReflectionEngine:
                             nested_s = f"{hub_prefix}/{s[len(hub_prefix) + 1:]}"
                             if nested_s not in candidates:
                                 candidates.append(nested_s)
-                    if property_id.lower() != "prexvo":
+                    if property_id.lower() == "profithelm":
                         from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
                         if s in {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}:
                             veh_nested = f"section-179-calculator/{s}"
@@ -9847,7 +9860,12 @@ class RetroReflectionEngine:
 
                 def _tool_sort_key(item: Tuple[str, Dict[str, str]]) -> Tuple[int, str]:
                     k = item[0]
-                    if not is_prexvo:
+                    if is_gainhelm:
+                        if k == "soc-2-audit-cost-calculator":
+                            return (0, k)
+                        if k == "cmmc-2-0-compliance-cost-calculator":
+                            return (1, k)
+                    elif not is_prexvo:
                         if k == "irs-2027-tax-brackets":
                             return (0, k)
                         if k == "crypto-tax-calculator":
@@ -9857,7 +9875,7 @@ class RetroReflectionEngine:
                 sections_out: List[str] = [header_block]
                 for idx, (s_key, m_info) in enumerate(sorted(tool_meta.items(), key=_tool_sort_key), start=1):
                     sec_title = m_info["title"]
-                    if not is_prexvo and s_key == "crypto-tax-calculator":
+                    if not is_prexvo and not is_gainhelm and s_key == "crypto-tax-calculator":
                         sec_title = "Crypto Tax Liability & Capital Gains Calculator 2027"
                     q_syn = m_info.get("query_syntax") or f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
                     stat_line = f"Statutory Authority: {m_info['statutory_authority']}\n" if m_info.get("statutory_authority") else ""
@@ -9880,7 +9898,7 @@ class RetroReflectionEngine:
                             f"Direct Statutory Answer: {m_info['quick_answer']}\n"
                         )
 
-                if not is_prexvo and spoke_lines:
+                if not is_prexvo and not is_gainhelm and spoke_lines:
                     sections_out.append(
                         "## State Income Tax, Commercial Vehicle Section 179, and Section 1031 Spoke Endpoints\n"
                         + "\n".join(spoke_lines)
@@ -10098,8 +10116,9 @@ class RetroReflectionEngine:
         raw_canon = (canonical_base or "").strip().rstrip("/")
         if (
             not raw_canon
-            or (is_prexvo and "profithelm" in raw_canon.lower())
+            or (is_prexvo and ("profithelm" in raw_canon.lower() or "gainhelm" in raw_canon.lower()))
             or (not is_prexvo and "prexvo" in raw_canon.lower())
+            or (not is_gainhelm and "gainhelm" in raw_canon.lower())
             or (is_gainhelm and ("profithelm" in raw_canon.lower() or "prexvo" in raw_canon.lower()))
         ):
             canon = default_canon
@@ -11766,6 +11785,36 @@ def _execute_autonomous_downstream_chain(
                 live=not dry_run,
             )
             summary["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+
+        if not dry_run:
+            try:
+                latest_ledger = indexer.load_pushed_ledger()
+                valid_push_urls = indexer.inspect_platform_assets().get("valid_push_urls") or []
+                now_iso_push = datetime.now(timezone.utc).isoformat()
+                ledger_changed = False
+                for u_item in valid_push_urls:
+                    cur_fp = indexer.compute_url_fingerprint(u_item)
+                    prev_entry = latest_ledger.get(u_item)
+                    if not isinstance(prev_entry, dict) or prev_entry.get("hash") != cur_fp:
+                        engs = dict(prev_entry.get("engines", {})) if isinstance(prev_entry, dict) else {}
+                        latest_ledger[u_item] = {
+                            "hash": cur_fp,
+                            "last_pushed": (
+                                prev_entry.get("last_pushed")
+                                if isinstance(prev_entry, dict) and prev_entry.get("last_pushed")
+                                else now_iso_push
+                            ),
+                            "push_count": max(
+                                1,
+                                int(prev_entry.get("push_count", 1)) if isinstance(prev_entry, dict) else 1,
+                            ),
+                            "engines": engs,
+                        }
+                        ledger_changed = True
+                if ledger_changed:
+                    indexer.save_pushed_ledger(latest_ledger)
+            except Exception:
+                pass
     except Exception as idx_err:
         summary["indexing_status"] = "EXCEPTION_ROUTED"
         act = bus.route_stage_exception(
