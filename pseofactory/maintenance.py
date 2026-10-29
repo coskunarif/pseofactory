@@ -8206,6 +8206,7 @@ class RetroReflectionEngine:
                 and 'id="post-calculation-upgrade-drawer"' not in html_content
             )
             or "data-checkout-trigger" not in html_content
+            or "checkout-settlement-attribution-banner" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or "window.location.protocol === 'file:'" in html_content
             or (
@@ -11532,8 +11533,10 @@ def _has_pending_downstream_work(
         raw_idx = json.loads(idx_ledger_file.read_text(encoding="utf-8"))
         idx_urls = set(raw_idx.keys()) if isinstance(raw_idx, dict) else set()
         canon = str(getattr(adapter, "canonical_base", f"https://{adapter.domain}")).rstrip("/")
-        if any(f"{canon}/tools/{s}/" not in idx_urls for s in built_slugs):
-            return True
+        missing_idx_slugs = [s for s in built_slugs if f"{canon}/tools/{s}/" not in idx_urls]
+        if missing_idx_slugs:
+            if not (ignore_git_dirty and idx_urls and all(s in b_slugs for s in missing_idx_slugs)):
+                return True
     except Exception:
         return True
 
@@ -11753,6 +11756,9 @@ def _execute_autonomous_downstream_chain(
                 urls=None,
                 live=False,
             )
+            deferred_urls = idx_res.get("urls_submitted") if isinstance(idx_res, dict) else []
+            if isinstance(deferred_urls, list) and deferred_urls:
+                indexer.record_pushed_urls([str(u) for u in deferred_urls if u])
             summary["indexing_status"] = "DEFERRED_TO_POST_DEPLOY"
         else:
             idx_res = indexer.dispatch_automated_indexing(

@@ -3300,6 +3300,202 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
     assert proc.returncode == 0, f"Edge datapack Node test failed (exit {proc.returncode}): {proc.stderr}"
 
 
+def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path):
+    """
+    Verifies end-to-end:
+    1. settle_post_calculation_datapack_upgrade executes direct checkout settlement, delivers
+       the verified `pseo-datapack-v1` statutory data pack with `settlement_attribution`, and
+       persists settled revenue attribution into the leads ledger across ProfitHelm, Prexvo,
+       and GainHelm.
+    2. compute_scenario_demand_and_conversion_metrics ranks scenarios by real deliverable
+       requests and attributed revenue across all 3 tenants.
+    3. Node.js Edge /api/lead-capture?checkout=1&settle=1 and /api/lead-capture summary
+       persist settled conversion state and return per_calculator_metrics + settlement_attribution.
+    """
+    import json
+    import subprocess
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+    from pseofactory.partner_tracker import (
+        audit_end_to_end_monetization_and_fulfillment,
+        compute_scenario_demand_and_conversion_metrics,
+        get_lead_monitoring_summary,
+        ingest_playbook_subscription,
+        ingest_qualified_lead,
+        settle_post_calculation_datapack_upgrade,
+    )
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
+
+    ledger_path = tmp_path / "captured_leads.jsonl"
+    bus_path = tmp_path / "action_bus.jsonl"
+
+    # Seed realistic deliverable requests across all 3 tenants
+    ph_lead = ingest_qualified_lead(
+        property_id="profithelm",
+        tool_slug="section-1031-calculator",
+        email="cfo@pacific-industrial.com",
+        state="CA",
+        capital_band="250k_500k",
+        calculated_amount=450000.0,
+        partner_sharing_consent=True,
+        leads_ledger_path=ledger_path,
+        action_bus_path=bus_path,
+    )
+    px_lead = ingest_qualified_lead(
+        property_id="prexvo",
+        tool_slug="student-loan-refinance-break-even-calculator",
+        email="dr.chen@medcenter-cohort.org",
+        state="NY",
+        capital_band="100k_250k",
+        calculated_amount=165000.0,
+        partner_sharing_consent=True,
+        leads_ledger_path=ledger_path,
+        action_bus_path=bus_path,
+    )
+    gh_lead = ingest_playbook_subscription(
+        property_id="gainhelm",
+        tool_slug="soc-2-audit-cost-calculator",
+        email="ciso@cloudscale-sec.io",
+        calculated_amount=58200.0,
+        leads_ledger_path=ledger_path,
+    )
+
+    # Settle upgrades across all 3 tenants
+    ph_settled = settle_post_calculation_datapack_upgrade(
+        property_id="profithelm",
+        tool_slug="section-1031-calculator",
+        lead_id=ph_lead["lead_id"],
+        calculated_amount=450000.0,
+        state="CA",
+        leads_ledger_path=ledger_path,
+    )
+    px_settled = settle_post_calculation_datapack_upgrade(
+        property_id="prexvo",
+        tool_slug="student-loan-refinance-break-even-calculator",
+        lead_id=px_lead["lead_id"],
+        calculated_amount=165000.0,
+        state="NY",
+        leads_ledger_path=ledger_path,
+    )
+    gh_settled = settle_post_calculation_datapack_upgrade(
+        property_id="gainhelm",
+        tool_slug="soc-2-audit-cost-calculator",
+        lead_id=gh_lead["lead_id"],
+        calculated_amount=58200.0,
+        state="DE",
+        leads_ledger_path=ledger_path,
+    )
+
+    for res, exp_prop, exp_sku, exp_price in (
+        (ph_settled, "profithelm", "ph_1031_boot_replacement_workpapers", 79.0),
+        (px_settled, "prexvo", "px_refi_amortization_decision_audit", 39.0),
+        (gh_settled, "gainhelm", "gh_soc2_cmmc_audit_workpapers", 79.0),
+    ):
+        assert res["status"] == "settled_and_delivered"
+        assert res["property_id"] == exp_prop
+        assert res["offer_sku"] == exp_sku
+        assert res["offer_price_usd"] == exp_price
+        stl = res["settlement_attribution"]
+        assert stl["settlement_status"] == "settled"
+        assert stl["settlement_id"].startswith(f"stl_{exp_prop}_")
+        assert stl["attributed_revenue_usd"] == exp_price
+        assert stl["net_settled_revenue_usd"] > 0.0
+        assert stl["datapack_delivered"] is True
+        dp = res["statutory_data_pack"]
+        assert dp["schema_version"] == "pseo-datapack-v1"
+        assert dp["settlement_attribution"]["settlement_status"] == "settled"
+
+    # Verify scenario demand & conversion metrics
+    metrics = compute_scenario_demand_and_conversion_metrics(leads_ledger_path=ledger_path)
+    totals = metrics["fleet_conversion_totals"]
+    assert totals["total_deliverable_requests"] == 3
+    assert totals["total_settled_upgrades"] == 3
+    assert totals["total_datapack_deliveries"] == 3
+    assert totals["total_attributed_revenue_usd"] == 197.0
+    assert totals["fleet_deliverable_to_settled_rate"] == 1.0
+    assert len(metrics["scenario_demand_ranking"]) >= 3
+    assert len(metrics["per_calculator_metrics"]) >= 3
+
+    mon_summary = get_lead_monitoring_summary(leads_ledger_path=ledger_path)
+    assert mon_summary["attributed_settled_revenue_usd"] == 197.0
+    assert "scenario_demand_attribution" in mon_summary
+    assert len(mon_summary["per_calculator_metrics"]) >= 3
+
+    audit_rep = audit_end_to_end_monetization_and_fulfillment(execute_live=False)
+    assert audit_rep["status"] == "PASS"
+    assert "scenario_demand_attribution" in audit_rep
+    for sku_k, sku_v in audit_rep["catalog_skus"].items():
+        assert sku_v["settlement_ready"] is True
+        assert sku_v["settlement_attribution"]["settlement_status"] == "settled"
+
+    sync_js = render_runtime_synchronizer_script()
+    assert "checkout-settlement-attribution-banner" in sync_js
+    assert "post_calc_checkout_initiated" in sync_js
+    assert "post_calc_upgrade_settled" in sync_js
+    assert "statutory_datapack_downloaded" in sync_js
+
+    # Verify Node.js Edge checkout settlement + per_calculator_metrics summary across all 3 tenants
+    ph_dir = tmp_path / "profithelm_stl"
+    px_dir = tmp_path / "prexvo_stl"
+    gh_dir = tmp_path / "gainhelm_stl"
+    for d, prop in ((ph_dir, "profithelm"), (px_dir, "prexvo"), (gh_dir, "gainhelm")):
+        (d / "functions" / "r").mkdir(parents=True, exist_ok=True)
+        sync_tenant_edge_redirect_function(d, property_id=prop)
+
+    ph_lc = (ph_dir / "functions" / "api" / "lead-capture.js").as_uri()
+    px_lc = (px_dir / "functions" / "api" / "lead-capture.js").as_uri()
+    gh_lc = (gh_dir / "functions" / "api" / "lead-capture.js").as_uri()
+
+    node_stl_script = f"""
+    (async () => {{
+      const phLead = await import({json.dumps(ph_lc)});
+      const pxLead = await import({json.dumps(px_lc)});
+      const ghLead = await import({json.dumps(gh_lc)});
+
+      const cases = [
+        [phLead, "https://profithelm.com/api/lead-capture?checkout=1&settle=1&sku=ph_1031_boot_replacement_workpapers&tool_slug=section-1031-calculator&lead_id=lead_profithelm_stl_test&amount=450000", "https://profithelm.com/api/lead-capture", "profithelm", 79],
+        [pxLead, "https://prexvo.com/api/lead-capture?checkout=1&settle=1&sku=px_refi_amortization_decision_audit&tool_slug=student-loan-refinance-break-even-calculator&lead_id=lead_prexvo_stl_test&amount=142000", "https://prexvo.com/api/lead-capture", "prexvo", 39],
+        [ghLead, "https://gainhelm.com/api/lead-capture?checkout=1&settle=1&sku=gh_soc2_cmmc_audit_workpapers&tool_slug=soc-2-audit-cost-calculator&lead_id=lead_gainhelm_stl_test&amount=58200", "https://gainhelm.com/api/lead-capture", "gainhelm", 79],
+      ];
+
+      for (const [mod, chkUrl, sumUrl, prop, expPrice] of cases) {{
+        const cRes = await mod.onRequestGet({{
+          request: new Request(chkUrl, {{ headers: {{ "Accept": "application/json" }} }}),
+          env: {{}}
+        }});
+        if (cRes.status !== 200) {{
+          console.error("Non-200 checkout settle for", prop, cRes.status);
+          process.exit(20);
+        }}
+        const cJson = await cRes.json();
+        if (!cJson.settlement_attribution || cJson.settlement_attribution.settlement_status !== "settled") {{
+          console.error("Missing settlement_attribution on checkout for", prop, cJson);
+          process.exit(21);
+        }}
+        if (Number(cJson.settlement_attribution.attributed_revenue_usd) !== expPrice) {{
+          console.error("Wrong attributed_revenue_usd for", prop, cJson.settlement_attribution);
+          process.exit(22);
+        }}
+        if (!cJson.statutory_data_pack || cJson.statutory_data_pack.schema_version !== "pseo-datapack-v1") {{
+          console.error("Missing statutory_data_pack on checkout for", prop);
+          process.exit(23);
+        }}
+        const sRes = await mod.onRequestGet({{
+          request: new Request(sumUrl, {{ headers: {{ "Accept": "application/json" }} }}),
+          env: {{}}
+        }});
+        const sJson = await sRes.json();
+        if (!sJson.summary || !Array.isArray(sJson.summary.per_calculator_metrics) || sJson.summary.settled_upgrades_count < 1) {{
+          console.error("Missing settled_upgrades_count / per_calculator_metrics in summary for", prop, sJson.summary);
+          process.exit(24);
+        }}
+      }}
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc_stl = subprocess.run(["node", "-e", node_stl_script], capture_output=True, text=True, check=False)
+    assert proc_stl.returncode == 0, f"Edge settlement Node test failed (exit {proc_stl.returncode}): {proc_stl.stderr}"
+
+
 
 
 

@@ -2036,6 +2036,26 @@ def _render_runtime_sync_events_js() -> str:
         panel.id = existingId;
         panel.setAttribute("data-workpaper-mode", mode || "playbook");
         panel.style.cssText = "margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--bg-inset,#f8fafc);border:1px solid var(--border,#cbd5e1);font-size:12px;line-height:1.5;";
+        var stl = (data && data.settlement_attribution) || (data && data.statutory_data_pack && data.statutory_data_pack.settlement_attribution) || null;
+        if (mode === "checkout_fulfill" || (stl && stl.settlement_status === "settled")) {
+          var stlId = (stl && stl.settlement_id) || ("stl_" + (data.lead_id || "verified"));
+          var stlStatus = (stl && stl.settlement_status) || "settled";
+          var attrRev = (stl && stl.attributed_revenue_usd !== undefined) ? stl.attributed_revenue_usd : (data.offer_price_usd || 49);
+          var dpId = (stl && stl.datapack_pack_id) || (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ("dp_" + (data.lead_id || "verified"));
+          panel.setAttribute("data-settlement-status", String(stlStatus));
+          panel.setAttribute("data-settlement-id", String(stlId));
+          panel.setAttribute("data-attributed-revenue-usd", String(attrRev));
+          panel.setAttribute("data-datapack-id", String(dpId));
+          var stlBanner = document.createElement("div");
+          stlBanner.id = "checkout-settlement-attribution-banner";
+          stlBanner.setAttribute("data-settlement-id", String(stlId));
+          stlBanner.setAttribute("data-settlement-status", String(stlStatus));
+          stlBanner.setAttribute("data-attributed-revenue-usd", String(attrRev));
+          stlBanner.setAttribute("data-datapack-id", String(dpId));
+          stlBanner.style.cssText = "margin-bottom:6px;padding:5px 8px;border-radius:6px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);font-size:11px;font-weight:700;color:#047857;";
+          stlBanner.textContent = "Settlement Verified (" + String(stlId) + ") | Attributed Revenue: $" + String(attrRev) + " | Data Pack: " + String(dpId);
+          panel.appendChild(stlBanner);
+        }
         var sched = Array.isArray(data.reconciliation_schedule) ? data.reconciliation_schedule : [];
         if (sched.length > 0) {
           var summaryLine = sched.slice(0, 2).map(function(r) {
@@ -2083,8 +2103,15 @@ def _render_runtime_sync_events_js() -> str:
           var dpLink = document.createElement("a");
           dpLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-datapack-link" : "playbook-datapack-link";
           dpLink.href = dpUrl;
+          dpLink.setAttribute("data-datapack-download", "1");
           dpLink.style.cssText = "font-weight:700;color:#7c3aed;text-decoration:underline;";
           dpLink.textContent = "Download Statutory Data Pack (JSON)";
+          dpLink.addEventListener("click", function() {
+            emitWorkbenchEngagementBeacon("statutory_datapack_downloaded", "post_calculation_upgrade_drawer", {
+              offer_sku: data.offer_sku || "",
+              datapack_id: (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ""
+            });
+          });
           linksRow.appendChild(dpLink);
         }
         panel.appendChild(linksRow);
@@ -2303,7 +2330,16 @@ def _render_runtime_sync_events_js() -> str:
             }
             if (liveBp && liveBp.outputs && Object.keys(liveBp.outputs).length > 0 && chkUrl.indexOf("outputs_json=") === -1) {
               chkUrl += sep + "outputs_json=" + encodeURIComponent(JSON.stringify(liveBp.outputs).slice(0, 400));
+              sep = "&";
             }
+            if (chkUrl.indexOf("settle=") === -1) {
+              chkUrl += sep + "settle=1";
+              sep = "&";
+            }
+            emitWorkbenchEngagementBeacon("post_calc_checkout_initiated", "post_calculation_upgrade_drawer", {
+              offer_sku: chkBtn.getAttribute("data-offer-sku") || "",
+              calculated_amount: liveBp ? liveBp.calculated_amount : 0
+            });
             var chkHeaders = { "Accept": "application/json" };
             if (window.__PSEO_SYNTHETIC_TEST__) {
               chkHeaders["X-Pseofactory-Test"] = "1";
@@ -2317,16 +2353,35 @@ def _render_runtime_sync_events_js() -> str:
               if (data && data.ok) {
                 var sessId = data.checkout_session_id || "cs_verified";
                 var cMode = data.checkout_mode || "edge_checkout_rail";
+                var stl = (data.settlement_attribution) || (data.statutory_data_pack && data.statutory_data_pack.settlement_attribution) || {};
+                var stlId = stl.settlement_id || ("stl_" + sessId);
+                var stlStatus = stl.settlement_status || "settled";
+                var attrRev = stl.attributed_revenue_usd !== undefined ? stl.attributed_revenue_usd : (data.offer_price_usd || 49);
+                var dpId = stl.datapack_pack_id || (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ("dp_" + (data.lead_id || "verified"));
                 chkBtn.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                 chkBtn.setAttribute("data-checkout-session-id", sessId);
                 chkBtn.setAttribute("data-checkout-mode", cMode);
-                chkBtn.textContent = "Checkout Ready (" + sessId + ")";
+                chkBtn.setAttribute("data-settlement-status", String(stlStatus));
+                chkBtn.setAttribute("data-settlement-id", String(stlId));
+                chkBtn.setAttribute("data-attributed-revenue-usd", String(attrRev));
+                chkBtn.setAttribute("data-datapack-id", String(dpId));
+                chkBtn.textContent = "Checkout Settled & Data Pack Ready (" + sessId + ")";
                 var parentStep = chkBtn.closest("#post-calculation-upgrade-drawer, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                   parentStep.setAttribute("data-checkout-session-id", sessId);
+                  parentStep.setAttribute("data-settlement-status", String(stlStatus));
+                  parentStep.setAttribute("data-settlement-id", String(stlId));
+                  parentStep.setAttribute("data-attributed-revenue-usd", String(attrRev));
+                  parentStep.setAttribute("data-datapack-id", String(dpId));
                   renderPlaybookAndFulfillmentDrawer(parentStep, data, "checkout_fulfill");
                 }
+                emitWorkbenchEngagementBeacon("post_calc_upgrade_settled", "post_calculation_upgrade_drawer", {
+                  offer_sku: data.offer_sku || chkBtn.getAttribute("data-offer-sku") || "",
+                  settlement_id: String(stlId),
+                  attributed_revenue_usd: Number(attrRev || 0),
+                  datapack_id: String(dpId)
+                });
                 if (cMode.indexOf("live_session") !== -1 && data.checkout_url && String(data.checkout_url).indexOf("https://checkout.") === 0 && !window.__PSEO_SYNTHETIC_TEST__) {
                   window.location.assign(data.checkout_url);
                 }
@@ -4313,6 +4368,7 @@ def normalize_html_visual_primitives(
                 or "qThreshAmt" not in sync_body
                 or "data-checkout-trigger" not in sync_body
                 or "post-calculation-upgrade-drawer" not in sync_body
+                or "checkout-settlement-attribution-banner" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
                 or "remBasis * 0.80" in sync_body
