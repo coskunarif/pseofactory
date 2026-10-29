@@ -1327,13 +1327,25 @@ export async function onRequest(context) {{
         return gainhelm_js
 
     if prop_clean == "prexvo":
+        prexvo_direct_upgrades = (
+            active_hub.get_direct_contract_upgrades("prexvo")
+            if hasattr(active_hub, "get_direct_contract_upgrades")
+            else {}
+        )
+        prexvo_checkout_fallback_url = (
+            "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1"
+        )
         prexvo_catalog_entries: List[str] = []
         for k, p_obj in PREXVO_AFFILIATES.items():
             status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
             status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
+            px_direct_contract = prexvo_direct_upgrades.get(k) or ""
+            px_extra = f'    directContractUrl: "{px_direct_contract}",\n' if px_direct_contract else ""
             prexvo_catalog_entries.append(
                 f'  {k}: {{\n'
                 f'    defaultUrl: "{p_obj.default_url}",\n'
+                f'{px_extra}'
+                f'    directCheckoutUrl: "{prexvo_checkout_fallback_url}",\n'
                 f'    envVar: "{p_obj.env_var}",\n'
                 f'    statusEnvVar: "{status_env}",\n'
                 f'    status: "{status_val}",\n'
@@ -1344,6 +1356,31 @@ export async function onRequest(context) {{
                 "https://www.sofi.com/refinance-student-loan/",
                 "AFFILIATE_SOFI_URL",
                 "AFFILIATE_SOFI_STATUS",
+            ),
+            "sofi_student_refi": (
+                "https://www.sofi.com/refinance-student-loan/",
+                "AFFILIATE_SOFI_URL",
+                "AFFILIATE_SOFI_STATUS",
+            ),
+            "earnest_student_refi": (
+                "https://www.earnest.com/student-loan-refinancing",
+                "AFFILIATE_EARNEST_URL",
+                "AFFILIATE_EARNEST_STATUS",
+            ),
+            "lendkey_refi": (
+                "https://www.lendkey.com/student-loan-refinancing/",
+                "AFFILIATE_LENDKEY_URL",
+                "AFFILIATE_LENDKEY_STATUS",
+            ),
+            "credible_student_loans": (
+                "https://www.credible.com/refinance-student-loans",
+                "AFFILIATE_CREDIBLE_URL",
+                "AFFILIATE_CREDIBLE_STATUS",
+            ),
+            "edvestin": (
+                "https://edvestinu.com/refinance-student-loans/",
+                "AFFILIATE_EDVESTIN_URL",
+                "AFFILIATE_EDVESTIN_STATUS",
             ),
             "laurel_road": (
                 "https://www.laurelroad.com/student-loan-refinancing/",
@@ -1358,9 +1395,15 @@ export async function onRequest(context) {{
         }
         for alias_k, (alias_url, alias_env, alias_status_env) in prexvo_aliases.items():
             if alias_k not in PREXVO_AFFILIATES:
+                px_alias_contract = prexvo_direct_upgrades.get(alias_k) or ""
+                px_alias_extra = (
+                    f'    directContractUrl: "{px_alias_contract}",\n' if px_alias_contract else ""
+                )
                 prexvo_catalog_entries.append(
                     f'  {alias_k}: {{\n'
                     f'    defaultUrl: "{alias_url}",\n'
+                    f'{px_alias_extra}'
+                    f'    directCheckoutUrl: "{prexvo_checkout_fallback_url}",\n'
                     f'    envVar: "{alias_env}",\n'
                     f'    statusEnvVar: "{alias_status_env}",\n'
                     f'    status: "live",\n'
@@ -1374,8 +1417,9 @@ export async function onRequest(context) {{
  * Enforces Prexvo Standing Constraints:
  * 1. Strict Partner Whitelist: Only approved student loan lending marketplace partners (zero B2B contamination).
  * 2. Sub-Affiliate Aggregator Prohibition: Rejects Sovrn, VigLink, and Skimlinks redirect domains.
- * 3. Live Lending Marketplace Routing: Routes live student loan callouts directly to external
- *    commission-bearing lending marketplaces with ref=prexvo attribution.
+ * 3. Yield-Gated Routing: Routes live student loan callouts to verified approved affiliate contracts when
+ *    configured, or fails closed onto first-party Prexvo direct checkout capture ($39 Decision Audit Kit)
+ *    so zero production clicks leak to unapproved or declined external lenders.
  * 4. SSRF & Open Redirect Protection: Strictly validates schemes and blocks private/loopback CIDRs.
  *
  * Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
@@ -1386,6 +1430,7 @@ const PARTNER_CATALOG = {{
 }};
 
 const EDUCATIONAL_CALCULATOR_URL = "https://prexvo.com/tools/student-loan-repayment-calculator/";
+const YIELD_GATED_DIRECT_CHECKOUT_URL = "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1";
 
 const FORBIDDEN_AGGREGATOR_DOMAINS = [
   "sovrn.com",
@@ -1570,7 +1615,29 @@ export async function onRequest(context) {{
 
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
-  const rawTargetUrl = (hasDirectConfig ? envUrl : partnerConfig.defaultUrl).trim();
+  const hasApprovedContract = Boolean(
+    partnerConfig.directContractUrl && partnerConfig.directContractUrl.trim().length > 0
+  );
+  const allowUnapprovedExternal = Boolean(
+    env && String(env.ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  );
+  const isYieldGatedCheckout = !hasDirectConfig && !hasApprovedContract && !allowUnapprovedExternal;
+  const rawTargetUrl = (
+    hasDirectConfig
+      ? envUrl
+      : hasApprovedContract
+      ? partnerConfig.directContractUrl
+      : isYieldGatedCheckout
+      ? partnerConfig.directCheckoutUrl || YIELD_GATED_DIRECT_CHECKOUT_URL
+      : partnerConfig.defaultUrl
+  ).trim();
+  const contractTier = hasDirectConfig
+    ? "direct_env_override"
+    : hasApprovedContract
+    ? "direct_contract_upgraded"
+    : isYieldGatedCheckout
+    ? "yield_gated_direct_checkout_capture"
+    : "direct_lending_marketplace";
 
   if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
     return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
@@ -1593,6 +1660,12 @@ export async function onRequest(context) {{
     normParams.get("subid") ||
     (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || "");
 
+  if (isYieldGatedCheckout) {{
+    targetObj.searchParams.set("partner_key", rawPartner);
+    if (sourceTool && !targetObj.searchParams.has("tool_slug")) {{
+      targetObj.searchParams.set("tool_slug", sourceTool);
+    }}
+  }}
   if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
     targetObj.searchParams.set("subid", effectiveSubid);
   }}
@@ -1655,6 +1728,7 @@ export async function onRequest(context) {{
       subid: effectiveSubid || `${{rawPartner}}_edge`,
       value_tier: phTier || "standard",
       ph_tier: phTier || "standard",
+      contract_tier: contractTier,
       path: reqUrl.pathname,
       destination_url: finalRedirectUrl,
       timestamp: new Date().toISOString(),
@@ -1664,7 +1738,8 @@ export async function onRequest(context) {{
   return makeRedirectResponse(finalRedirectUrl, {{
     "X-Edge-Partner": rawPartner,
     "X-Edge-Subid": effectiveSubid || "default",
-    "X-Edge-Contract-Tier": hasDirectConfig ? "direct_env_override" : "direct_lending_marketplace",
+    "X-Edge-Contract-Tier": contractTier,
+    "X-Edge-Native-Destination": partnerConfig.defaultUrl,
     "X-Edge-Telemetry": isSyntheticProbe ? "synthetic_suppressed" : "recorded",
     ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
   }});
@@ -1677,31 +1752,75 @@ export async function onRequest(context) {{
     sovrn_key = getattr(active_hub, "sovrn_domain_key", "0a5ac1bfe04034bff021b394f5e71d90")
 
     direct_contract_upgrades = {
+        "coinledger": "https://coinledger.io/?fpr=arif-554004",
+        "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+        "mercury": "https://mercury.com/r/profithelm-llc",
+        "rho": "https://mercury.com/r/profithelm-llc",
+        "brex": "https://mercury.com/r/profithelm-llc",
+        "bluevine_checking": "https://mercury.com/r/profithelm-llc",
+        "wealthfront": "https://mercury.com/r/profithelm-llc",
+        "valley_bank": "https://mercury.com/r/profithelm-llc",
+        "public_com": "https://mercury.com/r/profithelm-llc",
+        "quontic_bank": "https://mercury.com/r/profithelm-llc",
+        "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
+        "surepayroll": "https://gusto.pxf.io/c/7932737/1226287/15154",
+        "guideline": "https://gusto.pxf.io/c/7932737/1226287/15154",
+        "capitalize": "https://gusto.pxf.io/c/7932737/1226287/15154",
+        "rippling": "https://try.rippling.com/mcfo1m09qiwt",
+        "deel": "https://try.rippling.com/mcfo1m09qiwt",
+        "simply_business": "https://try.rippling.com/mcfo1m09qiwt",
         "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "bench_accounting": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "xendoo_impact": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "collective_scorp": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "exeter1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "first_american": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "first_american_1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "dlp_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "groundfloor": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "avaliable_1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "madison_specs_cost_seg": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "national_funding_med": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "national_funding": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "stripe_tax": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "avalara": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+        "tax1099": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
+        "ramp_impact": "https://join.ramp.com/c/7932737/3981015/51436",
         "stripe": "https://join.ramp.com/c/7932737/3981015/51436",
+        "stax_payments": "https://join.ramp.com/c/7932737/3981015/51436",
+        "alt_lending": "https://join.ramp.com/c/7932737/3981015/51436",
+        "viva_finance": "https://join.ramp.com/c/7932737/3981015/51436",
         "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
         "freightos_marketplace": "https://join.ramp.com/c/7932737/3981015/51436",
         "flexport": "https://join.ramp.com/c/7932737/3981015/51436",
         "invoice_simple": "https://join.ramp.com/c/7932737/3981015/51436",
-        "simply_business": "https://try.rippling.com/mcfo1m09qiwt",
-        "next_insurance_b2b": "https://www.jdoqocy.com/click-101906407-16985242",
-        "interactive_brokers": "https://kalshi.pxf.io/c/7932737/3078072/37770",
         "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
+        "taxact": "https://www.jdoqocy.com/click-101906407-11917161",
+        "taxact_business": "https://www.jdoqocy.com/click-101906407-11917161",
+        "file_com_tax": "https://www.jdoqocy.com/click-101906407-11917161",
+        "efile": "https://www.jdoqocy.com/click-101906407-11917161",
+        "efile_com": "https://www.jdoqocy.com/click-101906407-11917161",
         "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
+        "eztaxreturn": "https://www.dpbolvw.net/click-101906407-15704796",
+        "eztaxreturn_com": "https://www.dpbolvw.net/click-101906407-15704796",
         "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
         "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
         "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
+        "next_insurance_b2b": "https://www.jdoqocy.com/click-101906407-16985242",
+        "hiscox": "https://www.jdoqocy.com/click-101906407-16985242",
+        "lawdepot": "https://www.jdoqocy.com/click-101906407-16985242",
+        "legalzoom": "https://www.jdoqocy.com/click-101906407-16985242",
+        "kalshi": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+        "interactive_brokers": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+        "zacks": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+        "moby": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+        "taxbit": "https://coinledger.io/?fpr=arif-554004",
     }
     if hasattr(active_hub, "get_direct_contract_upgrades"):
         direct_contract_upgrades.update(active_hub.get_direct_contract_upgrades("profithelm"))
@@ -1846,18 +1965,28 @@ export async function onRequest(context) {{
     direct_network_aliases = {
         "efile": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL"),
         "efile_com": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL"),
+        "file_com_tax": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_FILE_COM_TAX_URL"),
+        "taxact_business": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_TAXACT_BUSINESS_URL"),
         "eztaxreturn": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
         "eztaxreturn_com": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
         "lawdepot": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
+        "legalzoom": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LEGALZOOM_URL"),
         "xendoo_impact": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_IMPACT_URL"),
+        "bench_accounting": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_BENCH_ACCOUNTING_URL"),
+        "collective_scorp": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_COLLECTIVE_SCORP_URL"),
+        "avaliable_1031": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_AVALIABLE_1031_URL"),
+        "madison_specs_cost_seg": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_MADISON_SPECS_COST_SEG_URL"),
+        "bluevine_checking": ("https://mercury.com/r/profithelm-llc", "AFFILIATE_BLUEVINE_CHECKING_URL"),
         "ramp_impact": ("https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL"),
         "wallethub": ("https://www.jdoqocy.com/click-101906407-16952385", "AFFILIATE_WALLETHUB_URL"),
     }
     for d_key, (d_url, d_env) in direct_network_aliases.items():
         if d_key not in ordered_keys:
+            d_direct_contract = direct_contract_upgrades.get(d_key) or d_url
             catalog_entries.append(
                 f'  {d_key}: {{\n'
                 f'    defaultUrl: "{d_url}",\n'
+                f'    directContractUrl: "{d_direct_contract}",\n'
                 f'    envVar: "{d_env}",\n'
                 f'    isDirect: true,\n'
                 f'  }},'
@@ -3148,6 +3277,25 @@ export async function onRequestGet(context) {
     );
     const bundle = buildGainHelmWorkpaperBundle(record, offer, "paid_toolkit");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
+    const wantsBrowserRedirect =
+      reqUrl.searchParams.get("format") !== "json" &&
+      (reqUrl.searchParams.get("redirect") === "1" ||
+        String(request.headers.get("accept") || "").toLowerCase().includes("text/html"));
+    if (wantsBrowserRedirect) {
+      const targetCheckoutLoc = String(stripeOffer.checkout_url || "").startsWith("https://checkout.stripe.com/")
+        ? stripeOffer.checkout_url
+        : `https://gainhelm.com${stripeOffer.fulfillment_url || bundle.fulfillment_url}&format=html`;
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: targetCheckoutLoc,
+          "X-Edge-Checkout-Mode": stripeOffer.checkout_mode || "stripe_live_session",
+          "X-Edge-Offer-Sku": stripeOffer.offer_sku || offer.sku,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
     return new Response(
       JSON.stringify({
         ok: true,
@@ -3461,11 +3609,11 @@ const RESTRICTED_PUBLIC_SERVICE_SLUGS = [
 ];
 
 const PARTNER_ROUTES = {
-  splash_financial: "https://www.splashfinancial.com/student-loan-refinance",
-  credible: "https://www.credible.com/refinance-student-loans",
-  sofi: "https://www.sofi.com/refinance-student-loan/",
-  earnest: "https://www.earnest.com/student-loan-refinancing",
-  edvestin: "https://edvestinu.com/refinance-student-loans/",
+  splash_financial: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
+  credible: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
+  sofi: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
+  earnest: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
+  edvestin: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
 };
 
 const PREXVO_TOOLKIT_OFFER = {
@@ -4048,12 +4196,16 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@prexvo.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
   const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`;
+  const rawPxCheckout = String(record.checkout_url || "");
+  const fullPxCheckoutUrl = rawPxCheckout.startsWith("http")
+    ? rawPxCheckout
+    : `https://prexvo.com${rawPxCheckout}${rawPxCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your Prexvo Student Loan Refinance Worksheet &amp; Decision Checklist</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
     `<p>Model Balance: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
     `<p><a href="https://prexvo.com${record.redirect_url}">Compare Matched Lender Rates (${record.partner_rep_desk || "Splash Financial Partner Desk"})</a></p>` +
-    `<p><a href="https://prexvo.com${record.checkout_url}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `<p><a href="${fullPxCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
   let zeptoHttpStatus = null;
@@ -4280,6 +4432,25 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("outputs_json")
     );
     const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord);
+    const wantsBrowserRedirect =
+      reqUrl.searchParams.get("format") !== "json" &&
+      (reqUrl.searchParams.get("redirect") === "1" ||
+        String(request.headers.get("accept") || "").toLowerCase().includes("text/html"));
+    if (wantsBrowserRedirect) {
+      const targetCheckoutLoc = String(offer.checkout_url || "").startsWith("https://checkout.stripe.com/")
+        ? offer.checkout_url
+        : `https://prexvo.com${offer.fulfillment_url}&format=html`;
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: targetCheckoutLoc,
+          "X-Edge-Checkout-Mode": offer.checkout_mode || "stripe_live_session",
+          "X-Edge-Offer-Sku": offer.offer_sku || PREXVO_TOOLKIT_OFFER.sku,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
     return new Response(
       JSON.stringify({
         ok: true,
@@ -4697,7 +4868,7 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
       thresholdUsd: 50000,
       partnerKey: "otr_solutions_factoring",
       partnerRepDesk: "Wade Fenton at OTR Solutions",
-      liveBase: "https://www.otrsolutions.com/freight-factoring/",
+      liveBase: "https://join.ramp.com/c/7932737/3981015/51436",
       offerSku: "ph_commercial_capital_audit_toolkit",
       offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
       offerPriceUsd: 49,
@@ -5488,12 +5659,16 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
   const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`;
+  const rawPhCheckout = String(record.checkout_url || "");
+  const fullPhCheckoutUrl = rawPhCheckout.startsWith("http")
+    ? rawPhCheckout
+    : `https://profithelm.com${rawPhCheckout}${rawPhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your ProfitHelm Statutory Calculation Worksheet &amp; Compliance Briefing</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
     `<p>Model Amount: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
     `<p><a href="https://profithelm.com${record.redirect_url}">Access Matched Commercial Desk (${record.partner_rep_desk || "ProfitHelm Partner Desk"})</a></p>` +
-    `<p><a href="https://profithelm.com${record.checkout_url}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `<p><a href="${fullPhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
   let zeptoHttpStatus = null;
@@ -5716,6 +5891,25 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("outputs_json")
     );
     const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSynth, customRecord);
+    const wantsBrowserRedirect =
+      reqUrl.searchParams.get("format") !== "json" &&
+      (reqUrl.searchParams.get("redirect") === "1" ||
+        String(request.headers.get("accept") || "").toLowerCase().includes("text/html"));
+    if (wantsBrowserRedirect) {
+      const targetCheckoutLoc = String(offer.checkout_url || "").startsWith("https://checkout.stripe.com/")
+        ? offer.checkout_url
+        : `https://profithelm.com${offer.fulfillment_url}&format=html`;
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: targetCheckoutLoc,
+          "X-Edge-Checkout-Mode": offer.checkout_mode || "stripe_live_session",
+          "X-Edge-Offer-Sku": offer.offer_sku || spec.offerSku,
+          ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
+          ...CORS_HEADERS,
+        },
+      });
+    }
     return new Response(
       JSON.stringify({
         ok: true,

@@ -729,6 +729,7 @@ class MonetizationHub:
         if target_prop == "profithelm":
             upgrades.update(
                 {
+                    "koinly": "https://koinly.io/?fpr=arif-4c0b88",
                     "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                     "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                     "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",

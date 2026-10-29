@@ -1059,9 +1059,11 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       }});
       if (pxRes.status !== 302) process.exit(40);
       const pxLoc = new URL(pxRes.headers.get("Location"));
-      if (pxLoc.hostname !== "www.splashfinancial.com") process.exit(41);
+      if (pxLoc.hostname !== "prexvo.com" || pxLoc.pathname !== "/api/lead-capture") process.exit(41);
+      if (pxLoc.searchParams.get("checkout") !== "1" || pxLoc.searchParams.get("sku") !== "px_refi_amortization_decision_audit") process.exit(41);
       if (pxLoc.searchParams.get("subid") !== "student-loan-repayment-calculator_calculator_result_inline") process.exit(42);
       if (pxLoc.searchParams.get("ref") !== "prexvo") process.exit(43);
+      if (pxRes.headers.get("X-Edge-Contract-Tier") !== "yield_gated_direct_checkout_capture") process.exit(46);
 
       const beaconReq = new Request("https://prexvo.com/api/telemetry", {{
         method: "POST",

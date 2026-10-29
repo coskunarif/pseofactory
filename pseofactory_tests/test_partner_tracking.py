@@ -1663,6 +1663,7 @@ def test_durable_kv_sync_page_slot_aggregation_and_portal_click_reconciliation(
        Impact.com, CJ Affiliate, PartnerStack, and FirstPromoter.
     """
     from pseofactory.affiliates import aggregate_outbound_partner_engagement
+    import subprocess
     from pseofactory.edge import sync_tenant_edge_redirect_function
 
     # 1. Verify Prexvo and ProfitHelm wrangler.toml KV namespace synchronization
@@ -2156,6 +2157,7 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
     """
     import subprocess
     from pseofactory.action_bus import HumanActionBus
+    import subprocess
     from pseofactory.edge import sync_tenant_edge_redirect_function
     from pseofactory.email_ingest import EmailIngestionEngine, EmailMessage
     from pseofactory.partner_tracker import (
@@ -2836,6 +2838,176 @@ def test_falsify_monetization_and_autonomous_partner_followups_and_bounce_suppre
     for act in followups["actions"]:
         assert "\u2014" not in act["subject"] and "\u2013" not in act["subject"]
         assert "\u2014" not in act["body_text"] and "\u2013" not in act["body_text"]
+
+
+def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_redirect(tmp_path):
+    """
+    Proves across ProfitHelm, Prexvo, and GainHelm edge redirect (/r/<partner>) and
+    lead-capture (/api/lead-capture?checkout=1) functions that:
+    1. Every canonical and alias partner key resolves with HTTP 302 (zero HTTP 404 dead-ends).
+    2. 100% of ProfitHelm and GainHelm clicks route strictly to verified active affiliate contracts
+       (zero leaks to redirect.viglink.com or unapproved merchants, and /r/koinly uses ?fpr=arif-4c0b88).
+    3. 100% of Prexvo clicks fail closed onto first-party direct Stripe Checkout capture
+       (https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1)
+       when no approved lender contract URL is present, sending zero clicks to declined/unapproved lenders.
+    4. Browser navigation (Accept: text/html) or redirect=1 on GET /api/lead-capture?checkout=1 executes
+       an HTTP 302 redirect rather than dumping raw JSON in the browser.
+    """
+    import subprocess
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+
+    ph_dir = tmp_path / "profithelm"
+    px_dir = tmp_path / "prexvo"
+    gh_dir = tmp_path / "gainhelm"
+    for d, prop in ((ph_dir, "profithelm"), (px_dir, "prexvo"), (gh_dir, "gainhelm")):
+        (d / "functions" / "r").mkdir(parents=True, exist_ok=True)
+        sync_tenant_edge_redirect_function(d, property_id=prop)
+
+    ph_r = (ph_dir / "functions" / "r" / "[partner].js").as_uri()
+    px_r = (px_dir / "functions" / "r" / "[partner].js").as_uri()
+    gh_r = (gh_dir / "functions" / "r" / "[partner].js").as_uri()
+    ph_lc = (ph_dir / "functions" / "api" / "lead-capture.js").as_uri()
+    px_lc = (px_dir / "functions" / "api" / "lead-capture.js").as_uri()
+
+    node_script = f"""
+    (async () => {{
+      const phRedirect = await import({json.dumps(ph_r)});
+      const pxRedirect = await import({json.dumps(px_r)});
+      const ghRedirect = await import({json.dumps(gh_r)});
+      const phLead = await import({json.dumps(ph_lc)});
+      const pxLead = await import({json.dumps(px_lc)});
+
+      const approvedProfitHelmHosts = new Set([
+        "join.ramp.com",
+        "xendoo.pxf.io",
+        "gusto.pxf.io",
+        "kalshi.pxf.io",
+        "try.rippling.com",
+        "coinledger.io",
+        "koinly.io",
+        "mercury.com",
+        "www.jdoqocy.com",
+        "www.dpbolvw.net"
+      ]);
+
+      const phKeys = [
+        "coinledger", "koinly", "mercury", "stripe", "ramp", "rho", "gusto", "rippling",
+        "crest_capital", "equipment_macrs", "ipx1031", "exeter1031", "first_american",
+        "first_american_1031", "turbotax", "taxslayer", "kalshi", "interactive_brokers",
+        "simply_business", "suretybonds_direct", "next_insurance_b2b", "national_funding_med",
+        "otr_solutions_factoring", "freightos_marketplace", "brex", "flexport", "wealthfront",
+        "bench", "pilot", "guideline", "stripe_tax", "deel", "taxbit", "freetaxusa",
+        "public_com", "avalara", "national_funding", "taxact", "eztaxreturn", "tax1099",
+        "hiscox", "alt_lending", "viva_finance", "invoice_simple", "dlp_capital", "groundfloor",
+        "stax_payments", "surepayroll", "xendoo", "capitalize", "valley_bank", "quontic_bank",
+        "zacks", "moby", "efile", "efile_com", "file_com_tax", "taxact_business",
+        "eztaxreturn_com", "lawdepot", "legalzoom", "xendoo_impact", "bench_accounting",
+        "collective_scorp", "avaliable_1031", "madison_specs_cost_seg", "bluevine_checking",
+        "ramp_impact", "wallethub"
+      ];
+
+      for (const k of phKeys) {{
+        const res = await phRedirect.onRequest({{
+          request: new Request(`https://profithelm.com/r/${{k}}?source_tool=section-179-calculator&cta_slot=card_1&synthetic_test=1`),
+          env: {{}},
+          params: {{ partner: k }}
+        }});
+        if (res.status !== 302) {{
+          console.error("ProfitHelm non-302 for", k, res.status);
+          process.exit(10);
+        }}
+        const loc = new URL(res.headers.get("Location"));
+        if (!approvedProfitHelmHosts.has(loc.hostname)) {{
+          console.error("Unapproved ProfitHelm destination for", k, loc.toString());
+          process.exit(11);
+        }}
+        if (k === "koinly" && loc.searchParams.get("fpr") !== "arif-4c0b88") {{
+          console.error("Koinly missing FirstPromoter fpr=arif-4c0b88:", loc.toString());
+          process.exit(12);
+        }}
+      }}
+
+      const pxKeys = [
+        "splash_financial", "sofi", "sofi_refi", "sofi_student_refi",
+        "credible", "credible_student_loans", "earnest", "earnest_student_refi",
+        "lendkey", "lendkey_refi", "edvestin", "laurel_road", "juno"
+      ];
+      for (const k of pxKeys) {{
+        const res = await pxRedirect.onRequest({{
+          request: new Request(`https://prexvo.com/r/${{k}}?source_tool=student-loan-refinance-break-even-calculator&cta_slot=card_1&synthetic_test=1`),
+          env: {{}},
+          params: {{ partner: k }}
+        }});
+        if (res.status !== 302) {{
+          console.error("Prexvo non-302 for", k, res.status);
+          process.exit(20);
+        }}
+        const loc = new URL(res.headers.get("Location"));
+        if (loc.hostname !== "prexvo.com" || loc.pathname !== "/api/lead-capture" || loc.searchParams.get("checkout") !== "1") {{
+          console.error("Unapproved Prexvo leak for", k, loc.toString());
+          process.exit(21);
+        }}
+        if (res.headers.get("X-Edge-Contract-Tier") !== "yield_gated_direct_checkout_capture") {{
+          console.error("Unexpected Prexvo contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+          process.exit(22);
+        }}
+      }}
+
+      // Verify Prexvo env override routes to approved tracking contract when explicitly supplied
+      const pxApprovedRes = await pxRedirect.onRequest({{
+        request: new Request("https://prexvo.com/r/splash_financial?source_tool=rap-payment-calculator&synthetic_test=1"),
+        env: {{ AFFILIATE_SPLASH_FINANCIAL_URL: "https://splash.pxf.io/c/7932737/12345/9516" }},
+        params: {{ partner: "splash_financial" }}
+      }});
+      const pxApprovedLoc = new URL(pxApprovedRes.headers.get("Location"));
+      if (pxApprovedLoc.hostname !== "splash.pxf.io" || pxApprovedRes.headers.get("X-Edge-Contract-Tier") !== "direct_env_override") {{
+        process.exit(23);
+      }}
+
+      const ghKeys = [
+        "vanta_security", "drata_compliance", "sprinto_compliance",
+        "thoropass_audit", "coalition_cyber_insurance", "cobalt_pentest"
+      ];
+      for (const k of ghKeys) {{
+        const res = await ghRedirect.onRequest({{
+          request: new Request(`https://gainhelm.com/r/${{k}}?source_tool=soc-2-audit-cost-calculator&cta_slot=card_1&synthetic_test=1`),
+          env: {{}},
+          params: {{ partner: k }}
+        }});
+        if (res.status !== 302) {{
+          console.error("GainHelm non-302 for", k, res.status);
+          process.exit(25);
+        }}
+        const loc = new URL(res.headers.get("Location"));
+        if (!approvedProfitHelmHosts.has(loc.hostname)) {{
+          console.error("Unapproved GainHelm destination for", k, loc.toString());
+          process.exit(26);
+        }}
+      }}
+
+      // Verify browser/redirect=1 on GET /api/lead-capture?checkout=1 returns HTTP 302 redirect
+      const phNavRes = await phLead.onRequestGet({{
+        request: new Request("https://profithelm.com/api/lead-capture?checkout=1&sku=ph_1031_boot_replacement_workpapers&redirect=1&synthetic_test=1", {{
+          headers: {{ Accept: "text/html,application/xhtml+xml", "x-pseofactory-test": "1" }}
+        }}),
+        env: {{}}
+      }});
+      if (phNavRes.status !== 302) process.exit(30);
+
+      const pxNavRes = await pxLead.onRequestGet({{
+        request: new Request("https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1&synthetic_test=1", {{
+          headers: {{ Accept: "text/html,application/xhtml+xml", "x-pseofactory-test": "1" }}
+        }}),
+        env: {{}}
+      }});
+      if (pxNavRes.status !== 302) process.exit(31);
+
+      process.exit(0);
+    }})().catch(err => {{ console.error(err); process.exit(99); }});
+    """
+    proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"Yield-gated routing Node test failed (exit {proc.returncode}): {proc.stderr}"
+
 
 
 
