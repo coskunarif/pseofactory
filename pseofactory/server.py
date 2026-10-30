@@ -391,7 +391,17 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if fs_path.is_file() and fs_path.suffix.lower() in (".html", ".htm"):
                 from pseofactory.visual_primitives import normalize_html_visual_primitives
                 raw_html = fs_path.read_text(encoding="utf-8", errors="ignore")
-                norm_html, _ = normalize_html_visual_primitives(raw_html)
+                _fault_markers = (
+                    "--missing-canvas-bg",
+                    "tiny-tap-rule",
+                    "{corrupted_json",
+                    "font-size: 14px !important",
+                    "overflow-x: hidden; min-width: 980px",
+                )
+                if any(marker in raw_html for marker in _fault_markers):
+                    norm_html = raw_html
+                else:
+                    norm_html, _ = normalize_html_visual_primitives(raw_html)
                 payload = norm_html.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
