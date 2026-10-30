@@ -220,6 +220,34 @@ def _load_trend_db_cache() -> Dict[str, Any]:
         except Exception:
             pass
 
+    if not series_by_id:
+        try:
+            from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+
+            for rec in StatutoryEconomicDatasetCollector().build_canonical_timeseries_records():
+                sid = str(rec.series_id)
+                entry = series_by_id.setdefault(
+                    sid,
+                    {
+                        "series_id": sid,
+                        "property_id": str(rec.property_id),
+                        "jurisdiction": str(rec.jurisdiction),
+                        "statutory_citation": str(rec.statutory_citation),
+                        "metric_key": str(rec.metric_key),
+                        "metric_label": str(rec.metric_label),
+                        "unit": str(rec.unit),
+                        "source_agency": str(rec.source_agency),
+                        "points": {},
+                        "timeline": [],
+                    },
+                )
+                yr = int(rec.effective_year)
+                val = float(rec.metric_value)
+                entry["points"][str(yr)] = val
+                entry["timeline"].append({"year": yr, "value": val})
+        except Exception:
+            pass
+
     _TREND_DB_CACHE = {
         "series_by_id": series_by_id,
         "keywords_by_prop": keywords_by_prop,
