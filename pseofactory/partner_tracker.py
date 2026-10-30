@@ -6217,11 +6217,28 @@ def compute_scenario_demand_and_conversion_metrics(
                 continue
             _ensure_calc_bucket(prop_k, slug_k)
 
+    sku_to_canonical_calc = {
+        "ph_1031_boot_replacement_workpapers": "section-1031-calculator",
+        "ph_commercial_capital_audit_toolkit": "section-179-calculator",
+        "ph_statutory_tax_audit_workpapers": "s-corp-reasonable-salary-tax-calculator",
+        "px_refi_amortization_decision_audit": "student-loan-refinance-break-even-calculator",
+        "gh_soc2_cmmc_audit_workpapers": "soc-2-audit-cost-calculator",
+        "gh_hipaa_iso27001_governance_kit": "iso-27001-certification-cost-calculator",
+    }
+
     for rec in leads:
         prop = str(rec.get("property_id") or "profithelm").strip().lower()
         if property_id and prop != property_id.strip().lower():
             continue
         slug = str(rec.get("tool_slug") or "general").strip().strip("/").lower() or "general"
+        if slug in ("general", "index", ""):
+            rec_sku = str(rec.get("offer_sku") or "").strip()
+            slug = sku_to_canonical_calc.get(
+                rec_sku,
+                "s-corp-reasonable-salary-tax-calculator"
+                if prop == "profithelm"
+                else ("student-loan-refinance-break-even-calculator" if prop == "prexvo" else "soc-2-audit-cost-calculator"),
+            )
         if prop == "prexvo" and is_restricted_public_service_slug(slug, slug):
             continue
         vert = str(rec.get("vertical") or "")
@@ -6404,6 +6421,445 @@ def compute_scenario_demand_and_conversion_metrics(
         "scenario_demand_ranking": ranked_scenarios,
         "top_scenarios_by_tenant": top_by_tenant,
         "per_calculator_metrics": ranked_calculators,
+    }
+
+
+def resolve_candidate_realized_revenue_signal(
+    property_id: str,
+    slug_or_query: str,
+    matching_tool: Optional[str] = None,
+    scenario_metrics: Optional[Dict[str, Any]] = None,
+    leads_ledger_path: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministically maps a candidate topic, query, or calculator slug to its parent calculator
+    and scenario cluster, returning realized settled revenue, deliverable request volume, settled
+    upgrade count, conversion rate, and the deterministic revenue priority bonus.
+    Restricted public-service pages on Prexvo (`pslf`, `save`, `ibr-hardship`, `default-rehabilitation`)
+    always receive $0.00 commercial revenue weight and 0.0 priority bonus.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import is_restricted_public_service_slug
+
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    cand_text = str(slug_or_query or "").strip().lower().replace(" ", "-")
+    raw_text = f"{slug_or_query or ''} {matching_tool or ''}".strip().lower().replace(" ", "-")
+    slug_clean = str(matching_tool or slug_or_query or "").strip().lower().replace(" ", "-")
+
+    metrics = scenario_metrics or compute_scenario_demand_and_conversion_metrics(
+        leads_ledger_path=leads_ledger_path,
+        include_live_edge_telemetry=False,
+    )
+    calc_by_key: Dict[str, Dict[str, Any]] = {
+        f"{c['property_id']}:{c['tool_slug']}": c
+        for c in (metrics.get("per_calculator_metrics") or [])
+        if isinstance(c, dict)
+    }
+    scen_by_id: Dict[str, Dict[str, Any]] = {
+        str(s.get("scenario_id") or ""): s
+        for s in (metrics.get("scenario_demand_ranking") or [])
+        if isinstance(s, dict)
+    }
+
+    if prop_clean == "prexvo" and is_restricted_public_service_slug(raw_text, slug_clean):
+        return {
+            "property_id": prop_clean,
+            "matched_calculator_slug": slug_clean,
+            "scenario_id": "prexvo_restricted_public_service_ymyl",
+            "scenario_label": "Restricted Public-Service Title IV Relief (Non-Commercial Isolation)",
+            "commercial_eligible": False,
+            "realized_calculator_revenue_usd": 0.0,
+            "realized_calculator_net_revenue_usd": 0.0,
+            "scenario_attributed_revenue_usd": 0.0,
+            "scenario_net_settled_revenue_usd": 0.0,
+            "deliverable_requests_count": 0,
+            "settled_upgrades_count": 0,
+            "deliverable_to_settled_conversion_rate": 0.0,
+            "revenue_priority_bonus": 0.0,
+        }
+
+    scenario_id = ""
+    canonical_calc_slug = ""
+
+    if prop_clean == "gainhelm":
+        if any(k in cand_text for k in ("cmmc", "c3pao", "nist-800-171", "nist", "sprs", "fedramp", "3pao", "dfars")):
+            scenario_id = "gainhelm_federal_cmmc_sprs_readiness"
+            canonical_calc_slug = "cmmc-2-0-compliance-cost-calculator"
+        elif any(k in cand_text for k in ("soc-2", "soc2", "type-2", "type-ii", "grc-automation", "vanta", "drata", "trust-center")):
+            scenario_id = "gainhelm_soc2_type2_audit_budgeting"
+            canonical_calc_slug = "soc-2-audit-cost-calculator"
+        elif any(k in cand_text for k in ("hipaa", "iso-27001", "hitrust", "pci-dss", "penetration", "pentest", "cyber-liability", "breach")):
+            scenario_id = "gainhelm_hipaa_iso27001_breach_governance"
+            canonical_calc_slug = "hipaa-violation-penalty-breach-cost-calculator"
+    elif prop_clean == "prexvo":
+        if any(k in cand_text for k in ("refinance", "break-even", "private-student-loan", "rate-arbitrage", "splash", "sofi", "earnest")):
+            scenario_id = "prexvo_private_refi_break_even_arbitrage"
+            canonical_calc_slug = "student-loan-refinance-break-even-calculator"
+        elif any(k in cand_text for k in ("grad-plus", "grad-school-loan-cap", "borrowing-cap", "parent-plus", "2026-rap", "rap-calculator", "obbb")):
+            scenario_id = "prexvo_obbb_2026_grad_plus_cap_transition"
+            canonical_calc_slug = "grad-plus-borrowing-cap-calculator"
+        elif any(
+            k in cand_text
+            for k in (
+                "repayment-calculator",
+                "repayment-estimator",
+                "married-filing-separately",
+                "mfs",
+                "tiered-standard",
+                "tax-bomb",
+                "paye",
+                "icr",
+                "discretionary-income",
+                "residency",
+                "ibr-vs-rap",
+            )
+        ):
+            scenario_id = "prexvo_idr_tax_filing_repayment_optimization"
+            canonical_calc_slug = "student-loan-repayment-calculator"
+    elif prop_clean == "profithelm":
+        if any(k in cand_text for k in ("1031", "like-kind", "boot", "8824", "3840", "dst", "replacement-property")):
+            scenario_id = "profithelm_irc_1031_boot_and_replacement_basis"
+            canonical_calc_slug = "section-1031-calculator"
+        elif any(
+            k in cand_text
+            for k in (
+                "179",
+                "macrs",
+                "depreciation",
+                "bonus-depreciation",
+                "equipment",
+                "gvwr",
+                "vehicle",
+                "ford",
+                "chevy",
+                "ram",
+                "tesla",
+                "gmc",
+            )
+        ):
+            scenario_id = "profithelm_irc_179_bonus_depreciation_capex"
+            canonical_calc_slug = "section-179-calculator"
+        elif any(k in cand_text for k in ("factoring", "invoice", "line-of-credit", "working-capital", "receivables")):
+            scenario_id = "profithelm_invoice_factoring_effective_apr"
+            canonical_calc_slug = "invoice-factoring-cost-apr-calculator"
+        elif any(
+            k in cand_text
+            for k in (
+                "s-corp",
+                "reasonable-salary",
+                "199a",
+                "qbi",
+                "pass-through",
+                "payroll-tax",
+                "self-employment",
+            )
+        ):
+            scenario_id = "profithelm_tcja_2027_sunset_and_scorp_tax_shield"
+            canonical_calc_slug = "s-corp-reasonable-salary-tax-calculator"
+        elif any(k in cand_text for k in ("tax-bracket", "2027-tax", "tcja")):
+            scenario_id = "profithelm_tcja_2027_sunset_and_scorp_tax_shield"
+            canonical_calc_slug = "irs-2027-tax-brackets-alaska"
+
+    direct_calc = calc_by_key.get(f"{prop_clean}:{slug_clean}") if scenario_id else None
+    canon_calc = calc_by_key.get(f"{prop_clean}:{canonical_calc_slug}") if canonical_calc_slug else None
+    scen_obj = scen_by_id.get(scenario_id, {}) if scenario_id else {}
+
+    scen_rev = float(scen_obj.get("attributed_revenue_usd") or 0.0)
+    scen_net_rev = float(scen_obj.get("net_settled_revenue_usd") or 0.0)
+    scen_reqs = int(scen_obj.get("deliverable_requests_count") or 0)
+    scen_settled = int(scen_obj.get("settled_upgrades_count") or 0)
+    scen_conv = float(scen_obj.get("deliverable_to_settled_conversion_rate") or 0.0)
+
+    calc_rev = 0.0
+    calc_net_rev = 0.0
+    matched_slug = canonical_calc_slug or slug_clean
+    if direct_calc and float(direct_calc.get("attributed_revenue_usd") or 0.0) > 0.0:
+        calc_rev = float(direct_calc.get("attributed_revenue_usd") or 0.0)
+        calc_net_rev = float(direct_calc.get("net_settled_revenue_usd") or 0.0)
+        matched_slug = str(direct_calc.get("tool_slug") or slug_clean)
+    elif canon_calc and float(canon_calc.get("attributed_revenue_usd") or 0.0) > 0.0:
+        calc_rev = float(canon_calc.get("attributed_revenue_usd") or 0.0)
+        calc_net_rev = float(canon_calc.get("net_settled_revenue_usd") or 0.0)
+        matched_slug = str(canon_calc.get("tool_slug") or canonical_calc_slug)
+    elif scen_rev > 0.0:
+        calc_rev = scen_rev
+        calc_net_rev = scen_net_rev
+        if canonical_calc_slug:
+            matched_slug = canonical_calc_slug
+
+    priority_bonus = 0.0
+    if scen_settled > 0 or calc_rev > 0.0 or scen_rev > 0.0:
+        base_settlement_bonus = 10.0 if scen_settled > 0 else 0.0
+        calc_rev_component = min(38.0, calc_rev * 0.22)
+        scenario_rev_component = min(10.0, scen_rev * 0.04)
+        demand_conversion_component = min(
+            10.0,
+            (scen_settled * 1.5) + (scen_reqs * 0.8) + (scen_conv * 2.0),
+        )
+        priority_bonus = round(
+            base_settlement_bonus
+            + calc_rev_component
+            + scenario_rev_component
+            + demand_conversion_component,
+            2,
+        )
+
+    return {
+        "property_id": prop_clean,
+        "matched_calculator_slug": matched_slug or canonical_calc_slug or slug_clean,
+        "scenario_id": scenario_id or f"{prop_clean}_unmonetized_or_zero_settled_cluster",
+        "scenario_label": str(scen_obj.get("scenario_label") or "Unsettled / Emerging Topic Cluster"),
+        "commercial_eligible": True,
+        "realized_calculator_revenue_usd": round(calc_rev, 2),
+        "realized_calculator_net_revenue_usd": round(calc_net_rev, 2),
+        "scenario_attributed_revenue_usd": round(scen_rev, 2),
+        "scenario_net_settled_revenue_usd": round(scen_net_rev, 2),
+        "deliverable_requests_count": scen_reqs,
+        "settled_upgrades_count": scen_settled,
+        "deliverable_to_settled_conversion_rate": round(scen_conv, 4),
+        "revenue_priority_bonus": priority_bonus,
+    }
+
+
+def rank_revenue_weighted_expansion_queue(
+    void_candidates_path: Optional[Any] = None,
+    property_id: Optional[str] = None,
+    leads_ledger_path: Optional[Any] = None,
+    persist_reweighted_queue: bool = False,
+) -> Dict[str, Any]:
+    """
+    Re-weights the autonomous topic expansion queue (`void_candidates.jsonl`) using live
+    deliverable requests and settled checkout revenue across `profithelm`, `prexvo`, and `gainhelm`.
+    Produces deterministic before-and-after queues ranked by realized revenue per calculator
+    and revenue-weighted composite profit yield.
+    Zero em-dashes. Zero en-dashes.
+    """
+    eff_vc_path = (
+        str(void_candidates_path)
+        if void_candidates_path
+        else os.path.join(os.path.dirname(__file__), "..", ".agy", "void_candidates.jsonl")
+    )
+    scenario_metrics = compute_scenario_demand_and_conversion_metrics(
+        leads_ledger_path=leads_ledger_path,
+        include_live_edge_telemetry=False,
+    )
+
+    raw_records: List[Dict[str, Any]] = []
+    if os.path.isfile(eff_vc_path):
+        with open(eff_vc_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        raw_records.append(obj)
+                except Exception:
+                    continue
+
+    prop_filter = str(property_id).strip().lower() if property_id else None
+    action_priority_map = {
+        "BUILD_PAGE": 3,
+        "REFACTOR_PAGE": 2,
+        "PROPOSE_NEW_APP": 2,
+        "MONITOR": 1,
+        "REJECT": 0,
+    }
+
+    enriched_items: List[Dict[str, Any]] = []
+    for rec in raw_records:
+        p_id = str(rec.get("property_id") or "unassigned").strip().lower()
+        if prop_filter and p_id != prop_filter:
+            continue
+        act = str(rec.get("action") or "MONITOR").strip().upper()
+        base_yield = float(
+            rec.get("before_composite_profit_yield")
+            if rec.get("before_composite_profit_yield") is not None
+            else (rec.get("composite_profit_yield") or 0.0)
+        )
+        slug_val = str(rec.get("slug") or "")
+        query_val = str(rec.get("query") or slug_val)
+        match_tool = str(rec.get("matching_tool") or "")
+
+        rev_sig = resolve_candidate_realized_revenue_signal(
+            property_id=p_id,
+            slug_or_query=f"{slug_val} {query_val}",
+            matching_tool=match_tool,
+            scenario_metrics=scenario_metrics,
+        )
+        bonus = float(rev_sig["revenue_priority_bonus"]) if act != "REJECT" and base_yield > 0.0 else 0.0
+        weighted_yield = round(base_yield + bonus, 2) if act != "REJECT" and base_yield > 0.0 else round(base_yield, 2)
+
+        item = {
+            **rec,
+            "before_composite_profit_yield": round(base_yield, 2),
+            "composite_profit_yield": round(base_yield, 2),
+            "revenue_priority_bonus": bonus,
+            "revenue_weighted_yield": weighted_yield,
+            "matched_calculator_slug": rev_sig["matched_calculator_slug"],
+            "scenario_id": rev_sig["scenario_id"],
+            "scenario_label": rev_sig["scenario_label"],
+            "commercial_eligible": rev_sig["commercial_eligible"],
+            "realized_calculator_revenue_usd": rev_sig["realized_calculator_revenue_usd"],
+            "realized_calculator_net_revenue_usd": rev_sig["realized_calculator_net_revenue_usd"],
+            "scenario_attributed_revenue_usd": rev_sig["scenario_attributed_revenue_usd"],
+            "scenario_net_settled_revenue_usd": rev_sig["scenario_net_settled_revenue_usd"],
+            "deliverable_requests_count": rev_sig["deliverable_requests_count"],
+            "settled_upgrades_count": rev_sig["settled_upgrades_count"],
+            "deliverable_to_settled_conversion_rate": rev_sig["deliverable_to_settled_conversion_rate"],
+            "_action_priority": action_priority_map.get(act, 0),
+        }
+        enriched_items.append(item)
+
+    actionable_items = [
+        x
+        for x in enriched_items
+        if x.get("property_id") in ("profithelm", "prexvo", "gainhelm")
+        and x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE", "MONITOR")
+        and float(x.get("before_composite_profit_yield") or 0.0) > 0.0
+    ]
+
+    before_queue = sorted(
+        [dict(x) for x in actionable_items],
+        key=lambda x: (
+            1
+            if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
+            and float(x["before_composite_profit_yield"]) >= 30.0
+            else 0,
+            float(x["before_composite_profit_yield"]),
+            int(x["_action_priority"]),
+            str(x.get("slug") or ""),
+        ),
+        reverse=True,
+    )
+    for idx, b_item in enumerate(before_queue, start=1):
+        b_item["before_rank"] = idx
+        b_item.pop("_action_priority", None)
+
+    before_rank_by_slug = {f"{x['property_id']}:{x['slug']}": x["before_rank"] for x in before_queue}
+
+    after_queue = sorted(
+        [dict(x) for x in actionable_items],
+        key=lambda x: (
+            1
+            if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
+            and float(x["before_composite_profit_yield"]) >= 30.0
+            else 0,
+            float(x["realized_calculator_revenue_usd"]),
+            float(x["revenue_weighted_yield"]),
+            float(x["scenario_attributed_revenue_usd"]),
+            int(x["_action_priority"]),
+            float(x["before_composite_profit_yield"]),
+        ),
+        reverse=True,
+    )
+    for idx, a_item in enumerate(after_queue, start=1):
+        key = f"{a_item['property_id']}:{a_item['slug']}"
+        b_rk = before_rank_by_slug.get(key, idx)
+        a_item["before_rank"] = b_rk
+        a_item["after_rank"] = idx
+        a_item["rank_delta"] = b_rk - idx
+        a_item.pop("_action_priority", None)
+
+    per_tenant: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    for t_id in ("profithelm", "prexvo", "gainhelm"):
+        if prop_filter and t_id != prop_filter:
+            continue
+        t_items = [x for x in actionable_items if x.get("property_id") == t_id]
+        t_before = sorted(
+            [dict(x) for x in t_items],
+            key=lambda x: (
+                1
+                if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
+                and float(x["before_composite_profit_yield"]) >= 30.0
+                else 0,
+                float(x["before_composite_profit_yield"]),
+                int(x["_action_priority"]),
+                str(x.get("slug") or ""),
+            ),
+            reverse=True,
+        )
+        t_before_map: Dict[str, int] = {}
+        for i_b, tb in enumerate(t_before, start=1):
+            tb["tenant_before_rank"] = i_b
+            tb.pop("_action_priority", None)
+            t_before_map[str(tb.get("slug") or "")] = i_b
+
+        t_after = sorted(
+            [dict(x) for x in t_items],
+            key=lambda x: (
+                1
+                if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
+                and float(x["before_composite_profit_yield"]) >= 30.0
+                else 0,
+                float(x["realized_calculator_revenue_usd"]),
+                float(x["revenue_weighted_yield"]),
+                float(x["scenario_attributed_revenue_usd"]),
+                int(x["_action_priority"]),
+                float(x["before_composite_profit_yield"]),
+            ),
+            reverse=True,
+        )
+        for i_a, ta in enumerate(t_after, start=1):
+            s_k = str(ta.get("slug") or "")
+            tb_rk = t_before_map.get(s_k, i_a)
+            ta["tenant_before_rank"] = tb_rk
+            ta["tenant_after_rank"] = i_a
+            ta["tenant_rank_delta"] = tb_rk - i_a
+            ta.pop("_action_priority", None)
+
+        per_tenant[t_id] = {
+            "before_queue": t_before,
+            "after_queue": t_after,
+        }
+
+    if persist_reweighted_queue and os.path.isfile(eff_vc_path) and not prop_filter:
+        sorted_all = sorted(
+            enriched_items,
+            key=lambda x: (
+                1 if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE") else 0,
+                float(x.get("revenue_weighted_yield") or 0.0),
+                float(x.get("realized_calculator_revenue_usd") or 0.0),
+                float(x.get("before_composite_profit_yield") or 0.0),
+            ),
+            reverse=True,
+        )
+        with open(eff_vc_path, "w", encoding="utf-8") as wfh:
+            for s_rec in sorted_all:
+                clean_rec = {k: v for k, v in s_rec.items() if k != "_action_priority"}
+                wfh.write(json.dumps(clean_rec) + "\n")
+
+        summary_json_path = os.path.join(
+            os.path.dirname(os.path.abspath(eff_vc_path)),
+            "revenue_weighted_expansion_queue.json",
+        )
+        try:
+            with open(summary_json_path, "w", encoding="utf-8") as sfh:
+                json.dump(
+                    {
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                        "fleet_conversion_totals": scenario_metrics["fleet_conversion_totals"],
+                        "per_calculator_metrics": scenario_metrics["per_calculator_metrics"],
+                        "before_queue": before_queue,
+                        "after_queue": after_queue,
+                        "per_tenant": per_tenant,
+                    },
+                    sfh,
+                    indent=2,
+                )
+                sfh.write("\n")
+        except Exception:
+            pass
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "void_candidates_path": eff_vc_path,
+        "fleet_conversion_totals": scenario_metrics["fleet_conversion_totals"],
+        "per_calculator_metrics": scenario_metrics["per_calculator_metrics"],
+        "before_queue": before_queue,
+        "after_queue": after_queue,
+        "per_tenant": per_tenant,
     }
 
 
@@ -7844,6 +8300,11 @@ def get_lead_monitoring_summary(
         "net_settled_revenue_usd": scenario_demand["fleet_conversion_totals"]["total_net_settled_revenue_usd"],
         "scenario_demand_attribution": scenario_demand,
         "per_calculator_metrics": scenario_demand["per_calculator_metrics"],
+        "revenue_weighted_expansion_queue": rank_revenue_weighted_expansion_queue(
+            property_id=property_id,
+            leads_ledger_path=leads_ledger_path,
+            persist_reweighted_queue=False,
+        ),
         "monetization_e2e_audit": audit_end_to_end_monetization_and_fulfillment(
             execute_live=verify_live_providers
         ),
@@ -8384,6 +8845,9 @@ def audit_end_to_end_monetization_and_fulfillment(
         "catalog_skus": catalog_skus,
         "scenario_demand_attribution": compute_scenario_demand_and_conversion_metrics(
             include_live_edge_telemetry=execute_live,
+        ),
+        "revenue_weighted_expansion_queue": rank_revenue_weighted_expansion_queue(
+            persist_reweighted_queue=False,
         ),
         "ymyl_public_service_isolation": {
             "isolated": ymyl_isolated,

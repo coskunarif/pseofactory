@@ -3496,6 +3496,156 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
     assert proc_stl.returncode == 0, f"Edge settlement Node test failed (exit {proc_stl.returncode}): {proc_stl.stderr}"
 
 
+def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e() -> None:
+    """
+    Verifies that real settled revenue and deliverable conversion metrics across `profithelm`,
+    `prexvo`, and `gainhelm` deterministically steer autonomous topic selection
+    (`resolve_candidate_realized_revenue_signal`, `rank_revenue_weighted_expansion_queue`,
+    `JevEngine.compute_composite_yield`) and syndicate priority
+    (`prioritize_distribution_queue_by_referral_yield`), while keeping restricted public-service
+    pages on Prexvo (`pslf`, `save`, `ibr-hardship`) at $0.00 commercial revenue boost.
+    """
+    from pseofactory.partner_tracker import (
+        resolve_candidate_realized_revenue_signal,
+        rank_revenue_weighted_expansion_queue,
+        get_lead_monitoring_summary,
+    )
+    from pseofactory.distributor import prioritize_distribution_queue_by_referral_yield
+    from pseofactory.trends.jev_engine import JevEngine
+    from pseofactory.trends.models import TrendCandidate, TregDurabilityResult
+
+    # 1. Verify scenario and calculator revenue signal resolution + Prexvo YMYL isolation
+    soc2_sig = resolve_candidate_realized_revenue_signal("gainhelm", "soc-2-compliance-cost")
+    assert soc2_sig["matched_calculator_slug"] == "soc-2-audit-cost-calculator"
+    assert soc2_sig["realized_calculator_revenue_usd"] >= 474.0
+    assert soc2_sig["settled_upgrades_count"] >= 6
+    assert soc2_sig["revenue_priority_bonus"] >= 50.0
+
+    cmmc_sig = resolve_candidate_realized_revenue_signal("gainhelm", "cmmc-level-2-c3pao-audit-cost-calculator")
+    assert cmmc_sig["matched_calculator_slug"] == "cmmc-2-0-compliance-cost-calculator"
+    assert cmmc_sig["realized_calculator_revenue_usd"] >= 79.0
+    assert cmmc_sig["revenue_priority_bonus"] > 20.0
+
+    ph_1031_sig = resolve_candidate_realized_revenue_signal("profithelm", "partial-1031-exchange-boot-calculator")
+    assert ph_1031_sig["matched_calculator_slug"] == "section-1031-calculator"
+    assert ph_1031_sig["realized_calculator_revenue_usd"] >= 158.0
+    assert ph_1031_sig["revenue_priority_bonus"] > 45.0
+
+    ph_zero_sig = resolve_candidate_realized_revenue_signal(
+        "profithelm",
+        "corporate-amt-camt-book-income-minimum-tax-calculator",
+    )
+    assert ph_zero_sig["realized_calculator_revenue_usd"] == 0.0
+    assert ph_zero_sig["revenue_priority_bonus"] == 0.0
+
+    px_refi_sig = resolve_candidate_realized_revenue_signal(
+        "prexvo",
+        "student-loan-refinance-break-even-calculator",
+    )
+    assert px_refi_sig["realized_calculator_revenue_usd"] >= 156.0
+    assert px_refi_sig["revenue_priority_bonus"] > 45.0
+
+    px_pslf_sig = resolve_candidate_realized_revenue_signal(
+        "prexvo",
+        "pslf-buyback-months-reconsideration-student-loan-calculator",
+    )
+    assert px_pslf_sig["commercial_eligible"] is False
+    assert px_pslf_sig["realized_calculator_revenue_usd"] == 0.0
+    assert px_pslf_sig["revenue_priority_bonus"] == 0.0
+
+    # 2. Verify before-and-after expansion queue across ProfitHelm, Prexvo, and GainHelm
+    queue_res = rank_revenue_weighted_expansion_queue(persist_reweighted_queue=False)
+    assert queue_res["fleet_conversion_totals"]["total_attributed_revenue_usd"] >= 1239.0
+    assert len(queue_res["before_queue"]) == len(queue_res["after_queue"]) >= 25
+
+    ph_after = queue_res["per_tenant"]["profithelm"]["after_queue"]
+    assert ph_after[0]["slug"] == "partial-1031-exchange-boot-calculator"
+    assert ph_after[0]["realized_calculator_revenue_usd"] >= 158.0
+    assert ph_after[0]["tenant_rank_delta"] > 0
+
+    px_after = queue_res["per_tenant"]["prexvo"]["after_queue"]
+    assert px_after[0]["slug"] == "repayment-estimator-student-loans"
+    assert px_after[0]["realized_calculator_revenue_usd"] >= 39.0
+    assert px_after[0]["tenant_rank_delta"] > 0
+
+    gh_after = queue_res["per_tenant"]["gainhelm"]["after_queue"]
+    assert gh_after[0]["matched_calculator_slug"] == "soc-2-audit-cost-calculator"
+    assert gh_after[0]["realized_calculator_revenue_usd"] >= 474.0
+
+    # 3. Verify JevEngine closed-loop realized revenue multiplier boost
+    jev = JevEngine()
+    treg = TregDurabilityResult(
+        query="partial 1031 exchange boot calculator",
+        search_volume=900,
+        cpc_usd=18.5,
+        competition_index=0.35,
+        keyword_difficulty=24.0,
+        position_zero_vacant=True,
+        historical_stability=0.88,
+    )
+    cand_base = TrendCandidate(
+        id="cand_1031_base",
+        query="partial 1031 exchange boot calculator",
+        slug="partial-1031-exchange-boot-calculator",
+        source="reddit",
+        velocity=42.0,
+        acceleration=11.0,
+        z_score=3.8,
+        intent_cluster="1031_exchange",
+        is_transient_noise=False,
+        discovered_at="2026-10-29T00:00:00Z",
+        metadata={"property_id": "profithelm", "closed_loop_feedback": {"gsc_cluster_impressions": 40}},
+    )
+    cand_rev = TrendCandidate(
+        id="cand_1031_rev",
+        query="partial 1031 exchange boot calculator",
+        slug="partial-1031-exchange-boot-calculator",
+        source="reddit",
+        velocity=42.0,
+        acceleration=11.0,
+        z_score=3.8,
+        intent_cluster="1031_exchange",
+        is_transient_noise=False,
+        discovered_at="2026-10-29T00:00:00Z",
+        metadata={
+            "property_id": "profithelm",
+            "closed_loop_feedback": {
+                "gsc_cluster_impressions": 40,
+                "deliverable_requests": 3,
+                "settled_upgrades": 2,
+                "attributed_revenue_usd": 158.0,
+            },
+        },
+    )
+    y_base = jev.compute_composite_yield(
+        cand_base, treg, jev_score=0.82, durable_prob=0.84, cannibalization_risk=0.05
+    )
+    y_rev = jev.compute_composite_yield(
+        cand_rev, treg, jev_score=0.82, durable_prob=0.84, cannibalization_risk=0.05
+    )
+    assert y_rev > y_base
+
+    # 4. Verify syndication priority queue across ProfitHelm, Prexvo, and GainHelm
+    ph_synd = prioritize_distribution_queue_by_referral_yield(property_id="profithelm")
+    assert ph_synd[0]["slug"] == "section-1031-calculator"
+    assert ph_synd[0]["realized_revenue_usd"] >= 158.0
+    assert ph_synd[0]["rank_delta"] > 0
+
+    px_synd = prioritize_distribution_queue_by_referral_yield(property_id="prexvo")
+    assert px_synd[0]["slug"] == "student-loan-refinance-break-even-calculator"
+    assert px_synd[0]["realized_revenue_usd"] >= 156.0
+
+    gh_synd = prioritize_distribution_queue_by_referral_yield(property_id="gainhelm")
+    assert gh_synd[0]["slug"] == "soc-2-audit-cost-calculator"
+    assert gh_synd[0]["revenue_priority_score"] == 69.0
+    assert gh_synd[0]["realized_revenue_usd"] >= 474.0
+
+    mon = get_lead_monitoring_summary()
+    assert "revenue_weighted_expansion_queue" in mon
+    assert len(mon["revenue_weighted_expansion_queue"]["after_queue"]) >= 25
+
+
+
 
 
 

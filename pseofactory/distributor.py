@@ -9097,16 +9097,40 @@ def prioritize_distribution_queue_by_referral_yield(
             resolved_root = None
 
     if tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
-        raw_tools = (
-            list(PREXVO_DEFAULT_TOOLS)
-            if norm_prop == "prexvo"
-            else (
-                list(GAINHELM_DEFAULT_TOOLS)
-                if norm_prop == "gainhelm"
-                else (list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS))
-            )
+        from pseofactory.maintenance import (
+            PREXVO_DEFAULT_TOOLS,
+            PREXVO_EXTENDED_TOOLS,
+            PROFITHELM_DEFAULT_TOOLS,
+            PROFITHELM_EXTENDED_TOOLS,
+            GAINHELM_DEFAULT_TOOLS,
         )
+        if norm_prop == "prexvo":
+            raw_tools = list(PREXVO_DEFAULT_TOOLS)
+            seen_px = {str(t.get("slug") if isinstance(t, dict) else t) for t in raw_tools}
+            for ext_t in PREXVO_EXTENDED_TOOLS:
+                ext_slug = str(ext_t.get("slug") or "")
+                if ext_slug in (
+                    "student-loan-refinance-break-even-calculator",
+                    "grad-plus-borrowing-cap-calculator",
+                    "married-filing-separately-student-loan-calculator",
+                    "student-loan-repayment-calculator",
+                ) and ext_slug not in seen_px:
+                    raw_tools.append(ext_t)
+                    seen_px.add(ext_slug)
+        elif norm_prop == "gainhelm":
+            raw_tools = list(GAINHELM_DEFAULT_TOOLS)
+        else:
+            raw_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
+            seen_ph = {str(t.get("slug") if isinstance(t, dict) else t) for t in raw_tools}
+            for ext_t in PROFITHELM_EXTENDED_TOOLS:
+                ext_slug = str(ext_t.get("slug") or "")
+                if ext_slug in (
+                    "s-corp-reasonable-salary-tax-calculator",
+                    "invoice-factoring-cost-apr-calculator",
+                    "invoice-factoring-vs-business-line-of-credit-calculator",
+                ) and ext_slug not in seen_ph:
+                    raw_tools.append(ext_t)
+                    seen_ph.add(ext_slug)
     else:
         raw_tools = list(tools)
 
@@ -9176,9 +9200,12 @@ def prioritize_distribution_queue_by_referral_yield(
 
     prexvo_urgency_weights: Dict[str, float] = {
         "2026-rap-calculator": 68.0,
+        "student-loan-refinance-break-even-calculator": 66.0,
         "ibr-vs-rap-calculator": 65.0,
         "pslf-buyback-calculator": 62.0,
+        "grad-plus-borrowing-cap-calculator": 61.0,
         "student-loan-tax-bomb-calculator": 59.0,
+        "student-loan-repayment-calculator": 58.0,
         "married-filing-separately-student-loan-calculator": 57.0,
         "parent-plus-consolidation-calculator": 55.0,
         "joint-consolidation-loan-separation-act-calculator": 54.0,
@@ -9187,6 +9214,7 @@ def prioritize_distribution_queue_by_referral_yield(
         "grad-school-loan-cap-calculator": 48.0,
         "medical-dental-residency-loan-deferment-calculator": 47.0,
         "tiered-standard-repayment-calculator": 45.0,
+        "tiered-standard-calculator": 45.0,
         "teacher-loan-forgiveness-vs-pslf-calculator": 44.0,
     }
     gainhelm_urgency_weights: Dict[str, float] = {
@@ -9206,6 +9234,34 @@ def prioritize_distribution_queue_by_referral_yield(
         "hitrust-certification-cost-calculator": 50.0,
         "hitrust-csf-e1-i1-r2-certification-cost-calculator": 50.0,
         "cyber-liability-insurance-breach-exposure-calculator": 49.0,
+    }
+
+    scenario_metrics: Optional[Dict[str, Any]] = None
+    try:
+        from pseofactory.partner_tracker import (
+            compute_scenario_demand_and_conversion_metrics,
+            resolve_candidate_realized_revenue_signal,
+        )
+        scenario_metrics = compute_scenario_demand_and_conversion_metrics(
+            include_live_edge_telemetry=False,
+        )
+    except Exception:
+        scenario_metrics = None
+
+    direct_settled_calculators = {
+        "soc-2-audit-cost-calculator",
+        "cmmc-2-0-compliance-cost-calculator",
+        "cmmc-level-2-audit-cost-calculator",
+        "section-1031-calculator",
+        "irs-2027-tax-brackets",
+        "irs-2027-tax-brackets-alaska",
+        "s-corp-reasonable-salary-tax-calculator",
+        "section-179-calculator",
+        "invoice-factoring-cost-apr-calculator",
+        "invoice-factoring-vs-business-line-of-credit-calculator",
+        "student-loan-refinance-break-even-calculator",
+        "student-loan-repayment-calculator",
+        "grad-plus-borrowing-cap-calculator",
     }
 
     ranked: List[Dict[str, Any]] = []
@@ -9241,7 +9297,32 @@ def prioritize_distribution_queue_by_referral_yield(
         gsc_boost = min(impressions * 0.5, 35.0) + (15.0 if is_striking_distance else 0.0)
         click_boost = min(partner_clicks * 5.0, 25.0)
         freshness_boost = 10.0 if (not staged_slugs or slug in staged_slugs) else 0.0
-        total_score = round(rev_score + gsc_boost + click_boost + freshness_boost, 2)
+        baseline_score = round(rev_score + gsc_boost + click_boost + freshness_boost, 2)
+
+        rev_sig: Dict[str, Any] = {}
+        if scenario_metrics is not None:
+            try:
+                rev_sig = resolve_candidate_realized_revenue_signal(
+                    property_id=norm_prop,
+                    slug_or_query=slug,
+                    matching_tool=slug,
+                    scenario_metrics=scenario_metrics,
+                )
+            except Exception:
+                rev_sig = {}
+
+        is_direct_calc = slug in direct_settled_calculators
+        raw_bonus = float(rev_sig.get("revenue_priority_bonus") or 0.0)
+        realized_rev_boost = round(raw_bonus if is_direct_calc else (raw_bonus * 0.45), 2)
+        calc_rev_usd = (
+            float(rev_sig.get("realized_calculator_revenue_usd") or 0.0)
+            if is_direct_calc
+            else 0.0
+        )
+        scen_rev_usd = float(rev_sig.get("scenario_attributed_revenue_usd") or 0.0)
+        deliv_reqs = int(rev_sig.get("deliverable_requests_count") or 0)
+        settled_upgs = int(rev_sig.get("settled_upgrades_count") or 0)
+        total_score = round(baseline_score + realized_rev_boost, 2)
 
         ranked.append({
             "slug": slug,
@@ -9249,6 +9330,13 @@ def prioritize_distribution_queue_by_referral_yield(
             "property_id": norm_prop,
             "company_id": company_id,
             "priority_score": total_score,
+            "baseline_priority_score": baseline_score,
+            "realized_revenue_boost": realized_rev_boost,
+            "realized_revenue_usd": round(calc_rev_usd, 2),
+            "scenario_attributed_revenue_usd": round(scen_rev_usd, 2),
+            "deliverable_requests_count": deliv_reqs,
+            "settled_upgrades_count": settled_upgs,
+            "scenario_id": str(rev_sig.get("scenario_id") or ""),
             "revenue_priority_score": round(rev_score, 2),
             "gsc_impressions": impressions,
             "gsc_position": round(position, 2),
@@ -9258,9 +9346,22 @@ def prioritize_distribution_queue_by_referral_yield(
             "first_comment_url": _with_first_comment_utm(proof["parameterized_url"], "linkedin"),
         })
 
-    ranked.sort(key=lambda item: (-item["priority_score"], item["slug"]))
+    baseline_sorted = sorted(ranked, key=lambda item: (-item["baseline_priority_score"], item["slug"]))
+    baseline_rank_map = {item["slug"]: idx for idx, item in enumerate(baseline_sorted, start=1)}
+
+    ranked.sort(
+        key=lambda item: (
+            -item["priority_score"],
+            -item["realized_revenue_usd"],
+            -item["scenario_attributed_revenue_usd"],
+            item["slug"],
+        )
+    )
     for idx, item in enumerate(ranked, start=1):
+        b_rk = baseline_rank_map.get(item["slug"], idx)
+        item["baseline_rank"] = b_rk
         item["rank"] = idx
+        item["rank_delta"] = b_rk - idx
     return ranked
 
 

@@ -500,6 +500,16 @@ class TrendCronRunner:
             except Exception:
                 pass
 
+            scenario_demand_metrics: Optional[Dict[str, Any]] = None
+            if not fixture_path:
+                try:
+                    from pseofactory.partner_tracker import compute_scenario_demand_and_conversion_metrics
+                    scenario_demand_metrics = compute_scenario_demand_and_conversion_metrics(
+                        include_live_edge_telemetry=False,
+                    )
+                except Exception:
+                    scenario_demand_metrics = None
+
             obs_records: List[RawObservationRecord] = []
             eval_records: List[JevEvaluationRecord] = []
             assignment_records: List[PropertyAssignmentRecord] = []
@@ -902,6 +912,18 @@ class TrendCronRunner:
                                 if e_slug == slug or e_slug == matching_tool or any(ct in e_slug for ct in cluster_tokens):
                                     c_impr += int(e_imp)
                                     c_clicks += int(e_clk)
+                        rev_signal: Dict[str, Any] = {}
+                        if scenario_demand_metrics is not None:
+                            try:
+                                from pseofactory.partner_tracker import resolve_candidate_realized_revenue_signal
+                                rev_signal = resolve_candidate_realized_revenue_signal(
+                                    property_id=assigned_property,
+                                    slug_or_query=f"{slug} {clean_q}",
+                                    matching_tool=matching_tool,
+                                    scenario_metrics=scenario_demand_metrics,
+                                )
+                            except Exception:
+                                rev_signal = {}
                         cand.metadata["closed_loop_feedback"] = {
                             "gsc_cluster_impressions": c_impr,
                             "gsc_cluster_clicks": c_clicks,
@@ -912,6 +934,11 @@ class TrendCronRunner:
                             "verified_outbound_clicks": int(prop_eng.get("verified_non_probe_outbound_clicks", 0) or 0),
                             "synthetic_probe_clicks_filtered": int(prop_eng.get("synthetic_probe_clicks_filtered", 0) or 0),
                             "consecutive_cycles": consecutive_streak,
+                            "deliverable_requests": int(rev_signal.get("deliverable_requests_count", 0) or 0),
+                            "settled_upgrades": int(rev_signal.get("settled_upgrades_count", 0) or 0),
+                            "attributed_revenue_usd": float(rev_signal.get("scenario_attributed_revenue_usd", 0.0) or 0.0),
+                            "realized_calculator_revenue_usd": float(rev_signal.get("realized_calculator_revenue_usd", 0.0) or 0.0),
+                            "revenue_priority_bonus": float(rev_signal.get("revenue_priority_bonus", 0.0) or 0.0),
                         }
                 if assigned_property in ("prexvo", "profithelm", "gainhelm"):
                     cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
@@ -1145,18 +1172,39 @@ class TrendCronRunner:
                 )
                 eval_records.append(eval_rec)
 
+                cl_meta = (cand.metadata or {}).get("closed_loop_feedback") or {}
+                rev_bonus = float(cl_meta.get("revenue_priority_bonus", 0.0) or 0.0)
+                calc_rev_usd = float(cl_meta.get("realized_calculator_revenue_usd", 0.0) or 0.0)
+                scen_rev_usd = float(cl_meta.get("attributed_revenue_usd", 0.0) or 0.0)
+                weighted_yield = round(
+                    float(decision.composite_profit_yield)
+                    + (rev_bonus if action_to_record != "REJECT" and decision.composite_profit_yield > 0.0 else 0.0),
+                    2,
+                )
+
                 all_rankings.append({
                     "query": clean_q,
                     "slug": slug,
                     "property_id": assigned_property,
                     "action": action_to_record,
                     "composite_profit_yield": decision.composite_profit_yield,
+                    "revenue_weighted_yield": weighted_yield,
+                    "realized_calculator_revenue_usd": calc_rev_usd,
+                    "scenario_attributed_revenue_usd": scen_rev_usd,
+                    "revenue_priority_bonus": rev_bonus,
                     "consecutive_cycles": consecutive_streak,
                     "target_asset_type": target_asset,
                 })
 
-            # Sort rankings by composite profit yield descending
-            all_rankings.sort(key=lambda r: r["composite_profit_yield"], reverse=True)
+            # Sort rankings by revenue-weighted yield and composite profit yield descending
+            all_rankings.sort(
+                key=lambda r: (
+                    float(r.get("revenue_weighted_yield", r["composite_profit_yield"])),
+                    float(r.get("realized_calculator_revenue_usd", 0.0)),
+                    float(r["composite_profit_yield"]),
+                ),
+                reverse=True,
+            )
 
             # 5. Commit all records atomically to SQLite
             deduplicated_sink_count = 0

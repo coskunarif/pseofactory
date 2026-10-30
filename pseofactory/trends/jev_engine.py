@@ -273,6 +273,9 @@ class JevEngine:
             bp_saves = int(closed_loop.get("blueprint_saves", 0) or 0)
             ver_clicks = int(closed_loop.get("verified_outbound_clicks", 0) or 0)
             consec_cycles = int(closed_loop.get("consecutive_cycles", 1) or 1)
+            deliv_reqs = int(closed_loop.get("deliverable_requests", 0) or 0)
+            settled_upgs = int(closed_loop.get("settled_upgrades", 0) or 0)
+            attr_rev_usd = float(closed_loop.get("attributed_revenue_usd", 0.0) or 0.0)
             if c_impr >= 10:
                 cl_mult += min(0.11, math.log10(max(1, c_impr)) * 0.032)
             if c_clicks >= 1:
@@ -283,7 +286,14 @@ class JevEngine:
                 cl_mult += min(0.08, ver_clicks * 0.015)
             if consec_cycles >= 3:
                 cl_mult += min(0.09, (consec_cycles - 2) * 0.035)
-            y_asset = y_asset * min(1.34, cl_mult)
+            has_realized_rev = bool(deliv_reqs >= 1 or settled_upgs >= 1 or attr_rev_usd > 0.0)
+            if has_realized_rev:
+                cl_mult += min(
+                    0.22,
+                    (attr_rev_usd / 400.0) * 0.12 + (settled_upgs * 0.025) + (deliv_reqs * 0.012),
+                )
+            max_cl = 1.48 if has_realized_rev else 1.34
+            y_asset = y_asset * min(max_cl, cl_mult)
 
         momentum_core = 0.35 * v_norm + 0.65 * s_norm
         momentum_factor = math.pow(momentum_core, 0.85) if momentum_core > 0.0 else 0.0
