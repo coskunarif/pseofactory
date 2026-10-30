@@ -318,29 +318,29 @@ class CompetitorGapEngine:
                 statutory_authority = "32 CFR Part 170 & DFARS 252.204-7012 / 7019 / 7020 / 7021"
                 economic_dataset = "DoD CMMC 2.0 Cost Assessment & BLS OEWS 15-1212"
                 model_name = "CMMC 2.0 Level 2 C3PAO & NIST 800-171 SPRS Readiness Model"
-                formula = "c3pao_assessment_fee + enclave_licensing_cost + (remediation_hours * eng_hourly_rate)"
+                formula = "round(c3pao_assessment_fee + enclave_licensing_cost + (remediation_hours * eng_hourly_rate), 2)"
                 inputs = {
                     "c3pao_assessment_fee": 48000,
-                    "enclave_licensing_cost": 18000,
-                    "remediation_hours": 220,
-                    "eng_hourly_rate": 95,
+                    "enclave_licensing_cost": 36000,
+                    "remediation_hours": 320,
+                    "eng_hourly_rate": 150,
                 }
-                published_output = 86900.0
-                sample_calculation = "C3PAO fee $48,000 plus $18,000 CUI enclave plus 220 hrs at $95/hr yields $86,900 CMMC Level 2 TCO"
+                published_output = 132000.0
+                sample_calculation = "C3PAO fee $48,000 plus $36,000 CUI enclave plus 320 hrs at $150/hr specialist rate yields $132,000 CMMC Level 2 TCO"
             elif any(t in combined_q for t in ("iso-27001", "iso 27001", "isms", "27006")):
                 statutory_authority = "ISO/IEC 27001:2022 Annex A (93 Controls) & ISO/IEC 27006-1:2024"
                 economic_dataset = "IAF MD 5 Auditor-Day Schedule & BLS OEWS 15-1212"
                 model_name = "ISO/IEC 27001:2022 Stage 1/2 & Surveillance Certification Model"
-                formula = "(auditor_days * auditor_day_rate) + grc_platform_annual_cost + (isms_prep_hours * eng_hourly_rate)"
+                formula = "round(stage1_stage2_registrar_fee + two_year_surveillance_audits + isms_platform_cost + (internal_isms_hours * eng_hourly_rate), 2)"
                 inputs = {
-                    "auditor_days": 14,
-                    "auditor_day_rate": 1850,
-                    "grc_platform_annual_cost": 15000,
-                    "isms_prep_hours": 140,
-                    "eng_hourly_rate": 95,
+                    "stage1_stage2_registrar_fee": 24000,
+                    "two_year_surveillance_audits": 16000,
+                    "isms_platform_cost": 12400,
+                    "internal_isms_hours": 120,
+                    "eng_hourly_rate": 121.67,
                 }
-                published_output = 54200.0
-                sample_calculation = "14 auditor-days at $1,850/day plus $15,000 GRC platform plus 140 hrs at $95/hr yields $54,200 ISO 27001 TCO"
+                published_output = 67000.4
+                sample_calculation = "$24,000 Stage 1/2 registrar fee plus $16,000 surveillance audits plus $12,400 ISMS platform plus 120 hrs at $121.67/hr yields $67,000.40 ISO 27001 TCO"
             elif any(t in combined_q for t in ("hipaa", "hitech", "ocr", "breach", "phi")):
                 statutory_authority = "45 CFR 160.404, 45 CFR Part 164 & 42 U.S.C. 1320d-5"
                 economic_dataset = "HHS OCR Penalty Inflation Schedule & IBM Cost of a Data Breach Report"
@@ -357,15 +357,16 @@ class CompetitorGapEngine:
                 statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
                 economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
                 model_name = "SOC 2 Type II Audit & Readiness TCO Model"
-                formula = "cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate)"
+                formula = "round(cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate) + pentest_and_legal_cost, 2)"
                 inputs = {
                     "cpa_audit_fee": 28000,
                     "grc_platform_annual_cost": 15000,
-                    "readiness_hours": 160,
-                    "eng_hourly_rate": 95,
+                    "readiness_hours": 120,
+                    "eng_hourly_rate": 121.67,
+                    "pentest_and_legal_cost": 20500,
                 }
-                published_output = 58200.0
-                sample_calculation = "CPA audit fee $28,000 plus $15,000 GRC platform plus 160 hours at $95/hr yields $58,200 total SOC 2 Type II TCO"
+                published_output = 78100.4
+                sample_calculation = "CPA audit fee $28,000 plus $15,000 GRC platform plus 120 hours at $121.67/hr plus $20,500 pentest/legal yields $78,100.40 total SOC 2 Type II TCO"
             disclosures = [
                 GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
                 GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
@@ -697,20 +698,21 @@ class CompetitorGapEngine:
                 monetization.get("recommended_partners") or ["vanta_security", "drata_compliance"],
             )
             spec.setdefault("model_name", "SOC 2 Type II Audit & Readiness TCO Model")
-            spec.setdefault("formula", "cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate)")
+            spec.setdefault("formula", "round(cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate) + pentest_and_legal_cost, 2)")
             spec.setdefault(
                 "inputs",
                 {
                     "cpa_audit_fee": 28000,
                     "grc_platform_annual_cost": 15000,
-                    "readiness_hours": 160,
-                    "eng_hourly_rate": 95,
+                    "readiness_hours": 120,
+                    "eng_hourly_rate": 121.67,
+                    "pentest_and_legal_cost": 20500,
                 },
             )
-            spec.setdefault("published_output", 58200.0)
+            spec.setdefault("published_output", 78100.4)
             spec.setdefault(
                 "sample_calculation",
-                "CPA audit fee $28,000 plus $15,000 GRC platform plus 160 hours at $95/hr yields $58,200 total SOC 2 Type II TCO",
+                "CPA audit fee $28,000 plus $15,000 GRC platform plus 120 hours at $121.67/hr plus $20,500 pentest/legal yields $78,100.40 total SOC 2 Type II TCO",
             )
             spec.setdefault(
                 "mandatory_disclosures",
@@ -3887,7 +3889,7 @@ def _build_gainhelm_depth_spec(
             (
                 "HIPAA Civil Monetary Penalties &amp; HITECH Breach",
                 "45 CFR 160.404, 45 CFR Part 164 &amp; 42 U.S.C. 1320d-5",
-                "4 penalty tiers ($141 to $2,134,831 annual cap per identical provision)",
+                "4 penalty tiers ($141 to $2,067,813 annual cap per identical provision)",
                 "60-day OCR &amp; media breach notification (>500 records) + BAA encryption",
             ),
             (
@@ -5506,7 +5508,7 @@ COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
         ),
         "content_effort": (
             "Reconciliation of 42 U.S.C. 1320d-5 statutory tiers vs 45 CFR 160.404 inflation-adjusted caps ($141 to "
-            "$2,134,831 annual cap per identical provision) and HITECH Act recognized security practices mitigation."
+            "$2,067,813 annual cap per identical provision) and HITECH Act recognized security practices mitigation."
         ),
         "trust_signals": (
             "Citations to 45 CFR 160.404, 45 CFR Part 164 Subpart C/D, 42 U.S.C. 1320d-5, Public Law 116-321 (HITECH "

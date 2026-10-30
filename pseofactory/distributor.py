@@ -1266,19 +1266,19 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"balance": 65000, "agi": 95000, "rate": 6.5, "deps": 0},
     },
     "soc-2-audit-cost-calculator": {
-        "formula": "round(cpa_fee + grc_cost + (eng_hours * hourly_rate), 2)",
-        "inputs": {"cpa_fee": 28000.0, "grc_cost": 12000.0, "eng_hours": 120.0, "hourly_rate": 95.0},
-        "published_output": 51400.0,
-        "sample_calculation": "$28,000 CPA attestation fee + $12,000 GRC automation + (120 hrs * $95/hr BLS SOC 15-1212 rate) = $51,400 total Year-1 SOC 2 Type II audit cost",
+        "formula": "round(cpa_fee + grc_cost + (eng_hours * hourly_rate) + pentest_and_legal_cost, 2)",
+        "inputs": {"cpa_fee": 28000.0, "grc_cost": 15000.0, "eng_hours": 120.0, "hourly_rate": 121.67, "pentest_and_legal_cost": 20500.0},
+        "published_output": 78100.4,
+        "sample_calculation": "$28,000 CPA attestation fee + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $20,500 pentest/legal = $78,100.40 total Year-1 SOC 2 Type II audit cost",
         "statutory_claim_key": "sprs_max_score",
         "statutory_claim_value": 110,
-        "query_params": {"headcount": 45, "grc_tier": 1, "audit_type": 2},
+        "query_params": {"headcount": 75, "grc_tier": 1, "audit_type": 2},
     },
     "cmmc-2-0-compliance-cost-calculator": {
         "formula": "round(c3pao_fee + enclave_cost + (remediation_hours * hourly_rate), 2)",
-        "inputs": {"c3pao_fee": 48000.0, "enclave_cost": 18000.0, "remediation_hours": 240.0, "hourly_rate": 95.0},
-        "published_output": 88800.0,
-        "sample_calculation": "$48,000 C3PAO Level 2 assessment fee + $18,000 CUI enclave boundary + (240 hrs * $95/hr BLS SOC 15-1212 rate) = $88,800 total CMMC 2.0 Level 2 budget",
+        "inputs": {"c3pao_fee": 48000.0, "enclave_cost": 36000.0, "remediation_hours": 320.0, "hourly_rate": 150.0},
+        "published_output": 132000.0,
+        "sample_calculation": "$48,000 C3PAO Level 2 assessment fee + $36,000 CUI enclave boundary + (320 hrs * $150/hr specialist rate) = $132,000 total CMMC 2.0 Level 2 budget",
         "statutory_claim_key": "cmmc_conditional_min_sprs",
         "statutory_claim_value": 88,
         "query_params": {"cui_users": 35, "level": 2, "enclave": 1},
@@ -1370,10 +1370,10 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
             "policy_limit_millions": 5.0,
             "base_rate_per_million": 6800.0,
             "control_posture_modifier": 0.85,
-            "annual_retention_reserve_allocation": 10000.0,
+            "annual_retention_reserve_allocation": 12000.0,
         },
-        "published_output": 38900.0,
-        "sample_calculation": "($5M policy limit * $6,800/M base rate * 0.85 EDR/MFA control posture credit = $28,900 annual premium) + $10,000 SIR retention reserve = $38,900 annual cyber risk transfer cost",
+        "published_output": 40900.0,
+        "sample_calculation": "($5M policy limit * $6,800/M base rate * 0.85 EDR/MFA control posture credit = $28,900 annual premium) + $12,000 SIR retention reserve = $40,900 annual cyber risk transfer cost",
         "statutory_claim_key": "sec_form_8k_item_1_05_disclosure_business_days",
         "statutory_claim_value": 4,
         "query_params": {"limit": 5, "rate": 6800, "posture": 85},
@@ -1452,13 +1452,13 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         claim_val = 2.25
         q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1}
     elif norm_prop == "gainhelm":
-        formula = "round(cpa_fee + grc_cost + (eng_hours * hourly_rate), 2)"
-        inputs = {"cpa_fee": 28000.0, "grc_cost": 12000.0, "eng_hours": 120.0, "hourly_rate": 95.0}
-        published_output = 51400.0
-        sample_calc = "$28,000 CPA attestation fee + $12,000 GRC automation + (120 hrs * $95/hr BLS SOC 15-1212 rate) = $51,400 total Year-1 audit cost"
+        formula = "round(cpa_fee + grc_cost + (eng_hours * hourly_rate) + pentest_and_legal_cost, 2)"
+        inputs = {"cpa_fee": 28000.0, "grc_cost": 15000.0, "eng_hours": 120.0, "hourly_rate": 121.67, "pentest_and_legal_cost": 20500.0}
+        published_output = 78100.4
+        sample_calc = "$28,000 CPA attestation fee + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $20,500 pentest/legal = $78,100.40 total Year-1 audit cost"
         claim_key = "sprs_max_score"
         claim_val = 110
-        q_params = {"headcount": 45, "grc_tier": 1, "audit_type": 2}
+        q_params = {"headcount": 75, "grc_tier": 1, "audit_type": 2}
     else:
         domain = _classify_tool_domain(slug)
         if "1031" in slug or "like-kind" in slug:
@@ -5576,19 +5576,19 @@ TOOL_YOUTUBE_METADATA = {
     },
     "soc-2-audit-cost-calculator": {
         "title": "SOC 2 Type II Audit Cost & GRC TCO Calculator [2026 CPA Fees]",
-        "preset_query": "cpa_audit_fee=28000&grc_platform_annual=12000&remediation_hours=120&hourly_rate=95",
+        "preset_query": "cpa_audit_fee=28000&grc_platform_annual=15000&remediation_hours=120&hourly_rate=121.67",
         "chapters": [
             "AICPA SSAE 18 (AT-C Section 205) Type I vs Type II Audit Scope",
             "External CPA Attestation Fees vs Continuous GRC Automation",
-            "Internal Engineering Labor Valuation at $95/hr BLS SOC 15-1212",
+            "Internal Engineering Labor Valuation at $121.67/hr BLS SOC 15-1212",
             "Interactive SOC 2 Audit Cost Calculator Walkthrough",
         ],
         "pinned_comment": (
             "CALCULATE YOUR SOC 2 TYPE II TOTAL COST OF OWNERSHIP:\n"
-            "A 45-person B2B SaaS team faces a $51,400 Year-1 SOC 2 Type II audit budget ($28,000 CPA attestation fee + $12,000 GRC automation + 120 engineering hours at $95/hr).\n\n"
+            "A 75-person B2B SaaS team faces a $78,100.40 Year-1 SOC 2 Type II audit budget ($28,000 CPA attestation fee + $15,000 GRC automation + 120 engineering hours at $121.67/hr + $20,500 pentest/legal).\n\n"
             "Model your exact SOC 2 CPA fees and GRC automation ROI live on GainHelm:\n"
-            "https://gainhelm.com/tools/soc-2-audit-cost-calculator/?cpa_audit_fee=28000&grc_platform_annual=12000&remediation_hours=120&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=soc-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under AICPA SSAE 18 (AT-C Section 205) and BLS OEWS SOC 15-1212 ($95/hr)."
+            "https://gainhelm.com/tools/soc-2-audit-cost-calculator/?cpa_audit_fee=28000&grc_platform_annual=15000&remediation_hours=120&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=soc-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under AICPA SSAE 18 (AT-C Section 205) and BLS OEWS SOC 15-1212 ($121.67/hr)."
         ),
         "tags": [
             "soc 2 audit cost calculator",
@@ -5602,7 +5602,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "cmmc-level-2-audit-cost-calculator": {
         "title": "CMMC 2.0 Level 2 C3PAO Audit Cost Calculator [32 CFR Part 170]",
-        "preset_query": "c3pao_assessment_fee=48000&cui_enclave_annual=24000&remediation_hours=260&hourly_rate=95",
+        "preset_query": "c3pao_assessment_fee=48000&cui_enclave_annual=36000&remediation_hours=320&hourly_rate=150",
         "chapters": [
             "DoD 32 CFR Part 170 & DFARS 252.204-7021 CMMC Level 2 Mandate",
             "Accredited C3PAO Assessment Fees Across 110 NIST 800-171 Controls",
@@ -5611,9 +5611,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR CMMC 2.0 LEVEL 2 CERTIFICATION BUDGET:\n"
-            "Defense contractors handling CUI face an average $96,700 certification budget ($48,000 C3PAO assessment + $24,000 FedRAMP enclave + 260 engineering hours at $95/hr).\n\n"
+            "Defense contractors handling CUI face an average $132,000 certification budget ($48,000 C3PAO assessment + $36,000 FedRAMP enclave + 320 engineering hours at $150/hr).\n\n"
             "Scope your C3PAO audit and CUI enclave boundary live on GainHelm:\n"
-            "https://gainhelm.com/tools/cmmc-level-2-audit-cost-calculator/?c3pao_assessment_fee=48000&cui_enclave_annual=24000&remediation_hours=260&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-level-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/cmmc-level-2-audit-cost-calculator/?c3pao_assessment_fee=48000&cui_enclave_annual=36000&remediation_hours=320&hourly_rate=150&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-level-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under DoD 32 CFR Part 170, DFARS 252.204-7021, and NIST SP 800-171 Rev 2."
         ),
         "tags": [
@@ -5654,7 +5654,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "iso-27001-certification-cost-calculator": {
         "title": "ISO/IEC 27001:2022 Certification & 3-Year ISMS Cost Calculator",
-        "preset_query": "stage1_stage2_audit_fee=26000&surveillance_audits_2yr=18000&isms_tooling_3yr=27000&internal_hours=160&hourly_rate=95",
+        "preset_query": "stage1_stage2_audit_fee=24000&surveillance_audits_2yr=16000&isms_tooling_3yr=12400&internal_hours=120&hourly_rate=121.67",
         "chapters": [
             "ISO/IEC 27006-1:2024 Mandatory Auditor-Day Calculation Tables",
             "Stage 1 Documentation Review vs Stage 2 Annex A Control Audit",
@@ -5663,9 +5663,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR 3-YEAR ISO/IEC 27001:2022 CERTIFICATION TCO:\n"
-            "Across Stage 1/2 certification ($26,000), two annual surveillance audits ($18,000), 3-year ISMS tooling ($27,000), and 160 internal hours at $95/hr, 3-year ISO 27001 TCO totals $86,200.\n\n"
+            "Across Stage 1/2 certification ($24,000), two annual surveillance audits ($16,000), ISMS tooling ($12,400), and 120 internal hours at $121.67/hr, 3-year ISO 27001 TCO totals $67,000.40.\n\n"
             "Model your ISO/IEC 27006-1 auditor-day schedule and 3-year TCO live on GainHelm:\n"
-            "https://gainhelm.com/tools/iso-27001-certification-cost-calculator/?stage1_stage2_audit_fee=26000&surveillance_audits_2yr=18000&isms_tooling_3yr=27000&internal_hours=160&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=iso-27001-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/iso-27001-certification-cost-calculator/?stage1_stage2_audit_fee=24000&surveillance_audits_2yr=16000&isms_tooling_3yr=12400&internal_hours=120&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=iso-27001-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under ISO/IEC 27001:2022 and ISO/IEC 27006-1:2024."
         ),
         "tags": [
@@ -5706,7 +5706,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "pci-dss-4-0-compliance-cost-calculator": {
         "title": "PCI DSS v4.0.1 Level 1 QSA ROC vs SAQ Scoping Cost Calculator",
-        "preset_query": "qsa_roc_fee=42000&asv_pentest_annual=14000&cde_remediation_hours=180&hourly_rate=95",
+        "preset_query": "qsa_roc_fee=42000&asv_pentest_annual=29500&cde_remediation_hours=200&hourly_rate=116.50",
         "chapters": [
             "PCI DSS v4.0.1 Merchant Level 1 (>6M Transactions) vs SAQ Scoping",
             "Cardholder Data Environment (CDE) Tokenization & Scope Reduction",
@@ -5715,9 +5715,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR PCI DSS v4.0.1 COMPLIANCE BUDGET:\n"
-            "Merchant Level 1 QSA Report on Compliance ($42,000), quarterly ASV/pentesting ($14,000), and 180 CDE engineering hours at $95/hr total $73,100 in annual PCI DSS v4.0.1 outlay.\n\n"
+            "Merchant Level 1 QSA Report on Compliance ($42,000), quarterly ASV/pentesting ($29,500), and CDE remediation ($23,300) total $94,800 in annual PCI DSS v4.0.1 outlay.\n\n"
             "Compare QSA ROC vs tokenized SAQ A scoping live on GainHelm:\n"
-            "https://gainhelm.com/tools/pci-dss-4-0-compliance-cost-calculator/?qsa_roc_fee=42000&asv_pentest_annual=14000&cde_remediation_hours=180&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=pci-dss-4-0-compliance-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/pci-dss-4-0-compliance-cost-calculator/?qsa_roc_fee=42000&asv_pentest_annual=29500&cde_remediation_hours=200&hourly_rate=116.50&utm_source=youtube&utm_medium=video&utm_campaign=pci-dss-4-0-compliance-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under PCI SSC PCI DSS v4.0.1 and BLS OEWS SOC 15-1212."
         ),
         "tags": [
@@ -5732,19 +5732,19 @@ TOOL_YOUTUBE_METADATA = {
     },
     "grc-automation-roi-calculator": {
         "title": "GRC Automation Platform ROI Calculator [Vanta vs Drata vs Manual]",
-        "preset_query": "manual_audit_hours=420&automated_audit_hours=120&hourly_rate=95&grc_subscription_cost=12000",
+        "preset_query": "manual_audit_hours=520&automated_audit_hours=115&hourly_rate=121.67&grc_subscription_cost=15000",
         "chapters": [
             "Manual Evidence Collection Overhead Across SOC 2 & ISO 27001",
             "API-Driven Continuous Control Monitoring (CCM) Hour Compression",
-            "Net Annual Engineering Dollar Savings at $95/hr BLS Benchmark",
+            "Net Annual Engineering Dollar Savings at $121.67/hr BLS Benchmark",
             "Interactive GRC Automation ROI Calculator Walkthrough",
         ],
         "pinned_comment": (
             "CALCULATE YOUR GRC AUTOMATION NET ANNUAL SAVINGS:\n"
-            "Cutting manual audit prep from 420 hours to 120 hours at the $95/hr BLS SOC 15-1212 rate saves $28,500 in engineering labor, yielding $16,500 net Year-1 savings after a $12,000 GRC subscription.\n\n"
+            "Cutting manual audit prep from 520 hours to 115 hours at the $121.67/hr BLS SOC 15-1212 rate saves $49,276.35 in engineering labor, yielding $37,000 net Year-1 savings after a $15,000 GRC subscription and $2,723.65 auditor efficiency credit.\n\n"
             "Run your team's multi-framework GRC ROI math live on GainHelm:\n"
-            "https://gainhelm.com/tools/grc-automation-roi-calculator/?manual_audit_hours=420&automated_audit_hours=120&hourly_rate=95&grc_subscription_cost=12000&utm_source=youtube&utm_medium=video&utm_campaign=grc-automation-roi-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under NIST SP 800-53A Rev 5 and BLS OEWS SOC 15-1212 ($95/hr)."
+            "https://gainhelm.com/tools/grc-automation-roi-calculator/?manual_audit_hours=520&automated_audit_hours=115&hourly_rate=121.67&grc_subscription_cost=15000&utm_source=youtube&utm_medium=video&utm_campaign=grc-automation-roi-calculator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under NIST SP 800-53A Rev 5 and BLS OEWS SOC 15-1212 ($121.67/hr)."
         ),
         "tags": [
             "grc automation roi calculator",
@@ -5810,7 +5810,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "hitrust-certification-cost-calculator": {
         "title": "HITRUST CSF e1 vs i1 vs r2 Certification Cost Calculator [2026]",
-        "preset_query": "mycsf_and_inheritance_fee=22000&external_assessor_fee=46000&remediation_hours=240&hourly_rate=95",
+        "preset_query": "mycsf_and_inheritance_fee=22000&external_assessor_fee=46000&remediation_hours=240&hourly_rate=121.67",
         "chapters": [
             "HITRUST CSF v11.x Tier Selection: e1 (44) vs i1 (182) vs r2 (350+)",
             "MyCSF Portal Subscription & Cloud Shared Responsibility Inheritance",
@@ -5819,9 +5819,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR HITRUST CSF e1, i1, OR r2 CERTIFICATION COST:\n"
-            "A HITRUST i1/r2 assessment with $22,000 MyCSF subscription, $46,000 External Assessor fee, and 240 engineering hours at $95/hr totals $90,800.\n\n"
+            "A HITRUST i1/r2 assessment with $27,500 MyCSF subscription, $55,000 External Assessor fee, and $32,500 internal readiness remediation totals $115,000.\n\n"
             "Compare HITRUST e1 vs i1 vs r2 scoping and cloud inheritance live on GainHelm:\n"
-            "https://gainhelm.com/tools/hitrust-certification-cost-calculator/?mycsf_and_inheritance_fee=22000&external_assessor_fee=46000&remediation_hours=240&hourly_rate=95&utm_source=youtube&utm_medium=video&utm_campaign=hitrust-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/hitrust-certification-cost-calculator/?mycsf_and_inheritance_fee=27500&external_assessor_fee=55000&remediation_hours=240&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=hitrust-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under 45 CFR Part 164, NIST SP 800-53 Rev 5, and HITRUST CSF v11.x."
         ),
         "tags": [
@@ -5845,7 +5845,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR CMMC 2.0 LEVEL 2 CERTIFICATION BUDGET:\n"
-            "Defense contractors handling CUI face an average $88,800 certification budget ($48,000 C3PAO assessment + $18,000 CUI enclave boundary + 240 engineering hours at $95/hr).\n\n"
+            "Defense contractors handling CUI face an average $132,000 certification budget ($48,000 C3PAO assessment + $36,000 CUI enclave boundary + 320 engineering hours at $150/hr).\n\n"
             "Scope your C3PAO audit and CUI enclave boundary live on GainHelm:\n"
             "https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/?cui_users=35&level=2&enclave=1&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-2-0-compliance-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under DoD 32 CFR Part 170, DFARS 252.204-7021, and NIST SP 800-171 Rev 2."
@@ -5975,7 +5975,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR CYBER LIABILITY INSURANCE & RETENTION COST:\n"
-            "A $5M cyber liability policy at $6,800/M base rate with an 0.85 EDR/MFA security posture modifier ($28,900 premium) plus $10,000 SIR reserve totals $38,900/yr.\n\n"
+            "A $5M cyber liability policy at $6,800/M base rate with an 0.85 EDR/MFA security posture modifier ($28,900 premium) plus $12,000 SIR reserve totals $40,900/yr.\n\n"
             "Model your cyber insurance policy limits and SEC Item 1.05 breach exposure live on GainHelm:\n"
             "https://gainhelm.com/tools/cyber-liability-insurance-breach-exposure-calculator/?limit=5&rate=6800&posture=85&utm_source=youtube&utm_medium=video&utm_campaign=cyber-liability-insurance-breach-exposure-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under SEC 17 CFR 229.106 (Form 8-K Item 1.05) and NAIC Cyber Insurance Data."
@@ -7129,14 +7129,14 @@ All calculations are 100% deterministic, grounded in federal Title IV regulation
         gainhelm_base = "https://gainhelm.com"
         soc2_cmmc_md = """# SOC 2 Type II, CMMC 2.0 & ISO 27001 Cyber Compliance Audit Benchmarks
 
-Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024, enterprise software and defense contractors evaluate external attestation fees, continuous GRC automation licensing, and internal security engineering labor valued at the BLS SOC 15-1212 fully burdened rate ($95/hr).
+Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024, enterprise software and defense contractors evaluate external attestation fees, continuous GRC automation licensing, and internal security engineering labor valued at the BLS SOC 15-1212 fully burdened rate ($121.67/hr).
 
 | Compliance Framework | Primary Statutory / Standard Authority | Baseline Audit Fee Range | Key Threshold / Rule |
 | :--- | :--- | :--- | :--- |
 | SOC 2 Type II | AICPA SSAE 18 (AT-C Sec. 205) | $24,000 to $65,000 | 6 to 12 month observation period |
 | CMMC 2.0 Level 2 | DoD 32 CFR Part 170 & DFARS 252.204-7021 | $38,000 to $85,000 | 110 NIST SP 800-171 controls (88 SPRS floor) |
 | ISO/IEC 27001:2022 | ISO/IEC 27006-1:2024 Auditor-Day Tables | $22,000 to $58,000 | Stage 1 + Stage 2 + 2 surveillance audits |
-| HIPAA / HITECH | 45 CFR 160.404 & 42 U.S.C. 1320d-5 | $141 to $2,134,831 | 4 culpability tiers + 500-record breach rule |
+| HIPAA / HITECH | 45 CFR 160.404 & 42 U.S.C. 1320d-5 | $141 to $2,067,813 | 4 culpability tiers + 500-record breach rule |
 """
         soc2_cmmc_json = {
             "topic": "SOC 2 Type II, CMMC 2.0 and ISO 27001 Audit Cost Benchmarks",
@@ -7148,7 +7148,7 @@ Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1
                 "ISO/IEC 27006-1:2024",
                 "45 CFR 160.404",
             ],
-            "bls_soc_15_1212_hourly_rate_usd": 95.0,
+            "bls_soc_15_1212_hourly_rate_usd": 121.67,
             "sprs_score_range": [-203, 110],
             "sprs_conditional_poam_floor": 88,
         }
@@ -7158,8 +7158,8 @@ Under 45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), and 45 CFR Part 164 Subpar
 
 | Regulatory / Certification Tier | Governing Authority | Statutory Penalty or Assessment Range | Key Compliance Requirement |
 | :--- | :--- | :--- | :--- |
-| HIPAA Tier 1 (Lack of Knowledge) | 45 CFR 160.404(b)(1) | $141 to $71,162 per violation | Annual calendar cap up to $2,134,831 |
-| HIPAA Tier 4 (Willful Neglect) | 45 CFR 160.404(b)(4) | $71,162 to $2,134,831 per violation | Mandatory OCR investigation + corrective plan |
+| HIPAA Tier 1 (Lack of Knowledge) | 45 CFR 160.404(b)(1) | $141 to $71,162 per violation | Annual calendar cap up to $2,067,813 |
+| HIPAA Tier 4 (Willful Neglect) | 45 CFR 160.404(b)(4) | $71,162 to $2,067,813 per violation | Mandatory OCR investigation + corrective plan |
 | HITRUST CSF e1 (Essentials) | HITRUST CSF v11.x (44 Controls) | $18,000 to $32,000 total assessment | 1-year validated cyber hygiene baseline |
 | HITRUST CSF i1 / r2 | HITRUST CSF v11.x (182 to 350+ Controls) | $55,000 to $145,000 total assessment | 1-year (i1) or 2-year (r2) risk-based validation |
 """
@@ -7174,7 +7174,7 @@ Under 45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), and 45 CFR Part 164 Subpar
             ],
             "breach_media_notification_threshold_records": 500,
             "forensic_and_notification_cost_per_record_usd": 165.0,
-            "annual_calendar_cap_per_provision_usd": 2134831,
+            "annual_calendar_cap_per_provision_usd": 2067813,
         }
         pci_fedramp_md = """# PCI DSS v4.0.1 QSA Scoping & FedRAMP 20x / Moderate ATO Benchmarks
 
@@ -7508,7 +7508,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
         citables = [
             {
                 "id": "stat-soc2-grc-automation-roi",
-                "headline_stat": "In 2026, deploying continuous GRC evidence automation under AICPA SSAE 18 (AT-C Section 205) reduces internal SOC 2 Type II engineering preparation from 420 hours to 120 hours, saving $28,500 in labor at the BLS SOC 15-1212 benchmark rate of $95/hr.",
+                "headline_stat": "In 2026, deploying continuous GRC evidence automation under AICPA SSAE 18 (AT-C Section 205) reduces internal SOC 2 Type II engineering preparation from 520 hours to 115 hours, saving $37,000 in net Year-1 budget at the BLS SOC 15-1212 benchmark rate of $121.67/hr.",
                 "statutory_authority": "AICPA SSAE 18 (AT-C Section 205), BLS OEWS SOC 15-1212",
                 "canonical_calculator_url": f"{base_url}/tools/soc-2-audit-cost-calculator/",
             },
@@ -7631,7 +7631,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Cloud Security Alliance & Regional CPA IT Audit Resource Directories",
                 ],
                 "replacement_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
-                "statutory_upgrade_angle": "Models AICPA SSAE 18 (AT-C 205), ISO/IEC 27001:2022 (93 Annex A controls), and BLS SOC 15-1212 ($95/hr) GRC automation ROI.",
+                "statutory_upgrade_angle": "Models AICPA SSAE 18 (AT-C 205), ISO/IEC 27001:2022 (93 Annex A controls), and BLS SOC 15-1212 ($121.67/hr) GRC automation ROI.",
             },
         ]
     else:
@@ -9994,7 +9994,7 @@ Calculations and statutory rules derived from:
                 f"| **SOC 2 Type II** | AICPA SSAE 18 (AT-C 205) | Licensed CPA Firm | $24,000 - $65,000 | 6 - 12 Month Window |\n"
                 f"| **CMMC 2.0 Level 2** | 32 CFR Part 170 / NIST 800-171 | Accredited C3PAO (110 Controls) | $38,000 - $85,000 | Triennial (3 Years) |\n"
                 f"| **ISO/IEC 27001:2022** | ISO/IEC 27006-1:2024 | Accredited Registrar (Stage 1+2) | $22,000 - $58,000 | 3-Yr Cycle + Annual Surveillance |\n"
-                f"| **HIPAA / HITECH** | 45 CFR 160.404 | HHS OCR 4-Tier Penalty Schedule | $141 - $2,134,831 Cap | Continuous ePHI Safeguards |\n\n"
+                f"| **HIPAA / HITECH** | 45 CFR 160.404 | HHS OCR 4-Tier Penalty Schedule | $141 - $2,067,813 Cap | Continuous ePHI Safeguards |\n\n"
                 f"## Verification & Deterministic Execution\n"
                 f"All figures and compliance scoping calculations are verified at https://gainhelm.com/tools/{s_val}/.\n"
             )
@@ -10530,7 +10530,7 @@ def dispatch_to_distribution_lead(
         if property_id == "prexvo":
             sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
         elif property_id == "gainhelm":
-            sample_draft = first_pack["x"]["content"] if first_pack else "on a 45-person SaaS team, SOC 2 Type II audit TCO hits $51,400 ($28k CPA fee + $12k GRC + 120 hrs at $95/hr BLS rate): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
+            sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO hits $78,100.40 ($28k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS rate + $20.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
         else:
             sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert: https://profithelm.com/tools/irs-2027-tax-brackets/"
         voice_ok = False

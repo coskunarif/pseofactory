@@ -126,6 +126,23 @@ _FIXED_STATUTORY_INPUT_EXACT: frozenset[str] = frozenset(
         "annual_retention_reserve_allocation",
         "base_policy_premium",
         "control_maturity_discount",
+        "cpa_base_fee",
+        "fee_per_extra_tsc",
+        "pentest_fee",
+        "enclave_licensing_annual",
+        "isms_platform_cost",
+        "internal_audit_fee",
+        "forensic_legal_retainer",
+        "asv_annual_cost",
+        "fee_per_cde_system",
+        "segmentation_pentest_fee",
+        "threepao_rar_sar_fee",
+        "conmon_annual_cost",
+        "hitrust_certification_fee",
+        "base_engagement_fee",
+        "fee_per_endpoint",
+        "retention_reserve_allocation",
+        "surplus_lines_fee",
     }
 )
 
@@ -291,33 +308,33 @@ def _load_trend_db_cache() -> Dict[str, Any]:
         except Exception:
             pass
 
-    if not series_by_id:
-        try:
-            from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
+    try:
+        from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
 
-            for rec in StatutoryEconomicDatasetCollector().build_canonical_timeseries_records():
-                sid = str(rec.series_id)
-                entry = series_by_id.setdefault(
-                    sid,
-                    {
-                        "series_id": sid,
-                        "property_id": str(rec.property_id),
-                        "jurisdiction": str(rec.jurisdiction),
-                        "statutory_citation": str(rec.statutory_citation),
-                        "metric_key": str(rec.metric_key),
-                        "metric_label": str(rec.metric_label),
-                        "unit": str(rec.unit),
-                        "source_agency": str(rec.source_agency),
-                        "points": {},
-                        "timeline": [],
-                    },
-                )
-                yr = int(rec.effective_year)
-                val = float(rec.metric_value)
-                entry["points"][str(yr)] = val
-                entry["timeline"].append({"epoch": yr, "value": val})
-        except Exception:
-            pass
+        refreshed_sids = set()
+        for rec in StatutoryEconomicDatasetCollector().build_canonical_timeseries_records():
+            sid = str(rec.series_id)
+            if sid not in refreshed_sids:
+                series_by_id[sid] = {
+                    "series_id": sid,
+                    "property_id": str(rec.property_id),
+                    "jurisdiction": str(rec.jurisdiction),
+                    "statutory_citation": str(rec.statutory_citation),
+                    "metric_key": str(rec.metric_key),
+                    "metric_label": str(rec.metric_label),
+                    "unit": str(rec.unit),
+                    "source_agency": str(rec.source_agency),
+                    "points": {},
+                    "timeline": [],
+                }
+                refreshed_sids.add(sid)
+            entry = series_by_id[sid]
+            yr = int(rec.effective_year)
+            val = float(rec.metric_value)
+            entry["points"][str(yr)] = val
+            entry["timeline"].append({"epoch": yr, "value": val})
+    except Exception:
+        pass
 
     _TREND_DB_CACHE = {
         "series_by_id": series_by_id,
@@ -736,26 +753,26 @@ def compute_multi_year_longitudinal_trajectory(
         cmmc_pts = db_series.get("dod_cmmc_l2_c3pao_mandatory_pct", {}).get("points", {})
         hipaa_pts = db_series.get("hhs_ocr_hipaa_tier4_annual_cap_usd", {}).get("points", {})
 
-        cpa24 = soc2_pts.get("2024", 24500.0)
-        cpa25 = soc2_pts.get("2025", 26200.0)
-        cpa26 = soc2_pts.get("2026", 28500.0)
-        cpa27 = soc2_pts.get("2027", 30200.0)
-        cpa30 = soc2_pts.get("2030", 35800.0)
-        wg24 = wage_pts.get("2024", 57.60)
-        wg25 = wage_pts.get("2025", 60.10)
-        wg26 = wage_pts.get("2026", 62.80)
-        wg27 = wage_pts.get("2027", 65.40)
-        wg30 = wage_pts.get("2030", 73.90)
+        cpa24 = soc2_pts.get("2024", 34000.0)
+        cpa25 = soc2_pts.get("2025", 35500.0)
+        cpa26 = soc2_pts.get("2026", 37000.0)
+        cpa27 = soc2_pts.get("2027", 38500.0)
+        cpa30 = soc2_pts.get("2030", 43200.0)
+        wg24 = wage_pts.get("2024", 114.50)
+        wg25 = wage_pts.get("2025", 118.00)
+        wg26 = wage_pts.get("2026", 121.67)
+        wg27 = wage_pts.get("2027", 125.30)
+        wg30 = wage_pts.get("2030", 137.00)
         cm24 = cmmc_pts.get("2024", 0.0)
         cm25 = cmmc_pts.get("2025", 15.0)
         cm26 = cmmc_pts.get("2026", 35.0)
         cm27 = cmmc_pts.get("2027", 65.0)
         cm30 = cmmc_pts.get("2030", 100.0)
-        hp24 = hipaa_pts.get("2024", 2067813.0)
-        hp25 = hipaa_pts.get("2025", 2134831.0)
-        hp26 = hipaa_pts.get("2026", 2194606.0)
-        hp27 = hipaa_pts.get("2027", 2258250.0)
-        hp30 = hipaa_pts.get("2030", 2460500.0)
+        hp24 = hipaa_pts.get("2024", 2003947.0)
+        hp25 = hipaa_pts.get("2025", 2067813.0)
+        hp26 = hipaa_pts.get("2026", 2067813.0)
+        hp27 = hipaa_pts.get("2027", 2129847.0)
+        hp30 = hipaa_pts.get("2030", 2327341.0)
 
         h3_title = f"Multi-Year Statutory Compliance &amp; Enforcement Cliff Visualizer (2024 to 2030): {topic_label}"
         if any(k in s_low for k in ("cmmc", "nist-800-171", "sprs", "fedramp")):
@@ -774,15 +791,15 @@ def compute_multi_year_longitudinal_trajectory(
         elif any(k in s_low for k in ("hipaa", "hitrust")):
             summary = (
                 f"2026 Healthcare ePHI &amp; HITRUST Assurance Cliff: Under 45 CFR 160.404 and HITECH 42 U.S.C. 1320d-5, "
-                f"HHS OCR Tier 4 annual penalty caps escalate from ${hp24:,.0f} (2024) to ${hp26:,.0f} (2026) and ${hp30:,.0f} (2030) "
+                f"HHS OCR Tier 3/4 annual penalty caps stand at ${hp26:,.0f} (2026) and escalate toward ${hp30:,.0f} (2030) "
                 f"alongside mandatory HITRUST CSF v11 e1/i1/r2 External Assessor validation. {telemetry_tag}"
             )
             rows = [
-                ("2024 Baseline Window", f"45 CFR 160.404 Tier 4 Cap ${hp24:,.0f}", f"HITRUST v11 Transition / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$548,000 Breach / $98k HITRUST"),
-                ("2025 Enforcement Ramp", f"HHS OCR Tier 4 Cap ${hp25:,.0f} (+3.2% CPI)", f"OCR Right-of-Access &amp; ePHI Audit / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$584,200 Breach / $106k HITRUST"),
-                ("2026 Statutory Cliff Year", f"HHS OCR Tier 4 Cap ${hp26:,.0f} Active", f"45 CFR 164 MFA &amp; Encryption Rule / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$622,500 Breach / $115k HITRUST"),
-                ("2027 Full Mandate Phase", f"Projected OCR Tier 4 Cap ${hp27:,.0f}", f"72-Hr Vendor Incident SLA / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$658,900 Breach / $122k HITRUST"),
-                ("2028-2030 Triennial Cycle", f"Projected OCR Tier 4 Cap ${hp30:,.0f} by 2030", f"Biennial HITRUST r2 Re-Certification / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$714,500 Breach / $136k HITRUST"),
+                ("2024 Baseline Window", f"45 CFR 160.404 Tier 4 Cap ${hp24:,.0f}", f"HITRUST v11 Transition / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$2,391,447 Breach / $98k HITRUST"),
+                ("2025 Enforcement Ramp", f"HHS OCR Tier 4 Cap ${hp25:,.0f} (+3.2% CPI)", f"OCR Right-of-Access &amp; ePHI Audit / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$2,455,313 Breach / $106k HITRUST"),
+                ("2026 Statutory Cliff Year", f"HHS OCR Tier 4 Cap ${hp26:,.0f} Active", f"45 CFR 164 MFA &amp; Encryption Rule / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$2,455,313 Breach / $115k HITRUST"),
+                ("2027 Full Mandate Phase", f"Projected OCR Tier 4 Cap ${hp27:,.0f}", f"72-Hr Vendor Incident SLA / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$2,517,347 Breach / $122k HITRUST"),
+                ("2028-2030 Triennial Cycle", f"Projected OCR Tier 4 Cap ${hp30:,.0f} by 2030", f"Biennial HITRUST r2 Re-Certification / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$2,714,841 Breach / $136k HITRUST"),
             ]
         elif any(k in s_low for k in ("pci-dss", "iso-27001", "penetration", "cyber-liability")):
             summary = (
@@ -793,20 +810,20 @@ def compute_multi_year_longitudinal_trajectory(
             rows = [
                 ("2024 Baseline Window", f"ISO 27001:2022 Transition (${cpa24:,.0f} Benchmark)", f"PCI v4.0 Best-Practice Window / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$58,400 ISO / $82,500 PCI"),
                 ("2025 Enforcement Ramp", "PCI DSS v4.0.1 Mandatory Future-Dated Controls", f"NIST 800-115 Offensive Testing / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$62,800 ISO / $88,900 PCI"),
-                ("2026 Statutory Cliff Year", "ISO 27006-1:2024 Auditor-Day &amp; QSA ROC Gate", f"NAIC Cyber Supplement &amp; SEC 8-K / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$67,000 ISO / $94,800 PCI"),
+                ("2026 Statutory Cliff Year", "ISO 27006-1:2024 Auditor-Day &amp; QSA ROC Gate", f"NAIC Cyber Supplement &amp; SEC 8-K / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$67,000.40 ISO / $94,800 PCI"),
                 ("2027 Full Mandate Phase", f"Surveillance &amp; CDE Re-Segmentation (${cpa27:,.0f} Base)", f"Continuous PTaaS &amp; ASV Scans / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$71,500 ISO / $101,200 PCI"),
                 ("2028-2030 Triennial Cycle", f"3-Yr ISO Recertification (${cpa30:,.0f} 2030 Base)", f"Automated Evidence &amp; EDR Mandate / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$79,800 ISO / $112,400 PCI"),
             ]
         else:
             summary = (
-                f"2026 AICPA SOC 2 Type II &amp; GRC Cost Cliff: Peer-reviewed AICPA SSAE 18 (AT-C Section 205) median CPA "
+                f"2026 AICPA SOC 2 Type II &amp; GRC Cost Cliff: Peer-reviewed AICPA SSAE 18 (AT-C Section 205) 3-TSC CPA "
                 f"audit fees escalate from ${cpa24:,.0f} (2024) and ${cpa25:,.0f} (2025) to ${cpa26:,.0f} (2026) and ${cpa30:,.0f} (2030) "
                 f"while BLS SOC 15-1212 engineering wages climb from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
             )
             rows = [
                 ("2024 Baseline Window", f"AICPA AT-C 205 Type II CPA Fee ${cpa24:,.0f}", f"TSP Section 100 Security Base / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$64,800 SOC 2 TCO"),
                 ("2025 Enforcement Ramp", f"AICPA AT-C 205 Type II CPA Fee ${cpa25:,.0f}", f"3-to-12 Month Observation Window / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$71,200 SOC 2 TCO"),
-                ("2026 Statutory Cliff Year", f"AICPA AT-C 205 Type II CPA Fee ${cpa26:,.0f}", f"Security + Availability + Confidentiality / ${wg26:.2f}/hr", "cliff-exposure-2026", "$78,100 SOC 2 TCO"),
+                ("2026 Statutory Cliff Year", f"AICPA AT-C 205 Type II CPA Fee ${cpa26:,.0f}", f"Security + Availability + Confidentiality / ${wg26:.2f}/hr", "cliff-exposure-2026", "$78,100.40 SOC 2 TCO"),
                 ("2027 Full Mandate Phase", f"Projected Type II CPA Fee ${cpa27:,.0f}", f"AI Governance &amp; Subservice Carve-Out / ${wg27:.2f}/hr", "cliff-exposure-2027", "$83,400 SOC 2 TCO"),
                 ("2028-2030 Triennial Cycle", f"Projected Type II CPA Fee ${cpa30:,.0f} by 2030", f"Continuous Automated Trust Center / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$94,600 SOC 2 TCO"),
             ]
@@ -1016,56 +1033,56 @@ def compute_stateful_comparator_defaults(
         if any(k in s_low for k in ("hipaa", "hitrust")):
             return {
                 "base_a": "$115,000 HITRUST i1 / Recognized Security",
-                "base_b": "$622,500 HHS OCR Tier 2 Breach Exposure",
-                "base_live": "$622,500 HIPAA Breach / $115k HITRUST",
-                "ret_a": "$507,500 HITECH Safe-Harbor Mitigation",
+                "base_b": "$2,455,313 HHS OCR Tier 3 Breach Exposure",
+                "base_live": "$2,455,313 HIPAA Breach / $115k HITRUST",
+                "ret_a": "$2,340,313 HITECH Safe-Harbor Mitigation",
                 "ret_b": "$0 Recognized Security Practice Credit",
-                "ret_live": "$100,000 OCR CMP + $522,500 Response",
+                "ret_live": "$2,067,813 OCR CMP + $387,500 Response",
                 "tax_a": "$115,000 Validated Assurance Cost",
-                "tax_b": "$622,500 Unshielded Breach Liability",
-                "tax_live": "$622,500 / $115,000",
-                "delta_b": "+$507,500 Breach Penalty Delta",
-                "delta_live": "45 CFR 160.404 Tier 4 Cap $2.19M",
+                "tax_b": "$2,455,313 Unshielded Breach Liability",
+                "tax_live": "$2,455,313 / $115,000",
+                "delta_b": "+$2,340,313 Breach Penalty Delta",
+                "delta_live": "45 CFR 160.404 Tier 4 Cap $2,067,813",
             }
         if any(k in s_low for k in ("pci-dss", "iso-27001")):
             return {
-                "base_a": "$67,000 ISO 27001 / $94,800 Tokenized PCI",
+                "base_a": "$67,000.40 ISO 27001 / $94,800 Tokenized PCI",
                 "base_b": "$168,000 Unsegmented Level 1 ROC Scope",
-                "base_live": "$67,000 ISO 27001 / $94,800 PCI v4.0.1",
+                "base_live": "$67,000.40 ISO 27001 / $94,800 PCI v4.0.1",
                 "ret_a": "$73,200 CDE Tokenization &amp; GRC Savings",
                 "ret_b": "$0 Network Segmentation Reduction",
                 "ret_live": "ISO 27006-1:2024 &amp; PCI Req 11.4",
-                "tax_a": "$67,000 ISO / $94,800 PCI TCO",
+                "tax_a": "$67,000.40 ISO / $94,800 PCI TCO",
                 "tax_b": "$168,000 Unsegmented Audit TCO",
-                "tax_live": "$67,000 / $94,800",
+                "tax_live": "$67,000.40 / $94,800",
                 "delta_b": "+$73,200 Unsegmented ROC Drag",
                 "delta_live": "Stage 1+2 Registrar &amp; QSA ROC",
             }
         if any(k in s_low for k in ("penetration", "cyber-liability")):
             return {
-                "base_a": "$38,900 MFA+EDR Policy ($23.3k PenTest)",
-                "base_b": "$50,900 Unmitigated Cyber Policy Load",
-                "base_live": "$38,900 Cyber Premium / $23,300 PenTest",
+                "base_a": "$40,900 MFA+EDR Policy ($23.3k PenTest)",
+                "base_b": "$52,900 Unmitigated Cyber Policy Load",
+                "base_live": "$40,900 Cyber Risk Transfer / $23,300 PenTest",
                 "ret_a": "$12,000 Control Maturity Underwriting Credit",
                 "ret_b": "$0 Underwriting Control Discount",
                 "ret_live": "$2,500 Retest Attestation Included",
-                "tax_a": "$38,900 Net Cyber Risk Transfer",
-                "tax_b": "$50,900 Uncredited Premium Exposure",
-                "tax_live": "$38,900 / $23,300",
+                "tax_a": "$40,900 Net Cyber Risk Transfer",
+                "tax_b": "$52,900 Uncredited Premium Exposure",
+                "tax_live": "$40,900 / $23,300",
                 "delta_b": "+$12,000 Control Deficiency Surcharge",
                 "delta_live": "NIST SP 800-115 &amp; NAIC Supplement",
             }
         return {
-            "base_a": "$78,100 Automated GRC SOC 2 Type II",
+            "base_a": "$78,100.40 Automated GRC SOC 2 Type II",
             "base_b": "$125,900 Manual Audit Preparation Scope",
-            "base_live": "$78,100 Verified SOC 2 Baseline",
-            "ret_a": "$47,800 Engineering &amp; Readiness Saved",
+            "base_live": "$78,100.40 Verified SOC 2 Baseline",
+            "ret_a": "$47,799.60 Engineering &amp; Readiness Saved",
             "ret_b": "$0 Automation Offset",
-            "ret_live": "$28,500 CPA + $14,000 GRC + $13,500 PenTest",
-            "tax_a": "$78,100 Net Type II Audit TCO",
+            "ret_live": "$37,000 CPA + $15,000 GRC + $11,500 PenTest",
+            "tax_a": "$78,100.40 Net Type II Audit TCO",
             "tax_b": "$125,900 Unoptimized Manual TCO",
-            "tax_live": "$78,100",
-            "delta_b": "+$47,800 Manual Audit Drag",
+            "tax_live": "$78,100.40",
+            "delta_b": "+$47,799.60 Manual Audit Drag",
             "delta_live": "AICPA SSAE 18 AT-C Section 205",
         }
 

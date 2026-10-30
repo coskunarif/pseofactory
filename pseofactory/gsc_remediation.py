@@ -2560,12 +2560,83 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
     if tenant_id == "gainhelm":
-        base_words = (
-            f"Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024 "
-            f"auditor-day tables, {short_q} computes deterministic CPA and C3PAO attestation fees, "
-            f"continuous GRC evidence automation savings, and internal security engineering labor "
-            f"benchmarked against Bureau of Labor Statistics SOC 15-1212 wage percentiles."
-        ).split()
+        if any(k in combined_low for k in ("hipaa", "hitech", "ephi", "160.404")):
+            base_words = (
+                "Pursuant to 45 CFR 160.404 and the HITECH Act (42 U.S.C. 1320d-5), HHS Office for Civil Rights "
+                "assesses four-tier inflation-adjusted civil monetary penalties alongside mandatory breach notification "
+                "under 45 CFR Part 164 Subpart D. A 1,500-record ePHI breach under Tier 3 Willful Neglect Corrected "
+                "results in $2,455,313.00 total exposure, including the $2,067,813.00 statutory penalty cap."
+            ).split()
+        elif any(k in combined_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
+            base_words = (
+                "Under PCI DSS v4.0.1, Level 1 merchants processing over 6 million annual Visa or Mastercard "
+                "transactions must complete an annual Report on Compliance (ROC) led by a Qualified Security Assessor "
+                "(QSA). Total Level 1 compliance cost across 6 CDE systems reaches $94,800.00, comprising $42,000.00 "
+                "in QSA fees, $3,800.00 in ASV scans, $13,200.00 in CDE system scoping, $12,500.00 in pentesting, and $23,300.00 in remediation."
+            ).split()
+        elif any(k in combined_low for k in ("fedramp", "3pao", "3607")):
+            base_words = (
+                "Pursuant to the FedRAMP Authorization Act (44 U.S.C. 3607) and NIST SP 800-53 Rev 5 baselines, "
+                "achieving FedRAMP Moderate Authorization to Operate (ATO) across 325 security controls costs "
+                "$500,000.00. This total includes $165,000.00 for the 3PAO Readiness and Security Assessment Report, "
+                "$217,000.00 in FIPS 140-3 boundary engineering, $68,000.00 for ConMon, and $50,000.00 in PMO documentation."
+            ).split()
+        elif any(k in combined_low for k in ("hitrust", "mycsf")):
+            base_words = (
+                "HITRUST CSF v11 provides three progressive assurance tiers: e1 Essentials (44 controls), i1 Implemented "
+                "(182 controls), and r2 Risk-Based (200 to 350+ tailored controls). An i1 Validated Assessment costs "
+                "$115,000.00 in total, consisting of $22,500.00 in MyCSF subscription fees, $54,000.00 in External "
+                "Assessor validation fees, $14,500.00 in certification review, and $24,000.00 in control remediation."
+            ).split()
+        elif any(k in combined_low for k in ("pentest", "penetration", "800-115")):
+            base_words = (
+                "Technical penetration testing scoped under NIST SP 800-115, OWASP ASVS v4.0, and PCI DSS v4.0.1 "
+                "Requirement 11.4 scales deterministically by base engagement scope, web application and API endpoints, "
+                "cloud IAM architecture, and retest verification. A multi-vector SaaS engagement covering 18 web and "
+                "API endpoints totals $23,300.00 ($8,500.00 base, $8,100.00 endpoints, $4,200.00 cloud IAM, $2,500.00 retest)."
+            ).split()
+        elif any(k in combined_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
+            base_words = (
+                "Actuarial cyber liability insurance underwriting pursuant to the NAIC Cyber Supplement and SEC Item "
+                "1.05 Form 8-K materiality rules evaluates policy limits, industry hazard multipliers, and technical "
+                "controls. A $5M limit policy with a 1.35 hazard multiplier and 20 percent control discount yields a "
+                "$20,415.00 annual premium plus $20,485.00 self-insured retention ($40,900.00 total first-incident outlay)."
+            ).split()
+        elif any(k in combined_low for k in ("iso-27001", "iso 27001", "27006")):
+            base_words = (
+                "Under ISO/IEC 27006-1:2024 mandatory auditor-day tables and ISO/IEC 27001:2022 Annex A (93 controls), "
+                "a 75-employee organization requires 11.0 accredited Stage 1 and Stage 2 auditor days. Total first-year "
+                "ISMS certification cost reaches $67,000.40, combining $21,450.00 in registrar fees, $14,500.00 for ISMS "
+                "platform licensing, $8,500.00 for internal audit, and $22,550.40 in gap remediation."
+            ).split()
+        elif any(k in combined_low for k in ("sprs", "800-171")):
+            base_words = (
+                "Under DFARS 252.204-7019 and the DoD NIST SP 800-171 Assessment Methodology, Supplier Performance "
+                "Risk System (SPRS) scores begin at +110 and deduct 1, 3, or 5 points per unimplemented control down "
+                "to a floor of -203. A contractor missing three 5-point controls, two 3-point controls, and two 1-point "
+                "controls records a verified SPRS score of 87.00."
+            ).split()
+        elif any(k in combined_low for k in ("cmmc", "c3pao", "32 cfr")):
+            base_words = (
+                "Pursuant to 32 CFR Part 170 and DFARS 252.204-7021, achieving CMMC 2.0 Level 2 certification across "
+                "all 110 NIST SP 800-171 Rev 2 security requirements for a 75-employee defense contractor costs "
+                "$132,000.00, encompassing $48,500.00 in accredited C3PAO assessment fees, $26,400.00 for enclave "
+                "licensing, $43,700.00 in engineering remediation labor, and $13,400.00 for RPO advisory."
+            ).split()
+        elif any(k in combined_low for k in ("soc-2", "soc 2", "ssae")):
+            base_words = (
+                "Under AICPA SSAE 18 (AT-C Section 205) and Trust Services Criteria (TSP Section 100), a first-year "
+                "SOC 2 Type II compliance program for a 75-employee SaaS company with 3 Trust Services Criteria costs "
+                "$78,100.40 in total, combining $37,000.00 in CPA attestation fees, $15,000.00 for GRC automation, "
+                "$11,500.00 for penetration testing, and $14,600.40 in internal engineering labor."
+            ).split()
+        else:
+            base_words = (
+                f"Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024 "
+                f"auditor-day tables, {short_q} computes deterministic CPA and C3PAO attestation fees, "
+                f"continuous GRC evidence automation savings, and internal security engineering labor "
+                f"benchmarked against Bureau of Labor Statistics SOC 15-1212 wage percentiles ($121.67/hr loaded rate)."
+            ).split()
         filler_pool = [
             "Verified", "against", "NIST", "SP", "800-171", "Rev", "2", "and", "45", "CFR", "160.404."
         ]
@@ -3881,9 +3952,9 @@ def build_zero_tax_state_spoke_copy(
     quick_answer_title = f"Key Finding: {st_name} 0% State Income Tax & 2026-2027 Federal Take-Home Pay"
     quick_answer = (
         f"{st_name} levies a 0% state individual income tax ($0 state tax), so a single filer earning "
-        f"the {inc_val} median wage benchmark owes {tot_val} in 2026 federal tax ({eff_val} effective rate) "
-        f"and keeps {th_val} in net take-home pay. Under IRC Section 1(j), only federal brackets "
-        f"(10% to 37%) and standard deductions apply."
+        f"the {inc_val} median wage benchmark owes {tot_val} in 2027 post-sunset federal tax ({eff_val} effective rate) "
+        f"and keeps {th_val} in net take-home pay. Under IRC Section 1(j) sunset rules, only federal brackets "
+        f"(10% to 39.6%) and standard deductions apply."
     )
     return {
         "state_slug": st_leaf,
@@ -4342,16 +4413,16 @@ def compile_remediation_overlay_spec(
             "comparison_rows": [
                 {
                     "scenario": "Manual Spreadsheet Evidence vs Continuous GRC Automation",
-                    "baseline": "420 Engineering Hours ($39,900 Labor Cost)",
-                    "optimized": "120 Engineering Hours ($11,400 Labor + GRC Platform)",
+                    "baseline": "420 Engineering Hours ($51,101.40 Labor Cost)",
+                    "optimized": "120 Engineering Hours ($14,600.40 Labor + GRC Platform)",
                     "delta": "-300 Engineering Hours Saved",
                     "authority": "AICPA SSAE 18 (AT-C Sec. 205) & BLS SOC 15-1212",
                 },
                 {
                     "scenario": "Unscoped Multi-Criteria Audit vs Scoped Trust Services Baseline",
                     "baseline": "$64,500 Unbundled CPA / C3PAO Attestation",
-                    "optimized": "$38,500 Scoped Attestation + Automated Evidence Readiness",
-                    "delta": "-$26,000 Direct Audit Fee Reduction",
+                    "optimized": "$37,000 Scoped Attestation + Automated Evidence Readiness",
+                    "delta": "-$27,500 Direct Audit Fee Reduction",
                     "authority": "32 CFR Part 170 & ISO/IEC 27006-1:2024",
                 },
             ],
@@ -4361,7 +4432,7 @@ def compile_remediation_overlay_spec(
                     "answer": (
                         f"Our deterministic {query_clean} model sums external CPA or C3PAO attestation fees, "
                         f"GRC automation licensing, penetration testing, and internal security engineering hours "
-                        f"valued at the BLS SOC 15-1212 fully burdened rate ($95/hr)."
+                        f"valued at the BLS SOC 15-1212 mean loaded rate ($121.67/hr)."
                     ),
                 },
                 {
@@ -4629,34 +4700,267 @@ def _build_autonomous_citation_assertions_and_matrix(
     """
     low = f"{slug} {query_clean} {heading_label}".lower()
     if tenant_id == "gainhelm":
-        assertions = [
-            f"In 2026, {heading_label} evaluates external CPA and C3PAO attestation fees, GRC automation licensing, and internal engineering labor at $95/hr under BLS SOC 15-1212 wage benchmarks.",
-            "Under AICPA SSAE 18 (AT-C Section 205) and ISO/IEC 27006-1:2024, continuous GRC evidence collection reduces manual audit preparation labor by 60% to 75% across 6-to-12 month observation windows.",
-            "Under DoD 32 CFR Part 170 and DFARS 252.204-7021, defense contractors handling CUI require a minimum 88-point NIST SP 800-171 SPRS score for 180-day conditional POA&M eligibility toward the 110-point maximum.",
-        ]
-        matrix = [
-            {
-                "profile": "Series A B2B SaaS (45 Employees, Single Cloud)",
-                "statutory_threshold": "AICPA SSAE 18 AT-C Section 205 (SOC 2 Type II)",
-                "optimal_path": "Automated GRC Platform (Vanta / Drata) + Bundled CPA Attestation",
-                "net_dollar_impact": "$28,500 Engineering Labor Saved (300 Hours at $95/hr)",
-                "next_action": "Compare Automated vs Manual SOC 2 Total Cost",
-            },
-            {
-                "profile": "DoD Defense Contractor Handling CUI (120 Employees)",
-                "statutory_threshold": "32 CFR Part 170 Level 2 C3PAO & 88-Point SPRS Floor",
-                "optimal_path": "Remediate 5-Point NIST 800-171 Controls + CUI Enclave Scoping",
-                "net_dollar_impact": "$48,000 C3PAO Assessment Scope Reduction",
-                "next_action": "Calculate Weighted SPRS Score & POA&M Eligibility",
-            },
-            {
-                "profile": "Global Enterprise SaaS (250 Employees, EU & US Customers)",
-                "statutory_threshold": "ISO/IEC 27006-1:2024 Stage 1/2 + SOC 2 Cross-Mapping",
-                "optimal_path": "Unified GRC Control Framework (82% SOC 2 / ISO 27001 Overlap)",
-                "net_dollar_impact": "$34,200 Duplicate Audit Prep Eliminated",
-                "next_action": "Model Combined ISO 27001 & SOC 2 Surveillance TCO",
-            },
-        ]
+        if any(k in low for k in ("hipaa", "hitech", "ephi", "160.404")):
+            assertions = [
+                f"In 2026, {heading_label} calculates HHS Office for Civil Rights four-tier civil monetary penalties under 45 CFR 160.404 and the HITECH Act (42 U.S.C. 1320d-5) up to the $2,067,813.00 annual statutory tier cap.",
+                "Under 45 CFR 164.404 through 164.408, any unsecured ePHI breach affecting 500 or more individuals triggers mandatory notification to affected patients, prominent media outlets, and the HHS OCR Breach Portal within 60 calendar days.",
+                "For a 1,500-record ePHI breach classified under Tier 3 Willful Neglect Corrected ($13,795 minimum per violation capped at $2,067,813.00), total exposure reaches $2,455,313.00 including $95,000.00 in forensic/legal retainer and $292,500.00 in notification and monitoring.",
+            ]
+            matrix = [
+                {
+                    "profile": "Covered Entity / Business Associate (1,500 ePHI Records, Tier 3)",
+                    "statutory_threshold": "45 CFR 160.404 Tier 3 ($13,795/Violation, $2,067,813 Annual Cap)",
+                    "optimal_path": "30-Day Corrective Action + Recognized Security Practices (P.L. 116-321)",
+                    "net_dollar_impact": "$2,455,313.00 Total Exposure Modeled ($2,067,813.00 OCR Cap + $387,500.00 Response)",
+                    "next_action": "Model Tier 1-4 OCR Civil Penalty & Breach Response Costs",
+                },
+                {
+                    "profile": "Localized Clinic or Health Tech Incident (<500 ePHI Records)",
+                    "statutory_threshold": "45 CFR 164.408 Annual Log Threshold (<500 Individuals)",
+                    "optimal_path": "Encrypt ePHI at Rest/In Transit (NIST SP 800-111 Safe Harbor)",
+                    "net_dollar_impact": "Avoids Immediate 60-Day Media Notice & OCR Wall of Shame Listing",
+                    "next_action": "Verify Sub-500 Record Notification & Safe Harbor Status",
+                },
+                {
+                    "profile": "Healthcare Enterprise Implementing NIST CSF / 405(d) Controls",
+                    "statutory_threshold": "12-Month Recognized Security Practices (42 U.S.C. 1320d-5(e))",
+                    "optimal_path": "Maintain Continuous GRC Evidence Log of NIST CSF Implementation",
+                    "net_dollar_impact": "Statutory Mitigation of OCR Fine Tiers & Audit Scope Reduction",
+                    "next_action": "Audit 12-Month Recognized Security Practice Evidence",
+                },
+            ]
+        elif any(k in low for k in ("pci-dss", "pci dss", "qsa", "roc")):
+            assertions = [
+                f"In 2026, {heading_label} models Level 1 Report on Compliance (ROC) and SAQ costs under PCI DSS v4.0.1 for merchants processing over 6,000,000 annual Visa or Mastercard transactions.",
+                "Under PCI DSS v4.0.1 Requirements 11.3 and 11.4, compliant entities must complete quarterly Approved Scanning Vendor (ASV) external scans ($3,800.00/yr) and internal/external network segmentation penetration testing ($12,500.00).",
+                "For a 6-system Level 1 Cardholder Data Environment (CDE), combining a $42,000.00 QSA ROC assessment, $3,800.00 ASV scanning, $13,200.00 CDE system scoping, $12,500.00 segmentation pentesting, and $23,300.00 CDE remediation labor yields $94,800.00.",
+            ]
+            matrix = [
+                {
+                    "profile": "Level 1 E-Commerce / Enterprise Merchant (>6M Transactions)",
+                    "statutory_threshold": "PCI DSS v4.0.1 Mandatory Annual QSA Report on Compliance (ROC)",
+                    "optimal_path": "Tokenized Payment Iframe + Strict CDE Network Segmentation",
+                    "net_dollar_impact": "$94,800.00 Total Level 1 ROC Cost ($42,000 QSA + $52,800.00 Scoping/Testing/Labor)",
+                    "next_action": "Calculate QSA ROC, ASV & CDE Hardening Budget",
+                },
+                {
+                    "profile": "Level 2 SaaS / Retail Merchant (1M to 6M Annual Transactions)",
+                    "statutory_threshold": "PCI DSS v4.0.1 SAQ D vs SAQ A-EP Eligibility",
+                    "optimal_path": "Eliminate Cardholder Data Storage via P2PE / Hosted Fields",
+                    "net_dollar_impact": "$28,000+ Annual QSA & CDE Audit Scope Reduction",
+                    "next_action": "Compare SAQ A-EP vs Full CDE QSA Assessment",
+                },
+                {
+                    "profile": "Multi-Tenant Payment Service Provider (Level 1 Service Provider)",
+                    "statutory_threshold": "Over 300,000 Annual Card Transactions (PCI SSC Service Provider Rule)",
+                    "optimal_path": "Automated GRC Control Mapping Across PCI DSS v4.0.1 & SOC 2",
+                    "net_dollar_impact": "Eliminates Duplicate Evidence Collection Across 12 Requirements",
+                    "next_action": "Map PCI DSS v4.0.1 Controls to SOC 2 Common Criteria",
+                },
+            ]
+        elif any(k in low for k in ("fedramp", "3pao", "3607")):
+            assertions = [
+                f"In 2026, {heading_label} computes Cloud Service Provider (CSP) authorization costs under the FedRAMP Authorization Act (44 U.S.C. 3607), OMB Circular A-130, and NIST SP 800-53 Rev 5 baselines.",
+                "Under FedRAMP Moderate authorization rules (325 NIST SP 800-53 Rev 5 controls), CSPs must engage an accredited Third-Party Assessment Organization (3PAO) for a Readiness Assessment Report (RAR) and full Security Assessment Report (SAR).",
+                "Total FedRAMP Moderate baseline investment reaches $500,000.00, combining $165,000.00 in 3PAO RAR/SAR fees, $217,000.00 in FIPS 140-3 boundary engineering (1,400 hours at $155.00/hr), $68,000.00 in continuous monitoring (ConMon), and $50,000.00 in PMO documentation.",
+            ]
+            matrix = [
+                {
+                    "profile": "B2G Cloud Service Provider Pursuing FedRAMP Moderate ATO",
+                    "statutory_threshold": "44 U.S.C. 3607 & NIST SP 800-53 Rev 5 (325 Moderate Controls)",
+                    "optimal_path": "Deploy Inherited FedRAMP High Cloud IaaS + 3PAO Readiness Assessment",
+                    "net_dollar_impact": "$500,000.00 Total ATO Program Cost ($165,000 3PAO + $217,000 Engineering)",
+                    "next_action": "Model 3PAO SAR, Boundary Engineering & ConMon Costs",
+                },
+                {
+                    "profile": "Low-Impact SaaS Application (FedRAMP Tailored LI-SaaS)",
+                    "statutory_threshold": "NIST SP 800-53 Rev 5 LI-SaaS Baseline (No PII Beyond Login)",
+                    "optimal_path": "Qualify for LI-SaaS Attestation Instead of Full Moderate Baseline",
+                    "net_dollar_impact": "$240,000+ Boundary Engineering & 3PAO Assessment Savings",
+                    "next_action": "Evaluate LI-SaaS vs Moderate Control Scope",
+                },
+                {
+                    "profile": "Authorized CSP Managing Post-ATO Continuous Monitoring (ConMon)",
+                    "statutory_threshold": "Monthly Vulnerability Scans & Annual 3PAO Assessment",
+                    "optimal_path": "Automate POA&M Tracking and OSCAL System Security Plan Updates",
+                    "net_dollar_impact": "$68,000.00 Annual ConMon Budget Stabilized",
+                    "next_action": "Calculate Ongoing Annual FedRAMP ConMon Expenditure",
+                },
+            ]
+        elif any(k in low for k in ("hitrust", "mycsf")):
+            assertions = [
+                f"In 2026, {heading_label} evaluates validated assessment costs across HITRUST CSF v11 assurance tiers: e1 Essentials (44 controls), i1 Implemented (182 controls), and r2 Risk-Based (200 to 350+ tailored controls).",
+                "Under HITRUST Assurance Program requirements, every validated assessment requires an active MyCSF portal subscription alongside independent fieldwork by an accredited HITRUST External Assessor and centralized quality review.",
+                "A baseline HITRUST i1 Validated Assessment totals $115,000.00, comprising $22,500.00 for MyCSF annual licensing, $54,000.00 for External Assessor validation, $14,500.00 for HITRUST certification review, and $24,000.00 in remediation labor (200 hours at $120.00/hr).",
+            ]
+            matrix = [
+                {
+                    "profile": "Health Tech / Payer Vendor Pursuing HITRUST i1 Validation",
+                    "statutory_threshold": "HITRUST CSF v11 i1 Tier (182 Threat-Adaptive Controls)",
+                    "optimal_path": "MyCSF Rapid Assessment + Accredited External Assessor Fieldwork",
+                    "net_dollar_impact": "$115,000.00 Total i1 Certification Cost ($54,000 Assessor + $22,500 MyCSF)",
+                    "next_action": "Compare HITRUST e1, i1, and r2 Total Cost of Ownership",
+                },
+                {
+                    "profile": "Enterprise Healthcare Clearinghouse Requiring HITRUST r2",
+                    "statutory_threshold": "HITRUST CSF v11 r2 Risk-Based 2-Year Certification + Interim Review",
+                    "optimal_path": "Harmonize SOC 2 Type II + HIPAA Security Rule Inside MyCSF",
+                    "net_dollar_impact": "Consolidates Multiple Payer Audits Into Single Validated Report",
+                    "next_action": "Scope r2 Regulatory Factors (HIPAA, NIST, ISO 27001)",
+                },
+                {
+                    "profile": "Early-Stage Healthcare SaaS Startup (Low Technical Risk)",
+                    "statutory_threshold": "HITRUST CSF v11 e1 Essentials (44 Foundational Cyber Controls)",
+                    "optimal_path": "Start With e1 Validated Assessment + GRC Evidence Automation",
+                    "net_dollar_impact": "50%+ Lower Assessor & Remediation Cost vs Full r2 Scope",
+                    "next_action": "Evaluate e1 Essentials Readiness Timeline",
+                },
+            ]
+        elif any(k in low for k in ("pentest", "penetration", "800-115")):
+            assertions = [
+                f"In 2026, {heading_label} scopes offensive security engagements under NIST SP 800-115, OWASP ASVS v4.0, AICPA SOC 2 CC4.1/CC7.1, and PCI DSS v4.0.1 Requirement 11.4.",
+                "Under NIST SP 800-115 and CREST/OSCP methodology, grey-box application and cloud penetration testing scales deterministically by base engagement overhead, authenticated web/API endpoints, cloud IAM boundaries, and remediation retesting.",
+                "A baseline enterprise penetration test covering 18 web application and API endpoints at $450.00 per endpoint ($8,100.00) plus an $8,500.00 base engagement fee, $4,200.00 cloud IAM/network testing fee, and $2,500.00 retest verification totals $23,300.00.",
+            ]
+            matrix = [
+                {
+                    "profile": "B2B SaaS Completing Annual SOC 2 Type II & Customer Due Diligence",
+                    "statutory_threshold": "NIST SP 800-115 & SOC 2 CC7.1 Grey-Box Web/API + Cloud Scope",
+                    "optimal_path": "18 Web/API Endpoints ($8,100) + Base ($8,500) + Cloud ($4,200) + Retest ($2,500)",
+                    "net_dollar_impact": "$23,300.00 Total Engagement Fee Including Clean Retest Attestation Letter",
+                    "next_action": "Enter Web App, API Endpoint & Cloud Asset Counts",
+                },
+                {
+                    "profile": "Level 1 Merchant / FinTech Subject to PCI DSS v4.0.1 Req 11.4",
+                    "statutory_threshold": "Mandatory Internal/External Pentest + CDE Segmentation Verification",
+                    "optimal_path": "Bundle CDE Segmentation Testing With Application Pentest Window",
+                    "net_dollar_impact": "Satisfies Both QSA ROC Req 11.4 and Enterprise Procurement Gates",
+                    "next_action": "Add CDE Segmentation Scope to Pentest Calculator",
+                },
+                {
+                    "profile": "Continuous Deployment Engineering Org (Bi-Weekly Releases)",
+                    "statutory_threshold": "OWASP ASVS v4.0 Level 2 + Continuous DAST/SAST Integration",
+                    "optimal_path": "Pair Annual Manual CREST Pentest With Automated CI/CD Vulnerability Scanning",
+                    "net_dollar_impact": "Eliminates Critical Findings Prior to Formal Retest Window",
+                    "next_action": "Model Annual Manual Pentest + Retest Budget",
+                },
+            ]
+        elif any(k in low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
+            assertions = [
+                f"In 2026, {heading_label} models commercial cyber liability premiums and retention exposure under the NAIC Cyber Insurance Supplement and SEC Cybersecurity Risk Governance rules (17 CFR 229.106 / Form 8-K Item 1.05).",
+                "Under SEC Form 8-K Item 1.05, public companies must disclose material cybersecurity incidents within 4 business days of materiality determination, elevating first-party forensic, legal, and notification retention requirements.",
+                "For a $5,000,000 policy limit at a $3,400.00 per million base rate with a 1.35 industry hazard multiplier, 0.80 control discount factor, and $2,055.00 surplus tax ($20,415.00 annual premium) plus $20,485.00 self-insured retention, total first-incident outlay is $40,900.00.",
+            ]
+            matrix = [
+                {
+                    "profile": "Mid-Market Enterprise ($5M Cyber Limit, Verified MFA/EDR/Backups)",
+                    "statutory_threshold": "NAIC Cyber Supplement Underwriting & 0.80 Control Discount Factor",
+                    "optimal_path": "$20,415.00 Annual Policy Premium + $20,485.00 Self-Insured Retention Reserve",
+                    "net_dollar_impact": "$40,900.00 Total First-Incident Outlay (20% Premium Credit Applied)",
+                    "next_action": "Calculate Annual Cyber Premium & SIR Exposure",
+                },
+                {
+                    "profile": "Publicly Traded / Pre-IPO Enterprise Subject to SEC Item 1.05",
+                    "statutory_threshold": "SEC 17 CFR 229.106 & 4-Business-Day Form 8-K Incident Disclosure",
+                    "optimal_path": "Pre-Negotiate Breach Coach Legal Retainer & DFIR Panel on Policy",
+                    "net_dollar_impact": "Preserves Policy Coverage & Meets 4-Day Materiality Assessment Window",
+                    "next_action": "Model Policy Limit vs Breach Notification Exposure",
+                },
+                {
+                    "profile": "Organization Lacking Phishing-Resistant MFA or Immutable Backups",
+                    "statutory_threshold": "Underwriting Sub-Limits & Coinsurance Penalties on Ransomware",
+                    "optimal_path": "Deploy EDR, MFA, and Offline Backups Before Policy Renewal",
+                    "net_dollar_impact": "$4,590+ Annual Premium Reduction + Full Ransomware Limit Restoration",
+                    "next_action": "Simulate Security Control Discount Impact",
+                },
+            ]
+        elif any(k in low for k in ("iso-27001", "iso 27001", "27006")):
+            assertions = [
+                f"In 2026, {heading_label} calculates accredited Stage 1 and Stage 2 certification costs under ISO/IEC 27001:2022 (93 Annex A controls) and ISO/IEC 27006-1:2024 mandatory auditor-day tables.",
+                "Under ISO/IEC 27006-1:2024 Annex B and IAF MD 5, an organization in the 66-to-85 employee bracket requires 11.0 accredited Stage 1 and Stage 2 auditor days ($21,450.00 registrar fee at $1,950.00/day) plus annual surveillance audits at 33% of initial audit time.",
+                "Combining $21,450.00 in accredited registrar fees, $14,500.00 in ISMS platform licensing, $8,500.00 for Clause 9.2 internal audit, and $22,550.40 in Annex A gap remediation (180 hours at $125.28/hr) yields a verified $67,000.40 first-year total.",
+            ]
+            matrix = [
+                {
+                    "profile": "Mid-Market SaaS (75 Employees, ISO/IEC 27001:2022 Initial Audit)",
+                    "statutory_threshold": "ISO/IEC 27006-1:2024 Mandatory 11.0 Stage 1+2 Auditor Days",
+                    "optimal_path": "ANAB/UKAS Registrar ($21,450) + ISMS Platform ($14,500) + Clause 9.2 Audit ($8,500)",
+                    "net_dollar_impact": "$67,000.40 Total Year-1 Certification Cost (Including $22,550.40 Remediation)",
+                    "next_action": "Calculate Stage 1/2 Registrar & 3-Year Surveillance TCO",
+                },
+                {
+                    "profile": "Organization Holding Existing SOC 2 Type II Report",
+                    "statutory_threshold": "82% Control Overlap Between SOC 2 TSC and ISO 27001:2022 Annex A",
+                    "optimal_path": "Reuse Automated GRC Evidence for Statement of Applicability (SoA)",
+                    "net_dollar_impact": "Reduces Internal Annex A Gap Remediation Hours by 50%+",
+                    "next_action": "Model Dual SOC 2 + ISO 27001 Cross-Mapped Budget",
+                },
+                {
+                    "profile": "Years 2 & 3 Certified ISMS Maintaining Triennial Cycle",
+                    "statutory_threshold": "ISO/IEC 27006-1:2024 Surveillance Ratio (0.33 of Initial Auditor Days)",
+                    "optimal_path": "3.7-Day Annual Surveillance Audits + Continuous Clause 9.2 Internal Audit",
+                    "net_dollar_impact": "$7,150.00 Annual Surveillance Registrar Fee per Year",
+                    "next_action": "Project 3-Year ISO 27001 Certification Lifecycle",
+                },
+            ]
+        elif any(k in low for k in ("sprs", "800-171", "cmmc", "c3pao", "32 cfr")):
+            assertions = [
+                f"In 2026, {heading_label} enforces DoD 32 CFR Part 170 (CMMC 2.0 Final Rule), DFARS 252.204-7012 / 7019 / 7020 / 7021, and the NIST SP 800-171 Rev 2 DoD Assessment Methodology across 110 security requirements.",
+                "Under DFARS 252.204-7019 and 32 CFR 170.21, Supplier Performance Risk System (SPRS) scores span [-203, +110]; contractors missing three 5-point, two 3-point, and two 1-point controls score 87.00 (1 point below the 88-point conditional POA&M floor).",
+                "For a 75-employee Defense Industrial Base contractor, CMMC 2.0 Level 2 certification totals $132,000.00, combining $48,500.00 in C3PAO assessment fees, $26,400.00 in FedRAMP enclave licensing, $43,700.00 in remediation labor (380 hours at $115.00/hr), and $13,400.00 in RPO advisory.",
+            ]
+            matrix = [
+                {
+                    "profile": "Defense Contractor Handling CUI (75 Employees, CMMC Level 2)",
+                    "statutory_threshold": "32 CFR Part 170 Triennial C3PAO Assessment (110 NIST 800-171 Controls)",
+                    "optimal_path": "Isolate CUI in FedRAMP Moderate Enclave ($26,400/yr) + C3PAO ($48,500)",
+                    "net_dollar_impact": "$132,000.00 Total Level 2 Certification Cost (Including $43,700 Labor & $13,400 RPO)",
+                    "next_action": "Model C3PAO Fee, Enclave Licensing & Remediation Labor",
+                },
+                {
+                    "profile": "Contractor at 87.00 SPRS Score (3x5pt, 2x3pt, 2x1pt Open Controls)",
+                    "statutory_threshold": "32 CFR 170.21 Conditional POA&M Floor (>=88 SPRS & Zero Open 5-Pt Controls)",
+                    "optimal_path": "Remediate All Three 5-Point Controls First (+15 Points to Reach 102 SPRS)",
+                    "net_dollar_impact": "Unlocks 180-Day Conditional CMMC Level 2 Award Eligibility",
+                    "next_action": "Calculate Exact NIST SP 800-171 Weighted SPRS Deductions",
+                },
+                {
+                    "profile": "Subcontractor Handling Only Federal Contract Information (FCI)",
+                    "statutory_threshold": "32 CFR 170.15 CMMC Level 1 (15 FAR 52.204-21 Basic Safeguarding Controls)",
+                    "optimal_path": "Annual Senior Official Self-Affirmation in SPRS (No C3PAO Required)",
+                    "net_dollar_impact": "$48,500.00 C3PAO Assessment Fee Avoided",
+                    "next_action": "Verify FCI vs CUI Contract Clause Scope (DFARS 252.204-7021)",
+                },
+            ]
+        else:
+            assertions = [
+                f"In 2026, {heading_label} evaluates external CPA attestation fees ($28,000.00 base plus $4,500.00 per extra Trust Services Criterion), GRC automation ($15,000.00), penetration testing ($11,500.00), and internal engineering labor at $121.67/hr under BLS SOC 15-1212 wage benchmarks.",
+                "Under AICPA SSAE 18 (AT-C Section 205) and TSP Section 100, a 75-employee SaaS company completing a SOC 2 Type II audit across Security plus 2 additional criteria incurs $78,100.40 in total first-year compliance cost ($37,000.00 CPA fee + $15,000.00 GRC + $11,500.00 pentest + $14,600.40 labor).",
+                "Deploying continuous GRC evidence collection reduces manual engineering preparation by 55% ($8,030.22 in verified annual labor savings at $121.67/hr across a 6-to-12 month Type II observation window).",
+            ]
+            matrix = [
+                {
+                    "profile": "Series B B2B SaaS (75 Employees, Security + 2 Extra TSC)",
+                    "statutory_threshold": "AICPA SSAE 18 AT-C Section 205 & TSP Section 100 (SOC 2 Type II)",
+                    "optimal_path": "Automated GRC Platform ($15,000) + Peer-Reviewed CPA Firm ($37,000) + Pentest ($11,500)",
+                    "net_dollar_impact": "$78,100.40 Total Year-1 Cost (With $8,030.22 Automation Labor Savings)",
+                    "next_action": "Compare Automated vs Manual SOC 2 Total Cost",
+                },
+                {
+                    "profile": "DoD Defense Contractor Handling CUI (75 Employees)",
+                    "statutory_threshold": "32 CFR Part 170 Level 2 C3PAO & 88-Point SPRS Floor",
+                    "optimal_path": "Remediate 5-Point NIST 800-171 Controls + CUI Enclave Scoping",
+                    "net_dollar_impact": "$132,000.00 Total CMMC Level 2 Program ($48,500 C3PAO + $26,400 Enclave)",
+                    "next_action": "Calculate Weighted SPRS Score & POA&M Eligibility",
+                },
+                {
+                    "profile": "Global Enterprise SaaS (75 Employees, EU & US Customers)",
+                    "statutory_threshold": "ISO/IEC 27006-1:2024 (11.0 Auditor Days) + SOC 2 Cross-Mapping",
+                    "optimal_path": "Unified GRC Control Framework (82% SOC 2 / ISO 27001 Overlap)",
+                    "net_dollar_impact": "$67,000.40 ISO 27001 Year-1 Cost With Shared Evidence Collection",
+                    "next_action": "Model Combined ISO 27001 & SOC 2 Surveillance TCO",
+                },
+            ]
         return {
             "autonomous_citation_assertions": assertions,
             "ai_mode_decision_matrix": matrix,
@@ -4807,6 +5111,64 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Compare Effective Subsidized Federal Rate vs Private APR",
                 },
             ]
+        elif any(k in low for k in ("married-filing-separately", "married filing separately", "mfs")):
+            assertions = [
+                f"In 2026, {heading_label} excludes spousal Adjusted Gross Income from federal Income-Driven Repayment calculations when married borrowers file separate tax returns under 34 CFR 685.209(e) and IRC Section 6013.",
+                "Under 34 CFR 685.209(e), filing separately reduces the borrower's countable IDR income to individual AGI ($65,000 vs $135,000 joint), lowering the monthly RAP payment by $410.31/mo ($4,923.72/yr).",
+                "After subtracting the $120.42/mo ($1,445/yr) marginal federal income tax increase from forfeiting joint tax brackets and credits under IRC Section 1(j), separate filing yields $289.90/mo ($3,478.75/yr) in net household savings.",
+            ]
+            matrix = [
+                {
+                    "profile": "Dual-Earner Household ($65k Borrower AGI + $70k Spouse AGI, $60k Debt)",
+                    "statutory_threshold": "34 CFR 685.209(e) Spousal AGI Exclusion Under Separate Returns",
+                    "optimal_path": "Married Filing Separately (IRC Section 6013) + Individual IDR Certification",
+                    "net_dollar_impact": "+$289.90/mo Net Household Savings ($410.31/mo IDR Drop Minus $120.42/mo Tax Cost)",
+                    "next_action": "Compare Joint vs Separate IDR Payment & Tax Delta",
+                },
+                {
+                    "profile": "Community Property State Resident (CA, TX, WA, AZ, NV, ID, LA, NM, WI)",
+                    "statutory_threshold": "IRS Publication 555 Community Income 50/50 Split Rules",
+                    "optimal_path": "Submit Alternative Documentation of Income (Pay Stubs) When Borrower Earns Less",
+                    "net_dollar_impact": "Caps IDR Payment at Lower of 50% Community AGI or Individual Gross Income",
+                    "next_action": "Evaluate Community Property AGI Split Impact",
+                },
+                {
+                    "profile": "Spouse Also Carries Federal Direct Student Loans",
+                    "statutory_threshold": "34 CFR 685.209(e)(2) Proportional Joint IDR Proration",
+                    "optimal_path": "Remain Married Filing Jointly (IDR Payment Prorated by Debt Share)",
+                    "net_dollar_impact": "Preserves Joint Tax Credits Without Double-Counting Household Income",
+                    "next_action": "Check Joint Debt Proration vs Separate Filing",
+                },
+            ]
+        elif any(k in low for k in ("insolvency", "tax-bomb", "tax bomb", "982")):
+            assertions = [
+                f"In 2026, {heading_label} calculates federal cancellation-of-debt tax liability on 20-year and 25-year IDR student loan discharge following the December 31, 2025 expiration of ARPA Section 108(f)(5).",
+                "Under IRC Section 108(a)(1)(B) and IRS Form 982, borrowers exclude forgiven student loan debt from federal gross income up to the exact dollar amount by which total liabilities exceed fair market value of assets immediately before discharge.",
+                "For an $85,000 forgiven IDR balance where borrower liabilities ($140,000) exceed assets ($85,000) by $55,000, the Form 982 insolvency exclusion shields $55,000 and leaves only $30,000 taxable ($7,200 federal tax at a 24% marginal rate).",
+            ]
+            matrix = [
+                {
+                    "profile": "Partially Insolvent IDR Forgiveness Borrower ($85k Forgiven, $55k Insolvent)",
+                    "statutory_threshold": "IRC Section 108(a)(1)(B) Insolvency Exclusion on IRS Form 982",
+                    "optimal_path": "Attach IRS Form 982 Line 1b & Insolvency Worksheet to Form 1040",
+                    "net_dollar_impact": "$55,000 Excluded From Income ($13,200 Tax Saved; $7,200 Residual Tax at 24%)",
+                    "next_action": "Complete Assets vs Liabilities Balance Sheet Worksheet",
+                },
+                {
+                    "profile": "Fully Insolvent Borrower (Total Liabilities Exceed Assets by >= Forgiven Debt)",
+                    "statutory_threshold": "100% Cancellation-of-Debt Exclusion (IRC Section 108(a)(3))",
+                    "optimal_path": "File IRS Form 982 to Exclude 100% of Form 1099-C Discharged Balance",
+                    "net_dollar_impact": "$0 Federal Tax Liability on Discharged IDR Balance",
+                    "next_action": "Verify Pre-Discharge Net Worth Valuation",
+                },
+                {
+                    "profile": "Public Service / 501(c)(3) Borrower (120 Qualifying Payments)",
+                    "statutory_threshold": "IRC Section 108(f)(1) Permanent Statutory Tax Exclusion",
+                    "optimal_path": "Discharge Under PSLF (34 CFR 685.219) Instead of 20/25-Year IDR",
+                    "net_dollar_impact": "100% Permanently Tax-Free Regardless of Net Worth or Solvency",
+                    "next_action": "Verify PSLF Employment Certification Status",
+                },
+            ]
         elif any(k in low for k in ("ibr", "hardship", "paye", "pay as you earn", "income-based", "income based", "student-loan-repayment")) and "rap" not in low:
             assertions = [
                 f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the federal poverty guideline ($23,475 single baseline) under 34 CFR 685.209.",
@@ -4924,6 +5286,35 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Track Monthly Net Margin Against $75k S-Corp Trigger",
                 },
             ]
+        elif any(k in low for k in ("equipment-lease", "equipment lease", "lease-tax-deduction", "162(a)(3)")):
+            assertions = [
+                f"In 2026, {heading_label} deducts 100% of true operating lease payments as ordinary and necessary business expenses under IRC Section 162(a)(3) and GAAP ASC 842 without consuming capital expensing limits.",
+                "Under IRC Section 162(a)(3) and Revenue Procedure 2001-28, operating lease rentals bypass the IRC Section 280F(d)(7) $30,500 Heavy SUV cap and the IRC Section 163(j) 30% ATI business interest limitation.",
+                "For a $120,000 commercial equipment lease paid at $2,450/mo ($29,400/yr) in the 32% marginal tax bracket, full Section 162(a)(3) rental deductibility generates a $9,408 annual cash tax shield ($19,992 net after-tax lease cost).",
+            ]
+            matrix = [
+                {
+                    "profile": "Operating Lease / FMV True Lease ($29,400 Annual Lease Payments)",
+                    "statutory_threshold": "IRC Section 162(a)(3) 100% Ordinary Rental Expense Deduction",
+                    "optimal_path": "Deduct $29,400/yr on Schedule C Line 20a or Form 1120 Line 16",
+                    "net_dollar_impact": "$9,408 Annual Cash Tax Shield at 32% Marginal Rate ($0 Down Payment)",
+                    "next_action": "Compare Operating Lease vs Financed Purchase Cash Flow",
+                },
+                {
+                    "profile": "Conditional Sales / $1 Buyout Capital Lease ($120k Financed Asset)",
+                    "statutory_threshold": "IRC Section 179(b)(1) ($2.56M Cap) & IRC Section 168(k) (20% Bonus)",
+                    "optimal_path": "Reclassify as Capital Purchase & Elect Section 179 on Form 4562",
+                    "net_dollar_impact": "$38,400 Year-1 Immediate Depreciation Tax Shield at 32% Rate",
+                    "next_action": "Evaluate $1 Buyout vs Fair Market Value Residual Structure",
+                },
+                {
+                    "profile": "Heavy SUV / Passenger Fleet Acquisition (6,000-14,000 lbs GVWR)",
+                    "statutory_threshold": "IRC Section 280F(d)(7) $30,500 SUV Purchase Cap vs Lease Inclusion Table",
+                    "optimal_path": "Compare 36-Month Operating Lease Deduction vs $38,000 Year-1 Purchase Write-Off",
+                    "net_dollar_impact": "Preserves Working Capital Liquidity While Deducting Business-Use Rentals",
+                    "next_action": "Model Lease Inclusion Offset vs Section 179 SUV Cap",
+                },
+            ]
         elif "179" in low or "4562" in low or "depreciation" in low or "equipment" in low:
             clean_179_label = re.sub(
                 r"\b(?:heavy\s+suv|suv|heavy\s+vehicle)s?\b",
@@ -4960,23 +5351,255 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Run Form 4562 Section 179 Phase-Out & MACRS Schedule",
                 },
             ]
-        else:
+        elif any(k in low for k in ("crypto", "1099-da", "1099 da", "digital-asset", "8949")):
             assertions = [
-                f"In 2026, {heading_label} computes exact after-tax cash flow, marginal tax brackets, and statutory compliance thresholds under Internal Revenue Code Sections 61, 162, 199A, and 1401.",
-                "For tax years 2026 and 2027, federal pass-through and corporate treasury models must account for the $176,100 OASDI wage cap (IRC Section 3121), the 20% QBI deduction (IRC Section 199A), and quarterly estimated tax safe harbors (100% or 110% of prior-year tax under IRC Section 6654).",
-                "Operating businesses maintaining at least 12 to 18 months of net cash runway and sub-1.5x net burn multiples reduce working-capital financing cost by 220 to 380 basis points across 2026 credit facilities.",
+                f"In 2026, {heading_label} reconciles digital asset cost basis and capital gains under IRC Sections 1001, 1012, 1222, and 1411 (3.8% Net Investment Income Tax) alongside mandatory custodial broker reporting on IRS Form 1099-DA.",
+                "Under Treasury Regulation 1.6045-1 and IRS Revenue Procedure 2024-28, taxpayers must allocate cost basis per wallet or account using specific identification (HIFO/LIFO) prior to execution or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
+                "On $150,000 of digital asset proceeds with $45,000 verified cost basis ($105,000 net gain) taxed at the 20% long-term capital gains rate plus 3.8% NIIT ($24,990 tax), net after-tax proceeds equal $80,010 (or $14,880 in tax saved via HIFO lot selection on a $185,000 disposal).",
             ]
             matrix = [
                 {
-                    "profile": "High-Growth Operator ($1.5M ARR, 14-Month Runway)",
-                    "statutory_threshold": "IRC Section 162 Ordinary & Necessary Expense Optimization + R&D Section 174",
-                    "optimal_path": "Reallocate Non-Core OpEx + Treasury High-Yield Sweep (4.85% APY)",
-                    "net_dollar_impact": "+5.4 Months Extended Cash Runway ($184,000 Preserved)",
-                    "next_action": "Load Baseline ARR & Monthly Burn into Calculator",
+                    "profile": "Long-Term Digital Asset Holder ($150k Proceeds, $45k Basis, >365 Days)",
+                    "statutory_threshold": "IRC Section 1(h) 20% LTCG Cap + IRC Section 1411 3.8% NIIT",
+                    "optimal_path": "Hold >12 Months + Reconcile Form 1099-DA Against Wallet Basis",
+                    "net_dollar_impact": "$80,010 Net After-Tax Gain ($24,990 Federal Tax vs $42,840 Short-Term)",
+                    "next_action": "Calculate Long-Term vs Short-Term Crypto Tax Liability",
+                },
+                {
+                    "profile": "Active Multi-Wallet Trader Receiving 2026 IRS Form 1099-DA",
+                    "statutory_threshold": "IRC Section 1012 Per-Wallet Specific Identification (Rev. Proc. 2024-28)",
+                    "optimal_path": "Apply Pre-Trade HIFO Specific Lot Identification on Form 8949",
+                    "net_dollar_impact": "$14,880 Tax Reduction vs Unreconciled Default FIFO Basis",
+                    "next_action": "Run Form 1099-DA FIFO vs HIFO Basis Reconciliation",
+                },
+                {
+                    "profile": "Investor With Unrealized Digital Asset Capital Losses",
+                    "statutory_threshold": "IRC Section 1211(b) Capital Loss Offset & $3,000 Ordinary Cap",
+                    "optimal_path": "Harvest Realized Crypto Losses to Offset Short-Term Gains Before Dec 31",
+                    "net_dollar_impact": "Offsets 100% of Realized Capital Gains + $3,000 Ordinary Income",
+                    "next_action": "Model Year-End Tax-Loss Harvesting Offset",
+                },
+            ]
+        elif any(k in low for k in ("tax-bracket", "tax bracket", "2027", "tcja", "capital-gains", "capital gains")):
+            assertions = [
+                f"In 2026 and 2027, {heading_label} compares current TCJA tax schedules against post-sunset statutory reversion under IRC Section 1(j) and IRC Section 1(h) (0%, 15%, and 20% long-term capital gains tiers plus the 3.8% IRC Section 1411 NIIT).",
+                "Under IRC Section 1(j), expiration of the Tax Cuts and Jobs Act reverts ordinary federal marginal rates to 10%, 15%, 25%, 28%, 33%, 35%, and 39.6% while contracting the single standard deduction from $16,100 (2026) to $13,600 (2027 post-sunset).",
+                "For a single filer earning $125,000 gross income, reverting from 2026 TCJA brackets ($19,181 federal tax) to 2027 post-sunset brackets ($23,530 federal tax) increases annual federal income tax liability by +$4,349.",
+            ]
+            matrix = [
+                {
+                    "profile": "Single Earner ($125,000 Gross Income, Standard Deduction)",
+                    "statutory_threshold": "IRC Section 1(j) TCJA Sunset ($16,100 -> $13,600 Standard Deduction)",
+                    "optimal_path": "Accelerate Roth Conversions & Bonus Recognition Into 22%/24% Brackets",
+                    "net_dollar_impact": "+$4,349 Annual Sunset Tax Increase ($19,181 TCJA vs $23,530 Post-Sunset)",
+                    "next_action": "Compare 2026 TCJA vs 2027 Post-Sunset Marginal Brackets",
+                },
+                {
+                    "profile": "High-Income Investor Realizing $250,000 Long-Term Capital Gain",
+                    "statutory_threshold": "IRC Section 1(h) 20% LTCG Ceiling + IRC Section 1411 3.8% NIIT ($200k Single)",
+                    "optimal_path": "Bracket-Fill 15% LTCG Tier + Offset With Carryforward Capital Losses",
+                    "net_dollar_impact": "$59,500 Combined Federal LTCG + NIIT Liability (23.8% Effective Rate)",
+                    "next_action": "Model Capital Gains Stacking Above Ordinary Income",
+                },
+                {
+                    "profile": "Relocating Earner Comparing State Income Tax Jurisdictions ($150k Income)",
+                    "statutory_threshold": "IRC Section 164(b)(6) SALT Deduction Cap & State Bracket Schedules",
+                    "optimal_path": "Compare 0% Income Tax States (FL, TX, NV, WA, TN, WY, SD, AK) vs High-Tax States",
+                    "net_dollar_impact": "Up to $12,000+ Annual State Income Tax Differential Preserved",
+                    "next_action": "Select State Spoke to Calculate Combined Federal + State Tax",
+                },
+            ]
+        elif any(k in low for k in ("174", "r-and-d", "r&d", "research", "6765")):
+            assertions = [
+                f"In 2026, {heading_label} models mandatory 5-year domestic research and experimental (R&E) capitalization under IRC Section 174(a)(2)(B) alongside the IRC Section 41 Credit for Increasing Research Activities on IRS Form 6765.",
+                "Under IRC Section 174(a), domestic software development and engineering wages must be amortized over 5 years using a mid-year convention (10% deduction in Year 1, 20% in Years 2-5), while foreign R&E amortizes over 15 years (3.33% in Year 1).",
+                "For $800,000 in domestic R&E expenditure, the 10% Year-1 Section 174 amortization deduction ($80,000) at a 27% effective tax rate ($21,600 tax shield) plus a $52,500 net IRC Section 280C(c) reduced research credit yields $74,100 in Year-1 tax benefit.",
+            ]
+            matrix = [
+                {
+                    "profile": "Domestic Software / Engineering Firm ($800k Domestic R&E Wages)",
+                    "statutory_threshold": "IRC Section 174(a) 10% Year-1 Mid-Year Convention + IRC Section 41 Credit",
+                    "optimal_path": "Elect IRC Section 280C(c)(3) Reduced Credit ($52,500) on IRS Form 6765",
+                    "net_dollar_impact": "$74,100 Combined Year-1 Tax Benefit ($52,500 Credit + $21,600 Amortization Shield)",
+                    "next_action": "Calculate 5-Year Section 174 Amortization & Form 6765 Credit",
+                },
+                {
+                    "profile": "Qualified Small Business (<$5M Gross Receipts, <=5 Years Revenue)",
+                    "statutory_threshold": "IRC Section 41(h) Payroll Tax Credit Election (IRS Form 8974)",
+                    "optimal_path": "Apply Up to $500,000 Annual R&D Credit Against Employer FICA Taxes",
+                    "net_dollar_impact": "Immediate Quarterly Payroll Cash Savings Even With Zero Income Tax",
+                    "next_action": "Evaluate Form 6765 Section D Payroll Tax Offset",
+                },
+                {
+                    "profile": "Company With Offshore Engineering Contractors (15-Year Foreign R&E)",
+                    "statutory_threshold": "IRC Section 174(a)(2)(B) 15-Year Foreign Amortization (3.33% Year 1)",
+                    "optimal_path": "Shift Qualifying R&D Roles to U.S. W-2 Staff to Capture 5-Year + Section 41 Credit",
+                    "net_dollar_impact": "3x Faster Year-1 Amortization + Full IRC Section 41 QRE Eligibility",
+                    "next_action": "Compare Domestic 5-Year vs Foreign 15-Year R&E Tax Drag",
+                },
+            ]
+        elif any(k in low for k in ("301", "tariff", "landed-cost", "landed cost", "customs", "mpf", "hmf")):
+            assertions = [
+                f"In 2026, {heading_label} calculates total customs landed cost under Section 301 of the Trade Act of 1974 (19 U.S.C. 2411), Harmonized Tariff Schedule (HTSUS) Chapter 99 surcharges, and 19 U.S.C. 1401a transaction valuation.",
+                "Under 19 CFR 24.23 and 26 U.S.C. 4461, ocean container imports incur a 0.3464% Merchandise Processing Fee (MPF, subject to the $31.67 minimum and $614.35 maximum) plus a 0.125% Harbor Maintenance Fee (HMF) on declared FOB value.",
+                "For a $120,000 FOB shipment subject to a 25% Section 301 tariff and 3.5% MFN base duty ($34,200 customs duty) plus $6,000 ocean freight, $528.40 MPF, and $237.50 HMF, total landed cost equals $160,966 ($40,966 total import burden).",
+            ]
+            matrix = [
+                {
+                    "profile": "Commercial Importer ($120,000 FOB Ocean Shipment, List 1-4A 25% Tariff)",
+                    "statutory_threshold": "19 U.S.C. 2411 (25% Section 301) + 3.5% MFN + MPF/HMF ($6,766 Freight/Fees)",
+                    "optimal_path": "Verify HTSUS 10-Digit Classification & First-Sale Valuation Eligibility",
+                    "net_dollar_impact": "$160,966 Total Landed Cost ($34,200 Customs Duty + $6,766 Freight/MPF/HMF)",
+                    "next_action": "Calculate Exact HTSUS Duty, MPF, HMF & Unit Landed Cost",
+                },
+                {
+                    "profile": "Manufacturer Re-Exporting Imported Components (19 U.S.C. 1313)",
+                    "statutory_threshold": "19 U.S.C. 1313(b)/(j) Unused Merchandise & Manufacturing Duty Drawback",
+                    "optimal_path": "File CBP Form 7551 Duty Drawback Claim on Exported Inventory",
+                    "net_dollar_impact": "Recovers Up to 99% of Eligible Section 301 & MFN Duties Paid",
+                    "next_action": "Evaluate CBP Duty Drawback & Foreign Trade Zone Deferral",
+                },
+                {
+                    "profile": "Importer Updating Continuous CBP Customs Bond (19 CFR Part 113)",
+                    "statutory_threshold": "CBP Continuous Bond Formula (10% of Total Annual Duties, Taxes & Fees)",
+                    "optimal_path": "Recalculate Bond Sufficiency Threshold After 25% Section 301 Surcharge",
+                    "net_dollar_impact": "Prevents CBP Bond Insufficiency Notices & Port Clearance Delays",
+                    "next_action": "Model Annualized Duty Exposure for Customs Bond Sizing",
+                },
+            ]
+        elif any(k in low for k in ("treasury", "3124", "tax-equivalent-yield", "tey")):
+            assertions = [
+                f"In 2026, {heading_label} computes the state-tax-exempt Tax-Equivalent Yield (TEY) of U.S. Treasury bills and notes under 31 U.S.C. 3124(a) compared against fully taxable bank CDs and commercial money market funds.",
+                "Under 31 U.S.C. 3124(a), interest income from direct U.S. Treasury obligations is 100% exempt from state and local income taxes while remaining subject to federal ordinary income tax under IRC Section 61.",
+                "For a corporate or high-income treasury depositor in a 13.3% top state tax bracket (California), a 4.50% U.S. Treasury bill yield divided by (1 - 0.133) delivers a verified 5.19% Tax-Equivalent Yield (69 basis points of state tax alpha).",
+            ]
+            matrix = [
+                {
+                    "profile": "High-Tax State Depositor ($1M Treasury Bill at 4.50%, 13.3% State Rate)",
+                    "statutory_threshold": "31 U.S.C. 3124(a) 100% State & Local Income Tax Exemption",
+                    "optimal_path": "Allocate Idle Cash to Direct U.S. T-Bills or 100% Treasury Sweep",
+                    "net_dollar_impact": "5.19% Tax-Equivalent Yield (+$5,985 Annual State Tax Alpha per $1M)",
+                    "next_action": "Compare U.S. Treasury TEY Against Taxable CD / Money Market",
+                },
+                {
+                    "profile": "New York / New Jersey Corporate Treasury (10.75% to 10.90% State Rate)",
+                    "statutory_threshold": "State Pass-Through & Individual Interest Tax Exemption (31 U.S.C. 3124)",
+                    "optimal_path": "Ladder 4-Week to 26-Week Treasury Bills Above 5.80% Equivalent Yield",
+                    "net_dollar_impact": "5.82% to 5.84% TEY on 5.20% Benchmark Treasury Ladder",
+                    "next_action": "Select State Marginal Rate in Treasury Yield Calculator",
+                },
+                {
+                    "profile": "Zero-Income-Tax State Resident (FL, TX, NV, WA, WY, TN, SD, AK)",
+                    "statutory_threshold": "0% State Income Tax Differential (Federal IRC Section 61 Only)",
+                    "optimal_path": "Compare Nominal After-Fee APY Across T-Bills and Institutional Sweep",
+                    "net_dollar_impact": "4.50% TEY Equals 4.50% Nominal Yield ($0 State Tax Differential)",
+                    "next_action": "Compare Net Federal After-Tax Cash Yield",
+                },
+            ]
+        elif any(k in low for k in ("prediction-market", "prediction market", "1256", "kalshi", "polymarket", "odds")):
+            assertions = [
+                f"In 2026, {heading_label} evaluates CFTC-regulated event contract returns, binary implied probabilities, and hybrid 60/40 capital gains taxation under IRC Section 1256(a) and IRC Section 1222.",
+                "Under IRC Section 1256(a) and IRS Form 6781, regulated futures and qualifying Designated Contract Market (DCM) contracts are marked to market at year-end with 60% taxed at the 20% maximum long-term capital gains rate and 40% at the 37% short-term rate (26.8% blended maximum).",
+                "On $50,000 of net prediction market profit for a top-bracket trader, IRC Section 1256 60/40 treatment ($13,400 tax at 26.8%) saves $5,100 compared to ordinary short-term capital gains treatment ($18,500 tax at 37%).",
+            ]
+            matrix = [
+                {
+                    "profile": "CFTC-Regulated DCM Event Contract Trader ($50,000 Net Annual Gain)",
+                    "statutory_threshold": "IRC Section 1256(a) 60% Long-Term / 40% Short-Term Split (Form 6781)",
+                    "optimal_path": "Report Qualifying Regulated Contracts on IRS Form 6781 Part I",
+                    "net_dollar_impact": "$13,400 Federal Tax (26.8% Blended Rate; $5,100 Saved vs 37% Ordinary)",
+                    "next_action": "Compare Section 1256 60/40 vs Ordinary Short-Term Tax",
+                },
+                {
+                    "profile": "Quantitative Event Trader Sizing Binary Contract ($0.54 Price, 62% Edge)",
+                    "statutory_threshold": "Implied Breakeven Probability = Contract Price + Exchange Fee",
+                    "optimal_path": "Half-Kelly Fractional Position Sizing ($0.8519 Net Multiplier per $1 Risked)",
+                    "net_dollar_impact": "Maximizes Expected Log-Wealth Growth While Capping Drawdown Risk",
+                    "next_action": "Calculate Exact Implied Probability, EV & Kelly Allocation",
+                },
+                {
+                    "profile": "Trader With Net Section 1256 Losses in Current Tax Year",
+                    "statutory_threshold": "IRC Section 1212(c) 3-Year Net Section 1256 Loss Carryback Election",
+                    "optimal_path": "Check Box D on IRS Form 6781 to Carry Back Losses Against Prior 1256 Gains",
+                    "net_dollar_impact": "Immediate Tax Refund From Prior 3 Years of Section 1256 Tax Paid",
+                    "next_action": "Evaluate Form 6781 3-Year Loss Carryback Eligibility",
+                },
+            ]
+        elif any(k in low for k in ("irs-interest", "6621", "6654", "estimated-tax", "underpayment", "penalty")):
+            assertions = [
+                f"In 2026, {heading_label} computes federal tax underpayment interest and quarterly safe-harbor thresholds under IRC Section 6621(a)(2), IRC Section 6622 daily compounding, and IRC Section 6654(d).",
+                "Under IRC Section 6621(a)(2) and 6621(c), standard individual and corporate underpayments accrue interest at the federal short-term rate plus 3 percentage points (8% annual rate compounded daily), while large corporate underpayments (> $100,000) accrue at +5 percentage points (10%).",
+                "On a $25,000 unpaid federal tax balance held for 365 days at the 8% IRC Section 6621 rate compounded daily under IRC Section 6622, accrued statutory interest equals $2,126 (8.504% effective annual yield).",
+            ]
+            matrix = [
+                {
+                    "profile": "Taxpayer With $25,000 Unpaid Balance Over 365 Calendar Days",
+                    "statutory_threshold": "IRC Section 6621(a)(2) 8% Rate Compounded Daily (IRC Section 6622)",
+                    "optimal_path": "Remit Designated Tax Principal Payment Immediately via EFTPS",
+                    "net_dollar_impact": "$2,126 Annualized Compounded Interest Avoided (Plus 0.5%/mo IRC 6651 Penalty)",
+                    "next_action": "Calculate Exact Daily Compounded IRS Interest Accrual",
+                },
+                {
+                    "profile": "High-Income Pass-Through Filer (Prior-Year AGI > $150,000)",
+                    "statutory_threshold": "IRC Section 6654(d)(1)(B) 110% Prior-Year Tax Safe Harbor",
+                    "optimal_path": "Pay 27.5% of Prior-Year Total Tax per Quarter or Elect Form 2210 Schedule AI",
+                    "net_dollar_impact": "Eliminates 100% of IRC Section 6654 Quarterly Underpayment Penalties",
+                    "next_action": "Compute Quarterly Estimated Safe-Harbor Vouchers",
+                },
+                {
+                    "profile": "First-Time Penalty Filers With Clean 3-Year Compliance History",
+                    "statutory_threshold": "IRS Internal Revenue Manual (IRM) 20.1.1.3.3.2.1 First Time Abate",
+                    "optimal_path": "Request Administrative First Time Abate on IRC 6651 Failure-to-Pay Penalty",
+                    "net_dollar_impact": "Abates Failure-to-Pay Penalty and Associated Penalty Interest",
+                    "next_action": "Verify 3-Year Clean Filing & Payment Eligibility",
+                },
+            ]
+        elif any(k in low for k in ("workers-comp", "payroll-burden", "invoice-factoring", "surety-bond", "llc")):
+            assertions = [
+                f"In 2026, {heading_label} quantifies statutory employer payroll taxes (IRC Sections 3111 and 3301), NCCI workers' compensation Experience Modification Rate (EMR) premiums, and commercial operating costs.",
+                "Under IRC Section 3111 and 3301, employers pay 6.2% OASDI (up to $176,100 per employee), 1.45% Medicare, and 0.6% net FUTA (after the 5.4% SUTA credit on the first $7,000), while NCCI workers' comp manual rates scale by the employer's EMR.",
+                "For a $1,250,000 covered payroll with a $7.00 per $100 NCCI manual rate, achieving a 0.85 safety EMR credit reduces annual workers' compensation premium from $87,500 to $74,375 ($13,125 saved; $115,375 total burden with $41,000 FICA/FUTA/SUTA).",
+            ]
+            matrix = [
+                {
+                    "profile": "Commercial Employer ($1.25M Covered Payroll, 0.85 NCCI EMR Credit)",
+                    "statutory_threshold": "NCCI Experience Rating Plan (0.85 EMR) + IRC 3111/3301 Payroll Taxes",
+                    "optimal_path": "Enforce Workplace Safety Return-to-Work Program + Audit NCCI Class Codes",
+                    "net_dollar_impact": "$115,375 Total Annual Burden ($74,375 Workers' Comp + $41,000 Payroll Tax; $13,125 EMR Savings)",
+                    "next_action": "Model NCCI Class Code Rate, EMR & Total Employer Burden",
+                },
+                {
+                    "profile": "B2B Contractor Comparing Invoice Factoring vs Bank Line of Credit",
+                    "statutory_threshold": "TILA Regulation Z Annualized APR & IRC Section 162/163 Deductibility",
+                    "optimal_path": "Transition From 2.5% 45-Day Factoring (20.28% APR) to 9.25% Bank LOC",
+                    "net_dollar_impact": "Reduces Annualized Working Capital Financing Cost by 1,103 Basis Points",
+                    "next_action": "Compare Effective APR of Factoring Fees vs Revolving Credit",
+                },
+                {
+                    "profile": "Federal/Public Works Contractor Sizing Miller Act Surety Bond",
+                    "statutory_threshold": "40 U.S.C. 3131 (Miller Act) 100% Performance & Payment Bond Requirement",
+                    "optimal_path": "Maintain CPA-Reviewed Working Capital >= 10% of Bonded Backlog",
+                    "net_dollar_impact": "Qualifies for Tier-1 Sliding Scale Surety Rate (0.75% to 1.20% of Contract)",
+                    "next_action": "Calculate Surety Bond Premium & Working Capital Capacity",
+                },
+            ]
+        else:
+            assertions = [
+                f"In 2026, {heading_label} computes exact after-tax cash flow, monthly net burn, and going-concern liquidity windows under GAAP ASC 205-40 and Internal Revenue Code Sections 162, 174, and 199A.",
+                "Under FASB ASC 205-40 (Presentation of Financial Statements: Going Concern), management must evaluate whether liquid cash reserves cover at least 12 months of projected net cash burn from the financial statement issuance date.",
+                "For an operating business holding $1,200,000 in liquid treasury reserves with $85,000 monthly gross burn and $20,000 monthly recurring revenue ($65,000 net burn), baseline cash runway equals 18.5 months.",
+            ]
+            matrix = [
+                {
+                    "profile": "High-Growth Operator ($1.2M Cash Reserves, $65k Net Monthly Burn)",
+                    "statutory_threshold": "GAAP ASC 205-40 12-Month Going-Concern Liquidity Floor",
+                    "optimal_path": "Maintain 18.5-Month Runway + Allocate Idle Cash to 4.50% U.S. T-Bills",
+                    "net_dollar_impact": "+6.5 Months Cushion Above ASC 205-40 Going-Concern Threshold",
+                    "next_action": "Load Cash Balance, MRR & Monthly Burn Into Calculator",
                 },
                 {
                     "profile": "Pass-Through Owner Optimizing Quarterly Estimated Taxes",
-                    "statutory_threshold": "110% Prior-Year Tax Safe Harbor (IRC Section 6654(d)(1)(C))",
+                    "statutory_threshold": "110% Prior-Year Tax Safe Harbor (IRC Section 6654(d)(1)(B))",
                     "optimal_path": "Annualized Income Installment Method (IRS Form 2210 Schedule AI)",
                     "net_dollar_impact": "$11,400 Underpayment Penalty & Working Capital Preserved",
                     "next_action": "Calculate Quarterly Safe-Harbor Voucher Schedule",
@@ -7056,6 +7679,35 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
     if str(overlay_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
         return rollback_degraded_overlay_from_html(html, overlay_data)
+
+    canon_m_early = re.search(
+        r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    ) or re.search(
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+        html,
+        re.IGNORECASE,
+    )
+    canon_url_early = canon_m_early.group(1).strip().lower() if canon_m_early else ""
+    ov_slug_early = str(overlay_data.get("slug") or "").strip("/").lower()
+    if (
+        canon_url_early.rstrip("/").endswith(("/tools", "/disclaimers", "/methodology", "/about", "/privacy", "/terms"))
+        or ov_slug_early in ("tools", "disclaimers", "methodology", "about", "privacy", "terms")
+    ):
+        html = re.sub(
+            r'<section\s+class=["\']overlay-section[^>]*>.*?</section>\s*',
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        html = re.sub(
+            r'<div\s+id=["\']gsc-striking-overlay["\'][^>]*>\s*</div>\s*',
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        return _strip_forbidden_dashes(html)
 
     # 1. Upgrade <title>
     raw_ov_ctx = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or "").lower()

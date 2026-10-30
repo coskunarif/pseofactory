@@ -103,7 +103,29 @@ BANNED_TAUTOLOGICAL_FORMULA_PATTERNS: Tuple[Tuple[str, str], ...] = (
         "48212.5",
         "Invalid 225% FPL poverty exemption '48212.50' (2026 HHS single exemption is 35212.50, 2-person is 47587.50)",
     ),
+    (
+        "registrar_stage1_stage2_fee",
+        "Stale ISO 27001 manifest formula using flat 'registrar_stage1_stage2_fee' instead of '(auditor_days * daily_rate)'",
+    ),
+    (
+        "2134831.0",
+        "Stale 2024 HIPAA annual penalty cap '2134831.0' (current 45 CFR 160.404 Tier 3/4 cap is 2067813.0)",
+    ),
 )
+
+
+GAINHELM_CANONICAL_BASELINE_OUTPUTS: Dict[str, float] = {
+    "soc-2-audit-cost-calculator": 78100.40,
+    "cmmc-2-0-compliance-cost-calculator": 132000.00,
+    "nist-800-171-sprs-score-calculator": 87.0,
+    "iso-27001-certification-cost-calculator": 67000.40,
+    "hipaa-violation-penalty-breach-cost-calculator": 2455313.00,
+    "pci-dss-4-0-compliance-cost-calculator": 94800.00,
+    "fedramp-authorization-3pao-cost-calculator": 500000.00,
+    "hitrust-csf-e1-i1-r2-certification-cost-calculator": 115000.00,
+    "penetration-testing-scoping-cost-calculator": 23300.00,
+    "cyber-liability-insurance-breach-exposure-calculator": 40900.00,
+}
 
 
 def detect_tautological_or_fabricated_manifest_issues(
@@ -170,7 +192,57 @@ def verify_manifest_ssr_metric_parity(
     if not metrics:
         return issues
 
-    slug_low = (slug or "").lower()
+    slug_low = (slug or "").strip("/").lower()
+    if "/" in slug_low:
+        slug_leaf = slug_low.split("/")[-1]
+    else:
+        slug_leaf = slug_low
+
+    var_base_m = re.search(
+        r'id=["\']variant-baseline["\'][^>]*>\s*([^<]+)<',
+        visible_html,
+        re.IGNORECASE,
+    )
+    if var_base_m:
+        vb_num = re.search(r"-?\d[\d,]*(?:\.\d+)?", var_base_m.group(1))
+        if vb_num:
+            try:
+                vb_val = float(vb_num.group(0).replace(",", ""))
+                if abs(float(published_output) - vb_val) > 0.05:
+                    issues.append(
+                        f"Gate 5 (SSR Metric Parity): Manifest/output-value ({published_output}) diverges from #variant-baseline ({vb_val})"
+                    )
+            except ValueError:
+                pass
+
+    if "metric-soc2_total_cost" in metrics:
+        geo_m = re.search(
+            r'class=["\'][^"\']*\bcalc-geo-answer-text\b[^"\']*["\'][^>]*>([\s\S]*?)</p>',
+            visible_html,
+            re.IGNORECASE,
+        )
+        if geo_m:
+            tot_m = re.search(
+                r"(?:\btotals\s+|\btotal\s+outlay\s+of\s+)\$(\d[\d,]*(?:\.\d+)?)",
+                geo_m.group(1),
+                re.IGNORECASE,
+            )
+            if tot_m:
+                try:
+                    geo_tot = float(tot_m.group(1).replace(",", ""))
+                    if abs(geo_tot - metrics["metric-soc2_total_cost"]) > 0.05:
+                        issues.append(
+                            f"Gate 5 (SSR Metric Parity): .calc-geo-answer-text total (${geo_tot:,.2f}) diverges from #metric-soc2_total_cost (${metrics['metric-soc2_total_cost']:,.2f})"
+                        )
+                except ValueError:
+                    pass
+        if slug_leaf in GAINHELM_CANONICAL_BASELINE_OUTPUTS:
+            gt_expected = GAINHELM_CANONICAL_BASELINE_OUTPUTS[slug_leaf]
+            if abs(float(published_output) - gt_expected) > 0.05:
+                issues.append(
+                    f"Gate 5 (SSR Metric Parity): GainHelm manifest/output-value ({published_output}) for '{slug_leaf}' diverges from compliance_formulas ground truth ({gt_expected})"
+                )
+
     # Plan-specific Prexvo and GainHelm SSR metric binding
     plan_metric_map = (
         (("icr-repayment", "parent-plus-repayment-strategy"), "metric-icr_payment"),
@@ -186,7 +258,7 @@ def verify_manifest_ssr_metric_parity(
     for keywords, target_metric in plan_metric_map:
         if any(k in slug_low for k in keywords) and target_metric in metrics:
             expected_val = metrics[target_metric]
-            plan_tol = 1.0 if abs(expected_val) >= 10000.0 else 0.02
+            plan_tol = 0.05 if "metric-soc2_total_cost" in metrics else (1.0 if abs(expected_val) >= 10000.0 else 0.02)
             if abs(float(published_output) - expected_val) > plan_tol:
                 issues.append(
                     f"Gate 5 (SSR Metric Parity): Manifest/output-value ({published_output}) diverges from rendered SSR calculator metric #{target_metric} ({expected_val})"

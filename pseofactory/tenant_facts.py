@@ -631,8 +631,10 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
             "cmmc_conditional_min_sprs": 88,
             "cmmc_poam_closeout_days": 180,
             "hipaa_tier1_min_per_violation": 141.0,
+            "hipaa_tier2_min_per_violation": 1424.0,
+            "hipaa_tier3_min_per_violation": 13795.0,
             "hipaa_tier4_min_per_violation": 71162.0,
-            "hipaa_statutory_annual_cap_tier4": 2134831.0,
+            "hipaa_statutory_annual_cap_tier4": 2067813.0,
             "hipaa_ocr_enforcement_discretion_tier1_cap": 25000.0,
             "hipaa_ocr_enforcement_discretion_tier2_cap": 100000.0,
             "hipaa_ocr_enforcement_discretion_tier3_cap": 250000.0,
@@ -651,9 +653,19 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
             "eu_ai_act_high_risk_fine_cap_eur": 15000000.0,
             "eu_ai_act_high_risk_turnover_pct": 0.03,
             "sec_form_8k_item_1_05_disclosure_business_days": 4,
-            "soc2_baseline_type2_75emp_total_cost": 48500.0,
-            "cmmc_level2_baseline_85emp_total_cost": 94200.0,
-            "iso27001_baseline_120emp_3yr_tco": 68400.0,
+            "bls_soc_15_1212_median_annual_wage": 120360.0,
+            "bls_soc_15_1212_mean_hourly_loaded_rate": 121.67,
+            "soc2_baseline_type2_75emp_total_cost": 78100.40,
+            "cmmc_level2_baseline_75emp_total_cost": 132000.0,
+            "cmmc_level2_baseline_85emp_total_cost": 132000.0,
+            "iso27001_baseline_75emp_total_cost": 67000.40,
+            "iso27001_baseline_120emp_3yr_tco": 67000.40,
+            "hipaa_baseline_1500rec_total_exposure": 2455313.0,
+            "pci_dss_baseline_level1_total_cost": 94800.0,
+            "fedramp_moderate_baseline_total_cost": 500000.0,
+            "hitrust_i1_baseline_total_cost": 115000.0,
+            "pentest_baseline_total_cost": 23300.0,
+            "cyber_insurance_baseline_total_cost": 40900.0,
         },
     )
 
@@ -2225,6 +2237,37 @@ class TenantFactStore:
                     "Inexact Section 301 tariff landed cost figure '$161,000' detected: ground-truth landed cost at $120,000 FOB + $34,200 duty + $6,000 freight + $528.40 MPF + $237.50 HMF is $160,966"
                 )
 
+            # Zero-income-tax state year-label contradiction ($10,539 post-sunset 2027 tax labeled as 2026 federal tax)
+            if "$10,539 in 2026 federal tax" in text_lower:
+                violations.append(
+                    "Zero-income-tax state year-label contradiction: '$10,539 in 2026 federal tax' mislabels the 2027 post-sunset federal tax ($10,539 at $13,600 deduction and 10%/15%/25% brackets) as 2026 federal tax ($7,961.50 under 2026 TCJA)"
+                )
+
+            # Equipment Lease vs Section 179 capital expensing misattribution
+            ctx_low_ph = f"{context or ''} {text_lower[:1200]}".lower()
+            if "equipment-lease-tax-deduction" in ctx_low_ph and (
+                "up to $2,560,000 in qualifying commercial equipment placed in service during the 2026 tax year" in text_lower
+                or "standard capex allocation ($850k qualifying equipment)" in text_lower
+                or "calculates first-year equipment expensing" in text_lower
+            ):
+                violations.append(
+                    "Statutory authority misattribution on equipment-lease-tax-deduction: IRC Section 179 capital expensing assertions injected onto IRC Section 162(a)(3) / ASC 842 operating lease page"
+                )
+
+            # SaaS Runway catch-all pollution on non-runway ProfitHelm pages
+            if (
+                "12 to 18 months of net cash runway" in text_lower
+                or "high-growth operator ($1.5m arr, 14-month runway)" in text_lower
+            ):
+                is_runway_ctx = any(
+                    k in ctx_low_ph
+                    for k in ("saas-runway", "burn-rate", "cash-runway", "going-concern", "verify_claim(profithelm)")
+                ) or (not context and "<html" not in text_lower)
+                if not is_runway_ctx:
+                    violations.append(
+                        "Statutory overlay misattribution: SaaS Runway (GAAP ASC 205-40) citation assertions and decision matrix injected onto non-runway page"
+                    )
+
         elif tenant_norm == "prexvo":
             # PSLF qualifying payments: strictly 120 payments
             if "pslf" in text_lower or "public service" in text_lower:
@@ -2319,6 +2362,19 @@ class TenantFactStore:
                 violations.append(
                     "Prexvo non-tool institutional page contains calculator template meta/prose ('Calculate ... under Title IV')"
                 )
+            ctx_low_px = (context or "").lower()
+            if (
+                ctx_low_px in ("tools/index.html", "disclaimers/index.html", "methodology/index.html")
+                or 'rel="canonical" href="https://prexvo.com/tools/"' in text_lower
+                or 'rel="canonical" href="https://prexvo.com/disclaimers/"' in text_lower
+                or 'rel="canonical" href="https://prexvo.com/methodology/"' in text_lower
+            ) and (
+                'id="gsc-striking-overlay"' in text_lower
+                or "student loan deferment calculator determines monthly obligations" in text_lower
+            ):
+                violations.append(
+                    "Prexvo institutional/directory page overlay pollution: calculator striking-distance overlay injected onto non-calculator directory or institutional route"
+                )
         elif tenant_norm == "gainhelm":
             # Unverified $29 offer fallback in JS or JSON-LD
             if "offer_price_usd || 29" in text or '"price":"29"' in text or '"price": "29"' in text:
@@ -2348,6 +2404,92 @@ class TenantFactStore:
                             )
                     except ValueError:
                         pass
+            # BLS SOC 15-1212 wage rate contradiction ($95/hr or $61.40/hr vs signed $121.67/hr loaded rate)
+            if (
+                "$95/hr" in text_lower
+                or "$61.40/hr" in text_lower
+                or "$61.40 per hour" in text_lower
+                or "($61.40/hr)" in text_lower
+            ):
+                violations.append(
+                    "BLS SOC 15-1212 wage benchmark contradiction: '$95/hr' or '$61.40/hr' contradicts cryptographically signed BLS OEWS dataset ($121.67/hr mean loaded hourly rate; $120,360 median annual wage)"
+                )
+            # ISO/IEC 27006-1:2024 auditor-day contradiction for 75-employee baseline (9.0 days / $16,200 vs signed 11.0 days / $21,450)
+            if (
+                "75-employee organization requires 9.0" in text_lower
+                or "certification body fee ($16,200)" in text_lower
+                or "combining $16,200.00 in registrar fees" in text_lower
+                or "<td>46 to 85 employees</td>\n              <td>9.0 auditor days</td>" in text_lower
+            ):
+                violations.append(
+                    "ISO/IEC 27006-1:2024 auditor-day contradiction: 75-employee baseline requires 11.0 Stage 1+2 auditor days ($21,450.00 registrar fee, $67,000.40 total cost) per signed AICPA/ISO dataset, not 9.0 auditor days ($16,200)"
+                )
+            # HIPAA 45 CFR 160.404 penalty cap & baseline exposure contradictions
+            if (
+                "$2,134,831" in text
+                or "2134831" in text
+                or "$622,500" in text
+                or '"published_output": 622500' in text
+                or '<td class="td-plan-name">hipaa hitech tier 2 breach</td>' in text_lower
+            ):
+                violations.append(
+                    "HIPAA 45 CFR 160.404 statutory contradiction: contradicts signed HHS OCR dataset ($2,067,813.00 annual cap, $2,455,313.00 Tier 3 baseline exposure for 1,500 ePHI records)"
+                )
+            # SOC 2 / CMMC / PCI DSS / Cyber Insurance component & sum contradictions
+            if (
+                "cpa audit fee ($28,500)" in text_lower
+                or "includes $28,500.00 in cpa attestation fees" in text_lower
+                or ("$14,600.40" in text and "totals $78,100.00" in text_lower)
+                or '"published_output": 78100.0' in text
+            ):
+                violations.append(
+                    "SOC 2 AICPA SSAE 18 component/sum contradiction: baseline 75-employee 3-TSC Type II cost is $78,100.40 ($37,000.00 CPA + $15,000.00 GRC + $11,500.00 pentest + $14,600.40 labor)"
+                )
+            if (
+                "c3pao fee ($47,000)" in text_lower
+                or "$47,000.00 in accredited c3pao assessment fees" in text_lower
+                or "($52,000 c3pao assessment" in text_lower
+            ):
+                violations.append(
+                    "CMMC 2.0 Level 2 component contradiction: baseline is $48,500.00 C3PAO + $26,400.00 enclave + $43,700.00 remediation labor + $13,400.00 RPO = $132,000.00"
+                )
+            if (
+                '"published_output": 38900' in text
+                or "reduces its $5m policy limit premium by 28 percent to $38,900.00" in text_lower
+            ):
+                violations.append(
+                    "Cyber Liability Insurance baseline contradiction: ground-truth formula output is $40,900.00 ($20,415.00 annual premium + $20,485.00 self-insured retention), not $38,900.00"
+                )
+            if (
+                "quarterly asv scans ($4,800)" in text_lower
+                or "$4,800.00 in quarterly asv scans" in text_lower
+                or "$94,799.80" in text
+            ):
+                violations.append(
+                    "PCI DSS v4.0.1 component contradiction: ground-truth formula uses $3,800.00 ASV + $13,200.00 CDE systems + $12,500.00 pentest + $23,300.00 remediation labor ($94,800.00 total), not $4,800.00 ASV or $94,799.80"
+                )
+            # GainHelm generic SOC 2 / CMMC / ISO 27006 overlay misattribution on specialized tools
+            ctx_low_gh = f"{context or ''} {text_lower[:1200]}".lower()
+            is_non_soc2_gh_tool = any(
+                k in ctx_low_gh
+                for k in (
+                    "hipaa-violation",
+                    "pci-dss",
+                    "fedramp-authorization",
+                    "hitrust-csf",
+                    "penetration-testing",
+                    "cyber-liability",
+                    "iso-27001",
+                    "nist-800-171-sprs",
+                )
+            )
+            if is_non_soc2_gh_tool and (
+                "determines enterprise compliance expenditures under aicpa ssae 18 (at-c section 205), dod 32 cfr part 170 (cmmc 2.0), and iso/iec 27006-1:2024 auditor-day tables" in text_lower
+                or "first-year soc 2 type ii or iso 27001 compliance under aicpa ssae 18 and iso/iec 27006-1:2024 combines accredited cpa/registrar fees ($25,000 to $65,000)" in text_lower
+            ):
+                violations.append(
+                    "GainHelm statutory authority misattribution: generic SOC 2 / CMMC / ISO 27006 template copy injected onto specialized compliance tool"
+                )
 
         is_valid = len(violations) == 0
         return is_valid, violations
@@ -2546,6 +2688,15 @@ class TruthReconciliationEngine:
             "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
             "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
         ),
+        # Zero-income-tax state spoke quick-answer 2027 post-sunset federal tax label reconciliation
+        (
+            "owes $10,539 in 2026 federal tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
+            "owes $10,539 in 2027 post-sunset federal tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j) sunset rules, only federal brackets (10% to 39.6%) and standard deductions apply.",
+        ),
+        (
+            "or default to First-In, First-Out (FIFO) on Form 8949.",
+            "or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
+        ),
     )
 
     PREXVO_IBR_PAYE_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
@@ -2709,6 +2860,41 @@ class TruthReconciliationEngine:
         ("$29/mo", "$49/mo"),
         ("$29/month", "$49/month"),
         ("SPRS score of 115", "SPRS score of 110"),
+        ("($95/hr)", "($121.67/hr)"),
+        ("($61.40/hr)", "($121.67/hr)"),
+        ("$61.40 per hour base wage", "$121.67 per hour loaded wage"),
+        (
+            "$14,600.40 in internal security engineering labor (120 hours at $121.67/hr), total first-year compliance investment totals $78,100.00",
+            "$14,600.40 in internal security engineering labor (120 hours at $121.67/hr), total first-year compliance investment totals $78,100.40",
+        ),
+        (
+            "a 75-employee enterprise incurs a baseline SOC 2 Type II total outlay of $78,100.00",
+            "a 75-employee enterprise incurs a baseline SOC 2 Type II total outlay of $78,100.40",
+        ),
+        ("<strong>$78,100 SOC 2 TCO</strong>", "<strong>$78,100.40 SOC 2 TCO</strong>"),
+        ("$78,100 Automated GRC SOC 2 Type II", "$78,100.40 Automated GRC SOC 2 Type II"),
+        ("<strong>$78,100 Verified SOC 2 Baseline</strong>", "<strong>$78,100.40 Verified SOC 2 Baseline</strong>"),
+        ("$78,100 Net Type II Audit TCO", "$78,100.40 Net Type II Audit TCO"),
+        (
+            '<td id="comp-live-tax" class="calc-metric-value"><strong>$78,100</strong></td>',
+            '<td id="comp-live-tax" class="calc-metric-value"><strong>$78,100.40</strong></td>',
+        ),
+        (
+            '<td class="td-plan-name">HIPAA HITECH Tier 2 Breach</td>',
+            '<td class="td-plan-name">HIPAA HITECH Tier 3 Breach</td>',
+        ),
+        ("$2,134,831", "$2,067,813"),
+        ("2134831", "2067813"),
+        ("$94,799.80", "$94,800.00"),
+        ("94799.80", "94800.00"),
+        ("$23,500.00 in remediation", "$23,300.00 in remediation"),
+        ("$23,500.00 CDE remediation labor", "$23,300.00 CDE remediation labor"),
+        ("$95.00/hr", "$121.67/hr"),
+        ("$622,500 Breach", "$2,455,313 Breach"),
+        ("$622,500 HHS OCR Tier 2 Breach Exposure", "$2,455,313 HHS OCR Tier 3 Breach Exposure"),
+        ("$622,500 HIPAA Breach", "$2,455,313 HIPAA Breach"),
+        ("$622,500 Unshielded Breach Liability", "$2,455,313 Unshielded Breach Liability"),
+        ("$622,500 / $115,000", "$2,455,313 / $115,000"),
     )
 
     @classmethod
@@ -2940,6 +3126,10 @@ class TruthReconciliationEngine:
                 ("saves $13,180 in FICA taxes.", "saves $13,193 in FICA taxes."),
                 ("$34,425 Unstructured Pass-Through SE Tax", "$32,549 Unstructured Pass-Through SE Tax"),
                 ("+$12,240 Medicare Surtax & FICA Shield", "+$10,364 Medicare Surtax & FICA Shield"),
+                (
+                    "or default to First-In, First-Out (FIFO) on Form 8949.",
+                    "or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
+                ),
             ):
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)

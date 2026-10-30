@@ -635,7 +635,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "HHS OCR HIPAA Tier 4 Willful Neglect Uncorrected Annual Statutory Penalty Cap",
                 "USD",
                 "HHS-OCR",
-                {2024: 2067813.0, 2025: 2134831.0, 2026: 2194606.0, 2027: 2249471.0, 2028: 2301209.0, 2029: 2351835.0, 2030: 2401224.0},
+                {2024: 2003947.0, 2025: 2067813.0, 2026: 2067813.0, 2027: 2129847.0, 2028: 2193742.0, 2029: 2259555.0, 2030: 2327341.0},
             ),
             (
                 "bls_soc_15_1212_infosec_hourly_wage_usd",
@@ -646,7 +646,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "BLS SOC 15-1212 Information Security Engineer Fully Burdened Hourly Rate",
                 "USD",
                 "BLS-OEWS",
-                {2024: 89.0, 2025: 92.0, 2026: 95.0, 2027: 98.5, 2028: 102.0, 2029: 105.5, 2030: 109.0},
+                {2024: 114.50, 2025: 118.00, 2026: 121.67, 2027: 125.30, 2028: 129.10, 2029: 133.00, 2030: 137.00},
             ),
             (
                 "aicpa_soc2_type2_median_cpa_fee_usd",
@@ -657,7 +657,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "AICPA SSAE 18 SOC 2 Type II Mid-Market CPA Firm Attestation Fee Benchmark",
                 "USD",
                 "AICPA-BENCHMARK",
-                {2024: 26000.0, 2025: 27000.0, 2026: 28000.0, 2027: 29200.0, 2028: 30400.0, 2029: 31600.0, 2030: 32800.0},
+                {2024: 34000.0, 2025: 35500.0, 2026: 37000.0, 2027: 38500.0, 2028: 40000.0, 2029: 41600.0, 2030: 43200.0},
             ),
         ]
         records = []

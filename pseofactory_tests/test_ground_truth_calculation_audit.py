@@ -456,4 +456,136 @@ def test_closed_loop_empirical_substrate_three_tenant_parity() -> None:
     assert len({c_soc2["base_a"], c_cmmc["base_a"], c_fedramp["base_a"], c_hipaa["base_a"]}) == 4
 
 
+def test_gainhelm_fallback_manifests_match_ground_truth_compliance_formulas() -> None:
+    """Every GainHelm fallback manifest must match compliance_formulas.py ground truth without tautologies."""
+    expected_outputs = {
+        "soc-2-audit-cost-calculator": 78100.40,
+        "cmmc-2-0-compliance-cost-calculator": 132000.00,
+        "nist-800-171-sprs-score-calculator": 87.00,
+        "iso-27001-certification-cost-calculator": 67000.40,
+        "hipaa-violation-penalty-breach-cost-calculator": 2455313.00,
+        "pci-dss-4-0-compliance-cost-calculator": 94800.00,
+        "fedramp-authorization-3pao-cost-calculator": 500000.00,
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": 115000.00,
+        "penetration-testing-scoping-cost-calculator": 23300.00,
+        "cyber-liability-insurance-breach-exposure-calculator": 40900.00,
+    }
+    manifests = RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS
+    assert set(manifests.keys()) == set(expected_outputs.keys())
+
+    for slug, expected in expected_outputs.items():
+        spec = manifests[slug]
+        formula = str(spec["formula"])
+        for banned in BANNED_TAUTOLOGICAL_SUBSTRINGS:
+            assert banned not in formula, f"Banned formula pattern {banned!r} in GainHelm manifest {slug}"
+        calc_val = safe_eval_mathematical_formula(formula, spec["inputs"])
+        assert abs(calc_val - expected) <= 0.01, f"GainHelm {slug} formula eval {calc_val} != {expected}"
+        assert abs(float(spec["published_output"]) - expected) <= 0.01, (
+            f"GainHelm {slug} published_output {spec['published_output']} != {expected}"
+        )
+
+
+def test_adversarial_seeded_false_claims_caught_and_rejected_across_all_three_tenants() -> None:
+    """
+    Adversarial verification gate test across ProfitHelm, Prexvo, and GainHelm:
+    Seeds false statutory claims, wrong year labels, cross-tool overlay misattributions,
+    and prose-vs-SSR math contradictions, proving they are deterministically caught and rejected.
+    """
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+
+    store = TenantFactStore.get_instance()
+    engine = LiveTruthAuditEngine()
+
+    # 1. ProfitHelm: zero-income-tax state spoke claiming 2027 post-sunset figure is "2026 federal tax"
+    ph_zero_tax_ok, ph_zero_tax_violations = store.verify_claim(
+        "profithelm",
+        "Under IRC Section 1(j), a $150,000 Alaska household with 0% state income tax leaves $10,539 in 2026 federal tax (a 7.03% effective rate).",
+        context="tools/irs-2027-tax-brackets/alaska/index.html",
+    )
+    assert not ph_zero_tax_ok
+    assert any("2027 post-sunset" in v for v in ph_zero_tax_violations)
+
+    # 2. ProfitHelm: equipment lease page falsely claiming operating lease payments are Section 179 capital expensing
+    ph_lease_ok, ph_lease_violations = store.verify_claim(
+        "profithelm",
+        "Under IRC Section 179($2,560,000 cap) and Section 168(k) (20% bonus depreciation), this model calculates first-year equipment expensing.",
+        context="tools/equipment-lease-tax-deduction/index.html",
+    )
+    assert not ph_lease_ok
+    assert any("IRC Section 162(a)(3)" in v for v in ph_lease_violations)
+
+    # 3. ProfitHelm: SaaS Runway catch-all overlay injected onto a non-runway calculator page
+    ph_runway_pollution = TruthReconciliationEngine.audit_html_truth_reconciliation(
+        """
+        <html><body>
+        <h1>Commercial Heavy Vehicle Section 179 Weight Calculator</h1>
+        <section class="overlay-section" id="gsc-striking-overlay">
+          <p>Benchmarks monthly net burn against institutional venture thresholds requiring 12 to 18 months of net cash runway.</p>
+          <td>High-Growth Operator ($1.5M ARR, 14-Month Runway)</td>
+        </section>
+        </body></html>
+        """,
+        tenant="profithelm",
+        rel_path="tools/commercial-heavy-vehicle-section-179-weight-calculator/index.html",
+        slug="commercial-heavy-vehicle-section-179-weight-calculator",
+        include_fact_store=True,
+    )
+    assert any("SaaS Runway" in v for v in ph_runway_pollution)
+
+    # 4. Prexvo: calculator striking-distance overlay injected onto non-tool /disclaimers/ page
+    px_non_tool_overlay = TruthReconciliationEngine.audit_html_truth_reconciliation(
+        """
+        <html><body>
+        <h1>Legal Disclaimers &amp; Statutory Notice</h1>
+        <section class="overlay-section" id="gsc-striking-overlay" data-overlay-slug="disclaimers">
+          <h2>2026 Statutory Verification &amp; Autonomous Citation Assertions: Disclaimers</h2>
+        </section>
+        </body></html>
+        """,
+        tenant="prexvo",
+        rel_path="disclaimers/index.html",
+        slug="disclaimers",
+        include_fact_store=True,
+    )
+    assert any("Non-calculator route" in v or "overlay" in v.lower() for v in px_non_tool_overlay)
+
+    # 5. GainHelm: seeded stale HIPAA cap ($2,134,831), stale ISO auditor days (9.0 / $16,200), and stale BLS wage ($95/hr)
+    gh_hipaa_ok, gh_hipaa_violations = store.verify_claim(
+        "gainhelm",
+        "Under 45 CFR 160.404, HHS OCR Tier 4 penalties reach an annual cap of $2,134,831 per identical provision.",
+        context="tools/hipaa-violation-penalty-breach-cost-calculator/index.html",
+    )
+    assert not gh_hipaa_ok
+    assert any("2,067,813" in v for v in gh_hipaa_violations)
+
+    gh_iso_ok, gh_iso_violations = store.verify_claim(
+        "gainhelm",
+        "For a 75-employee organization requiring 9.0 accredited Stage 1 and Stage 2 auditor days, Certification Body fee ($16,200) yields $67,000.00.",
+        context="tools/iso-27001-certification-cost-calculator/index.html",
+    )
+    assert not gh_iso_ok
+    assert any("11.0" in v for v in gh_iso_violations)
+
+    gh_wage_ok, gh_wage_violations = store.verify_claim(
+        "gainhelm",
+        "Internal security engineering labor is valued at the BLS SOC 15-1212 rate ($95/hr).",
+        context="tools/soc-2-audit-cost-calculator/index.html",
+    )
+    assert not gh_wage_ok
+    assert any("121.67/hr" in v for v in gh_wage_violations)
+
+    # 6. GainHelm: seeded .calc-geo-answer-text ($78,100.00) diverging from SSR #metric-soc2_total_cost ($78,100.40)
+    soc2_spec = {"slug": "soc-2-audit-cost-calculator", **RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]}
+    bad_soc2_html, _ = _wrap_valid_page(
+        soc2_spec,
+        """
+        <div id="metric-soc2_total_cost">$78,100.40</div>
+        <p class="calc-geo-answer-text">Combining $37,000.00 CPA fees, $15,000.00 GRC, $11,500.00 pentest, and $14,600.40 labor, total outlay totals $78,100.00.</p>
+        """,
+    )
+    soc2_violations = engine.audit_html(bad_soc2_html, "gainhelm", "tools/soc-2-audit-cost-calculator/index.html")
+    assert any("78,100.00" in v or "calc-geo-answer-text" in v for v in soc2_violations)
+
+
+
 

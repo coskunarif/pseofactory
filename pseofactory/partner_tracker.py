@@ -5080,7 +5080,7 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
         "metric_label": "HHS OCR Tier 4 Willful Neglect Annual Statutory Penalty Cap",
         "unit": "USD",
         "source_agency": "HHS-OCR",
-        "points": {"2024": 2067813.0, "2025": 2134831.0, "2026": 2198876.0, "2027": 2253848.0, "2028": 2310194.0, "2029": 2367949.0, "2030": 2427148.0},
+        "points": {"2024": 2003947.0, "2025": 2067813.0, "2026": 2067813.0, "2027": 2129847.0, "2028": 2193742.0, "2029": 2259555.0, "2030": 2327341.0},
     },
     {
         "series_id": "iso_27006_stage2_auditor_days",

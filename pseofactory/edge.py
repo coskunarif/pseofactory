@@ -2990,11 +2990,11 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     {
       metric_name: "HHS OCR HIPAA 45 CFR 160.404 Tier 3/4 Annual Penalty Cap (Inflation Adjusted)",
       authority_source: "45 CFR Part 102 Civil Monetary Penalty Inflation Adjustment",
-      y2024: "$2,067,813",
-      y2025: "$2,134,831",
-      y2026: "$2,198,876",
-      y2028_proj: "$2,332,780",
-      y2030_proj: "$2,474,845",
+      y2024: "$2,003,947",
+      y2025: "$2,067,813",
+      y2026: "$2,067,813",
+      y2028_proj: "$2,193,742",
+      y2030_proj: "$2,327,341",
     },
   ];
   const fulfillQs = new URLSearchParams({
