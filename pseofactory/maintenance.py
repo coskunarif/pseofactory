@@ -8224,6 +8224,13 @@ class RetroReflectionEngine:
                                     or not curr_m.get("proprietary_telemetry")
                                     or '"year":' in json.dumps(curr_m.get("statutory_economic_matrix"))
                                     or curr_m.get("statutory_economic_matrix") != expected_m.get("statutory_economic_matrix")
+                                    or (
+                                        expected_m.get("proprietary_telemetry", {})
+                                        .get("demand_telemetry", {})
+                                        .get("source")
+                                        == "pseofactory/trends/data/trend_history.db"
+                                        and curr_m.get("proprietary_telemetry") != expected_m.get("proprietary_telemetry")
+                                    )
                                 )
                             )
                         ):

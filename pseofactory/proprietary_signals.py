@@ -189,7 +189,11 @@ def _load_trend_db_cache() -> Dict[str, Any]:
     if _TREND_DB_CACHE is not None:
         return _TREND_DB_CACHE
 
-    db_path = Path(__file__).resolve().parent / "trends" / "data" / "trend_history.db"
+    candidate_db_paths = [
+        Path(__file__).resolve().parent / "trends" / "data" / "trend_history.db",
+        Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db"),
+    ]
+    db_path = next((p for p in candidate_db_paths if p.is_file()), candidate_db_paths[0])
     series_by_id: Dict[str, Dict[str, Any]] = {}
     keywords_by_prop: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -232,20 +236,40 @@ def _load_trend_db_cache() -> Dict[str, Any]:
             kw_rows = cur.execute(
                 """
                 SELECT kh.query_slug, kh.query, kh.current_property_id,
-                       kh.consecutive_cycles_count, kh.latest_velocity,
-                       kh.acceleration_2nd_deriv,
-                       tm.search_volume, tm.cpc_usd, tm.keyword_difficulty,
-                       tm.historical_stability,
-                       je.jev_score, je.composite_profit_yield
+                       MAX(kh.consecutive_cycles_count) AS consecutive_cycles_count,
+                       MAX(kh.latest_velocity) AS latest_velocity,
+                       MAX(kh.acceleration_2nd_deriv) AS acceleration_2nd_deriv,
+                       MAX(tm.search_volume) AS search_volume,
+                       MAX(tm.cpc_usd) AS cpc_usd,
+                       MAX(tm.keyword_difficulty) AS keyword_difficulty,
+                       MAX(tm.historical_stability) AS historical_stability,
+                       MAX(je.jev_score) AS jev_score,
+                       MAX(je.composite_profit_yield) AS composite_profit_yield
                 FROM keyword_history kh
                 LEFT JOIN treg_metric_snapshots tm ON kh.query_slug = tm.query_slug
                 LEFT JOIN jev_evaluations je ON kh.query_slug = je.query_slug
+                WHERE tm.search_volume > 0 AND je.jev_score > 0
                 GROUP BY kh.query_slug
-                ORDER BY je.composite_profit_yield DESC, kh.latest_velocity DESC
+                ORDER BY composite_profit_yield DESC, jev_score DESC, latest_velocity DESC
                 """
             ).fetchall()
             for kr in kw_rows:
-                prop = str(kr["current_property_id"] or "profithelm").lower()
+                qs_low = str(kr["query_slug"]).lower()
+                cp_low = str(kr["current_property_id"] or "").lower()
+                if cp_low in ("profithelm", "prexvo", "gainhelm"):
+                    prop = cp_low
+                elif any(
+                    k in qs_low
+                    for k in ("student-loan", "pslf", "ibr", "paye", "rap-", "icr-", "parent-plus", "grad-plus", "save-plan")
+                ):
+                    prop = "prexvo"
+                elif any(
+                    k in qs_low
+                    for k in ("soc-2", "cmmc", "sprs", "iso-27001", "hipaa", "pci-dss", "fedramp", "hitrust", "pentest", "cyber")
+                ):
+                    prop = "gainhelm"
+                else:
+                    prop = "profithelm"
                 keywords_by_prop.setdefault(prop, []).append(
                     {
                         "query_slug": str(kr["query_slug"]),
@@ -307,7 +331,11 @@ def _load_scenario_attribution_cache() -> Dict[str, Any]:
     if _SCENARIO_ATTRIBUTION_CACHE is not None:
         return _SCENARIO_ATTRIBUTION_CACHE
 
-    sda_path = Path(__file__).resolve().parent.parent / ".agy" / "scenario_demand_attribution.json"
+    candidate_sda_paths = [
+        Path(__file__).resolve().parent.parent / ".agy" / "scenario_demand_attribution.json",
+        Path("/home/ubuntuadmin/projects/pseofactory/.agy/scenario_demand_attribution.json"),
+    ]
+    sda_path = next((p for p in candidate_sda_paths if p.is_file()), candidate_sda_paths[0])
     by_slug: Dict[str, List[Dict[str, Any]]] = {}
     by_tenant: Dict[str, List[Dict[str, Any]]] = {}
     if sda_path.is_file():
@@ -387,13 +415,19 @@ def resolve_proprietary_signal_bundle(
     ordered_series = [item[2] for item in matched_series]
 
     kw_list = db_cache["keywords_by_prop"].get(prop, [])
+    stop_tokens = {"calculator", "tax", "2026", "2027", "and", "vs", "by", "for", "of", "the", "in", "to"}
+    meaningful_q = q_tokens - stop_tokens
     best_kw: Optional[Dict[str, Any]] = None
-    best_kw_score = -1
+    best_kw_score = -1.0
     for kw in kw_list:
-        kw_tokens = set(re.findall(r"[a-z0-9]+", kw["query_slug"].lower()))
-        overlap = len(q_tokens & kw_tokens)
-        if overlap > best_kw_score:
-            best_kw_score = overlap
+        ks = kw["query_slug"].lower()
+        kw_tokens = set(re.findall(r"[a-z0-9]+", ks))
+        exact_bonus = 100.0 if ks in (s_clean, base_slug) else 0.0
+        core_overlap = len(meaningful_q & (kw_tokens - stop_tokens)) * 5.0
+        full_overlap = float(len(q_tokens & kw_tokens))
+        score_kw = exact_bonus + core_overlap + full_overlap + (float(kw.get("composite_profit_yield") or 0.0) / 1000.0)
+        if score_kw > best_kw_score:
+            best_kw_score = score_kw
             best_kw = kw
     if best_kw is None and kw_list:
         best_kw = kw_list[0]
