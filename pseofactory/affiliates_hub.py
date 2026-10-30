@@ -887,7 +887,12 @@ class MonetizationHub:
                     f"Strict isolation violation: Sub-affiliate fallback is prohibited on Prexvo. "
                     f"{PREXVO_STANDING_RESTRICTION}"
                 )
-            if key_clean in B2B_PARTNER_KEYS or key_clean in PROFITHELM_AFFILIATES:
+            if (
+                key_clean in B2B_PARTNER_KEYS
+                or key_clean in PROFITHELM_AFFILIATES
+                or key_clean in GAINHELM_PARTNER_KEYS
+                or key_clean in GAINHELM_AFFILIATES
+            ):
                 raise ValueError(
                     f"Strict isolation violation: B2B partner '{key_clean}' is prohibited on Prexvo."
                 )
@@ -899,7 +904,16 @@ class MonetizationHub:
                 )
                 partner_obj = PREXVO_AFFILIATES.get(route["partner"])
             else:
-                for b2b_token in ("saas-runway", "section-179", "section-1031", "qsbs-section-1202"):
+                for b2b_token in (
+                    "saas-runway",
+                    "section-179",
+                    "section-1031",
+                    "qsbs-section-1202",
+                    "soc-2-audit",
+                    "cmmc-2-0",
+                    "nist-800-171-sprs",
+                    "hipaa-violation-penalty",
+                ):
                     if b2b_token in slug_clean:
                         raise ValueError(
                             f"Strict isolation violation: Commercial tool '{slug_clean}' is prohibited on Prexvo."
@@ -959,6 +973,19 @@ class MonetizationHub:
                 raise ValueError(
                     f"Strict isolation violation: Foreign tenant partner '{key_clean}' is prohibited on GainHelm."
                 )
+            for foreign_tok in (
+                "student-loan",
+                "rap-vs-ibr",
+                "pslf",
+                "section-179",
+                "section-1031",
+                "qsbs-section-1202",
+                "saas-runway",
+            ):
+                if foreign_tok in slug_clean:
+                    raise ValueError(
+                        f"Strict isolation violation: Foreign tenant tool '{slug_clean}' is prohibited on GainHelm."
+                    )
             route = get_affiliate_route(
                 "gainhelm",
                 tool_slug=slug_clean,
@@ -1000,12 +1027,30 @@ class MonetizationHub:
             raise ValueError(
                 f"Strict isolation violation: Student loan partner '{key_clean}' is prohibited on ProfitHelm."
             )
+        if key_clean in GAINHELM_PARTNER_KEYS or key_clean in GAINHELM_AFFILIATES:
+            raise ValueError(
+                f"Strict isolation violation: GainHelm cyber compliance partner '{key_clean}' is prohibited on ProfitHelm."
+            )
 
-        # Check for explicit student loan slug on ProfitHelm
+        # Check for explicit student loan or GainHelm cyber compliance slug on ProfitHelm
         for sl_token in ("student-loan", "rap-vs-ibr", "pslf"):
             if sl_token in slug_clean:
                 raise ValueError(
                     f"Strict isolation violation: Student loan tool '{slug_clean}' is prohibited on ProfitHelm."
+                )
+        for gh_token in (
+            "soc-2-audit-cost",
+            "cmmc-2-0-compliance",
+            "nist-800-171-sprs",
+            "iso-27001-certification",
+            "hipaa-violation-penalty",
+            "pci-dss-4-0",
+            "fedramp-authorization",
+            "hitrust-csf",
+        ):
+            if gh_token in slug_clean:
+                raise ValueError(
+                    f"Strict isolation violation: GainHelm cyber compliance tool '{slug_clean}' is prohibited on ProfitHelm."
                 )
 
         # Explicit fallback request or unmapped / long-tail tool on ProfitHelm

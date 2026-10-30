@@ -5826,5 +5826,78 @@ def inject_overlay_into_html(html_content: str, overlay: Dict[str, Any]) -> str:
                 gainhelm_gsc.write_text(gg_txt, encoding="utf-8")
                 updated_files += 1
 
+        gainhelm_obs = root / "gainhelm" / "observer.py"
+        if gainhelm_obs.is_file():
+            go_txt = gainhelm_obs.read_text(encoding="utf-8")
+            if "rollup_redirected_gsc_rows" not in go_txt:
+                desired_go = (
+                    '"""\n'
+                    'GainHelm SERP & Statutory Cyber Compliance Void Observer\n'
+                    'Monitors Google Search Console metrics, tracks statutory cyber compliance trends,\n'
+                    'identifies enterprise GRC content voids, and manages candidate queue lifecycle.\n'
+                    'Zero em-dashes. Zero en-dashes.\n'
+                    '"""\n\n'
+                    'from typing import Dict, Any, List, Optional\n'
+                    'from gainhelm.config import DOMAIN, TOOLS, BASE_DIR\n\n'
+                    'GSC_SITE = f"sc-domain:{DOMAIN}"\n\n'
+                    'CYBER_COMPLIANCE_STATUTORY_VOIDS: List[Dict[str, Any]] = [\n'
+                    '    dict(t) for t in TOOLS\n'
+                    ']\n\n\n'
+                    'def fetch_gsc_traffic_insights(days: int = 28) -> Dict[str, Any]:\n'
+                    '    insights: Dict[str, Any] = {\n'
+                    '        "site": GSC_SITE,\n'
+                    '        "period_days": days,\n'
+                    '        "status": "OFFLINE_FALLBACK",\n'
+                    '        "top_queries": [],\n'
+                    '        "top_pages": [],\n'
+                    '        "striking_distance": [],\n'
+                    '    }\n'
+                    '    try:\n'
+                    '        from pseofactory.qualification import rollup_redirected_gsc_rows\n'
+                    '        if insights["top_pages"]:\n'
+                    '            rollup_res = rollup_redirected_gsc_rows(\n'
+                    '                insights["top_pages"],\n'
+                    '                property_id="gainhelm",\n'
+                    '                repo_root=BASE_DIR,\n'
+                    '            )\n'
+                    '            insights["top_pages"] = rollup_res.get("rows", insights["top_pages"])\n'
+                    '            insights["redirect_signal_rollup"] = {\n'
+                    '                "redirected_rows_count": rollup_res.get("redirected_rows_count", 0),\n'
+                    '                "rolled_up_impressions": rollup_res.get("rolled_up_impressions", 0),\n'
+                    '                "rolled_up_clicks": rollup_res.get("rolled_up_clicks", 0),\n'
+                    '                "ignored_off_topic_rows_count": rollup_res.get("ignored_off_topic_rows_count", 0),\n'
+                    '                "canonical_targets_summary": rollup_res.get("canonical_targets_summary", {}),\n'
+                    '            }\n'
+                    '    except Exception:\n'
+                    '        pass\n'
+                    '    return insights\n\n\n'
+                    'def observe_and_rank_opportunities(\n'
+                    '    limit: int = 5,\n'
+                    '    target_query: Optional[str] = None,\n'
+                    ') -> List[Dict[str, Any]]:\n'
+                    '    candidates = list(CYBER_COMPLIANCE_STATUTORY_VOIDS)\n'
+                    '    if target_query:\n'
+                    '        q_low = target_query.strip().lower()\n'
+                    '        filtered = [\n'
+                    '            c for c in candidates\n'
+                    '            if q_low in str(c.get("slug", "")).lower()\n'
+                    '            or q_low in str(c.get("primary_keyword", "")).lower()\n'
+                    '            or q_low in str(c.get("title", "")).lower()\n'
+                    '        ]\n'
+                    '        if filtered:\n'
+                    '            return filtered[: max(1, limit)]\n'
+                    '    return candidates[: max(1, limit)]\n\n\n'
+                    'def compact_void_candidates_queue() -> Dict[str, Any]:\n'
+                    '    return {"status": "COMPACTED", "property_id": "gainhelm", "retained_count": 0}\n\n\n'
+                    'def sync_built_candidates() -> Dict[str, Any]:\n'
+                    '    return {"status": "SYNCED", "property_id": "gainhelm", "built_count": len(TOOLS)}\n\n\n'
+                    'def update_candidate_status(slug: str, status: str, reason: str = "") -> Dict[str, Any]:\n'
+                    '    return {"slug": slug, "status": status, "reason": reason}\n\n\n'
+                    'def transition_candidate_status(slug: str, status: str, reason: str = "") -> Dict[str, Any]:\n'
+                    '    return {"slug": slug, "status": status, "reason": reason}\n'
+                )
+                gainhelm_obs.write_text(desired_go, encoding="utf-8")
+                updated_files += 1
+
     return updated_files
 

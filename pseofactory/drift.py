@@ -219,17 +219,19 @@ def compute_two_tier_merkle_hash(
 
 
 def detect_engine_drift(
-    state_file: Union[str, Path],
+    state_file: Optional[Union[str, Path]] = None,
     include_paths: Optional[List[Union[str, Path]]] = None,
     base_dirs: Optional[List[Union[str, Path]]] = None,
     auto_record: bool = False,
+    lock_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Audits the current engine hash against recorded state in state_file (.agy/engine_hash.json).
     If state_file does not exist or the hash differs, detects DRIFT, which triggers
     requires_recompile = True so unattended cron/systemd executions recompile all pages.
     """
-    s_path = Path(state_file)
+    resolved_target = state_file if state_file is not None else (lock_path or ".agy/engine_hash.json")
+    s_path = Path(resolved_target)
     recorded_hash: Optional[str] = None
     recorded_base_dirs: Optional[List[str]] = None
     if s_path.exists():
@@ -237,7 +239,7 @@ def detect_engine_drift(
             from pseofactory.supervisor import AtomicStateLedger
             data = AtomicStateLedger.load_json(s_path)
             if isinstance(data, dict):
-                recorded_hash = data.get("engine_hash")
+                recorded_hash = data.get("engine_hash") or data.get("substrate_hash")
                 raw_bdirs = data.get("base_dirs")
                 if isinstance(raw_bdirs, list) and all(isinstance(x, str) and Path(x).exists() for x in raw_bdirs):
                     recorded_base_dirs = raw_bdirs
@@ -246,6 +248,15 @@ def detect_engine_drift(
 
     effective_base_dirs = base_dirs if (base_dirs is not None or include_paths is not None) else recorded_base_dirs
     current_hash = compute_engine_hash(include_paths=include_paths, base_dirs=effective_base_dirs)
+    if (
+        recorded_hash is not None
+        and recorded_hash != current_hash
+        and s_path.name == "substrate_lock.json"
+        and recorded_base_dirs is None
+    ):
+        substrate_only_hash = compute_engine_hash()
+        if recorded_hash == substrate_only_hash:
+            current_hash = substrate_only_hash
 
     drift_detected = (recorded_hash != current_hash)
 

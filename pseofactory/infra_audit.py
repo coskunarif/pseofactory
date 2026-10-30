@@ -523,16 +523,35 @@ def audit_gcp_billing_summary(
 def audit_host_hygiene(
     repo_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
-    """Audits repository host configuration using HostHygieneAuditor."""
-    target_repo = repo_path or DEFAULT_PROFITHELM_REPO
-    try:
-        res = HostHygieneAuditor.audit_repo_host_configs(target_repo)
-        if res.get("status") != "PASS" or res.get("violations_count", 0) > 0:
-            issues = res.get("issues", ["Host hygiene audit failed"])
-            return False, "; ".join(issues)
-        return True, "Host hygiene verified: 0 violations"
-    except Exception as exc:
-        return False, f"HostHygieneAuditor exception: {exc}"
+    """Audits repository host configuration using HostHygieneAuditor across tenant repositories."""
+    if repo_path is not None:
+        try:
+            res = HostHygieneAuditor.audit_repo_host_configs(repo_path)
+            if res.get("status") != "PASS" or res.get("violations_count", 0) > 0:
+                issues = res.get("issues", ["Host hygiene audit failed"])
+                return False, "; ".join(issues)
+            return True, "Host hygiene verified: 0 violations"
+        except Exception as exc:
+            return False, f"HostHygieneAuditor exception: {exc}"
+
+    all_issues: List[str] = []
+    audited_repos = 0
+    for contract in CANONICAL_TENANT_DECLARATIONS.values():
+        t_repo = contract.repo_root_path
+        if not t_repo.is_dir():
+            continue
+        audited_repos += 1
+        try:
+            res = HostHygieneAuditor.audit_repo_host_configs(t_repo)
+            if res.get("status") != "PASS" or res.get("violations_count", 0) > 0:
+                for iss in res.get("issues", ["Host hygiene audit failed"]):
+                    all_issues.append(f"{contract.property_id}: {iss}")
+        except Exception as exc:
+            all_issues.append(f"{contract.property_id}: HostHygieneAuditor exception: {exc}")
+
+    if all_issues:
+        return False, "; ".join(all_issues)
+    return True, f"Host hygiene verified across {audited_repos} tenant repositories: 0 violations"
 
 
 def audit_live_edge_endpoints(
@@ -696,7 +715,7 @@ def main() -> int:
     else:
         print(f"      FAIL: {msg_gcp}")
 
-    print("[3/5] Auditing profithelm-platform host configuration hygiene...")
+    print("[3/5] Auditing tenant repository host configuration hygiene (profithelm, prexvo, gainhelm)...")
     ok_hygiene, msg_hygiene = audit_host_hygiene()
     if ok_hygiene:
         print("      PASS: 0 crawler barriers or header violations")
@@ -710,7 +729,7 @@ def main() -> int:
     else:
         print(f"      FAIL: {msg_edge}")
 
-    print("[5/5] Verifying active tenant (gainhelm.com) & retired domain DNS isolation...")
+    print("[5/5] Verifying active tenant (profithelm.com, prexvo.com, gainhelm.com) & retired domain DNS isolation...")
     ok_dns, msg_dns = audit_hibernated_and_retired_dns_isolation()
     if ok_dns:
         print(f"      PASS: {msg_dns}")

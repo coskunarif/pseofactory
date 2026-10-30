@@ -3342,6 +3342,10 @@ def estimate_partner_approval_revenue_impact(
         # On Prexvo, pending_p2 offers are 100% suppressed until Gate 1 approval
         fallback_yield = 0.0
         bounty_uplift = bounty_mid
+    elif prop == "gainhelm":
+        # On GainHelm, pending direct offers route to approved B2B contracts at the edge (~25% baseline yield)
+        fallback_yield = round(bounty_mid * 0.25, 2)
+        bounty_uplift = round(max(35.0, bounty_mid - fallback_yield), 2)
     else:
         # On ProfitHelm, pending offers fall back to Sovrn (~18% of direct bounty) or secondary partner
         fallback_yield = round(bounty_mid * 0.20, 2)
@@ -3390,7 +3394,7 @@ def estimate_partner_approval_revenue_impact(
 
     # Baseline monthly impressions across affected tools when neither explicit nor GSC traffic is populated
     tool_count = max(1, len(slugs_set))
-    baseline_impressions = tool_count * (650 if prop == "profithelm" else 800)
+    baseline_impressions = tool_count * (650 if prop == "profithelm" else (700 if prop == "gainhelm" else 800))
     if emp_impressions > 0:
         effective_impressions = emp_impressions
     elif gsc_impressions > 0:
@@ -3400,13 +3404,13 @@ def estimate_partner_approval_revenue_impact(
         effective_impressions = baseline_impressions
 
     # Estimate monthly outbound CTA clicks from impressions + empirical clicks
-    expected_cta_ctr = 0.042 if prop == "profithelm" else 0.038
+    expected_cta_ctr = 0.042 if prop == "profithelm" else (0.040 if prop == "gainhelm" else 0.038)
     projected_monthly_clicks = max(
         float(emp_clicks),
         (effective_impressions * expected_cta_ctr) + (emp_clicks * 1.5) + (emp_calc_interactions * 0.15),
     )
 
-    lead_to_sale_rate = 0.045 if (pk in ENTERPRISE_B2B_PARTNERS or prop == "profithelm") else 0.035
+    lead_to_sale_rate = 0.045 if (pk in ENTERPRISE_B2B_PARTNERS or prop in ("profithelm", "gainhelm")) else 0.035
     est_monthly_conversions = projected_monthly_clicks * lead_to_sale_rate
     est_monthly_rev_impact = round(est_monthly_conversions * bounty_uplift, 2)
 
@@ -3993,14 +3997,19 @@ def qualify_monetization_opportunity(
                 "disclosures_required": dict(PREXVO_DISCLOSURES),
             }
 
-    if prop_explicit in ("profithelm", "exchange1031") and is_student_loan:
+    if prop_explicit in ("profithelm", "exchange1031") and (is_student_loan or (is_gainhelm and not is_b2b)):
+        rej_msg = (
+            "Strict isolation violation: Student loan intent is prohibited on ProfitHelm."
+            if is_student_loan
+            else "Strict isolation violation: GainHelm cyber compliance intent is prohibited on ProfitHelm."
+        )
         return {
             "query": q_clean,
             "slug": s_clean,
             "property_id": prop_explicit,
             "intent_tier": "cross_tenant_contamination",
             "monetization_qualified": False,
-            "rejection_reason": "Strict isolation violation: Student loan intent is prohibited on ProfitHelm.",
+            "rejection_reason": rej_msg,
             "primary_partner": "",
             "recommended_partners": [],
             "expected_bounty_usd": 0.0,
@@ -4012,24 +4021,58 @@ def qualify_monetization_opportunity(
             "disclosures_required": dict(PROFITHELM_DISCLOSURES),
         }
 
-    if prop_explicit == "gainhelm" and (is_student_loan or any(k in combined for k in ("section 179", "section-179", "section 1031", "1031 exchange", "qsbs"))):
-        return {
-            "query": q_clean,
-            "slug": s_clean,
-            "property_id": "gainhelm",
-            "intent_tier": "cross_tenant_contamination",
-            "monetization_qualified": False,
-            "rejection_reason": "Strict isolation violation: Foreign tenant tax or student loan intent is prohibited on GainHelm.",
-            "primary_partner": "",
-            "recommended_partners": [],
-            "expected_bounty_usd": 0.0,
-            "effective_partner_yield": 0.0,
-            "intent_weight": 0.0,
-            "y_asset": 0.0,
-            "estimated_monthly_revenue_usd": 0.0,
-            "partner_alignment_verified": False,
-            "disclosures_required": dict(GAINHELM_DISCLOSURES),
-        }
+    if prop_explicit == "gainhelm":
+        if is_student_loan or is_b2b or any(
+            k in combined
+            for k in (
+                "section 179",
+                "section-179",
+                "section 1031",
+                "1031 exchange",
+                "qsbs",
+                "corporate amt",
+                "section 174",
+                "s-corp",
+                "s corp",
+                "macrs",
+                "bonus depreciation",
+            )
+        ):
+            return {
+                "query": q_clean,
+                "slug": s_clean,
+                "property_id": "gainhelm",
+                "intent_tier": "cross_tenant_contamination",
+                "monetization_qualified": False,
+                "rejection_reason": "Strict isolation violation: Foreign tenant tax or student loan intent is prohibited on GainHelm.",
+                "primary_partner": "",
+                "recommended_partners": [],
+                "expected_bounty_usd": 0.0,
+                "effective_partner_yield": 0.0,
+                "intent_weight": 0.0,
+                "y_asset": 0.0,
+                "estimated_monthly_revenue_usd": 0.0,
+                "partner_alignment_verified": False,
+                "disclosures_required": dict(GAINHELM_DISCLOSURES),
+            }
+        if not is_gainhelm:
+            return {
+                "query": q_clean,
+                "slug": s_clean,
+                "property_id": "gainhelm",
+                "intent_tier": "out_of_scope_gainhelm",
+                "monetization_qualified": False,
+                "rejection_reason": "GainHelm requires enterprise cybersecurity compliance, GRC audit, or statutory security governance intent.",
+                "primary_partner": "",
+                "recommended_partners": [],
+                "expected_bounty_usd": 0.0,
+                "effective_partner_yield": 0.0,
+                "intent_weight": 0.0,
+                "y_asset": 0.0,
+                "estimated_monthly_revenue_usd": 0.0,
+                "partner_alignment_verified": False,
+                "disclosures_required": dict(GAINHELM_DISCLOSURES),
+            }
 
     is_restricted_ps = False
     commercial_offers_allowed = True
@@ -6498,6 +6541,21 @@ def _match_gsc_query_specialized_partner(
             return "sofi" if "sofi" in available_keys else "sofi_refi"
         if any(k in q_low for k in ("parent", "elfi", "advisor")) and "credible" in available_keys:
             return "credible"
+        return None
+
+    if prop == "gainhelm":
+        if any(k in q_low for k in ("pentest", "penetration test", "cobalt", "ptaaS", "owasp", "red team", "asv")) and "cobalt_pentest" in available_keys:
+            return "cobalt_pentest"
+        if any(k in q_low for k in ("cyber insurance", "coalition", "breach liability", "ransomware insurance", "e&o")) and "coalition_cyber_insurance" in available_keys:
+            return "coalition_cyber_insurance"
+        if any(k in q_low for k in ("thoropass", "hitrust", "pci dss", "qsa", "bundled audit", "mycsf")) and "thoropass_audit" in available_keys:
+            return "thoropass_audit"
+        if any(k in q_low for k in ("drata", "cmmc", "sprs", "nist 800-171", "fedramp", "3pao", "dfars")) and "drata_compliance" in available_keys:
+            return "drata_compliance"
+        if any(k in q_low for k in ("sprinto", "iso 27001", "iso 27006", "gdpr", "annex a")) and "sprinto_compliance" in available_keys:
+            return "sprinto_compliance"
+        if any(k in q_low for k in ("vanta", "soc 2", "soc2", "trust center", "continuous monitoring")) and "vanta_security" in available_keys:
+            return "vanta_security"
         return None
 
     # ProfitHelm query-intent specialized promotion rules

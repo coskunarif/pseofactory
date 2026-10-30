@@ -2040,6 +2040,23 @@ class TenantFactStore:
                     violations.append(
                         "Missing mandatory YMYL forfeiture disclaimer: 'Refinancing federal student loans permanently waives federal protections'"
                     )
+        elif tenant_norm == "gainhelm":
+            has_audit_modeling = (
+                "audit scenario modeling" in text_lower
+                or "compliance audit modeling" in text_lower
+                or "attestation scenario modeling" in text_lower
+            )
+            if has_audit_modeling:
+                has_attestation_disc = (
+                    "licensed cpa" in text_lower
+                    or "c3pao" in text_lower
+                    or "statutory compliance audit disclaimer" in text_lower
+                    or "does not constitute a formal cpa" in text_lower
+                )
+                if not has_attestation_disc:
+                    violations.append(
+                        "Missing mandatory GainHelm attestation disclosure: 'Statutory compliance audit disclaimer: Cost, penalty, and control-scoping figures are deterministic computational models and do not constitute a formal CPA attestation opinion, DoD C3PAO certification, QSA Report on Compliance, or legal counsel.'"
+                    )
 
         if spec_disclosures:
             for disclosure_phrase in spec_disclosures:
@@ -2302,6 +2319,35 @@ class TenantFactStore:
                 violations.append(
                     "Prexvo non-tool institutional page contains calculator template meta/prose ('Calculate ... under Title IV')"
                 )
+        elif tenant_norm == "gainhelm":
+            # Unverified $29 offer fallback in JS or JSON-LD
+            if "offer_price_usd || 29" in text or '"price":"29"' in text or '"price": "29"' in text:
+                violations.append(
+                    "Unverified offer_price_usd or price '29' detected: contradicts GainHelm ($49) canonical pricing tier"
+                )
+            # Unhydrated SSR calculator metric placeholders ($0.00 in primary compliance metrics)
+            if "$0.00" in text and re.search(
+                r'id=["\']metric-(?:soc2_total_cost|cmmc_total_cost|sprs_score|iso27001_total_cost|hipaa_penalty)["\'][^>]*>\s*\$0\.00\s*<',
+                text,
+                re.IGNORECASE,
+            ):
+                violations.append(
+                    "Unhydrated SSR calculator placeholder '$0.00' detected in primary GainHelm compliance metric card; SSR output must reflect ground-truth engine evaluation"
+                )
+            # NIST SP 800-171 SPRS score bounds [-203, 110]
+            if "sprs" in text_lower:
+                for sprs_m in re.finditer(
+                    r"sprs\s+score\s+(?:of\s+)?([+-]?\d{1,4})\b",
+                    text_lower,
+                ):
+                    try:
+                        sprs_val = int(sprs_m.group(1))
+                        if sprs_val > 110 or sprs_val < -203:
+                            violations.append(
+                                f"NIST SP 800-171 SPRS score contradiction: claimed {sprs_val} is outside statutory [-203, 110] bounds under DFARS 252.204-7019/7020"
+                            )
+                    except ValueError:
+                        pass
 
         is_valid = len(violations) == 0
         return is_valid, violations
@@ -2649,6 +2695,22 @@ class TruthReconciliationEngine:
         ),
     )
 
+    GAINHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        (
+            "data.offer_price_usd || 29",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+        ),
+        (
+            "data.offer_price_usd || (isPrexvo ? 19 : 49)",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+        ),
+        ('"price":"29"', '"price":"49"'),
+        ('"price": "29"', '"price": "49"'),
+        ("$29/mo", "$49/mo"),
+        ("$29/month", "$49/month"),
+        ("SPRS score of 115", "SPRS score of 110"),
+    )
+
     @classmethod
     def reconcile_html_truth(
         cls,
@@ -2736,6 +2798,12 @@ class TruthReconciliationEngine:
                         )
                     if "prexvo_plan_threshold_reconciled" not in repairs:
                         repairs.append("prexvo_plan_threshold_reconciled")
+        elif tenant_norm == "gainhelm":
+            for old_str, new_str in cls.GAINHELM_HTML_REPLACEMENTS:
+                if old_str in updated:
+                    updated = updated.replace(old_str, new_str)
+                    if "gainhelm_statutory_truth_reconciled" not in repairs:
+                        repairs.append("gainhelm_statutory_truth_reconciled")
 
         # 3. Ensure signal/index.html has a valid WebPage JSON-LD schema block if missing
         if (
@@ -2743,14 +2811,19 @@ class TruthReconciliationEngine:
             and 'type="application/ld+json"' not in updated
             and "</head>" in updated
         ):
+            tenant_contract = get_tenant_contract(tenant_norm)
             canon_m = re.search(
                 r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
                 updated,
                 re.IGNORECASE,
             )
-            sig_url = canon_m.group(1) if canon_m else "https://profithelm.com/signal/"
+            sig_url = canon_m.group(1) if canon_m else f"{tenant_contract.canonical_base}/signal/"
             t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
-            sig_title = _html_lib.unescape(re.sub(r"<[^>]+>", "", t_m.group(1)).strip()) if t_m else "ProfitHelm Statutory Signal"
+            sig_title = (
+                _html_lib.unescape(re.sub(r"<[^>]+>", "", t_m.group(1)).strip())
+                if t_m
+                else f"{tenant_contract.brand_name} Statutory Signal"
+            )
             ld_payload = {
                 "@context": "https://schema.org",
                 "@type": "WebPage",
@@ -2878,6 +2951,10 @@ class TruthReconciliationEngine:
                 for old_s, new_s in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
                     if old_s in updated_str:
                         updated_str = updated_str.replace(old_s, new_s)
+        elif tenant_norm == "gainhelm":
+            for old_s, new_s in cls.GAINHELM_HTML_REPLACEMENTS:
+                if old_s in updated_str:
+                    updated_str = updated_str.replace(old_s, new_s)
 
         if updated_str != serialized:
             return _json_lib.loads(updated_str), True
@@ -2939,6 +3016,12 @@ class TruthReconciliationEngine:
                             violations.append(msg)
                 if "ibr-hardship" in combined_slug and '"name": "RAP vs IBR Repayment Calculator"' in html_content:
                     violations.append("IBR Hardship Cap Calculator JSON-LD SoftwareApplication name misattributed as 'RAP vs IBR Repayment Calculator'")
+        elif tenant_norm == "gainhelm":
+            for old_str, _ in cls.GAINHELM_HTML_REPLACEMENTS:
+                if old_str in html_content:
+                    msg = f"Unreconciled GainHelm statutory figure or pricing tier: '{old_str[:60]}'"
+                    if msg not in violations:
+                        violations.append(msg)
 
         return violations
 

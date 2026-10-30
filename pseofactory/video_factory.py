@@ -84,6 +84,7 @@ def _in_pytest() -> bool:
         os.getenv("PYTEST_CURRENT_TEST")
         or os.getenv("PROFITHELM_IN_TEST") == "1"
         or os.getenv("PREXVO_IN_TEST") == "1"
+        or os.getenv("GAINHELM_IN_TEST") == "1"
     )
 
 

@@ -758,6 +758,13 @@ class EmailIngestionEngine:
             "info@ipx1031.com": ("profithelm", "ipx1031", "IPX1031 (Investment Property Exchange Services)", "In-House Direct"),
             "contactus@simplybusiness.com": ("profithelm", "simply_business", "Simply Business", "Impact.com"),
             "wade.fenton@otrsolutions.com": ("profithelm", "otr_solutions_factoring", "OTR Solutions Freight Factoring", "In-House Direct"),
+            "partners@vanta.com": ("gainhelm", "vanta_security", "Vanta Trust Management Platform", "PartnerStack / In-House Direct"),
+            "partnerships@vanta.com": ("gainhelm", "vanta_security", "Vanta Trust Management Platform", "PartnerStack / In-House Direct"),
+            "partners@drata.com": ("gainhelm", "drata_compliance", "Drata Continuous GRC & CMMC Automation", "In-House Direct"),
+            "partners@sprinto.com": ("gainhelm", "sprinto_compliance", "Sprinto ISO 27001 & Security Compliance", "In-House Direct"),
+            "partners@thoropass.com": ("gainhelm", "thoropass_audit", "Thoropass Compliance & Audit Readiness", "In-House Direct"),
+            "brokers@coalitioninc.com": ("gainhelm", "coalition_cyber_insurance", "Coalition Active Cyber Insurance", "In-House Direct"),
+            "partners@cobalt.io": ("gainhelm", "cobalt_pentest", "Cobalt Offensive Security & Pentest as a Service", "In-House Direct"),
         }
 
         for msg in messages:
@@ -1204,6 +1211,12 @@ class EmailIngestionEngine:
                         ("credible", "prexvo", "credible", "Credible Student Loan Marketplace", "STUDENT_LOAN_COMPARISON", "Impact.com"),
                         ("earnest", "prexvo", "earnest", "Earnest Student Loan Refinancing", "STUDENT_LOAN_REFINANCE", "In-House Direct"),
                         ("lendkey", "prexvo", "lendkey", "LendKey Student Loan Refinancing", "STUDENT_LOAN_REFINANCE", "Impact.com"),
+                        ("vanta", "gainhelm", "vanta_security", "Vanta Trust Management Platform", "CYBER_COMPLIANCE_GRC", "PartnerStack / In-House Direct"),
+                        ("drata", "gainhelm", "drata_compliance", "Drata Continuous GRC & CMMC Automation", "CYBER_COMPLIANCE_GRC", "In-House Direct"),
+                        ("sprinto", "gainhelm", "sprinto_compliance", "Sprinto ISO 27001 & Security Compliance", "CYBER_COMPLIANCE_GRC", "In-House Direct"),
+                        ("thoropass", "gainhelm", "thoropass_audit", "Thoropass Compliance & Audit Readiness", "CYBER_COMPLIANCE_GRC", "In-House Direct"),
+                        ("coalition", "gainhelm", "coalition_cyber_insurance", "Coalition Active Cyber Insurance", "CYBER_LIABILITY_INSURANCE", "In-House Direct"),
+                        ("cobalt", "gainhelm", "cobalt_pentest", "Cobalt Offensive Security & Pentest as a Service", "PENETRATION_TESTING", "In-House Direct"),
                     )
                     matched_alert = None
                     for tok_kw, prop_id, p_key, p_name, p_cat, net_name in alert_partner_map:

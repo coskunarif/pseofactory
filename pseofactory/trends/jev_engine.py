@@ -215,8 +215,8 @@ class JevEngine:
             jev_score=jev_score,
             durable_prob=durable_prob,
         )
-        intent_tier = monetization.get("intent_tier", "")
-        if intent_tier in ("cross_tenant_contamination", "out_of_scope_prexvo"):
+        intent_tier = str(monetization.get("intent_tier", "") or "")
+        if intent_tier == "cross_tenant_contamination" or intent_tier.startswith("out_of_scope_"):
             return 0.0
 
         y_intent = calculate_intent_weight(candidate.intent_cluster, candidate.query)
@@ -224,7 +224,7 @@ class JevEngine:
         base_y_asset = 0.7 * y_intent + 0.3 * cpc_norm
 
         tier_multiplier = 1.0
-        if intent_tier == "commercial_b2b":
+        if intent_tier in ("commercial_b2b", "enterprise_cyber_compliance_grc"):
             tier_multiplier = 1.15
         elif intent_tier == "student_loan_ymyl":
             tier_multiplier = 1.08
@@ -361,7 +361,8 @@ class JevEngine:
         target_asset = determine_target_asset_type(clean_q, candidate.intent_cluster)
 
         # Step 0: Cross-Tenant Isolation & Unmonetizable Signal Gate
-        if monetization.get("intent_tier") in ("cross_tenant_contamination", "out_of_scope_prexvo"):
+        mon_intent_tier = str(monetization.get("intent_tier") or "")
+        if mon_intent_tier == "cross_tenant_contamination" or mon_intent_tier.startswith("out_of_scope_"):
             return JevDecisionResult(
                 query=clean_q,
                 slug=slug,

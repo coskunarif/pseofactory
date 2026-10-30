@@ -5,9 +5,9 @@
 # Consolidates:
 #   1) satellites/cloudflare/bin/cloud audit
 #   2) satellites/cloudflare/bin/gcp billing summary
-#   3) HostHygieneAuditor on profithelm-platform
+#   3) HostHygieneAuditor on profithelm-platform, prexvo, and gainhelm
 #   4) Live edge curl checks on active tenant endpoints:
-#      profithelm.com, prexvo.com, arifcoskun.com
+#      profithelm.com, prexvo.com, gainhelm.com, arifcoskun.com
 # Emits structured JSON anomaly logs to .agy/telemetry_events.jsonl on failure.
 # Exits code 0 on all passes.
 # ==============================================================================

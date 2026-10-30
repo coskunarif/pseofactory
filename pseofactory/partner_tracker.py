@@ -1193,29 +1193,25 @@ class PartnerTrackingEngine:
             ymyl_restricted_pages_clean = True
             r_link_counts: Dict[str, int] = {}
 
-            edge_direct_contract_upgrades: Dict[str, str] = (
-                {
-                    "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
-                    "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
-                    "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-                    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
-                    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
-                    "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
-                    "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
-                }
-                if prop_id == "profithelm"
-                else (
-                    self.hub.get_direct_contract_upgrades("gainhelm")
-                    if prop_id == "gainhelm"
-                    else {}
+            edge_direct_contract_upgrades: Dict[str, str] = dict(self.hub.get_direct_contract_upgrades(prop_id))
+            if prop_id == "profithelm":
+                edge_direct_contract_upgrades.update(
+                    {
+                        "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                        "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                        "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                        "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                        "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                        "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+                        "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
+                        "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
+                        "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
+                        "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+                        "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
+                        "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
+                        "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
+                    }
                 )
-            )
 
             if dist_path and os.path.isdir(dist_path):
                 html_files = sorted(glob.glob(os.path.join(dist_path, "**", "*.html"), recursive=True))
@@ -1261,6 +1257,7 @@ class PartnerTrackingEngine:
                 is_mid_rebuild_torn = (
                     (prop_id == "profithelm" and (total_r_links < 671 or pending_partner_links_in_dom > 0))
                     or (prop_id == "prexvo" and (total_r_links < 75 or not ymyl_restricted_pages_clean))
+                    or (prop_id == "gainhelm" and (total_r_links < 30 or pending_partner_links_in_dom > 0))
                 )
                 repo_root_cand = os.path.dirname(os.path.abspath(dist_path.rstrip("/")))
                 if is_mid_rebuild_torn and os.path.exists(os.path.join(repo_root_cand, ".git")):
@@ -6260,7 +6257,8 @@ def compute_scenario_demand_and_conversion_metrics(
     }
 
     for rec in leads:
-        if leads_ledger_path is None and "_live_" in str(rec.get("lead_id") or ""):
+        rec_lid = str(rec.get("lead_id") or "")
+        if leads_ledger_path is None and ("_live_" in rec_lid or rec_lid.endswith("_direct")):
             continue
         prop = str(rec.get("property_id") or "profithelm").strip().lower()
         if property_id and prop != property_id.strip().lower():
@@ -8145,7 +8143,7 @@ def sync_edge_leads_to_ledger(
                     if not isinstance(item, dict) or not item.get("lead_id"):
                         continue
                     lid = str(item["lead_id"])
-                    if "_live_" in lid and leads_ledger_path is None:
+                    if ("_live_" in lid or lid.endswith("_direct")) and leads_ledger_path is None:
                         continue
                     slug = str(item.get("tool_slug") or "general")
                     vert = str(item.get("vertical") or "")
@@ -8910,7 +8908,7 @@ def audit_end_to_end_monetization_and_fulfillment(
             "live_direct_keys": sorted(live_direct),
             "fail_closed_fallback_count": len(fail_closed_fallback),
             "fail_closed_fallback_keys": sorted(fail_closed_fallback),
-            "verified_approved_contracts_count": 13 if prop_id == "profithelm" else 0,
+            "verified_approved_contracts_count": 13 if prop_id == "profithelm" else (6 if prop_id == "gainhelm" else 0),
             "yield_gated_checkout_or_contract_fallback_count": (
                 len(canonical_keys) if prop_id in ("prexvo", "gainhelm") else len(fail_closed_fallback)
             ),

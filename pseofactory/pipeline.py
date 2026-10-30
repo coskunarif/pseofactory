@@ -355,10 +355,15 @@ class FactoryPipeline:
                 for other_id, other_hit in matched_map.items():
                     if other_id == tenant_norm or not other_hit:
                         continue
-                    if other_id == "profithelm" and tenant_norm == "prexvo" and "1031" in q_lower:
+                    other_contract = CANONICAL_TENANT_DECLARATIONS[other_id]
+                    matched_tok = next(
+                        (tok for tok in other_contract.statutory_intent_tokens if tok in q_lower),
+                        None,
+                    )
+                    if other_id == "profithelm" and "1031" in q_lower:
                         token_found = "1031 exchange"
-                    elif other_id == "prexvo" and tenant_norm == "profithelm" and "title iv" in q_lower:
-                        token_found = "title iv"
+                    elif matched_tok:
+                        token_found = matched_tok
                     else:
                         token_found = f"{other_id} statutory token"
                     foreign = list(set(foreign + [token_found]))

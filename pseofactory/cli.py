@@ -38,6 +38,7 @@ from pseofactory.drift import (
     record_engine_hash,
     compute_engine_hash,
 )
+from pseofactory.tenant_facts import CANONICAL_TENANT_IDS
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -132,7 +133,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     if property_id == "all":
         all_passed = True
         reports_dict: Dict[str, Any] = {}
-        for p_id in ("profithelm", "prexvo", "gainhelm"):
+        for p_id in CANONICAL_TENANT_IDS:
             adp = reg.get_adapter(p_id)
             rep = audit_property_assets(
                 property_id=p_id,
@@ -177,7 +178,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 def cmd_maintain(args: argparse.Namespace) -> int:
     """
-    Executes closed-loop maintenance lifecycle on a property.
+    Executes closed-loop maintenance lifecycle on a property or across the entire fleet (--property all).
     Returns 0 on SUCCESS or SKIPPED_NO_CHANGES, 1 on failure.
     Zero em-dashes. Zero en-dashes.
     """
@@ -188,9 +189,32 @@ def cmd_maintain(args: argparse.Namespace) -> int:
         os.environ.setdefault("PSEUFACTORY_GIT_BACKOFF", "0.05,0.1,0.2")
         os.environ.setdefault("PSEUFACTORY_EDGE_BACKOFF", "0.001")
 
-    property_id = args.property or "prexvo"
+    property_id = (args.property or "prexvo").strip()
     auto_heal = getattr(args, "auto_heal", False)
-    res = run_maintenance_lifecycle(property_id=property_id, force=args.force or auto_heal)
+    dry_run = getattr(args, "dry_run", False)
+    if property_id.lower() == "all":
+        results = run_fleet_maintenance(force=args.force or auto_heal, dry_run=dry_run)
+        all_ok = True
+        if args.json:
+            print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
+        else:
+            for p_id, r in results.items():
+                print(f"[{r.status}] Property: {p_id} | Audited: {r.assets_audited} | Drifted: {r.assets_drifted} | Refactored: {r.assets_refactored} | Failed: {r.assets_failed}")
+                if r.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
+                    all_ok = False
+        return 0 if all_ok else 1
+
+    if dry_run:
+        reg = TenantRegistry.default()
+        try:
+            adapter = reg.get_adapter(property_id)
+        except KeyError:
+            print(f"Error: Property '{property_id}' not found in registry", file=sys.stderr)
+            return 1
+        lifecycle = MaintenanceLifecycle(registry=reg)
+        res = lifecycle.run(adapter, force=args.force or auto_heal, dry_run=True, enable_gitops=False)
+    else:
+        res = run_maintenance_lifecycle(property_id=property_id, force=args.force or auto_heal)
     if args.json:
         print(json.dumps(res.to_dict(), indent=2))
     else:
@@ -200,7 +224,7 @@ def cmd_maintain(args: argparse.Namespace) -> int:
         if res.failed_records:
             for fr in res.failed_records:
                 print(f"  - Failed asset: {fr.get('asset_path')}")
-    return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES") else 1
+    return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN") else 1
 
 
 def _ancestor_or_inherited_fd_holds_lock(lock_file: Path) -> bool:
@@ -280,7 +304,12 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     Reflects engine changes across existing assets and triggers re-auditing / recompiling.
     Zero em-dashes. Zero en-dashes.
     """
-    props = [args.property] if getattr(args, "property", None) else None
+    raw_prop = getattr(args, "property", None)
+    props = (
+        [raw_prop]
+        if (raw_prop and str(raw_prop).strip().lower() != "all")
+        else None
+    )
     no_gitops = getattr(args, "no_gitops", False)
     lock_fd = None
     lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
@@ -485,7 +514,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
 
     reg = TenantRegistry.default()
-    if property_id:
+    if property_id and str(property_id).strip().lower() != "all":
         try:
             adapter = reg.get_adapter(property_id)
         except KeyError:
@@ -589,7 +618,11 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
         execution_budget_seconds=budget,
     )
 
-    prop_ids = [property_id] if property_id else None
+    prop_ids = (
+        [property_id]
+        if (property_id and str(property_id).strip().lower() != "all")
+        else None
+    )
 
     if is_once:
         lock_fd = None
@@ -677,11 +710,30 @@ def cmd_distribute(args: argparse.Namespace) -> int:
     Executes multi-channel syndication export and Voice DNA verification.
     Zero em-dashes. Zero en-dashes.
     """
-    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    property_id = str(getattr(args, "property", "profithelm") or "profithelm").strip()
     dry_run = getattr(args, "dry_run", False)
     as_json = getattr(args, "json", False)
 
     from pseofactory.distributor import dispatch_to_distribution_lead
+    if property_id.lower() == "all":
+        reports = {}
+        all_ok = True
+        for p_id in CANONICAL_TENANT_IDS:
+            r = dispatch_to_distribution_lead(run_id=None, property_id=p_id, dry_run=dry_run)
+            reports[p_id] = r
+            if r.get("status") not in ("SUCCESS", "STAGED", "DRY_RUN"):
+                all_ok = False
+        if as_json:
+            print(json.dumps({"status": "SUCCESS" if all_ok else "FAIL", "properties": reports}, indent=2))
+        else:
+            for p_id, r in reports.items():
+                print(
+                    f"[{r.get('status', 'SUCCESS')}] Property: {p_id} | "
+                    f"Assets: {r.get('total_assets_generated', 0)} | "
+                    f"Voice Check: {'PASS' if r.get('voice_check_passed') else 'FAIL'}"
+                )
+        return 0 if all_ok else 1
+
     res = dispatch_to_distribution_lead(
         run_id=None,
         property_id=property_id,
@@ -1340,10 +1392,49 @@ def cmd_indexing_preflight(args: argparse.Namespace) -> int:
     Returns 0 on success/clean, 1 on strict blocked URLs, 2 on argument/config error.
     """
     property_id = getattr(args, "property", None) or "profithelm"
+    reg = TenantRegistry.default()
+    from pseofactory.indexing.preflight import run_indexing_preflight
+    as_json = getattr(args, "json", False) or getattr(args, "format", "table") == "json"
+
+    if str(property_id).strip().lower() == "all":
+        reports = {}
+        all_passed = True
+        for p_id in CANONICAL_TENANT_IDS:
+            adp = reg.get_adapter(p_id)
+            rep = run_indexing_preflight(
+                urls=getattr(args, "urls", None),
+                dist_dir=adp.dist_dir,
+                sitemap_path=getattr(args, "sitemap", None),
+                fixture_path=getattr(args, "fixture", None),
+                domain=adp.domain,
+                property_id=p_id,
+                min_words=getattr(args, "min_words", 150),
+                tier1_cap=getattr(args, "tier1_cap", 150),
+            )
+            reports[p_id] = rep.to_dict()
+            if not rep.is_gate_passed:
+                all_passed = False
+            if not as_json:
+                print("=" * 60)
+                print(f"INDEXING PREFLIGHT REPORT: {p_id.upper()} ({adp.domain})")
+                print("=" * 60)
+                print(f"Total Inspected:       {rep.total_inspected}")
+                print(f"Passed URLs:           {rep.passed_count}")
+                print(f"Blocked URLs:          {rep.blocked_count}")
+                print(f"Tier-1 Hubs (Push):    {rep.tier1_hubs_eligible} (cap {getattr(args, 'tier1_cap', 150)})")
+                print(f"Tier-2 Leaves (Queue): {rep.tier2_leaves_queued}")
+                print(f"Gate Status:           {'PASS' if rep.is_gate_passed else 'FAIL'}")
+        if as_json:
+            print(json.dumps({"status": "PASS" if all_passed else "FAIL", "properties": reports}, indent=2))
+        if getattr(args, "dry_run", False):
+            return 0
+        if getattr(args, "strict", False) and not all_passed:
+            return 1
+        return 0
+
     domain = f"{property_id}.com"
     dist_dir = Path(args.dist_dir).resolve() if getattr(args, "dist_dir", None) else None
 
-    reg = TenantRegistry.default()
     if getattr(args, "property", None):
         try:
             adapter = reg.get_adapter(args.property)
@@ -1363,7 +1454,6 @@ def cmd_indexing_preflight(args: argparse.Namespace) -> int:
             print("Error: No inspection target specified (--fixture, --urls, --sitemap, --dist-dir)", file=sys.stderr)
             return 2
 
-    from pseofactory.indexing.preflight import run_indexing_preflight
     try:
         report = run_indexing_preflight(
             urls=getattr(args, "urls", None),
@@ -1379,7 +1469,6 @@ def cmd_indexing_preflight(args: argparse.Namespace) -> int:
         print(f"Error executing indexing preflight: {ex}", file=sys.stderr)
         return 2
 
-    as_json = getattr(args, "json", False) or getattr(args, "format", "table") == "json"
     if as_json:
         print(json.dumps(report.to_dict(), indent=2))
     else:
@@ -1427,6 +1516,29 @@ def cmd_gsc_ceiling(args: argparse.Namespace) -> int:
     updates_path = getattr(args, "updates", None)
     output_json = getattr(args, "json", False)
     html_out = getattr(args, "html", None)
+
+    if str(property_id).strip().lower() == "all" and not fixture_path:
+        db = TrendHistoryDB()
+        updates = db.get_google_update_events() or DEFAULT_GOOGLE_UPDATES
+        reports = {}
+        for p_id in CANONICAL_TENANT_IDS:
+            recs = db.get_gsc_daily_metrics(p_id, days=days)
+            analysis = detect_algorithmic_ceiling(recs, updates=updates, threshold=threshold)
+            try:
+                db.record_gsc_ceiling_snapshot(analysis)
+            except Exception:
+                pass
+            reports[p_id] = analysis.to_dict()
+            if not output_json:
+                print(
+                    f"[PASS] GSC Ceiling ({p_id}): days={analysis.total_days} | "
+                    f"peak_rma28={int(analysis.peak_impressions_rma28)} | "
+                    f"cur_rma28={int(analysis.current_impressions_rma28)} | "
+                    f"ceiling={'YES' if analysis.ceiling_detected else 'NO'}"
+                )
+        if output_json:
+            print(json.dumps({"status": "PASS", "properties": reports}, indent=2))
+        return 0
 
     records: List[GSCDailyMetricRecord] = []
     updates: Optional[List[GoogleUpdateEvent]] = None
@@ -1542,7 +1654,7 @@ def cmd_indexing_inspect(args: argparse.Namespace) -> int:
     """
     from pseofactory.indexing_inspector import DailyIndexingInspector
     from pseofactory.indexer import PushIndexer
-    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    property_id = str(getattr(args, "property", "profithelm") or "profithelm").strip()
     strict = getattr(args, "strict", False)
     dry_run = getattr(args, "dry_run", False)
     sample = getattr(args, "sample", False)
@@ -1550,38 +1662,46 @@ def cmd_indexing_inspect(args: argparse.Namespace) -> int:
     prune_sitemaps = getattr(args, "prune_sitemaps", False)
     output_json = getattr(args, "json", False)
 
-    inspector = DailyIndexingInspector(tenant_id=property_id)
-    report = inspector.run_inspection(
-        strict=strict,
-        dry_run=dry_run,
-        sample=sample,
-        auto_remediate=auto_remediate,
-    )
-    if prune_sitemaps or auto_remediate:
-        try:
-            indexer = PushIndexer(
-                domain=f"{property_id}.com",
-                tenant_id=property_id,
-                dist_dir=inspector.base_dir / "dist",
-            )
-            report["sitemap_hygiene"] = indexer.prune_dead_gsc_sitemaps(live=not dry_run)
-        except Exception as ex:
-            report["sitemap_hygiene"] = {"status": "ERROR", "error": str(ex)}
+    target_props = list(CANONICAL_TENANT_IDS) if property_id.lower() == "all" else [property_id]
+    reports = {}
+    any_fail = False
+    for p_id in target_props:
+        inspector = DailyIndexingInspector(tenant_id=p_id)
+        report = inspector.run_inspection(
+            strict=strict,
+            dry_run=dry_run,
+            sample=sample,
+            auto_remediate=auto_remediate,
+        )
+        if prune_sitemaps or auto_remediate:
+            try:
+                indexer = PushIndexer(
+                    domain=f"{p_id}.com",
+                    tenant_id=p_id,
+                    dist_dir=inspector.base_dir / "dist",
+                )
+                report["sitemap_hygiene"] = indexer.prune_dead_gsc_sitemaps(live=not dry_run)
+            except Exception as ex:
+                report["sitemap_hygiene"] = {"status": "ERROR", "error": str(ex)}
+        reports[p_id] = report
+        if report.get("audit_status") in ("FAIL", "WARN"):
+            any_fail = True
+        if not output_json:
+            status = report.get("audit_status", "UNKNOWN")
+            print(f"[{status}] Daily Indexing Inspection for '{report.get('tenant_id')}':")
+            print(f"  - Rollover Queue: size={report['gsc_rollover']['queue_size']}, quota_exhausted={report['gsc_rollover']['quota_exhausted']}")
+            print(f"  - Quarantine: total={report['airlock_quarantine']['total_quarantined']}, 404s={report['airlock_quarantine']['breakdown'].get('HTTP_404', 0)}")
+            print(f"  - Velocity: stalled={report['velocity_stagnation']['stalled_routes_count']}/{report['velocity_stagnation']['routes_monitored']}")
+            if report.get("remediation_prompts"):
+                print("  Suggested Remediation Prompts:")
+                for prompt in report["remediation_prompts"]:
+                    print(f"    * {prompt}")
 
     if output_json:
-        print(json.dumps(report, indent=2))
-    else:
-        status = report.get("audit_status", "UNKNOWN")
-        print(f"[{status}] Daily Indexing Inspection for '{report.get('tenant_id')}':")
-        print(f"  - Rollover Queue: size={report['gsc_rollover']['queue_size']}, quota_exhausted={report['gsc_rollover']['quota_exhausted']}")
-        print(f"  - Quarantine: total={report['airlock_quarantine']['total_quarantined']}, 404s={report['airlock_quarantine']['breakdown'].get('HTTP_404', 0)}")
-        print(f"  - Velocity: stalled={report['velocity_stagnation']['stalled_routes_count']}/{report['velocity_stagnation']['routes_monitored']}")
-        if report.get("remediation_prompts"):
-            print("  Suggested Remediation Prompts:")
-            for prompt in report["remediation_prompts"]:
-                print(f"    * {prompt}")
+        out_payload = reports[target_props[0]] if len(target_props) == 1 else {"status": "FAIL" if any_fail else "PASS", "properties": reports}
+        print(json.dumps(out_payload, indent=2))
 
-    if strict and report.get("audit_status") in ("FAIL", "WARN"):
+    if strict and any_fail:
         return 1
     return 0
 
@@ -1595,34 +1715,42 @@ def cmd_indexing_feedback_loop(args: argparse.Namespace) -> int:
     """
     from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
     from pseofactory.indexer import PushIndexer
-    property_id = getattr(args, "property", "profithelm") or "profithelm"
+    property_id = str(getattr(args, "property", "profithelm") or "profithelm").strip()
     dry_run = getattr(args, "dry_run", False)
     live = getattr(args, "live", False)
     output_json = getattr(args, "json", False)
 
-    coordinator = IndexingFeedbackLoop(property_id=property_id)
-    result = coordinator.run_feedback_cycle(dry_run=dry_run, live=live)
-    try:
-        indexer = PushIndexer(
-            domain=coordinator.domain,
-            tenant_id=property_id,
-            dist_dir=coordinator.dist_dir,
-        )
-        result["sitemap_hygiene"] = indexer.prune_dead_gsc_sitemaps(live=(live and not dry_run))
-    except Exception as ex:
-        result["sitemap_hygiene"] = {"status": "ERROR", "error": str(ex)}
+    target_props = list(CANONICAL_TENANT_IDS) if property_id.lower() == "all" else [property_id]
+    reports = {}
+    all_ok = True
+    for p_id in target_props:
+        coordinator = IndexingFeedbackLoop(property_id=p_id)
+        result = coordinator.run_feedback_cycle(dry_run=dry_run, live=live)
+        try:
+            indexer = PushIndexer(
+                domain=coordinator.domain,
+                tenant_id=p_id,
+                dist_dir=coordinator.dist_dir,
+            )
+            result["sitemap_hygiene"] = indexer.prune_dead_gsc_sitemaps(live=(live and not dry_run))
+        except Exception as ex:
+            result["sitemap_hygiene"] = {"status": "ERROR", "error": str(ex)}
+        reports[p_id] = result
+        if result.get("status") not in ("SUCCESS", "PARTIAL"):
+            all_ok = False
+        if not output_json:
+            status = result.get("status", "UNKNOWN")
+            print(f"[{status}] Indexing Feedback Loop for '{result.get('property_id')}':")
+            print(f"  - Audited unindexed: {result.get('unindexed_audited', 0)}")
+            print(f"  - Diagnosed defects: {len(result.get('diagnosed_defects', []))}")
+            print(f"  - Repaired & recompiled assets: {result.get('repair_summary', {}).get('recompiled_assets_count', 0)}")
+            print(f"  - Preflight inspected: {result.get('preflight_summary', {}).get('total_inspected', 0)} (push eligible: {result.get('preflight_summary', {}).get('push_eligible', 0)})")
+            print(f"  - Multi-engine push status: {result.get('push_summary', {}).get('status')}")
 
     if output_json:
-        print(json.dumps(result, indent=2))
-    else:
-        status = result.get("status", "UNKNOWN")
-        print(f"[{status}] Indexing Feedback Loop for '{result.get('property_id')}':")
-        print(f"  - Audited unindexed: {result.get('unindexed_audited', 0)}")
-        print(f"  - Diagnosed defects: {len(result.get('diagnosed_defects', []))}")
-        print(f"  - Repaired & recompiled assets: {result.get('repair_summary', {}).get('recompiled_assets_count', 0)}")
-        print(f"  - Preflight inspected: {result.get('preflight_summary', {}).get('total_inspected', 0)} (push eligible: {result.get('preflight_summary', {}).get('push_eligible', 0)})")
-        print(f"  - Multi-engine push status: {result.get('push_summary', {}).get('status')}")
-    return 0 if result.get("status") in ("SUCCESS", "PARTIAL") else 1
+        out_payload = reports[target_props[0]] if len(target_props) == 1 else {"status": "SUCCESS" if all_ok else "FAIL", "properties": reports}
+        print(json.dumps(out_payload, indent=2))
+    return 0 if all_ok else 1
 
 
 def cmd_market_intel(args: argparse.Namespace) -> int:
@@ -1708,13 +1836,13 @@ def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
         prog="pseofactory",
-        description="Unified Programmatic SEO Substrate for Prexvo and ProfitHelm Software Factories",
+        description="Unified Programmatic SEO Substrate for ProfitHelm, Prexvo, and GainHelm Software Factories",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # cycle
     p_cycle = subparsers.add_parser("cycle", help="Execute complete autonomous release cycle across property or fleet")
-    p_cycle.add_argument("--property", type=str, default=None, help="Optional property ID (default: all fleet properties)")
+    p_cycle.add_argument("--property", type=str, default=None, help="Optional property ID (profithelm, prexvo, gainhelm, or all)")
     p_cycle.add_argument("--dry-run", action="store_true", help="Dry-run audit mode without committing or pushing")
     p_cycle.add_argument("--timeout", type=int, default=300, help="Timeout in seconds for CI watcher")
     p_cycle.add_argument("--skip-ci", action="store_true", help="Skip remote CI/CD quality gate watching")
@@ -1723,7 +1851,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # audit
     p_audit = subparsers.add_parser("audit", help="Audit static assets against engine baselines")
-    p_audit.add_argument("--property", type=str, default=None, help="Property ID (e.g. prexvo, profithelm, gainhelm)")
+    p_audit.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_audit.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory to audit")
     p_audit.add_argument("--browser", action="store_true", help="Audit static distribution using live Chrome DevTools Protocol (CDP)")
     p_audit.add_argument("--sample", type=int, default=None, help="Sample N routes for fast browser audit")
@@ -1735,7 +1863,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # maintain
     p_maintain = subparsers.add_parser("maintain", help="Execute closed-loop maintenance lifecycle on a property")
-    p_maintain.add_argument("--property", type=str, default="prexvo", help="Property ID (default: prexvo)")
+    p_maintain.add_argument("--property", type=str, default="prexvo", help="Property ID (profithelm, prexvo, gainhelm, or all)")
+    p_maintain.add_argument("--dry-run", action="store_true", help="Dry-run maintenance audit without writing changes")
     p_maintain.add_argument("--force", action="store_true", help="Force rebuild even if no drift detected")
     p_maintain.add_argument("--fast", action="store_true", help="Enable fast mode: aggressive polling intervals and concurrency")
     p_maintain.add_argument("--auto-heal", action="store_true", help="Automatically heal drifted assets in single pass")
@@ -1807,7 +1936,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_cron.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries for live streaming collectors")
     p_cron.add_argument("--cycle-id", type=str, default=None, help="Explicit cycle identifier (default: auto-generated UTC timestamp/hash)")
     p_cron.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold for asset build/refactor")
-    p_cron.add_argument("--property", type=str, default=None, help="Optional tenant filter (prexvo, profithelm, unassigned)")
+    p_cron.add_argument("--property", type=str, default=None, help="Optional tenant filter (profithelm, prexvo, gainhelm, unassigned)")
     p_cron.add_argument("--include-unassigned", action="store_true", help="Also evaluate unassigned greenfield clusters when --property is set")
     p_cron.add_argument("--sink", type=str, default=None, help="Optional path for JSONL candidates sink (e.g. void_candidates.jsonl)")
     p_cron.add_argument("--json", action="store_true", help="Output machine-readable JSON cycle summary")
@@ -1857,7 +1986,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--property",
         type=str,
         default="profithelm",
-        help="Target property identifier (default: profithelm)",
+        help="Target property identifier (profithelm, prexvo, gainhelm)",
     )
     p_sync.add_argument(
         "--dry-run",
@@ -1887,7 +2016,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # distribute
     p_dist = subparsers.add_parser("distribute", help="Execute multi-channel syndication export and Voice DNA verification")
-    p_dist.add_argument("--property", type=str, default="profithelm", help="Target property identifier (default: profithelm)")
+    p_dist.add_argument("--property", type=str, default="profithelm", help="Target property identifier (profithelm, prexvo, gainhelm, or all)")
     p_dist.add_argument("--dry-run", action="store_true", help="Dry-run simulation mode without live publishing")
     p_dist.add_argument("--json", action="store_true", help="Output machine-readable JSON distribution report")
 
@@ -1907,7 +2036,7 @@ def build_parser() -> argparse.ArgumentParser:
         "partner-status",
         help="Display actionable affiliate application status, readiness scores, and action bus items",
     )
-    p_pstat.add_argument("--property", type=str, default=None, help="Optional property filter (profithelm, prexvo, all)")
+    p_pstat.add_argument("--property", type=str, default=None, help="Optional property filter (profithelm, prexvo, gainhelm, all)")
     p_pstat.add_argument("--html", type=str, default=None, help="Export minimal modern light interface to specified HTML path")
     p_pstat.add_argument("--force-poll", "--force", dest="force_poll", action="store_true", help="Bypass poll rate-limit interval to query mail server directly")
     p_pstat.add_argument("--json", action="store_true", help="Output result as JSON")
@@ -1939,7 +2068,7 @@ def build_parser() -> argparse.ArgumentParser:
         "indexing-preflight",
         help="Execute automated indexing preflight inspection and crawl budget partition",
     )
-    p_preflight.add_argument("--property", type=str, default=None, help="Property ID (e.g. profithelm, prexvo)")
+    p_preflight.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_preflight.add_argument("--urls", nargs="*", default=None, help="Explicit URLs to inspect")
     p_preflight.add_argument("--sitemap", type=str, default=None, help="Path or URL to sitemap.xml")
     p_preflight.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory")
@@ -1959,7 +2088,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--interval", type=float, default=3600.0, help="Loop interval in seconds (default: 3600)")
     p_sup.add_argument("--daemon", action="store_true", help="Run supervisor continuously as a daemon")
     p_sup.add_argument("--run-once", action="store_true", help="Run single lifecycle cycle and exit")
-    p_sup.add_argument("--property", type=str, default=None, help="Restrict supervisor to specific property ID")
+    p_sup.add_argument("--property", type=str, default=None, help="Restrict supervisor to specific property ID (profithelm, prexvo, gainhelm, or all)")
     p_sup.add_argument("--force", action="store_true", help="Force rebuild and verification regardless of drift")
     p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
     p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 3 tenants")
@@ -1972,7 +2101,7 @@ def build_parser() -> argparse.ArgumentParser:
         "gsc-ceiling",
         help="Analyze 480-day Search Console trajectory and detect algorithmic glass ceilings",
     )
-    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo", "gainhelm"], help="Target property identifier")
+    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo", "gainhelm", "all"], help="Target property identifier")
     p_ceiling.add_argument("--days", type=int, default=480, help="Historical time series lookback days (default: 480)")
     p_ceiling.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing historical GSC records")
     p_ceiling.add_argument("--ceiling-threshold", type=float, default=0.35, help="Algorithmic ceiling dampening threshold (default: 0.35)")
@@ -1985,7 +2114,7 @@ def build_parser() -> argparse.ArgumentParser:
         "indexing-inspect",
         help="Execute daily indexing inspection auditing GSC rollover, quarantine, and velocity (Loop 3)",
     )
-    p_inspect.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Target property/tenant identifier")
+    p_inspect.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Target property/tenant identifier (profithelm, prexvo, gainhelm, or all)")
     p_inspect.add_argument("--strict", action="store_true", help="Fail with non-zero exit code if anomalies or warnings detected")
     p_inspect.add_argument("--dry-run", action="store_true", help="Audit without updating recovery ledger on disk")
     p_inspect.add_argument("--sample", action="store_true", help="Audit sample partition")
@@ -1998,7 +2127,7 @@ def build_parser() -> argparse.ArgumentParser:
         "indexing-feedback-loop",
         help="Execute autonomous closed-loop indexing feedback coordinator (Loop 4)",
     )
-    p_feedback.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Target property/tenant identifier (default: profithelm)")
+    p_feedback.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Target property/tenant identifier (profithelm, prexvo, gainhelm, or all)")
     p_feedback.add_argument("--dry-run", action="store_true", help="Audit and diagnose without executing actual live pushes or asset recompiles")
     p_feedback.add_argument("--live", action="store_true", help="Execute live network push submissions and live GSC inspections")
     p_feedback.add_argument("--json", action="store_true", help="Output feedback cycle results as structured JSON")
@@ -2008,7 +2137,7 @@ def build_parser() -> argparse.ArgumentParser:
         "reflect",
         help="Reflect engine changes across all existing assets and recompile drifted assets",
     )
-    p_ref.add_argument("--property", type=str, default=None, help="Property ID filter (e.g. profithelm, prexvo)")
+    p_ref.add_argument("--property", type=str, default=None, help="Property ID filter (profithelm, prexvo, gainhelm, or all)")
     p_ref.add_argument("--force", action="store_true", help="Force recompilation regardless of drift")
     p_ref.add_argument("--verbose", action="store_true", help="Verbose log output")
     p_ref.add_argument("--json", action="store_true", help="Output summary as JSON")
@@ -2019,7 +2148,7 @@ def build_parser() -> argparse.ArgumentParser:
         "seo-workflows",
         help="Execute all 8 autonomous SEO growth workflows across historical and live Search Console telemetry",
     )
-    p_seowf.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, or all)")
+    p_seowf.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_seowf.add_argument("--dry-run", action="store_true", help="Evaluate workflows without writing overlays or ledger updates")
     p_seowf.add_argument("--json", action="store_true", help="Output workflow report as structured JSON")
 
@@ -2028,7 +2157,7 @@ def build_parser() -> argparse.ArgumentParser:
         "north-star",
         help="Evaluate 30-day and 60-day North Star SEO, AI citation, and conversion targets",
     )
-    p_ns.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, or all)")
+    p_ns.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_ns.add_argument("--dry-run", action="store_true", help="Evaluate North Star targets without persisting scorecard JSON")
     p_ns.add_argument("--json", action="store_true", help="Output North Star scorecard as structured JSON")
 
@@ -2036,7 +2165,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cohort-reflection",
         help="Execute closed-loop cohort reflection across title remediation, indexing push, citation restructure, and sponsor slot updates",
     )
-    p_cr.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, or all)")
+    p_cr.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_cr.add_argument("--dry-run", action="store_true", help="Evaluate cohort reflection without persisting ledger or propagating winning patterns")
     p_cr.add_argument("--json", action="store_true", help="Output cohort reflection report as structured JSON")
 
@@ -2044,7 +2173,7 @@ def build_parser() -> argparse.ArgumentParser:
         "lead-monitor",
         help="Monitor captured leads, sync edge KV endpoints to local ledger, dispatch transactional playbooks, and verify Stripe Checkout readiness",
     )
-    p_lm.add_argument("--property", "--tenant", dest="property", type=str, default=None, help="Filter by property ID (profithelm or prexvo)")
+    p_lm.add_argument("--property", "--tenant", dest="property", type=str, default=None, help="Filter by property ID (profithelm, prexvo, gainhelm, or all)")
     p_lm.add_argument("--sync-edge", action="store_true", help="Pull live captured leads from Cloudflare Pages edge /api/lead-capture endpoints")
     p_lm.add_argument("--sync-pages-secrets", action="store_true", help="Bind ZeptoMail, Nango/Zoho OAuth, and Stripe credentials onto Cloudflare Pages projects")
     p_lm.add_argument("--fulfill", action="store_true", help="Dispatch transactional playbook emails for unfulfilled leads")
@@ -2071,7 +2200,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_lead_monitor(args: argparse.Namespace) -> int:
     """
-    Monitors captured leads across ProfitHelm and Prexvo, synchronizes live Cloudflare edge
+    Monitors captured leads across ProfitHelm, Prexvo, and GainHelm, synchronizes live Cloudflare edge
     `/api/lead-capture` records into `.agy/captured_leads.jsonl`, fulfills transactional
     playbooks, and verifies live ZeptoMail/Zoho Mail and Stripe Checkout session readiness.
     Zero em-dashes. Zero en-dashes.
@@ -2093,8 +2222,10 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
             fulfill_recipient_override=getattr(args, "recipient_override", None),
         )
 
+    raw_prop = getattr(args, "property", None)
+    eff_prop = None if (raw_prop and str(raw_prop).strip().lower() == "all") else raw_prop
     summary = get_lead_monitoring_summary(
-        property_id=getattr(args, "property", None),
+        property_id=eff_prop,
         verify_live_providers=bool(getattr(args, "verify_providers", False)),
     )
     if pages_secrets_report is not None:
@@ -2127,7 +2258,7 @@ def cmd_north_star(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = list(CANONICAL_TENANT_IDS) if prop_arg == "all" else [prop_arg]
     cards = {}
     for p_id in props:
         cards[p_id] = evaluate_north_star_targets(property_id=p_id, persist=not dry_run)
@@ -2157,7 +2288,7 @@ def cmd_cohort_reflection(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = list(CANONICAL_TENANT_IDS) if prop_arg == "all" else [prop_arg]
     reports = {}
     for p_id in props:
         reports[p_id] = evaluate_closed_loop_cohort_reflection(
@@ -2194,7 +2325,7 @@ def cmd_seo_workflows(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = list(CANONICAL_TENANT_IDS) if prop_arg == "all" else [prop_arg]
     reports = {}
     for p_id in props:
         reports[p_id] = run_all_seo_growth_workflows(
@@ -2311,7 +2442,7 @@ def cmd_video(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = ["profithelm", "prexvo", "gainhelm"] if prop_arg == "all" else [prop_arg]
+    props = list(CANONICAL_TENANT_IDS) if prop_arg == "all" else [prop_arg]
     reports = {}
     all_ok = True
     for p_id in props:
