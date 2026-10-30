@@ -6260,6 +6260,8 @@ def compute_scenario_demand_and_conversion_metrics(
     }
 
     for rec in leads:
+        if leads_ledger_path is None and "_live_" in str(rec.get("lead_id") or ""):
+            continue
         prop = str(rec.get("property_id") or "profithelm").strip().lower()
         if property_id and prop != property_id.strip().lower():
             continue
@@ -8143,6 +8145,8 @@ def sync_edge_leads_to_ledger(
                     if not isinstance(item, dict) or not item.get("lead_id"):
                         continue
                     lid = str(item["lead_id"])
+                    if "_live_" in lid and leads_ledger_path is None:
+                        continue
                     slug = str(item.get("tool_slug") or "general")
                     vert = str(item.get("vertical") or "")
                     offer = resolve_lead_monetization_offer(prop_id, slug, vert, lead_id=lid)
