@@ -5131,7 +5131,13 @@ def _needs_page_structure_geo_normalization(
         )
         if qa_m:
             qa_inner = qa_m.group(1)
-            qa_words = len(re.sub(r"<[^>]+>", " ", qa_inner).split())
+            qa_body_only = re.sub(
+                r'<div[^>]*class=["\'][^"\']*quick-answer-title[^"\']*["\'][^>]*>[\s\S]*?</div>',
+                " ",
+                qa_inner,
+                flags=re.IGNORECASE,
+            )
+            qa_words = len(re.sub(r"<[^>]+>", " ", qa_body_only).split())
             if "/tools/irs-2027-tax-brackets/" in canon_url:
                 from pseofactory.gsc_remediation import ZERO_INCOME_TAX_STATES
 
@@ -7301,8 +7307,8 @@ class RetroReflectionEngine:
     PREXVO_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "rap-payment-calculator": {
             "model_name": "Repayment Assistance Plan (RAP) Monthly Payment Model",
-            "formula": "round(max(0.0, (agi - 35212.50) * 0.10 / 12), 2)",
-            "inputs": {"agi": 65000, "loan_balance": 42000},
+            "formula": "round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)",
+            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 2.25, "rap_rate": 0.10, "loan_balance": 42000.0},
             "published_output": 248.23,
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (OBBBA) Title VIII Subtitle B",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
@@ -7310,8 +7316,8 @@ class RetroReflectionEngine:
         },
         "rap-vs-ibr-calculator": {
             "model_name": "RAP vs IBR Repayment Comparison Model",
-            "formula": "round(max(0.0, (agi - 35212.50) * 0.10 / 12), 2)",
-            "inputs": {"agi": 65000, "loan_balance": 60000},
+            "formula": "round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)",
+            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 2.25, "rap_rate": 0.10, "loan_balance": 60000.0},
             "published_output": 248.23,
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (OBBBA) Title VIII Subtitle B",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
@@ -7319,8 +7325,8 @@ class RetroReflectionEngine:
         },
         "student-loan-repayment-calculator": {
             "model_name": "Income-Based Student Loan Repayment Model",
-            "formula": "round(max(0.0, (agi - 35212.50) * 0.10 / 12), 2)",
-            "inputs": {"agi": 65000, "loan_balance": 60000},
+            "formula": "round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)",
+            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 2.25, "rap_rate": 0.10, "loan_balance": 60000.0},
             "published_output": 248.23,
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
@@ -7328,8 +7334,8 @@ class RetroReflectionEngine:
         },
         "ibr-hardship-cap-calculator": {
             "model_name": "IBR Hardship Cap and Partial Financial Hardship Model",
-            "formula": "round(max(0.0, (agi - 23475.00) * 0.10 / 12), 2)",
-            "inputs": {"agi": 65000, "loan_balance": 60000},
+            "formula": "round(min(loan_balance * (interest_rate / 12.0 * (1.0 + interest_rate / 12.0) ** 120) / ((1.0 + interest_rate / 12.0) ** 120 - 1.0), max(0.0, agi - (poverty_guideline * fpl_multiplier)) * ibr_levy_rate / 12.0), 2)",
+            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 1.5, "ibr_levy_rate": 0.10, "loan_balance": 60000.0, "interest_rate": 0.065},
             "published_output": 346.04,
             "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 42 U.S.C. 9902(2)",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
@@ -7425,6 +7431,84 @@ class RetroReflectionEngine:
             "economic_dataset": "Federal Reserve H.15 Selected Interest Rates and G.19 Consumer Credit Series",
             "sample_calculation": "Reducing rate from 7.0% to 5.2% on $55,000 saves $990.00 in first-year interest.",
         },
+        "student-loan-forgiveness-tax-bomb-insolvency-calculator": {
+            "model_name": "Student Loan Forgiveness Tax Bomb and Form 982 Insolvency Model",
+            "formula": "round(max(0.0, forgiven_balance - max(0.0, total_liabilities - fair_market_assets)) * (federal_marginal_rate + state_tax_rate), 2)",
+            "inputs": {
+                "forgiven_balance": 85000.0,
+                "total_liabilities": 112000.0,
+                "fair_market_assets": 64000.0,
+                "federal_marginal_rate": 0.24,
+                "state_tax_rate": 0.05,
+            },
+            "published_output": 10730.0,
+            "statutory_authority": "26 U.S.C. Section 108(f)(5); IRC Section 108(a)(1)(B) Form 982 Insolvency; 34 CFR 685.209",
+            "economic_dataset": "U.S. Department of Education FSA Portfolio Summary and IRS SOI Form 982 Insolvency Series",
+            "sample_calculation": "Under IRC Section 108(f)(5) post-2025 sunset and Section 108(a)(1)(B) Form 982 insolvency rules, $112,000 liabilities against $64,000 assets shields $48,000 of an $85,000 forgiven IDR balance, leaving $37,000 taxable at 29% combined federal and state rate for a $10,730.00 net tax liability.",
+        },
+        "pslf-buyback-months-reconsideration-student-loan-calculator": {
+            "model_name": "PSLF Buyback Months Reconsideration Lump-Sum Settlement Model",
+            "formula": "round(round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2) * eligible_buyback_months, 2)",
+            "inputs": {
+                "agi": 65000.0,
+                "poverty_guideline": 15650.0,
+                "fpl_multiplier": 2.25,
+                "rap_rate": 0.10,
+                "eligible_buyback_months": 14.0,
+            },
+            "published_output": 3475.22,
+            "statutory_authority": "34 CFR 685.219(g) Public Service Loan Forgiveness Hold Harmless Buyback Rules; Title IV HEA",
+            "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and U.S. Department of Education FSA Data Center",
+            "sample_calculation": "Under 34 CFR 685.219(g) PSLF hold-harmless buyback reconsideration rules, 14 qualifying deferment or forbearance months evaluated at the $248.23/mo 225% FPL RAP rate require a $3,475.22 lump-sum settlement to reach 120 payments.",
+        },
+        "parent-plus-double-consolidation-loophole-2026-calculator": {
+            "model_name": "Parent PLUS Double Consolidation ICR-to-RAP Arbitrage Model",
+            "formula": "round((round(min(max(0.0, agi - poverty_guideline) * discretionary_rate / 12.0, round(base_12yr_payment, 2) * (agi / 60000.0)), 2) - round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)) * 12.0, 2)",
+            "inputs": {
+                "agi": 65000.0,
+                "poverty_guideline": 15650.0,
+                "discretionary_rate": 0.20,
+                "base_12yr_payment": 601.15,
+                "fpl_multiplier": 2.25,
+                "rap_rate": 0.10,
+            },
+            "published_output": 4836.24,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 34 CFR 685.220 Consolidation Rules",
+            "economic_dataset": "U.S. Department of Education College Scorecard and Federal Student Aid Parent PLUS Portfolio Series",
+            "sample_calculation": "Under 34 CFR 685.209 and 685.220, completing a two-step Direct Consolidation shifts a $65,000 AGI Parent PLUS borrower from single-consolidation ICR ($651.25/mo) to double-consolidated RAP ($248.23/mo), saving $4,836.24 annually.",
+        },
+        "student-loan-forgiveness-2026": {
+            "model_name": "20-Year IDR Cumulative Repayment and Net Forgiven Principal Model",
+            "formula": "round(max(0.0, loan_balance + (loan_balance * interest_rate * (repayment_months / 12.0)) - (round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2) * repayment_months)), 2)",
+            "inputs": {
+                "loan_balance": 84000.0,
+                "interest_rate": 0.0,
+                "agi": 65000.0,
+                "poverty_guideline": 15650.0,
+                "fpl_multiplier": 2.25,
+                "rap_rate": 0.10,
+                "repayment_months": 240.0,
+            },
+            "published_output": 24424.8,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 26 U.S.C. Section 108(f)",
+            "economic_dataset": "U.S. Department of Education FSA IDR Portfolio Series and BLS CPI-U Inflation Dataset",
+            "sample_calculation": "On an $84,000 Direct Loan balance with 100% unpaid interest subsidy under RAP ($248.23/mo over 240 months = $59,575.20 cumulative payments), remaining forgiven principal at 20-year discharge is $24,424.80.",
+        },
+        "student-loan-interest-deduction-phaseout-2026-calculator": {
+            "model_name": "IRC Section 221 Student Loan Interest Deduction MAGI Phaseout Model",
+            "formula": "round(min(annual_interest_paid, 2500.0) * max(0.0, min(1.0, (phaseout_ceiling_magi - magi) / (phaseout_ceiling_magi - phaseout_start_magi))) * marginal_tax_rate, 2)",
+            "inputs": {
+                "annual_interest_paid": 3200.0,
+                "magi": 89000.0,
+                "phaseout_start_magi": 85000.0,
+                "phaseout_ceiling_magi": 100000.0,
+                "marginal_tax_rate": 0.22,
+            },
+            "published_output": 403.33,
+            "statutory_authority": "26 U.S.C. Section 221 (Interest on Education Loans); IRS Publication 970",
+            "economic_dataset": "IRS SOI Individual Income Tax Deduction Series and Federal Reserve G.19 Student Credit Dataset",
+            "sample_calculation": "Under 26 U.S.C. Section 221, a Single filer at $89,000 MAGI within the $85,000 to $100,000 phaseout range deducts $1,833.33 of the $2,500 statutory cap, saving $403.33 in federal tax at the 22% marginal bracket.",
+        },
     }
 
     PROFITHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -7457,12 +7541,17 @@ class RetroReflectionEngine:
         },
         "section-179-calculator": {
             "model_name": "Section 179 and Bonus Depreciation Calculator Model",
-            "formula": "min(equipment_cost, section_179_cap_2026)",
-            "inputs": {"equipment_cost": 350000.0, "section_179_cap_2026": 2560000.0},
+            "formula": "round(min(equipment_cost, max(0.0, section_179_cap_2026 - max(0.0, equipment_cost - phaseout_threshold_2026))) + max(0.0, equipment_cost - min(equipment_cost, max(0.0, section_179_cap_2026 - max(0.0, equipment_cost - phaseout_threshold_2026)))) * bonus_depreciation_rate, 2)",
+            "inputs": {
+                "equipment_cost": 350000.0,
+                "section_179_cap_2026": 2560000.0,
+                "phaseout_threshold_2026": 4090000.0,
+                "bonus_depreciation_rate": 0.20,
+            },
             "published_output": 350000.0,
             "statutory_authority": "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562",
             "economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)",
-            "sample_calculation": "For $350,000 in qualifying commercial equipment placed in service in 2026 (within the $2,560,000 IRC Section 179 cap), first-year deduction is $350,000.00.",
+            "sample_calculation": "For $350,000 in qualifying commercial equipment placed in service in 2026 (within the $2,560,000 IRC Section 179 cap and $4,090,000 phase-out threshold with 20% Section 168(k) bonus depreciation), first-year deduction is $350,000.00.",
         },
         "section-179-vehicle-deduction": {
             "model_name": "Section 179 Heavy SUV and Commercial Vehicle Deduction Model",
@@ -7594,6 +7683,39 @@ class RetroReflectionEngine:
             "statutory_authority": "IRC Section 41 Credit for Increasing Research Activities and IRC Section 174 R&E Amortization",
             "economic_dataset": "FRED Private R&D Investment Series, BEA Innovation Accounts, and IRS Form 6765 Statistics",
             "sample_calculation": "Qualifying research expenditures of $800,000 against a $500,000 prior 3-year average under the 14% Alternative Simplified Credit yields a $77,000.00 direct tax credit.",
+        },
+        "crypto-tax-form-1099-da-mandatory-reporting": {
+            "model_name": "IRS Form 1099-DA Digital Asset Broker Basis and NIIT Tax Model",
+            "formula": "round(max(0.0, gross_proceeds_1099da - verified_cost_basis - exchange_fee_offset) * ((short_term_share * federal_marginal_rate) + ((1.0 - short_term_share) * ltcg_rate) + niit_rate + state_tax_rate), 2)",
+            "inputs": {
+                "gross_proceeds_1099da": 145000.0,
+                "verified_cost_basis": 82000.0,
+                "exchange_fee_offset": 3000.0,
+                "short_term_share": 0.40,
+                "federal_marginal_rate": 0.24,
+                "ltcg_rate": 0.15,
+                "niit_rate": 0.038,
+                "state_tax_rate": 0.05,
+            },
+            "published_output": 16440.0,
+            "statutory_authority": "26 U.S.C. Section 6045; IRC Section 1012; IRS Rev. Proc. 2024-28; IRS Form 1099-DA",
+            "economic_dataset": "IRS SOI Capital Gains Realization Series and Federal Reserve Z.1 Digital Asset Flows",
+            "sample_calculation": "On $145,000 Form 1099-DA gross proceeds less $82,000 wallet-specific cost basis and $3,000 fees ($60,000 net gain split 40% short-term at 24% and 60% long-term at 15%, plus 3.8% NIIT and 5% state tax), total digital asset tax liability is $16,440.00.",
+        },
+        "irs-interest-calculator-2027": {
+            "model_name": "IRC Section 6621 Underpayment Interest and Section 6651 Penalty Model",
+            "formula": "round(underpayment_tax_principal * ((1.0 + quarterly_underpayment_rate / 4.0) ** underpayment_quarters - 1.0) + (underpayment_tax_principal * min(0.25, failure_to_pay_months * monthly_ftp_rate)), 2)",
+            "inputs": {
+                "underpayment_tax_principal": 85000.0,
+                "quarterly_underpayment_rate": 0.08,
+                "underpayment_quarters": 4.0,
+                "failure_to_pay_months": 12.0,
+                "monthly_ftp_rate": 0.005,
+            },
+            "published_output": 12106.73,
+            "statutory_authority": "26 U.S.C. Section 6621; IRC Section 6622 Daily Compounding; IRC Section 6651(a)(2)",
+            "economic_dataset": "Federal Reserve H.15 Short-Term Treasury Rate Series and IRS Quarterly Revenue Rulings",
+            "sample_calculation": "On an $85,000 federal tax underpayment over 4 quarters at the 8.0% IRC Section 6621 underpayment rate ($7,006.73 compounded interest) plus 12 months of IRC Section 6651(a)(2) 0.5%/mo failure-to-pay penalty ($5,100.00), combined statutory interest and penalty exposure is $12,106.73.",
         },
     }
 
@@ -8019,6 +8141,13 @@ class RetroReflectionEngine:
                             or str(curr_m.get("formula") or "") != expected_m["formula"]
                             or str(curr_m.get("sample_calculation") or "") != expected_m["sample_calculation"]
                             or str(curr_m.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
+                            or (
+                                inferred_prop in ("profithelm", "prexvo")
+                                and (
+                                    not curr_m.get("statutory_economic_matrix")
+                                    or not curr_m.get("proprietary_telemetry")
+                                )
+                            )
                         ):
                             if "calculation_manifest" not in missing:
                                 missing.append("calculation_manifest")
@@ -8045,7 +8174,10 @@ class RetroReflectionEngine:
                     html_content,
                     re.IGNORECASE,
                 )
-                if scen_m and scen_m.group(1).strip() != exp_disp:
+                if scen_m and (
+                    scen_m.group(1).strip() != exp_disp
+                    or (inferred_prop in ("profithelm", "prexvo") and 'class="scenario-ast-eval"' not in html_content)
+                ):
                     if "server_rendered_sensitivity_grid" not in missing:
                         missing.append("server_rendered_sensitivity_grid")
 
@@ -8158,6 +8290,15 @@ class RetroReflectionEngine:
         ):
             missing.append("vetted_commercial_handoff_framing")
 
+        has_stale_serp_depth = (
+            "$42,800" in html_content
+            or "$1,680 / yr" in html_content
+            or (
+                "California FTB Form 540" in html_content
+                and "california" not in canon_clean
+                and "ca-tax" not in canon_clean
+            )
+        )
         if (
             'data-mechanic="serp_incumbent_depth_upgrade"' not in html_content
             or 'id="serp-incumbent-depth-workbench"' not in html_content
@@ -8166,6 +8307,7 @@ class RetroReflectionEngine:
             or 'id="saveable-decision-blueprint"' not in html_content
             or "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in html_content
             or has_v_pollution
+            or has_stale_serp_depth
         ):
             missing.append("serp_incumbent_depth_upgrade")
 
@@ -8436,6 +8578,7 @@ class RetroReflectionEngine:
         )
 
         from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+        from pseofactory.proprietary_signals import resolve_proprietary_signal_bundle
 
         candidate_entity_type = str(raw.get("entity_type") or prior_entity_type or "")
         if candidate_entity_type not in AI_MODE_ENTITY_TAXONOMY:
@@ -8444,6 +8587,15 @@ class RetroReflectionEngine:
                 if is_prexvo
                 else ("AuditRiskRule" if is_gainhelm else "StatutoryDeduction")
             )
+
+        signal_bundle = resolve_proprietary_signal_bundle(
+            property_id=property_id,
+            slug=slug,
+            query=slug.replace("/", " ").replace("-", " "),
+            formula=formula,
+            inputs=clamped_inputs,
+            published_output=eval_out,
+        )
 
         return {
             "manifest_id": resolved_manifest_id,
@@ -8456,6 +8608,8 @@ class RetroReflectionEngine:
             "statutory_authority": statutory_authority,
             "economic_dataset": economic_dataset,
             "sample_calculation": sample_calc,
+            "statutory_economic_matrix": raw.get("statutory_economic_matrix") or signal_bundle["statutory_economic_matrix"],
+            "proprietary_telemetry": raw.get("proprietary_telemetry") or signal_bundle["proprietary_telemetry"],
         }
 
     _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str], Tuple[str, List[str]]] = {}
@@ -8468,7 +8622,12 @@ class RetroReflectionEngine:
         try:
             from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
             sc_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            if not isinstance(sc_data, dict) or str(sc_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY:
+            if (
+                not isinstance(sc_data, dict)
+                or str(sc_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
+                or not sc_data.get("statutory_economic_matrix")
+                or not sc_data.get("proprietary_telemetry")
+            ):
                 return True
             m = re.search(
                 r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\'][^>]*>(.*?)</script>',
@@ -8795,7 +8954,35 @@ class RetroReflectionEngine:
 
         if "server_rendered_sensitivity_grid" in missing:
             from pseofactory.compiler import _format_scenario_number, _render_5point_sensitivity_table_html
-            if "scenario-baseline" in updated and "scenario-conservative" in updated and "scenario-aggressive" in updated:
+            full_grid_html = _render_5point_sensitivity_table_html(
+                published_output=pub_out,
+                display_output=display_out,
+                statutory_authority=stat_auth,
+                economic_dataset=econ_ds,
+                model_name=topic_label,
+                formula=manifest["formula"],
+                inputs=clamped_inputs,
+            )
+            table_m = re.search(
+                r'(<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>)',
+                full_grid_html,
+                re.IGNORECASE,
+            )
+            if table_m and re.search(
+                r'<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>',
+                updated,
+                re.IGNORECASE,
+            ):
+                new_table_html = table_m.group(1)
+                updated = re.sub(
+                    r'<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>',
+                    lambda _m: new_table_html,
+                    updated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                repaired.append("server_rendered_sensitivity_grid")
+            elif '<strong class="scenario-baseline"' in updated and '<strong class="scenario-conservative"' in updated:
                 c_out = _format_scenario_number(pub_out * 0.8)
                 mc_out = _format_scenario_number(pub_out * 0.9)
                 me_out = _format_scenario_number(pub_out * 1.1)
@@ -8815,15 +9002,7 @@ class RetroReflectionEngine:
                     )
                 repaired.append("server_rendered_sensitivity_grid")
             else:
-                injected_parts.append(
-                    _render_5point_sensitivity_table_html(
-                        published_output=pub_out,
-                        display_output=display_out,
-                        statutory_authority=stat_auth,
-                        economic_dataset=econ_ds,
-                        model_name=topic_label,
-                    )
-                )
+                injected_parts.append(full_grid_html)
                 repaired.append("server_rendered_sensitivity_grid")
 
         if monetization_block_html:
@@ -8931,6 +9110,8 @@ class RetroReflectionEngine:
                         or existing_sidecar.get("formula") != manifest["formula"]
                         or existing_sidecar.get("sample_calculation") != manifest["sample_calculation"]
                         or str(existing_sidecar.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
+                        or not existing_sidecar.get("statutory_economic_matrix")
+                        or not existing_sidecar.get("proprietary_telemetry")
                         or (
                             property_id.lower() != "prexvo"
                             and (
@@ -8943,7 +9124,18 @@ class RetroReflectionEngine:
                         )
                     )
                     if sidecar_needs_heal and existing_sidecar != manifest:
-                        sidecar_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                        if (
+                            existing_sidecar.get("published_output") == manifest["published_output"]
+                            and existing_sidecar.get("formula") == manifest["formula"]
+                            and existing_sidecar.get("sample_calculation") == manifest["sample_calculation"]
+                            and str(existing_sidecar.get("entity_type") or "") in AI_MODE_ENTITY_TAXONOMY
+                        ):
+                            merged_sidecar = dict(existing_sidecar)
+                            merged_sidecar["statutory_economic_matrix"] = manifest["statutory_economic_matrix"]
+                            merged_sidecar["proprietary_telemetry"] = manifest["proprietary_telemetry"]
+                            sidecar_path.write_text(json.dumps(merged_sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
+                        else:
+                            sidecar_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
                         if "calculation_manifest" not in repaired:
                             repaired.append("calculation_manifest")
                 except Exception:

@@ -3547,11 +3547,15 @@ def _build_tax_brackets_depth_spec(
     s_low: str, topic_label: str, statutory_authority: str
 ) -> Dict[str, Any]:
     is_ca = "california" in s_low or "ca-tax" in s_low
-    state_focus_lbl = (
-        "California FTB Form 540 (1.0% to 13.3% + 1.1% SDI)"
-        if is_ca
-        else "Federal IRC Section 1(j) &amp; State Marginal"
-    )
+    if not is_ca:
+        from pseofactory.proprietary_signals import build_non_ca_state_tax_brackets_spec
+
+        return build_non_ca_state_tax_brackets_spec(
+            s_low=s_low,
+            topic_label=topic_label,
+            statutory_authority=statutory_authority,
+        )
+    state_focus_lbl = "California FTB Form 540 (1.0% to 13.3% + 1.1% SDI)"
     return {
         "workbench_mode": "tax_brackets",
         "workbench_h2": f"Interactive 401(k)/HSA Pre-Tax Shield, PTET Election &amp; {state_focus_lbl} Sub-Ledger: {topic_label}",
@@ -4030,38 +4034,20 @@ def _render_multi_year_cliff_visualizer_html(
     statutory_authority: str,
     economic_dataset: str,
     is_gainhelm: bool = False,
+    slug: str = "",
 ) -> str:
     """Renders the longitudinal 2024 to 2030 statutory and repayment cliff visualizer and SVG trajectory."""
-    if is_prexvo:
-        h3_title = f"Multi-Year Repayment &amp; Forgiveness Tax Cliff Visualizer (2024 to 2030): {topic_label}"
-        summary_default = "2026 Cliff Alert: IRC Section 108(f)(5) tax-free forgiveness expires Jan 1, 2026 (+22% to 37% federal tax exposure on discharged balances) alongside 34 CFR 685.209 IDR discretionary levy shifts."
-        rows = [
-            ("2024 Enacted Baseline", "34 CFR 685.209 (5% Undergrad / 225% FPL)", "IRC 108(f)(5) 100% Tax-Free Forgiveness", "cliff-exposure-2024", "$1,680 / yr"),
-            ("2025 Pre-Cliff Window", "SAVE Injunction / IBR 10% Discretionary Levy", "IRC 108(f)(5) Final Tax-Free Window", "cliff-exposure-2025", "$2,540 / yr"),
-            ("2026 Statutory Cliff Year", "34 CFR 685.209 RAP / Old-New IBR Transition", "Federal Tax Bomb Resumes on Forgiven Debt", "cliff-exposure-2026", "$3,420 / yr"),
-            ("2027 Post-Sunset Regime", "150% HHS FPL Exemption / 10% to 15% Levy", "Ordinary Income Inclusion + Insolvency Form 982", "cliff-exposure-2027", "$3,690 / yr"),
-            ("2028-2030 Forward Projection", "CPI-Indexed HHS Poverty Guideline Escalation", "PSLF 26 U.S.C. 108(f)(1) Remains Tax-Exempt", "cliff-exposure-2028", "$3,980 / yr"),
-        ]
-    elif is_gainhelm:
-        h3_title = f"Multi-Year Statutory Compliance &amp; Enforcement Cliff Visualizer (2024 to 2030): {topic_label}"
-        summary_default = "2026 Enforcement Alert: DoD 32 CFR Part 170 CMMC 2.0 contract phase-in, PCI DSS v4.0.1 mandatory future-dated controls, and ISO/IEC 27001:2022 transition enforcement escalate uncertified audit and breach exposure."
-        rows = [
-            ("2024 Baseline Window", "AICPA AT-C 205 / NIST 800-171 Self-Attest", "ISO 27001:2022 Transition / SEC 8-K Item 1.05", "cliff-exposure-2024", "$44,500"),
-            ("2025 Enforcement Ramp", "PCI DSS v4.0.1 Mandatory Controls Active", "32 CFR Part 170 Final Rule Effective", "cliff-exposure-2025", "$52,400"),
-            ("2026 Statutory Cliff Year", "DFARS 252.204-7021 C3PAO Solicitation Gate", "HHS OCR 45 CFR 160.404 Inflation Multiplier", "cliff-exposure-2026", "$58,200"),
-            ("2027 Full Mandate Phase", "Mandatory CMMC Level 2 on All CUI Contracts", "FedRAMP 20x Continuous Automated Reporting", "cliff-exposure-2027", "$68,900"),
-            ("2028-2030 Triennial Cycle", "Triennial C3PAO &amp; ISO Recertification", "NIST SP 800-171 Rev 3 Control Expansion", "cliff-exposure-2028", "$74,500"),
-        ]
-    else:
-        h3_title = f"Multi-Year Statutory Phaseout &amp; TCJA Sunset Cliff Visualizer (2024 to 2030): {topic_label}"
-        summary_default = "2026 Cliff Alert: IRC Section 168(k) first-year bonus depreciation steps down from 60% (2024) and 40% (2025) to 20% in 2026 and 0% in 2027 alongside Section 179 inflation-indexed caps."
-        rows = [
-            ("2024 Enacted Baseline", "IRC 179 ($1.22M Cap) / 168(k) 60% Bonus", "20% Section 199A QBI / 3.4% Core CPI", "cliff-exposure-2024", "$42,800"),
-            ("2025 Pre-Cliff Window", "IRC 179 ($1.25M Cap) / 168(k) 40% Bonus", "25% Section 301 Tariff / 4.48% 10Y Treasury", "cliff-exposure-2025", "$54,600"),
-            ("2026 Statutory Cliff Year", "IRC 179 ($2.56M Cap) / 168(k) 20% Bonus", "TCJA Sunset &amp; Section 199A Expiration Cliff", "cliff-exposure-2026", "$69,825"),
-            ("2027 Post-Sunset Regime", "IRC 179 ($1.33M Cap) / 168(k) 0% Bonus", "MACRS 5-Yr / 7-Yr Straight Schedule Only", "cliff-exposure-2027", "$84,200"),
-            ("2028-2030 Forward Projection", "IRC 179 ($1.37M to $1.45M Indexed Cap)", "Section 174 5-Yr R&amp;D Amortization Mandate", "cliff-exposure-2028", "$88,950"),
-        ]
+    from pseofactory.proprietary_signals import compute_multi_year_longitudinal_trajectory
+
+    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    traj = compute_multi_year_longitudinal_trajectory(
+        property_id=prop_id,
+        slug=slug or topic_label.lower().replace(" ", "-"),
+        topic_label=topic_label,
+    )
+    h3_title = traj["h3_title"]
+    summary_default = traj["summary_default"]
+    rows = traj["rows"]
     tr_cliff = "\n".join(
         f'            <tr>\n'
         f'              <td><strong>{yr_label}</strong></td>\n'
@@ -4116,23 +4102,20 @@ def _render_stateful_scenario_comparator_html(
     statutory_authority: str = "",
     economic_dataset: str = "",
     is_gainhelm: bool = False,
+    slug: str = "",
 ) -> str:
     """Renders the stateful side-by-side Scenario A vs Scenario B vs Live Workbench comparator."""
-    if is_prexvo:
-        base_a, base_b, base_live = "$85,000", "$145,000", "$95,000"
-        ret_a, ret_b, ret_live = "$61,510", "$92,800", "$70,510"
-        tax_a, tax_b, tax_live = "$2,349", "$5,220", "$2,949"
-        delta_b, delta_live = "+$2,871", "+$600"
-    elif is_gainhelm:
-        base_a, base_b, base_live = "$84,000", "$148,000", "$96,000"
-        ret_a, ret_b, ret_live = "$25,800", "$42,000", "$31,400"
-        tax_a, tax_b, tax_live = "$58,200", "$106,000", "$64,600"
-        delta_b, delta_live = "+$47,800", "+$6,400"
-    else:
-        base_a, base_b, base_live = "$240,000", "$520,000", "$285,000"
-        ret_a, ret_b, ret_live = "$184,200", "$368,400", "$215,175"
-        tax_a, tax_b, tax_live = "$55,800", "$151,600", "$69,825"
-        delta_b, delta_live = "+$95,800", "+$14,025"
+    from pseofactory.proprietary_signals import compute_stateful_comparator_defaults
+
+    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    comp = compute_stateful_comparator_defaults(
+        property_id=prop_id,
+        slug=slug or topic_label.lower().replace(" ", "-"),
+    )
+    base_a, base_b, base_live = comp["base_a"], comp["base_b"], comp["base_live"]
+    ret_a, ret_b, ret_live = comp["ret_a"], comp["ret_b"], comp["ret_live"]
+    tax_a, tax_b, tax_live = comp["tax_a"], comp["tax_b"], comp["tax_live"]
+    delta_b, delta_live = comp["delta_b"], comp["delta_live"]
     comp_prefix = "GRC Audit &amp; Control TCO" if is_gainhelm else "Scenario"
     return (
         f'      <div id="stateful-scenario-comparator" class="serp-scenario-comparator" data-mechanic="stateful_scenario_comparator">\n'
@@ -4726,6 +4709,7 @@ def render_serp_incumbent_depth_upgrade_block(
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
         is_gainhelm=is_gainhelm,
+        slug=s_low,
     )
     comparator_html = _render_stateful_scenario_comparator_html(
         topic_label=topic_label,
@@ -4733,6 +4717,7 @@ def render_serp_incumbent_depth_upgrade_block(
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
         is_gainhelm=is_gainhelm,
+        slug=s_low,
     )
     blueprint_html = _render_saveable_decision_blueprint_html(
         slug=s_low,

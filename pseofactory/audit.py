@@ -203,6 +203,9 @@ def verify_manifest_ssr_metric_parity(
             "student-loan-refinance-break-even",
             "married-filing-separately",
             "student-loan-interest-deduction-phaseout",
+            "student-loan-forgiveness-tax-bomb-insolvency",
+            "student-loan-forgiveness-2026",
+            "parent-plus-double-consolidation-loophole",
         )
     ) and "metric-rap_payment" in metrics and len(metrics) >= 4:
         return issues

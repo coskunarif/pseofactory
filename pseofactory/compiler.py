@@ -440,10 +440,13 @@ def _render_5point_sensitivity_table_html(
     statutory_authority: str,
     economic_dataset: str,
     model_name: str = "",
+    formula: str = "",
+    inputs: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Renders a 5-point server-side sensitivity scenario table (0.8x to 1.2x)
-    so search engine crawlers index multi-row numerical outputs directly in initial HTML.
+    combining linear proportional benchmarks with non-linear statutory AST
+    evaluations against fixed statutory caps and phaseouts.
     Zero em-dashes. Zero en-dashes.
     """
     conservative_output = _format_scenario_number(published_output * 0.8)
@@ -451,14 +454,27 @@ def _render_5point_sensitivity_table_html(
     mod_exp_output = _format_scenario_number(published_output * 1.1)
     aggressive_output = _format_scenario_number(published_output * 1.2)
     from pseofactory.competitor import _format_safe_heading_topic
+    from pseofactory.proprietary_signals import compute_5point_nonlinear_sensitivity_rows
+
     clean_model = _format_safe_heading_topic(str(model_name or "").strip(), "")
     sens_h2 = f"Sensitivity Scenario Modeling: {clean_model}" if clean_model else "Sensitivity Scenario Modeling"
+    ast_rows = compute_5point_nonlinear_sensitivity_rows(
+        formula=formula,
+        inputs=inputs or {},
+        published_output=published_output,
+    )
+    ast_by_cls = {r["css_class"]: r for r in ast_rows}
+    base_ast = ast_by_cls.get("scenario-baseline", {"ast_output": display_output, "cliff_delta": "0.00 (Linear Parity)"})
+    con_ast = ast_by_cls.get("scenario-conservative", {"ast_output": conservative_output, "cliff_delta": "0.00 (Linear Parity)"})
+    mcon_ast = ast_by_cls.get("scenario-moderate-contraction", {"ast_output": mod_con_output, "cliff_delta": "0.00 (Linear Parity)"})
+    mexp_ast = ast_by_cls.get("scenario-moderate-expansion", {"ast_output": mod_exp_output, "cliff_delta": "0.00 (Linear Parity)"})
+    agg_ast = ast_by_cls.get("scenario-aggressive", {"ast_output": aggressive_output, "cliff_delta": "0.00 (Linear Parity)"})
 
     return (
         f'    <div class="scenario-container comparison-container card pseo-card" '
         f'data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid">\n'
         f'      <h2>{sens_h2}</h2>\n'
-        f'      <p>SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>\n'
+        f'      <p>SSR 5-point sensitivity matrix comparing linear proportional benchmarks against non-linear statutory AST evaluations across fixed exemptions and phaseout cliffs:</p>\n'
         f'      <div class="table-wrap pseo-table-wrap">\n'
         f'        <table class="scenario-table comparison-table" data-entity-type="scenario" '
         f'data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
@@ -469,6 +485,8 @@ def _render_5point_sensitivity_table_html(
         f'              <th scope="col">Statutory Basis</th>\n'
         f'              <th scope="col">Economic Series</th>\n'
         f'              <th scope="col">Projected Outcome</th>\n'
+        f'              <th scope="col">Non-Linear Statutory AST Output</th>\n'
+        f'              <th scope="col">Statutory Cliff Divergence</th>\n'
         f'            </tr>\n'
         f'          </thead>\n'
         f'          <tbody>\n'
@@ -478,6 +496,8 @@ def _render_5point_sensitivity_table_html(
         f'              <td>{statutory_authority}</td>\n'
         f'              <td>{economic_dataset}</td>\n'
         f'              <td><strong class="scenario-baseline">{display_output}</strong></td>\n'
+        f'              <td><strong class="scenario-ast-eval" data-tier="baseline">{base_ast["ast_output"]}</strong></td>\n'
+        f'              <td><span class="scenario-cliff-delta">{base_ast["cliff_delta"]}</span></td>\n'
         f'            </tr>\n'
         f'            <tr data-entity-type="scenario">\n'
         f'              <td><strong>Conservative Scenario</strong></td>\n'
@@ -485,6 +505,8 @@ def _render_5point_sensitivity_table_html(
         f'              <td>{statutory_authority}</td>\n'
         f'              <td>{economic_dataset}</td>\n'
         f'              <td><strong class="scenario-conservative">{conservative_output}</strong></td>\n'
+        f'              <td><strong class="scenario-ast-eval" data-tier="conservative">{con_ast["ast_output"]}</strong></td>\n'
+        f'              <td><span class="scenario-cliff-delta">{con_ast["cliff_delta"]}</span></td>\n'
         f'            </tr>\n'
         f'            <tr data-entity-type="scenario">\n'
         f'              <td><strong>Moderate Contraction Scenario</strong></td>\n'
@@ -492,6 +514,8 @@ def _render_5point_sensitivity_table_html(
         f'              <td>{statutory_authority}</td>\n'
         f'              <td>{economic_dataset}</td>\n'
         f'              <td><strong class="scenario-moderate-contraction">{mod_con_output}</strong></td>\n'
+        f'              <td><strong class="scenario-ast-eval" data-tier="moderate-contraction">{mcon_ast["ast_output"]}</strong></td>\n'
+        f'              <td><span class="scenario-cliff-delta">{mcon_ast["cliff_delta"]}</span></td>\n'
         f'            </tr>\n'
         f'            <tr data-entity-type="scenario">\n'
         f'              <td><strong>Moderate Expansion Scenario</strong></td>\n'
@@ -499,6 +523,8 @@ def _render_5point_sensitivity_table_html(
         f'              <td>{statutory_authority}</td>\n'
         f'              <td>{economic_dataset}</td>\n'
         f'              <td><strong class="scenario-moderate-expansion">{mod_exp_output}</strong></td>\n'
+        f'              <td><strong class="scenario-ast-eval" data-tier="moderate-expansion">{mexp_ast["ast_output"]}</strong></td>\n'
+        f'              <td><span class="scenario-cliff-delta">{mexp_ast["cliff_delta"]}</span></td>\n'
         f'            </tr>\n'
         f'            <tr data-entity-type="scenario">\n'
         f'              <td><strong>Aggressive Scenario</strong></td>\n'
@@ -506,6 +532,8 @@ def _render_5point_sensitivity_table_html(
         f'              <td>{statutory_authority}</td>\n'
         f'              <td>{economic_dataset}</td>\n'
         f'              <td><strong class="scenario-aggressive">{aggressive_output}</strong></td>\n'
+        f'              <td><strong class="scenario-ast-eval" data-tier="aggressive">{agg_ast["ast_output"]}</strong></td>\n'
+        f'              <td><span class="scenario-cliff-delta">{agg_ast["cliff_delta"]}</span></td>\n'
         f'            </tr>\n'
         f'          </tbody>\n'
         f'        </table>\n'
@@ -1235,6 +1263,66 @@ def _build_compiled_json_ld_graph(
     return json.dumps(graph_payload, indent=2)
 
 
+def _enrich_manifest_with_proprietary_signals(
+    manifest: Dict[str, Any],
+    candidate_spec: Dict[str, Any],
+    manifest_source: Dict[str, Any],
+    slug: str,
+    query: str,
+    statutory_authority: str,
+    formula: str,
+    clamped_inputs: Dict[str, Any],
+    published_output: float,
+) -> None:
+    """Attaches statutory_economic_matrix, proprietary_telemetry, and corroborating_sources to manifest in-place."""
+    from pseofactory.proprietary_signals import resolve_proprietary_signal_bundle
+
+    statutory_matrix = (
+        candidate_spec.get("statutory_economic_matrix")
+        if isinstance(candidate_spec.get("statutory_economic_matrix"), dict)
+        else (
+            manifest_source.get("statutory_economic_matrix")
+            if isinstance(manifest_source.get("statutory_economic_matrix"), dict)
+            else None
+        )
+    )
+    corroborating_sources = (
+        candidate_spec.get("corroborating_sources")
+        if isinstance(candidate_spec.get("corroborating_sources"), list)
+        else (
+            manifest_source.get("corroborating_sources")
+            if isinstance(manifest_source.get("corroborating_sources"), list)
+            else []
+        )
+    )
+    spec_tenant_hint = " ".join(
+        str(candidate_spec.get(k) or "")
+        for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
+    ).lower()
+    inferred_prop = (
+        "gainhelm"
+        if "gainhelm" in spec_tenant_hint
+        else (
+            "prexvo"
+            if "prexvo" in spec_tenant_hint
+            or any(t in str(statutory_authority).lower() for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan"))
+            else "profithelm"
+        )
+    )
+    bundle = resolve_proprietary_signal_bundle(
+        property_id=inferred_prop,
+        slug=slug,
+        query=query,
+        formula=formula,
+        inputs=clamped_inputs,
+        published_output=published_output,
+    )
+    manifest["proprietary_telemetry"] = bundle["proprietary_telemetry"]
+    manifest["statutory_economic_matrix"] = statutory_matrix or bundle["statutory_economic_matrix"]
+    if corroborating_sources:
+        manifest["corroborating_sources"] = corroborating_sources
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -1360,25 +1448,6 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     gsc_coverage_state = gsc_sig["coverage_state"]
     gsc_appearance_attr = gsc_sig["appearance_attr"]
 
-    statutory_matrix = (
-        candidate_spec.get("statutory_economic_matrix")
-        if isinstance(candidate_spec.get("statutory_economic_matrix"), dict)
-        else (
-            manifest_source.get("statutory_economic_matrix")
-            if isinstance(manifest_source.get("statutory_economic_matrix"), dict)
-            else None
-        )
-    )
-    corroborating_sources = (
-        candidate_spec.get("corroborating_sources")
-        if isinstance(candidate_spec.get("corroborating_sources"), list)
-        else (
-            manifest_source.get("corroborating_sources")
-            if isinstance(manifest_source.get("corroborating_sources"), list)
-            else []
-        )
-    )
-
     manifest: Dict[str, Any] = {
         "manifest_id": f"{slug}-manifest",
         "model_name": model_name,
@@ -1395,10 +1464,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             "coverage_state": gsc_coverage_state,
         },
     }
-    if statutory_matrix:
-        manifest["statutory_economic_matrix"] = statutory_matrix
-    if corroborating_sources:
-        manifest["corroborating_sources"] = corroborating_sources
+    _enrich_manifest_with_proprietary_signals(
+        manifest, candidate_spec, manifest_source, slug, query, statutory_authority, formula, clamped_inputs, published_output
+    )
 
     # 6. Render Obsidian dark-theme HTML asset
     form_inputs_html = []
@@ -1443,6 +1511,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         statutory_authority=statutory_authority,
         economic_dataset=economic_dataset,
         model_name=model_name,
+        formula=formula,
+        inputs=clamped_inputs,
     )
 
     spec_tenant_signals = " ".join(

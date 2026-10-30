@@ -332,3 +332,55 @@ def test_sidecar_manifest_lockstep_audit_and_healing(tmp_path) -> None:
     assert healed_sidecar["formula"] == preset["formula"]
     assert engine.audit_file(html_file, property_id="profithelm") == []
 
+
+def test_proprietary_signals_multivariable_synthesis_and_state_tax_isolation() -> None:
+    """Verifies non-linear statutory AST sensitivity, 2024-2030 longitudinal trajectory, and non-CA state isolation."""
+    from pseofactory.competitor import render_serp_incumbent_depth_upgrade_block
+    from pseofactory.proprietary_signals import (
+        compute_5point_nonlinear_sensitivity_rows,
+        compute_multi_year_longitudinal_trajectory,
+        resolve_proprietary_signal_bundle,
+    )
+
+    rap_preset = RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS["rap-payment-calculator"]
+    rows = compute_5point_nonlinear_sensitivity_rows(
+        rap_preset["formula"], rap_preset["inputs"], float(rap_preset["published_output"])
+    )
+    assert len(rows) == 5
+    # Under 225% HHS FPL ($35,212.50 fixed shield), 0.8x AGI ($52,000) yields $139.90/mo vs $198.58 linear
+    cons_row = next(r for r in rows if r["css_class"] == "scenario-conservative")
+    assert cons_row["linear_output"] == "198.58"
+    assert cons_row["ast_output"] == "139.90"
+    assert cons_row["cliff_delta"] == "-58.68 Non-Linear Cliff"
+
+    bundle = resolve_proprietary_signal_bundle(
+        property_id="prexvo",
+        slug="student-loan-forgiveness-tax-bomb-insolvency-calculator",
+        formula=RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS[
+            "student-loan-forgiveness-tax-bomb-insolvency-calculator"
+        ]["formula"],
+        inputs=RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS[
+            "student-loan-forgiveness-tax-bomb-insolvency-calculator"
+        ]["inputs"],
+        published_output=10730.0,
+    )
+    assert bundle["statutory_economic_matrix"]["series_count"] >= 4
+    assert bundle["proprietary_telemetry"]["demand_telemetry"]["jev_score"] > 0
+
+    tx_depth = render_serp_incumbent_depth_upgrade_block(
+        slug="irs-2027-tax-brackets/texas",
+        title="2027 Texas Tax Brackets Calculator",
+        property_id="profithelm",
+        statutory_authority="26 U.S.C. Section 1(j); Texas Constitution Article VIII Section 1-e",
+    )
+    assert "California FTB Form 540" not in tx_depth
+    assert "0.00%" in tx_depth
+    assert "$42,800" not in tx_depth
+
+    traj_scorp = compute_multi_year_longitudinal_trajectory(
+        "profithelm", "s-corp-reasonable-salary-tax-calculator", "S-Corp FICA Optimization"
+    )
+    assert "$176,100" in traj_scorp["summary_default"]
+    assert all("$42,800" not in r[4] for r in traj_scorp["rows"])
+
+
